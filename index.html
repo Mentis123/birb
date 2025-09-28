@@ -85,6 +85,7 @@
       );
       camera.position.set(2.75, 1.8, 3.65);
 
+
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
@@ -128,6 +129,7 @@
         color: 0x1f3c6f,
         transparent: true,
         opacity: 0.3,
+
       });
       const glideTrail = new THREE.Mesh(trailGeometry, trailMaterial);
       glideTrail.rotation.x = Math.PI / 2;
@@ -144,16 +146,19 @@
       floor.position.y = -0.75;
       scene.add(floor);
 
+
       const clock = new THREE.Clock();
 
       function resizeRenderer() {
         const width = window.innerWidth;
         const height = window.innerHeight;
+
         const needsResize =
           renderer.domElement.width !== width ||
           renderer.domElement.height !== height;
 
         if (needsResize) {
+
           renderer.setSize(width, height, false);
           camera.aspect = width / height;
           camera.updateProjectionMatrix();
@@ -162,8 +167,7 @@
 
       window.addEventListener("resize", resizeRenderer);
 
-      function animate() {
-        requestAnimationFrame(animate);
+      resizeRenderer();
 
         resizeRenderer();
 
