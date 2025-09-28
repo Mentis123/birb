@@ -14,6 +14,7 @@
 - Update this document whenever new tasks arise or issues are resolved to keep progress transparent.
 
 ## Future Roadmap
+
 - Restore the interactive UI layer that once exposed play/pause, glide speed, and camera reset controls so that the scene is not purely passive.
 - Re-implement spline-based navigation for the capsule to follow a believable glide path instead of the current circular placeholder orbit.
 - Bring back dynamic thruster particles and trailing exhaust shaders to reinforce motion and directional cues.
@@ -25,3 +26,4 @@
 - Explore expanding the scene with environmental elements (e.g., skybox or terrain) while preserving performance.
 - Document reusable utilities for material presets and motion patterns to accelerate future scene variations.
 - Produce design notes for future features such as waypoint editor, cinematic camera sweeps, and narrative overlays.
+
