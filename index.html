@@ -1,1 +1,191 @@
-<html>Hello World</html>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Birb Flight Lab</title>
+    <meta
+      name="description"
+      content="Three.js playground for experimenting with gliding capsules."
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, #1f2945, #0b0d17 65%);
+        color: #f3f4f8;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        padding: 1.5rem;
+        text-align: center;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+        opacity: 0.75;
+      }
+
+      canvas {
+        flex: 1;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+
+      footer {
+        position: absolute;
+        inset: auto 0 1.5rem;
+        text-align: center;
+        font-size: 0.75rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        pointer-events: none;
+        opacity: 0.45;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Birb Flight Lab</header>
+    <canvas id="scene"></canvas>
+    <footer>Gently gliding in progress…</footer>
+
+    <script type="module">
+      import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js";
+      import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/controls/OrbitControls.js";
+
+      const canvas = document.querySelector("#scene");
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.1;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x060912);
+
+      const camera = new THREE.PerspectiveCamera(
+        60,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        100
+      );
+      camera.position.set(2.75, 1.8, 3.65);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.autoRotate = false;
+      controls.target.set(0, 0.5, 0);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+      scene.add(ambientLight);
+
+      const keyLight = new THREE.DirectionalLight(0x9dc4ff, 0.85);
+      keyLight.position.set(4, 5, 3);
+      scene.add(keyLight);
+
+      const rimLight = new THREE.DirectionalLight(0xffb58c, 0.45);
+      rimLight.position.set(-3.5, 2.5, -2.2);
+      scene.add(rimLight);
+
+      const glowLight = new THREE.PointLight(0x3fa4ff, 1.4, 6, 2);
+      glowLight.position.set(0, 1.2, 0);
+      scene.add(glowLight);
+
+      const capsuleGroup = new THREE.Group();
+      scene.add(capsuleGroup);
+
+      const capsuleGeometry = new THREE.CapsuleGeometry(0.42, 1.35, 32, 64);
+      const capsuleMaterial = new THREE.MeshStandardMaterial({
+        color: 0xaed9ff,
+        metalness: 0.35,
+        roughness: 0.3,
+        emissive: 0x12345f,
+        emissiveIntensity: 0.18,
+      });
+      const capsule = new THREE.Mesh(capsuleGeometry, capsuleMaterial);
+      capsule.castShadow = true;
+      capsule.receiveShadow = true;
+      capsule.rotation.z = Math.PI / 2;
+      capsuleGroup.add(capsule);
+
+      const trailGeometry = new THREE.TorusGeometry(1.95, 0.018, 32, 200);
+      const trailMaterial = new THREE.MeshBasicMaterial({
+        color: 0x1f3c6f,
+        transparent: true,
+        opacity: 0.3,
+      });
+      const glideTrail = new THREE.Mesh(trailGeometry, trailMaterial);
+      glideTrail.rotation.x = Math.PI / 2;
+      scene.add(glideTrail);
+
+      const floorGeometry = new THREE.CircleGeometry(3.5, 64);
+      const floorMaterial = new THREE.MeshBasicMaterial({
+        color: 0x101e39,
+        transparent: true,
+        opacity: 0.6,
+      });
+      const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = -0.75;
+      scene.add(floor);
+
+      const clock = new THREE.Clock();
+
+      function resizeRenderer() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const needsResize =
+          renderer.domElement.width !== width ||
+          renderer.domElement.height !== height;
+
+        if (needsResize) {
+          renderer.setSize(width, height, false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+        }
+      }
+
+      window.addEventListener("resize", resizeRenderer);
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        resizeRenderer();
+
+        const elapsed = clock.getElapsedTime();
+        const glideRadius = 1.35;
+        const glideSpeed = 0.35;
+
+        capsuleGroup.position.x = Math.cos(elapsed * glideSpeed) * glideRadius;
+        capsuleGroup.position.z = Math.sin(elapsed * glideSpeed) * glideRadius;
+        capsuleGroup.position.y = Math.sin(elapsed * 1.2) * 0.25;
+        capsuleGroup.lookAt(0, 0.5, 0);
+
+        capsule.rotation.x = Math.sin(elapsed * 1.5) * 0.25;
+        capsule.rotation.y = Math.cos(elapsed * 0.8) * 0.35;
+
+        glideTrail.rotation.z += 0.0025;
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+    </script>
+  </body>
+</html>
