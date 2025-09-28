@@ -6,9 +6,22 @@
     <title>Birb Flight Lab</title>
     <meta
       name="description"
-      content="Three.js playground for experimenting with gliding capsules."
+      content="Mobile-first Three.js playground for experimenting with gliding capsules."
     />
+    <meta name="theme-color" content="#0b0d17" />
     <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --space-2: clamp(0.75rem, 1.5vw + 0.35rem, 1.1rem);
+        --space-3: clamp(1rem, 1.5vw + 0.6rem, 1.5rem);
+        --space-4: clamp(1.25rem, 2vw + 0.75rem, 1.9rem);
+        --max-width: min(92vw, 42rem);
+        --header-size: clamp(0.75rem, 1vw + 0.65rem, 1.1rem);
+        --status-size: clamp(0.6rem, 0.7vw + 0.55rem, 0.75rem);
+        background-color: #060912;
+      }
+
       *,
       *::before,
       *::after {
@@ -17,47 +30,127 @@
 
       body {
         margin: 0;
-        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
-          "Segoe UI", sans-serif;
-        background: radial-gradient(circle at top, #1f2945, #0b0d17 65%);
-        color: #f3f4f8;
         min-height: 100vh;
+        min-height: 100dvh;
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        background: radial-gradient(circle at top, #1b2741, #060912 70%);
+        color: #f4f6fa;
+      }
+
+      main {
+        width: 100%;
+        max-width: var(--max-width);
         display: flex;
         flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-3) calc(var(--space-3) + 3rem);
       }
 
       header {
-        padding: 1.5rem;
         text-align: center;
-        letter-spacing: 0.05em;
         text-transform: uppercase;
-        font-size: 0.85rem;
+        letter-spacing: 0.12em;
+        font-size: var(--header-size);
         opacity: 0.75;
       }
 
-      canvas {
+      .canvas-wrapper {
+        position: relative;
         flex: 1;
-        width: 100vw;
-        height: 100vh;
-        display: block;
+        min-height: clamp(18rem, 62vw, 32rem);
+        border-radius: 1.5rem;
+        overflow: hidden;
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        box-shadow: 0 20px 48px rgba(5, 11, 23, 0.65);
       }
 
-      footer {
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: transparent;
+      }
+
+      .status-badge {
         position: absolute;
-        inset: auto 0 1.5rem;
-        text-align: center;
-        font-size: 0.75rem;
-        letter-spacing: 0.06em;
+        bottom: var(--space-2);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.35rem 0.8rem;
+        font-size: var(--status-size);
         text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: rgba(231, 238, 255, 0.9);
+        background: rgba(7, 11, 22, 0.6);
+        border-radius: 999px;
+        border: 1px solid rgba(109, 159, 255, 0.22);
+        backdrop-filter: blur(6px);
         pointer-events: none;
-        opacity: 0.45;
+      }
+
+      .status-badge::before {
+        content: "";
+        display: inline-block;
+        width: 0.4rem;
+        height: 0.4rem;
+        margin-right: 0.55rem;
+        border-radius: 999px;
+        background: radial-gradient(circle, #8fd2ff 0%, #3fa4ff 60%, rgba(63, 164, 255, 0) 100%);
+        box-shadow: 0 0 12px rgba(104, 188, 255, 0.75);
+        vertical-align: middle;
+      }
+
+      .status-badge span {
+        vertical-align: middle;
+      }
+
+      noscript {
+        position: fixed;
+        inset: auto 0 0 0;
+        padding: 1rem;
+        text-align: center;
+        font-size: 0.85rem;
+        background: rgba(6, 9, 18, 0.92);
+        color: #eff2fc;
+      }
+
+      @media (min-width: 48rem) {
+        main {
+          padding-bottom: calc(var(--space-4) + 4rem);
+        }
+
+        .canvas-wrapper {
+          min-height: clamp(24rem, 55vh, 38rem);
+          border-radius: 2rem;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .status-badge::before {
+          animation: none;
+          box-shadow: none;
+        }
       }
     </style>
   </head>
   <body>
-    <header>Birb Flight Lab</header>
-    <canvas id="scene"></canvas>
-    <footer>Gently gliding in progress…</footer>
+    <main>
+      <header>Birb Flight Lab</header>
+      <div class="canvas-wrapper">
+        <canvas
+          id="scene"
+          role="img"
+          aria-label="Stylized capsule gently gliding through a dark sky"
+        ></canvas>
+        <div class="status-badge" aria-live="polite" aria-atomic="true">
+          <span>Gently gliding in progress…</span>
+        </div>
+      </div>
+    </main>
+    <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
 
     <script type="module">
       import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js";
@@ -67,130 +160,208 @@
       const renderer = new THREE.WebGLRenderer({
         canvas,
         antialias: true,
+        alpha: true,
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(window.innerWidth, window.innerHeight, false);
+
+      const DPR_CAP = 1.8;
+      const resizeState = { width: 0, height: 0 };
+
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.1;
+      renderer.toneMappingExposure = 1.05;
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x060912);
+      scene.fog = new THREE.Fog(0x060912, 6.5, 18);
 
-      const camera = new THREE.PerspectiveCamera(
-        60,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        100
-      );
+      const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
       camera.position.set(2.75, 1.8, 3.65);
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
-      controls.autoRotate = false;
-
+      controls.enablePan = false;
+      controls.minDistance = 2.3;
+      controls.maxDistance = 6;
+      controls.maxPolarAngle = Math.PI / 2;
       controls.target.set(0, 0.5, 0);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
-      scene.add(ambientLight);
+      const ambient = new THREE.HemisphereLight(0x9cc9ff, 0x060912, 0.55);
+      scene.add(ambient);
 
-      const keyLight = new THREE.DirectionalLight(0x9dc4ff, 0.85);
+      const keyLight = new THREE.DirectionalLight(0x9dc4ff, 0.8);
       keyLight.position.set(4, 5, 3);
       scene.add(keyLight);
 
-      const rimLight = new THREE.DirectionalLight(0xffb58c, 0.45);
-      rimLight.position.set(-3.5, 2.5, -2.2);
+      const rimLight = new THREE.DirectionalLight(0xffb58c, 0.35);
+      rimLight.position.set(-3.5, 2.8, -2.4);
       scene.add(rimLight);
 
-      const glowLight = new THREE.PointLight(0x3fa4ff, 1.4, 6, 2);
-      glowLight.position.set(0, 1.2, 0);
+      const glowLight = new THREE.PointLight(0x3fa4ff, 1.15, 6, 2);
+      glowLight.position.set(0, 1.05, 0.4);
       scene.add(glowLight);
 
       const capsuleGroup = new THREE.Group();
       scene.add(capsuleGroup);
 
-      const capsuleGeometry = new THREE.CapsuleGeometry(0.42, 1.35, 32, 64);
+      const capsuleGeometry = new THREE.CapsuleGeometry(0.42, 1.25, 18, 36);
       const capsuleMaterial = new THREE.MeshStandardMaterial({
-        color: 0xaed9ff,
-        metalness: 0.35,
-        roughness: 0.3,
-        emissive: 0x12345f,
-        emissiveIntensity: 0.18,
+        color: 0xb9e1ff,
+        metalness: 0.32,
+        roughness: 0.28,
+        emissive: 0x0f2f63,
+        emissiveIntensity: 0.16,
       });
       const capsule = new THREE.Mesh(capsuleGeometry, capsuleMaterial);
-      capsule.castShadow = true;
-      capsule.receiveShadow = true;
+      capsule.castShadow = false;
+      capsule.receiveShadow = false;
       capsule.rotation.z = Math.PI / 2;
       capsuleGroup.add(capsule);
 
-      const trailGeometry = new THREE.TorusGeometry(1.95, 0.018, 32, 200);
+      const trailGeometry = new THREE.TorusGeometry(1.8, 0.016, 16, 120);
       const trailMaterial = new THREE.MeshBasicMaterial({
         color: 0x1f3c6f,
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.32,
       });
       const glideTrail = new THREE.Mesh(trailGeometry, trailMaterial);
       glideTrail.rotation.x = Math.PI / 2;
       scene.add(glideTrail);
 
-      const floorGeometry = new THREE.CircleGeometry(3.5, 64);
+      const floorGeometry = new THREE.CircleGeometry(3.4, 48);
       const floorMaterial = new THREE.MeshBasicMaterial({
         color: 0x101e39,
         transparent: true,
-        opacity: 0.6,
+        opacity: 0.55,
       });
       const floor = new THREE.Mesh(floorGeometry, floorMaterial);
       floor.rotation.x = -Math.PI / 2;
-      floor.position.y = -0.75;
+      floor.position.y = -0.7;
       scene.add(floor);
 
-      const clock = new THREE.Clock();
+      const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const motionState = {
+        animate: !motionQuery.matches,
+        elapsed: 0,
+      };
 
-      function resizeRenderer() {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
+      let previousTime = null;
 
-        const needsResize =
-          renderer.domElement.width !== width ||
-          renderer.domElement.height !== height;
+      motionQuery.addEventListener("change", (event) => {
+        motionState.animate = !event.matches;
+        previousTime = null;
+      });
 
-        if (needsResize) {
+      function updateRendererSize(force = false) {
+        const clientWidth = canvas.clientWidth || window.innerWidth;
+        const clientHeight = canvas.clientHeight || window.innerHeight;
 
-          renderer.setSize(width, height, false);
-          camera.aspect = width / height;
-          camera.updateProjectionMatrix();
+        if (!clientWidth || !clientHeight) return;
+
+        const nextWidth = Math.floor(clientWidth);
+        const nextHeight = Math.floor(clientHeight);
+
+        if (!force && resizeState.width === nextWidth && resizeState.height === nextHeight) {
+          return;
         }
+
+        resizeState.width = nextWidth;
+        resizeState.height = nextHeight;
+
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(nextWidth, nextHeight, false);
+        camera.aspect = nextWidth / nextHeight;
+        camera.updateProjectionMatrix();
       }
 
-      window.addEventListener("resize", resizeRenderer);
+      const resizeObserver =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver(() => updateRendererSize())
+          : null;
+      if (resizeObserver) {
+        resizeObserver.observe(canvas);
+      }
+      window.addEventListener("orientationchange", () => updateRendererSize(true), {
+        passive: true,
+      });
+      window.addEventListener("resize", () => updateRendererSize(), { passive: true });
 
-      function animate() {
-        requestAnimationFrame(animate);
+      const glideSettings = {
+        radius: 1.35,
+        glideSpeed: 0.36,
+        bobAmplitude: 0.22,
+        bobSpeed: 1.1,
+        rollAmplitude: 0.28,
+        rollSpeed: 1.4,
+        yawAmplitude: 0.32,
+        yawSpeed: 0.82,
+      };
 
-      resizeRenderer();
+      const renderFrame = (time = 0) => {
+        updateRendererSize();
 
-        resizeRenderer();
+        if (motionState.animate) {
+          if (previousTime === null) {
+            previousTime = time;
+          }
+          const delta = (time - previousTime) * 0.001;
+          motionState.elapsed += delta;
+          previousTime = time;
+        } else {
+          previousTime = null;
+        }
 
-        const elapsed = clock.getElapsedTime();
-        const glideRadius = 1.35;
-        const glideSpeed = 0.35;
+        const elapsed = motionState.elapsed;
+        const {
+          radius,
+          glideSpeed,
+          bobAmplitude,
+          bobSpeed,
+          rollAmplitude,
+          rollSpeed,
+          yawAmplitude,
+          yawSpeed,
+        } = glideSettings;
 
-        capsuleGroup.position.x = Math.cos(elapsed * glideSpeed) * glideRadius;
-        capsuleGroup.position.z = Math.sin(elapsed * glideSpeed) * glideRadius;
-        capsuleGroup.position.y = Math.sin(elapsed * 1.2) * 0.25;
+        const angle = elapsed * glideSpeed * Math.PI * 2;
+
+        capsuleGroup.position.set(
+          Math.cos(angle) * radius,
+          Math.sin(elapsed * bobSpeed) * bobAmplitude,
+          Math.sin(angle) * radius
+        );
         capsuleGroup.lookAt(0, 0.5, 0);
 
-        capsule.rotation.x = Math.sin(elapsed * 1.5) * 0.25;
-        capsule.rotation.y = Math.cos(elapsed * 0.8) * 0.35;
+        capsule.rotation.x = Math.sin(elapsed * rollSpeed) * rollAmplitude;
+        capsule.rotation.y = Math.cos(elapsed * yawSpeed) * yawAmplitude;
 
-        glideTrail.rotation.z += 0.0025;
+        glideTrail.rotation.z = elapsed * 0.32;
 
         controls.update();
         renderer.render(scene, camera);
-      }
+      };
 
-      animate();
+      renderer.setAnimationLoop(renderFrame);
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          previousTime = null;
+        }
+        renderer.setAnimationLoop(document.hidden ? null : renderFrame);
+      });
+
+      window.addEventListener("beforeunload", () => {
+        renderer.setAnimationLoop(null);
+        if (resizeObserver) {
+          resizeObserver.disconnect();
+        }
+        controls.dispose();
+        renderer.dispose();
+      });
+
+      updateRendererSize(true);
+      renderFrame(0);
     </script>
   </body>
 </html>

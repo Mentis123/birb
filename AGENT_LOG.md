@@ -7,11 +7,13 @@
 ## Current Issues
 - Need regular validation that the capsule's glide path and controls remain responsive after changes.
 - Lack of structured documentation for iterative scene refinements and planned enhancements.
+- Newly refactored mobile-first layout should be sanity-checked on multiple breakpoints and device orientations to confirm size observers behave as expected.
 
 ## Execution Steps
 - Perform manual run-throughs in a local server environment to confirm animation, lighting, and resizing are stable.
 - Capture observations, regressions, or visual artifacts for each iteration in this log before shipping updates.
 - Update this document whenever new tasks arise or issues are resolved to keep progress transparent.
+- Re-test the lightweight renderer configuration on low-power devices to ensure the capped pixel ratio maintains visual quality without overtaxing GPUs.
 
 ## Future Roadmap
 
