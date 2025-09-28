@@ -74,6 +74,119 @@
         background: transparent;
       }
 
+      .control-panel {
+        position: absolute;
+        inset: var(--space-2) auto auto var(--space-2);
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+        padding: 0.75rem 0.85rem;
+        width: min(14rem, 45vw);
+        background: rgba(5, 9, 19, 0.75);
+        border-radius: 1rem;
+        border: 1px solid rgba(124, 170, 255, 0.18);
+        box-shadow: 0 12px 28px rgba(4, 10, 24, 0.4);
+        backdrop-filter: blur(18px);
+      }
+
+      .control-panel h2 {
+        margin: 0;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        opacity: 0.7;
+      }
+
+      .control-button {
+        appearance: none;
+        border: 1px solid rgba(136, 177, 255, 0.3);
+        border-radius: 999px;
+        padding: 0.45rem 0.95rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #e5edff;
+        background: linear-gradient(135deg, rgba(39, 79, 162, 0.45), rgba(19, 33, 77, 0.85));
+        box-shadow: inset 0 0 0 1px rgba(20, 42, 97, 0.4);
+        cursor: pointer;
+        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+      }
+
+      .control-button[disabled] {
+        cursor: not-allowed;
+        opacity: 0.6;
+        border-color: rgba(136, 177, 255, 0.1);
+        box-shadow: none;
+      }
+
+      .control-button:focus-visible {
+        outline: 2px solid rgba(124, 170, 255, 0.75);
+        outline-offset: 2px;
+      }
+
+      .control-button:not([disabled]):hover {
+        box-shadow: inset 0 0 0 1px rgba(76, 123, 207, 0.5), 0 6px 14px rgba(6, 15, 38, 0.45);
+        border-color: rgba(165, 207, 255, 0.6);
+        transform: translateY(-1px);
+      }
+
+      .control-button:not([disabled]):active {
+        transform: translateY(0);
+      }
+
+      .control-slider {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0.4rem 0.6rem;
+        font-size: 0.7rem;
+        letter-spacing: 0.06em;
+        color: rgba(225, 233, 255, 0.85);
+      }
+
+      .control-slider label {
+        text-transform: uppercase;
+      }
+
+      .control-slider input[type="range"] {
+        -webkit-appearance: none;
+        width: 100%;
+        height: 0.3rem;
+        border-radius: 999px;
+        background: rgba(34, 56, 107, 0.7);
+        outline: none;
+        position: relative;
+      }
+
+      .control-slider input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, #c4dcff, #5f8dff 60%, #2d4fa0 100%);
+        border: 1px solid rgba(184, 208, 255, 0.6);
+        box-shadow: 0 4px 10px rgba(13, 24, 53, 0.5);
+        cursor: pointer;
+      }
+
+      .control-slider input[type="range"]::-moz-range-thumb {
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, #c4dcff, #5f8dff 60%, #2d4fa0 100%);
+        border: 1px solid rgba(184, 208, 255, 0.6);
+        box-shadow: 0 4px 10px rgba(13, 24, 53, 0.5);
+        cursor: pointer;
+      }
+
+      .control-slider output {
+        justify-self: end;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.85;
+      }
+
       .status-badge {
         position: absolute;
         bottom: var(--space-2);
@@ -126,6 +239,26 @@
           min-height: clamp(24rem, 55vh, 38rem);
           border-radius: 2rem;
         }
+
+        .control-panel {
+          flex-direction: row;
+          align-items: center;
+          gap: 0.75rem;
+          width: max-content;
+        }
+
+        .control-panel h2 {
+          font-size: 0.75rem;
+        }
+
+        .control-slider {
+          grid-template-columns: auto minmax(9rem, 1fr) auto;
+          column-gap: 0.9rem;
+        }
+
+        .control-button {
+          font-size: 0.75rem;
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -145,8 +278,37 @@
           role="img"
           aria-label="Stylized capsule gently gliding through a dark sky"
         ></canvas>
+        <div class="control-panel" role="group" aria-label="Flight controls">
+          <h2>Controls</h2>
+          <button
+            type="button"
+            class="control-button"
+            data-control="toggle"
+            aria-pressed="true"
+          >
+            Pause Glide
+          </button>
+          <div class="control-slider">
+            <label for="glide-speed">Glide Speed</label>
+            <input
+              id="glide-speed"
+              type="range"
+              min="0.2"
+              max="0.8"
+              step="0.01"
+              value="0.36"
+              aria-describedby="glide-speed-display"
+            />
+            <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
+              0.36×
+            </output>
+          </div>
+          <button type="button" class="control-button" data-control="reset">
+            Reset Camera
+          </button>
+        </div>
         <div class="status-badge" aria-live="polite" aria-atomic="true">
-          <span>Gently gliding in progress…</span>
+          <span id="status-text">Gently gliding in progress…</span>
         </div>
       </div>
     </main>
@@ -247,9 +409,57 @@
 
       let previousTime = null;
 
+      const statusText = document.querySelector("#status-text");
+      const toggleButton = document.querySelector('[data-control="toggle"]');
+      const resetButton = document.querySelector('[data-control="reset"]');
+      const glideSpeedInput = document.querySelector("#glide-speed");
+      const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
+
+      const controlState = {
+        manuallyPaused: false,
+        systemPaused: motionQuery.matches,
+      };
+
+      function updateStatusBadge() {
+        if (controlState.systemPaused) {
+          statusText.textContent = "Motion paused via system preference";
+        } else if (motionState.animate) {
+          statusText.textContent = "Gently gliding in progress…";
+        } else {
+          statusText.textContent = "Glide paused";
+        }
+      }
+
+      function updateToggleButton() {
+        if (controlState.systemPaused) {
+          toggleButton.disabled = true;
+          toggleButton.setAttribute("aria-pressed", "false");
+          toggleButton.textContent = "Motion Disabled";
+        } else {
+          toggleButton.disabled = false;
+          toggleButton.textContent = motionState.animate ? "Pause Glide" : "Resume Glide";
+          toggleButton.setAttribute("aria-pressed", motionState.animate ? "true" : "false");
+        }
+      }
+
+      function refreshAnimationState() {
+        motionState.animate = !(controlState.manuallyPaused || controlState.systemPaused);
+        if (!motionState.animate) {
+          previousTime = null;
+        }
+        updateToggleButton();
+        updateStatusBadge();
+      }
+
+      function updateGlideSpeedDisplay(value) {
+        glideSpeedDisplay.textContent = `${value.toFixed(2)}×`;
+      }
+
+      refreshAnimationState();
+
       motionQuery.addEventListener("change", (event) => {
-        motionState.animate = !event.matches;
-        previousTime = null;
+        controlState.systemPaused = event.matches;
+        refreshAnimationState();
       });
 
       function updateRendererSize(force = false) {
@@ -297,6 +507,26 @@
         yawAmplitude: 0.32,
         yawSpeed: 0.82,
       };
+
+      toggleButton.addEventListener("click", () => {
+        if (controlState.systemPaused) return;
+        controlState.manuallyPaused = !controlState.manuallyPaused;
+        refreshAnimationState();
+      });
+
+      resetButton.addEventListener("click", () => {
+        camera.position.set(2.75, 1.8, 3.65);
+        controls.target.set(0, 0.5, 0);
+        controls.update();
+      });
+
+      updateGlideSpeedDisplay(parseFloat(glideSpeedInput.value));
+
+      glideSpeedInput.addEventListener("input", (event) => {
+        const nextSpeed = Number.parseFloat(event.target.value);
+        glideSettings.glideSpeed = Number.isFinite(nextSpeed) ? nextSpeed : glideSettings.glideSpeed;
+        updateGlideSpeedDisplay(glideSettings.glideSpeed);
+      });
 
       const renderFrame = (time = 0) => {
         updateRendererSize();
