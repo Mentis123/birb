@@ -365,7 +365,7 @@
       glowLight.position.set(0, 1.05, 0.4);
       scene.add(glowLight);
 
-      createWorldShell(scene, { three: THREE });
+      const { glideTrail } = createWorldShell(scene, { three: THREE });
 
       const capsuleGroup = new THREE.Group();
       scene.add(capsuleGroup);
