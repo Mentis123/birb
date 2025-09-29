@@ -318,6 +318,7 @@
       import * as THREE from "https://esm.sh/three@0.161.0";
       import { OrbitControls } from "https://esm.sh/three@0.161.0/examples/jsm/controls/OrbitControls";
       import { FreeFlightController } from "./free-flight-controller.js";
+      import { createWorldShell } from "./src/environment/world-shell.js";
 
       const canvas = document.querySelector("#scene");
       const renderer = new THREE.WebGLRenderer({
@@ -364,16 +365,18 @@
       glowLight.position.set(0, 1.05, 0.4);
       scene.add(glowLight);
 
+      createWorldShell(scene, { three: THREE });
+
       const capsuleGroup = new THREE.Group();
       scene.add(capsuleGroup);
 
       const capsuleGeometry = new THREE.CapsuleGeometry(0.42, 1.25, 18, 36);
       const capsuleMaterial = new THREE.MeshStandardMaterial({
-        color: 0xb9e1ff,
-        metalness: 0.32,
-        roughness: 0.28,
-        emissive: 0x0f2f63,
-        emissiveIntensity: 0.16,
+        color: 0xb6d9ff,
+        metalness: 0.28,
+        roughness: 0.34,
+        emissive: 0x10244a,
+        emissiveIntensity: 0.12,
       });
       const capsule = new THREE.Mesh(capsuleGeometry, capsuleMaterial);
       capsule.castShadow = false;
@@ -381,26 +384,75 @@
       capsule.rotation.z = Math.PI / 2;
       capsuleGroup.add(capsule);
 
-      const trailGeometry = new THREE.TorusGeometry(1.8, 0.016, 16, 120);
-      const trailMaterial = new THREE.MeshBasicMaterial({
-        color: 0x1f3c6f,
+      const visorGeometry = new THREE.SphereGeometry(0.28, 16, 16, 0, Math.PI * 1.2);
+      const visorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x3f87ff,
+        metalness: 0.5,
+        roughness: 0.12,
         transparent: true,
-        opacity: 0.32,
+        opacity: 0.82,
+        emissive: 0x0a1f3d,
+        emissiveIntensity: 0.3,
       });
-      const glideTrail = new THREE.Mesh(trailGeometry, trailMaterial);
-      glideTrail.rotation.x = Math.PI / 2;
-      scene.add(glideTrail);
+      const visor = new THREE.Mesh(visorGeometry, visorMaterial);
+      visor.rotation.y = Math.PI / 2;
+      visor.rotation.z = Math.PI / 2;
+      visor.position.x = 0.66;
+      capsuleGroup.add(visor);
 
-      const floorGeometry = new THREE.CircleGeometry(3.4, 48);
-      const floorMaterial = new THREE.MeshBasicMaterial({
-        color: 0x101e39,
-        transparent: true,
-        opacity: 0.55,
+      const noseGeometry = new THREE.ConeGeometry(0.16, 0.32, 18);
+      const noseMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffc48c,
+        metalness: 0.12,
+        roughness: 0.4,
+        emissive: 0x40210d,
+        emissiveIntensity: 0.08,
       });
-      const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.y = -0.7;
-      scene.add(floor);
+      const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+      nose.rotation.z = Math.PI / 2;
+      nose.position.x = 0.98;
+      capsuleGroup.add(nose);
+
+      const wingGeometry = new THREE.BoxGeometry(0.18, 0.08, 1.4);
+      const wingMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5b8def,
+        metalness: 0.22,
+        roughness: 0.38,
+        emissive: 0x142a51,
+        emissiveIntensity: 0.12,
+      });
+      const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+      leftWing.position.set(0.1, 0.12, 0.76);
+      leftWing.rotation.y = Math.PI / 10;
+      capsuleGroup.add(leftWing);
+
+      const rightWing = leftWing.clone();
+      rightWing.position.z *= -1;
+      rightWing.rotation.y *= -1;
+      capsuleGroup.add(rightWing);
+
+      const tailGeometry = new THREE.ConeGeometry(0.22, 0.5, 10);
+      const tailMaterial = new THREE.MeshStandardMaterial({
+        color: 0x284a8b,
+        metalness: 0.18,
+        roughness: 0.52,
+        emissive: 0x08142b,
+        emissiveIntensity: 0.18,
+      });
+      const tail = new THREE.Mesh(tailGeometry, tailMaterial);
+      tail.rotation.z = -Math.PI / 2;
+      tail.position.set(-1.02, 0.06, 0);
+      capsuleGroup.add(tail);
+
+      const stabilizerGeometry = new THREE.BoxGeometry(0.12, 0.42, 0.18);
+      const stabilizerMaterial = new THREE.MeshStandardMaterial({
+        color: 0x3d6ac5,
+        metalness: 0.2,
+        roughness: 0.4,
+      });
+      const stabilizer = new THREE.Mesh(stabilizerGeometry, stabilizerMaterial);
+      stabilizer.position.set(-0.85, 0.36, 0);
+      capsuleGroup.add(stabilizer);
 
       const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
       const motionState = {
