@@ -873,7 +873,7 @@
       const rightThumbstick = createThumbstick(document.querySelector('[data-thumbstick="right"]'), {
         onChange: (value) => {
           analogLookInput.x = value.x;
-          analogLookInput.y = value.y;
+          analogLookInput.y = -value.y;
         },
       });
 
