@@ -11,6 +11,15 @@ export const AMBIENT_ROLL_SPEED = 0.9;
 export const AMBIENT_YAW_AMPLITUDE = 0.05;
 export const AMBIENT_YAW_SPEED = 0.7;
 
+const clamp = (value, min, max, fallback) => {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+};
+
 export class FreeFlightController {
   constructor(three, options = {}) {
     if (!three) {
@@ -55,13 +64,14 @@ export class FreeFlightController {
   }
 
   setThrustInput({ forward = this.input.forward, strafe = this.input.strafe, lift = this.input.lift } = {}) {
-    this.input.forward = forward;
-    this.input.strafe = strafe;
-    this.input.lift = lift;
+    this.input.forward = clamp(forward, -1, 1, this.input.forward);
+    this.input.strafe = clamp(strafe, -1, 1, this.input.strafe);
+    this.input.lift = clamp(lift, -1, 1, this.input.lift);
   }
 
   setThrottle(value) {
-    this.throttle = Math.max(0, Number.isFinite(value) ? value : this.throttle);
+    const nextValue = clamp(value, 0, 1, this.throttle);
+    this.throttle = nextValue;
   }
 
   addLookDelta(deltaX, deltaY) {

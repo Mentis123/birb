@@ -65,6 +65,7 @@
         backdrop-filter: blur(12px);
         border: 1px solid rgba(255, 255, 255, 0.04);
         box-shadow: 0 20px 48px rgba(5, 11, 23, 0.65);
+        padding-bottom: clamp(2.5rem, 16vw, 5.25rem);
       }
 
       canvas {
@@ -87,6 +88,7 @@
         border: 1px solid rgba(124, 170, 255, 0.18);
         box-shadow: 0 12px 28px rgba(4, 10, 24, 0.4);
         backdrop-filter: blur(18px);
+        z-index: 2;
       }
 
       .control-panel h2 {
@@ -220,6 +222,101 @@
         vertical-align: middle;
       }
 
+      .touch-controls {
+        position: absolute;
+        inset: auto 0 var(--space-2) 0;
+        display: none;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: end;
+        gap: var(--space-2);
+        padding: 0 var(--space-2);
+        pointer-events: none;
+        z-index: 3;
+      }
+
+      .touch-controls > * {
+        pointer-events: auto;
+      }
+
+      .thumbstick {
+        position: relative;
+        width: clamp(5.5rem, 28vw, 7.25rem);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: rgba(9, 15, 28, 0.58);
+        border: 1px solid rgba(120, 165, 255, 0.25);
+        box-shadow: 0 10px 28px rgba(5, 10, 22, 0.55);
+        backdrop-filter: blur(18px);
+        touch-action: none;
+        user-select: none;
+      }
+
+      .thumbstick::before {
+        content: "";
+        position: absolute;
+        inset: 18%;
+        border-radius: 50%;
+        border: 1px solid rgba(152, 190, 255, 0.32);
+        background: radial-gradient(circle at 35% 35%, rgba(170, 202, 255, 0.48), rgba(82, 124, 209, 0.35) 60%, rgba(39, 61, 114, 0.2) 100%);
+        opacity: 0.55;
+      }
+
+      .thumbstick__handle {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 42%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 30%, #c4dcff, #5f8dff 60%, #2d4fa0 100%);
+        border: 1px solid rgba(184, 208, 255, 0.65);
+        box-shadow: 0 8px 22px rgba(9, 16, 32, 0.6);
+        transform: translate(calc(-50% + var(--thumbstick-offset-x, 0px)), calc(-50% + var(--thumbstick-offset-y, 0px)));
+        transition: transform 160ms ease;
+      }
+
+      .thumbstick.is-active .thumbstick__handle {
+        transition: none;
+      }
+
+      .lift-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .lift-button {
+        appearance: none;
+        border: 1px solid rgba(136, 177, 255, 0.32);
+        border-radius: 999px;
+        padding: 0.4rem 1rem;
+        font-size: 0.65rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #e5edff;
+        background: linear-gradient(135deg, rgba(39, 79, 162, 0.55), rgba(19, 33, 77, 0.85));
+        box-shadow: inset 0 0 0 1px rgba(20, 42, 97, 0.4);
+        touch-action: none;
+        user-select: none;
+        min-width: clamp(3.6rem, 18vw, 4.75rem);
+        text-align: center;
+      }
+
+      .lift-button.is-active,
+      .lift-button:active {
+        box-shadow: inset 0 0 0 1px rgba(88, 134, 214, 0.55), 0 6px 16px rgba(7, 14, 30, 0.55);
+        border-color: rgba(165, 207, 255, 0.6);
+      }
+
+      @media (pointer: coarse) {
+        .touch-controls {
+          display: grid;
+        }
+      }
+
       noscript {
         position: fixed;
         inset: auto 0 0 0;
@@ -232,12 +329,13 @@
 
       @media (min-width: 48rem) {
         main {
-          padding-bottom: calc(var(--space-4) + 4rem);
+          padding-bottom: calc(var(--space-4) + 5.5rem);
         }
 
         .canvas-wrapper {
           min-height: clamp(24rem, 55vh, 38rem);
           border-radius: 2rem;
+          padding-bottom: clamp(2rem, 8vw, 3.5rem);
         }
 
         .control-panel {
@@ -258,6 +356,10 @@
 
         .control-button {
           font-size: 0.75rem;
+        }
+
+        .touch-controls {
+          display: none;
         }
       }
 
@@ -307,6 +409,18 @@
             Reset Camera
           </button>
         </div>
+        <div class="touch-controls" aria-hidden="true">
+          <div class="thumbstick" data-thumbstick="left">
+            <div class="thumbstick__handle" data-thumbstick-handle></div>
+          </div>
+          <div class="lift-controls">
+            <button type="button" class="lift-button" data-lift-button data-lift="1">Ascend</button>
+            <button type="button" class="lift-button" data-lift-button data-lift="-1">Descend</button>
+          </div>
+          <div class="thumbstick" data-thumbstick="right">
+            <div class="thumbstick__handle" data-thumbstick-handle></div>
+          </div>
+        </div>
         <div class="status-badge" aria-live="polite" aria-atomic="true">
           <span id="status-text">Gently gliding in progress…</span>
         </div>
@@ -329,6 +443,133 @@
 
       const DPR_CAP = 1.8;
       const resizeState = { width: 0, height: 0 };
+
+      function clamp(value, min, max) {
+        if (!Number.isFinite(value)) {
+          return 0;
+        }
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function createThumbstick(root, { onChange } = {}) {
+        if (!root) return null;
+
+        const handle = root.querySelector("[data-thumbstick-handle]");
+        if (!handle) return null;
+
+        const DEADZONE = 0.12;
+        const state = {
+          pointerId: null,
+          value: { x: 0, y: 0 },
+          handleValue: { x: 0, y: 0 },
+        };
+
+        const listenerOptions = { passive: false };
+
+        const updateVisuals = () => {
+          const maxDistance = (root.clientWidth - handle.clientWidth) / 2;
+          const offsetX = state.handleValue.x * maxDistance;
+          const offsetY = state.handleValue.y * maxDistance;
+          handle.style.setProperty("--thumbstick-offset-x", `${offsetX}px`);
+          handle.style.setProperty("--thumbstick-offset-y", `${offsetY}px`);
+          const active = state.pointerId !== null || Math.hypot(offsetX, offsetY) > 0.5;
+          root.classList.toggle("is-active", active);
+        };
+
+        const emitChange = () => {
+          if (typeof onChange === "function") {
+            onChange({ x: state.value.x, y: state.value.y });
+          }
+        };
+
+        const setValues = ({ handleX = 0, handleY = 0, outputX = 0, outputY = 0 } = {}) => {
+          state.handleValue.x = handleX;
+          state.handleValue.y = handleY;
+          state.value.x = outputX;
+          state.value.y = outputY;
+          updateVisuals();
+          emitChange();
+        };
+
+        const translatePointer = (event) => {
+          const rect = root.getBoundingClientRect();
+          const maxDistance = rect.width / 2;
+          if (maxDistance <= 0) {
+            setValues();
+            return;
+          }
+          const dx = event.clientX - (rect.left + rect.width / 2);
+          const dy = event.clientY - (rect.top + rect.height / 2);
+          let normalizedX = dx / maxDistance;
+          let normalizedY = dy / maxDistance;
+          const length = Math.hypot(normalizedX, normalizedY);
+          if (length > 1) {
+            normalizedX /= length;
+            normalizedY /= length;
+          }
+
+          const handleMagnitude = Math.hypot(normalizedX, normalizedY);
+          let outputX = 0;
+          let outputY = 0;
+
+          if (handleMagnitude > DEADZONE) {
+            const scaledMagnitude = (handleMagnitude - DEADZONE) / (1 - DEADZONE);
+            const dirX = handleMagnitude === 0 ? 0 : normalizedX / handleMagnitude;
+            const dirY = handleMagnitude === 0 ? 0 : normalizedY / handleMagnitude;
+            outputX = dirX * scaledMagnitude;
+            outputY = dirY * scaledMagnitude;
+          }
+
+          setValues({ handleX: normalizedX, handleY: normalizedY, outputX, outputY });
+        };
+
+        const resetValues = () => {
+          setValues({ handleX: 0, handleY: 0, outputX: 0, outputY: 0 });
+        };
+
+        const handlePointerDown = (event) => {
+          event.preventDefault();
+          root.setPointerCapture(event.pointerId);
+          state.pointerId = event.pointerId;
+          translatePointer(event);
+        };
+
+        const handlePointerMove = (event) => {
+          if (state.pointerId !== event.pointerId) return;
+          event.preventDefault();
+          translatePointer(event);
+        };
+
+        const handlePointerEnd = (event) => {
+          if (state.pointerId !== event.pointerId) return;
+          if (root.hasPointerCapture(event.pointerId)) {
+            root.releasePointerCapture(event.pointerId);
+          }
+          state.pointerId = null;
+          event.preventDefault();
+          resetValues();
+        };
+
+        root.addEventListener("pointerdown", handlePointerDown, listenerOptions);
+        root.addEventListener("pointermove", handlePointerMove, listenerOptions);
+        root.addEventListener("pointerup", handlePointerEnd, listenerOptions);
+        root.addEventListener("pointercancel", handlePointerEnd, listenerOptions);
+        root.addEventListener("lostpointercapture", handlePointerEnd, listenerOptions);
+
+        resetValues();
+
+        return {
+          reset: resetValues,
+          destroy() {
+            root.removeEventListener("pointerdown", handlePointerDown, listenerOptions);
+            root.removeEventListener("pointermove", handlePointerMove, listenerOptions);
+            root.removeEventListener("pointerup", handlePointerEnd, listenerOptions);
+            root.removeEventListener("pointercancel", handlePointerEnd, listenerOptions);
+            root.removeEventListener("lostpointercapture", handlePointerEnd, listenerOptions);
+            resetValues();
+          },
+        };
+      }
 
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -578,6 +819,17 @@
 
       const thrustAxes = Object.values(thrustAxisKeys);
 
+      const thrustSources = {
+        keys: { forward: 0, strafe: 0, lift: 0 },
+        touch: { forward: 0, strafe: 0, lift: 0 },
+      };
+
+      const analogLookInput = { x: 0, y: 0 };
+      const ANALOG_LOOK_SPEED = 800;
+      const touchLiftPresses = new Map();
+      const liftButtons = Array.from(document.querySelectorAll("[data-lift-button]"));
+      const pointerListenerOptions = { passive: false };
+
       function computeAxisValue(axisKeys) {
         const hasPositive = axisKeys.positive.some((code) => thrustKeys.has(code));
         const hasNegative = axisKeys.negative.some((code) => thrustKeys.has(code));
@@ -587,13 +839,85 @@
         return 0;
       }
 
-      function updateThrustFromKeys() {
+      function combineThrustAxis(axis) {
+        return clamp(
+          Object.values(thrustSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0),
+          -1,
+          1
+        );
+      }
+
+      function applyThrustInput() {
         flightController.setThrustInput({
-          forward: computeAxisValue(thrustAxisKeys.forward),
-          strafe: computeAxisValue(thrustAxisKeys.strafe),
-          lift: computeAxisValue(thrustAxisKeys.lift),
+          forward: combineThrustAxis("forward"),
+          strafe: combineThrustAxis("strafe"),
+          lift: combineThrustAxis("lift"),
         });
       }
+
+      function updateThrustFromKeys() {
+        thrustSources.keys.forward = computeAxisValue(thrustAxisKeys.forward);
+        thrustSources.keys.strafe = computeAxisValue(thrustAxisKeys.strafe);
+        thrustSources.keys.lift = computeAxisValue(thrustAxisKeys.lift);
+        applyThrustInput();
+      }
+
+      const leftThumbstick = createThumbstick(document.querySelector('[data-thumbstick="left"]'), {
+        onChange: (value) => {
+          thrustSources.touch.forward = -value.y;
+          thrustSources.touch.strafe = value.x;
+          applyThrustInput();
+        },
+      });
+
+      const rightThumbstick = createThumbstick(document.querySelector('[data-thumbstick="right"]'), {
+        onChange: (value) => {
+          analogLookInput.x = value.x;
+          analogLookInput.y = value.y;
+        },
+      });
+
+      const updateLiftFromButtons = () => {
+        let lift = 0;
+        touchLiftPresses.forEach((value) => {
+          lift += value;
+        });
+        thrustSources.touch.lift = clamp(lift, -1, 1);
+        applyThrustInput();
+      };
+
+      const handleLiftButtonDown = (event) => {
+        event.preventDefault();
+        const { currentTarget } = event;
+        const direction = Number.parseFloat(currentTarget?.dataset?.lift ?? "0");
+        if (!Number.isFinite(direction) || direction === 0) {
+          return;
+        }
+        if (typeof currentTarget.setPointerCapture === "function") {
+          currentTarget.setPointerCapture(event.pointerId);
+        }
+        touchLiftPresses.set(event.pointerId, direction);
+        currentTarget.classList.add("is-active");
+        updateLiftFromButtons();
+      };
+
+      const handleLiftButtonEnd = (event) => {
+        const { currentTarget } = event;
+        if (typeof currentTarget?.hasPointerCapture === "function" && currentTarget.hasPointerCapture(event.pointerId)) {
+          currentTarget.releasePointerCapture(event.pointerId);
+        }
+        event.preventDefault();
+        touchLiftPresses.delete(event.pointerId);
+        currentTarget?.classList.remove("is-active");
+        updateLiftFromButtons();
+      };
+
+      liftButtons.forEach((button) => {
+        button.addEventListener("pointerdown", handleLiftButtonDown, pointerListenerOptions);
+        button.addEventListener("pointerup", handleLiftButtonEnd, pointerListenerOptions);
+        button.addEventListener("pointercancel", handleLiftButtonEnd, pointerListenerOptions);
+        button.addEventListener("lostpointercapture", handleLiftButtonEnd, pointerListenerOptions);
+      });
 
       toggleButton.addEventListener("click", () => {
         if (controlState.systemPaused) return;
@@ -606,7 +930,19 @@
         controls.target.set(0, 0.5, 0);
         controls.update();
         flightController.reset();
+        thrustKeys.clear();
         updateThrustFromKeys();
+        if (leftThumbstick) {
+          leftThumbstick.reset();
+        }
+        if (rightThumbstick) {
+          rightThumbstick.reset();
+        }
+        analogLookInput.x = 0;
+        analogLookInput.y = 0;
+        touchLiftPresses.clear();
+        liftButtons.forEach((button) => button.classList.remove("is-active"));
+        updateLiftFromButtons();
         updateStatusBadge();
       });
 
@@ -621,6 +957,7 @@
         updateStatusBadge();
       });
 
+      applyThrustInput();
       refreshAnimationState();
 
       document.addEventListener("keydown", (event) => {
@@ -652,6 +989,9 @@
       });
 
       canvas.addEventListener("click", () => {
+        if (!window.matchMedia("(pointer: fine)").matches) {
+          return;
+        }
         if (canvas.requestPointerLock && document.pointerLockElement !== canvas) {
           canvas.requestPointerLock();
         }
@@ -666,6 +1006,17 @@
       window.addEventListener("blur", () => {
         thrustKeys.clear();
         updateThrustFromKeys();
+        touchLiftPresses.clear();
+        liftButtons.forEach((button) => button.classList.remove("is-active"));
+        updateLiftFromButtons();
+        if (leftThumbstick) {
+          leftThumbstick.reset();
+        }
+        if (rightThumbstick) {
+          rightThumbstick.reset();
+        }
+        analogLookInput.x = 0;
+        analogLookInput.y = 0;
         if (document.pointerLockElement === canvas && document.exitPointerLock) {
           document.exitPointerLock();
         }
@@ -684,6 +1035,14 @@
           previousTime = time;
         } else {
           previousTime = null;
+        }
+
+        const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
+        if (analogLookInput.x !== 0 || analogLookInput.y !== 0) {
+          flightController.addLookDelta(
+            analogLookInput.x * ANALOG_LOOK_SPEED * lookDeltaTime,
+            analogLookInput.y * ANALOG_LOOK_SPEED * lookDeltaTime
+          );
         }
 
         const pose = flightController.update(delta);
@@ -711,6 +1070,17 @@
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
           previousTime = null;
+          if (leftThumbstick) {
+            leftThumbstick.reset();
+          }
+          if (rightThumbstick) {
+            rightThumbstick.reset();
+          }
+          analogLookInput.x = 0;
+          analogLookInput.y = 0;
+          touchLiftPresses.clear();
+          liftButtons.forEach((button) => button.classList.remove("is-active"));
+          updateLiftFromButtons();
         }
         renderer.setAnimationLoop(document.hidden ? null : renderFrame);
       });
@@ -722,6 +1092,18 @@
         }
         controls.dispose();
         renderer.dispose();
+        if (leftThumbstick) {
+          leftThumbstick.destroy();
+        }
+        if (rightThumbstick) {
+          rightThumbstick.destroy();
+        }
+        liftButtons.forEach((button) => {
+          button.removeEventListener("pointerdown", handleLiftButtonDown, pointerListenerOptions);
+          button.removeEventListener("pointerup", handleLiftButtonEnd, pointerListenerOptions);
+          button.removeEventListener("pointercancel", handleLiftButtonEnd, pointerListenerOptions);
+          button.removeEventListener("lostpointercapture", handleLiftButtonEnd, pointerListenerOptions);
+        });
       });
 
       updateRendererSize(true);

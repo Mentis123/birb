@@ -1,14 +1,14 @@
 # Project Log
 
 ## Current Steps
-- Review existing Three.js gliding capsule scene to verify visual fidelity and interaction responsiveness.
-- Maintain alignment between HTML structure, module imports, and animation loop behavior.
-- Validate the new control panel overlay (pause/resume, glide speed, camera reset) across pointer, touch, and keyboard input.
+- Exercise the refreshed mobile-first layout to confirm the control panel, thumbsticks, and lift buttons avoid overlapping content on phones and small tablets.
+- Validate the combined keyboard and touch input pipeline (thumbsticks + lift buttons + throttle slider) to ensure thrust blending behaves consistently across interaction types.
+- Monitor analog look responsiveness and ensure sensitivity feels balanced for coarse pointers while preserving desktop pointer-lock behavior.
 
 ## Current Issues
 - Need regular validation that the capsule's glide path and controls remain responsive after changes.
 - Lack of structured documentation for iterative scene refinements and planned enhancements.
-- Newly refactored mobile-first layout and control cluster should be sanity-checked on multiple breakpoints and device orientations to confirm size observers behave as expected.
+- Thumbstick deadzone and lift button responsiveness should be reviewed on low-end Android browsers to ensure no accidental drift occurs.
 - Require telemetry or analytics hooks to learn which controls see the most usage before expanding the panel further.
 
 ## Execution Steps
@@ -16,7 +16,7 @@
 - Capture observations, regressions, or visual artifacts for each iteration in this log before shipping updates.
 - Update this document whenever new tasks arise or issues are resolved to keep progress transparent.
 - Re-test the lightweight renderer configuration on low-power devices to ensure the capped pixel ratio maintains visual quality without overtaxing GPUs.
-- Exercise the revived control panel on touch and keyboard to confirm focus rings, button states, and slider feedback remain accessible.
+- Exercise the revived control panel on touch, keyboard, and newly added thumbsticks to confirm focus rings, button states, and slider feedback remain accessible.
 
 ## Future Roadmap
 
