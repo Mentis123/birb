@@ -143,7 +143,7 @@ export function createCameraState({ three, scene, flightController }) {
   };
 
   const state = {
-    mode: CAMERA_MODES.FIXED,
+    mode: CAMERA_MODES.FOLLOW,
   };
 
   const debugScratchOffset = new Vector3();
