@@ -89,6 +89,13 @@
         box-shadow: 0 12px 28px rgba(4, 10, 24, 0.4);
         backdrop-filter: blur(18px);
         z-index: 2;
+        transition: opacity 160ms ease, transform 200ms ease;
+      }
+
+      .control-panel.is-collapsed {
+        opacity: 0;
+        transform: translateY(-0.6rem) scale(0.96);
+        pointer-events: none;
       }
 
       .control-panel h2 {
@@ -113,6 +120,8 @@
         box-shadow: inset 0 0 0 1px rgba(20, 42, 97, 0.4);
         cursor: pointer;
         transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
       }
 
       .control-button[disabled] {
@@ -301,6 +310,8 @@
         box-shadow: inset 0 0 0 1px rgba(20, 42, 97, 0.4);
         touch-action: none;
         user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
         min-width: clamp(3.6rem, 18vw, 4.75rem);
         text-align: center;
       }
@@ -310,6 +321,33 @@
         box-shadow: inset 0 0 0 1px rgba(88, 134, 214, 0.55), 0 6px 16px rgba(7, 14, 30, 0.55);
         border-color: rgba(165, 207, 255, 0.6);
       }
+
+      .control-toggle {
+        position: absolute;
+        inset: var(--space-2) var(--space-2) auto auto;
+        padding: 0.4rem 0.9rem;
+        border-radius: 999px;
+        background: rgba(5, 9, 19, 0.65);
+        border: 1px solid rgba(124, 170, 255, 0.25);
+        color: #e5edff;
+        font-size: 0.66rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 10px 24px rgba(4, 9, 21, 0.55);
+        backdrop-filter: blur(18px);
+        z-index: 3;
+        -webkit-touch-callout: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .control-toggle:focus-visible {
+        outline: 2px solid rgba(124, 170, 255, 0.75);
+        outline-offset: 2px;
+      }
+
 
       @media (pointer: coarse) {
         .touch-controls {
@@ -380,7 +418,12 @@
           role="img"
           aria-label="Stylized capsule gently gliding through a dark sky"
         ></canvas>
-        <div class="control-panel" role="group" aria-label="Flight controls">
+        <div
+          id="flight-control-panel"
+          class="control-panel"
+          role="group"
+          aria-label="Flight controls"
+        >
           <h2>Controls</h2>
           <button
             type="button"
@@ -409,6 +452,16 @@
             Reset Camera
           </button>
         </div>
+        <button
+          type="button"
+          class="control-toggle"
+          data-control="panel-toggle"
+          aria-pressed="false"
+          aria-expanded="true"
+          aria-controls="flight-control-panel"
+        >
+          Hide Controls
+        </button>
         <div class="touch-controls" aria-hidden="true">
           <div class="thumbstick" data-thumbstick="left">
             <div class="thumbstick__handle" data-thumbstick-handle></div>
@@ -577,7 +630,7 @@
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x060912);
-      scene.fog = new THREE.Fog(0x060912, 6.5, 18);
+      scene.fog = new THREE.Fog(0x060912, 9.75, 27);
 
       const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
       camera.position.set(2.75, 1.8, 3.65);
@@ -587,7 +640,7 @@
       controls.dampingFactor = 0.08;
       controls.enablePan = false;
       controls.minDistance = 2.3;
-      controls.maxDistance = 6;
+      controls.maxDistance = 9;
       controls.maxPolarAngle = Math.PI / 2;
       controls.target.set(0, 0.5, 0);
 
@@ -602,7 +655,7 @@
       rimLight.position.set(-3.5, 2.8, -2.4);
       scene.add(rimLight);
 
-      const glowLight = new THREE.PointLight(0x3fa4ff, 1.15, 6, 2);
+      const glowLight = new THREE.PointLight(0x3fa4ff, 1.15, 9, 2);
       glowLight.position.set(0, 1.05, 0.4);
       scene.add(glowLight);
 
@@ -610,6 +663,7 @@
 
       const capsuleGroup = new THREE.Group();
       scene.add(capsuleGroup);
+      capsuleGroup.scale.setScalar(0.5);
 
       const capsuleOrientationOffset = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(0, -Math.PI / 2, 0)
@@ -710,6 +764,8 @@
       const statusText = document.querySelector("#status-text");
       const toggleButton = document.querySelector('[data-control="toggle"]');
       const resetButton = document.querySelector('[data-control="reset"]');
+      const controlPanel = document.querySelector("#flight-control-panel");
+      const panelToggleButton = document.querySelector('[data-control="panel-toggle"]');
       const glideSpeedInput = document.querySelector("#glide-speed");
       const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
 
@@ -748,6 +804,15 @@
         }
         updateToggleButton();
         updateStatusBadge();
+      }
+
+      function updatePanelToggle() {
+        if (!panelToggleButton || !controlPanel) return;
+        const isCollapsed = controlPanel.classList.contains("is-collapsed");
+        panelToggleButton.textContent = isCollapsed ? "Show Controls" : "Hide Controls";
+        panelToggleButton.setAttribute("aria-pressed", isCollapsed ? "true" : "false");
+        panelToggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        controlPanel.setAttribute("aria-hidden", isCollapsed ? "true" : "false");
       }
 
       function updateGlideSpeedDisplay(value) {
@@ -917,6 +982,9 @@
         button.addEventListener("pointerup", handleLiftButtonEnd, pointerListenerOptions);
         button.addEventListener("pointercancel", handleLiftButtonEnd, pointerListenerOptions);
         button.addEventListener("lostpointercapture", handleLiftButtonEnd, pointerListenerOptions);
+        button.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+        });
       });
 
       toggleButton.addEventListener("click", () => {
@@ -924,6 +992,14 @@
         controlState.manuallyPaused = !controlState.manuallyPaused;
         refreshAnimationState();
       });
+
+      if (panelToggleButton && controlPanel) {
+        panelToggleButton.addEventListener("click", () => {
+          controlPanel.classList.toggle("is-collapsed");
+          updatePanelToggle();
+        });
+        updatePanelToggle();
+      }
 
       resetButton.addEventListener("click", () => {
         camera.position.set(2.75, 1.8, 3.65);

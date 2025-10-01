@@ -4,14 +4,16 @@ import * as THREEImported from "https://esm.sh/three@0.161.0";
 // Adjust these values to balance clarity and performance during testing.
 export const WORLD_TWEAKS = {
   /** Distance where the scene fog begins blending in. */
-  FOG_START: 6.5,
+  FOG_START: 9.75,
   /** Distance where the fog fully obscures geometry. */
-  FOG_END: 18,
+  FOG_END: 27,
   /** Emissive intensity for the skydome's subtle glow. */
   DOME_BRIGHTNESS: 0.18,
   /** Controls the base scale of distant terrain silhouettes. */
-  TERRAIN_SCALE: 52,
+  TERRAIN_SCALE: 78,
 };
+
+const SPACE_SCALE = 1.5;
 
 const DEFAULT_OPTIONS = {
   floor: {
@@ -51,7 +53,7 @@ export function createWorldShell(
     scene.fog = new THREE.Fog(0x060912, WORLD_TWEAKS.FOG_START, WORLD_TWEAKS.FOG_END);
   }
 
-  const skyGeometry = new THREE.SphereGeometry(60, 48, 32);
+  const skyGeometry = new THREE.SphereGeometry(60 * SPACE_SCALE, 48, 32);
   const skyMaterial = new THREE.MeshStandardMaterial({
     color: 0x08111f,
     emissive: 0x0a1b33,
@@ -65,9 +67,9 @@ export function createWorldShell(
 
   const hazeGroup = new THREE.Group();
   const hazeLayers = [
-    { radius: 32, height: 16, opacity: 0.22 },
-    { radius: 42, height: 18, opacity: 0.18 },
-    { radius: 55, height: 22, opacity: 0.14 },
+    { radius: 32 * SPACE_SCALE, height: 16 * SPACE_SCALE, opacity: 0.22 },
+    { radius: 42 * SPACE_SCALE, height: 18 * SPACE_SCALE, opacity: 0.18 },
+    { radius: 55 * SPACE_SCALE, height: 22 * SPACE_SCALE, opacity: 0.14 },
   ];
 
   hazeLayers.forEach((layer, index) => {
@@ -86,7 +88,7 @@ export function createWorldShell(
   hazeGroup.position.y = -3.5;
   scene.add(hazeGroup);
 
-  const trailGeometry = new THREE.TorusGeometry(1.8, 0.016, 16, 120);
+  const trailGeometry = new THREE.TorusGeometry(1.8 * SPACE_SCALE, 0.016 * SPACE_SCALE, 16, 120);
   const trailMaterial = new THREE.MeshBasicMaterial({
     color: mergedOptions.trail.color,
     transparent: true,
@@ -96,7 +98,7 @@ export function createWorldShell(
   glideTrail.rotation.x = Math.PI / 2;
   scene.add(glideTrail);
 
-  const floorGeometry = new THREE.CircleGeometry(3.4, 48);
+  const floorGeometry = new THREE.CircleGeometry(3.4 * SPACE_SCALE, 48);
   const floorMaterial = new THREE.MeshBasicMaterial({
     color: mergedOptions.floor.color,
     transparent: true,
@@ -145,7 +147,7 @@ export function createWorldShell(
   const anchors = new THREE.InstancedMesh(anchorGeometry, anchorMaterial, anchorCount);
   const dummy = new THREE.Object3D();
   for (let i = 0; i < anchorCount; i += 1) {
-    const radius = 5 + Math.random() * 10;
+    const radius = (5 + Math.random() * 10) * SPACE_SCALE;
     const angle = Math.random() * Math.PI * 2;
     const height = -0.3 + Math.random() * 3.5;
     dummy.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
