@@ -203,16 +203,19 @@
         bottom: var(--space-2);
         left: 50%;
         transform: translateX(-50%);
-        padding: 0.35rem 0.8rem;
+        padding: 0.4rem 1.1rem;
         font-size: var(--status-size);
         text-transform: uppercase;
         letter-spacing: 0.12em;
-        color: rgba(231, 238, 255, 0.9);
-        background: rgba(7, 11, 22, 0.6);
+        color: rgba(231, 238, 255, 0.92);
+        background: rgba(7, 11, 22, 0.62);
         border-radius: 999px;
         border: 1px solid rgba(109, 159, 255, 0.22);
-        backdrop-filter: blur(6px);
+        backdrop-filter: blur(8px);
         pointer-events: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
       }
 
       .status-badge::before {
@@ -220,15 +223,22 @@
         display: inline-block;
         width: 0.4rem;
         height: 0.4rem;
-        margin-right: 0.55rem;
+        margin-right: 0.2rem;
         border-radius: 999px;
         background: radial-gradient(circle, #8fd2ff 0%, #3fa4ff 60%, rgba(63, 164, 255, 0) 100%);
         box-shadow: 0 0 12px rgba(104, 188, 255, 0.75);
-        vertical-align: middle;
       }
 
-      .status-badge span {
-        vertical-align: middle;
+      .status-badge__text {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      .status-badge__fps {
+        opacity: 0.82;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.16em;
       }
 
       .touch-controls {
@@ -475,7 +485,8 @@
           </div>
         </div>
         <div class="status-badge" aria-live="polite" aria-atomic="true">
-          <span id="status-text">Gently gliding in progress…</span>
+          <span id="status-text" class="status-badge__text">Gently gliding in progress…</span>
+          <span id="fps-text" class="status-badge__fps" aria-hidden="true">-- FPS</span>
         </div>
       </div>
     </main>
@@ -626,11 +637,11 @@
 
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.05;
+      renderer.toneMappingExposure = 1.08;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x060912);
-      scene.fog = new THREE.Fog(0x060912, 9.75, 27);
+      scene.background = new THREE.Color(0x050a14);
+      scene.fog = new THREE.Fog(0x050a14, 8.5, 24);
 
       const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
       camera.position.set(2.75, 1.8, 3.65);
@@ -644,19 +655,24 @@
       controls.maxPolarAngle = Math.PI / 2;
       controls.target.set(0, 0.5, 0);
 
-      const ambient = new THREE.HemisphereLight(0x9cc9ff, 0x060912, 0.55);
+      const ambient = new THREE.HemisphereLight(0xa9d7ff, 0x0a1323, 0.62);
+      ambient.groundColor.set(0x0b1624);
       scene.add(ambient);
 
-      const keyLight = new THREE.DirectionalLight(0x9dc4ff, 0.8);
-      keyLight.position.set(4, 5, 3);
+      const keyLight = new THREE.DirectionalLight(0x9ecbff, 0.68);
+      keyLight.position.set(4.2, 4.6, 3.4);
       scene.add(keyLight);
 
-      const rimLight = new THREE.DirectionalLight(0xffb58c, 0.35);
-      rimLight.position.set(-3.5, 2.8, -2.4);
+      const rimLight = new THREE.DirectionalLight(0xffcaa5, 0.32);
+      rimLight.position.set(-3.2, 3, -2.6);
       scene.add(rimLight);
 
-      const glowLight = new THREE.PointLight(0x3fa4ff, 1.15, 9, 2);
-      glowLight.position.set(0, 1.05, 0.4);
+      const fillLight = new THREE.DirectionalLight(0x6ea4ff, 0.24);
+      fillLight.position.set(0.8, 2.2, -3.8);
+      scene.add(fillLight);
+
+      const glowLight = new THREE.PointLight(0x4ab2ff, 0.95, 9.5, 1.6);
+      glowLight.position.set(0.05, 1.1, 0.45);
       scene.add(glowLight);
 
       const { glideTrail } = createWorldShell(scene, { three: THREE });
@@ -759,9 +775,16 @@
         elapsed: 0,
       };
 
+      const fpsState = {
+        lastSampleTime: null,
+        frames: 0,
+        value: 0,
+      };
+
       let previousTime = null;
 
       const statusText = document.querySelector("#status-text");
+      const fpsText = document.querySelector("#fps-text");
       const toggleButton = document.querySelector('[data-control="toggle"]');
       const resetButton = document.querySelector('[data-control="reset"]');
       const controlPanel = document.querySelector("#flight-control-panel");
@@ -773,6 +796,28 @@
         manuallyPaused: false,
         systemPaused: motionQuery.matches,
       };
+
+      function updateFpsReadout(time) {
+        if (!fpsText) return;
+
+        if (fpsState.lastSampleTime === null) {
+          fpsState.lastSampleTime = time;
+          fpsState.frames = 0;
+          return;
+        }
+
+        fpsState.frames += 1;
+        const elapsed = time - fpsState.lastSampleTime;
+        if (elapsed < 250) {
+          return;
+        }
+
+        const fps = (fpsState.frames / elapsed) * 1000;
+        fpsState.value = fps;
+        fpsState.frames = 0;
+        fpsState.lastSampleTime = time;
+        fpsText.textContent = `${Math.max(0, Math.round(fps)).toString().padStart(2, "0")} FPS`;
+      }
 
       function updateStatusBadge(speed = flightController.getSpeed()) {
         const throttlePercent = Math.round(flightController.throttle * 100);
@@ -1137,6 +1182,7 @@
           updateStatusBadge(flightController.getSpeed());
         }
 
+        updateFpsReadout(time);
         controls.update();
         renderer.render(scene, camera);
       };
@@ -1157,6 +1203,11 @@
           touchLiftPresses.clear();
           liftButtons.forEach((button) => button.classList.remove("is-active"));
           updateLiftFromButtons();
+          fpsState.lastSampleTime = null;
+          fpsState.frames = 0;
+          if (fpsText) {
+            fpsText.textContent = "-- FPS";
+          }
         }
         renderer.setAnimationLoop(document.hidden ? null : renderFrame);
       });
