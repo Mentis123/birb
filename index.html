@@ -906,7 +906,6 @@
         three: THREE,
         scene,
         flightController,
-        domElement: renderer.domElement,
       });
 
       const blendedQuaternion = new THREE.Quaternion();
@@ -1047,8 +1046,8 @@
       }
 
       resetButton.addEventListener("click", () => {
-        cameraState.reset();
         flightController.reset();
+        cameraState.reset();
         thrustKeys.clear();
         updateThrustFromKeys();
         if (leftThumbstick) {
