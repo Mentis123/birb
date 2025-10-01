@@ -1,4 +1,4 @@
-import { OrbitControls } from "https://esm.sh/three@0.161.0/examples/jsm/controls/OrbitControls";
+import { createFollowCameraRig } from "./follow-camera.js";
 
 export const CAMERA_MODES = Object.freeze({
   FOLLOW: "Follow",
@@ -32,22 +32,43 @@ function createDebugOverlay({ getSnapshot }) {
   let rafId = 0;
   const renderOverlay = () => {
     const snapshot = getSnapshot();
-    const { mode, config, offset, cameraPosition } = snapshot;
+    const { mode, config, offset, cameraPosition, followMetrics } = snapshot;
     const formatVector = (vector) =>
       vector
         ? `(${vector.x.toFixed(2)}, ${vector.y.toFixed(2)}, ${vector.z.toFixed(2)})`
         : "(n/a)";
 
-    const easing = config?.easing ?? null;
-    const smoothing = config?.smoothing ?? null;
+    const positionDamping = config?.positionDamping ?? null;
+    const lookAtDamping = config?.lookAtDamping ?? null;
+    const rotationDamping = config?.rotationDamping ?? null;
 
-    overlay.textContent = [
+    const lines = [
       `Camera Mode: ${mode}`,
       `Camera Position: ${formatVector(cameraPosition)}`,
       `Offset: ${formatVector(offset)}`,
-      `Easing: ${Number.isFinite(easing) ? easing.toFixed(3) : "n/a"}`,
-      `Smoothing: ${Number.isFinite(smoothing) ? smoothing.toFixed(3) : "n/a"}`,
-    ].join("\n");
+      `Position Damping: ${
+        Number.isFinite(positionDamping) ? positionDamping.toFixed(3) : "n/a"
+      }`,
+      `LookAt Damping: ${
+        Number.isFinite(lookAtDamping) ? lookAtDamping.toFixed(3) : "n/a"
+      }`,
+      `Rotation Damping: ${
+        Number.isFinite(rotationDamping) ? rotationDamping.toFixed(3) : "n/a"
+      }`,
+    ];
+
+    if (followMetrics) {
+      lines.push(
+        `Follow Offset Distance: ${followMetrics.offsetMagnitude.toFixed(2)}`,
+        `Follow Position: ${formatVector(followMetrics.position)}`,
+        `Follow LookAt: ${formatVector(followMetrics.lookAt)}`,
+        `Follow Damping (pos/look/rot): ${followMetrics.positionDamping.toFixed(3)} / ${followMetrics.lookAtDamping.toFixed(3)} / ${followMetrics.rotationDamping.toFixed(3)}`,
+        `Velocity LookAhead: ${followMetrics.velocityLookAhead.toFixed(2)}`,
+        `Steering LookAhead: f:${followMetrics.steeringLookAhead.forward.toFixed(2)} s:${followMetrics.steeringLookAhead.strafe.toFixed(2)} l:${followMetrics.steeringLookAhead.lift.toFixed(2)}`,
+      );
+    }
+
+    overlay.textContent = lines.join("\n");
 
     rafId = window.requestAnimationFrame(renderOverlay);
   };
@@ -62,7 +83,7 @@ function createDebugOverlay({ getSnapshot }) {
   };
 }
 
-export function createCameraState({ three, scene, flightController, domElement }) {
+export function createCameraState({ three, scene, flightController }) {
   if (!three) {
     throw new Error("createCameraState requires the THREE namespace");
   }
@@ -71,25 +92,15 @@ export function createCameraState({ three, scene, flightController, domElement }
     PerspectiveCamera,
     Vector3,
     Quaternion,
+    Matrix4,
   } = three;
 
   const camera = new PerspectiveCamera(60, 1, 0.1, 100);
   const defaultPosition = new Vector3(2.75, 1.8, 3.65);
   const defaultTarget = new Vector3(0, 0.5, 0);
 
-  const controls = new OrbitControls(camera, domElement ?? document.body);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.enablePan = false;
-  controls.minDistance = 2.3;
-  controls.maxDistance = 9;
-  controls.maxPolarAngle = Math.PI / 2;
-  controls.target.copy(defaultTarget);
-
   const followState = {
-    position: defaultPosition.clone(),
-    target: defaultTarget.clone(),
-    initialized: false,
+    rig: createFollowCameraRig(three),
   };
 
   const fpvState = {
@@ -100,22 +111,29 @@ export function createCameraState({ three, scene, flightController, domElement }
   const scratch = {
     targetPosition: new Vector3(),
     ambientPosition: new Vector3(),
-    desiredPosition: new Vector3(),
     offset: new Vector3(),
-    lookAt: new Vector3(),
     quaternion: new Quaternion(),
+    lookMatrix: new Matrix4(),
   };
 
   const modeConfigurations = {
     [CAMERA_MODES.FIXED]: {
       offset: defaultPosition.clone().sub(defaultTarget),
-      easing: 0.18,
-      smoothing: 0.12,
+      positionDamping: 0.2,
+      lookAtDamping: 0.24,
+      rotationDamping: 0.18,
     },
     [CAMERA_MODES.FOLLOW]: {
       offset: new Vector3(0, 1.2, 4.2),
-      easing: 0.22,
-      smoothing: 0.16,
+      positionDamping: 0.16,
+      lookAtDamping: 0.24,
+      rotationDamping: 0.2,
+      velocityLookAhead: 0.52,
+      steeringLookAhead: {
+        forward: 0.75,
+        strafe: 0.55,
+        lift: 0.38,
+      },
     },
     [CAMERA_MODES.FPV]: {
       offset: new Vector3(0, 0.2, 0.45),
@@ -135,16 +153,20 @@ export function createCameraState({ three, scene, flightController, domElement }
       const mode = state.mode;
       const config = modeConfigurations[mode];
       let offset = config?.offset ?? null;
-      if (mode === CAMERA_MODES.FIXED && controls) {
-        offset = debugScratchOffset
-          .copy(camera.position)
-          .sub(controls.target);
+      let followMetrics = null;
+      if (mode === CAMERA_MODES.FIXED) {
+        offset = debugScratchOffset.copy(camera.position).sub(defaultTarget);
+      }
+      if (mode === CAMERA_MODES.FOLLOW) {
+        followMetrics = followState.rig.getDebugState();
+        offset = followMetrics?.offset ?? offset;
       }
       return {
         mode,
         config,
         offset: offset ? offset.clone() : null,
         cameraPosition: camera.position.clone(),
+        followMetrics,
       };
     },
   });
@@ -154,36 +176,35 @@ export function createCameraState({ three, scene, flightController, domElement }
   }
 
   const applyFixedState = () => {
-    controls.enabled = true;
     camera.position.copy(defaultPosition);
-    controls.target.copy(defaultTarget);
-    controls.update();
+    scratch.lookMatrix.lookAt(defaultPosition, defaultTarget, camera.up);
+    camera.quaternion.setFromRotationMatrix(scratch.lookMatrix);
+    camera.lookAt(defaultTarget);
   };
 
-  const updateFollow = ({ pose, ambientOffsets }) => {
+  followState.rig.attach(camera, modeConfigurations[CAMERA_MODES.FOLLOW]);
+
+  const updateFollow = ({ pose, ambientOffsets, delta }) => {
     if (!pose) return;
-    const config = modeConfigurations[CAMERA_MODES.FOLLOW];
-    const smoothing = Number.isFinite(config.smoothing) ? config.smoothing : 0.16;
-    const easing = Number.isFinite(config.easing) ? config.easing : smoothing;
 
-    scratch.targetPosition.copy(pose.position);
-    if (ambientOffsets?.position) {
-      scratch.targetPosition.add(scratch.ambientPosition.copy(ambientOffsets.position));
-    }
+    followState.rig.configure(modeConfigurations[CAMERA_MODES.FOLLOW]);
 
-    scratch.desiredPosition.copy(scratch.targetPosition).add(config.offset);
+    const velocity = flightController?.velocity?.clone?.() ?? null;
+    const steering = flightController
+      ? {
+          forward: flightController.input?.forward ?? 0,
+          strafe: flightController.input?.strafe ?? 0,
+          lift: flightController.input?.lift ?? 0,
+        }
+      : null;
 
-    if (!followState.initialized) {
-      followState.position.copy(scratch.desiredPosition);
-      followState.target.copy(scratch.targetPosition);
-      followState.initialized = true;
-    }
-
-    followState.position.lerp(scratch.desiredPosition, smoothing);
-    followState.target.lerp(scratch.targetPosition, easing);
-
-    camera.position.copy(followState.position);
-    camera.lookAt(followState.target);
+    followState.rig.updateFromPose({
+      pose,
+      velocity,
+      ambientOffsets,
+      steering,
+      delta,
+    });
   };
 
   const updateFpv = ({ pose, ambientOffsets, delta }) => {
@@ -233,8 +254,7 @@ export function createCameraState({ three, scene, flightController, domElement }
     if (state.mode === CAMERA_MODES.FIXED) {
       applyFixedState();
     } else {
-      controls.enabled = false;
-      followState.initialized = false;
+      followState.rig.reset();
       fpvState.initialized = false;
     }
   }
@@ -244,16 +264,61 @@ export function createCameraState({ three, scene, flightController, domElement }
   }
 
   function reset() {
-    state.mode = CAMERA_MODES.FIXED;
-    followState.initialized = false;
     fpvState.initialized = false;
-    applyFixedState();
+
+    if (state.mode === CAMERA_MODES.FOLLOW) {
+      const pose = flightController
+        ? {
+            position: flightController.position?.clone?.() ?? null,
+            quaternion: flightController.quaternion?.clone?.() ?? null,
+          }
+        : null;
+      const velocity = flightController?.velocity?.clone?.() ?? null;
+      followState.rig.reset({
+        camera,
+        pose,
+        velocity,
+        steering: flightController
+          ? {
+              forward: flightController.input?.forward ?? 0,
+              strafe: flightController.input?.strafe ?? 0,
+              lift: flightController.input?.lift ?? 0,
+            }
+          : null,
+      });
+    } else if (state.mode === CAMERA_MODES.FPV) {
+      const pose = flightController
+        ? {
+            position: flightController.position,
+            quaternion: flightController.quaternion,
+          }
+        : null;
+      if (pose) {
+        const config = modeConfigurations[CAMERA_MODES.FPV];
+        scratch.offset.copy(config.offset).applyQuaternion(pose.quaternion);
+        scratch.targetPosition.copy(pose.position);
+        camera.position.copy(scratch.targetPosition).add(scratch.offset);
+        camera.quaternion.copy(pose.quaternion);
+        if (flightController?.getAmbientOffsets) {
+          const ambientOffsets = flightController.getAmbientOffsets();
+          if (ambientOffsets?.position) {
+            camera.position.add(ambientOffsets.position);
+          }
+          if (ambientOffsets?.quaternion) {
+            camera.quaternion.multiply(ambientOffsets.quaternion);
+          }
+        }
+      } else {
+        fpvState.initialized = false;
+      }
+    } else {
+      applyFixedState();
+      state.mode = CAMERA_MODES.FIXED;
+    }
   }
 
   function update({ pose, ambientOffsets, delta } = {}) {
     if (state.mode === CAMERA_MODES.FIXED) {
-      controls.enabled = true;
-      controls.update();
       return;
     }
 
@@ -266,7 +331,6 @@ export function createCameraState({ three, scene, flightController, domElement }
 
   function dispose() {
     debugOverlay.dispose();
-    controls.dispose();
     if (scene && typeof scene.remove === "function") {
       scene.remove(camera);
     }
@@ -276,7 +340,6 @@ export function createCameraState({ three, scene, flightController, domElement }
 
   return {
     camera,
-    controls,
     setMode,
     getMode,
     reset,
