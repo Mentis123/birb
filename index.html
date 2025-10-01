@@ -332,9 +332,16 @@
         border-color: rgba(165, 207, 255, 0.6);
       }
 
-      .control-toggle {
+      .canvas-actions {
         position: absolute;
         inset: var(--space-2) var(--space-2) auto auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+        z-index: 3;
+      }
+
+      .canvas-action-button {
         padding: 0.4rem 0.9rem;
         border-radius: 999px;
         background: rgba(5, 9, 19, 0.65);
@@ -347,15 +354,51 @@
         cursor: pointer;
         box-shadow: 0 10px 24px rgba(4, 9, 21, 0.55);
         backdrop-filter: blur(18px);
-        z-index: 3;
         -webkit-touch-callout: none;
         user-select: none;
         -webkit-user-select: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        min-height: 2.25rem;
+        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
       }
 
-      .control-toggle:focus-visible {
+      .canvas-action-button:focus-visible {
         outline: 2px solid rgba(124, 170, 255, 0.75);
         outline-offset: 2px;
+      }
+
+      .canvas-action-button:not([disabled]):hover {
+        box-shadow: 0 12px 30px rgba(4, 9, 21, 0.6);
+        border-color: rgba(165, 207, 255, 0.6);
+      }
+
+      .canvas-action-button:not([disabled]):active {
+        transform: translateY(1px);
+      }
+
+      .control-toggle,
+      .fullscreen-toggle {
+        border-color: rgba(124, 170, 255, 0.25);
+      }
+
+      .canvas-wrapper:fullscreen,
+      .canvas-wrapper:-webkit-full-screen {
+        max-width: none;
+        width: 100%;
+        min-height: 100vh;
+        min-height: 100dvh;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        padding-bottom: clamp(3rem, 14vw, 4.5rem);
+      }
+
+      .canvas-wrapper:fullscreen .canvas-actions,
+      .canvas-wrapper:-webkit-full-screen .canvas-actions {
+        inset: clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem) auto auto;
       }
 
 
@@ -408,6 +451,10 @@
 
         .touch-controls {
           display: none;
+        }
+
+        .canvas-actions {
+          flex-direction: row;
         }
       }
 
@@ -462,16 +509,26 @@
             Reset Camera
           </button>
         </div>
-        <button
-          type="button"
-          class="control-toggle"
-          data-control="panel-toggle"
-          aria-pressed="false"
-          aria-expanded="true"
-          aria-controls="flight-control-panel"
-        >
-          Hide Controls
-        </button>
+        <div class="canvas-actions" role="group" aria-label="Display options">
+          <button
+            type="button"
+            class="canvas-action-button control-toggle"
+            data-control="panel-toggle"
+            aria-pressed="false"
+            aria-expanded="true"
+            aria-controls="flight-control-panel"
+          >
+            Hide Controls
+          </button>
+          <button
+            type="button"
+            class="canvas-action-button fullscreen-toggle"
+            data-control="fullscreen"
+            aria-pressed="false"
+          >
+            Enter Fullscreen
+          </button>
+        </div>
         <div class="touch-controls" aria-hidden="true">
           <div class="thumbstick" data-thumbstick="left">
             <div class="thumbstick__handle" data-thumbstick-handle></div>
@@ -498,6 +555,7 @@
       import { createCameraState } from "./src/camera/camera-state.js";
       import { createWorldShell } from "./src/environment/world-shell.js";
 
+      const canvasWrapper = document.querySelector(".canvas-wrapper");
       const canvas = document.querySelector("#scene");
       const renderer = new THREE.WebGLRenderer({
         canvas,
@@ -777,6 +835,7 @@
       const resetButton = document.querySelector('[data-control="reset"]');
       const controlPanel = document.querySelector("#flight-control-panel");
       const panelToggleButton = document.querySelector('[data-control="panel-toggle"]');
+      const fullscreenToggleButton = document.querySelector('[data-control="fullscreen"]');
       const glideSpeedInput = document.querySelector("#glide-speed");
       const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
 
@@ -846,6 +905,56 @@
         panelToggleButton.setAttribute("aria-pressed", isCollapsed ? "true" : "false");
         panelToggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
         controlPanel.setAttribute("aria-hidden", isCollapsed ? "true" : "false");
+      }
+
+      function getFullscreenElement() {
+        return (
+          document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          document.mozFullScreenElement ||
+          document.msFullscreenElement ||
+          null
+        );
+      }
+
+      function requestFullscreen(element) {
+        if (!element) return Promise.resolve();
+        if (element.requestFullscreen) {
+          return element.requestFullscreen();
+        }
+        if (element.webkitRequestFullscreen) {
+          return element.webkitRequestFullscreen();
+        }
+        if (element.mozRequestFullScreen) {
+          return element.mozRequestFullScreen();
+        }
+        if (element.msRequestFullscreen) {
+          return element.msRequestFullscreen();
+        }
+        return Promise.resolve();
+      }
+
+      function exitFullscreen() {
+        if (document.exitFullscreen) {
+          return document.exitFullscreen();
+        }
+        if (document.webkitExitFullscreen) {
+          return document.webkitExitFullscreen();
+        }
+        if (document.mozCancelFullScreen) {
+          return document.mozCancelFullScreen();
+        }
+        if (document.msExitFullscreen) {
+          return document.msExitFullscreen();
+        }
+        return Promise.resolve();
+      }
+
+      function updateFullscreenButton() {
+        if (!fullscreenToggleButton) return;
+        const isFullscreen = getFullscreenElement() === canvasWrapper;
+        fullscreenToggleButton.textContent = isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen";
+        fullscreenToggleButton.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
       }
 
       function updateGlideSpeedDisplay(value) {
@@ -1043,6 +1152,45 @@
           updatePanelToggle();
         });
         updatePanelToggle();
+      }
+
+      if (fullscreenToggleButton && canvasWrapper) {
+        fullscreenToggleButton.addEventListener("click", () => {
+          const isFullscreen = getFullscreenElement() === canvasWrapper;
+          const action = isFullscreen ? exitFullscreen() : requestFullscreen(canvasWrapper);
+          if (action && typeof action.then === "function") {
+            action
+              .then(() => {
+                updateFullscreenButton();
+                updateRendererSize(true);
+              })
+              .catch(() => {
+                updateFullscreenButton();
+              });
+          } else {
+            // Ensure legacy browsers update button state even without promise support.
+            setTimeout(() => {
+              updateFullscreenButton();
+              updateRendererSize(true);
+            }, 0);
+          }
+        });
+
+        const fullscreenEvents = [
+          "fullscreenchange",
+          "webkitfullscreenchange",
+          "mozfullscreenchange",
+          "MSFullscreenChange",
+        ];
+
+        fullscreenEvents.forEach((eventName) => {
+          document.addEventListener(eventName, () => {
+            updateFullscreenButton();
+            updateRendererSize(true);
+          });
+        });
+
+        updateFullscreenButton();
       }
 
       resetButton.addEventListener("click", () => {
