@@ -605,6 +605,8 @@
           pointerId: null,
           value: { x: 0, y: 0 },
           handleValue: { x: 0, y: 0 },
+          captured: false,
+          globalListeners: false,
         };
 
         const listenerOptions = { passive: false };
@@ -670,11 +672,72 @@
           setValues({ handleX: 0, handleY: 0, outputX: 0, outputY: 0 });
         };
 
+        const attachGlobalListeners = () => {
+          if (state.globalListeners || typeof window === "undefined") {
+            return;
+          }
+          window.addEventListener("pointermove", handlePointerMove, listenerOptions);
+          window.addEventListener("pointerup", handlePointerEnd, listenerOptions);
+          window.addEventListener("pointercancel", handlePointerEnd, listenerOptions);
+          state.globalListeners = true;
+        };
+
+        const detachGlobalListeners = () => {
+          if (!state.globalListeners || typeof window === "undefined") {
+            return;
+          }
+          window.removeEventListener("pointermove", handlePointerMove, listenerOptions);
+          window.removeEventListener("pointerup", handlePointerEnd, listenerOptions);
+          window.removeEventListener("pointercancel", handlePointerEnd, listenerOptions);
+          state.globalListeners = false;
+        };
+
         const handlePointerDown = (event) => {
+          if (state.pointerId !== null && state.pointerId !== event.pointerId) {
+            return;
+          }
           event.preventDefault();
-          root.setPointerCapture(event.pointerId);
+          const supportsPointerCapture =
+            typeof root.setPointerCapture === "function" &&
+            typeof root.releasePointerCapture === "function";
+          const shouldCapture = supportsPointerCapture && event.pointerType !== "touch";
+          if (shouldCapture) {
+            try {
+              root.setPointerCapture(event.pointerId);
+              state.captured = true;
+            } catch (error) {
+              state.captured = false;
+            }
+          } else {
+            state.captured = false;
+          }
           state.pointerId = event.pointerId;
+          attachGlobalListeners();
           translatePointer(event);
+        };
+
+        const resetPointerState = () => {
+          if (state.pointerId === null) {
+            detachGlobalListeners();
+            state.captured = false;
+            return;
+          }
+          if (state.captured && typeof root.releasePointerCapture === "function") {
+            const hasCapture =
+              typeof root.hasPointerCapture === "function"
+                ? root.hasPointerCapture(state.pointerId)
+                : true;
+            if (hasCapture) {
+              try {
+                root.releasePointerCapture(state.pointerId);
+              } catch (error) {
+                // Ignore release failures to avoid breaking touch input fallbacks.
+              }
+            }
+          }
+          state.pointerId = null;
+          state.captured = false;
+          detachGlobalListeners();
         };
 
         const handlePointerMove = (event) => {
@@ -685,30 +748,25 @@
 
         const handlePointerEnd = (event) => {
           if (state.pointerId !== event.pointerId) return;
-          if (root.hasPointerCapture(event.pointerId)) {
-            root.releasePointerCapture(event.pointerId);
-          }
-          state.pointerId = null;
           event.preventDefault();
+          resetPointerState();
           resetValues();
         };
 
         root.addEventListener("pointerdown", handlePointerDown, listenerOptions);
-        root.addEventListener("pointermove", handlePointerMove, listenerOptions);
-        root.addEventListener("pointerup", handlePointerEnd, listenerOptions);
-        root.addEventListener("pointercancel", handlePointerEnd, listenerOptions);
         root.addEventListener("lostpointercapture", handlePointerEnd, listenerOptions);
 
         resetValues();
 
         return {
-          reset: resetValues,
+          reset() {
+            resetPointerState();
+            resetValues();
+          },
           destroy() {
             root.removeEventListener("pointerdown", handlePointerDown, listenerOptions);
-            root.removeEventListener("pointermove", handlePointerMove, listenerOptions);
-            root.removeEventListener("pointerup", handlePointerEnd, listenerOptions);
-            root.removeEventListener("pointercancel", handlePointerEnd, listenerOptions);
             root.removeEventListener("lostpointercapture", handlePointerEnd, listenerOptions);
+            resetPointerState();
             resetValues();
           },
         };
