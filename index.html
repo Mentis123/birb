@@ -1596,7 +1596,7 @@
         }
 
         updateFpsReadout(time);
-        cameraState.update({ pose, ambientOffsets, delta });
+        cameraState.updateActiveCamera({ pose, ambientOffsets, delta });
         renderer.render(scene, cameraState.camera);
       };
 
