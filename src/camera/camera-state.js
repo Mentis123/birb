@@ -1,4 +1,12 @@
 import { createFollowCameraRig } from "./follow-camera.js";
+import { attachFpvCamera } from "./fpv-camera.js";
+
+const easeInOutCubic = (t) => {
+  const clamped = Math.min(Math.max(t, 0), 1);
+  return clamped < 0.5
+    ? 4 * clamped * clamped * clamped
+    : 1 - Math.pow(-2 * clamped + 2, 3) / 2;
+};
 
 export const CAMERA_MODES = Object.freeze({
   FOLLOW: "Follow",
@@ -103,11 +111,6 @@ export function createCameraState({ three, scene, flightController }) {
     rig: createFollowCameraRig(three),
   };
 
-  const fpvState = {
-    quaternion: new Quaternion(),
-    initialized: false,
-  };
-
   const scratch = {
     targetPosition: new Vector3(),
     ambientPosition: new Vector3(),
@@ -136,9 +139,8 @@ export function createCameraState({ three, scene, flightController }) {
       },
     },
     [CAMERA_MODES.FPV]: {
-      offset: new Vector3(0, 0.2, 0.45),
-      easing: 0.28,
-      smoothing: 0.22,
+      offset: new Vector3(0, 0.14, -0.38),
+      blendDuration: 0.26,
     },
   };
 
@@ -147,6 +149,34 @@ export function createCameraState({ three, scene, flightController }) {
   };
 
   const debugScratchOffset = new Vector3();
+
+  const transitionState = {
+    active: false,
+    type: null,
+    elapsed: 0,
+    duration: modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26,
+    fromPosition: new Vector3(),
+    fromQuaternion: new Quaternion(),
+    toPosition: new Vector3(),
+    toQuaternion: new Quaternion(),
+  };
+
+  const transitionCamera = new PerspectiveCamera(
+    camera.fov,
+    camera.aspect,
+    camera.near,
+    camera.far,
+  );
+  transitionCamera.up.copy(camera.up);
+
+  const fpvRig = attachFpvCamera({
+    camera,
+    flightController,
+    offset: modeConfigurations[CAMERA_MODES.FPV].offset,
+    blendDuration: modeConfigurations[CAMERA_MODES.FPV].blendDuration,
+  });
+
+  let activeUpdater = null;
 
   const debugOverlay = createDebugOverlay({
     getSnapshot: () => {
@@ -205,39 +235,79 @@ export function createCameraState({ three, scene, flightController }) {
       steering,
       delta,
     });
+
+    if (transitionState.active && transitionState.type === "fromFpv") {
+      transitionState.toPosition.copy(camera.position);
+      transitionState.toQuaternion.copy(camera.quaternion);
+
+      const step = Number.isFinite(delta) && delta > 0 ? delta : 1 / 60;
+      transitionState.elapsed += step;
+      const progress = Math.min(
+        transitionState.elapsed / Math.max(transitionState.duration, 1e-4),
+        1,
+      );
+      const eased = easeInOutCubic(progress);
+
+      camera.position
+        .copy(transitionState.fromPosition)
+        .lerp(transitionState.toPosition, eased);
+      camera.quaternion
+        .copy(transitionState.fromQuaternion)
+        .slerp(transitionState.toQuaternion, eased);
+
+      if (progress >= 1) {
+        transitionState.active = false;
+        transitionState.type = null;
+        transitionState.fromPosition.copy(camera.position);
+        transitionState.fromQuaternion.copy(camera.quaternion);
+        followState.rig.reset({
+          camera,
+          pose,
+          velocity,
+          ambientOffsets,
+          steering,
+        });
+      }
+    }
   };
 
   const updateFpv = ({ pose, ambientOffsets, delta }) => {
-    if (!pose) return;
-    const config = modeConfigurations[CAMERA_MODES.FPV];
-    const smoothing = Number.isFinite(config.smoothing) ? config.smoothing : 0.24;
-    const easing = Number.isFinite(config.easing) ? config.easing : smoothing;
+    fpvRig.update({ pose, ambientOffsets, delta });
+  };
 
-    scratch.offset.copy(config.offset).applyQuaternion(pose.quaternion);
-    scratch.targetPosition.copy(pose.position);
-    if (ambientOffsets?.position) {
-      scratch.targetPosition.add(scratch.ambientPosition.copy(ambientOffsets.position));
-    }
-    scratch.targetPosition.add(scratch.offset);
-
-    if (!fpvState.initialized) {
-      camera.position.copy(scratch.targetPosition);
-      fpvState.quaternion.copy(pose.quaternion);
-      if (ambientOffsets?.quaternion) {
-        fpvState.quaternion.multiply(ambientOffsets.quaternion);
-      }
-      fpvState.initialized = true;
+  const beginFollowTransitionFromFpv = ({
+    pose,
+    velocity,
+    ambientOffsets,
+    steering,
+  }) => {
+    if (!pose || !pose.position || !pose.quaternion) {
+      transitionState.active = false;
+      transitionState.type = null;
+      return false;
     }
 
-    camera.position.lerp(scratch.targetPosition, smoothing);
+    transitionState.active = true;
+    transitionState.type = "fromFpv";
+    transitionState.elapsed = 0;
+    transitionState.duration =
+      modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
+    transitionState.fromPosition.copy(camera.position);
+    transitionState.fromQuaternion.copy(camera.quaternion);
 
-    scratch.quaternion.copy(pose.quaternion);
-    if (ambientOffsets?.quaternion) {
-      scratch.quaternion.multiply(ambientOffsets.quaternion);
-    }
+    followState.rig.configure(modeConfigurations[CAMERA_MODES.FOLLOW]);
 
-    fpvState.quaternion.slerp(scratch.quaternion, easing * (Number.isFinite(delta) ? Math.min(delta * 60, 1) : 1));
-    camera.quaternion.copy(fpvState.quaternion);
+    followState.rig.reset({
+      camera: transitionCamera,
+      pose,
+      velocity,
+      ambientOffsets,
+      steering,
+    });
+
+    transitionState.toPosition.copy(transitionCamera.position);
+    transitionState.toQuaternion.copy(transitionCamera.quaternion);
+    return true;
   };
 
   function setMode(nextMode) {
@@ -249,13 +319,87 @@ export function createCameraState({ three, scene, flightController }) {
       return;
     }
 
+    const previousMode = state.mode;
     state.mode = nextMode;
 
     if (state.mode === CAMERA_MODES.FIXED) {
+      transitionState.active = false;
+      transitionState.type = null;
+      transitionState.elapsed = 0;
       applyFixedState();
+      activeUpdater = null;
+      fpvRig.reset();
+      return;
+    }
+
+    if (state.mode === CAMERA_MODES.FPV) {
+      transitionState.active = false;
+      transitionState.type = null;
+      transitionState.elapsed = 0;
+      transitionState.duration =
+        modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
+      fpvRig.activateBlend();
+      activeUpdater = updateFpv;
+      return;
+    }
+
+    activeUpdater = updateFollow;
+    fpvRig.reset();
+    transitionState.duration =
+      modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
+
+    const pose = flightController
+      ? {
+          position: flightController.position?.clone?.() ?? null,
+          quaternion: flightController.quaternion?.clone?.() ?? null,
+        }
+      : null;
+    const velocity = flightController?.velocity?.clone?.() ?? null;
+    const ambientOffsets = flightController?.getAmbientOffsets
+      ? flightController.getAmbientOffsets()
+      : null;
+    const steering = flightController
+      ? {
+          forward: flightController.input?.forward ?? 0,
+          strafe: flightController.input?.strafe ?? 0,
+          lift: flightController.input?.lift ?? 0,
+        }
+      : null;
+
+    if (previousMode === CAMERA_MODES.FPV) {
+      const startedTransition = beginFollowTransitionFromFpv({
+        pose,
+        velocity,
+        ambientOffsets,
+        steering,
+      });
+      if (!startedTransition) {
+        transitionState.active = false;
+        transitionState.type = null;
+        transitionState.elapsed = 0;
+        transitionState.duration =
+          modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
+        followState.rig.reset({
+          camera,
+          pose,
+          velocity,
+          ambientOffsets,
+          steering,
+        });
+      }
     } else {
-      followState.rig.reset();
-      fpvState.initialized = false;
+      transitionState.active = false;
+      transitionState.type = null;
+      transitionState.elapsed = 0;
+      transitionState.duration =
+        modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
+      followState.rig.reset({
+        camera,
+        pose,
+        velocity,
+        ambientOffsets,
+        steering,
+      });
     }
   }
 
@@ -264,69 +408,57 @@ export function createCameraState({ three, scene, flightController }) {
   }
 
   function reset() {
-    fpvState.initialized = false;
+    fpvRig.reset();
+    transitionState.active = false;
+    transitionState.type = null;
+    transitionState.elapsed = 0;
+    transitionState.duration =
+      modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
 
-    if (state.mode === CAMERA_MODES.FOLLOW) {
-      const pose = flightController
-        ? {
-            position: flightController.position?.clone?.() ?? null,
-            quaternion: flightController.quaternion?.clone?.() ?? null,
-          }
-        : null;
-      const velocity = flightController?.velocity?.clone?.() ?? null;
-      followState.rig.reset({
-        camera,
-        pose,
-        velocity,
-        steering: flightController
-          ? {
-              forward: flightController.input?.forward ?? 0,
-              strafe: flightController.input?.strafe ?? 0,
-              lift: flightController.input?.lift ?? 0,
-            }
-          : null,
-      });
-    } else if (state.mode === CAMERA_MODES.FPV) {
-      const pose = flightController
-        ? {
-            position: flightController.position,
-            quaternion: flightController.quaternion,
-          }
-        : null;
-      if (pose) {
-        const config = modeConfigurations[CAMERA_MODES.FPV];
-        scratch.offset.copy(config.offset).applyQuaternion(pose.quaternion);
-        scratch.targetPosition.copy(pose.position);
-        camera.position.copy(scratch.targetPosition).add(scratch.offset);
-        camera.quaternion.copy(pose.quaternion);
-        if (flightController?.getAmbientOffsets) {
-          const ambientOffsets = flightController.getAmbientOffsets();
-          if (ambientOffsets?.position) {
-            camera.position.add(ambientOffsets.position);
-          }
-          if (ambientOffsets?.quaternion) {
-            camera.quaternion.multiply(ambientOffsets.quaternion);
-          }
-        }
-      } else {
-        fpvState.initialized = false;
-      }
-    } else {
-      applyFixedState();
-      state.mode = CAMERA_MODES.FIXED;
-    }
-  }
-
-  function update({ pose, ambientOffsets, delta } = {}) {
     if (state.mode === CAMERA_MODES.FIXED) {
+      applyFixedState();
+      activeUpdater = null;
       return;
     }
 
-    if (state.mode === CAMERA_MODES.FOLLOW) {
-      updateFollow({ pose, ambientOffsets, delta });
-    } else if (state.mode === CAMERA_MODES.FPV) {
-      updateFpv({ pose, ambientOffsets, delta });
+    if (state.mode !== CAMERA_MODES.FOLLOW) {
+      state.mode = CAMERA_MODES.FOLLOW;
+      activeUpdater = updateFollow;
     }
+
+    const pose = flightController
+      ? {
+          position: flightController.position?.clone?.() ?? null,
+          quaternion: flightController.quaternion?.clone?.() ?? null,
+        }
+      : null;
+    const velocity = flightController?.velocity?.clone?.() ?? null;
+    const ambientOffsets = flightController?.getAmbientOffsets
+      ? flightController.getAmbientOffsets()
+      : null;
+    const steering = flightController
+      ? {
+          forward: flightController.input?.forward ?? 0,
+          strafe: flightController.input?.strafe ?? 0,
+          lift: flightController.input?.lift ?? 0,
+        }
+      : null;
+
+    followState.rig.reset({
+      camera,
+      pose,
+      velocity,
+      ambientOffsets,
+      steering,
+    });
+  }
+
+  function updateActiveCamera({ pose, ambientOffsets, delta } = {}) {
+    if (state.mode === CAMERA_MODES.FIXED || typeof activeUpdater !== "function") {
+      return;
+    }
+
+    activeUpdater({ pose, ambientOffsets, delta });
   }
 
   function dispose() {
@@ -343,7 +475,8 @@ export function createCameraState({ three, scene, flightController }) {
     setMode,
     getMode,
     reset,
-    update,
+    updateActiveCamera,
+    update: updateActiveCamera,
     dispose,
     getConfig(mode) {
       return modeConfigurations[mode];
