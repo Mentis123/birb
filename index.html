@@ -77,24 +77,26 @@
 
       .control-panel {
         position: absolute;
-        inset: var(--space-2) auto auto var(--space-2);
+        top: calc(100% + 0.85rem);
+        right: 0;
         display: flex;
         flex-direction: column;
         gap: 0.55rem;
-        padding: 0.75rem 0.85rem;
-        width: min(14rem, 45vw);
-        background: rgba(5, 9, 19, 0.75);
+        padding: 0.75rem 0.85rem 0.95rem;
+        width: min(16rem, 70vw);
+        background: rgba(5, 9, 19, 0.9);
         border-radius: 1rem;
-        border: 1px solid rgba(124, 170, 255, 0.18);
-        box-shadow: 0 12px 28px rgba(4, 10, 24, 0.4);
+        border: 1px solid rgba(124, 170, 255, 0.22);
+        box-shadow: 0 16px 40px rgba(4, 10, 24, 0.55);
         backdrop-filter: blur(18px);
-        z-index: 2;
+        z-index: 4;
+        transform-origin: top right;
         transition: opacity 160ms ease, transform 200ms ease;
       }
 
       .control-panel.is-collapsed {
         opacity: 0;
-        transform: translateY(-0.6rem) scale(0.96);
+        transform: translateY(-0.65rem) scale(0.96);
         pointer-events: none;
       }
 
@@ -198,49 +200,6 @@
         opacity: 0.85;
       }
 
-      .status-badge {
-        position: absolute;
-        bottom: var(--space-2);
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.4rem 1.1rem;
-        font-size: var(--status-size);
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        color: rgba(231, 238, 255, 0.92);
-        background: rgba(7, 11, 22, 0.62);
-        border-radius: 999px;
-        border: 1px solid rgba(109, 159, 255, 0.22);
-        backdrop-filter: blur(8px);
-        pointer-events: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.75rem;
-      }
-
-      .status-badge::before {
-        content: "";
-        display: inline-block;
-        width: 0.4rem;
-        height: 0.4rem;
-        margin-right: 0.2rem;
-        border-radius: 999px;
-        background: radial-gradient(circle, #8fd2ff 0%, #3fa4ff 60%, rgba(63, 164, 255, 0) 100%);
-        box-shadow: 0 0 12px rgba(104, 188, 255, 0.75);
-      }
-
-      .status-badge__text {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-      }
-
-      .status-badge__fps {
-        opacity: 0.82;
-        font-variant-numeric: tabular-nums;
-        letter-spacing: 0.16em;
-      }
-
       .touch-controls {
         position: absolute;
         inset: auto 0 var(--space-2) 0;
@@ -338,7 +297,82 @@
         display: flex;
         flex-direction: column;
         gap: 0.55rem;
+        align-items: flex-end;
         z-index: 3;
+      }
+
+      .settings-popover {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+      }
+
+      .settings-toggle,
+      .fullscreen-toggle {
+        padding: 0.4rem;
+        width: 2.4rem;
+        min-width: auto;
+        min-height: 2.4rem;
+        border-radius: 50%;
+      }
+
+      .settings-toggle svg,
+      .fullscreen-toggle svg {
+        width: 1.1rem;
+        height: 1.1rem;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.6;
+      }
+
+      .fullscreen-toggle svg[hidden] {
+        display: none;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .control-metrics {
+        margin-top: 0.35rem;
+        padding: 0.6rem 0.75rem;
+        border-radius: 0.8rem;
+        background: rgba(9, 14, 29, 0.75);
+        border: 1px solid rgba(124, 170, 255, 0.16);
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+
+      .control-metrics__row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(222, 230, 255, 0.88);
+      }
+
+      .control-metrics__value {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .control-metrics__note {
+        margin: 0.1rem 0 0;
+        font-size: 0.62rem;
+        letter-spacing: 0.05em;
+        color: rgba(199, 211, 245, 0.72);
       }
 
       .canvas-action-button {
@@ -451,10 +485,7 @@
         }
 
         .control-panel {
-          flex-direction: row;
-          align-items: center;
-          gap: 0.75rem;
-          width: max-content;
+          width: clamp(18rem, 32vw, 20rem);
         }
 
         .control-panel h2 {
@@ -478,13 +509,6 @@
           flex-direction: row;
         }
       }
-
-      @media (prefers-reduced-motion: reduce) {
-        .status-badge::before {
-          animation: none;
-          box-shadow: none;
-        }
-      }
     </style>
   </head>
   <body>
@@ -496,58 +520,110 @@
           role="img"
           aria-label="Stylized capsule gently gliding through a dark sky"
         ></canvas>
-        <div
-          id="flight-control-panel"
-          class="control-panel"
-          role="group"
-          aria-label="Flight controls"
-        >
-          <h2>Controls</h2>
-          <button
-            type="button"
-            class="control-button"
-            data-control="toggle"
-            aria-pressed="true"
-          >
-            Pause Glide
-          </button>
-          <div class="control-slider">
-            <label for="glide-speed">Throttle</label>
-            <input
-              id="glide-speed"
-              type="range"
-              min="0.2"
-              max="0.8"
-              step="0.01"
-              value="0.36"
-              aria-describedby="glide-speed-display"
-            />
-            <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-              36%
-            </output>
-          </div>
-          <button type="button" class="control-button" data-control="reset">
-            Reset Camera
-          </button>
-        </div>
         <div class="canvas-actions" role="group" aria-label="Display options">
-          <button
-            type="button"
-            class="canvas-action-button control-toggle"
-            data-control="panel-toggle"
-            aria-pressed="false"
-            aria-expanded="true"
-            aria-controls="flight-control-panel"
-          >
-            Hide Controls
-          </button>
+          <div class="settings-popover">
+            <button
+              type="button"
+              class="canvas-action-button control-toggle settings-toggle"
+              data-control="panel-toggle"
+              aria-pressed="false"
+              aria-expanded="false"
+              aria-controls="flight-control-panel"
+              aria-label="Show flight controls"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M12 8.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Zm9 3.75a1.2 1.2 0 0 0-.84-1.14l-1.74-.58a7.47 7.47 0 0 0-.68-1.66l.87-1.67a1.2 1.2 0 0 0-1.05-1.75h-1.8a7.47 7.47 0 0 0-1.31-.9l-.32-1.82A1.2 1.2 0 0 0 12 1.5c-.57 0-1.06.4-1.17.95l-.32 1.82a7.47 7.47 0 0 0-1.31.9H7.4a1.2 1.2 0 0 0-1.05 1.75l.87 1.67a7.47 7.47 0 0 0-.68 1.66l-1.74.58a1.2 1.2 0 0 0 0 2.28l1.74.58c.16.57.39 1.12.68 1.66l-.87 1.67A1.2 1.2 0 0 0 7.4 19.5h1.8c.4.35.84.66 1.31.9l.32 1.82c.11.55.6.95 1.17.95s1.06-.4 1.17-.95l.32-1.82c.47-.24.91-.55 1.31-.9h1.8c.87 0 1.45-.92 1.05-1.75l-.87-1.67c.29-.54.52-1.09.68-1.66l1.74-.58c.49-.16.84-.62.84-1.14Z"
+                />
+              </svg>
+              <span class="visually-hidden" data-settings-label>Show Controls</span>
+            </button>
+            <div
+              id="flight-control-panel"
+              class="control-panel is-collapsed"
+              role="group"
+              aria-label="Flight controls"
+              aria-hidden="true"
+            >
+              <h2>Controls</h2>
+              <button
+                type="button"
+                class="control-button"
+                data-control="toggle"
+                aria-pressed="true"
+              >
+                Pause Glide
+              </button>
+              <div class="control-slider">
+                <label for="glide-speed">Throttle</label>
+                <input
+                  id="glide-speed"
+                  type="range"
+                  min="0.2"
+                  max="0.8"
+                  step="0.01"
+                  value="0.36"
+                  aria-describedby="glide-speed-display"
+                />
+                <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
+                  36%
+                </output>
+              </div>
+              <button type="button" class="control-button" data-control="reset">
+                Reset Camera
+              </button>
+              <div class="control-metrics" aria-live="polite" aria-atomic="true">
+                <div class="control-metrics__row">
+                  <span class="control-metrics__label">Speed</span>
+                  <span class="control-metrics__value" data-metric="speed">0.00u/s</span>
+                </div>
+                <div class="control-metrics__row">
+                  <span class="control-metrics__label">Throttle</span>
+                  <span class="control-metrics__value" data-metric="throttle">36%</span>
+                </div>
+                <div class="control-metrics__row">
+                  <span class="control-metrics__label">FPS</span>
+                  <span class="control-metrics__value" data-metric="fps">--</span>
+                </div>
+                <p class="control-metrics__note" data-metric="status">
+                  Gently gliding in progress…
+                </p>
+              </div>
+            </div>
+          </div>
           <button
             type="button"
             class="canvas-action-button fullscreen-toggle"
             data-control="fullscreen"
             aria-pressed="false"
+            aria-label="Enter fullscreen"
           >
-            Enter Fullscreen
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon="enter">
+              <path
+                d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+              data-icon="exit"
+              hidden
+            >
+              <path
+                d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M15 9h4M15 15h4M5 9h4M5 15h4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span class="visually-hidden" data-fullscreen-label>Enter Fullscreen</span>
           </button>
         </div>
         <div class="touch-controls" aria-hidden="true">
@@ -561,10 +637,6 @@
           <div class="thumbstick" data-thumbstick="right">
             <div class="thumbstick__handle" data-thumbstick-handle></div>
           </div>
-        </div>
-        <div class="status-badge" aria-live="polite" aria-atomic="true">
-          <span id="status-text" class="status-badge__text">Gently gliding in progress…</span>
-          <span id="fps-text" class="status-badge__fps" aria-hidden="true">-- FPS</span>
         </div>
       </div>
     </main>
@@ -908,8 +980,6 @@
 
       let previousTime = null;
 
-      const statusText = document.querySelector("#status-text");
-      const fpsText = document.querySelector("#fps-text");
       const toggleButton = document.querySelector('[data-control="toggle"]');
       const resetButton = document.querySelector('[data-control="reset"]');
       const controlPanel = document.querySelector("#flight-control-panel");
@@ -917,6 +987,22 @@
       const fullscreenToggleButton = document.querySelector('[data-control="fullscreen"]');
       const glideSpeedInput = document.querySelector("#glide-speed");
       const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
+      const speedMetric = document.querySelector('[data-metric="speed"]');
+      const throttleMetric = document.querySelector('[data-metric="throttle"]');
+      const fpsMetric = document.querySelector('[data-metric="fps"]');
+      const statusMetric = document.querySelector('[data-metric="status"]');
+      const panelToggleLabel = panelToggleButton
+        ? panelToggleButton.querySelector('[data-settings-label]')
+        : null;
+      const fullscreenToggleLabel = fullscreenToggleButton
+        ? fullscreenToggleButton.querySelector('[data-fullscreen-label]')
+        : null;
+      const fullscreenEnterIcon = fullscreenToggleButton
+        ? fullscreenToggleButton.querySelector('[data-icon="enter"]')
+        : null;
+      const fullscreenExitIcon = fullscreenToggleButton
+        ? fullscreenToggleButton.querySelector('[data-icon="exit"]')
+        : null;
 
       const controlState = {
         manuallyPaused: false,
@@ -928,7 +1014,7 @@
       };
 
       function updateFpsReadout(time) {
-        if (!fpsText) return;
+        if (!fpsMetric) return;
 
         if (fpsState.lastSampleTime === null) {
           fpsState.lastSampleTime = time;
@@ -946,17 +1032,27 @@
         fpsState.value = fps;
         fpsState.frames = 0;
         fpsState.lastSampleTime = time;
-        fpsText.textContent = `${Math.max(0, Math.round(fps)).toString().padStart(2, "0")} FPS`;
+        const formatted = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
+        fpsMetric.textContent = formatted;
       }
 
-      function updateStatusBadge(speed = flightController.getSpeed()) {
+      function updateControlMetrics(speed = flightController.getSpeed()) {
         const throttlePercent = Math.round(flightController.throttle * 100);
-        if (controlState.systemPaused) {
-          statusText.textContent = "Motion paused via system preference";
-        } else if (!motionState.animate) {
-          statusText.textContent = `Glide paused · Throttle ${throttlePercent}%`;
-        } else {
-          statusText.textContent = `Speed ${speed.toFixed(2)}u/s · Throttle ${throttlePercent}%`;
+        const safeSpeed = Number.isFinite(speed) ? speed : 0;
+        if (speedMetric) {
+          speedMetric.textContent = `${safeSpeed.toFixed(2)}u/s`;
+        }
+        if (throttleMetric) {
+          throttleMetric.textContent = `${throttlePercent}%`;
+        }
+        if (statusMetric) {
+          if (controlState.systemPaused) {
+            statusMetric.textContent = "Motion paused via system preference";
+          } else if (!motionState.animate) {
+            statusMetric.textContent = "Glide paused";
+          } else {
+            statusMetric.textContent = "Gently gliding in progress…";
+          }
         }
       }
 
@@ -978,15 +1074,21 @@
           previousTime = null;
         }
         updateToggleButton();
-        updateStatusBadge();
+        updateControlMetrics();
       }
 
       function updatePanelToggle() {
         if (!panelToggleButton || !controlPanel) return;
         const isCollapsed = controlPanel.classList.contains("is-collapsed");
-        panelToggleButton.textContent = isCollapsed ? "Show Controls" : "Hide Controls";
-        panelToggleButton.setAttribute("aria-pressed", isCollapsed ? "true" : "false");
+        if (panelToggleLabel) {
+          panelToggleLabel.textContent = isCollapsed ? "Show Controls" : "Hide Controls";
+        }
+        panelToggleButton.setAttribute("aria-pressed", isCollapsed ? "false" : "true");
         panelToggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        panelToggleButton.setAttribute(
+          "aria-label",
+          isCollapsed ? "Show flight controls" : "Hide flight controls"
+        );
         controlPanel.setAttribute("aria-hidden", isCollapsed ? "true" : "false");
       }
 
@@ -1088,8 +1190,16 @@
         const isFallbackFullscreen = fullscreenState.fallbackActive && !fullscreenElement;
         const isFullscreen =
           fullscreenElement === canvasWrapper || isDocumentFullscreen || isFallbackFullscreen;
-        fullscreenToggleButton.textContent = isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen";
+        const labelText = isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen";
         fullscreenToggleButton.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+        fullscreenToggleButton.setAttribute("aria-label", labelText);
+        if (fullscreenToggleLabel) {
+          fullscreenToggleLabel.textContent = labelText;
+        }
+        if (fullscreenEnterIcon && fullscreenExitIcon) {
+          fullscreenEnterIcon.toggleAttribute("hidden", isFullscreen);
+          fullscreenExitIcon.toggleAttribute("hidden", !isFullscreen);
+        }
         if (canvasWrapper) {
           const shouldApplyFallback = isDocumentFullscreen || isFallbackFullscreen;
           canvasWrapper.classList.toggle("is-fullscreen-fallback", shouldApplyFallback);
@@ -1367,7 +1477,7 @@
         touchLiftPresses.clear();
         liftButtons.forEach((button) => button.classList.remove("is-active"));
         updateLiftFromButtons();
-        updateStatusBadge();
+        updateControlMetrics();
       });
 
       const initialThrottle = Number.parseFloat(glideSpeedInput.value);
@@ -1378,7 +1488,7 @@
         const nextThrottle = Number.parseFloat(event.target.value);
         flightController.setThrottle(Number.isFinite(nextThrottle) ? nextThrottle : flightController.throttle);
         updateGlideSpeedDisplay(flightController.throttle);
-        updateStatusBadge();
+        updateControlMetrics();
       });
 
       applyThrustInput();
@@ -1482,7 +1592,7 @@
         glideTrail.rotation.z = motionState.elapsed * 0.32;
 
         if (motionState.animate && !controlState.systemPaused) {
-          updateStatusBadge(flightController.getSpeed());
+          updateControlMetrics(flightController.getSpeed());
         }
 
         updateFpsReadout(time);
@@ -1508,8 +1618,8 @@
           updateLiftFromButtons();
           fpsState.lastSampleTime = null;
           fpsState.frames = 0;
-          if (fpsText) {
-            fpsText.textContent = "-- FPS";
+          if (fpsMetric) {
+            fpsMetric.textContent = "--";
           }
         }
         renderer.setAnimationLoop(document.hidden ? null : renderFrame);
