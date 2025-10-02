@@ -384,10 +384,30 @@
         border-color: rgba(124, 170, 255, 0.25);
       }
 
-      .canvas-wrapper:fullscreen,
-      .canvas-wrapper:-webkit-full-screen {
+      body.is-fullscreen-fallback {
+        align-items: stretch;
+      }
+
+      body.is-fullscreen-fallback main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
         max-width: none;
-        width: 100%;
+        width: 100vw;
+        padding: 0;
+      }
+
+      body.is-fullscreen-fallback header {
+        display: none;
+      }
+
+      .canvas-wrapper:fullscreen,
+      .canvas-wrapper:-webkit-full-screen,
+      .canvas-wrapper.is-fullscreen-fallback {
+        max-width: none;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
         min-height: 100vh;
         min-height: 100dvh;
         border-radius: 0;
@@ -397,7 +417,8 @@
       }
 
       .canvas-wrapper:fullscreen .canvas-actions,
-      .canvas-wrapper:-webkit-full-screen .canvas-actions {
+      .canvas-wrapper:-webkit-full-screen .canvas-actions,
+      .canvas-wrapper.is-fullscreen-fallback .canvas-actions {
         inset: clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem) auto auto;
       }
 
@@ -917,44 +938,97 @@
         );
       }
 
-      function requestFullscreen(element) {
-        if (!element) return Promise.resolve();
-        if (element.requestFullscreen) {
-          return element.requestFullscreen();
+      function callFullscreenMethod(target, methodNames) {
+        if (!target) return null;
+        for (const methodName of methodNames) {
+          const method = target[methodName];
+          if (typeof method === "function") {
+            return method.call(target);
+          }
         }
-        if (element.webkitRequestFullscreen) {
-          return element.webkitRequestFullscreen();
-        }
-        if (element.mozRequestFullScreen) {
-          return element.mozRequestFullScreen();
-        }
-        if (element.msRequestFullscreen) {
-          return element.msRequestFullscreen();
+        return null;
+      }
+
+      function ensurePromise(result) {
+        if (result && typeof result.then === "function") {
+          return result;
         }
         return Promise.resolve();
+      }
+
+      function requestFullscreen(element) {
+        const targets = [element, document.documentElement, document.body].filter(Boolean);
+        let lastError = null;
+
+        const attemptAtIndex = (index = 0) => {
+          if (index >= targets.length) {
+            return Promise.reject(lastError ?? new Error("Fullscreen not supported"));
+          }
+
+          const target = targets[index];
+          const result = callFullscreenMethod(target, [
+            "requestFullscreen",
+            "webkitRequestFullscreen",
+            "mozRequestFullScreen",
+            "msRequestFullscreen",
+          ]);
+
+          if (result === null) {
+            return attemptAtIndex(index + 1);
+          }
+
+          return ensurePromise(result)
+            .then(() => target)
+            .catch((error) => {
+              lastError = error;
+              return attemptAtIndex(index + 1);
+            });
+        };
+
+        return attemptAtIndex();
       }
 
       function exitFullscreen() {
-        if (document.exitFullscreen) {
-          return document.exitFullscreen();
+        const result = callFullscreenMethod(document, [
+          "exitFullscreen",
+          "webkitExitFullscreen",
+          "mozCancelFullScreen",
+          "msExitFullscreen",
+        ]);
+
+        if (!result) {
+          return Promise.resolve();
         }
-        if (document.webkitExitFullscreen) {
-          return document.webkitExitFullscreen();
-        }
-        if (document.mozCancelFullScreen) {
-          return document.mozCancelFullScreen();
-        }
-        if (document.msExitFullscreen) {
-          return document.msExitFullscreen();
-        }
-        return Promise.resolve();
+
+        return ensurePromise(result);
       }
 
-      function updateFullscreenButton() {
+      function isFullscreenActive() {
+        const fullscreenElement = getFullscreenElement();
+        if (!fullscreenElement) {
+          return false;
+        }
+        return (
+          fullscreenElement === canvasWrapper ||
+          fullscreenElement === document.documentElement ||
+          fullscreenElement === document.body
+        );
+      }
+
+      function syncFullscreenUi() {
         if (!fullscreenToggleButton) return;
-        const isFullscreen = getFullscreenElement() === canvasWrapper;
+        const fullscreenElement = getFullscreenElement();
+        const isDocumentFullscreen =
+          fullscreenElement === document.documentElement || fullscreenElement === document.body;
+        const isFullscreen = fullscreenElement === canvasWrapper || isDocumentFullscreen;
         fullscreenToggleButton.textContent = isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen";
         fullscreenToggleButton.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+        if (canvasWrapper) {
+          canvasWrapper.classList.toggle("is-fullscreen-fallback", isDocumentFullscreen);
+        }
+        if (document.body) {
+          document.body.classList.toggle("is-fullscreen-fallback", isDocumentFullscreen);
+        }
       }
 
       function updateGlideSpeedDisplay(value) {
@@ -1156,21 +1230,21 @@
 
       if (fullscreenToggleButton && canvasWrapper) {
         fullscreenToggleButton.addEventListener("click", () => {
-          const isFullscreen = getFullscreenElement() === canvasWrapper;
+          const isFullscreen = isFullscreenActive();
           const action = isFullscreen ? exitFullscreen() : requestFullscreen(canvasWrapper);
           if (action && typeof action.then === "function") {
             action
               .then(() => {
-                updateFullscreenButton();
+                syncFullscreenUi();
                 updateRendererSize(true);
               })
               .catch(() => {
-                updateFullscreenButton();
+                syncFullscreenUi();
               });
           } else {
             // Ensure legacy browsers update button state even without promise support.
             setTimeout(() => {
-              updateFullscreenButton();
+              syncFullscreenUi();
               updateRendererSize(true);
             }, 0);
           }
@@ -1185,12 +1259,12 @@
 
         fullscreenEvents.forEach((eventName) => {
           document.addEventListener(eventName, () => {
-            updateFullscreenButton();
+            syncFullscreenUi();
             updateRendererSize(true);
           });
         });
 
-        updateFullscreenButton();
+        syncFullscreenUi();
       }
 
       resetButton.addEventListener("click", () => {
