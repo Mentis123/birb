@@ -129,7 +129,7 @@ export class FreeFlightController {
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
-    const bankTarget = -this.input.strafe * BANK_MAX_ANGLE;
+    const bankTarget = this.input.strafe * BANK_MAX_ANGLE;
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
     this.bank += (bankTarget - this.bank) * bankStep;
 
