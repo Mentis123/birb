@@ -675,6 +675,7 @@
         const DEADZONE = 0.12;
         const state = {
           pointerId: null,
+          pointerType: null,
           value: { x: 0, y: 0 },
           handleValue: { x: 0, y: 0 },
           captured: false,
@@ -695,7 +696,10 @@
 
         const emitChange = () => {
           if (typeof onChange === "function") {
-            onChange({ x: state.value.x, y: state.value.y });
+            onChange(
+              { x: state.value.x, y: state.value.y },
+              { isActive: state.pointerId !== null, pointerType: state.pointerType }
+            );
           }
         };
 
@@ -784,6 +788,7 @@
             state.captured = false;
           }
           state.pointerId = event.pointerId;
+          state.pointerType = event.pointerType || null;
           attachGlobalListeners();
           translatePointer(event);
         };
@@ -808,6 +813,7 @@
             }
           }
           state.pointerId = null;
+          state.pointerType = null;
           state.captured = false;
           detachGlobalListeners();
         };
@@ -1037,7 +1043,7 @@
       }
 
       function updateControlMetrics(speed = flightController.getSpeed()) {
-        const throttlePercent = Math.round(flightController.throttle * 100);
+        const throttlePercent = Math.round(flightController.getEffectiveThrottle() * 100);
         const safeSpeed = Number.isFinite(speed) ? speed : 0;
         if (speedMetric) {
           speedMetric.textContent = `${safeSpeed.toFixed(2)}u/s`;
@@ -1050,6 +1056,8 @@
             statusMetric.textContent = "Motion paused via system preference";
           } else if (!motionState.animate) {
             statusMetric.textContent = "Glide paused";
+          } else if (flightController.isSprinting) {
+            statusMetric.textContent = "Sprinting boost engaged";
           } else {
             statusMetric.textContent = "Gently gliding in progress…";
           }
@@ -1284,7 +1292,7 @@
         },
         lift: {
           positive: ["Space", "KeyE"],
-          negative: ["ShiftLeft", "ShiftRight", "KeyQ"],
+          negative: ["KeyQ"],
         },
       };
 
@@ -1295,11 +1303,24 @@
         touch: { forward: 0, strafe: 0, lift: 0 },
       };
 
+      const sprintSources = {
+        keys: false,
+        touch: false,
+      };
+
+      function updateSprintState() {
+        const isActive = sprintSources.keys || sprintSources.touch;
+        flightController.setSprintActive(isActive);
+        updateControlMetrics();
+      }
+
       const analogLookInput = { x: 0, y: 0 };
       const ANALOG_LOOK_SPEED = 800;
+      const TOUCH_SPRINT_THRESHOLD = 0.85;
       const touchLiftPresses = new Map();
       const liftButtons = Array.from(document.querySelectorAll("[data-lift-button]"));
       const pointerListenerOptions = { passive: false };
+      const SHIFT_CODES = new Set(["ShiftLeft", "ShiftRight"]);
 
       function computeAxisValue(axisKeys) {
         const hasPositive = axisKeys.positive.some((code) => thrustKeys.has(code));
@@ -1334,9 +1355,14 @@
       }
 
       const leftThumbstick = createThumbstick(document.querySelector('[data-thumbstick="left"]'), {
-        onChange: (value) => {
+        onChange: (value, context = {}) => {
           thrustSources.touch.forward = -value.y;
           thrustSources.touch.strafe = value.x;
+          const magnitude = Math.hypot(value.x, value.y);
+          const isTouch = context.pointerType === "touch";
+          const isActive = Boolean(context.isActive);
+          sprintSources.touch = Boolean(isTouch && isActive && magnitude >= TOUCH_SPRINT_THRESHOLD);
+          updateSprintState();
           applyThrustInput();
         },
       });
@@ -1477,6 +1503,9 @@
         touchLiftPresses.clear();
         liftButtons.forEach((button) => button.classList.remove("is-active"));
         updateLiftFromButtons();
+        sprintSources.keys = false;
+        sprintSources.touch = false;
+        updateSprintState();
         updateControlMetrics();
       });
 
@@ -1499,12 +1528,19 @@
         if (event.target && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) {
           return;
         }
+        const isShift = SHIFT_CODES.has(code);
         const isRelevant = thrustAxes.some((axis) =>
           axis.positive.includes(code) || axis.negative.includes(code)
         );
-        if (!isRelevant) return;
-        thrustKeys.add(code);
-        updateThrustFromKeys();
+        if (!isRelevant && !isShift) return;
+        if (isRelevant) {
+          thrustKeys.add(code);
+          updateThrustFromKeys();
+        }
+        if (isShift) {
+          sprintSources.keys = true;
+          updateSprintState();
+        }
         event.preventDefault();
       });
 
@@ -1513,12 +1549,19 @@
         if (event.target && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) {
           return;
         }
+        const isShift = SHIFT_CODES.has(code);
         const wasRelevant = thrustAxes.some((axis) =>
           axis.positive.includes(code) || axis.negative.includes(code)
         );
-        if (!wasRelevant) return;
-        thrustKeys.delete(code);
-        updateThrustFromKeys();
+        if (!wasRelevant && !isShift) return;
+        if (wasRelevant) {
+          thrustKeys.delete(code);
+          updateThrustFromKeys();
+        }
+        if (isShift) {
+          sprintSources.keys = false;
+          updateSprintState();
+        }
         event.preventDefault();
       });
 
@@ -1543,6 +1586,9 @@
         touchLiftPresses.clear();
         liftButtons.forEach((button) => button.classList.remove("is-active"));
         updateLiftFromButtons();
+        sprintSources.keys = false;
+        sprintSources.touch = false;
+        updateSprintState();
         if (leftThumbstick) {
           leftThumbstick.reset();
         }
@@ -1616,6 +1662,9 @@
           touchLiftPresses.clear();
           liftButtons.forEach((button) => button.classList.remove("is-active"));
           updateLiftFromButtons();
+          sprintSources.keys = false;
+          sprintSources.touch = false;
+          updateSprintState();
           fpsState.lastSampleTime = null;
           fpsState.frames = 0;
           if (fpsMetric) {
