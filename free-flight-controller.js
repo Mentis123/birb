@@ -129,7 +129,17 @@ export class FreeFlightController {
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
-    const bankTarget = this.input.strafe * BANK_MAX_ANGLE;
+    const forwardZ = forward.z;
+    let bankOrientation = 1;
+    // When the bird is facing back toward the camera (positive Z), invert the
+    // roll direction so strafing left still lowers the left wing.
+    if (forwardZ > 1e-4) {
+      bankOrientation = -1;
+    } else if (forwardZ < -1e-4) {
+      bankOrientation = 1;
+    }
+
+    const bankTarget = this.input.strafe * bankOrientation * BANK_MAX_ANGLE;
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
     this.bank += (bankTarget - this.bank) * bankStep;
 
