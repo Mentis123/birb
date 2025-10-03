@@ -52,7 +52,10 @@ export function attachFpvCamera({
   };
 
   const scratch = {
-    localOffset,
+    localOffset:
+      typeof localOffset.clone === "function"
+        ? localOffset.clone()
+        : new Vector3Ctor(),
     orientation: new QuaternionCtor(),
     euler: EulerCtor ? new EulerCtor(0, 0, 0, "YXZ") : null,
     candidatePosition: new Vector3Ctor(),
