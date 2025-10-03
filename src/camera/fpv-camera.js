@@ -62,9 +62,11 @@ export function attachFpvCamera({
     if (scratch.resolvedAmbient?.position) {
       state.targetPosition.add(scratch.ambientPosition.copy(scratch.resolvedAmbient.position));
     }
-    if (scratch.resolvedAmbient?.quaternion) {
-      state.targetQuaternion.multiply(scratch.resolvedAmbient.quaternion);
-    }
+
+    // Applying the ambient rotation offsets in first-person produced large, disorienting
+    // spins while blending between camera poses. The ambient quaternion is only used to
+    // add a subtle wobble for third-person views, so we intentionally skip it here to keep
+    // the FPV orientation stable.
 
     return true;
   };
