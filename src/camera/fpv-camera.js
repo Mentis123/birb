@@ -39,18 +39,6 @@ export function attachFpvCamera({
 
   const scratch = {
     localOffset,
-    ambientPosition: new Vector3Ctor(),
-    resolvedAmbient: null,
-  };
-
-  const resolveAmbientOffsets = (ambientOffsets) => {
-    if (ambientOffsets) {
-      return ambientOffsets;
-    }
-    if (state.flightController && typeof state.flightController.getAmbientOffsets === "function") {
-      return state.flightController.getAmbientOffsets();
-    }
-    return null;
   };
 
   const updateTargetFromPose = ({ pose, ambientOffsets }) => {
@@ -63,10 +51,10 @@ export function attachFpvCamera({
     state.targetPosition.copy(pose.position).add(scratch.localOffset);
     state.targetQuaternion.copy(pose.quaternion);
 
-    scratch.resolvedAmbient = resolveAmbientOffsets(ambientOffsets);
-    if (scratch.resolvedAmbient?.position) {
-      state.targetPosition.add(scratch.ambientPosition.copy(scratch.resolvedAmbient.position));
-    }
+    // Skipping ambient position offsets avoids injecting the subtle idle bob used for
+    // third-person cameras. The additional vertical motion felt jittery in first-person
+    // and was a frequent source of motion sickness reports, so we keep the view locked
+    // tightly to the capsule while in FPV mode.
 
     // Applying the ambient rotation offsets in first-person produced large, disorienting
     // spins while blending between camera poses. The ambient quaternion is only used to
