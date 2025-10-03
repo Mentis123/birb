@@ -926,8 +926,11 @@
       scene.add(capsuleGroup);
       capsuleGroup.scale.setScalar(0.44);
 
+      // Align the capsule's nose (modeled along the +X axis) with the
+      // controller's forward vector (-Z) so the beak points in the direction of
+      // flight.
       const capsuleOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, -Math.PI / 2, 0)
+        new THREE.Euler(0, Math.PI / 2, 0)
       );
 
       const bodyGeometry = new THREE.CapsuleGeometry(0.24, 1.2, 20, 40);
