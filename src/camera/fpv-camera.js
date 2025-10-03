@@ -45,12 +45,17 @@ export function attachFpvCamera({
       1,
     ),
     firstUpdate: true,
+    lastPosePosition: camera.position.clone(),
+    lastPoseQuaternion: camera.quaternion.clone(),
+    positionEpsilonSq: 1e-6,
+    orientationEpsilon: 1e-5,
   };
 
   const scratch = {
     localOffset,
     orientation: new QuaternionCtor(),
     euler: EulerCtor ? new EulerCtor(0, 0, 0, "YXZ") : null,
+    candidatePosition: new Vector3Ctor(),
   };
 
   const updateTargetFromPose = ({ pose, ambientOffsets }) => {
@@ -68,8 +73,31 @@ export function attachFpvCamera({
 
     scratch.localOffset.copy(localOffset).applyQuaternion(scratch.orientation);
 
-    state.targetPosition.copy(pose.position).add(scratch.localOffset);
-    state.targetQuaternion.copy(scratch.orientation);
+    scratch.candidatePosition
+      .copy(pose.position)
+      .add(scratch.localOffset);
+
+    const positionDeltaSq = scratch.candidatePosition.distanceToSquared(
+      state.lastPosePosition,
+    );
+    const dot = Math.min(
+      Math.max(Math.abs(state.lastPoseQuaternion.dot(scratch.orientation)), 0),
+      1,
+    );
+    const orientationDelta = 1 - dot;
+
+    const hasMeaningfulChange =
+      positionDeltaSq > state.positionEpsilonSq || orientationDelta > state.orientationEpsilon;
+
+    if (hasMeaningfulChange) {
+      state.targetPosition.copy(scratch.candidatePosition);
+      state.targetQuaternion.copy(scratch.orientation);
+      state.lastPosePosition.copy(state.targetPosition);
+      state.lastPoseQuaternion.copy(state.targetQuaternion);
+    } else {
+      state.targetPosition.copy(state.lastPosePosition);
+      state.targetQuaternion.copy(state.lastPoseQuaternion);
+    }
 
     // Skipping ambient position offsets avoids injecting the subtle idle bob used for
     // third-person cameras. The additional vertical motion felt jittery in first-person
@@ -130,11 +158,15 @@ export function attachFpvCamera({
       state.startPosition.copy(camera.position);
       state.startQuaternion.copy(camera.quaternion);
       state.firstUpdate = false;
+      state.lastPosePosition.copy(camera.position);
+      state.lastPoseQuaternion.copy(camera.quaternion);
     },
     reset() {
       state.blending = false;
       state.blendElapsed = 0;
       state.firstUpdate = true;
+      state.lastPosePosition.copy(camera.position);
+      state.lastPoseQuaternion.copy(camera.quaternion);
     },
     update({ pose, ambientOffsets, delta } = {}) {
       if (!updateTargetFromPose({ pose, ambientOffsets })) {
@@ -145,6 +177,8 @@ export function attachFpvCamera({
         camera.position.copy(state.targetPosition);
         camera.quaternion.copy(state.targetQuaternion);
         state.firstUpdate = false;
+        state.lastPosePosition.copy(state.targetPosition);
+        state.lastPoseQuaternion.copy(state.targetQuaternion);
         return;
       }
 
