@@ -529,6 +529,13 @@
           aria-label="Stylized capsule gently gliding through a dark sky"
         ></canvas>
         <div class="canvas-actions" role="group" aria-label="Display options">
+          <button
+            type="button"
+            class="canvas-action-button view-toggle"
+            data-control="view-toggle"
+          >
+            <span data-view-label>Toggle View</span>
+          </button>
           <div class="settings-popover">
             <button
               type="button"
@@ -1008,6 +1015,10 @@
       const controlPanel = document.querySelector("#flight-control-panel");
       const panelToggleButton = document.querySelector('[data-control="panel-toggle"]');
       const fullscreenToggleButton = document.querySelector('[data-control="fullscreen"]');
+      const viewToggleButton = document.querySelector('[data-control="view-toggle"]');
+      const viewToggleLabel = viewToggleButton
+        ? viewToggleButton.querySelector('[data-view-label]')
+        : null;
       const glideSpeedInput = document.querySelector("#glide-speed");
       const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
       const speedMetric = document.querySelector('[data-metric="speed"]');
@@ -1059,6 +1070,30 @@
         fpsMetric.textContent = formatted;
       }
 
+      function getCameraModeLabel(mode) {
+        switch (mode) {
+          case CAMERA_MODES.FPV:
+            return "FPV view";
+          case CAMERA_MODES.FIXED:
+            return "Fixed view";
+          case CAMERA_MODES.FOLLOW:
+          default:
+            return "Follow view";
+        }
+      }
+
+      function updateViewToggleUi(mode = cameraState?.getMode?.()) {
+        if (!viewToggleButton) return;
+        const modeLabel = getCameraModeLabel(mode);
+        if (viewToggleLabel) {
+          viewToggleLabel.textContent = modeLabel;
+        }
+        viewToggleButton.setAttribute(
+          "aria-label",
+          `Toggle camera view (current: ${modeLabel})`
+        );
+      }
+
       function updateControlMetrics(speed = flightController.getSpeed()) {
         const throttlePercent = Math.round(flightController.getEffectiveThrottle() * 100);
         const safeSpeed = Number.isFinite(speed) ? speed : 0;
@@ -1076,19 +1111,13 @@
           } else if (flightController.isSprinting) {
             statusMetric.textContent = "Sprinting boost engaged";
           } else {
-            const modeLabel = (() => {
-              const mode = cameraState?.getMode?.();
-              switch (mode) {
-                case CAMERA_MODES.FPV:
-                  return "FPV view";
-                case CAMERA_MODES.FIXED:
-                  return "Fixed view";
-                case CAMERA_MODES.FOLLOW:
-                default:
-                  return "Follow view";
-              }
-            })();
-            statusMetric.textContent = `Gently gliding in progress… (${modeLabel} — press V to toggle)`;
+            const mode = cameraState?.getMode?.();
+            const modeLabel = getCameraModeLabel(mode);
+            const instruction = viewToggleButton
+              ? "use the view toggle or press V"
+              : "press V to toggle";
+            statusMetric.textContent =
+              `Gently gliding in progress… (${modeLabel} — ${instruction})`;
           }
         }
       }
@@ -1323,6 +1352,7 @@
         }
         syncAvatarVisibility(mode);
         updateControlMetrics();
+        updateViewToggleUi(mode);
       };
 
       const cycleCameraMode = () => {
@@ -1547,6 +1577,7 @@
         const currentMode = cameraState.getMode();
         const currentIndex = CAMERA_MODE_SEQUENCE.indexOf(currentMode);
         cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
+        updateViewToggleUi(currentMode);
         thrustKeys.clear();
         updateThrustFromKeys();
         if (leftThumbstick) {
@@ -1604,6 +1635,12 @@
         }
         event.preventDefault();
       });
+
+      if (viewToggleButton) {
+        viewToggleButton.addEventListener("click", () => {
+          cycleCameraMode();
+        });
+      }
 
       document.addEventListener("keyup", (event) => {
         const { code } = event;
