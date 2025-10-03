@@ -1295,6 +1295,11 @@
         flightController,
       });
 
+      const syncAvatarVisibility = (mode) => {
+        if (!capsuleGroup) return;
+        capsuleGroup.visible = mode !== CAMERA_MODES.FPV;
+      };
+
       const setCameraMode = (mode) => {
         if (!cameraState) return;
         cameraState.setMode(mode);
@@ -1302,6 +1307,7 @@
         if (index !== -1) {
           cameraModeIndex = index;
         }
+        syncAvatarVisibility(mode);
         updateControlMetrics();
       };
 
