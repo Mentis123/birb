@@ -19,7 +19,7 @@
         --max-width: min(92vw, 42rem);
         --header-size: clamp(0.75rem, 1vw + 0.65rem, 1.1rem);
         --status-size: clamp(0.6rem, 0.7vw + 0.55rem, 0.75rem);
-        background-color: #060912;
+        background-color: #0a1324;
       }
 
       *,
@@ -35,8 +35,8 @@
         display: flex;
         align-items: stretch;
         justify-content: center;
-        background: radial-gradient(circle at top, #1b2741, #060912 70%);
-        color: #f4f6fa;
+        background: radial-gradient(circle at 30% 20%, #273d68, #0a1324 68%);
+        color: #f6f8ff;
       }
 
       main {
@@ -62,9 +62,9 @@
         min-height: clamp(18rem, 62vw, 32rem);
         border-radius: 1.5rem;
         overflow: hidden;
-        backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.04);
-        box-shadow: 0 20px 48px rgba(5, 11, 23, 0.65);
+        backdrop-filter: blur(16px);
+        border: 1px solid rgba(186, 210, 255, 0.12);
+        box-shadow: 0 26px 56px rgba(6, 14, 29, 0.6);
         padding-bottom: clamp(2.5rem, 16vw, 5.25rem);
       }
 
@@ -84,10 +84,10 @@
         gap: 0.55rem;
         padding: 0.75rem 0.85rem 0.95rem;
         width: min(16rem, 70vw);
-        background: rgba(5, 9, 19, 0.9);
+        background: rgba(14, 23, 41, 0.88);
         border-radius: 1rem;
         border: 1px solid rgba(124, 170, 255, 0.22);
-        box-shadow: 0 16px 40px rgba(4, 10, 24, 0.55);
+        box-shadow: 0 18px 46px rgba(7, 14, 32, 0.55);
         backdrop-filter: blur(18px);
         z-index: 4;
         transform-origin: top right;
@@ -110,16 +110,16 @@
 
       .control-button {
         appearance: none;
-        border: 1px solid rgba(136, 177, 255, 0.3);
+        border: 1px solid rgba(176, 209, 255, 0.36);
         border-radius: 999px;
         padding: 0.45rem 0.95rem;
         font-size: 0.72rem;
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #e5edff;
-        background: linear-gradient(135deg, rgba(39, 79, 162, 0.45), rgba(19, 33, 77, 0.85));
-        box-shadow: inset 0 0 0 1px rgba(20, 42, 97, 0.4);
+        color: #f3f7ff;
+        background: linear-gradient(135deg, rgba(64, 105, 184, 0.55), rgba(26, 44, 92, 0.9));
+        box-shadow: inset 0 0 0 1px rgba(32, 62, 124, 0.45);
         cursor: pointer;
         transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
         -webkit-touch-callout: none;
@@ -129,7 +129,7 @@
       .control-button[disabled] {
         cursor: not-allowed;
         opacity: 0.6;
-        border-color: rgba(136, 177, 255, 0.1);
+        border-color: rgba(176, 209, 255, 0.18);
         box-shadow: none;
       }
 
@@ -139,8 +139,8 @@
       }
 
       .control-button:not([disabled]):hover {
-        box-shadow: inset 0 0 0 1px rgba(76, 123, 207, 0.5), 0 6px 14px rgba(6, 15, 38, 0.45);
-        border-color: rgba(165, 207, 255, 0.6);
+        box-shadow: inset 0 0 0 1px rgba(108, 150, 226, 0.6), 0 8px 16px rgba(8, 17, 40, 0.45);
+        border-color: rgba(206, 230, 255, 0.72);
         transform: translateY(-1px);
       }
 
@@ -221,9 +221,9 @@
         width: clamp(5.5rem, 28vw, 7.25rem);
         aspect-ratio: 1;
         border-radius: 50%;
-        background: rgba(9, 15, 28, 0.58);
-        border: 1px solid rgba(120, 165, 255, 0.25);
-        box-shadow: 0 10px 28px rgba(5, 10, 22, 0.55);
+        background: rgba(18, 27, 46, 0.6);
+        border: 1px solid rgba(168, 204, 255, 0.32);
+        box-shadow: 0 12px 32px rgba(7, 13, 28, 0.55);
         backdrop-filter: blur(18px);
         touch-action: none;
         user-select: none;
@@ -234,8 +234,8 @@
         position: absolute;
         inset: 18%;
         border-radius: 50%;
-        border: 1px solid rgba(152, 190, 255, 0.32);
-        background: radial-gradient(circle at 35% 35%, rgba(170, 202, 255, 0.48), rgba(82, 124, 209, 0.35) 60%, rgba(39, 61, 114, 0.2) 100%);
+        border: 1px solid rgba(182, 214, 255, 0.38);
+        background: radial-gradient(circle at 35% 35%, rgba(192, 220, 255, 0.52), rgba(104, 148, 226, 0.4) 60%, rgba(46, 74, 132, 0.24) 100%);
         opacity: 0.55;
       }
 
@@ -246,9 +246,9 @@
         width: 42%;
         aspect-ratio: 1;
         border-radius: 50%;
-        background: radial-gradient(circle at 30% 30%, #c4dcff, #5f8dff 60%, #2d4fa0 100%);
-        border: 1px solid rgba(184, 208, 255, 0.65);
-        box-shadow: 0 8px 22px rgba(9, 16, 32, 0.6);
+        background: radial-gradient(circle at 30% 30%, #d8e7ff, #7ba6ff 60%, #345cae 100%);
+        border: 1px solid rgba(204, 224, 255, 0.7);
+        box-shadow: 0 10px 24px rgba(10, 17, 34, 0.62);
         transform: translate(calc(-50% + var(--thumbstick-offset-x, 0px)), calc(-50% + var(--thumbstick-offset-y, 0px)));
         transition: transform 160ms ease;
       }
@@ -267,16 +267,16 @@
 
       .lift-button {
         appearance: none;
-        border: 1px solid rgba(136, 177, 255, 0.32);
+        border: 1px solid rgba(176, 209, 255, 0.36);
         border-radius: 999px;
         padding: 0.4rem 1rem;
         font-size: 0.65rem;
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #e5edff;
-        background: linear-gradient(135deg, rgba(39, 79, 162, 0.55), rgba(19, 33, 77, 0.85));
-        box-shadow: inset 0 0 0 1px rgba(20, 42, 97, 0.4);
+        color: #f3f7ff;
+        background: linear-gradient(135deg, rgba(64, 105, 184, 0.58), rgba(26, 44, 92, 0.9));
+        box-shadow: inset 0 0 0 1px rgba(32, 62, 124, 0.45);
         touch-action: none;
         user-select: none;
         -webkit-touch-callout: none;
@@ -295,8 +295,8 @@
 
       .lift-button.is-active,
       .lift-button:active {
-        box-shadow: inset 0 0 0 1px rgba(88, 134, 214, 0.55), 0 6px 16px rgba(7, 14, 30, 0.55);
-        border-color: rgba(165, 207, 255, 0.6);
+        box-shadow: inset 0 0 0 1px rgba(118, 162, 230, 0.65), 0 8px 18px rgba(9, 16, 34, 0.55);
+        border-color: rgba(206, 230, 255, 0.75);
       }
 
       .canvas-actions {
@@ -354,8 +354,8 @@
         margin-top: 0.35rem;
         padding: 0.6rem 0.75rem;
         border-radius: 0.8rem;
-        background: rgba(9, 14, 29, 0.75);
-        border: 1px solid rgba(124, 170, 255, 0.16);
+        background: rgba(20, 30, 54, 0.72);
+        border: 1px solid rgba(174, 206, 255, 0.2);
         display: flex;
         flex-direction: column;
         gap: 0.45rem;
@@ -369,7 +369,7 @@
         font-size: 0.68rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: rgba(222, 230, 255, 0.88);
+        color: rgba(232, 240, 255, 0.92);
       }
 
       .control-metrics__value {
@@ -380,21 +380,21 @@
         margin: 0.1rem 0 0;
         font-size: 0.62rem;
         letter-spacing: 0.05em;
-        color: rgba(199, 211, 245, 0.72);
+        color: rgba(210, 222, 252, 0.78);
       }
 
       .canvas-action-button {
         padding: 0.4rem 0.9rem;
         border-radius: 999px;
-        background: rgba(5, 9, 19, 0.65);
-        border: 1px solid rgba(124, 170, 255, 0.25);
-        color: #e5edff;
+        background: rgba(22, 33, 56, 0.72);
+        border: 1px solid rgba(174, 206, 255, 0.3);
+        color: #f1f5ff;
         font-size: 0.66rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         font-weight: 600;
         cursor: pointer;
-        box-shadow: 0 10px 24px rgba(4, 9, 21, 0.55);
+        box-shadow: 0 12px 28px rgba(7, 14, 30, 0.55);
         backdrop-filter: blur(18px);
         -webkit-touch-callout: none;
         user-select: none;
@@ -407,14 +407,21 @@
         transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
       }
 
+      .view-toggle__icon {
+        width: 1.1rem;
+        height: 1.1rem;
+        display: block;
+        fill: currentColor;
+      }
+
       .canvas-action-button:focus-visible {
         outline: 2px solid rgba(124, 170, 255, 0.75);
         outline-offset: 2px;
       }
 
       .canvas-action-button:not([disabled]):hover {
-        box-shadow: 0 12px 30px rgba(4, 9, 21, 0.6);
-        border-color: rgba(165, 207, 255, 0.6);
+        box-shadow: 0 16px 34px rgba(8, 15, 33, 0.6);
+        border-color: rgba(198, 224, 255, 0.7);
       }
 
       .canvas-action-button:not([disabled]):active {
@@ -533,8 +540,19 @@
             type="button"
             class="canvas-action-button view-toggle"
             data-control="view-toggle"
+            aria-label="Cycle camera view"
           >
-            <span data-view-label>Toggle View</span>
+            <svg
+              class="view-toggle__icon"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path
+                d="M2.25 12C4.2 7.7 7.8 5 12 5s7.8 2.7 9.75 7c-1.95 4.3-5.55 7-9.75 7s-7.8-2.7-9.75-7Zm9.75 4a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-1.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"
+              />
+            </svg>
+            <span class="visually-hidden" data-view-label>Follow view</span>
           </button>
           <div class="settings-popover">
             <button
@@ -879,27 +897,27 @@
       renderer.toneMappingExposure = 1.08;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x050a14);
-      scene.fog = new THREE.Fog(0x050a14, 8.5, 24);
+      scene.background = new THREE.Color(0x0a1426);
+      scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
 
-      const ambient = new THREE.HemisphereLight(0xa9d7ff, 0x0a1323, 0.62);
-      ambient.groundColor.set(0x0b1624);
+      const ambient = new THREE.HemisphereLight(0xc9e5ff, 0x0f2037, 0.78);
+      ambient.groundColor.set(0x13243b);
       scene.add(ambient);
 
-      const keyLight = new THREE.DirectionalLight(0x9ecbff, 0.68);
+      const keyLight = new THREE.DirectionalLight(0xb7d5ff, 0.88);
       keyLight.position.set(4.2, 4.6, 3.4);
       scene.add(keyLight);
 
-      const rimLight = new THREE.DirectionalLight(0xffcaa5, 0.32);
-      rimLight.position.set(-3.2, 3, -2.6);
+      const rimLight = new THREE.DirectionalLight(0xffd6b9, 0.4);
+      rimLight.position.set(-3.2, 3.2, -2.6);
       scene.add(rimLight);
 
-      const fillLight = new THREE.DirectionalLight(0x6ea4ff, 0.24);
-      fillLight.position.set(0.8, 2.2, -3.8);
+      const fillLight = new THREE.DirectionalLight(0x7fb3ff, 0.35);
+      fillLight.position.set(0.8, 2.4, -3.8);
       scene.add(fillLight);
 
-      const glowLight = new THREE.PointLight(0x4ab2ff, 0.95, 9.5, 1.6);
-      glowLight.position.set(0.05, 1.1, 0.45);
+      const glowLight = new THREE.PointLight(0x64c2ff, 1.1, 9.5, 1.6);
+      glowLight.position.set(0.1, 1.1, 0.45);
       scene.add(glowLight);
 
       const { glideTrail } = createWorldShell(scene, { three: THREE });
@@ -912,13 +930,13 @@
         new THREE.Euler(0, -Math.PI / 2, 0)
       );
 
-      const bodyGeometry = new THREE.CapsuleGeometry(0.3, 0.7, 18, 36);
+      const bodyGeometry = new THREE.CapsuleGeometry(0.24, 1.2, 20, 40);
       const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0xb6d9ff,
-        metalness: 0.26,
-        roughness: 0.36,
-        emissive: 0x10244a,
-        emissiveIntensity: 0.1,
+        color: 0xd5e6ff,
+        metalness: 0.28,
+        roughness: 0.34,
+        emissive: 0x17305c,
+        emissiveIntensity: 0.14,
       });
       const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
       body.castShadow = false;
@@ -926,84 +944,122 @@
       body.rotation.z = Math.PI / 2;
       capsuleGroup.add(body);
 
-      const headGeometry = new THREE.SphereGeometry(0.22, 22, 18);
-      const headMaterial = bodyMaterial.clone();
-      headMaterial.color = new THREE.Color(0xc4e3ff);
-      headMaterial.roughness = 0.32;
-      headMaterial.emissiveIntensity = 0.08;
-      const head = new THREE.Mesh(headGeometry, headMaterial);
-      head.position.set(0.55, 0.08, 0);
-      capsuleGroup.add(head);
-
-      const visorGeometry = new THREE.SphereGeometry(0.18, 16, 16, 0, Math.PI * 1.2);
-      const visorMaterial = new THREE.MeshStandardMaterial({
-        color: 0x3f87ff,
-        metalness: 0.48,
-        roughness: 0.14,
+      const fuselageBandGeometry = new THREE.CylinderGeometry(0.26, 0.26, 0.18, 32, 1, true);
+      const fuselageBandMaterial = new THREE.MeshStandardMaterial({
+        color: 0x7da8ff,
+        metalness: 0.36,
+        roughness: 0.3,
         transparent: true,
-        opacity: 0.86,
-        emissive: 0x0a1f3d,
-        emissiveIntensity: 0.28,
+        opacity: 0.68,
+        emissive: 0x1a2f58,
+        emissiveIntensity: 0.16,
+      });
+      const fuselageBand = new THREE.Mesh(fuselageBandGeometry, fuselageBandMaterial);
+      fuselageBand.rotation.z = Math.PI / 2;
+      fuselageBand.position.set(-0.08, -0.01, 0);
+      capsuleGroup.add(fuselageBand);
+
+      const canopyGeometry = new THREE.SphereGeometry(0.2, 24, 18);
+      const canopyMaterial = bodyMaterial.clone();
+      canopyMaterial.color = new THREE.Color(0xf5fbff);
+      canopyMaterial.roughness = 0.28;
+      canopyMaterial.emissiveIntensity = 0.1;
+      const canopy = new THREE.Mesh(canopyGeometry, canopyMaterial);
+      canopy.position.set(0.46, 0.16, 0);
+      capsuleGroup.add(canopy);
+
+      const visorGeometry = new THREE.SphereGeometry(0.2, 18, 16, 0, Math.PI * 1.3);
+      const visorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4e94ff,
+        metalness: 0.52,
+        roughness: 0.16,
+        transparent: true,
+        opacity: 0.88,
+        emissive: 0x0d2245,
+        emissiveIntensity: 0.32,
       });
       const visor = new THREE.Mesh(visorGeometry, visorMaterial);
       visor.rotation.y = Math.PI / 2;
       visor.rotation.z = Math.PI / 2;
-      visor.position.set(0.72, 0.06, 0);
+      visor.position.set(0.7, 0.08, 0);
       capsuleGroup.add(visor);
 
-      const noseGeometry = new THREE.ConeGeometry(0.08, 0.24, 18);
+      const noseGeometry = new THREE.ConeGeometry(0.1, 0.32, 24);
       const noseMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffc48c,
-        metalness: 0.12,
-        roughness: 0.4,
-        emissive: 0x40210d,
-        emissiveIntensity: 0.08,
+        color: 0xffd4a3,
+        metalness: 0.18,
+        roughness: 0.38,
+        emissive: 0x4a230f,
+        emissiveIntensity: 0.12,
       });
       const nose = new THREE.Mesh(noseGeometry, noseMaterial);
       nose.rotation.z = Math.PI / 2;
-      nose.position.set(0.88, 0.04, 0);
+      nose.position.set(0.98, 0.06, 0);
       capsuleGroup.add(nose);
 
-      const wingGeometry = new THREE.ConeGeometry(0.42, 0.22, 16);
+      const engineGeometry = new THREE.CylinderGeometry(0.12, 0.18, 0.44, 28, 1, true);
+      const engineMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4c74bf,
+        metalness: 0.42,
+        roughness: 0.32,
+        emissive: 0x0f1e3a,
+        emissiveIntensity: 0.26,
+      });
+      const engine = new THREE.Mesh(engineGeometry, engineMaterial);
+      engine.rotation.z = Math.PI / 2;
+      engine.position.set(-0.54, -0.02, 0);
+      capsuleGroup.add(engine);
+
+      const wingGeometry = new THREE.BoxGeometry(1.6, 0.08, 0.66);
       const wingMaterial = new THREE.MeshStandardMaterial({
-        color: 0x5b8def,
-        metalness: 0.22,
-        roughness: 0.38,
-        emissive: 0x142a51,
-        emissiveIntensity: 0.12,
+        color: 0x6fa9ff,
+        metalness: 0.32,
+        roughness: 0.3,
+        emissive: 0x1a3159,
+        emissiveIntensity: 0.18,
       });
       const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
-      leftWing.position.set(0.05, 0.04, 0.58);
-      leftWing.rotation.set(Math.PI / 2, 0, Math.PI / 2.8);
+      leftWing.position.set(-0.18, 0.02, 0.6);
+      leftWing.rotation.set(-Math.PI / 14, Math.PI / 16, -Math.PI / 30);
       capsuleGroup.add(leftWing);
 
       const rightWing = leftWing.clone();
       rightWing.position.z *= -1;
+      rightWing.rotation.x *= -1;
+      rightWing.rotation.y *= -1;
       rightWing.rotation.z *= -1;
       capsuleGroup.add(rightWing);
 
-      const tailGeometry = new THREE.ConeGeometry(0.16, 0.34, 12);
+      const tailplaneGeometry = new THREE.BoxGeometry(0.72, 0.06, 0.32);
       const tailMaterial = new THREE.MeshStandardMaterial({
-        color: 0x284a8b,
-        metalness: 0.18,
-        roughness: 0.52,
-        emissive: 0x08142b,
+        color: 0x4b7fd5,
+        metalness: 0.26,
+        roughness: 0.36,
+        emissive: 0x132a52,
         emissiveIntensity: 0.18,
       });
-      const tail = new THREE.Mesh(tailGeometry, tailMaterial);
-      tail.rotation.set(Math.PI / 2, 0, -Math.PI / 2.4);
-      tail.position.set(-0.62, -0.02, 0);
-      capsuleGroup.add(tail);
+      const tailplane = new THREE.Mesh(tailplaneGeometry, tailMaterial);
+      tailplane.position.set(-0.88, -0.02, 0);
+      tailplane.rotation.set(-Math.PI / 22, 0, 0);
+      capsuleGroup.add(tailplane);
 
-      const stabilizerGeometry = new THREE.BoxGeometry(0.06, 0.24, 0.12);
-      const stabilizerMaterial = new THREE.MeshStandardMaterial({
-        color: 0x3d6ac5,
-        metalness: 0.2,
-        roughness: 0.4,
+      const tailFinGeometry = new THREE.BoxGeometry(0.18, 0.42, 0.08);
+      const tailFin = new THREE.Mesh(tailFinGeometry, tailMaterial.clone());
+      tailFin.position.set(-0.82, 0.2, 0);
+      tailFin.rotation.set(0, 0, -Math.PI / 36);
+      capsuleGroup.add(tailFin);
+
+      const tailLightGeometry = new THREE.SphereGeometry(0.06, 18, 14);
+      const tailLightMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff9c8a,
+        emissive: 0x46140c,
+        emissiveIntensity: 0.5,
+        roughness: 0.32,
+        metalness: 0.08,
       });
-      const stabilizer = new THREE.Mesh(stabilizerGeometry, stabilizerMaterial);
-      stabilizer.position.set(-0.52, 0.18, 0);
-      capsuleGroup.add(stabilizer);
+      const tailLight = new THREE.Mesh(tailLightGeometry, tailLightMaterial);
+      tailLight.position.set(-1.08, 0, 0);
+      capsuleGroup.add(tailLight);
 
       const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
       const motionState = {
@@ -1099,8 +1155,9 @@
         }
         viewToggleButton.setAttribute(
           "aria-label",
-          `Toggle camera view (current: ${modeLabel})`
+          `Cycle camera view (current: ${modeLabel})`
         );
+        viewToggleButton.setAttribute("title", `Cycle camera view • ${modeLabel}`);
       }
 
       function updateControlMetrics(speed = flightController.getSpeed()) {
@@ -1123,8 +1180,8 @@
             const mode = cameraState?.getMode?.();
             const modeLabel = getCameraModeLabel(mode);
             const instruction = viewToggleButton
-              ? "use the view toggle or press V"
-              : "press V to toggle";
+              ? "tap the eye icon or press V"
+              : "press V to change";
             statusMetric.textContent =
               `Gently gliding in progress… (${modeLabel} — ${instruction})`;
           }
@@ -1296,7 +1353,11 @@
       });
 
       let cameraState = null;
-      const CAMERA_MODE_SEQUENCE = [CAMERA_MODES.FPV, CAMERA_MODES.FOLLOW];
+      const CAMERA_MODE_SEQUENCE = [
+        CAMERA_MODES.FOLLOW,
+        CAMERA_MODES.FPV,
+        CAMERA_MODES.FIXED,
+      ];
       let cameraModeIndex = 0;
 
       function updateRendererSize(force = false) {
@@ -1409,7 +1470,7 @@
 
       const analogLookInput = { x: 0, y: 0 };
       const ANALOG_LOOK_SPEED = 800;
-      const TOUCH_SPRINT_THRESHOLD = 0.85;
+      const TOUCH_SPRINT_THRESHOLD = 0.75;
       const touchLiftPresses = new Map();
       const liftButtons = Array.from(document.querySelectorAll("[data-lift-button]"));
       const pointerListenerOptions = { passive: false };

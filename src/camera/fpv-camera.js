@@ -10,6 +10,8 @@ export function attachFpvCamera({
   flightController,
   offset,
   blendDuration = 0.24,
+  positionDamping = 18,
+  rotationDamping = 14,
 } = {}) {
   if (!camera) {
     throw new Error("attachFpvCamera requires a camera instance");
@@ -30,6 +32,9 @@ export function attachFpvCamera({
     startQuaternion: camera.quaternion.clone(),
     targetPosition: camera.position.clone(),
     targetQuaternion: camera.quaternion.clone(),
+    positionDamping: Number.isFinite(positionDamping) && positionDamping > 0 ? positionDamping : 0,
+    rotationDamping: Number.isFinite(rotationDamping) && rotationDamping > 0 ? rotationDamping : 0,
+    firstUpdate: true,
   };
 
   const scratch = {
@@ -85,9 +90,29 @@ export function attachFpvCamera({
     }
   };
 
-  const applyDirect = () => {
-    camera.position.copy(state.targetPosition);
-    camera.quaternion.copy(state.targetQuaternion);
+  const getDampedAlpha = (lambda, delta) => {
+    if (!Number.isFinite(lambda) || lambda <= 0) {
+      return 1;
+    }
+    const step = Number.isFinite(delta) && delta > 0 ? delta : 1 / 60;
+    return 1 - Math.exp(-lambda * step);
+  };
+
+  const applyDamped = (delta) => {
+    const positionAlpha = getDampedAlpha(state.positionDamping, delta);
+    const rotationAlpha = getDampedAlpha(state.rotationDamping, delta);
+
+    if (positionAlpha >= 1) {
+      camera.position.copy(state.targetPosition);
+    } else {
+      camera.position.lerp(state.targetPosition, positionAlpha);
+    }
+
+    if (rotationAlpha >= 1) {
+      camera.quaternion.copy(state.targetQuaternion);
+    } else {
+      camera.quaternion.slerp(state.targetQuaternion, rotationAlpha);
+    }
   };
 
   return {
@@ -96,20 +121,29 @@ export function attachFpvCamera({
       state.blendElapsed = 0;
       state.startPosition.copy(camera.position);
       state.startQuaternion.copy(camera.quaternion);
+      state.firstUpdate = false;
     },
     reset() {
       state.blending = false;
       state.blendElapsed = 0;
+      state.firstUpdate = true;
     },
     update({ pose, ambientOffsets, delta } = {}) {
       if (!updateTargetFromPose({ pose, ambientOffsets })) {
         return;
       }
 
+      if (state.firstUpdate) {
+        camera.position.copy(state.targetPosition);
+        camera.quaternion.copy(state.targetQuaternion);
+        state.firstUpdate = false;
+        return;
+      }
+
       if (state.blending) {
         applyBlend(delta);
       } else {
-        applyDirect();
+        applyDamped(delta);
       }
     },
     getSnapshot() {

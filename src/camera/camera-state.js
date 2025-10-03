@@ -141,6 +141,8 @@ export function createCameraState({ three, scene, flightController }) {
     [CAMERA_MODES.FPV]: {
       offset: new Vector3(0, 0.14, -0.38),
       blendDuration: 0.26,
+      positionDamping: 18,
+      rotationDamping: 14,
     },
   };
 
@@ -174,6 +176,8 @@ export function createCameraState({ three, scene, flightController }) {
     flightController,
     offset: modeConfigurations[CAMERA_MODES.FPV].offset,
     blendDuration: modeConfigurations[CAMERA_MODES.FPV].blendDuration,
+    positionDamping: modeConfigurations[CAMERA_MODES.FPV].positionDamping,
+    rotationDamping: modeConfigurations[CAMERA_MODES.FPV].rotationDamping,
   });
 
   let activeUpdater = null;

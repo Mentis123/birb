@@ -4,11 +4,11 @@ import * as THREEImported from "https://esm.sh/three@0.161.0";
 // Adjust these values to balance clarity and performance during testing.
 export const WORLD_TWEAKS = {
   /** Distance where the scene fog begins blending in. */
-  FOG_START: 8.5,
+  FOG_START: 10.5,
   /** Distance where the fog fully obscures geometry. */
-  FOG_END: 24,
+  FOG_END: 30,
   /** Emissive intensity for the skydome's subtle glow. */
-  DOME_BRIGHTNESS: 0.12,
+  DOME_BRIGHTNESS: 0.18,
   /** Controls the base scale of distant terrain silhouettes. */
   TERRAIN_SCALE: 74,
   /** Controls the spread of procedural prop placement. */
@@ -60,19 +60,19 @@ function createScatterGroup({
 
 const DEFAULT_OPTIONS = {
   floor: {
-    color: 0x101e39,
-    opacity: 0.55,
+    color: 0x1a2f57,
+    opacity: 0.6,
   },
   trail: {
-    color: 0x1f3c6f,
-    opacity: 0.32,
+    color: 0x2b4f8f,
+    opacity: 0.35,
   },
   anchor: {
-    color: 0x2a3957,
-    opacity: 0.92,
+    color: 0x324c78,
+    opacity: 0.9,
   },
   haze: {
-    color: 0x0d1829,
+    color: 0x132648,
   },
 };
 
@@ -90,18 +90,18 @@ export function createWorldShell(
 
   // Ensure fog aligns with the shell defaults for quick iteration.
   if (scene.fog) {
-    scene.fog.color.set(0x050a14);
+    scene.fog.color.set(0x0a1426);
     scene.fog.near = WORLD_TWEAKS.FOG_START;
     scene.fog.far = WORLD_TWEAKS.FOG_END;
   } else {
-    scene.fog = new THREE.Fog(0x050a14, WORLD_TWEAKS.FOG_START, WORLD_TWEAKS.FOG_END);
+    scene.fog = new THREE.Fog(0x0a1426, WORLD_TWEAKS.FOG_START, WORLD_TWEAKS.FOG_END);
   }
 
   const skyGeometry = new THREE.SphereGeometry(60 * SPACE_SCALE, 48, 32);
   const skyMaterial = new THREE.ShaderMaterial({
     uniforms: {
-      topColor: { value: new THREE.Color(0x1a2a4b) },
-      bottomColor: { value: new THREE.Color(0x050913) },
+      topColor: { value: new THREE.Color(0x2f4f86) },
+      bottomColor: { value: new THREE.Color(0x08152a) },
       glowIntensity: { value: WORLD_TWEAKS.DOME_BRIGHTNESS },
     },
     side: THREE.BackSide,
@@ -133,9 +133,9 @@ export function createWorldShell(
 
   const hazeGroup = new THREE.Group();
   const hazeLayers = [
-    { radius: 32 * SPACE_SCALE, height: 16 * SPACE_SCALE, opacity: 0.24 },
-    { radius: 42 * SPACE_SCALE, height: 18 * SPACE_SCALE, opacity: 0.19 },
-    { radius: 55 * SPACE_SCALE, height: 22 * SPACE_SCALE, opacity: 0.15 },
+    { radius: 32 * SPACE_SCALE, height: 16 * SPACE_SCALE, opacity: 0.2 },
+    { radius: 42 * SPACE_SCALE, height: 18 * SPACE_SCALE, opacity: 0.16 },
+    { radius: 55 * SPACE_SCALE, height: 22 * SPACE_SCALE, opacity: 0.13 },
   ];
 
   hazeLayers.forEach((layer, index) => {
@@ -166,9 +166,9 @@ export function createWorldShell(
 
   const groundGeometry = new THREE.CylinderGeometry(3.3 * SPACE_SCALE, 4.5 * SPACE_SCALE, 1.2, 36, 2, true);
   const groundMaterial = new THREE.MeshStandardMaterial({
-    color: 0x142238,
-    roughness: 0.85,
-    metalness: 0.08,
+    color: 0x1e3254,
+    roughness: 0.82,
+    metalness: 0.12,
     transparent: true,
     opacity: 0.88,
     side: THREE.DoubleSide,
@@ -191,12 +191,12 @@ export function createWorldShell(
 
   const islandGeometry = new THREE.IcosahedronGeometry(1, 2);
   const islandMaterial = new THREE.MeshStandardMaterial({
-    color: 0x172742,
+    color: 0x203a62,
     flatShading: true,
-    roughness: 0.95,
-    metalness: 0.05,
+    roughness: 0.92,
+    metalness: 0.08,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.78,
   });
 
   const islandsGroup = new THREE.Group();
