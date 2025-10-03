@@ -1,5 +1,6 @@
 export const MOVEMENT_ACCELERATION = 4.5;
 export const LINEAR_DRAG = 1.6;
+export const SPRINT_MULTIPLIER = 1.75;
 export const MAX_PITCH_ANGLE = (70 * Math.PI) / 180;
 export const BANK_MAX_ANGLE = (32 * Math.PI) / 180;
 export const BANK_RESPONSIVENESS = 6.5;
@@ -48,6 +49,8 @@ export class FreeFlightController {
 
     this.lookSensitivity = options.lookSensitivity ?? LOOK_SENSITIVITY;
     this.throttle = options.throttle ?? 1;
+    this.sprintMultiplier = options.sprintMultiplier ?? SPRINT_MULTIPLIER;
+    this.isSprinting = false;
 
     this.input = {
       forward: 0,
@@ -72,6 +75,16 @@ export class FreeFlightController {
   setThrottle(value) {
     const nextValue = clamp(value, 0, 1, this.throttle);
     this.throttle = nextValue;
+  }
+
+  setSprintActive(isActive) {
+    this.isSprinting = Boolean(isActive);
+  }
+
+  getEffectiveThrottle() {
+    const baseThrottle = this.throttle;
+    const multiplier = this.isSprinting ? this.sprintMultiplier : 1;
+    return baseThrottle * multiplier;
   }
 
   addLookDelta(deltaX, deltaY) {
@@ -120,7 +133,7 @@ export class FreeFlightController {
       acceleration.normalize();
     }
 
-    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.throttle);
+    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.getEffectiveThrottle());
 
     this.velocity.addScaledVector(acceleration, deltaTime);
 
@@ -177,5 +190,6 @@ export class FreeFlightController {
     this.bank = 0;
     this.elapsed = 0;
     this.setThrustInput({ forward: 0, strafe: 0, lift: 0 });
+    this.setSprintActive(false);
   }
 }
