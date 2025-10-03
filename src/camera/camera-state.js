@@ -1,5 +1,6 @@
 import { createFollowCameraRig } from "./follow-camera.js";
 import { attachFpvCamera } from "./fpv-camera.js";
+import { createSequenceCameraRig } from "./sequence-camera.js";
 
 const easeInOutCubic = (t) => {
   const clamped = Math.min(Math.max(t, 0), 1);
@@ -10,6 +11,7 @@ const easeInOutCubic = (t) => {
 
 export const CAMERA_MODES = Object.freeze({
   FOLLOW: "Follow",
+  SEQUENCE: "Sequence",
   FPV: "FPV",
   FIXED: "Fixed",
 });
@@ -40,7 +42,14 @@ function createDebugOverlay({ getSnapshot }) {
   let rafId = 0;
   const renderOverlay = () => {
     const snapshot = getSnapshot();
-    const { mode, config, offset, cameraPosition, followMetrics } = snapshot;
+    const {
+      mode,
+      config,
+      offset,
+      cameraPosition,
+      followMetrics,
+      sequenceMetrics,
+    } = snapshot;
     const formatVector = (vector) =>
       vector
         ? `(${vector.x.toFixed(2)}, ${vector.y.toFixed(2)}, ${vector.z.toFixed(2)})`
@@ -73,6 +82,16 @@ function createDebugOverlay({ getSnapshot }) {
         `Follow Damping (pos/look/rot): ${followMetrics.positionDamping.toFixed(3)} / ${followMetrics.lookAtDamping.toFixed(3)} / ${followMetrics.rotationDamping.toFixed(3)}`,
         `Velocity LookAhead: ${followMetrics.velocityLookAhead.toFixed(2)}`,
         `Steering LookAhead: f:${followMetrics.steeringLookAhead.forward.toFixed(2)} s:${followMetrics.steeringLookAhead.strafe.toFixed(2)} l:${followMetrics.steeringLookAhead.lift.toFixed(2)}`,
+      );
+    }
+
+    if (sequenceMetrics) {
+      lines.push(
+        `Sequence Orbit Radius: ${sequenceMetrics.orbitRadius.toFixed(2)}`,
+        `Sequence Orbit Speed: ${sequenceMetrics.orbitSpeed.toFixed(3)}`,
+        `Sequence Vertical Bias: ${sequenceMetrics.verticalBias.toFixed(2)}`,
+        `Sequence Vertical Amplitude: ${sequenceMetrics.verticalAmplitude.toFixed(2)}`,
+        `Sequence Vertical Frequency: ${sequenceMetrics.verticalFrequency.toFixed(2)}`,
       );
     }
 
@@ -111,6 +130,10 @@ export function createCameraState({ three, scene, flightController }) {
     rig: createFollowCameraRig(three),
   };
 
+  const sequenceState = {
+    rig: createSequenceCameraRig(three),
+  };
+
   const scratch = {
     targetPosition: new Vector3(),
     ambientPosition: new Vector3(),
@@ -138,11 +161,25 @@ export function createCameraState({ three, scene, flightController }) {
         lift: 0.38,
       },
     },
+    [CAMERA_MODES.SEQUENCE]: {
+      anchorOffset: new Vector3(0, 0, 0),
+      lookAtOffset: new Vector3(0, 0.66, 0),
+      orbitRadius: 4.85,
+      orbitSpeed: 0.18,
+      verticalBias: 1.64,
+      verticalAmplitude: 0.42,
+      verticalFrequency: 1.12,
+      ambientPositionInfluence: 0.18,
+      positionDamping: 0.2,
+      lookAtDamping: 0.24,
+      rotationDamping: 0.22,
+    },
     [CAMERA_MODES.FPV]: {
       offset: new Vector3(0, 0.14, -0.38),
       blendDuration: 0.26,
-      positionDamping: 0,
-      rotationDamping: 0,
+      positionDamping: 18,
+      rotationDamping: 20,
+      rollInfluence: 0.42,
     },
   };
 
@@ -161,6 +198,7 @@ export function createCameraState({ three, scene, flightController }) {
     fromQuaternion: new Quaternion(),
     toPosition: new Vector3(),
     toQuaternion: new Quaternion(),
+    targetMode: null,
   };
 
   const transitionCamera = new PerspectiveCamera(
@@ -178,6 +216,7 @@ export function createCameraState({ three, scene, flightController }) {
     blendDuration: modeConfigurations[CAMERA_MODES.FPV].blendDuration,
     positionDamping: modeConfigurations[CAMERA_MODES.FPV].positionDamping,
     rotationDamping: modeConfigurations[CAMERA_MODES.FPV].rotationDamping,
+    rollInfluence: modeConfigurations[CAMERA_MODES.FPV].rollInfluence,
   });
 
   let activeUpdater = null;
@@ -188,6 +227,7 @@ export function createCameraState({ three, scene, flightController }) {
       const config = modeConfigurations[mode];
       let offset = config?.offset ?? null;
       let followMetrics = null;
+      let sequenceMetrics = null;
       if (mode === CAMERA_MODES.FIXED) {
         offset = debugScratchOffset.copy(camera.position).sub(defaultTarget);
       }
@@ -195,12 +235,16 @@ export function createCameraState({ three, scene, flightController }) {
         followMetrics = followState.rig.getDebugState();
         offset = followMetrics?.offset ?? offset;
       }
+      if (mode === CAMERA_MODES.SEQUENCE) {
+        sequenceMetrics = sequenceState.rig.getDebugState?.() ?? null;
+      }
       return {
         mode,
         config,
         offset: offset ? offset.clone() : null,
         cameraPosition: camera.position.clone(),
         followMetrics,
+        sequenceMetrics,
       };
     },
   });
@@ -217,6 +261,65 @@ export function createCameraState({ three, scene, flightController }) {
   };
 
   followState.rig.attach(camera, modeConfigurations[CAMERA_MODES.FOLLOW]);
+  sequenceState.rig.attach(
+    camera,
+    modeConfigurations[CAMERA_MODES.SEQUENCE],
+  );
+
+  const applyTransitionFromFpv = ({
+    rig,
+    pose,
+    velocity,
+    ambientOffsets,
+    steering,
+    delta,
+  }) => {
+    if (!transitionState.active || transitionState.type !== "fromFpv") {
+      return;
+    }
+
+    if (
+      transitionState.targetMode &&
+      transitionState.targetMode !== state.mode
+    ) {
+      return;
+    }
+
+    transitionState.toPosition.copy(camera.position);
+    transitionState.toQuaternion.copy(camera.quaternion);
+
+    const step = Number.isFinite(delta) && delta > 0 ? delta : 1 / 60;
+    transitionState.elapsed += step;
+    const progress = Math.min(
+      transitionState.elapsed / Math.max(transitionState.duration, 1e-4),
+      1,
+    );
+    const eased = easeInOutCubic(progress);
+
+    camera.position
+      .copy(transitionState.fromPosition)
+      .lerp(transitionState.toPosition, eased);
+    camera.quaternion
+      .copy(transitionState.fromQuaternion)
+      .slerp(transitionState.toQuaternion, eased);
+
+    if (progress >= 1) {
+      transitionState.active = false;
+      transitionState.type = null;
+      transitionState.targetMode = null;
+      transitionState.fromPosition.copy(camera.position);
+      transitionState.fromQuaternion.copy(camera.quaternion);
+      if (rig?.reset) {
+        rig.reset({
+          camera,
+          pose,
+          velocity,
+          ambientOffsets,
+          steering,
+        });
+      }
+    }
+  };
 
   const updateFollow = ({ pose, ambientOffsets, delta }) => {
     if (!pose) return;
@@ -240,46 +343,40 @@ export function createCameraState({ three, scene, flightController }) {
       delta,
     });
 
-    if (transitionState.active && transitionState.type === "fromFpv") {
-      transitionState.toPosition.copy(camera.position);
-      transitionState.toQuaternion.copy(camera.quaternion);
+    applyTransitionFromFpv({
+      rig: followState.rig,
+      pose,
+      velocity,
+      ambientOffsets,
+      steering,
+      delta,
+    });
+  };
 
-      const step = Number.isFinite(delta) && delta > 0 ? delta : 1 / 60;
-      transitionState.elapsed += step;
-      const progress = Math.min(
-        transitionState.elapsed / Math.max(transitionState.duration, 1e-4),
-        1,
-      );
-      const eased = easeInOutCubic(progress);
+  const updateSequence = ({ pose, ambientOffsets, delta }) => {
+    sequenceState.rig.configure(modeConfigurations[CAMERA_MODES.SEQUENCE]);
 
-      camera.position
-        .copy(transitionState.fromPosition)
-        .lerp(transitionState.toPosition, eased);
-      camera.quaternion
-        .copy(transitionState.fromQuaternion)
-        .slerp(transitionState.toQuaternion, eased);
+    sequenceState.rig.update({
+      pose,
+      ambientOffsets,
+      delta,
+    });
 
-      if (progress >= 1) {
-        transitionState.active = false;
-        transitionState.type = null;
-        transitionState.fromPosition.copy(camera.position);
-        transitionState.fromQuaternion.copy(camera.quaternion);
-        followState.rig.reset({
-          camera,
-          pose,
-          velocity,
-          ambientOffsets,
-          steering,
-        });
-      }
-    }
+    applyTransitionFromFpv({
+      rig: sequenceState.rig,
+      pose,
+      ambientOffsets,
+      delta,
+    });
   };
 
   const updateFpv = ({ pose, ambientOffsets, delta }) => {
     fpvRig.update({ pose, ambientOffsets, delta });
   };
 
-  const beginFollowTransitionFromFpv = ({
+  const beginThirdPersonTransitionFromFpv = ({
+    mode,
+    rig,
     pose,
     velocity,
     ambientOffsets,
@@ -288,26 +385,35 @@ export function createCameraState({ three, scene, flightController }) {
     if (!pose || !pose.position || !pose.quaternion) {
       transitionState.active = false;
       transitionState.type = null;
+      transitionState.targetMode = null;
       return false;
     }
 
     transitionState.active = true;
     transitionState.type = "fromFpv";
+    transitionState.targetMode = mode ?? null;
     transitionState.elapsed = 0;
     transitionState.duration =
       modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
     transitionState.fromPosition.copy(camera.position);
     transitionState.fromQuaternion.copy(camera.quaternion);
 
-    followState.rig.configure(modeConfigurations[CAMERA_MODES.FOLLOW]);
+    if (rig?.configure) {
+      rig.configure(modeConfigurations[mode]);
+    }
 
-    followState.rig.reset({
-      camera: transitionCamera,
-      pose,
-      velocity,
-      ambientOffsets,
-      steering,
-    });
+    if (rig?.reset) {
+      rig.reset({
+        camera: transitionCamera,
+        pose,
+        velocity,
+        ambientOffsets,
+        steering,
+      });
+    } else {
+      transitionCamera.position.copy(camera.position);
+      transitionCamera.quaternion.copy(camera.quaternion);
+    }
 
     transitionState.toPosition.copy(transitionCamera.position);
     transitionState.toQuaternion.copy(transitionCamera.quaternion);
@@ -330,6 +436,7 @@ export function createCameraState({ three, scene, flightController }) {
       transitionState.active = false;
       transitionState.type = null;
       transitionState.elapsed = 0;
+      transitionState.targetMode = null;
       applyFixedState();
       activeUpdater = null;
       fpvRig.reset();
@@ -340,6 +447,7 @@ export function createCameraState({ three, scene, flightController }) {
       transitionState.active = false;
       transitionState.type = null;
       transitionState.elapsed = 0;
+      transitionState.targetMode = null;
       transitionState.duration =
         modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
       fpvRig.activateBlend();
@@ -347,7 +455,19 @@ export function createCameraState({ three, scene, flightController }) {
       return;
     }
 
-    activeUpdater = updateFollow;
+    let targetRig = null;
+    switch (state.mode) {
+      case CAMERA_MODES.SEQUENCE:
+        activeUpdater = updateSequence;
+        targetRig = sequenceState.rig;
+        break;
+      case CAMERA_MODES.FOLLOW:
+      default:
+        activeUpdater = updateFollow;
+        targetRig = followState.rig;
+        break;
+    }
+
     fpvRig.reset();
     transitionState.duration =
       modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
@@ -370,8 +490,22 @@ export function createCameraState({ three, scene, flightController }) {
         }
       : null;
 
+    if (targetRig?.configure) {
+      targetRig.configure(modeConfigurations[state.mode]);
+    }
+
+    const resetPayload = {
+      camera,
+      pose,
+      velocity,
+      ambientOffsets,
+      steering,
+    };
+
     if (previousMode === CAMERA_MODES.FPV) {
-      const startedTransition = beginFollowTransitionFromFpv({
+      const startedTransition = beginThirdPersonTransitionFromFpv({
+        mode: state.mode,
+        rig: targetRig,
         pose,
         velocity,
         ambientOffsets,
@@ -380,30 +514,20 @@ export function createCameraState({ three, scene, flightController }) {
       if (!startedTransition) {
         transitionState.active = false;
         transitionState.type = null;
+        transitionState.targetMode = null;
         transitionState.elapsed = 0;
         transitionState.duration =
           modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
-        followState.rig.reset({
-          camera,
-          pose,
-          velocity,
-          ambientOffsets,
-          steering,
-        });
+        targetRig?.reset?.(resetPayload);
       }
     } else {
       transitionState.active = false;
       transitionState.type = null;
+      transitionState.targetMode = null;
       transitionState.elapsed = 0;
       transitionState.duration =
         modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
-      followState.rig.reset({
-        camera,
-        pose,
-        velocity,
-        ambientOffsets,
-        steering,
-      });
+      targetRig?.reset?.(resetPayload);
     }
   }
 
@@ -416,6 +540,7 @@ export function createCameraState({ three, scene, flightController }) {
     transitionState.active = false;
     transitionState.type = null;
     transitionState.elapsed = 0;
+    transitionState.targetMode = null;
     transitionState.duration =
       modeConfigurations[CAMERA_MODES.FPV].blendDuration ?? 0.26;
 
@@ -427,8 +552,8 @@ export function createCameraState({ three, scene, flightController }) {
 
     if (state.mode !== CAMERA_MODES.FOLLOW) {
       state.mode = CAMERA_MODES.FOLLOW;
-      activeUpdater = updateFollow;
     }
+    activeUpdater = updateFollow;
 
     const pose = flightController
       ? {
@@ -454,6 +579,13 @@ export function createCameraState({ three, scene, flightController }) {
       velocity,
       ambientOffsets,
       steering,
+    });
+
+    sequenceState.rig.configure(modeConfigurations[CAMERA_MODES.SEQUENCE]);
+    sequenceState.rig.reset({
+      camera: transitionCamera,
+      pose,
+      ambientOffsets,
     });
   }
 
