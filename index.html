@@ -645,7 +645,10 @@
     <script type="module">
       import * as THREE from "https://esm.sh/three@0.161.0";
       import { FreeFlightController } from "./free-flight-controller.js";
-      import { createCameraState } from "./src/camera/camera-state.js";
+      import {
+        createCameraState,
+        CAMERA_MODES,
+      } from "./src/camera/camera-state.js";
       import { createWorldShell } from "./src/environment/world-shell.js";
 
       const canvasWrapper = document.querySelector(".canvas-wrapper");
@@ -1059,7 +1062,19 @@
           } else if (flightController.isSprinting) {
             statusMetric.textContent = "Sprinting boost engaged";
           } else {
-            statusMetric.textContent = "Gently gliding in progress…";
+            const modeLabel = (() => {
+              const mode = cameraState?.getMode?.();
+              switch (mode) {
+                case CAMERA_MODES.FPV:
+                  return "FPV view";
+                case CAMERA_MODES.FIXED:
+                  return "Fixed view";
+                case CAMERA_MODES.FOLLOW:
+                default:
+                  return "Follow view";
+              }
+            })();
+            statusMetric.textContent = `Gently gliding in progress… (${modeLabel} — press V to toggle)`;
           }
         }
       }
@@ -1229,6 +1244,8 @@
       });
 
       let cameraState = null;
+      const CAMERA_MODE_SEQUENCE = [CAMERA_MODES.FPV, CAMERA_MODES.FOLLOW];
+      let cameraModeIndex = 0;
 
       function updateRendererSize(force = false) {
         const clientWidth = canvas.clientWidth || window.innerWidth;
@@ -1277,6 +1294,23 @@
         scene,
         flightController,
       });
+
+      const setCameraMode = (mode) => {
+        if (!cameraState) return;
+        cameraState.setMode(mode);
+        const index = CAMERA_MODE_SEQUENCE.indexOf(mode);
+        if (index !== -1) {
+          cameraModeIndex = index;
+        }
+        updateControlMetrics();
+      };
+
+      const cycleCameraMode = () => {
+        const nextIndex = (cameraModeIndex + 1) % CAMERA_MODE_SEQUENCE.length;
+        setCameraMode(CAMERA_MODE_SEQUENCE[nextIndex]);
+      };
+
+      setCameraMode(CAMERA_MODE_SEQUENCE[cameraModeIndex]);
 
       const blendedQuaternion = new THREE.Quaternion();
       const thrustKeys = new Set();
@@ -1490,6 +1524,9 @@
       resetButton.addEventListener("click", () => {
         flightController.reset();
         cameraState.reset();
+        const currentMode = cameraState.getMode();
+        const currentIndex = CAMERA_MODE_SEQUENCE.indexOf(currentMode);
+        cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
         thrustKeys.clear();
         updateThrustFromKeys();
         if (leftThumbstick) {
@@ -1528,7 +1565,11 @@
         if (event.target && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) {
           return;
         }
-        const isShift = SHIFT_CODES.has(code);
+        if (code === "KeyV" && !event.repeat) {
+          cycleCameraMode();
+          event.preventDefault();
+          return;
+        }
         const isRelevant = thrustAxes.some((axis) =>
           axis.positive.includes(code) || axis.negative.includes(code)
         );
