@@ -10,8 +10,8 @@ export function attachFpvCamera({
   flightController,
   offset,
   blendDuration = 0.24,
-  positionDamping = 18,
-  rotationDamping = 14,
+  positionDamping = 0,
+  rotationDamping = 0,
 } = {}) {
   if (!camera) {
     throw new Error("attachFpvCamera requires a camera instance");
