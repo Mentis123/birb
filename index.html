@@ -1140,6 +1140,8 @@
 
       function getCameraModeLabel(mode) {
         switch (mode) {
+          case CAMERA_MODES.SEQUENCE:
+            return "Sequence view";
           case CAMERA_MODES.FPV:
             return "FPV view";
           case CAMERA_MODES.FIXED:
@@ -1358,6 +1360,7 @@
       let cameraState = null;
       const CAMERA_MODE_SEQUENCE = [
         CAMERA_MODES.FOLLOW,
+        CAMERA_MODES.SEQUENCE,
         CAMERA_MODES.FPV,
         CAMERA_MODES.FIXED,
       ];

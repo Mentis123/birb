@@ -12,12 +12,18 @@ export function attachFpvCamera({
   blendDuration = 0.24,
   positionDamping = 0,
   rotationDamping = 0,
+  rollInfluence = 1,
 } = {}) {
   if (!camera) {
     throw new Error("attachFpvCamera requires a camera instance");
   }
 
   const Vector3Ctor = camera.position.constructor;
+  const QuaternionCtor = camera.quaternion.constructor;
+  const EulerCtor =
+    (camera.rotation && camera.rotation.constructor) ||
+    flightController?.euler?.constructor ||
+    null;
 
   const localOffset = offset && typeof offset.clone === "function"
     ? offset.clone()
@@ -34,11 +40,17 @@ export function attachFpvCamera({
     targetQuaternion: camera.quaternion.clone(),
     positionDamping: Number.isFinite(positionDamping) && positionDamping > 0 ? positionDamping : 0,
     rotationDamping: Number.isFinite(rotationDamping) && rotationDamping > 0 ? rotationDamping : 0,
+    rollInfluence: Math.min(
+      Math.max(Number.isFinite(rollInfluence) ? rollInfluence : 1, 0),
+      1,
+    ),
     firstUpdate: true,
   };
 
   const scratch = {
     localOffset,
+    orientation: new QuaternionCtor(),
+    euler: EulerCtor ? new EulerCtor(0, 0, 0, "YXZ") : null,
   };
 
   const updateTargetFromPose = ({ pose, ambientOffsets }) => {
@@ -46,10 +58,18 @@ export function attachFpvCamera({
       return false;
     }
 
-    scratch.localOffset.copy(localOffset).applyQuaternion(pose.quaternion);
+    scratch.orientation.copy(pose.quaternion);
+
+    if (scratch.euler && state.rollInfluence < 1) {
+      scratch.euler.setFromQuaternion(scratch.orientation, "YXZ");
+      scratch.euler.z *= state.rollInfluence;
+      scratch.orientation.setFromEuler(scratch.euler);
+    }
+
+    scratch.localOffset.copy(localOffset).applyQuaternion(scratch.orientation);
 
     state.targetPosition.copy(pose.position).add(scratch.localOffset);
-    state.targetQuaternion.copy(pose.quaternion);
+    state.targetQuaternion.copy(scratch.orientation);
 
     // Skipping ambient position offsets avoids injecting the subtle idle bob used for
     // third-person cameras. The additional vertical motion felt jittery in first-person
