@@ -93,7 +93,7 @@ export class FreeFlightController {
     }
 
     this.yaw -= deltaX * this.lookSensitivity;
-    this.pitch -= deltaY * this.lookSensitivity;
+    this.pitch += deltaY * this.lookSensitivity;
 
     if (this.yaw > Math.PI) {
       this.yaw -= Math.PI * 2;
