@@ -1061,42 +1061,42 @@
         const wingGroup = new THREE.Group();
 
         const shoulder = new THREE.Mesh(wingShoulderGeometry, wingMaterial);
-        shoulder.scale.set(1.52, 0.34, 1.28);
-        shoulder.rotation.set(0.28, side * 0.42, side * -0.24);
-        shoulder.position.set(0.04, 0.04, side * 0.46);
+        shoulder.scale.set(1.44, 0.32, 1.12);
+        shoulder.rotation.set(0.12, side * 0.54, side * -0.16);
+        shoulder.position.set(0.02, 0.12, side * 0.56);
         wingGroup.add(shoulder);
 
         const primary = new THREE.Mesh(wingPrimaryGeometry, wingPrimaryMaterial);
-        primary.scale.set(1.28, 0.28, 1.08);
-        primary.rotation.set(0.38, side * 0.92, side * -0.62);
-        primary.position.set(0.62, -0.04, side * 0.38);
+        primary.scale.set(1.36, 0.26, 0.92);
+        primary.rotation.set(-0.18, side * 0.78, side * -0.34);
+        primary.position.set(0.78, -0.02, side * 0.3);
         wingGroup.add(primary);
 
         const fan = new THREE.Mesh(wingFanGeometry, wingPrimaryMaterial.clone());
         fan.material.opacity = 0.82;
         fan.material.side = THREE.DoubleSide;
-        fan.rotation.set(0.06, side * 0.58, side * -1.18);
-        fan.position.set(0.86, -0.08, side * 0.18);
+        fan.rotation.set(-0.12, side * 0.92, side * -0.88);
+        fan.position.set(1.02, -0.08, side * 0.16);
         wingGroup.add(fan);
 
         const tip = new THREE.Mesh(wingTipGeometry, wingPrimaryMaterial.clone());
         tip.material.opacity = 0.78;
-        tip.scale.set(1.16, 0.22, 0.86);
-        tip.rotation.set(0.32, side * 1.08, side * -0.92);
-        tip.position.set(1.04, -0.16, side * 0.08);
+        tip.scale.set(1.12, 0.2, 0.78);
+        tip.rotation.set(-0.28, side * 1.18, side * -0.66);
+        tip.position.set(1.16, -0.12, side * 0.06);
         wingGroup.add(tip);
 
         return wingGroup;
       };
 
       const leftWing = createWing(1);
-      leftWing.position.set(0.06, 0.2, 0.68);
-      leftWing.rotation.set(0.08, -0.12, 0.12);
+      leftWing.position.set(0.02, 0.22, 0.66);
+      leftWing.rotation.set(0.14, -0.2, 0.16);
       birbGroup.add(leftWing);
 
       const rightWing = createWing(-1);
-      rightWing.position.set(0.06, 0.2, -0.68);
-      rightWing.rotation.set(0.08, 0.12, -0.12);
+      rightWing.position.set(0.02, 0.22, -0.66);
+      rightWing.rotation.set(0.14, 0.2, -0.16);
       birbGroup.add(rightWing);
 
       const tailFeatherMaterial = wingMaterial.clone();
@@ -1108,13 +1108,6 @@
       tailBase.scale.set(0.84, 0.56, 0.78);
       tailBase.position.set(-0.08, 0.02, 0);
       tailGroup.add(tailBase);
-
-      const tailSpineGeometry = new THREE.ConeGeometry(0.32, 0.58, 18, 1);
-      const tailSpine = new THREE.Mesh(tailSpineGeometry, tailFeatherMaterial.clone());
-      tailSpine.rotation.set(0, Math.PI / 2, Math.PI / 2);
-      tailSpine.scale.set(1.04, 0.86, 1);
-      tailSpine.position.set(-0.32, -0.02, 0);
-      tailGroup.add(tailSpine);
 
       const tailFeatherGeometry = new THREE.CapsuleGeometry(0.1, 0.64, 10, 18);
       const tailFeatherLayout = [
