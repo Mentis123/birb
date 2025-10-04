@@ -976,25 +976,38 @@
       neck.position.set(0.46, 0.06, 0);
       birbGroup.add(neck);
 
-      const beakGeometry = new THREE.ConeGeometry(0.085, 0.36, 28);
       const beakMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf5b35c,
-        metalness: 0.16,
-        roughness: 0.32,
+        color: 0xf3ad58,
+        metalness: 0.18,
+        roughness: 0.34,
         emissive: 0x3b1f08,
-        emissiveIntensity: 0.22,
+        emissiveIntensity: 0.24,
       });
-      const beak = new THREE.Mesh(beakGeometry, beakMaterial);
-      beak.rotation.set(0.16, 0, -Math.PI / 2.2);
-      beak.position.set(1.14, 0.18, 0.02);
-      birbGroup.add(beak);
 
-      const beakTipGeometry = new THREE.ConeGeometry(0.045, 0.16, 24);
+      const upperBeakGeometry = new THREE.ConeGeometry(0.11, 0.4, 32);
+      const upperBeak = new THREE.Mesh(upperBeakGeometry, beakMaterial);
+      upperBeak.scale.set(1.05, 0.82, 1.18);
+      upperBeak.rotation.set(0.14, 0, -Math.PI / 2.18);
+      upperBeak.position.set(1.18, 0.2, 0.02);
+      birbGroup.add(upperBeak);
+
+      const lowerBeakMaterial = beakMaterial.clone();
+      lowerBeakMaterial.color = new THREE.Color(0xf09b3c);
+      lowerBeakMaterial.roughness = 0.42;
+      const lowerBeakGeometry = new THREE.ConeGeometry(0.095, 0.3, 30);
+      const lowerBeak = new THREE.Mesh(lowerBeakGeometry, lowerBeakMaterial);
+      lowerBeak.scale.set(0.92, 0.64, 1.02);
+      lowerBeak.rotation.set(-0.32, 0, -Math.PI / 2.26);
+      lowerBeak.position.set(1.16, 0.12, 0.02);
+      birbGroup.add(lowerBeak);
+
+      const beakTipGeometry = new THREE.ConeGeometry(0.05, 0.18, 28);
       const beakTipMaterial = beakMaterial.clone();
-      beakTipMaterial.color = new THREE.Color(0xfdd697);
+      beakTipMaterial.color = new THREE.Color(0xfddbb0);
       const beakTip = new THREE.Mesh(beakTipGeometry, beakTipMaterial);
-      beakTip.rotation.copy(beak.rotation);
-      beakTip.position.set(1.28, 0.12, 0.04);
+      beakTip.scale.set(0.92, 0.9, 1);
+      beakTip.rotation.set(0.08, 0, -Math.PI / 2.14);
+      beakTip.position.set(1.3, 0.16, 0.04);
       birbGroup.add(beakTip);
 
       const eyeGeometry = new THREE.SphereGeometry(0.08, 20, 16);
@@ -1039,23 +1052,49 @@
       crest.scale.set(1, 0.7, 1);
       birbGroup.add(crest);
 
-      const wingGeometry = new THREE.CapsuleGeometry(0.42, 0.16, 8, 18);
       const wingMaterial = plumageMaterial.clone();
       wingMaterial.color = new THREE.Color(0x5b8ae0);
       wingMaterial.roughness = 0.42;
-      const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
-      leftWing.scale.set(1.48, 0.3, 0.88);
-      leftWing.rotation.set(0.26, 1.02, -0.18);
-      leftWing.position.set(0.14, 0.14, 0.66);
+      const wingPrimaryMaterial = wingMaterial.clone();
+      wingPrimaryMaterial.color = new THREE.Color(0x4c79d2);
+      wingPrimaryMaterial.transparent = true;
+      wingPrimaryMaterial.opacity = 0.94;
+
+      const wingShoulderGeometry = new THREE.CapsuleGeometry(0.54, 0.22, 12, 22);
+      const wingPrimaryGeometry = new THREE.CapsuleGeometry(0.32, 0.68, 10, 20);
+      const wingTipGeometry = new THREE.CapsuleGeometry(0.2, 0.52, 8, 18);
+
+      const createWing = (side = 1) => {
+        const wingGroup = new THREE.Group();
+
+        const shoulder = new THREE.Mesh(wingShoulderGeometry, wingMaterial);
+        shoulder.scale.set(1.68, 0.32, 1.16);
+        shoulder.rotation.set(0.16, side * 1.18, side * -0.26);
+        shoulder.position.set(0.02, 0.02, side * 0.34);
+        wingGroup.add(shoulder);
+
+        const primary = new THREE.Mesh(wingPrimaryGeometry, wingPrimaryMaterial);
+        primary.scale.set(1.34, 0.28, 0.92);
+        primary.rotation.set(0.32, side * 1.34, side * -0.4);
+        primary.position.set(0.56, -0.08, side * 0.52);
+        wingGroup.add(primary);
+
+        const tip = new THREE.Mesh(wingTipGeometry, wingPrimaryMaterial.clone());
+        tip.material.opacity = 0.86;
+        tip.scale.set(1.12, 0.24, 0.82);
+        tip.rotation.set(0.46, side * 1.46, side * -0.52);
+        tip.position.set(0.96, -0.14, side * 0.42);
+        wingGroup.add(tip);
+
+        return wingGroup;
+      };
+
+      const leftWing = createWing(1);
+      leftWing.position.set(0.08, 0.18, 0.7);
       birbGroup.add(leftWing);
 
-      const rightWing = leftWing.clone();
-      rightWing.position.z *= -1;
-      rightWing.rotation.set(
-        -leftWing.rotation.x,
-        -leftWing.rotation.y,
-        -leftWing.rotation.z
-      );
+      const rightWing = createWing(-1);
+      rightWing.position.set(0.08, 0.18, -0.7);
       birbGroup.add(rightWing);
 
       const tailFeatherMaterial = wingMaterial.clone();
@@ -1084,71 +1123,93 @@
         emissive: 0x2a1605,
         emissiveIntensity: 0.16,
       });
-      const legGeometry = new THREE.CylinderGeometry(0.038, 0.05, 0.36, 12);
-      const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-      leftLeg.rotation.z = Math.PI / 2.35;
-      leftLeg.position.set(0.22, -0.52, 0.28);
-      birbGroup.add(leftLeg);
 
-      const rightLeg = leftLeg.clone();
-      rightLeg.position.z *= -1;
-      rightLeg.rotation.z *= -1;
-      birbGroup.add(rightLeg);
-
-      const footPadGeometry = new THREE.SphereGeometry(0.12, 20, 16);
       const footPadMaterial = legMaterial.clone();
       footPadMaterial.color = new THREE.Color(0xf6d7a8);
       footPadMaterial.metalness = 0.08;
-      footPadMaterial.roughness = 0.58;
-      const leftFootPad = new THREE.Mesh(footPadGeometry, footPadMaterial);
-      leftFootPad.scale.set(1.6, 0.52, 1.1);
-      leftFootPad.position.set(0.32, -0.72, 0.28);
-      birbGroup.add(leftFootPad);
+      footPadMaterial.roughness = 0.6;
 
-      const toeNubGeometry = new THREE.SphereGeometry(0.055, 18, 14);
       const toeMaterial = footPadMaterial.clone();
-      toeMaterial.roughness = 0.6;
-      const leftOuterToe = new THREE.Mesh(toeNubGeometry, toeMaterial);
-      leftOuterToe.scale.set(1.45, 0.7, 0.9);
-      leftOuterToe.position.set(0.42, -0.74, 0.36);
-      birbGroup.add(leftOuterToe);
+      toeMaterial.roughness = 0.64;
 
-      const leftCenterToe = leftOuterToe.clone();
-      leftCenterToe.position.z = 0.18;
-      leftCenterToe.scale.set(1.55, 0.72, 1.02);
-      leftCenterToe.position.x = 0.44;
-      birbGroup.add(leftCenterToe);
+      const clawMaterial = new THREE.MeshStandardMaterial({
+        color: 0xe7b678,
+        metalness: 0.2,
+        roughness: 0.36,
+        emissive: 0x201204,
+        emissiveIntensity: 0.24,
+      });
 
-      const leftInnerToe = leftOuterToe.clone();
-      leftInnerToe.position.z = 0.02;
-      leftInnerToe.scale.set(1.35, 0.68, 0.85);
-      leftInnerToe.position.x = 0.41;
-      birbGroup.add(leftInnerToe);
+      const legGeometry = new THREE.CylinderGeometry(0.04, 0.055, 0.42, 14);
+      const ankleGeometry = new THREE.SphereGeometry(0.07, 16, 12);
+      const footPadGeometry = new THREE.SphereGeometry(0.14, 22, 18);
+      const toeGeometry = new THREE.CapsuleGeometry(0.03, 0.24, 8, 16);
+      const backToeGeometry = new THREE.CapsuleGeometry(0.026, 0.16, 6, 14);
+      const clawGeometry = new THREE.ConeGeometry(0.02, 0.08, 14);
 
-      const leftHeel = leftOuterToe.clone();
-      leftHeel.scale.set(1.1, 0.66, 0.9);
-      leftHeel.position.set(0.26, -0.74, 0.28);
-      birbGroup.add(leftHeel);
+      const createFoot = (side = 1) => {
+        const footGroup = new THREE.Group();
 
-      const rightFootPad = leftFootPad.clone();
-      rightFootPad.position.z *= -1;
-      birbGroup.add(rightFootPad);
+        const leg = new THREE.Mesh(legGeometry, legMaterial);
+        leg.rotation.z = (Math.PI / 2.28) * side;
+        leg.position.set(0.04, -0.18, 0);
+        footGroup.add(leg);
 
-      const rightOuterToe = leftOuterToe.clone();
-      rightOuterToe.position.z *= -1;
-      birbGroup.add(rightOuterToe);
+        const ankle = new THREE.Mesh(ankleGeometry, legMaterial.clone());
+        ankle.scale.set(1.15, 0.82, 1.15);
+        ankle.position.set(0.14, -0.34, 0);
+        footGroup.add(ankle);
 
-      const rightCenterToe = leftCenterToe.clone();
-      rightCenterToe.position.z *= -1;
-      birbGroup.add(rightCenterToe);
+        const pad = new THREE.Mesh(footPadGeometry, footPadMaterial);
+        pad.scale.set(1.8, 0.42, 1.36);
+        pad.position.set(0.26, -0.4, 0);
+        footGroup.add(pad);
 
-      const rightInnerToe = leftInnerToe.clone();
-      rightInnerToe.position.z *= -1;
-      birbGroup.add(rightInnerToe);
+        const toeLayout = [
+          { angle: 0.34, z: 0.16, length: 1.08 },
+          { angle: 0.08, z: 0, length: 1.18 },
+          { angle: -0.28, z: -0.16, length: 1 },
+        ];
 
-      const rightHeel = leftHeel.clone();
-      rightHeel.position.z *= -1;
-      birbGroup.add(rightHeel);
+        toeLayout.forEach(({ angle, z, length }) => {
+          const toeGroup = new THREE.Group();
+          toeGroup.rotation.y = angle * side;
+          toeGroup.position.set(0.36, -0.44, side * z);
+
+          const toe = new THREE.Mesh(toeGeometry, toeMaterial);
+          toe.scale.set(1, length, 1);
+          toe.rotation.set(Math.PI / 7, 0, Math.PI / 2);
+          toeGroup.add(toe);
+
+          const claw = new THREE.Mesh(clawGeometry, clawMaterial);
+          claw.rotation.set(Math.PI / 2.6, 0, -Math.PI / 2);
+          claw.position.set(0.18 * length + 0.04, -0.02, 0);
+          toeGroup.add(claw);
+
+          footGroup.add(toeGroup);
+        });
+
+        const backToe = new THREE.Mesh(backToeGeometry, toeMaterial);
+        backToe.rotation.set(-Math.PI / 2.1, 0, Math.PI / 2);
+        backToe.position.set(0.12, -0.4, side * -0.1);
+        footGroup.add(backToe);
+
+        const backClaw = new THREE.Mesh(clawGeometry, clawMaterial.clone());
+        backClaw.scale.set(0.9, 0.82, 0.9);
+        backClaw.rotation.set(-Math.PI / 2.4, 0, -Math.PI / 2);
+        backClaw.position.set(0.02, -0.38, side * -0.1);
+        footGroup.add(backClaw);
+
+        return footGroup;
+      };
+
+      const leftFoot = createFoot(1);
+      leftFoot.position.set(0.24, -0.52, 0.32);
+      birbGroup.add(leftFoot);
+
+      const rightFoot = createFoot(-1);
+      rightFoot.position.set(0.24, -0.52, -0.32);
+      birbGroup.add(rightFoot);
 
       birbGroup.traverse((child) => {
         if (child.isMesh) {
