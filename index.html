@@ -943,8 +943,8 @@
 
       const bodyGeometry = new THREE.SphereGeometry(0.62, 40, 28);
       const body = new THREE.Mesh(bodyGeometry, plumageMaterial);
-      body.scale.set(1.68, 1.26, 1.22);
-      body.position.set(-0.06, -0.04, 0);
+      body.scale.set(1.46, 1.08, 1.04);
+      body.position.set(-0.02, -0.02, 0);
       birbGroup.add(body);
 
       const bellyGeometry = new THREE.SphereGeometry(0.46, 36, 24);
@@ -956,8 +956,8 @@
         emissiveIntensity: 0.06,
       });
       const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
-      belly.scale.set(1.16, 0.96, 0.94);
-      belly.position.set(0.26, -0.18, 0);
+      belly.scale.set(1.08, 0.88, 0.86);
+      belly.position.set(0.28, -0.16, 0);
       birbGroup.add(belly);
 
       const headGeometry = new THREE.SphereGeometry(0.32, 36, 24);
@@ -966,7 +966,7 @@
       headMaterial.roughness = 0.4;
       headMaterial.emissiveIntensity = 0.14;
       const head = new THREE.Mesh(headGeometry, headMaterial);
-      head.position.set(0.86, 0.24, 0);
+      head.position.set(0.82, 0.26, 0);
       birbGroup.add(head);
 
       const neckGeometry = new THREE.SphereGeometry(0.28, 32, 24, 0, Math.PI * 2, 0, Math.PI / 1.35);
@@ -976,7 +976,7 @@
       neck.position.set(0.46, 0.06, 0);
       birbGroup.add(neck);
 
-      const beakGeometry = new THREE.ConeGeometry(0.12, 0.38, 28);
+      const beakGeometry = new THREE.ConeGeometry(0.085, 0.36, 28);
       const beakMaterial = new THREE.MeshStandardMaterial({
         color: 0xf5b35c,
         metalness: 0.16,
@@ -985,16 +985,16 @@
         emissiveIntensity: 0.22,
       });
       const beak = new THREE.Mesh(beakGeometry, beakMaterial);
-      beak.rotation.set(0.08, Math.PI, -Math.PI / 2);
-      beak.position.set(1.14, 0.18, 0);
+      beak.rotation.set(0.2, Math.PI, -Math.PI / 2.2);
+      beak.position.set(1.08, 0.2, 0.02);
       birbGroup.add(beak);
 
-      const beakTipGeometry = new THREE.ConeGeometry(0.06, 0.18, 24);
+      const beakTipGeometry = new THREE.ConeGeometry(0.045, 0.16, 24);
       const beakTipMaterial = beakMaterial.clone();
       beakTipMaterial.color = new THREE.Color(0xfdd697);
       const beakTip = new THREE.Mesh(beakTipGeometry, beakTipMaterial);
       beakTip.rotation.copy(beak.rotation);
-      beakTip.position.set(1.28, 0.16, 0.02);
+      beakTip.position.set(1.24, 0.14, 0.04);
       birbGroup.add(beakTip);
 
       const eyeGeometry = new THREE.SphereGeometry(0.08, 20, 16);
@@ -1086,8 +1086,8 @@
       });
       const legGeometry = new THREE.CylinderGeometry(0.038, 0.05, 0.36, 12);
       const leftLeg = new THREE.Mesh(legGeometry, legMaterial);
-      leftLeg.rotation.z = Math.PI / 2.1;
-      leftLeg.position.set(0.16, -0.48, 0.26);
+      leftLeg.rotation.z = Math.PI / 2.35;
+      leftLeg.position.set(0.22, -0.52, 0.28);
       birbGroup.add(leftLeg);
 
       const rightLeg = leftLeg.clone();
@@ -1100,13 +1100,13 @@
       talonMaterial.metalness = 0.18;
       talonMaterial.roughness = 0.42;
       const leftTalonOuter = new THREE.Mesh(talonGeometry, talonMaterial);
-      leftTalonOuter.rotation.set(0.1, 0, Math.PI / 3);
-      leftTalonOuter.position.set(0.28, -0.64, 0.36);
+      leftTalonOuter.rotation.set(0.14, -Math.PI / 14, Math.PI / 2.8);
+      leftTalonOuter.position.set(0.34, -0.68, 0.38);
       birbGroup.add(leftTalonOuter);
 
       const leftTalonInner = leftTalonOuter.clone();
-      leftTalonInner.position.z = 0.1;
-      leftTalonInner.rotation.y = Math.PI / 10;
+      leftTalonInner.position.z = 0.12;
+      leftTalonInner.rotation.y = Math.PI / 9;
       birbGroup.add(leftTalonInner);
 
       const rightTalonOuter = leftTalonOuter.clone();
