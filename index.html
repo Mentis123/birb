@@ -1964,10 +1964,15 @@
         }
 
         const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
-        if (analogLookInput.x !== 0 || analogLookInput.y !== 0) {
+        const activeCameraMode = cameraState?.getMode?.();
+        const analogLookY =
+          activeCameraMode === CAMERA_MODES.FPV
+            ? analogLookInput.y
+            : -analogLookInput.y;
+        if (analogLookInput.x !== 0 || analogLookY !== 0) {
           flightController.addLookDelta(
             analogLookInput.x * ANALOG_LOOK_SPEED * lookDeltaTime,
-            analogLookInput.y * ANALOG_LOOK_SPEED * lookDeltaTime
+            analogLookY * ANALOG_LOOK_SPEED * lookDeltaTime
           );
         }
 
