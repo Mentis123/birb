@@ -1,7 +1,6 @@
 export const MOVEMENT_ACCELERATION = 4.5;
 export const LINEAR_DRAG = 1.6;
 export const SPRINT_MULTIPLIER = 1.75;
-export const MAX_PITCH_ANGLE = (70 * Math.PI) / 180;
 // Allow a full 180° roll so the player can comfortably fly upside down.
 export const BANK_MAX_ANGLE = Math.PI;
 export const BANK_RESPONSIVENESS = 6.5;
@@ -34,13 +33,15 @@ export class FreeFlightController {
     this.position = new Vector3();
     this.velocity = new Vector3();
     this.quaternion = new Quaternion();
-    this.euler = new Euler(0, 0, 0, "YXZ");
+    this.lookQuaternion = new Quaternion();
 
     this._forward = new Vector3(0, 0, -1);
     this._right = new Vector3(1, 0, 0);
     this._up = new Vector3(0, 1, 0);
     this._acceleration = new Vector3();
     this._bankQuaternion = new Quaternion();
+    this._yawQuaternion = new Quaternion();
+    this._pitchQuaternion = new Quaternion();
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
@@ -59,8 +60,6 @@ export class FreeFlightController {
       lift: 0,
     };
 
-    this.yaw = 0;
-    this.pitch = 0;
     this.bank = 0;
     this.elapsed = 0;
 
@@ -93,18 +92,21 @@ export class FreeFlightController {
       return;
     }
 
-    this.yaw -= deltaX * this.lookSensitivity;
-    this.pitch += deltaY * this.lookSensitivity;
+    const yawAngle = -deltaX * this.lookSensitivity;
+    const pitchAngle = deltaY * this.lookSensitivity;
 
-    if (this.yaw > Math.PI) {
-      this.yaw -= Math.PI * 2;
-    } else if (this.yaw < -Math.PI) {
-      this.yaw += Math.PI * 2;
+    if (yawAngle !== 0) {
+      this._yawQuaternion.setFromAxisAngle(this._up, yawAngle);
+      this.lookQuaternion.premultiply(this._yawQuaternion);
     }
 
-    const minPitch = -MAX_PITCH_ANGLE;
-    const maxPitch = MAX_PITCH_ANGLE;
-    this.pitch = Math.min(Math.max(this.pitch, minPitch), maxPitch);
+    if (pitchAngle !== 0) {
+      const right = this._right.set(1, 0, 0).applyQuaternion(this.lookQuaternion).normalize();
+      this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
+      this.lookQuaternion.multiply(this._pitchQuaternion);
+    }
+
+    this.lookQuaternion.normalize();
   }
 
   getSpeed() {
@@ -118,8 +120,7 @@ export class FreeFlightController {
 
     this.elapsed += deltaTime;
 
-    this.euler.set(this.pitch, this.yaw, 0);
-    this.quaternion.setFromEuler(this.euler);
+    this.quaternion.copy(this.lookQuaternion);
 
     const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
@@ -184,10 +185,8 @@ export class FreeFlightController {
   reset() {
     this.position.copy(this._initialPosition);
     this.velocity.set(0, 0, 0);
+    this.lookQuaternion.copy(this._initialQuaternion);
     this.quaternion.copy(this._initialQuaternion);
-    this.euler.setFromQuaternion(this._initialQuaternion, "YXZ");
-    this.pitch = this.euler.x;
-    this.yaw = this.euler.y;
     this.bank = 0;
     this.elapsed = 0;
     this.setThrustInput({ forward: 0, strafe: 0, lift: 0 });
