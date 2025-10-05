@@ -1549,6 +1549,7 @@
       });
 
       const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
       const motionState = {
         animate: !motionQuery.matches,
         elapsed: 0,
@@ -1964,6 +1965,7 @@
       }
 
       const analogLookInput = { x: 0, y: 0 };
+      const analogLookState = { pointerType: null, isActive: false };
       const ANALOG_LOOK_SPEED = 800;
       const TOUCH_SPRINT_THRESHOLD = 0.75;
       const touchLiftPresses = new Map();
@@ -2017,9 +2019,11 @@
       });
 
       const rightThumbstick = createThumbstick(document.querySelector('[data-thumbstick="right"]'), {
-        onChange: (value) => {
+        onChange: (value, context = {}) => {
           analogLookInput.x = value.x;
           analogLookInput.y = value.y;
+          analogLookState.pointerType = context.pointerType ?? null;
+          analogLookState.isActive = Boolean(context.isActive);
         },
       });
 
@@ -2169,6 +2173,8 @@
         }
         analogLookInput.x = 0;
         analogLookInput.y = 0;
+        analogLookState.pointerType = null;
+        analogLookState.isActive = false;
         touchLiftPresses.clear();
         liftButtons.forEach((button) => button.classList.remove("is-active"));
         updateLiftFromButtons();
@@ -2276,6 +2282,8 @@
         }
         analogLookInput.x = 0;
         analogLookInput.y = 0;
+        analogLookState.pointerType = null;
+        analogLookState.isActive = false;
         if (document.pointerLockElement === canvas && document.exitPointerLock) {
           document.exitPointerLock();
         }
@@ -2298,7 +2306,12 @@
 
         const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
         const activeCameraMode = cameraState?.getMode?.();
-        const analogLookY = -analogLookInput.y;
+        const isTouchAnalogLook =
+          analogLookState.pointerType === "touch" ||
+          (analogLookState.isActive && !analogLookState.pointerType && coarsePointerQuery.matches);
+        const shouldInvertAnalogLookY =
+          activeCameraMode === CAMERA_MODES.FOLLOW && isTouchAnalogLook;
+        const analogLookY = shouldInvertAnalogLookY ? analogLookInput.y : -analogLookInput.y;
         if (analogLookInput.x !== 0 || analogLookY !== 0) {
           flightController.addLookDelta(
             analogLookInput.x * ANALOG_LOOK_SPEED * lookDeltaTime,
