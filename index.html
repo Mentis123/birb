@@ -602,6 +602,9 @@
                   36%
                 </output>
               </div>
+              <button type="button" class="control-button" data-control="environment">
+                Environment: Forest
+              </button>
               <button type="button" class="control-button" data-control="reset">
                 Reset Camera
               </button>
@@ -688,7 +691,11 @@
         createCameraState,
         CAMERA_MODES,
       } from "./src/camera/camera-state.js";
-      import { createWorldShell } from "./src/environment/world-shell.js";
+      import {
+        createWorldShell,
+        ENVIRONMENT_VARIANTS,
+        getEnvironmentDefinition,
+      } from "./src/environment/world-shell.js";
 
       const canvasWrapper = document.querySelector(".canvas-wrapper");
       const canvas = document.querySelector("#scene");
@@ -894,33 +901,154 @@
 
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.08;
+      renderer.toneMappingExposure = 1.22;
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x0a1426);
       scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
 
-      const ambient = new THREE.HemisphereLight(0xc9e5ff, 0x0f2037, 0.78);
-      ambient.groundColor.set(0x13243b);
+      const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
+      ambient.groundColor.set(0x1a2f32);
       scene.add(ambient);
 
-      const keyLight = new THREE.DirectionalLight(0xb7d5ff, 0.88);
-      keyLight.position.set(4.2, 4.6, 3.4);
+      const keyLight = new THREE.DirectionalLight(0xf3f0d2, 1.2);
+      keyLight.position.set(7.5, 8.2, 5.2);
       scene.add(keyLight);
 
-      const rimLight = new THREE.DirectionalLight(0xffd6b9, 0.4);
-      rimLight.position.set(-3.2, 3.2, -2.6);
+      const rimLight = new THREE.DirectionalLight(0x78b6ff, 0.48);
+      rimLight.position.set(-6.2, 5.1, -5.4);
       scene.add(rimLight);
 
-      const fillLight = new THREE.DirectionalLight(0x7fb3ff, 0.35);
-      fillLight.position.set(0.8, 2.4, -3.8);
+      const fillLight = new THREE.DirectionalLight(0x9fc8ff, 0.38);
+      fillLight.position.set(1.2, 3.1, -6.2);
       scene.add(fillLight);
 
-      const glowLight = new THREE.PointLight(0x64c2ff, 1.1, 9.5, 1.6);
-      glowLight.position.set(0.1, 1.1, 0.45);
+      const glowLight = new THREE.PointLight(0x63d0ff, 1.35, 12, 2.1);
+      glowLight.position.set(0.3, 1.6, 0.8);
       scene.add(glowLight);
 
-      const { glideTrail } = createWorldShell(scene, { three: THREE });
+      const lightingRig = { ambient, keyLight, rimLight, fillLight, glowLight };
+
+      const environmentButton = document.querySelector('[data-control="environment"]');
+      const environmentOrder = ENVIRONMENT_VARIANTS.map((variant) => variant.id);
+      const defaultEnvironmentId = environmentOrder[0] ?? "forest";
+      const defaultEnvironment =
+        getEnvironmentDefinition(defaultEnvironmentId) ?? {
+          id: defaultEnvironmentId,
+          label: defaultEnvironmentId,
+        };
+      const environmentState = {
+        order: environmentOrder,
+        index: Math.max(0, environmentOrder.indexOf(defaultEnvironmentId)),
+        id: defaultEnvironment.id,
+        label: defaultEnvironment.label,
+      };
+      let environmentShell = null;
+      let glideTrail = null;
+      let flightControllerInitialized = false;
+
+      function updateEnvironmentButton(config) {
+        if (!environmentButton || !config) return;
+        const label = config.label ?? config.id;
+        environmentButton.textContent = `Environment: ${label}`;
+        environmentButton.setAttribute(
+          "aria-label",
+          `Cycle environment (current: ${label})`
+        );
+        environmentButton.setAttribute("title", `Cycle environment • ${label}`);
+      }
+
+      function applyLightingPreset(config) {
+        if (!config || !config.lighting) return;
+        const { ambient, key, rim, fill, glow } = config.lighting;
+        if (ambient && lightingRig.ambient) {
+          if (ambient.sky !== undefined) {
+            lightingRig.ambient.color.setHex(ambient.sky);
+          }
+          if (ambient.ground !== undefined) {
+            lightingRig.ambient.groundColor.setHex(ambient.ground);
+          }
+          if (ambient.intensity !== undefined) {
+            lightingRig.ambient.intensity = ambient.intensity;
+          }
+        }
+        if (key && lightingRig.keyLight) {
+          if (key.color !== undefined) {
+            lightingRig.keyLight.color.setHex(key.color);
+          }
+          if (key.intensity !== undefined) {
+            lightingRig.keyLight.intensity = key.intensity;
+          }
+          if (Array.isArray(key.position)) {
+            lightingRig.keyLight.position.set(...key.position);
+          }
+        }
+        if (rim && lightingRig.rimLight) {
+          if (rim.color !== undefined) {
+            lightingRig.rimLight.color.setHex(rim.color);
+          }
+          if (rim.intensity !== undefined) {
+            lightingRig.rimLight.intensity = rim.intensity;
+          }
+          if (Array.isArray(rim.position)) {
+            lightingRig.rimLight.position.set(...rim.position);
+          }
+        }
+        if (fill && lightingRig.fillLight) {
+          if (fill.color !== undefined) {
+            lightingRig.fillLight.color.setHex(fill.color);
+          }
+          if (fill.intensity !== undefined) {
+            lightingRig.fillLight.intensity = fill.intensity;
+          }
+          if (Array.isArray(fill.position)) {
+            lightingRig.fillLight.position.set(...fill.position);
+          }
+        }
+        if (glow && lightingRig.glowLight) {
+          if (glow.color !== undefined) {
+            lightingRig.glowLight.color.setHex(glow.color);
+          }
+          if (glow.intensity !== undefined) {
+            lightingRig.glowLight.intensity = glow.intensity;
+          }
+          if (glow.distance !== undefined) {
+            lightingRig.glowLight.distance = glow.distance;
+          }
+          if (glow.decay !== undefined) {
+            lightingRig.glowLight.decay = glow.decay;
+          }
+          if (Array.isArray(glow.position)) {
+            lightingRig.glowLight.position.set(...glow.position);
+          }
+        }
+      }
+
+      function setEnvironment(variantId) {
+        const definition = getEnvironmentDefinition(variantId);
+        if (!definition) return;
+
+        if (environmentShell) {
+          environmentShell.dispose();
+        }
+
+        environmentShell = createWorldShell(scene, {
+          three: THREE,
+          variant: definition.id,
+        });
+        glideTrail = environmentShell.glideTrail;
+        environmentState.id = definition.id;
+        environmentState.label = definition.label;
+        const resolvedIndex = environmentState.order.indexOf(definition.id);
+        environmentState.index = resolvedIndex >= 0 ? resolvedIndex : 0;
+        updateEnvironmentButton(definition);
+        applyLightingPreset(definition);
+        if (flightControllerInitialized) {
+          updateControlMetrics();
+        }
+      }
+
+      setEnvironment(defaultEnvironment.id);
 
       const birbGroup = new THREE.Group();
       scene.add(birbGroup);
@@ -1359,8 +1487,11 @@
             const instruction = viewToggleButton
               ? "tap the eye icon or press V"
               : "press V to change";
+            const environmentMessage = environmentState.label
+              ? `the ${environmentState.label} environment`
+              : "this environment";
             statusMetric.textContent =
-              `Gently gliding in progress… (${modeLabel} — ${instruction})`;
+              `Gently gliding through ${environmentMessage}… (${modeLabel} — ${instruction})`;
           }
         }
       }
@@ -1579,6 +1710,8 @@
       const flightController = new FreeFlightController(THREE, {
         position: new THREE.Vector3(1.1, 0.9, 0),
       });
+      flightControllerInitialized = true;
+      updateControlMetrics();
 
       cameraState = createCameraState({
         three: THREE,
@@ -1756,6 +1889,16 @@
         controlState.manuallyPaused = !controlState.manuallyPaused;
         refreshAnimationState();
       });
+
+      if (environmentButton) {
+        environmentButton.addEventListener("click", () => {
+          if (!environmentState.order.length) return;
+          const currentIndex = environmentState.index >= 0 ? environmentState.index : 0;
+          const nextIndex = (currentIndex + 1) % environmentState.order.length;
+          const nextVariantId = environmentState.order[nextIndex];
+          setEnvironment(nextVariantId);
+        });
+      }
 
       if (panelToggleButton && controlPanel) {
         panelToggleButton.addEventListener("click", () => {
@@ -1986,7 +2129,9 @@
         birbGroup.quaternion.multiply(blendedQuaternion);
         birbGroup.quaternion.normalize();
 
-        glideTrail.rotation.z = motionState.elapsed * 0.32;
+        if (glideTrail) {
+          glideTrail.rotation.z = motionState.elapsed * 0.32;
+        }
 
         if (motionState.animate && !controlState.systemPaused) {
           updateControlMetrics(flightController.getSpeed());
@@ -2034,6 +2179,10 @@
           cameraState.dispose();
         }
         renderer.dispose();
+        if (environmentShell) {
+          environmentShell.dispose();
+          environmentShell = null;
+        }
         if (leftThumbstick) {
           leftThumbstick.destroy();
         }
