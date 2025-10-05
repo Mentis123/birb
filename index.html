@@ -302,36 +302,109 @@
       .canvas-actions {
         position: absolute;
         inset: var(--space-2) var(--space-2) auto auto;
-        display: flex;
-        flex-direction: column;
-        gap: 0.55rem;
-        align-items: flex-end;
         z-index: 3;
+        padding: 0.55rem;
+        border-radius: 1.1rem;
+        background: rgba(14, 23, 41, 0.76);
+        border: 1px solid rgba(132, 174, 255, 0.3);
+        box-shadow: 0 16px 42px rgba(6, 14, 31, 0.55);
+        backdrop-filter: blur(18px);
+        touch-action: none;
+        cursor: grab;
+        transition: box-shadow 180ms ease;
+      }
+
+      .canvas-actions:is(:hover, :focus-within) {
+        box-shadow: 0 20px 46px rgba(7, 15, 34, 0.6);
+      }
+
+      .canvas-actions.is-dragging {
+        cursor: grabbing;
+      }
+
+      .canvas-actions__tray {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.45rem;
       }
 
       .settings-popover {
         position: relative;
         display: flex;
-        flex-direction: column;
-        align-items: flex-end;
+        align-items: center;
+        justify-content: center;
       }
 
-      .settings-toggle,
-      .fullscreen-toggle {
-        padding: 0.4rem;
-        width: 2.4rem;
-        min-width: auto;
-        min-height: 2.4rem;
-        border-radius: 50%;
+      .canvas-action-button {
+        padding: 0;
+        width: 2.6rem;
+        min-width: 2.6rem;
+        min-height: 2.6rem;
+        border-radius: 0.85rem;
+        background: linear-gradient(145deg, rgba(30, 47, 84, 0.9), rgba(20, 31, 56, 0.78));
+        border: 1px solid rgba(158, 196, 255, 0.32);
+        color: #f1f5ff;
+        font-size: 0.66rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 12px 28px rgba(7, 14, 30, 0.55);
+        backdrop-filter: blur(18px);
+        -webkit-touch-callout: none;
+        user-select: none;
+        -webkit-user-select: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease,
+          background 180ms ease;
       }
 
-      .settings-toggle svg,
-      .fullscreen-toggle svg {
+      .canvas-action-button svg {
         width: 1.1rem;
         height: 1.1rem;
+        display: block;
+      }
+
+      .settings-toggle__icon,
+      .environment-toggle__icon {
         fill: none;
         stroke: currentColor;
-        stroke-width: 1.6;
+        stroke-width: 1.35;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .environment-toggle__icon path:first-of-type {
+        stroke-width: 1.25;
+      }
+
+      .view-toggle__icon {
+        fill: currentColor;
+      }
+
+      .canvas-action-button:focus-visible {
+        outline: 2px solid rgba(124, 170, 255, 0.75);
+        outline-offset: 2px;
+      }
+
+      .canvas-action-button:not([disabled]):hover {
+        box-shadow: 0 16px 34px rgba(8, 15, 33, 0.6);
+        border-color: rgba(198, 224, 255, 0.7);
+        background: linear-gradient(145deg, rgba(38, 59, 102, 0.98), rgba(24, 37, 66, 0.88));
+      }
+
+      .canvas-action-button:not([disabled]):active {
+        transform: translateY(1px);
+      }
+
+      .control-toggle,
+      .fullscreen-toggle,
+      .environment-toggle,
+      .view-toggle {
+        border-color: rgba(124, 170, 255, 0.28);
       }
 
       .fullscreen-toggle svg[hidden] {
@@ -383,55 +456,6 @@
         color: rgba(210, 222, 252, 0.78);
       }
 
-      .canvas-action-button {
-        padding: 0.4rem 0.9rem;
-        border-radius: 999px;
-        background: rgba(22, 33, 56, 0.72);
-        border: 1px solid rgba(174, 206, 255, 0.3);
-        color: #f1f5ff;
-        font-size: 0.66rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        font-weight: 600;
-        cursor: pointer;
-        box-shadow: 0 12px 28px rgba(7, 14, 30, 0.55);
-        backdrop-filter: blur(18px);
-        -webkit-touch-callout: none;
-        user-select: none;
-        -webkit-user-select: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.35rem;
-        min-height: 2.25rem;
-        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
-      }
-
-      .view-toggle__icon {
-        width: 1.1rem;
-        height: 1.1rem;
-        display: block;
-        fill: currentColor;
-      }
-
-      .canvas-action-button:focus-visible {
-        outline: 2px solid rgba(124, 170, 255, 0.75);
-        outline-offset: 2px;
-      }
-
-      .canvas-action-button:not([disabled]):hover {
-        box-shadow: 0 16px 34px rgba(8, 15, 33, 0.6);
-        border-color: rgba(198, 224, 255, 0.7);
-      }
-
-      .canvas-action-button:not([disabled]):active {
-        transform: translateY(1px);
-      }
-
-      .control-toggle,
-      .fullscreen-toggle {
-        border-color: rgba(124, 170, 255, 0.25);
-      }
 
       body.is-fullscreen-fallback {
         align-items: stretch;
@@ -521,7 +545,11 @@
         }
 
         .canvas-actions {
-          flex-direction: row;
+          padding: 0.65rem;
+        }
+
+        .canvas-actions__tray {
+          gap: 0.55rem;
         }
       }
     </style>
@@ -535,132 +563,161 @@
           role="img"
           aria-label="Stylized blue bird gliding through a dark sky"
         ></canvas>
-        <div class="canvas-actions" role="group" aria-label="Display options">
-          <button
-            type="button"
-            class="canvas-action-button view-toggle"
-            data-control="view-toggle"
-            aria-label="Cycle camera view"
-          >
-            <svg
-              class="view-toggle__icon"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <path
-                d="M2.25 12C4.2 7.7 7.8 5 12 5s7.8 2.7 9.75 7c-1.95 4.3-5.55 7-9.75 7s-7.8-2.7-9.75-7Zm9.75 4a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-1.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"
-              />
-            </svg>
-            <span class="visually-hidden" data-view-label>Follow view</span>
-          </button>
-          <div class="settings-popover">
-            <button
-              type="button"
-              class="canvas-action-button control-toggle settings-toggle"
-              data-control="panel-toggle"
-              aria-pressed="false"
-              aria-expanded="false"
-              aria-controls="flight-control-panel"
-              aria-label="Show flight controls"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  d="M12 8.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Zm9 3.75a1.2 1.2 0 0 0-.84-1.14l-1.74-.58a7.47 7.47 0 0 0-.68-1.66l.87-1.67a1.2 1.2 0 0 0-1.05-1.75h-1.8a7.47 7.47 0 0 0-1.31-.9l-.32-1.82A1.2 1.2 0 0 0 12 1.5c-.57 0-1.06.4-1.17.95l-.32 1.82a7.47 7.47 0 0 0-1.31.9H7.4a1.2 1.2 0 0 0-1.05 1.75l.87 1.67a7.47 7.47 0 0 0-.68 1.66l-1.74.58a1.2 1.2 0 0 0 0 2.28l1.74.58c.16.57.39 1.12.68 1.66l-.87 1.67A1.2 1.2 0 0 0 7.4 19.5h1.8c.4.35.84.66 1.31.9l.32 1.82c.11.55.6.95 1.17.95s1.06-.4 1.17-.95l.32-1.82c.47-.24.91-.55 1.31-.9h1.8c.87 0 1.45-.92 1.05-1.75l-.87-1.67c.29-.54.52-1.09.68-1.66l1.74-.58c.49-.16.84-.62.84-1.14Z"
-                />
-              </svg>
-              <span class="visually-hidden" data-settings-label>Show Controls</span>
-            </button>
-            <div
-              id="flight-control-panel"
-              class="control-panel is-collapsed"
-              role="group"
-              aria-label="Flight controls"
-              aria-hidden="true"
-            >
-              <h2>Controls</h2>
+        <div class="canvas-actions" data-draggable-panel>
+          <div class="canvas-actions__tray" role="group" aria-label="Display options">
+            <div class="settings-popover">
               <button
                 type="button"
-                class="control-button"
-                data-control="toggle"
-                aria-pressed="true"
+                class="canvas-action-button control-toggle settings-toggle"
+                data-control="panel-toggle"
+                aria-pressed="false"
+                aria-expanded="false"
+                aria-controls="flight-control-panel"
+                aria-label="Show flight controls"
               >
-                Pause Glide
+                <svg
+                  class="settings-toggle__icon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d="M12 8.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Zm9 3.75a1.2 1.2 0 0 0-.84-1.14l-1.74-.58a7.47 7.47 0 0 0-.68-1.66l.87-1.67a1.2 1.2 0 0 0-1.05-1.75h-1.8a7.47 7.47 0 0 0-1.31-.9l-.32-1.82A1.2 1.2 0 0 0 12 1.5c-.57 0-1.06.4-1.17.95l-.32 1.82a7.47 7.47 0 0 0-1.31.9H7.4a1.2 1.2 0 0 0-1.05 1.75l.87 1.67a7.47 7.47 0 0 0-.68 1.66l-1.74.58a1.2 1.2 0 0 0 0 2.28l1.74.58c.16.57.39 1.12.68 1.66l-.87 1.67A1.2 1.2 0 0 0 7.4 19.5h1.8c.4.35.84.66 1.31.9l.32 1.82c.11.55.6.95 1.17.95s1.06-.4 1.17-.95l.32-1.82c.47-.24.91-.55 1.31-.9h1.8c.87 0 1.45-.92 1.05-1.75l-.87-1.67c.29-.54.52-1.09.68-1.66l1.74-.58c.49-.16.84-.62.84-1.14Z"
+                  />
+                </svg>
+                <span class="visually-hidden" data-settings-label>Show Controls</span>
               </button>
-              <div class="control-slider">
-                <label for="glide-speed">Throttle</label>
-                <input
-                  id="glide-speed"
-                  type="range"
-                  min="0.2"
-                  max="0.8"
-                  step="0.01"
-                  value="0.36"
-                  aria-describedby="glide-speed-display"
-                />
-                <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-                  36%
-                </output>
-              </div>
-              <button type="button" class="control-button" data-control="environment">
-                Environment: Forest
-              </button>
-              <button type="button" class="control-button" data-control="reset">
-                Reset Camera
-              </button>
-              <div class="control-metrics" aria-live="polite" aria-atomic="true">
-                <div class="control-metrics__row">
-                  <span class="control-metrics__label">Speed</span>
-                  <span class="control-metrics__value" data-metric="speed">0.00u/s</span>
+              <div
+                id="flight-control-panel"
+                class="control-panel is-collapsed"
+                role="group"
+                aria-label="Flight controls"
+                aria-hidden="true"
+              >
+                <h2>Controls</h2>
+                <button
+                  type="button"
+                  class="control-button"
+                  data-control="toggle"
+                  aria-pressed="true"
+                >
+                  Pause Glide
+                </button>
+                <div class="control-slider">
+                  <label for="glide-speed">Throttle</label>
+                  <input
+                    id="glide-speed"
+                    type="range"
+                    min="0.2"
+                    max="0.8"
+                    step="0.01"
+                    value="0.36"
+                    aria-describedby="glide-speed-display"
+                  />
+                  <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
+                    36%
+                  </output>
                 </div>
-                <div class="control-metrics__row">
-                  <span class="control-metrics__label">Throttle</span>
-                  <span class="control-metrics__value" data-metric="throttle">36%</span>
+                <button type="button" class="control-button" data-control="environment">
+                  Environment: Forest
+                </button>
+                <button type="button" class="control-button" data-control="reset">
+                  Reset Camera
+                </button>
+                <div class="control-metrics" aria-live="polite" aria-atomic="true">
+                  <div class="control-metrics__row">
+                    <span class="control-metrics__label">Speed</span>
+                    <span class="control-metrics__value" data-metric="speed">0.00u/s</span>
+                  </div>
+                  <div class="control-metrics__row">
+                    <span class="control-metrics__label">Throttle</span>
+                    <span class="control-metrics__value" data-metric="throttle">36%</span>
+                  </div>
+                  <div class="control-metrics__row">
+                    <span class="control-metrics__label">FPS</span>
+                    <span class="control-metrics__value" data-metric="fps">--</span>
+                  </div>
+                  <p class="control-metrics__note" data-metric="status">
+                    Gently gliding in progress…
+                  </p>
                 </div>
-                <div class="control-metrics__row">
-                  <span class="control-metrics__label">FPS</span>
-                  <span class="control-metrics__value" data-metric="fps">--</span>
-                </div>
-                <p class="control-metrics__note" data-metric="status">
-                  Gently gliding in progress…
-                </p>
               </div>
             </div>
-          </div>
-          <button
-            type="button"
-            class="canvas-action-button fullscreen-toggle"
-            data-control="fullscreen"
-            aria-pressed="false"
-            aria-label="Enter fullscreen"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon="enter">
-              <path
-                d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              focusable="false"
-              data-icon="exit"
-              hidden
+            <button
+              type="button"
+              class="canvas-action-button fullscreen-toggle"
+              data-control="fullscreen"
+              aria-pressed="false"
+              aria-label="Enter fullscreen"
             >
-              <path
-                d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-              <path
-                d="M15 9h4M15 15h4M5 9h4M5 15h4"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <span class="visually-hidden" data-fullscreen-label>Enter Fullscreen</span>
-          </button>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon="enter">
+                <path
+                  d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+                data-icon="exit"
+                hidden
+              >
+                <path
+                  d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M15 9h4M15 15h4M5 9h4M5 15h4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="visually-hidden" data-fullscreen-label>Enter Fullscreen</span>
+            </button>
+            <button
+              type="button"
+              class="canvas-action-button environment-toggle"
+              data-control="environment-toggle"
+              aria-label="Cycle environment"
+            >
+              <svg
+                class="environment-toggle__icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z"
+                />
+                <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
+                <path
+                  d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25"
+                />
+              </svg>
+              <span class="visually-hidden" data-environment-label>Environment: Forest</span>
+            </button>
+            <button
+              type="button"
+              class="canvas-action-button view-toggle"
+              data-control="view-toggle"
+              aria-label="Cycle camera view"
+            >
+              <svg
+                class="view-toggle__icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M2.25 12C4.2 7.7 7.8 5 12 5s7.8 2.7 9.75 7c-1.95 4.3-5.55 7-9.75 7s-7.8-2.7-9.75-7Zm9.75 4a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-1.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"
+                />
+              </svg>
+              <span class="visually-hidden" data-view-label>Follow view</span>
+            </button>
+          </div>
         </div>
         <div class="touch-controls" aria-hidden="true">
           <div class="thumbstick" data-thumbstick="left">
@@ -698,6 +755,7 @@
       } from "./src/environment/world-shell.js";
 
       const canvasWrapper = document.querySelector(".canvas-wrapper");
+      const canvasActions = document.querySelector("[data-draggable-panel]");
       const canvas = document.querySelector("#scene");
       const renderer = new THREE.WebGLRenderer({
         canvas,
@@ -707,12 +765,109 @@
 
       const DPR_CAP = 1.8;
       const resizeState = { width: 0, height: 0 };
+      const actionPaletteState = {
+        pointerId: null,
+        offsetX: 0,
+        offsetY: 0,
+        width: 0,
+        height: 0,
+        hasCustomPosition: false,
+        relativeX: 0,
+        relativeY: 0,
+      };
 
       function clamp(value, min, max) {
         if (!Number.isFinite(value)) {
           return 0;
         }
         return Math.min(Math.max(value, min), max);
+      }
+
+      function repositionActionPalette() {
+        if (!canvasActions || !canvasWrapper || !actionPaletteState.hasCustomPosition)
+          return;
+        const wrapperRect = canvasWrapper.getBoundingClientRect();
+        const width = canvasActions.offsetWidth;
+        const height = canvasActions.offsetHeight;
+        const maxX = Math.max(0, wrapperRect.width - width);
+        const maxY = Math.max(0, wrapperRect.height - height);
+        const left = clamp(actionPaletteState.relativeX * maxX, 0, maxX);
+        const top = clamp(actionPaletteState.relativeY * maxY, 0, maxY);
+        canvasActions.style.left = `${left}px`;
+        canvasActions.style.top = `${top}px`;
+        canvasActions.style.right = "auto";
+        canvasActions.style.bottom = "auto";
+      }
+
+      if (canvasActions && canvasWrapper) {
+        const dragListenerOptions = { passive: false };
+
+        const handlePointerDown = (event) => {
+          if (event.button !== 0 && event.pointerType !== "touch") return;
+          const target = event.target;
+          if (target && target.closest("button")) return;
+          if (target && target.closest(".control-panel")) return;
+          const actionsRect = canvasActions.getBoundingClientRect();
+          actionPaletteState.pointerId = event.pointerId;
+          actionPaletteState.offsetX = event.clientX - actionsRect.left;
+          actionPaletteState.offsetY = event.clientY - actionsRect.top;
+          actionPaletteState.width = actionsRect.width;
+          actionPaletteState.height = actionsRect.height;
+          canvasActions.classList.add("is-dragging");
+          if (typeof canvasActions.setPointerCapture === "function") {
+            try {
+              canvasActions.setPointerCapture(event.pointerId);
+            } catch (error) {
+              // Ignore pointer capture errors in unsupported browsers.
+            }
+          }
+          event.preventDefault();
+        };
+
+        const handlePointerMove = (event) => {
+          if (actionPaletteState.pointerId !== event.pointerId) return;
+          event.preventDefault();
+          const wrapperRect = canvasWrapper.getBoundingClientRect();
+          const width = canvasActions.offsetWidth;
+          const height = canvasActions.offsetHeight;
+          const maxX = Math.max(0, wrapperRect.width - width);
+          const maxY = Math.max(0, wrapperRect.height - height);
+          const rawLeft = event.clientX - actionPaletteState.offsetX - wrapperRect.left;
+          const rawTop = event.clientY - actionPaletteState.offsetY - wrapperRect.top;
+          const clampedLeft = clamp(rawLeft, 0, maxX);
+          const clampedTop = clamp(rawTop, 0, maxY);
+          canvasActions.style.left = `${clampedLeft}px`;
+          canvasActions.style.top = `${clampedTop}px`;
+          canvasActions.style.right = "auto";
+          canvasActions.style.bottom = "auto";
+          actionPaletteState.width = width;
+          actionPaletteState.height = height;
+          actionPaletteState.hasCustomPosition = true;
+          actionPaletteState.relativeX = maxX > 0 ? clampedLeft / maxX : 0;
+          actionPaletteState.relativeY = maxY > 0 ? clampedTop / maxY : 0;
+        };
+
+        const handlePointerEnd = (event) => {
+          if (actionPaletteState.pointerId !== event.pointerId) return;
+          if (
+            typeof canvasActions.hasPointerCapture === "function" &&
+            canvasActions.hasPointerCapture(event.pointerId) &&
+            typeof canvasActions.releasePointerCapture === "function"
+          ) {
+            canvasActions.releasePointerCapture(event.pointerId);
+          }
+          canvasActions.classList.remove("is-dragging");
+          actionPaletteState.pointerId = null;
+          event.preventDefault();
+        };
+
+        canvasActions.addEventListener("pointerdown", handlePointerDown, dragListenerOptions);
+        canvasActions.addEventListener("pointermove", handlePointerMove, dragListenerOptions);
+        ["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
+          canvasActions.addEventListener(eventName, handlePointerEnd, dragListenerOptions);
+        });
+
+        window.addEventListener("resize", repositionActionPalette, { passive: true });
       }
 
       function createThumbstick(root, { onChange } = {}) {
@@ -930,6 +1085,9 @@
       const lightingRig = { ambient, keyLight, rimLight, fillLight, glowLight };
 
       const environmentButton = document.querySelector('[data-control="environment"]');
+      const environmentToggleButton = document.querySelector(
+        '[data-control="environment-toggle"]'
+      );
       const environmentOrder = ENVIRONMENT_VARIANTS.map((variant) => variant.id);
       const defaultEnvironmentId = environmentOrder[0] ?? "forest";
       const defaultEnvironment =
@@ -947,15 +1105,33 @@
       let glideTrail = null;
       let flightControllerInitialized = false;
 
-      function updateEnvironmentButton(config) {
-        if (!environmentButton || !config) return;
+      function updateEnvironmentControls(config) {
+        if (!config) return;
         const label = config.label ?? config.id;
-        environmentButton.textContent = `Environment: ${label}`;
-        environmentButton.setAttribute(
-          "aria-label",
-          `Cycle environment (current: ${label})`
-        );
-        environmentButton.setAttribute("title", `Cycle environment • ${label}`);
+        if (environmentButton) {
+          environmentButton.textContent = `Environment: ${label}`;
+          environmentButton.setAttribute(
+            "aria-label",
+            `Cycle environment (current: ${label})`
+          );
+          environmentButton.setAttribute("title", `Cycle environment • ${label}`);
+        }
+        if (environmentToggleButton) {
+          const toggleLabel = environmentToggleButton.querySelector(
+            '[data-environment-label]'
+          );
+          if (toggleLabel) {
+            toggleLabel.textContent = `Environment: ${label}`;
+          }
+          environmentToggleButton.setAttribute(
+            "aria-label",
+            `Cycle environment (current: ${label})`
+          );
+          environmentToggleButton.setAttribute(
+            "title",
+            `Cycle environment • ${label}`
+          );
+        }
       }
 
       function applyLightingPreset(config) {
@@ -1041,7 +1217,7 @@
         environmentState.label = definition.label;
         const resolvedIndex = environmentState.order.indexOf(definition.id);
         environmentState.index = resolvedIndex >= 0 ? resolvedIndex : 0;
-        updateEnvironmentButton(definition);
+        updateEnvironmentControls(definition);
         applyLightingPreset(definition);
         if (flightControllerInitialized) {
           updateControlMetrics();
@@ -1890,14 +2066,20 @@
         refreshAnimationState();
       });
 
+      const cycleEnvironment = () => {
+        if (!environmentState.order.length) return;
+        const currentIndex = environmentState.index >= 0 ? environmentState.index : 0;
+        const nextIndex = (currentIndex + 1) % environmentState.order.length;
+        const nextVariantId = environmentState.order[nextIndex];
+        setEnvironment(nextVariantId);
+      };
+
       if (environmentButton) {
-        environmentButton.addEventListener("click", () => {
-          if (!environmentState.order.length) return;
-          const currentIndex = environmentState.index >= 0 ? environmentState.index : 0;
-          const nextIndex = (currentIndex + 1) % environmentState.order.length;
-          const nextVariantId = environmentState.order[nextIndex];
-          setEnvironment(nextVariantId);
-        });
+        environmentButton.addEventListener("click", cycleEnvironment);
+      }
+
+      if (environmentToggleButton) {
+        environmentToggleButton.addEventListener("click", cycleEnvironment);
       }
 
       if (panelToggleButton && controlPanel) {
