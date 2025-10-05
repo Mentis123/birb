@@ -2,7 +2,8 @@ export const MOVEMENT_ACCELERATION = 4.5;
 export const LINEAR_DRAG = 1.6;
 export const SPRINT_MULTIPLIER = 1.75;
 export const MAX_PITCH_ANGLE = (70 * Math.PI) / 180;
-export const BANK_MAX_ANGLE = (32 * Math.PI) / 180;
+// Allow a full 180° roll so the player can comfortably fly upside down.
+export const BANK_MAX_ANGLE = Math.PI;
 export const BANK_RESPONSIVENESS = 6.5;
 export const LOOK_SENSITIVITY = 0.0025;
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
