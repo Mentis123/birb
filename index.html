@@ -1049,7 +1049,31 @@
         }
       }
 
+      function cycleEnvironment(step = 1) {
+        const { order } = environmentState;
+        if (!order || order.length === 0) {
+          return;
+        }
+
+        const total = order.length;
+        const nextIndex = (environmentState.index + step + total) % total;
+        const nextId = order[nextIndex];
+        setEnvironment(nextId);
+      }
+
       setEnvironment(defaultEnvironment.id);
+
+      if (environmentButton) {
+        environmentButton.addEventListener("click", () => {
+          cycleEnvironment(1);
+        });
+      }
+
+      if (environmentToggleButton) {
+        environmentToggleButton.addEventListener("click", () => {
+          cycleEnvironment(1);
+        });
+      }
 
       const birbGroup = new THREE.Group();
       scene.add(birbGroup);
@@ -1533,6 +1557,26 @@
         controlPanel.setAttribute("aria-hidden", isCollapsed ? "true" : "false");
       }
 
+      function setControlPanelCollapsed(collapsed) {
+        if (!controlPanel) return;
+        controlPanel.classList.toggle("is-collapsed", Boolean(collapsed));
+        updatePanelToggle();
+      }
+
+      function toggleControlPanel() {
+        if (!controlPanel) return;
+        const shouldCollapse = !controlPanel.classList.contains("is-collapsed");
+        setControlPanelCollapsed(shouldCollapse);
+      }
+
+      if (panelToggleButton) {
+        panelToggleButton.addEventListener("click", () => {
+          toggleControlPanel();
+        });
+      }
+
+      updatePanelToggle();
+
       function getFullscreenElement() {
         return (
           document.fullscreenElement ||
@@ -1650,6 +1694,83 @@
           document.body.classList.toggle("is-fullscreen-fallback", shouldApplyFallback);
         }
       }
+
+      function enterFullscreenFallback() {
+        if (fullscreenState.fallbackActive) return;
+        fullscreenState.fallbackActive = true;
+        syncFullscreenUi();
+      }
+
+      function exitFullscreenFallback() {
+        if (!fullscreenState.fallbackActive) {
+          syncFullscreenUi();
+          return;
+        }
+        fullscreenState.fallbackActive = false;
+        syncFullscreenUi();
+      }
+
+      function toggleFullscreen() {
+        if (!canvasWrapper) return;
+
+        if (isFullscreenActive()) {
+          const exitResult = exitFullscreen();
+          if (exitResult && typeof exitResult.then === "function") {
+            exitResult
+              .catch(() => {})
+              .finally(() => {
+                exitFullscreenFallback();
+              });
+          } else {
+            exitFullscreenFallback();
+          }
+          return;
+        }
+
+        requestFullscreen(canvasWrapper)
+          .then(() => {
+            fullscreenState.fallbackActive = false;
+            syncFullscreenUi();
+          })
+          .catch(() => {
+            enterFullscreenFallback();
+          });
+      }
+
+      const fullscreenChangeEvents = [
+        "fullscreenchange",
+        "webkitfullscreenchange",
+        "mozfullscreenchange",
+        "MSFullscreenChange",
+      ];
+      fullscreenChangeEvents.forEach((eventName) => {
+        document.addEventListener(eventName, () => {
+          fullscreenState.fallbackActive = false;
+          syncFullscreenUi();
+        });
+      });
+
+      const fullscreenErrorEvents = [
+        "fullscreenerror",
+        "webkitfullscreenerror",
+        "mozfullscreenerror",
+        "MSFullscreenError",
+      ];
+      fullscreenErrorEvents.forEach((eventName) => {
+        document.addEventListener(eventName, () => {
+          if (!isFullscreenActive()) {
+            enterFullscreenFallback();
+          }
+        });
+      });
+
+      if (fullscreenToggleButton) {
+        fullscreenToggleButton.addEventListener("click", () => {
+          toggleFullscreen();
+        });
+      }
+
+      syncFullscreenUi();
 
       function updateGlideSpeedDisplay(value) {
         const throttlePercent = Math.round(value * 100);
