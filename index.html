@@ -756,6 +756,7 @@
         createCameraState,
         CAMERA_MODES,
       } from "./src/camera/camera-state.js";
+      import { createFlightControls } from "./src/controls/flight-controls.js";
       import {
         createWorldShell,
         ENVIRONMENT_VARIANTS,
@@ -876,190 +877,6 @@
         });
 
         window.addEventListener("resize", repositionActionPalette, { passive: true });
-      }
-
-      function createThumbstick(root, { onChange } = {}) {
-        if (!root) return null;
-
-        const handle = root.querySelector("[data-thumbstick-handle]");
-        if (!handle) return null;
-
-        const DEADZONE = 0.12;
-        const state = {
-          pointerId: null,
-          pointerType: null,
-          value: { x: 0, y: 0 },
-          handleValue: { x: 0, y: 0 },
-          captured: false,
-          globalListeners: false,
-        };
-
-        const listenerOptions = { passive: false };
-
-        const updateVisuals = () => {
-          const maxDistance = (root.clientWidth - handle.clientWidth) / 2;
-          const offsetX = state.handleValue.x * maxDistance;
-          const offsetY = state.handleValue.y * maxDistance;
-          handle.style.setProperty("--thumbstick-offset-x", `${offsetX}px`);
-          handle.style.setProperty("--thumbstick-offset-y", `${offsetY}px`);
-          const active = state.pointerId !== null || Math.hypot(offsetX, offsetY) > 0.5;
-          root.classList.toggle("is-active", active);
-        };
-
-        const emitChange = () => {
-          if (typeof onChange === "function") {
-            onChange(
-              { x: state.value.x, y: state.value.y },
-              { isActive: state.pointerId !== null, pointerType: state.pointerType }
-            );
-          }
-        };
-
-        const setValues = ({ handleX = 0, handleY = 0, outputX = 0, outputY = 0 } = {}) => {
-          state.handleValue.x = handleX;
-          state.handleValue.y = handleY;
-          state.value.x = outputX;
-          state.value.y = outputY;
-          updateVisuals();
-          emitChange();
-        };
-
-        const translatePointer = (event) => {
-          const rect = root.getBoundingClientRect();
-          const maxDistance = rect.width / 2;
-          if (maxDistance <= 0) {
-            setValues();
-            return;
-          }
-          const dx = event.clientX - (rect.left + rect.width / 2);
-          const dy = event.clientY - (rect.top + rect.height / 2);
-          let normalizedX = dx / maxDistance;
-          let normalizedY = dy / maxDistance;
-          const length = Math.hypot(normalizedX, normalizedY);
-          if (length > 1) {
-            normalizedX /= length;
-            normalizedY /= length;
-          }
-
-          const handleMagnitude = Math.hypot(normalizedX, normalizedY);
-          let outputX = 0;
-          let outputY = 0;
-
-          if (handleMagnitude > DEADZONE) {
-            const scaledMagnitude = (handleMagnitude - DEADZONE) / (1 - DEADZONE);
-            const dirX = handleMagnitude === 0 ? 0 : normalizedX / handleMagnitude;
-            const dirY = handleMagnitude === 0 ? 0 : normalizedY / handleMagnitude;
-            outputX = dirX * scaledMagnitude;
-            outputY = dirY * scaledMagnitude;
-          }
-
-          setValues({ handleX: normalizedX, handleY: normalizedY, outputX, outputY });
-        };
-
-        const resetValues = () => {
-          setValues({ handleX: 0, handleY: 0, outputX: 0, outputY: 0 });
-        };
-
-        const attachGlobalListeners = () => {
-          if (state.globalListeners || typeof window === "undefined") {
-            return;
-          }
-          window.addEventListener("pointermove", handlePointerMove, listenerOptions);
-          window.addEventListener("pointerup", handlePointerEnd, listenerOptions);
-          window.addEventListener("pointercancel", handlePointerEnd, listenerOptions);
-          state.globalListeners = true;
-        };
-
-        const detachGlobalListeners = () => {
-          if (!state.globalListeners || typeof window === "undefined") {
-            return;
-          }
-          window.removeEventListener("pointermove", handlePointerMove, listenerOptions);
-          window.removeEventListener("pointerup", handlePointerEnd, listenerOptions);
-          window.removeEventListener("pointercancel", handlePointerEnd, listenerOptions);
-          state.globalListeners = false;
-        };
-
-        const handlePointerDown = (event) => {
-          if (state.pointerId !== null && state.pointerId !== event.pointerId) {
-            return;
-          }
-          event.preventDefault();
-          const supportsPointerCapture =
-            typeof root.setPointerCapture === "function" &&
-            typeof root.releasePointerCapture === "function";
-          const shouldCapture = supportsPointerCapture && event.pointerType !== "touch";
-          if (shouldCapture) {
-            try {
-              root.setPointerCapture(event.pointerId);
-              state.captured = true;
-            } catch (error) {
-              state.captured = false;
-            }
-          } else {
-            state.captured = false;
-          }
-          state.pointerId = event.pointerId;
-          state.pointerType = event.pointerType || null;
-          attachGlobalListeners();
-          translatePointer(event);
-        };
-
-        const resetPointerState = () => {
-          if (state.pointerId === null) {
-            detachGlobalListeners();
-            state.captured = false;
-            return;
-          }
-          if (state.captured && typeof root.releasePointerCapture === "function") {
-            const hasCapture =
-              typeof root.hasPointerCapture === "function"
-                ? root.hasPointerCapture(state.pointerId)
-                : true;
-            if (hasCapture) {
-              try {
-                root.releasePointerCapture(state.pointerId);
-              } catch (error) {
-                // Ignore release failures to avoid breaking touch input fallbacks.
-              }
-            }
-          }
-          state.pointerId = null;
-          state.pointerType = null;
-          state.captured = false;
-          detachGlobalListeners();
-        };
-
-        const handlePointerMove = (event) => {
-          if (state.pointerId !== event.pointerId) return;
-          event.preventDefault();
-          translatePointer(event);
-        };
-
-        const handlePointerEnd = (event) => {
-          if (state.pointerId !== event.pointerId) return;
-          event.preventDefault();
-          resetPointerState();
-          resetValues();
-        };
-
-        root.addEventListener("pointerdown", handlePointerDown, listenerOptions);
-        root.addEventListener("lostpointercapture", handlePointerEnd, listenerOptions);
-
-        resetValues();
-
-        return {
-          reset() {
-            resetPointerState();
-            resetValues();
-          },
-          destroy() {
-            root.removeEventListener("pointerdown", handlePointerDown, listenerOptions);
-            root.removeEventListener("lostpointercapture", handlePointerEnd, listenerOptions);
-            resetPointerState();
-            resetValues();
-          },
-        };
       }
 
       renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1928,294 +1745,29 @@
       setCameraMode(CAMERA_MODE_SEQUENCE[cameraModeIndex]);
 
       const blendedQuaternion = new THREE.Quaternion();
-      const thrustKeys = new Set();
 
-      const thrustAxisKeys = {
-        forward: {
-          positive: ["KeyW", "ArrowUp"],
-          negative: ["KeyS", "ArrowDown"],
-        },
-        strafe: {
-          positive: ["KeyD", "ArrowRight"],
-          negative: ["KeyA", "ArrowLeft"],
-        },
-        lift: {
-          positive: ["Space", "KeyE"],
-          negative: ["KeyQ"],
-        },
-      };
+      const flightControls = createFlightControls({
+        canvas,
+        flightController,
+        leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
+        rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
+        liftButtonElements: Array.from(document.querySelectorAll('[data-lift-button]')),
+        onSprintChange: () => updateControlMetrics(),
+        onThrustChange: () => updateControlMetrics(),
+      });
 
-      const thrustAxes = Object.values(thrustAxisKeys);
-
-      const thrustSources = {
-        keys: { forward: 0, strafe: 0, lift: 0 },
-        touch: { forward: 0, strafe: 0, lift: 0 },
-      };
-
-      const sprintSources = {
-        keys: false,
-        touch: false,
-      };
-
-      function updateSprintState() {
-        const isActive = sprintSources.keys || sprintSources.touch;
-        flightController.setSprintActive(isActive);
-        updateControlMetrics();
-      }
-
-      const analogLookInput = { x: 0, y: 0 };
-      const ANALOG_LOOK_SPEED = 800;
-      const TOUCH_SPRINT_THRESHOLD = 0.75;
-      const touchLiftPresses = new Map();
-      const liftButtons = Array.from(document.querySelectorAll("[data-lift-button]"));
-      const pointerListenerOptions = { passive: false };
-      const SHIFT_CODES = new Set(["ShiftLeft", "ShiftRight"]);
-
-      function computeAxisValue(axisKeys) {
-        const hasPositive = axisKeys.positive.some((code) => thrustKeys.has(code));
-        const hasNegative = axisKeys.negative.some((code) => thrustKeys.has(code));
-        if (hasPositive && hasNegative) return 0;
-        if (hasPositive) return 1;
-        if (hasNegative) return -1;
-        return 0;
-      }
-
-      function combineThrustAxis(axis) {
-        return clamp(
-          Object.values(thrustSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0),
-          -1,
-          1
-        );
-      }
-
-      function applyThrustInput() {
-        flightController.setThrustInput({
-          forward: combineThrustAxis("forward"),
-          strafe: combineThrustAxis("strafe"),
-          lift: combineThrustAxis("lift"),
+      if (resetButton) {
+        resetButton.addEventListener("click", () => {
+          flightController.reset();
+          cameraState.reset();
+          const currentMode = cameraState.getMode();
+          const currentIndex = CAMERA_MODE_SEQUENCE.indexOf(currentMode);
+          cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
+          updateViewToggleUi(currentMode);
+          flightControls.reset({ releasePointerLock: true });
+          updateControlMetrics();
         });
       }
-
-      function updateThrustFromKeys() {
-        thrustSources.keys.forward = computeAxisValue(thrustAxisKeys.forward);
-        thrustSources.keys.strafe = computeAxisValue(thrustAxisKeys.strafe);
-        thrustSources.keys.lift = computeAxisValue(thrustAxisKeys.lift);
-        applyThrustInput();
-      }
-
-      const leftThumbstick = createThumbstick(document.querySelector('[data-thumbstick="left"]'), {
-        onChange: (value, context = {}) => {
-          thrustSources.touch.forward = -value.y;
-          thrustSources.touch.strafe = value.x;
-          const magnitude = Math.hypot(value.x, value.y);
-          const isTouch = context.pointerType === "touch";
-          const isActive = Boolean(context.isActive);
-          sprintSources.touch = Boolean(isTouch && isActive && magnitude >= TOUCH_SPRINT_THRESHOLD);
-          updateSprintState();
-          applyThrustInput();
-        },
-      });
-
-      const rightThumbstick = createThumbstick(document.querySelector('[data-thumbstick="right"]'), {
-        onChange: (value) => {
-          analogLookInput.x = value.x;
-          analogLookInput.y = value.y;
-        },
-      });
-
-      const updateLiftFromButtons = () => {
-        let lift = 0;
-        touchLiftPresses.forEach((value) => {
-          lift += value;
-        });
-        thrustSources.touch.lift = clamp(lift, -1, 1);
-        applyThrustInput();
-      };
-
-      const handleLiftButtonDown = (event) => {
-        event.preventDefault();
-        const { currentTarget } = event;
-        const direction = Number.parseFloat(currentTarget?.dataset?.lift ?? "0");
-        if (!Number.isFinite(direction) || direction === 0) {
-          return;
-        }
-        if (typeof currentTarget.setPointerCapture === "function") {
-          currentTarget.setPointerCapture(event.pointerId);
-        }
-        touchLiftPresses.set(event.pointerId, direction);
-        currentTarget.classList.add("is-active");
-        updateLiftFromButtons();
-      };
-
-      const handleLiftButtonEnd = (event) => {
-        const { currentTarget } = event;
-        if (typeof currentTarget?.hasPointerCapture === "function" && currentTarget.hasPointerCapture(event.pointerId)) {
-          currentTarget.releasePointerCapture(event.pointerId);
-        }
-        event.preventDefault();
-        touchLiftPresses.delete(event.pointerId);
-        currentTarget?.classList.remove("is-active");
-        updateLiftFromButtons();
-      };
-
-      liftButtons.forEach((button) => {
-        button.addEventListener("pointerdown", handleLiftButtonDown, pointerListenerOptions);
-        button.addEventListener("pointerup", handleLiftButtonEnd, pointerListenerOptions);
-        button.addEventListener("pointercancel", handleLiftButtonEnd, pointerListenerOptions);
-        button.addEventListener("lostpointercapture", handleLiftButtonEnd, pointerListenerOptions);
-        button.addEventListener("contextmenu", (event) => {
-          event.preventDefault();
-        });
-      });
-
-      toggleButton.addEventListener("click", () => {
-        if (controlState.systemPaused) return;
-        controlState.manuallyPaused = !controlState.manuallyPaused;
-        refreshAnimationState();
-      });
-
-      const cycleEnvironment = () => {
-        if (!environmentState.order.length) return;
-        const currentIndex = environmentState.index >= 0 ? environmentState.index : 0;
-        const nextIndex = (currentIndex + 1) % environmentState.order.length;
-        const nextVariantId = environmentState.order[nextIndex];
-        setEnvironment(nextVariantId);
-      };
-
-      if (environmentButton) {
-        environmentButton.addEventListener("click", cycleEnvironment);
-      }
-
-      if (environmentToggleButton) {
-        environmentToggleButton.addEventListener("click", cycleEnvironment);
-      }
-
-      if (panelToggleButton && controlPanel) {
-        panelToggleButton.addEventListener("click", () => {
-          controlPanel.classList.toggle("is-collapsed");
-          updatePanelToggle();
-        });
-        updatePanelToggle();
-      }
-
-      if (fullscreenToggleButton && canvasWrapper) {
-        fullscreenToggleButton.addEventListener("click", () => {
-          const isFullscreen = isFullscreenActive();
-          if (isFullscreen && fullscreenState.fallbackActive) {
-            fullscreenState.fallbackActive = false;
-            syncFullscreenUi();
-            updateRendererSize(true);
-            return;
-          }
-          const action = isFullscreen ? exitFullscreen() : requestFullscreen(canvasWrapper);
-          if (action && typeof action.then === "function") {
-            action
-              .then(() => {
-                fullscreenState.fallbackActive = false;
-                syncFullscreenUi();
-                updateRendererSize(true);
-              })
-              .catch(() => {
-                if (!isFullscreen) {
-                  fullscreenState.fallbackActive = true;
-                } else {
-                  fullscreenState.fallbackActive = false;
-                }
-                syncFullscreenUi();
-                updateRendererSize(true);
-              });
-          } else {
-            // Ensure legacy browsers update button state even without promise support.
-            fullscreenState.fallbackActive = !isFullscreen;
-            setTimeout(() => {
-              syncFullscreenUi();
-              updateRendererSize(true);
-            }, 0);
-          }
-        });
-
-        const fullscreenEvents = [
-          "fullscreenchange",
-          "webkitfullscreenchange",
-          "mozfullscreenchange",
-          "MSFullscreenChange",
-        ];
-
-        fullscreenEvents.forEach((eventName) => {
-          document.addEventListener(eventName, () => {
-            fullscreenState.fallbackActive = false;
-            syncFullscreenUi();
-            updateRendererSize(true);
-          });
-        });
-
-        syncFullscreenUi();
-      }
-
-      resetButton.addEventListener("click", () => {
-        flightController.reset();
-        cameraState.reset();
-        const currentMode = cameraState.getMode();
-        const currentIndex = CAMERA_MODE_SEQUENCE.indexOf(currentMode);
-        cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
-        updateViewToggleUi(currentMode);
-        thrustKeys.clear();
-        updateThrustFromKeys();
-        if (leftThumbstick) {
-          leftThumbstick.reset();
-        }
-        if (rightThumbstick) {
-          rightThumbstick.reset();
-        }
-        analogLookInput.x = 0;
-        analogLookInput.y = 0;
-        touchLiftPresses.clear();
-        liftButtons.forEach((button) => button.classList.remove("is-active"));
-        updateLiftFromButtons();
-        sprintSources.keys = false;
-        sprintSources.touch = false;
-        updateSprintState();
-        updateControlMetrics();
-      });
-
-      const initialThrottle = Number.parseFloat(glideSpeedInput.value);
-      flightController.setThrottle(Number.isFinite(initialThrottle) ? initialThrottle : 0.36);
-      updateGlideSpeedDisplay(flightController.throttle);
-
-      glideSpeedInput.addEventListener("input", (event) => {
-        const nextThrottle = Number.parseFloat(event.target.value);
-        flightController.setThrottle(Number.isFinite(nextThrottle) ? nextThrottle : flightController.throttle);
-        updateGlideSpeedDisplay(flightController.throttle);
-        updateControlMetrics();
-      });
-
-      applyThrustInput();
-      refreshAnimationState();
-
-      document.addEventListener("keydown", (event) => {
-        const { code } = event;
-        if (event.target && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) {
-          return;
-        }
-        if (code === "KeyV" && !event.repeat) {
-          cycleCameraMode();
-          event.preventDefault();
-          return;
-        }
-        const isRelevant = thrustAxes.some((axis) =>
-          axis.positive.includes(code) || axis.negative.includes(code)
-        );
-        if (!isRelevant && !isShift) return;
-        if (isRelevant) {
-          thrustKeys.add(code);
-          updateThrustFromKeys();
-        }
-        if (isShift) {
-          sprintSources.keys = true;
-          updateSprintState();
-        }
-        event.preventDefault();
-      });
 
       if (viewToggleButton) {
         viewToggleButton.addEventListener("click", () => {
@@ -2223,62 +1775,22 @@
         });
       }
 
-      document.addEventListener("keyup", (event) => {
+      document.addEventListener("keydown", (event) => {
         const { code } = event;
-        if (event.target && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName))) {
+        if (
+          event.target &&
+          (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(event.target.tagName))
+        ) {
           return;
         }
-        const isShift = SHIFT_CODES.has(code);
-        const wasRelevant = thrustAxes.some((axis) =>
-          axis.positive.includes(code) || axis.negative.includes(code)
-        );
-        if (!wasRelevant && !isShift) return;
-        if (wasRelevant) {
-          thrustKeys.delete(code);
-          updateThrustFromKeys();
-        }
-        if (isShift) {
-          sprintSources.keys = false;
-          updateSprintState();
-        }
-        event.preventDefault();
-      });
-
-      canvas.addEventListener("click", () => {
-        if (!window.matchMedia("(pointer: fine)").matches) {
-          return;
-        }
-        if (canvas.requestPointerLock && document.pointerLockElement !== canvas) {
-          canvas.requestPointerLock();
-        }
-      });
-
-      document.addEventListener("mousemove", (event) => {
-        if (document.pointerLockElement === canvas) {
-          flightController.addLookDelta(event.movementX, event.movementY);
+        if (code === "KeyV" && !event.repeat) {
+          cycleCameraMode();
+          event.preventDefault();
         }
       });
 
       window.addEventListener("blur", () => {
-        thrustKeys.clear();
-        updateThrustFromKeys();
-        touchLiftPresses.clear();
-        liftButtons.forEach((button) => button.classList.remove("is-active"));
-        updateLiftFromButtons();
-        sprintSources.keys = false;
-        sprintSources.touch = false;
-        updateSprintState();
-        if (leftThumbstick) {
-          leftThumbstick.reset();
-        }
-        if (rightThumbstick) {
-          rightThumbstick.reset();
-        }
-        analogLookInput.x = 0;
-        analogLookInput.y = 0;
-        if (document.pointerLockElement === canvas && document.exitPointerLock) {
-          document.exitPointerLock();
-        }
+        flightControls.reset({ releasePointerLock: true });
       });
 
       const renderFrame = (time = 0) => {
@@ -2297,14 +1809,7 @@
         }
 
         const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
-        const activeCameraMode = cameraState?.getMode?.();
-        const analogLookY = -analogLookInput.y;
-        if (analogLookInput.x !== 0 || analogLookY !== 0) {
-          flightController.addLookDelta(
-            analogLookInput.x * ANALOG_LOOK_SPEED * lookDeltaTime,
-            analogLookY * ANALOG_LOOK_SPEED * lookDeltaTime
-          );
-        }
+        flightControls.applyAnalogLook(lookDeltaTime);
 
         const pose = flightController.update(delta);
         const ambientOffsets = flightController.getAmbientOffsets();
@@ -2334,25 +1839,14 @@
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
           previousTime = null;
-          if (leftThumbstick) {
-            leftThumbstick.reset();
-          }
-          if (rightThumbstick) {
-            rightThumbstick.reset();
-          }
-          analogLookInput.x = 0;
-          analogLookInput.y = 0;
-          touchLiftPresses.clear();
-          liftButtons.forEach((button) => button.classList.remove("is-active"));
-          updateLiftFromButtons();
-          sprintSources.keys = false;
-          sprintSources.touch = false;
-          updateSprintState();
+          flightControls.reset({ releasePointerLock: true });
           fpsState.lastSampleTime = null;
           fpsState.frames = 0;
           if (fpsMetric) {
             fpsMetric.textContent = "--";
           }
+        } else {
+          flightControls.reset();
         }
         renderer.setAnimationLoop(document.hidden ? null : renderFrame);
       });
@@ -2370,18 +1864,7 @@
           environmentShell.dispose();
           environmentShell = null;
         }
-        if (leftThumbstick) {
-          leftThumbstick.destroy();
-        }
-        if (rightThumbstick) {
-          rightThumbstick.destroy();
-        }
-        liftButtons.forEach((button) => {
-          button.removeEventListener("pointerdown", handleLiftButtonDown, pointerListenerOptions);
-          button.removeEventListener("pointerup", handleLiftButtonEnd, pointerListenerOptions);
-          button.removeEventListener("pointercancel", handleLiftButtonEnd, pointerListenerOptions);
-          button.removeEventListener("lostpointercapture", handleLiftButtonEnd, pointerListenerOptions);
-        });
+        flightControls.dispose();
       });
 
       updateRendererSize(true);
