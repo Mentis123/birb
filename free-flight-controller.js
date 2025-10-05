@@ -1,9 +1,12 @@
 export const MOVEMENT_ACCELERATION = 4.5;
 export const LINEAR_DRAG = 1.6;
 export const SPRINT_MULTIPLIER = 1.75;
-// Allow a full 180° roll so the player can comfortably fly upside down.
-export const BANK_MAX_ANGLE = Math.PI;
+// Controls how quickly the bird eases toward new roll velocities when strafing.
 export const BANK_RESPONSIVENESS = 6.5;
+// Maximum roll velocity (radians per second) that sustained input can achieve.
+export const BANK_ROLL_SPEED = Math.PI * 1.85;
+// How aggressively the bird levels out when there is no roll input.
+export const BANK_RETURN_STIFFNESS = Math.PI * 0.5;
 export const LOOK_SENSITIVITY = 0.0025;
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
 export const AMBIENT_BOB_SPEED = 1.15;
@@ -61,6 +64,7 @@ export class FreeFlightController {
     };
 
     this.bank = 0;
+    this._bankVelocity = 0;
     this.elapsed = 0;
 
     this.reset();
@@ -154,9 +158,18 @@ export class FreeFlightController {
       bankOrientation = 1;
     }
 
-    const bankTarget = this.input.strafe * bankOrientation * BANK_MAX_ANGLE;
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    this.bank += (bankTarget - this.bank) * bankStep;
+    const rollInput = this.input.strafe * bankOrientation;
+
+    if (Math.abs(rollInput) > 1e-4) {
+      const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
+      this._bankVelocity += (targetAngularVelocity - this._bankVelocity) * bankStep;
+    } else {
+      const targetAngularVelocity = -this._bankVelocity - this.bank * BANK_RETURN_STIFFNESS;
+      this._bankVelocity += targetAngularVelocity * bankStep;
+    }
+
+    this.bank += this._bankVelocity * deltaTime;
 
     this._bankQuaternion.setFromAxisAngle(forward, this.bank);
     this.quaternion.multiply(this._bankQuaternion);
@@ -188,6 +201,7 @@ export class FreeFlightController {
     this.lookQuaternion.copy(this._initialQuaternion);
     this.quaternion.copy(this._initialQuaternion);
     this.bank = 0;
+    this._bankVelocity = 0;
     this.elapsed = 0;
     this.setThrustInput({ forward: 0, strafe: 0, lift: 0 });
     this.setSprintActive(false);
