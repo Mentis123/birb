@@ -5,8 +5,6 @@ export const SPRINT_MULTIPLIER = 1.75;
 export const BANK_RESPONSIVENESS = 6.5;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
 export const BANK_ROLL_SPEED = Math.PI * 1.85;
-// How aggressively the bird levels out when there is no roll input.
-export const BANK_RETURN_STIFFNESS = Math.PI * 0.5;
 export const LOOK_SENSITIVITY = 0.0025;
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
 export const AMBIENT_BOB_SPEED = 1.15;
@@ -165,7 +163,7 @@ export class FreeFlightController {
       const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
       this._bankVelocity += (targetAngularVelocity - this._bankVelocity) * bankStep;
     } else {
-      const targetAngularVelocity = -this._bankVelocity - this.bank * BANK_RETURN_STIFFNESS;
+      const targetAngularVelocity = -this._bankVelocity;
       this._bankVelocity += targetAngularVelocity * bankStep;
     }
 
