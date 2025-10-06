@@ -39,6 +39,8 @@ export function createFlightControls({
   liftButtonElements = [],
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
   touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
+  getCameraMode,
+  followMode,
   onSprintChange,
   onThrustChange,
 } = {}) {
@@ -81,9 +83,15 @@ export function createFlightControls({
   });
 
   const rightThumbstick = createThumbstick(rightThumbstickElement, {
-    onChange: (value) => {
+    onChange: (value, context = {}) => {
+      const pointerType = context?.pointerType ?? null;
+      const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+      const isFollowModeActive =
+        pointerType === 'touch' &&
+        followMode != null &&
+        currentMode === followMode;
       analogLook.x = value.x;
-      analogLook.y = value.y;
+      analogLook.y = isFollowModeActive ? -value.y : value.y;
     },
   });
 

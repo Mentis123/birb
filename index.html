@@ -1873,6 +1873,8 @@
         leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
         rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
         liftButtonElements: Array.from(document.querySelectorAll('[data-lift-button]')),
+        getCameraMode: () => cameraState?.getMode?.(),
+        followMode: CAMERA_MODES.FOLLOW,
         onSprintChange: () => updateControlMetrics(),
         onThrustChange: () => updateControlMetrics(),
       });
