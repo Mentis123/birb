@@ -1,6 +1,7 @@
 import { createThumbstick } from './thumbstick.js';
 
-const DEFAULT_ANALOG_LOOK_SPEED = 800;
+const DEFAULT_ANALOG_LOOK_SPEED = 480;
+const DEFAULT_ROLL_SENSITIVITY = 0.65;
 const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 
 const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
@@ -38,6 +39,7 @@ export function createFlightControls({
   rightThumbstickElement,
   liftButtonElements = [],
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
+  rollSensitivity = DEFAULT_ROLL_SENSITIVITY,
   touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
   getCameraMode,
   followMode,
@@ -53,9 +55,12 @@ export function createFlightControls({
 
   const analogLook = { x: 0, y: 0 };
   const thrustKeys = new Set();
+  const effectiveRollSensitivity = Number.isFinite(rollSensitivity)
+    ? Math.max(0, Math.min(rollSensitivity, 1))
+    : DEFAULT_ROLL_SENSITIVITY;
   const thrustSources = {
-    keys: { forward: 0, strafe: 0, lift: 0 },
-    touch: { forward: 0, strafe: 0, lift: 0 },
+    keys: { forward: 0, strafe: 0, lift: 0, roll: 0 },
+    touch: { forward: 0, strafe: 0, lift: 0, roll: 0 },
   };
   const sprintSources = { keys: false, touch: false };
   const touchLiftPresses = new Map();
@@ -70,7 +75,8 @@ export function createFlightControls({
   const leftThumbstick = createThumbstick(leftThumbstickElement, {
     onChange: (value, context = {}) => {
       thrustSources.touch.forward = -value.y;
-      thrustSources.touch.strafe = value.x;
+      thrustSources.touch.strafe = 0;
+      thrustSources.touch.roll = value.x * effectiveRollSensitivity;
       const magnitude = Math.hypot(value.x, value.y);
       const shouldSprint =
         context.pointerType === 'touch' &&
@@ -117,6 +123,7 @@ export function createFlightControls({
       forward: combineThrustAxis('forward'),
       strafe: combineThrustAxis('strafe'),
       lift: combineThrustAxis('lift'),
+      roll: combineThrustAxis('roll'),
     });
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
@@ -142,6 +149,7 @@ export function createFlightControls({
     thrustSources.keys.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
     thrustSources.keys.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
     thrustSources.keys.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
+    thrustSources.keys.roll = thrustSources.keys.strafe;
     applyThrustInput();
   };
 
@@ -271,9 +279,11 @@ export function createFlightControls({
     thrustSources.keys.forward = 0;
     thrustSources.keys.strafe = 0;
     thrustSources.keys.lift = 0;
+    thrustSources.keys.roll = 0;
     thrustSources.touch.forward = 0;
     thrustSources.touch.strafe = 0;
     thrustSources.touch.lift = 0;
+    thrustSources.touch.roll = 0;
     applyThrustInput();
 
     sprintSources.keys = false;
