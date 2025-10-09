@@ -59,6 +59,7 @@ export class FreeFlightController {
       forward: 0,
       strafe: 0,
       lift: 0,
+      roll: 0,
     };
 
     this.bank = 0;
@@ -68,10 +69,16 @@ export class FreeFlightController {
     this.reset();
   }
 
-  setThrustInput({ forward = this.input.forward, strafe = this.input.strafe, lift = this.input.lift } = {}) {
+  setThrustInput({
+    forward = this.input.forward,
+    strafe = this.input.strafe,
+    lift = this.input.lift,
+    roll = this.input.roll,
+  } = {}) {
     this.input.forward = clamp(forward, -1, 1, this.input.forward);
     this.input.strafe = clamp(strafe, -1, 1, this.input.strafe);
     this.input.lift = clamp(lift, -1, 1, this.input.lift);
+    this.input.roll = clamp(roll, -1, 1, this.input.roll);
   }
 
   setThrottle(value) {
@@ -157,7 +164,7 @@ export class FreeFlightController {
     }
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    const rollInput = this.input.strafe * bankOrientation;
+    const rollInput = this.input.roll * bankOrientation;
 
     if (Math.abs(rollInput) > 1e-4) {
       const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
@@ -201,7 +208,7 @@ export class FreeFlightController {
     this.bank = 0;
     this._bankVelocity = 0;
     this.elapsed = 0;
-    this.setThrustInput({ forward: 0, strafe: 0, lift: 0 });
+    this.setThrustInput({ forward: 0, strafe: 0, lift: 0, roll: 0 });
     this.setSprintActive(false);
   }
 }
