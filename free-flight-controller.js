@@ -14,9 +14,8 @@ export const AMBIENT_YAW_AMPLITUDE = 0.05;
 export const AMBIENT_YAW_SPEED = 0.7;
 
 export const INPUT_SMOOTHING = 12;
-export const GLIDE_SPEED = 3.2;
-export const GLIDE_ACCELERATION = 6.5;
 export const STRAFE_DAMPING = 0.65;
+export const IDLE_LINEAR_DRAG = 4.2;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -67,20 +66,15 @@ export class FreeFlightController {
       ? Math.max(0, providedSmoothing)
       : INPUT_SMOOTHING;
 
-    const providedGlideSpeed = options.glideSpeed;
-    this.glideSpeed = Number.isFinite(providedGlideSpeed) && providedGlideSpeed > 0
-      ? providedGlideSpeed
-      : GLIDE_SPEED;
-
-    const providedGlideAcceleration = options.glideAcceleration;
-    this.glideAcceleration = Number.isFinite(providedGlideAcceleration) && providedGlideAcceleration > 0
-      ? providedGlideAcceleration
-      : GLIDE_ACCELERATION;
-
     const providedStrafeDamping = options.strafeDamping;
     this.strafeDamping = Number.isFinite(providedStrafeDamping)
       ? clamp(providedStrafeDamping, 0, 1, STRAFE_DAMPING)
       : STRAFE_DAMPING;
+
+    const providedIdleDrag = options.idleLinearDrag;
+    this.idleLinearDrag = Number.isFinite(providedIdleDrag) && providedIdleDrag >= 0
+      ? providedIdleDrag
+      : IDLE_LINEAR_DRAG;
 
     this.input = createAxisRecord();
     this._smoothedInput = createAxisRecord();
@@ -183,6 +177,11 @@ export class FreeFlightController {
       acceleration.normalize();
     }
 
+    const hasTranslationInput =
+      Math.abs(smoothed.forward) > 1e-3 ||
+      Math.abs(smoothed.strafe) > 1e-3 ||
+      Math.abs(smoothed.lift) > 1e-3;
+
     acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.getEffectiveThrottle());
 
     this.velocity.addScaledVector(acceleration, deltaTime);
@@ -190,30 +189,16 @@ export class FreeFlightController {
     const dragMultiplier = Math.exp(-LINEAR_DRAG * deltaTime);
     this.velocity.multiplyScalar(dragMultiplier);
 
-    const forwardSpeed = this.velocity.dot(forward);
-    const forwardIntent = smoothed.forward;
-    const backwardIntent = smoothed.forward < -0.1;
-
-    // Encourage a gentle forward glide whenever the player is not actively braking.
-    if (!backwardIntent) {
-      const effectiveThrottle = this.getEffectiveThrottle();
-      const baseGlideTarget = this.glideSpeed * effectiveThrottle;
-      const forwardBoost = Math.max(forwardIntent, 0);
-      const targetSpeed = baseGlideTarget + forwardBoost * this.glideSpeed;
-      if (forwardSpeed < targetSpeed) {
-        const glideDelta = Math.min(targetSpeed - forwardSpeed, this.glideAcceleration * deltaTime);
-        if (glideDelta > 0) {
-          this.velocity.addScaledVector(forward, glideDelta);
-        }
-      }
+    if (!hasTranslationInput) {
+      const idleDragMultiplier = Math.exp(-this.idleLinearDrag * deltaTime);
+      this.velocity.multiplyScalar(idleDragMultiplier);
     }
 
-    // When the player lets go of the strafe controls, bleed off sideways drift so the bird
-    // naturally levels out into its glide.
     if (Math.abs(smoothed.strafe) < 0.05) {
       const sidewaysSpeed = this.velocity.dot(right);
       if (Math.abs(sidewaysSpeed) > 1e-3) {
-        const maxCorrection = this.glideAcceleration * 0.5 * deltaTime;
+        const correctionRate = MOVEMENT_ACCELERATION * 0.45;
+        const maxCorrection = correctionRate * deltaTime;
         const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
         this.velocity.addScaledVector(right, -correction);
       }

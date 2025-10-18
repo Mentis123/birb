@@ -602,21 +602,21 @@
                   data-control="toggle"
                   aria-pressed="true"
                 >
-                  Pause Glide
+                  Pause Flight
                 </button>
                 <div class="control-slider">
                   <label for="glide-speed">Throttle</label>
                   <input
                     id="glide-speed"
                     type="range"
-                    min="0.2"
-                    max="0.8"
+                    min="0"
+                    max="1"
                     step="0.01"
-                    value="0.36"
+                    value="0.6"
                     aria-describedby="glide-speed-display"
                   />
                   <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-                    36%
+                    60%
                   </output>
                 </div>
                 <button type="button" class="control-button" data-control="environment">
@@ -632,14 +632,14 @@
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">Throttle</span>
-                    <span class="control-metrics__value" data-metric="throttle">36%</span>
+                    <span class="control-metrics__value" data-metric="throttle">60%</span>
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">FPS</span>
                     <span class="control-metrics__value" data-metric="fps">--</span>
                   </div>
                   <p class="control-metrics__note" data-metric="status">
-                    Gently gliding in progress…
+                    Ready for free flight. Use the left stick to move and the right stick to look.
                   </p>
                 </div>
               </div>
@@ -1442,6 +1442,8 @@
         ? fullscreenToggleButton.querySelector('[data-icon="exit"]')
         : null;
 
+      const initialThrottle = clampThrottle(Number.parseFloat(glideSpeedInput?.value ?? ""));
+
       const controlState = {
         manuallyPaused: false,
         systemPaused: motionQuery.matches,
@@ -1514,9 +1516,11 @@
           if (controlState.systemPaused) {
             statusMetric.textContent = "Motion paused via system preference";
           } else if (!motionState.animate) {
-            statusMetric.textContent = "Glide paused";
+            statusMetric.textContent = "Flight paused";
           } else if (flightController.isSprinting) {
-            statusMetric.textContent = "Sprinting boost engaged";
+            statusMetric.textContent = "Speed boost engaged";
+          } else if (safeSpeed < 0.25) {
+            statusMetric.textContent = "Hovering in place. Push the left stick forward to cruise.";
           } else {
             const mode = cameraState?.getMode?.();
             const modeLabel = getCameraModeLabel(mode);
@@ -1527,7 +1531,7 @@
               ? `the ${environmentState.label} environment`
               : "this environment";
             statusMetric.textContent =
-              `Gently gliding through ${environmentMessage}… (${modeLabel} — ${instruction})`;
+              `Exploring ${environmentMessage}. (${modeLabel} — ${instruction})`;
           }
         }
       }
@@ -1539,7 +1543,7 @@
           toggleButton.textContent = "Motion Disabled";
         } else {
           toggleButton.disabled = false;
-          toggleButton.textContent = motionState.animate ? "Pause Glide" : "Resume Glide";
+          toggleButton.textContent = motionState.animate ? "Pause Flight" : "Resume Flight";
           toggleButton.setAttribute("aria-pressed", motionState.animate ? "true" : "false");
         }
       }
@@ -1783,7 +1787,15 @@
 
       syncFullscreenUi();
 
+      function clampThrottle(value, fallback = 0.6) {
+        if (!Number.isFinite(value)) {
+          return fallback;
+        }
+        return Math.min(Math.max(value, 0), 1);
+      }
+
       function updateGlideSpeedDisplay(value) {
+        if (!glideSpeedDisplay) return;
         const throttlePercent = Math.round(value * 100);
         glideSpeedDisplay.textContent = `${throttlePercent}%`;
       }
@@ -1842,7 +1854,9 @@
 
       const flightController = new FreeFlightController(THREE, {
         position: new THREE.Vector3(1.1, 0.9, 0),
+        throttle: initialThrottle,
       });
+      flightController.setThrottle(initialThrottle);
       flightControllerInitialized = true;
       updateControlMetrics();
 
@@ -1889,6 +1903,23 @@
         onSprintChange: () => updateControlMetrics(),
         onThrustChange: () => updateControlMetrics(),
       });
+
+      const applyThrottleFromInput = () => {
+        if (!glideSpeedInput) return;
+        const value = clampThrottle(Number.parseFloat(glideSpeedInput.value));
+        flightController.setThrottle(value);
+        updateGlideSpeedDisplay(value);
+        updateControlMetrics();
+      };
+
+      if (glideSpeedInput) {
+        updateGlideSpeedDisplay(initialThrottle);
+        glideSpeedInput.value = `${initialThrottle}`;
+        glideSpeedInput.addEventListener("input", applyThrottleFromInput);
+        glideSpeedInput.addEventListener("change", applyThrottleFromInput);
+      } else {
+        updateGlideSpeedDisplay(initialThrottle);
+      }
 
       if (resetButton) {
         resetButton.addEventListener("click", () => {
