@@ -1,4 +1,5 @@
 import { createThumbstick } from './thumbstick.js';
+import { createFloatingThumbstick } from './virtual-thumbstick.js';
 
 const DEFAULT_ANALOG_LOOK_SPEED = 480;
 const DEFAULT_ROLL_SENSITIVITY = 0.65;
@@ -185,15 +186,27 @@ export function createFlightControls({
     analogLookState.isActive = Boolean(context.isActive);
   };
 
-  const leftThumbstick = createThumbstick(leftThumbstickElement, {
-    deadzone: 0.15,
-    onChange: handleLeftStickChange,
-  });
+  const leftThumbstick =
+    createThumbstick(leftThumbstickElement, {
+      deadzone: 0.15,
+      onChange: handleLeftStickChange,
+    }) ??
+    createFloatingThumbstick(leftThumbstickElement, {
+      deadzone: 0.15,
+      expo: 0.32,
+      onChange: handleLeftStickChange,
+    });
 
-  const rightThumbstick = createThumbstick(rightThumbstickElement, {
-    deadzone: 0.08,
-    onChange: handleRightStickChange,
-  });
+  const rightThumbstick =
+    createThumbstick(rightThumbstickElement, {
+      deadzone: 0.08,
+      onChange: handleRightStickChange,
+    }) ??
+    createFloatingThumbstick(rightThumbstickElement, {
+      deadzone: 0.08,
+      expo: 0.28,
+      onChange: handleRightStickChange,
+    });
 
   const handleLiftButtonDown = (event) => {
     event.preventDefault();
