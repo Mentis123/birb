@@ -1,10 +1,10 @@
 export const MOVEMENT_ACCELERATION = 5.25;
 export const LINEAR_DRAG = 0.6;
 export const SPRINT_MULTIPLIER = 1.75;
-// Controls how quickly the bird eases toward new roll velocities when strafing.
-export const BANK_RESPONSIVENESS = 4.25;
+// Controls how quickly the bird eases toward new roll velocities when banking.
+export const BANK_RESPONSIVENESS = 2.75;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
-export const BANK_ROLL_SPEED = Math.PI * 1.55;
+export const BANK_ROLL_SPEED = Math.PI;
 export const LOOK_SENSITIVITY = 0.0025;
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
 export const AMBIENT_BOB_SPEED = 1.15;
@@ -13,8 +13,10 @@ export const AMBIENT_ROLL_SPEED = 0.9;
 export const AMBIENT_YAW_AMPLITUDE = 0.05;
 export const AMBIENT_YAW_SPEED = 0.7;
 
+// Yaw speed applied when using the simplified turn input.
+export const TURN_SPEED = Math.PI * 0.75;
+
 export const INPUT_SMOOTHING = 12;
-export const STRAFE_DAMPING = 0.65;
 export const IDLE_LINEAR_DRAG = 4.2;
 
 const clamp = (value, min, max, fallback) => {
@@ -59,17 +61,13 @@ export class FreeFlightController {
     this.lookSensitivity = options.lookSensitivity ?? LOOK_SENSITIVITY;
     this.throttle = options.throttle ?? 1;
     this.sprintMultiplier = options.sprintMultiplier ?? SPRINT_MULTIPLIER;
+    this.turnSpeed = options.turnSpeed ?? TURN_SPEED;
     this.isSprinting = false;
 
     const providedSmoothing = options.inputSmoothing;
     this.inputSmoothing = Number.isFinite(providedSmoothing)
       ? Math.max(0, providedSmoothing)
       : INPUT_SMOOTHING;
-
-    const providedStrafeDamping = options.strafeDamping;
-    this.strafeDamping = Number.isFinite(providedStrafeDamping)
-      ? clamp(providedStrafeDamping, 0, 1, STRAFE_DAMPING)
-      : STRAFE_DAMPING;
 
     const providedIdleDrag = options.idleLinearDrag;
     this.idleLinearDrag = Number.isFinite(providedIdleDrag) && providedIdleDrag >= 0
@@ -146,12 +144,6 @@ export class FreeFlightController {
 
     this.elapsed += deltaTime;
 
-    this.quaternion.copy(this.lookQuaternion);
-
-    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
-    const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
-    const up = this._up.set(0, 1, 0);
-
     // Ease input changes over time so gamepad and keyboard controls feel less twitchy.
     const smoothingStrength = this.inputSmoothing > 0 ? 1 - Math.exp(-this.inputSmoothing * deltaTime) : 1;
     const smoothed = this._smoothedInput;
@@ -168,9 +160,27 @@ export class FreeFlightController {
       smoothed.roll += (this.input.roll - smoothed.roll) * smoothingStrength;
     }
 
+    const up = this._up.set(0, 1, 0);
+
+    if (deltaTime > 0) {
+      // Apply a gentle yaw response so horizontal thrust becomes a smooth turn
+      // instead of a sharp strafe.
+      const yawInput = clamp(smoothed.strafe, -1, 1, 0);
+      const yawAngle = yawInput * this.turnSpeed * deltaTime;
+      if (Math.abs(yawAngle) > 1e-6) {
+        this._yawQuaternion.setFromAxisAngle(up, yawAngle);
+        this.lookQuaternion.premultiply(this._yawQuaternion);
+      }
+    }
+
+    this.lookQuaternion.normalize();
+    this.quaternion.copy(this.lookQuaternion);
+
+    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+
     const acceleration = this._acceleration.set(0, 0, 0);
     acceleration.addScaledVector(forward, smoothed.forward);
-    acceleration.addScaledVector(right, smoothed.strafe * this.strafeDamping);
     acceleration.addScaledVector(up, smoothed.lift);
 
     if (acceleration.lengthSq() > 1) {
@@ -179,7 +189,6 @@ export class FreeFlightController {
 
     const hasTranslationInput =
       Math.abs(smoothed.forward) > 1e-3 ||
-      Math.abs(smoothed.strafe) > 1e-3 ||
       Math.abs(smoothed.lift) > 1e-3;
 
     acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.getEffectiveThrottle());
@@ -209,7 +218,7 @@ export class FreeFlightController {
     const forwardZ = forward.z;
     let bankOrientation = 1;
     // When the bird is facing back toward the camera (positive Z), invert the
-    // roll direction so strafing left still lowers the left wing.
+    // roll direction so turning left still lowers the left wing.
     if (forwardZ > 1e-4) {
       bankOrientation = -1;
     } else if (forwardZ < -1e-4) {
