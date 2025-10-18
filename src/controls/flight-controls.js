@@ -21,9 +21,11 @@ const THRUST_AXIS_KEYS = {
   },
 };
 
-const THRUST_AXES = Object.values(THRUST_AXIS_KEYS);
+const THRUST_AXIS_LIST = Object.values(THRUST_AXIS_KEYS);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
 
 const isEditableTarget = (target) => {
   if (!target) return false;
@@ -53,79 +55,52 @@ export function createFlightControls({
     throw new Error('createFlightControls requires a canvas element');
   }
 
-  const analogLook = { x: 0, y: 0 };
-  const thrustKeys = new Set();
   const effectiveRollSensitivity = Number.isFinite(rollSensitivity)
-    ? Math.max(0, Math.min(rollSensitivity, 1))
+    ? clamp(rollSensitivity, 0, 1)
     : DEFAULT_ROLL_SENSITIVITY;
-  const thrustSources = {
-    keys: { forward: 0, strafe: 0, lift: 0, roll: 0 },
-    touch: { forward: 0, strafe: 0, lift: 0, roll: 0 },
+  const effectiveTouchSprintThreshold = Number.isFinite(touchSprintThreshold)
+    ? clamp(touchSprintThreshold, 0, 1)
+    : DEFAULT_TOUCH_SPRINT_THRESHOLD;
+
+  const axisSources = {
+    keyboard: createAxisRecord(),
+    leftStick: createAxisRecord(),
+    liftButtons: createAxisRecord(),
   };
-  const sprintSources = { keys: false, touch: false };
+
+  const sprintSources = {
+    keyboard: false,
+    leftStick: false,
+  };
+
+  const analogLookState = {
+    x: 0,
+    y: 0,
+    isActive: false,
+    pointerType: null,
+  };
+
   const touchLiftPresses = new Map();
   const liftButtons = Array.isArray(liftButtonElements)
     ? liftButtonElements.filter(Boolean)
     : [];
+  const thrustKeys = new Set();
 
   let sprintActive = false;
 
   const pointerListenerOptions = { passive: false };
 
-  const leftThumbstick = createThumbstick(leftThumbstickElement, {
-    onChange: (value, context = {}) => {
-      const forward = clamp(-value.y, -1, 1);
-      const strafe = clamp(value.x, -1, 1);
-      thrustSources.touch.forward = forward;
-      thrustSources.touch.strafe = strafe;
-      thrustSources.touch.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-      const magnitude = Math.hypot(value.x, value.y);
-      const shouldSprint =
-        context.pointerType === 'touch' &&
-        Boolean(context.isActive) &&
-        magnitude >= touchSprintThreshold;
-      sprintSources.touch = shouldSprint;
-      updateSprintState();
-      applyThrustInput();
-    },
-  });
-
-  const rightThumbstick = createThumbstick(rightThumbstickElement, {
-    onChange: (value, context = {}) => {
-      const pointerType = context?.pointerType ?? null;
-      const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
-      const isFollowModeActive =
-        pointerType === 'touch' &&
-        followMode != null &&
-        currentMode === followMode;
-      analogLook.x = value.x;
-      analogLook.y = isFollowModeActive ? -value.y : value.y;
-    },
-  });
-
-  const computeAxisValue = (axisKeys) => {
-    const hasPositive = axisKeys.positive.some((code) => thrustKeys.has(code));
-    const hasNegative = axisKeys.negative.some((code) => thrustKeys.has(code));
-    if (hasPositive && hasNegative) return 0;
-    if (hasPositive) return 1;
-    if (hasNegative) return -1;
-    return 0;
-  };
-
-  const combineThrustAxis = (axis) => {
-    return clamp(
-      Object.values(thrustSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0),
-      -1,
-      1
-    );
+  const combineAxis = (axis) => {
+    const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
+    return clamp(total, -1, 1);
   };
 
   const applyThrustInput = () => {
     flightController.setThrustInput({
-      forward: combineThrustAxis('forward'),
-      strafe: combineThrustAxis('strafe'),
-      lift: combineThrustAxis('lift'),
-      roll: combineThrustAxis('roll'),
+      forward: combineAxis('forward'),
+      strafe: combineAxis('strafe'),
+      lift: combineAxis('lift'),
+      roll: combineAxis('roll'),
     });
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
@@ -144,19 +119,24 @@ export function createFlightControls({
   };
 
   const updateSprintState = () => {
-    setSprintActive(Boolean(sprintSources.keys || sprintSources.touch));
+    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick));
   };
 
-  const updateThrustFromKeys = () => {
-    thrustSources.keys.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
-    thrustSources.keys.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
-    thrustSources.keys.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
-    thrustSources.keys.roll = clamp(
-      thrustSources.keys.strafe * effectiveRollSensitivity,
-      -1,
-      1
-    );
+  const updateKeyboardAxes = () => {
+    axisSources.keyboard.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
+    axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
+    axisSources.keyboard.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
+    axisSources.keyboard.roll = clamp(axisSources.keyboard.strafe * effectiveRollSensitivity, -1, 1);
     applyThrustInput();
+  };
+
+  const computeAxisValue = (axisKeys) => {
+    const hasPositive = axisKeys.positive.some((code) => thrustKeys.has(code));
+    const hasNegative = axisKeys.negative.some((code) => thrustKeys.has(code));
+    if (hasPositive && hasNegative) return 0;
+    if (hasPositive) return 1;
+    if (hasNegative) return -1;
+    return 0;
   };
 
   const updateLiftFromButtons = () => {
@@ -164,9 +144,56 @@ export function createFlightControls({
     touchLiftPresses.forEach((value) => {
       lift += value;
     });
-    thrustSources.touch.lift = clamp(lift, -1, 1);
+    axisSources.liftButtons.lift = clamp(lift, -1, 1);
     applyThrustInput();
   };
+
+  const handleLeftStickChange = (value, context = {}) => {
+    const forward = clamp(-value.y, -1, 1);
+    const strafe = clamp(value.x, -1, 1);
+    axisSources.leftStick.forward = forward;
+    axisSources.leftStick.strafe = strafe;
+    axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
+    axisSources.leftStick.lift = 0;
+
+    const pointerType = context.pointerType ?? null;
+    const magnitudeForSprint = clamp(
+      pointerType === 'touch'
+        ? context.rawMagnitude ?? Math.hypot(value.x, value.y)
+        : context.magnitude ?? Math.hypot(value.x, value.y),
+      0,
+      1
+    );
+    sprintSources.leftStick = Boolean(
+      context.isActive && pointerType === 'touch' && magnitudeForSprint >= effectiveTouchSprintThreshold
+    );
+    updateSprintState();
+    applyThrustInput();
+  };
+
+  const handleRightStickChange = (value, context = {}) => {
+    const pointerType = context.pointerType ?? null;
+    const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+    const shouldInvertY =
+      pointerType === 'touch' &&
+      followMode != null &&
+      currentMode === followMode;
+
+    analogLookState.x = clamp(value.x, -1, 1);
+    analogLookState.y = clamp(shouldInvertY ? -value.y : value.y, -1, 1);
+    analogLookState.pointerType = pointerType;
+    analogLookState.isActive = Boolean(context.isActive);
+  };
+
+  const leftThumbstick = createThumbstick(leftThumbstickElement, {
+    deadzone: 0.15,
+    onChange: handleLeftStickChange,
+  });
+
+  const rightThumbstick = createThumbstick(rightThumbstickElement, {
+    deadzone: 0.08,
+    onChange: handleRightStickChange,
+  });
 
   const handleLiftButtonDown = (event) => {
     event.preventDefault();
@@ -179,7 +206,7 @@ export function createFlightControls({
       try {
         currentTarget.setPointerCapture(event.pointerId);
       } catch (error) {
-        // Ignore capture failures to preserve input on unsupported browsers.
+        // Ignore capture failures.
       }
     }
     touchLiftPresses.set(event.pointerId, direction);
@@ -197,7 +224,7 @@ export function createFlightControls({
       try {
         currentTarget.releasePointerCapture(event.pointerId);
       } catch (error) {
-        // Ignore release failures to avoid breaking touch input fallbacks.
+        // Ignore release failures.
       }
     }
     event.preventDefault();
@@ -224,7 +251,7 @@ export function createFlightControls({
       return;
     }
     const isShift = SHIFT_CODES.has(code);
-    const isThrustKey = THRUST_AXES.some(
+    const isThrustKey = THRUST_AXIS_LIST.some(
       (axis) => axis.positive.includes(code) || axis.negative.includes(code)
     );
     if (!isThrustKey && !isShift) {
@@ -233,10 +260,10 @@ export function createFlightControls({
     event.preventDefault();
     if (isThrustKey) {
       thrustKeys.add(code);
-      updateThrustFromKeys();
+      updateKeyboardAxes();
     }
     if (isShift) {
-      sprintSources.keys = true;
+      sprintSources.keyboard = true;
       updateSprintState();
     }
   };
@@ -247,7 +274,7 @@ export function createFlightControls({
       return;
     }
     const isShift = SHIFT_CODES.has(code);
-    const isThrustKey = THRUST_AXES.some(
+    const isThrustKey = THRUST_AXIS_LIST.some(
       (axis) => axis.positive.includes(code) || axis.negative.includes(code)
     );
     if (!isThrustKey && !isShift) {
@@ -256,10 +283,10 @@ export function createFlightControls({
     event.preventDefault();
     if (isThrustKey) {
       thrustKeys.delete(code);
-      updateThrustFromKeys();
+      updateKeyboardAxes();
     }
     if (isShift) {
-      sprintSources.keys = false;
+      sprintSources.keyboard = false;
       updateSprintState();
     }
   };
@@ -280,24 +307,26 @@ export function createFlightControls({
     }
   };
 
+  const resetAxisRecord = (record) => {
+    record.forward = 0;
+    record.strafe = 0;
+    record.lift = 0;
+    record.roll = 0;
+  };
+
   const resetInputs = ({ releasePointerLock = false } = {}) => {
     thrustKeys.clear();
-    thrustSources.keys.forward = 0;
-    thrustSources.keys.strafe = 0;
-    thrustSources.keys.lift = 0;
-    thrustSources.keys.roll = 0;
-    thrustSources.touch.forward = 0;
-    thrustSources.touch.strafe = 0;
-    thrustSources.touch.lift = 0;
-    thrustSources.touch.roll = 0;
+    Object.values(axisSources).forEach(resetAxisRecord);
     applyThrustInput();
 
-    sprintSources.keys = false;
-    sprintSources.touch = false;
+    sprintSources.keyboard = false;
+    sprintSources.leftStick = false;
     updateSprintState();
 
-    analogLook.x = 0;
-    analogLook.y = 0;
+    analogLookState.x = 0;
+    analogLookState.y = 0;
+    analogLookState.isActive = false;
+    analogLookState.pointerType = null;
 
     touchLiftPresses.clear();
     liftButtons.forEach((button) => button.classList.remove('is-active'));
@@ -324,12 +353,15 @@ export function createFlightControls({
       return;
     }
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
-    const lookX = analogLook.x;
-    const lookY = -analogLook.y;
+    const lookX = analogLookState.x;
+    const lookY = -analogLookState.y;
     if (lookX === 0 && lookY === 0) {
       return;
     }
-    flightController.addLookDelta(lookX * analogLookSpeed * limitedDelta, lookY * analogLookSpeed * limitedDelta);
+    flightController.addLookDelta(
+      lookX * analogLookSpeed * limitedDelta,
+      lookY * analogLookSpeed * limitedDelta
+    );
   };
 
   const dispose = () => {
@@ -351,7 +383,6 @@ export function createFlightControls({
     rightThumbstick?.destroy?.();
   };
 
-  // Initialize controller state with zeroed inputs.
   applyThrustInput();
   updateSprintState();
 

@@ -1,179 +1,245 @@
 const noop = () => {};
 
-export function createThumbstick(root, { onChange = noop } = {}) {
+const DEFAULT_OPTIONS = {
+  deadzone: 0.12,
+  onStart: noop,
+  onChange: noop,
+  onEnd: noop,
+  axis: { x: 1, y: 1 },
+};
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const normalizeVector = (x, y) => {
+  const length = Math.hypot(x, y);
+  if (length === 0) {
+    return { x: 0, y: 0, length: 0 };
+  }
+  if (length <= 1) {
+    return { x, y, length };
+  }
+  return { x: x / length, y: y / length, length: 1 };
+};
+
+const applyDeadzone = (x, y, deadzone) => {
+  const length = Math.hypot(x, y);
+  if (length <= deadzone) {
+    return {
+      x: 0,
+      y: 0,
+      magnitude: 0,
+      angle: 0,
+    };
+  }
+  const scaledMagnitude = clamp((length - deadzone) / (1 - deadzone), 0, 1);
+  const directionX = length === 0 ? 0 : x / length;
+  const directionY = length === 0 ? 0 : y / length;
+  return {
+    x: directionX * scaledMagnitude,
+    y: directionY * scaledMagnitude,
+    magnitude: scaledMagnitude,
+    angle: Math.atan2(directionY, directionX),
+  };
+};
+
+const createAxis = (optionsAxis = {}) => {
+  const axis = { x: 1, y: 1 };
+  if (typeof optionsAxis.x === 'number' && Number.isFinite(optionsAxis.x)) {
+    axis.x = optionsAxis.x === 0 ? 1 : optionsAxis.x;
+  }
+  if (typeof optionsAxis.y === 'number' && Number.isFinite(optionsAxis.y)) {
+    axis.y = optionsAxis.y === 0 ? 1 : optionsAxis.y;
+  }
+  return axis;
+};
+
+export function createThumbstick(root, options = {}) {
   if (!root) return null;
 
   const handle = root.querySelector('[data-thumbstick-handle]');
   if (!handle) return null;
 
-  const DEADZONE = 0.12;
+  const config = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+    axis: createAxis(options.axis),
+  };
+
   const state = {
     pointerId: null,
     pointerType: null,
-    value: { x: 0, y: 0 },
-    handleValue: { x: 0, y: 0 },
-    captured: false,
-    globalListeners: false,
+    active: false,
+    raw: { x: 0, y: 0 },
+    output: { x: 0, y: 0, magnitude: 0, angle: 0 },
+    outputRadius: Math.max(1, (root.clientWidth - handle.clientWidth) / 2),
   };
 
   const listenerOptions = { passive: false };
+  const globalTarget = typeof window !== 'undefined' ? window : null;
+
+  const getMetrics = () => {
+    const rect = root.getBoundingClientRect();
+    const maxDistance = Math.max(1, (root.clientWidth - handle.clientWidth) / 2);
+    return {
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      maxDistance,
+    };
+  };
 
   const updateVisuals = () => {
-    const maxDistance = (root.clientWidth - handle.clientWidth) / 2;
-    const offsetX = state.handleValue.x * maxDistance;
-    const offsetY = state.handleValue.y * maxDistance;
+    const offsetX = state.raw.x * state.outputRadius;
+    const offsetY = state.raw.y * state.outputRadius;
     handle.style.setProperty('--thumbstick-offset-x', `${offsetX}px`);
     handle.style.setProperty('--thumbstick-offset-y', `${offsetY}px`);
-    const active = state.pointerId !== null || Math.hypot(offsetX, offsetY) > 0.5;
-    root.classList.toggle('is-active', active);
+    root.classList.toggle('is-active', state.active || Math.hypot(offsetX, offsetY) > 0.5);
   };
 
   const emitChange = () => {
-    onChange(
-      { x: state.value.x, y: state.value.y },
-      { isActive: state.pointerId !== null, pointerType: state.pointerType }
-    );
+    const payload = { x: state.output.x, y: state.output.y };
+    const meta = {
+      isActive: state.active,
+      pointerType: state.pointerType,
+      magnitude: state.output.magnitude,
+      angle: state.output.angle,
+      raw: { x: state.raw.x, y: state.raw.y },
+      rawMagnitude: Math.hypot(state.raw.x, state.raw.y),
+    };
+    config.onChange(payload, meta);
   };
 
-  const setValues = ({ handleX = 0, handleY = 0, outputX = 0, outputY = 0 } = {}) => {
-    state.handleValue.x = handleX;
-    state.handleValue.y = handleY;
-    state.value.x = outputX;
-    state.value.y = outputY;
+  const setNeutral = (emit = true) => {
+    state.raw.x = 0;
+    state.raw.y = 0;
+    state.output = { x: 0, y: 0, magnitude: 0, angle: 0 };
+    updateVisuals();
+    if (emit) emitChange();
+  };
+
+  const updateFromPointer = (event) => {
+    const metrics = getMetrics();
+    state.outputRadius = metrics.maxDistance;
+    const dx = event.clientX - metrics.centerX;
+    const dy = event.clientY - metrics.centerY;
+
+    const normalized = normalizeVector(dx / metrics.maxDistance, dy / metrics.maxDistance);
+
+    state.raw.x = normalized.x;
+    state.raw.y = normalized.y;
+
+    let axisAdjustedX = normalized.x * config.axis.x;
+    let axisAdjustedY = normalized.y * config.axis.y;
+    const axisLength = Math.hypot(axisAdjustedX, axisAdjustedY);
+    if (axisLength > 1) {
+      axisAdjustedX /= axisLength;
+      axisAdjustedY /= axisLength;
+    }
+    state.output = applyDeadzone(axisAdjustedX, axisAdjustedY, config.deadzone);
+
     updateVisuals();
     emitChange();
   };
 
-  const translatePointer = (event) => {
-    const rect = root.getBoundingClientRect();
-    const maxDistance = rect.width / 2;
-    if (maxDistance <= 0) {
-      setValues();
-      return;
+  const resetPointerState = () => {
+    const wasActive = state.pointerId !== null || state.active || state.output.magnitude !== 0;
+    state.pointerId = null;
+    state.pointerType = null;
+    state.active = false;
+    state.outputRadius = Math.max(1, (root.clientWidth - handle.clientWidth) / 2);
+    setNeutral();
+    if (wasActive) {
+      config.onEnd();
     }
-
-    const dx = event.clientX - (rect.left + rect.width / 2);
-    const dy = event.clientY - (rect.top + rect.height / 2);
-    let normalizedX = dx / maxDistance;
-    let normalizedY = dy / maxDistance;
-    const length = Math.hypot(normalizedX, normalizedY);
-    if (length > 1) {
-      normalizedX /= length;
-      normalizedY /= length;
-    }
-
-    const handleMagnitude = Math.hypot(normalizedX, normalizedY);
-    let outputX = 0;
-    let outputY = 0;
-
-    if (handleMagnitude > DEADZONE) {
-      const scaledMagnitude = (handleMagnitude - DEADZONE) / (1 - DEADZONE);
-      const dirX = handleMagnitude === 0 ? 0 : normalizedX / handleMagnitude;
-      const dirY = handleMagnitude === 0 ? 0 : normalizedY / handleMagnitude;
-      outputX = dirX * scaledMagnitude;
-      outputY = dirY * scaledMagnitude;
-    }
-
-    setValues({ handleX: normalizedX, handleY: normalizedY, outputX, outputY });
-  };
-
-  const resetValues = () => {
-    setValues({ handleX: 0, handleY: 0, outputX: 0, outputY: 0 });
-  };
-
-  const attachGlobalListeners = () => {
-    if (state.globalListeners || typeof window === 'undefined') {
-      return;
-    }
-    window.addEventListener('pointermove', handlePointerMove, listenerOptions);
-    window.addEventListener('pointerup', handlePointerEnd, listenerOptions);
-    window.addEventListener('pointercancel', handlePointerEnd, listenerOptions);
-    state.globalListeners = true;
-  };
-
-  const detachGlobalListeners = () => {
-    if (!state.globalListeners || typeof window === 'undefined') {
-      return;
-    }
-    window.removeEventListener('pointermove', handlePointerMove, listenerOptions);
-    window.removeEventListener('pointerup', handlePointerEnd, listenerOptions);
-    window.removeEventListener('pointercancel', handlePointerEnd, listenerOptions);
-    state.globalListeners = false;
   };
 
   const handlePointerDown = (event) => {
     if (state.pointerId !== null && state.pointerId !== event.pointerId) {
       return;
     }
-    event.preventDefault();
-    const supportsPointerCapture =
-      typeof root.setPointerCapture === 'function' && typeof root.releasePointerCapture === 'function';
-    const shouldCapture = supportsPointerCapture && event.pointerType !== 'touch';
-    if (shouldCapture) {
-      try {
-        root.setPointerCapture(event.pointerId);
-        state.captured = true;
-      } catch (error) {
-        state.captured = false;
-      }
-    } else {
-      state.captured = false;
-    }
-    state.pointerId = event.pointerId;
-    state.pointerType = event.pointerType || null;
-    attachGlobalListeners();
-    translatePointer(event);
-  };
-
-  const resetPointerState = () => {
-    if (state.pointerId === null) {
-      detachGlobalListeners();
-      state.captured = false;
+    if (event.button !== undefined && event.button !== 0) {
       return;
     }
-    if (state.captured && typeof root.releasePointerCapture === 'function') {
-      const hasCapture =
-        typeof root.hasPointerCapture === 'function' ? root.hasPointerCapture(state.pointerId) : true;
-      if (hasCapture) {
-        try {
-          root.releasePointerCapture(state.pointerId);
-        } catch (error) {
-          // Ignore release failures to avoid breaking touch input fallbacks.
-        }
+    event.preventDefault();
+    state.pointerId = event.pointerId;
+    state.pointerType = event.pointerType || null;
+    state.active = true;
+    state.outputRadius = Math.max(1, (root.clientWidth - handle.clientWidth) / 2);
+
+    if (typeof root.setPointerCapture === 'function') {
+      try {
+        root.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore capture failures on unsupported platforms.
       }
     }
-    state.pointerId = null;
-    state.pointerType = null;
-    state.captured = false;
-    detachGlobalListeners();
+
+    config.onStart({ pointerType: state.pointerType });
+    updateFromPointer(event);
+    if (globalTarget) {
+      globalTarget.addEventListener('pointermove', handlePointerMove, listenerOptions);
+      globalTarget.addEventListener('pointerup', handlePointerUp, listenerOptions);
+      globalTarget.addEventListener('pointercancel', handlePointerUp, listenerOptions);
+    }
   };
 
   const handlePointerMove = (event) => {
     if (state.pointerId !== event.pointerId) return;
     event.preventDefault();
-    translatePointer(event);
+    updateFromPointer(event);
   };
 
-  const handlePointerEnd = (event) => {
+  const handlePointerUp = (event) => {
     if (state.pointerId !== event.pointerId) return;
     event.preventDefault();
+    if (typeof root.releasePointerCapture === 'function') {
+      try {
+        root.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore release failures.
+      }
+    }
+    if (globalTarget) {
+      globalTarget.removeEventListener('pointermove', handlePointerMove, listenerOptions);
+      globalTarget.removeEventListener('pointerup', handlePointerUp, listenerOptions);
+      globalTarget.removeEventListener('pointercancel', handlePointerUp, listenerOptions);
+    }
     resetPointerState();
-    resetValues();
   };
 
+  const handleLostPointerCapture = (event) => {
+    if (state.pointerId === null || state.pointerId !== event.pointerId) {
+      return;
+    }
+    if (globalTarget) {
+      globalTarget.removeEventListener('pointermove', handlePointerMove, listenerOptions);
+      globalTarget.removeEventListener('pointerup', handlePointerUp, listenerOptions);
+      globalTarget.removeEventListener('pointercancel', handlePointerUp, listenerOptions);
+    }
+    resetPointerState();
+  };
+
+  state.outputRadius = Math.max(1, (root.clientWidth - handle.clientWidth) / 2);
+  setNeutral(false);
+
   root.addEventListener('pointerdown', handlePointerDown, listenerOptions);
-  root.addEventListener('lostpointercapture', handlePointerEnd, listenerOptions);
+  root.addEventListener('lostpointercapture', handleLostPointerCapture, listenerOptions);
 
   return {
+    get value() {
+      return { ...state.output };
+    },
     reset() {
       resetPointerState();
-      resetValues();
     },
     destroy() {
       root.removeEventListener('pointerdown', handlePointerDown, listenerOptions);
-      root.removeEventListener('lostpointercapture', handlePointerEnd, listenerOptions);
+      root.removeEventListener('lostpointercapture', handleLostPointerCapture, listenerOptions);
+      if (globalTarget) {
+        globalTarget.removeEventListener('pointermove', handlePointerMove, listenerOptions);
+        globalTarget.removeEventListener('pointerup', handlePointerUp, listenerOptions);
+        globalTarget.removeEventListener('pointercancel', handlePointerUp, listenerOptions);
+      }
       resetPointerState();
-      resetValues();
     },
   };
 }
