@@ -1,10 +1,10 @@
-export const MOVEMENT_ACCELERATION = 4.5;
-export const LINEAR_DRAG = 1.6;
+export const MOVEMENT_ACCELERATION = 5.25;
+export const LINEAR_DRAG = 0.6;
 export const SPRINT_MULTIPLIER = 1.75;
 // Controls how quickly the bird eases toward new roll velocities when strafing.
-export const BANK_RESPONSIVENESS = 6.5;
+export const BANK_RESPONSIVENESS = 4.25;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
-export const BANK_ROLL_SPEED = Math.PI * 1.85;
+export const BANK_ROLL_SPEED = Math.PI * 1.55;
 export const LOOK_SENSITIVITY = 0.0025;
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
 export const AMBIENT_BOB_SPEED = 1.15;
@@ -12,6 +12,11 @@ export const AMBIENT_ROLL_AMPLITUDE = 0.08;
 export const AMBIENT_ROLL_SPEED = 0.9;
 export const AMBIENT_YAW_AMPLITUDE = 0.05;
 export const AMBIENT_YAW_SPEED = 0.7;
+
+export const INPUT_SMOOTHING = 12;
+export const GLIDE_SPEED = 3.2;
+export const GLIDE_ACCELERATION = 6.5;
+export const STRAFE_DAMPING = 0.65;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -21,6 +26,8 @@ const clamp = (value, min, max, fallback) => {
   if (value > max) return max;
   return value;
 };
+
+const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
 
 export class FreeFlightController {
   constructor(three, options = {}) {
@@ -55,12 +62,28 @@ export class FreeFlightController {
     this.sprintMultiplier = options.sprintMultiplier ?? SPRINT_MULTIPLIER;
     this.isSprinting = false;
 
-    this.input = {
-      forward: 0,
-      strafe: 0,
-      lift: 0,
-      roll: 0,
-    };
+    const providedSmoothing = options.inputSmoothing;
+    this.inputSmoothing = Number.isFinite(providedSmoothing)
+      ? Math.max(0, providedSmoothing)
+      : INPUT_SMOOTHING;
+
+    const providedGlideSpeed = options.glideSpeed;
+    this.glideSpeed = Number.isFinite(providedGlideSpeed) && providedGlideSpeed > 0
+      ? providedGlideSpeed
+      : GLIDE_SPEED;
+
+    const providedGlideAcceleration = options.glideAcceleration;
+    this.glideAcceleration = Number.isFinite(providedGlideAcceleration) && providedGlideAcceleration > 0
+      ? providedGlideAcceleration
+      : GLIDE_ACCELERATION;
+
+    const providedStrafeDamping = options.strafeDamping;
+    this.strafeDamping = Number.isFinite(providedStrafeDamping)
+      ? clamp(providedStrafeDamping, 0, 1, STRAFE_DAMPING)
+      : STRAFE_DAMPING;
+
+    this.input = createAxisRecord();
+    this._smoothedInput = createAxisRecord();
 
     this.bank = 0;
     this._bankVelocity = 0;
@@ -135,10 +158,26 @@ export class FreeFlightController {
     const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
     const up = this._up.set(0, 1, 0);
 
+    // Ease input changes over time so gamepad and keyboard controls feel less twitchy.
+    const smoothingStrength = this.inputSmoothing > 0 ? 1 - Math.exp(-this.inputSmoothing * deltaTime) : 1;
+    const smoothed = this._smoothedInput;
+
+    if (smoothingStrength >= 1) {
+      smoothed.forward = this.input.forward;
+      smoothed.strafe = this.input.strafe;
+      smoothed.lift = this.input.lift;
+      smoothed.roll = this.input.roll;
+    } else if (smoothingStrength > 0) {
+      smoothed.forward += (this.input.forward - smoothed.forward) * smoothingStrength;
+      smoothed.strafe += (this.input.strafe - smoothed.strafe) * smoothingStrength;
+      smoothed.lift += (this.input.lift - smoothed.lift) * smoothingStrength;
+      smoothed.roll += (this.input.roll - smoothed.roll) * smoothingStrength;
+    }
+
     const acceleration = this._acceleration.set(0, 0, 0);
-    acceleration.addScaledVector(forward, this.input.forward);
-    acceleration.addScaledVector(right, this.input.strafe);
-    acceleration.addScaledVector(up, this.input.lift);
+    acceleration.addScaledVector(forward, smoothed.forward);
+    acceleration.addScaledVector(right, smoothed.strafe * this.strafeDamping);
+    acceleration.addScaledVector(up, smoothed.lift);
 
     if (acceleration.lengthSq() > 1) {
       acceleration.normalize();
@@ -148,8 +187,37 @@ export class FreeFlightController {
 
     this.velocity.addScaledVector(acceleration, deltaTime);
 
-    const dragMultiplier = Math.max(0, 1 - LINEAR_DRAG * deltaTime);
+    const dragMultiplier = Math.exp(-LINEAR_DRAG * deltaTime);
     this.velocity.multiplyScalar(dragMultiplier);
+
+    const forwardSpeed = this.velocity.dot(forward);
+    const forwardIntent = smoothed.forward;
+    const backwardIntent = smoothed.forward < -0.1;
+
+    // Encourage a gentle forward glide whenever the player is not actively braking.
+    if (!backwardIntent) {
+      const effectiveThrottle = this.getEffectiveThrottle();
+      const baseGlideTarget = this.glideSpeed * effectiveThrottle;
+      const forwardBoost = Math.max(forwardIntent, 0);
+      const targetSpeed = baseGlideTarget + forwardBoost * this.glideSpeed;
+      if (forwardSpeed < targetSpeed) {
+        const glideDelta = Math.min(targetSpeed - forwardSpeed, this.glideAcceleration * deltaTime);
+        if (glideDelta > 0) {
+          this.velocity.addScaledVector(forward, glideDelta);
+        }
+      }
+    }
+
+    // When the player lets go of the strafe controls, bleed off sideways drift so the bird
+    // naturally levels out into its glide.
+    if (Math.abs(smoothed.strafe) < 0.05) {
+      const sidewaysSpeed = this.velocity.dot(right);
+      if (Math.abs(sidewaysSpeed) > 1e-3) {
+        const maxCorrection = this.glideAcceleration * 0.5 * deltaTime;
+        const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
+        this.velocity.addScaledVector(right, -correction);
+      }
+    }
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
@@ -164,7 +232,7 @@ export class FreeFlightController {
     }
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    const rollInput = this.input.roll * bankOrientation;
+    const rollInput = smoothed.roll * bankOrientation;
 
     if (Math.abs(rollInput) > 1e-4) {
       const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
@@ -208,6 +276,8 @@ export class FreeFlightController {
     this.bank = 0;
     this._bankVelocity = 0;
     this.elapsed = 0;
+    Object.assign(this.input, createAxisRecord());
+    Object.assign(this._smoothedInput, createAxisRecord());
     this.setThrustInput({ forward: 0, strafe: 0, lift: 0, roll: 0 });
     this.setSprintActive(false);
   }
