@@ -74,9 +74,11 @@ export function createFlightControls({
 
   const leftThumbstick = createThumbstick(leftThumbstickElement, {
     onChange: (value, context = {}) => {
-      thrustSources.touch.forward = -value.y;
-      thrustSources.touch.strafe = 0;
-      thrustSources.touch.roll = value.x * effectiveRollSensitivity;
+      const forward = clamp(-value.y, -1, 1);
+      const strafe = clamp(value.x, -1, 1);
+      thrustSources.touch.forward = forward;
+      thrustSources.touch.strafe = strafe;
+      thrustSources.touch.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
       const magnitude = Math.hypot(value.x, value.y);
       const shouldSprint =
         context.pointerType === 'touch' &&
@@ -149,7 +151,11 @@ export function createFlightControls({
     thrustSources.keys.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
     thrustSources.keys.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
     thrustSources.keys.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
-    thrustSources.keys.roll = thrustSources.keys.strafe;
+    thrustSources.keys.roll = clamp(
+      thrustSources.keys.strafe * effectiveRollSensitivity,
+      -1,
+      1
+    );
     applyThrustInput();
   };
 
