@@ -1,8 +1,8 @@
 import { createThumbstick } from './thumbstick.js';
 import { createFloatingThumbstick } from './virtual-thumbstick.js';
 
-const DEFAULT_ANALOG_LOOK_SPEED = 480;
-const DEFAULT_ROLL_SENSITIVITY = 0.65;
+const DEFAULT_ANALOG_LOOK_SPEED = 360;
+const DEFAULT_ROLL_SENSITIVITY = 0.45;
 const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 
 const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
