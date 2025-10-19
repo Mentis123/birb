@@ -228,6 +228,72 @@
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        --thumbstick-offset-x: 0px;
+        --thumbstick-offset-y: 0px;
+        transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+      }
+
+      .touch-controls__zone.is-active {
+        background: rgba(26, 40, 72, 0.45);
+        border-color: rgba(190, 220, 255, 0.42);
+        box-shadow: inset 0 0 0 1px rgba(104, 150, 224, 0.36);
+      }
+
+      .touch-thumbstick {
+        position: absolute;
+        inset: clamp(0.55rem, 4vw, 0.85rem);
+        border-radius: 1.25rem;
+        border: 1px solid rgba(124, 170, 255, 0.18);
+        box-shadow: inset 0 0 0 1px rgba(58, 92, 162, 0.18);
+        background: linear-gradient(
+          135deg,
+          rgba(36, 54, 92, 0.38),
+          rgba(18, 30, 54, 0.18)
+        );
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+
+      .touch-thumbstick__guide {
+        position: absolute;
+        width: clamp(2.75rem, 22vw, 4.5rem);
+        height: clamp(2.75rem, 22vw, 4.5rem);
+        border-radius: 1rem;
+        border: 1px dashed rgba(180, 208, 255, 0.28);
+        box-shadow: inset 0 0 0 1px rgba(108, 150, 226, 0.16);
+      }
+
+      .touch-thumbstick__handle {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: clamp(2.85rem, 24vw, 4.75rem);
+        height: clamp(2.85rem, 24vw, 4.75rem);
+        border-radius: 1.2rem;
+        background: linear-gradient(135deg, rgba(210, 224, 255, 0.9), rgba(124, 168, 255, 0.78));
+        box-shadow:
+          0 14px 24px rgba(6, 12, 28, 0.5),
+          inset 0 0 0 1px rgba(32, 58, 122, 0.45);
+        transform: translate3d(
+          calc(-50% + var(--thumbstick-offset-x)),
+          calc(-50% + var(--thumbstick-offset-y)),
+          0
+        );
+        transition: transform 90ms linear, box-shadow 150ms ease, background 150ms ease;
+        pointer-events: none;
+      }
+
+      .touch-controls__zone.is-active .touch-thumbstick__handle {
+        background: linear-gradient(135deg, rgba(230, 238, 255, 0.95), rgba(160, 196, 255, 0.88));
+        box-shadow:
+          0 18px 32px rgba(10, 18, 40, 0.6),
+          inset 0 0 0 1px rgba(76, 118, 198, 0.55);
       }
 
       .touch-controls__helper {
@@ -747,6 +813,10 @@
         </div>
         <div class="touch-controls" aria-hidden="true">
           <div class="touch-controls__zone" data-thumbstick="left">
+            <div class="touch-thumbstick">
+              <div class="touch-thumbstick__guide"></div>
+              <div class="touch-thumbstick__handle" data-thumbstick-handle></div>
+            </div>
             <div class="touch-controls__helper">Throttle / Yaw</div>
           </div>
           <div class="lift-controls">
@@ -760,6 +830,10 @@
             </button>
           </div>
           <div class="touch-controls__zone" data-thumbstick="right">
+            <div class="touch-thumbstick">
+              <div class="touch-thumbstick__guide"></div>
+              <div class="touch-thumbstick__handle" data-thumbstick-handle></div>
+            </div>
             <div class="touch-controls__helper">Pitch / Roll</div>
           </div>
         </div>
