@@ -337,7 +337,7 @@ export class FreeFlightController {
 
     this.bank += this._bankVelocity * deltaTime;
 
-    this._bankQuaternion.setFromAxisAngle(forward, this.bank);
+    this._bankQuaternion.setFromAxisAngle(forward, -this.bank);
     this.quaternion.multiply(this._bankQuaternion);
 
     return {
