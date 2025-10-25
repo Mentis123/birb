@@ -48,6 +48,7 @@ export class VirtualStick {
       },
     };
     this.activePointerId = null;
+    this.currentPointerId = null;
     this.pointerType = null;
     this.center = { x: 0, y: 0 };
     this.value = { x: 0, y: 0, active: false };
@@ -83,7 +84,7 @@ export class VirtualStick {
     this.knob.style.opacity = '0';
   }
 
-  update(x, y, active) {
+  update(x, y, active, overrides = {}) {
     const clampedX = clamp(x, -1, 1);
     const clampedY = clamp(y, -1, 1);
     const magnitude = Math.min(Math.hypot(clampedX, clampedY), 1);
@@ -95,6 +96,8 @@ export class VirtualStick {
     const meta = {
       isActive: active,
       pointerType: this.pointerType,
+      pointerId:
+        overrides.pointerId ?? (active ? this.activePointerId : this.currentPointerId),
       magnitude,
       angle,
       raw: { x: clampedX, y: clampedY },
@@ -107,11 +110,13 @@ export class VirtualStick {
   reset() {
     const wasActive = this.activePointerId !== null || this.value.active;
     const previousPointer = this.pointerType;
+    const previousPointerId = this.activePointerId ?? this.currentPointerId;
     this.activePointerId = null;
+    this.currentPointerId = null;
     this.hide();
-    this.update(0, 0, false);
+    this.update(0, 0, false, { pointerId: previousPointerId });
     if (wasActive) {
-      this.config.onEnd({ pointerType: previousPointer });
+      this.config.onEnd({ pointerType: previousPointer, pointerId: previousPointerId });
     }
     this.pointerType = null;
   }
@@ -131,12 +136,13 @@ export class VirtualStick {
       return;
     }
     this.activePointerId = event.pointerId;
+    this.currentPointerId = event.pointerId;
     this.pointerType = event.pointerType || null;
     this.center.x = event.clientX;
     this.center.y = event.clientY;
     this.show(this.center.x, this.center.y);
-    this.config.onStart({ pointerType: this.pointerType });
-    this.update(0, 0, true);
+    this.config.onStart({ pointerType: this.pointerType, pointerId: this.activePointerId });
+    this.update(0, 0, true, { pointerId: this.activePointerId });
     event.preventDefault();
   };
 
@@ -155,7 +161,7 @@ export class VirtualStick {
     this.knob.style.top = `${this.center.y + clampedDy}px`;
     const normalizedX = (clampedDx / maxDistance) * (this.config.axis?.x ?? 1);
     const normalizedY = (clampedDy / maxDistance) * (this.config.axis?.y ?? 1);
-    this.update(normalizedX, normalizedY, true);
+    this.update(normalizedX, normalizedY, true, { pointerId: this.activePointerId });
     event.preventDefault();
   };
 
@@ -164,10 +170,12 @@ export class VirtualStick {
       return;
     }
     const pointerType = this.pointerType;
+    const pointerId = this.activePointerId;
     this.activePointerId = null;
     this.hide();
-    this.update(0, 0, false);
-    this.config.onEnd({ pointerType });
+    this.update(0, 0, false, { pointerId });
+    this.config.onEnd({ pointerType, pointerId });
+    this.currentPointerId = null;
     this.pointerType = null;
     event.preventDefault();
   };
@@ -201,6 +209,7 @@ export function createFloatingThumbstick(zone, options = {}) {
       const payloadMeta = {
         isActive: meta.isActive,
         pointerType: meta.pointerType,
+        pointerId: meta.pointerId ?? null,
         magnitude,
         angle,
         raw: { x: value.x, y: value.y },

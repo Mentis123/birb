@@ -73,6 +73,7 @@
         height: 100%;
         display: block;
         background: transparent;
+        touch-action: none;
       }
 
       .control-panel {
@@ -234,109 +235,72 @@
         position: absolute;
         inset: auto 0 var(--space-2) 0;
         display: none;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: var(--space-2);
-        padding: 0 var(--space-2);
+        justify-content: center;
         pointer-events: none;
         z-index: 3;
       }
 
-      .touch-controls > * {
+      .touch-controls__actions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.45rem;
         pointer-events: auto;
       }
 
-      .touch-controls__zone {
-        position: relative;
-        width: clamp(6.25rem, 34vw, 9.25rem);
-        height: clamp(6.25rem, 38vh, 11rem);
-        border-radius: 1.6rem;
-        background: rgba(18, 27, 46, 0.28);
-        border: 1px solid rgba(168, 204, 255, 0.24);
-        box-shadow: inset 0 0 0 1px rgba(70, 110, 184, 0.22);
-        backdrop-filter: blur(18px);
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        --thumbstick-offset-x: 0px;
-        --thumbstick-offset-y: 0px;
-        transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
-      }
-
-      .touch-controls__zone.is-active {
-        background: rgba(26, 40, 72, 0.45);
-        border-color: rgba(190, 220, 255, 0.42);
-        box-shadow: inset 0 0 0 1px rgba(104, 150, 224, 0.36);
-      }
-
-      .touch-thumbstick {
-        position: absolute;
-        inset: clamp(0.55rem, 4vw, 0.85rem);
-        border-radius: 1.25rem;
-        border: 1px solid rgba(124, 170, 255, 0.18);
-        box-shadow: inset 0 0 0 1px rgba(58, 92, 162, 0.18);
-        background: linear-gradient(
-          135deg,
-          rgba(36, 54, 92, 0.38),
-          rgba(18, 30, 54, 0.18)
-        );
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        pointer-events: none;
-      }
-
-      .touch-thumbstick__guide {
-        position: absolute;
-        width: clamp(2.75rem, 22vw, 4.5rem);
-        height: clamp(2.75rem, 22vw, 4.5rem);
-        border-radius: 1rem;
-        border: 1px dashed rgba(180, 208, 255, 0.28);
-        box-shadow: inset 0 0 0 1px rgba(108, 150, 226, 0.16);
-      }
-
-      .touch-thumbstick__handle {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: clamp(2.85rem, 24vw, 4.75rem);
-        height: clamp(2.85rem, 24vw, 4.75rem);
-        border-radius: 1.2rem;
-        background: linear-gradient(135deg, rgba(210, 224, 255, 0.9), rgba(124, 168, 255, 0.78));
-        box-shadow:
-          0 14px 24px rgba(6, 12, 28, 0.5),
-          inset 0 0 0 1px rgba(32, 58, 122, 0.45);
-        transform: translate3d(
-          calc(-50% + var(--thumbstick-offset-x)),
-          calc(-50% + var(--thumbstick-offset-y)),
-          0
-        );
-        transition: transform 90ms linear, box-shadow 150ms ease, background 150ms ease;
-        pointer-events: none;
-      }
-
-      .touch-controls__zone.is-active .touch-thumbstick__handle {
-        background: linear-gradient(135deg, rgba(230, 238, 255, 0.95), rgba(160, 196, 255, 0.88));
-        box-shadow:
-          0 18px 32px rgba(10, 18, 40, 0.6),
-          inset 0 0 0 1px rgba(76, 118, 198, 0.55);
-      }
-
-      .touch-controls__helper {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0.6rem;
-        text-align: center;
-        font-size: 0.6rem;
+      .movement-toggle {
+        appearance: none;
+        border: 1px solid rgba(168, 204, 255, 0.32);
+        border-radius: 999px;
+        padding: 0.5rem 1.1rem;
+        font-size: 0.8rem;
+        font-weight: 600;
         letter-spacing: 0.12em;
         text-transform: uppercase;
-        color: rgba(224, 234, 255, 0.6);
-        pointer-events: none;
+        color: #f2f6ff;
+        background: linear-gradient(135deg, rgba(66, 106, 188, 0.78), rgba(32, 52, 108, 0.9));
+        box-shadow:
+          0 12px 26px rgba(8, 16, 36, 0.55),
+          inset 0 0 0 1px rgba(30, 60, 126, 0.42);
+        cursor: pointer;
+        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+      }
+
+      .movement-toggle:active {
+        transform: scale(0.97);
+        box-shadow:
+          0 8px 18px rgba(6, 12, 28, 0.6),
+          inset 0 0 0 1px rgba(56, 92, 162, 0.55);
+      }
+
+      .movement-toggle[aria-pressed='true'] {
+        border-color: rgba(206, 230, 255, 0.64);
+        background: linear-gradient(135deg, rgba(120, 164, 238, 0.82), rgba(48, 74, 132, 0.95));
+        box-shadow:
+          0 16px 32px rgba(10, 20, 44, 0.65),
+          inset 0 0 0 1px rgba(80, 122, 204, 0.58);
+      }
+
+      .movement-toggle__label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .movement-toggle__icon {
+        font-size: 1.05em;
+      }
+
+      .touch-controls__hint {
+        padding: 0.25rem 0.65rem;
+        border-radius: 999px;
+        background: rgba(18, 28, 52, 0.55);
+        border: 1px solid rgba(116, 156, 220, 0.3);
+        font-size: 0.58rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(216, 230, 255, 0.78);
+        box-shadow: 0 10px 22px rgba(8, 14, 28, 0.5);
       }
 
       .vj-ring {
@@ -369,48 +333,6 @@
         opacity: 0;
         transition: opacity 140ms ease;
         pointer-events: none;
-      }
-
-      .lift-controls {
-        display: flex;
-        flex-direction: column;
-        gap: 0.6rem;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .lift-button {
-        appearance: none;
-        border: 1px solid rgba(176, 209, 255, 0.36);
-        border-radius: 999px;
-        padding: 0.4rem 1rem;
-        font-size: 0.65rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: #f3f7ff;
-        background: linear-gradient(135deg, rgba(64, 105, 184, 0.58), rgba(26, 44, 92, 0.9));
-        box-shadow: inset 0 0 0 1px rgba(32, 62, 124, 0.45);
-        touch-action: none;
-        user-select: none;
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        min-width: clamp(3.6rem, 18vw, 4.75rem);
-        text-align: center;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .lift-button__icon {
-        font-size: 1.15rem;
-        line-height: 1;
-      }
-
-      .lift-button.is-active,
-      .lift-button:active {
-        box-shadow: inset 0 0 0 1px rgba(118, 162, 230, 0.65), 0 8px 18px rgba(9, 16, 34, 0.55);
-        border-color: rgba(206, 230, 255, 0.75);
       }
 
       .canvas-actions {
@@ -808,7 +730,7 @@
                     <span class="control-metrics__value" data-metric="fps">--</span>
                   </div>
                   <p class="control-metrics__note" data-metric="status">
-                    Ready for free flight. Use the left stick as a joystick and the right stick to look.
+                    Ready for free flight. Drag on the screen to steer and add a second touch to sprint.
                   </p>
                 </div>
               </div>
@@ -896,30 +818,21 @@
             </button>
           </div>
         </div>
-        <div class="touch-controls" aria-hidden="true">
-          <div class="touch-controls__zone" data-thumbstick="left">
-            <div class="touch-thumbstick">
-              <div class="touch-thumbstick__guide"></div>
-              <div class="touch-thumbstick__handle" data-thumbstick-handle></div>
-            </div>
-            <div class="touch-controls__helper">Throttle / Yaw</div>
-          </div>
-          <div class="lift-controls">
-            <button type="button" class="lift-button" data-lift-button data-lift="1">
-              <span aria-hidden="true" class="lift-button__icon">▲</span>
-              <span class="visually-hidden">Ascend (Space/E)</span>
+        <div class="touch-controls">
+          <div class="touch-controls__actions">
+            <button
+              type="button"
+              class="movement-toggle"
+              data-control="movement-toggle"
+              aria-pressed="false"
+              aria-label="Tap to switch movement mode"
+            >
+              <span class="movement-toggle__label">
+                <span class="movement-toggle__icon" aria-hidden="true" data-movement-toggle-icon>🕊️</span>
+                <span data-movement-toggle-label>Fly</span>
+              </span>
             </button>
-            <button type="button" class="lift-button" data-lift-button data-lift="-1">
-              <span aria-hidden="true" class="lift-button__icon">▼</span>
-              <span class="visually-hidden">Descend (Shift/Q)</span>
-            </button>
-          </div>
-          <div class="touch-controls__zone" data-thumbstick="right">
-            <div class="touch-thumbstick">
-              <div class="touch-thumbstick__guide"></div>
-              <div class="touch-thumbstick__handle" data-thumbstick-handle></div>
-            </div>
-            <div class="touch-controls__helper">Pitch / Roll</div>
+            <div class="touch-controls__hint">Second touch: Sprint</div>
           </div>
         </div>
       </div>
@@ -1611,6 +1524,13 @@
       const boostButton = document.querySelector('[data-action="boost"]');
       const jumpButton = document.querySelector('[data-action="jump"]');
       const liftButtonElements = Array.from(document.querySelectorAll('[data-lift-button]'));
+      const movementToggleButton = document.querySelector('[data-control="movement-toggle"]');
+      const movementToggleIcon = movementToggleButton
+        ? movementToggleButton.querySelector('[data-movement-toggle-icon]')
+        : null;
+      const movementToggleLabel = movementToggleButton
+        ? movementToggleButton.querySelector('[data-movement-toggle-label]')
+        : null;
       const panelToggleLabel = panelToggleButton
         ? panelToggleButton.querySelector('[data-settings-label]')
         : null;
@@ -1740,7 +1660,7 @@
           } else if (flightController.isSprinting) {
             statusMetric.textContent = "Speed boost engaged";
           } else if (safeSpeed < 0.25) {
-            statusMetric.textContent = "Hovering in place. Push the left stick forward to cruise.";
+            statusMetric.textContent = "Hovering in place. Drag forward to build speed.";
           } else {
             const mode = cameraState?.getMode?.();
             const modeLabel = getCameraModeLabel(mode);
@@ -2116,8 +2036,7 @@
       const flightControls = createFlightControls({
         canvas,
         flightController,
-        leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
-        rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
+        leftThumbstickElement: canvas,
         liftButtonElements,
         getCameraMode: () => cameraState?.getMode?.(),
         followMode: CAMERA_MODES.FOLLOW,
@@ -2175,6 +2094,23 @@
         );
       }
 
+      function updateMovementToggleButton() {
+        if (!movementToggleButton) return;
+        const isWalkMode = movementState.mode === "walk";
+        movementToggleButton.setAttribute("aria-pressed", isWalkMode ? "true" : "false");
+        if (movementToggleIcon) {
+          movementToggleIcon.textContent = isWalkMode ? "🚶" : "🕊️";
+        }
+        if (movementToggleLabel) {
+          movementToggleLabel.textContent = isWalkMode ? "Walk" : "Fly";
+        }
+        const actionLabel = isWalkMode ? "Tap to take off and fly" : "Tap to land and walk";
+        movementToggleButton.setAttribute("aria-label", actionLabel);
+        movementToggleButton.title = isWalkMode
+          ? "Tap to take off and resume flight"
+          : "Tap to land and walk around";
+      }
+
       function updateMovementModeUi() {
         movementModeButtons.forEach((button) => {
           if (!button) return;
@@ -2184,6 +2120,7 @@
           button.setAttribute("aria-pressed", isActive ? "true" : "false");
         });
         updateBoostButtonUi();
+        updateMovementToggleButton();
       }
 
       function showMovementMessage(message, duration = 2200) {
@@ -2246,11 +2183,14 @@
         updateMovementModeUi();
         if (userInitiated) {
           if (movementState.mode === "walk") {
-            showMovementMessage("Walk mode engaged — tap Jump or hold Boost to run.", 2600);
+            showMovementMessage(
+              "Walk mode engaged — tap Jump, hold Boost to run, tap the mode toggle to take off.",
+              3200,
+            );
           } else if (movementState.mode === "fly") {
-            showMovementMessage("Fly mode engaged — throttle up for powered flight.", 2400);
+            showMovementMessage("Fly mode engaged — drag to steer and tap the mode toggle to land.", 2800);
           } else {
-            showMovementMessage("Glide mode engaged — smooth coasting with the joystick.", 2400);
+            showMovementMessage("Glide mode engaged — smooth coasting as you drag to steer.", 2400);
           }
         } else {
           updateControlMetrics();
@@ -2267,6 +2207,13 @@
           setMovementMode(mode, { userInitiated: true, applyPreset: true });
         });
       });
+
+      if (movementToggleButton) {
+        movementToggleButton.addEventListener("click", () => {
+          const nextMode = movementState.mode === "walk" ? "fly" : "walk";
+          setMovementMode(nextMode, { userInitiated: true, applyPreset: true });
+        });
+      }
 
       if (boostButton) {
         const pointerListenerOptions = { passive: false };
