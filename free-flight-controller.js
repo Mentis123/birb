@@ -5,6 +5,10 @@ export const SPRINT_MULTIPLIER = 1.75;
 export const BANK_RESPONSIVENESS = 2.75;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
 export const BANK_ROLL_SPEED = Math.PI;
+// Highest bank angle (radians) that the controller will allow before clamping.
+export const MAX_BANK_ANGLE = (35 * Math.PI) / 180;
+// How strongly the controller tries to level the bird's wings when there is no roll input.
+export const BANK_LEVEL_STIFFNESS = 4.25;
 export const LOOK_SENSITIVITY = 0.0025;
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
 export const AMBIENT_BOB_SPEED = 1.15;
@@ -81,6 +85,11 @@ export class FreeFlightController {
     this.throttle = options.throttle ?? 1;
     this.sprintMultiplier = options.sprintMultiplier ?? SPRINT_MULTIPLIER;
     this.turnSpeed = options.turnSpeed ?? TURN_SPEED;
+    const providedMaxBankAngle = options.maxBankAngle;
+    this.maxBankAngle =
+      Number.isFinite(providedMaxBankAngle) && providedMaxBankAngle > 0
+        ? providedMaxBankAngle
+        : MAX_BANK_ANGLE;
     this.isSprinting = false;
 
     const providedSmoothing = options.inputSmoothing;
@@ -327,17 +336,50 @@ export class FreeFlightController {
     }
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    const rollInput = smoothed.roll * bankOrientation;
+    const maxBankAngle = Math.max(0, this.maxBankAngle ?? 0);
+    const rawRollInput = smoothed.roll * bankOrientation;
+    let rollInput = rawRollInput;
+    let rollInputClampedByBankLimit = false;
+
+    if (maxBankAngle > 0) {
+      const bankAbs = Math.abs(this.bank);
+      if (bankAbs >= maxBankAngle - 1e-4 && Math.sign(rollInput) === Math.sign(this.bank)) {
+        rollInput = 0;
+        rollInputClampedByBankLimit = true;
+      }
+    }
 
     if (Math.abs(rollInput) > 1e-4) {
       const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
       this._bankVelocity += (targetAngularVelocity - this._bankVelocity) * bankStep;
+    } else if (!rollInputClampedByBankLimit && Math.abs(rawRollInput) <= 1e-4) {
+      const levelingAngularVelocity = -this.bank * BANK_LEVEL_STIFFNESS;
+      const targetAngularVelocity = clamp(
+        levelingAngularVelocity,
+        -BANK_ROLL_SPEED,
+        BANK_ROLL_SPEED,
+        0
+      );
+      this._bankVelocity += (targetAngularVelocity - this._bankVelocity) * bankStep;
     } else {
-      const targetAngularVelocity = -this._bankVelocity;
-      this._bankVelocity += targetAngularVelocity * bankStep;
+      this._bankVelocity += (0 - this._bankVelocity) * bankStep;
     }
 
     this.bank += this._bankVelocity * deltaTime;
+
+    if (maxBankAngle > 0) {
+      if (this.bank > maxBankAngle) {
+        this.bank = maxBankAngle;
+        if (this._bankVelocity > 0) {
+          this._bankVelocity = 0;
+        }
+      } else if (this.bank < -maxBankAngle) {
+        this.bank = -maxBankAngle;
+        if (this._bankVelocity < 0) {
+          this._bankVelocity = 0;
+        }
+      }
+    }
 
     this._bankQuaternion.setFromAxisAngle(forward, -this.bank);
     this.quaternion.multiply(this._bankQuaternion);
