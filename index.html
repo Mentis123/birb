@@ -303,36 +303,50 @@
         box-shadow: 0 10px 22px rgba(8, 14, 28, 0.5);
       }
 
-      .vj-ring {
+      .virtual-stick {
         position: fixed;
-        z-index: 5;
-        width: 160px;
-        height: 160px;
-        margin-left: -80px;
-        margin-top: -80px;
-        border-radius: 50%;
-        border: 2px solid rgba(124, 170, 255, 0.6);
-        box-shadow: 0 0 0 4px rgba(124, 170, 255, 0.08) inset;
-        background: radial-gradient(circle at 50% 50%, rgba(78, 116, 188, 0.08), rgba(30, 48, 92, 0.05));
-        opacity: 0;
-        transition: opacity 140ms ease;
+        width: 140px;
+        height: 140px;
+        transform: translate(-50%, -50%);
         pointer-events: none;
+        z-index: 6;
+        display: none;
+        opacity: 0;
+        transition: opacity 160ms ease;
       }
 
-      .vj-knob {
-        position: fixed;
-        z-index: 6;
-        width: 112px;
-        height: 112px;
-        margin-left: -56px;
-        margin-top: -56px;
+      .virtual-stick.is-active {
+        opacity: 1;
+      }
+
+      .virtual-stick__base {
+        position: absolute;
+        inset: 0;
         border-radius: 50%;
-        background: radial-gradient(circle at 30% 30%, #f0f6ff, #8fb4ff 55%, #3a5fae 100%);
-        border: 1px solid rgba(198, 220, 255, 0.5);
-        box-shadow: 0 16px 40px rgba(8, 15, 32, 0.52), 0 0 0 3px rgba(110, 156, 232, 0.18) inset;
-        opacity: 0;
-        transition: opacity 140ms ease;
-        pointer-events: none;
+        background: radial-gradient(
+          circle at 50% 50%,
+          rgba(255, 255, 255, 0.22),
+          rgba(255, 255, 255, 0.08)
+        );
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.25) inset;
+      }
+
+      .virtual-stick__thumb {
+        position: absolute;
+        width: 72px;
+        height: 72px;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 30% 30%,
+          rgba(255, 255, 255, 0.9),
+          rgba(255, 255, 255, 0.55)
+        );
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
       }
 
       .canvas-actions {
