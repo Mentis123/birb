@@ -47,21 +47,31 @@ export class VirtualStick {
         y: options.axis?.y ?? defaultOptions.axis.y,
       },
     };
+
     this.activePointerId = null;
     this.currentPointerId = null;
     this.pointerType = null;
     this.center = { x: 0, y: 0 };
     this.value = { x: 0, y: 0, active: false };
 
-    this.ring = document.createElement('div');
-    this.ring.className = 'vj-ring';
-    this.knob = document.createElement('div');
-    this.knob.className = 'vj-knob';
-
-    document.body.append(this.ring, this.knob);
-
     this.listenerOptions = { passive: false };
     this.config.radius = Math.max(1, Number.isFinite(this.config.radius) ? this.config.radius : 80);
+
+    this.container = document.createElement('div');
+    this.container.className = 'virtual-stick';
+    this.container.style.width = `${this.config.radius * 2}px`;
+    this.container.style.height = `${this.config.radius * 2}px`;
+
+    this.base = document.createElement('div');
+    this.base.className = 'virtual-stick__base';
+
+    this.thumb = document.createElement('div');
+    this.thumb.className = 'virtual-stick__thumb';
+
+    this.container.append(this.base, this.thumb);
+    document.body.append(this.container);
+    this.hideTimeout = null;
+    this.hide();
 
     this.zone.addEventListener('pointerdown', this.handlePointerDown, this.listenerOptions);
     window.addEventListener('pointermove', this.handlePointerMove, this.listenerOptions);
@@ -71,17 +81,40 @@ export class VirtualStick {
   }
 
   show(x, y) {
-    this.ring.style.left = `${x}px`;
-    this.ring.style.top = `${y}px`;
-    this.knob.style.left = `${x}px`;
-    this.knob.style.top = `${y}px`;
-    this.ring.style.opacity = '1';
-    this.knob.style.opacity = '1';
+    if (this.hideTimeout !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.hideTimeout);
+      this.hideTimeout = null;
+    }
+    this.container.style.left = `${x}px`;
+    this.container.style.top = `${y}px`;
+    this.container.style.display = 'block';
+    const activate = () => this.container.classList.add('is-active');
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(activate);
+    } else if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(activate);
+    } else {
+      activate();
+    }
+    this.thumb.style.transform = 'translate(-50%, -50%)';
   }
 
   hide() {
-    this.ring.style.opacity = '0';
-    this.knob.style.opacity = '0';
+    this.container.classList.remove('is-active');
+    if (this.hideTimeout !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.hideTimeout);
+      this.hideTimeout = null;
+    }
+    const completeHide = () => {
+      this.container.style.display = 'none';
+      this.hideTimeout = null;
+    };
+    if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+      this.hideTimeout = window.setTimeout(completeHide, 160);
+    } else {
+      completeHide();
+    }
+    this.thumb.style.transform = 'translate(-50%, -50%)';
   }
 
   update(x, y, active, overrides = {}) {
@@ -122,13 +155,16 @@ export class VirtualStick {
   }
 
   destroy() {
+    if (this.hideTimeout !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.hideTimeout);
+      this.hideTimeout = null;
+    }
     this.reset();
     this.zone.removeEventListener('pointerdown', this.handlePointerDown, this.listenerOptions);
     window.removeEventListener('pointermove', this.handlePointerMove, this.listenerOptions);
     window.removeEventListener('pointerup', this.handlePointerUp, this.listenerOptions);
     window.removeEventListener('pointercancel', this.handlePointerUp, this.listenerOptions);
-    this.ring.remove();
-    this.knob.remove();
+    this.container.remove();
   }
 
   handlePointerDown = (event) => {
@@ -157,8 +193,9 @@ export class VirtualStick {
     const scale = distance > maxDistance ? maxDistance / distance : 1;
     const clampedDx = dx * scale;
     const clampedDy = dy * scale;
-    this.knob.style.left = `${this.center.x + clampedDx}px`;
-    this.knob.style.top = `${this.center.y + clampedDy}px`;
+    const offsetX = clampedDx;
+    const offsetY = clampedDy;
+    this.thumb.style.transform = `translate(calc(-50% + ${offsetX}px), calc(-50% + ${offsetY}px))`;
     const normalizedX = (clampedDx / maxDistance) * (this.config.axis?.x ?? 1);
     const normalizedY = (clampedDy / maxDistance) * (this.config.axis?.y ?? 1);
     this.update(normalizedX, normalizedY, true, { pointerId: this.activePointerId });
