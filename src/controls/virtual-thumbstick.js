@@ -55,6 +55,9 @@ export class VirtualStick {
     this.value = { x: 0, y: 0, active: false };
 
     this.listenerOptions = { passive: false };
+    this.handleContextMenu = (event) => {
+      event.preventDefault();
+    };
     this.config.radius = Math.max(1, Number.isFinite(this.config.radius) ? this.config.radius : 80);
 
     this.container = document.createElement('div');
@@ -78,6 +81,13 @@ export class VirtualStick {
     window.addEventListener('pointerup', this.handlePointerUp, this.listenerOptions);
     window.addEventListener('pointercancel', this.handlePointerUp, this.listenerOptions);
     this.zone.style.touchAction = 'none';
+    this.zone.style.setProperty('user-select', 'none');
+    this.zone.style.setProperty('-webkit-user-select', 'none');
+    this.zone.style.setProperty('-webkit-touch-callout', 'none');
+    this.container.style.setProperty('-webkit-user-select', 'none');
+    this.container.style.setProperty('user-select', 'none');
+    this.container.addEventListener('contextmenu', this.handleContextMenu);
+    this.zone.addEventListener('contextmenu', this.handleContextMenu);
   }
 
   show(x, y) {
@@ -164,6 +174,8 @@ export class VirtualStick {
     window.removeEventListener('pointermove', this.handlePointerMove, this.listenerOptions);
     window.removeEventListener('pointerup', this.handlePointerUp, this.listenerOptions);
     window.removeEventListener('pointercancel', this.handlePointerUp, this.listenerOptions);
+    this.container.removeEventListener('contextmenu', this.handleContextMenu);
+    this.zone.removeEventListener('contextmenu', this.handleContextMenu);
     this.container.remove();
   }
 

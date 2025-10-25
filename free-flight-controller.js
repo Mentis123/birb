@@ -290,20 +290,28 @@ export class FreeFlightController {
     }
 
     const acceleration = this._acceleration.set(0, 0, 0);
-    acceleration.addScaledVector(forward, smoothed.forward);
-    acceleration.addScaledVector(up, smoothed.lift);
-
-    if (acceleration.lengthSq() > 1) {
-      acceleration.normalize();
-    }
+    const forwardInput = clamp(smoothed.forward, -1, 1, 0);
+    const liftInput = clamp(smoothed.lift, -1, 1, 0);
 
     const hasTranslationInput =
-      Math.abs(smoothed.forward) > 1e-3 ||
-      Math.abs(smoothed.lift) > 1e-3;
+      Math.abs(forwardInput) > 1e-3 ||
+      Math.abs(liftInput) > 1e-3;
 
-    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.getEffectiveThrottle());
+    const effectiveAcceleration = MOVEMENT_ACCELERATION * this.getEffectiveThrottle();
 
-    this.velocity.addScaledVector(acceleration, deltaTime);
+    if (Math.abs(forwardInput) > 1e-3) {
+      acceleration.addScaledVector(forward, forwardInput);
+      if (acceleration.lengthSq() > 1) {
+        acceleration.normalize();
+      }
+      acceleration.multiplyScalar(effectiveAcceleration);
+      this.velocity.addScaledVector(acceleration, deltaTime);
+    }
+
+    if (Math.abs(liftInput) > 1e-3) {
+      const liftAcceleration = liftInput * effectiveAcceleration;
+      this.velocity.addScaledVector(up, liftAcceleration * deltaTime);
+    }
 
     const dragMultiplier = Math.exp(-LINEAR_DRAG * deltaTime);
     this.velocity.multiplyScalar(dragMultiplier);
