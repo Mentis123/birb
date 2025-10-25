@@ -253,7 +253,9 @@ export class FreeFlightController {
       // Apply a gentle yaw response so horizontal thrust becomes a smooth turn
       // instead of a sharp strafe.
       const yawInput = clamp(smoothed.strafe, -1, 1, 0);
-      const yawAngle = yawInput * this.turnSpeed * deltaTime;
+      // Negative sign keeps a positive strafe input yawing the bird to the right
+      // to match the on-screen joystick direction.
+      const yawAngle = -yawInput * this.turnSpeed * deltaTime;
       if (Math.abs(yawAngle) > 1e-6) {
         this._yawQuaternion.setFromAxisAngle(up, yawAngle);
         this.lookQuaternion.premultiply(this._yawQuaternion);
