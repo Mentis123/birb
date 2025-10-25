@@ -74,6 +74,8 @@ export function createFlightControls({
     leftStick: false,
   };
 
+  let externalSprint = false;
+
   const analogLookState = {
     x: 0,
     y: 0,
@@ -120,7 +122,7 @@ export function createFlightControls({
   };
 
   const updateSprintState = () => {
-    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick));
+    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick || externalSprint));
   };
 
   const updateKeyboardAxes = () => {
@@ -334,6 +336,7 @@ export function createFlightControls({
 
     sprintSources.keyboard = false;
     sprintSources.leftStick = false;
+    externalSprint = false;
     updateSprintState();
 
     analogLookState.x = 0;
@@ -403,5 +406,9 @@ export function createFlightControls({
     applyAnalogLook,
     reset: resetInputs,
     dispose,
+    setSprintOverride(isActive) {
+      externalSprint = Boolean(isActive);
+      updateSprintState();
+    },
   };
 }
