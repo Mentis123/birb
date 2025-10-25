@@ -177,10 +177,20 @@ export function createFlightControls({
   const handleLeftStickChange = (value, context = {}) => {
     const forward = clamp(-value.y, -1, 1);
     const strafe = clamp(value.x, -1, 1);
+
+    let lift = 0;
+    if (forward > 0) {
+      const climb = Math.min(1, forward * 1.2);
+      lift = Math.pow(climb, 1.22) * 0.9;
+    } else if (forward < 0) {
+      const dive = Math.min(1, -forward);
+      lift = -Math.pow(dive, 1.12) * 0.6;
+    }
+
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-    axisSources.leftStick.lift = 0;
+    axisSources.leftStick.lift = clamp(lift, -1, 1);
 
     const pointerType = context.pointerType ?? null;
     if (pointerType === 'touch') {
