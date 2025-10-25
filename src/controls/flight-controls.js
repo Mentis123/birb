@@ -445,7 +445,9 @@ export function createFlightControls({
     }
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
     const lookX = analogLookState.x;
-    const lookY = -analogLookState.y;
+    // Vertical orientation is already handled when writing analogLookState.y, so
+    // pass it through unchanged to keep up-input pitching the camera upward.
+    const lookY = analogLookState.y;
     if (lookX === 0 && lookY === 0) {
       return;
     }
