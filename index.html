@@ -1168,8 +1168,11 @@
       const birbAnchor = new THREE.Group();
       scene.add(birbAnchor);
 
+      const birbRig = new THREE.Group();
+      birbAnchor.add(birbRig);
+
       const birbModel = new THREE.Group();
-      birbAnchor.add(birbModel);
+      birbRig.add(birbModel);
 
       // Align the sculpted bird (modeled along the +X axis) with the
       // controller's forward vector (-Z) so the beak points in the direction of
@@ -1482,13 +1485,39 @@
       });
 
       birbModel.updateMatrixWorld(true);
-      const birbBounds = new THREE.Box3().setFromObject(birbModel);
       const birbCenter = new THREE.Vector3();
-      birbBounds.getCenter(birbCenter);
+      const birbVertex = new THREE.Vector3();
+      let vertexCount = 0;
+
+      // Accumulate the average world-space vertex position so the pivot aligns
+      // with the bird's geometry instead of the bounds center.
+      birbModel.traverse((child) => {
+        if (!child.isMesh) {
+          return;
+        }
+        const positionAttribute = child.geometry?.attributes?.position;
+        if (!positionAttribute) {
+          return;
+        }
+        for (let index = 0; index < positionAttribute.count; index += 1) {
+          birbVertex.fromBufferAttribute(positionAttribute, index);
+          child.localToWorld(birbVertex);
+          birbCenter.add(birbVertex);
+        }
+        vertexCount += positionAttribute.count;
+      });
+
+      if (vertexCount > 0) {
+        birbCenter.multiplyScalar(1 / vertexCount);
+        birbModel.worldToLocal(birbCenter);
+      } else {
+        new THREE.Box3().setFromObject(birbModel).getCenter(birbCenter);
+      }
+
       // Re-center the bird so yaw/roll rotations pivot around its body instead
       // of an offset point in space.
       birbModel.position.sub(birbCenter);
-      birbAnchor.scale.setScalar(0.52);
+      birbRig.scale.setScalar(0.52);
 
       const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
       const motionState = {
@@ -2352,11 +2381,11 @@
         const ambientOffsets = flightController.getAmbientOffsets();
 
         birbAnchor.position.copy(pose.position).add(ambientOffsets.position);
-        birbAnchor.quaternion.copy(pose.quaternion);
-        birbAnchor.quaternion.multiply(modelOrientationOffset);
+        birbRig.quaternion.copy(pose.quaternion);
+        birbRig.quaternion.multiply(modelOrientationOffset);
         blendedQuaternion.copy(ambientOffsets.quaternion);
-        birbAnchor.quaternion.multiply(blendedQuaternion);
-        birbAnchor.quaternion.normalize();
+        birbRig.quaternion.multiply(blendedQuaternion);
+        birbRig.quaternion.normalize();
 
         if (glideTrail) {
           glideTrail.rotation.z = motionState.elapsed * 0.32;
