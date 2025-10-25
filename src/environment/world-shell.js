@@ -67,6 +67,132 @@ function createScatterGroup(THREE, {
   return group;
 }
 
+function buildMountainEnvironment({ THREE, root, propOrigin, terrainScale, spaceScale }) {
+  const peakMaterial = new THREE.MeshStandardMaterial({
+    color: 0x3a4f66,
+    roughness: 0.76,
+    metalness: 0.08,
+    flatShading: true,
+  });
+  const peakGeometry = new THREE.ConeGeometry(1.2, 3.2, 7);
+  const peakGroup = new THREE.Group();
+  const peakCount = 12;
+  for (let i = 0; i < peakCount; i += 1) {
+    const peak = new THREE.Mesh(peakGeometry, peakMaterial);
+    const angle = (i / peakCount) * Math.PI * 2 + randomInRange(-0.25, 0.25);
+    const radius = terrainScale * (0.68 + Math.random() * 0.28);
+    peak.position.set(
+      Math.cos(angle) * radius,
+      -6.2 * spaceScale - Math.random() * 2.2,
+      Math.sin(angle) * radius,
+    );
+    const scale = 4.6 + Math.random() * 3.2;
+    peak.scale.set(scale, 2.6 + Math.random() * 1.8, scale * (0.8 + Math.random() * 0.4));
+    peak.rotation.y = randomInRange(0, Math.PI * 2);
+    peakGroup.add(peak);
+  }
+  peakGroup.position.y = -9.4;
+  root.add(peakGroup);
+
+  const snowMaterial = new THREE.MeshStandardMaterial({
+    color: 0xdfe9f6,
+    roughness: 0.34,
+    metalness: 0.12,
+    emissive: 0x1b2734,
+    emissiveIntensity: 0.16,
+    transparent: true,
+    opacity: 0.68,
+  });
+  const snowShelf = new THREE.Mesh(
+    new THREE.CylinderGeometry(propOrigin * 0.42, propOrigin * 0.58, 0.5, 42, 1, true),
+    snowMaterial,
+  );
+  snowShelf.rotation.x = Math.PI;
+  snowShelf.position.y = -0.28;
+  root.add(snowShelf);
+
+  const pinePrototype = new THREE.Group();
+  const pineTrunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.08, 0.52, 6),
+    new THREE.MeshStandardMaterial({
+      color: 0x2f2621,
+      roughness: 0.72,
+      metalness: 0.05,
+    }),
+  );
+  pineTrunk.position.y = 0.26;
+  pinePrototype.add(pineTrunk);
+  const pineCanopy = new THREE.Mesh(
+    new THREE.ConeGeometry(0.34, 0.92, 9),
+    new THREE.MeshStandardMaterial({
+      color: 0x1f4d36,
+      emissive: 0x0b2118,
+      emissiveIntensity: 0.18,
+      roughness: 0.52,
+      metalness: 0.06,
+    }),
+  );
+  pineCanopy.position.y = 0.62;
+  pinePrototype.add(pineCanopy);
+
+  const pineGroup = createScatterGroup(THREE, {
+    count: 32,
+    baseObject: pinePrototype,
+    radiusRange: [propOrigin * 0.48, propOrigin * 1.12],
+    heightRange: [-0.46, 0.54],
+    scaleRange: [0.85, 1.45],
+    tiltRange: [-6, 6],
+    yawJitter: Math.PI,
+  });
+  pineGroup.position.y = -0.2;
+  root.add(pineGroup);
+
+  const rockPrototype = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(0.26, 0),
+    new THREE.MeshStandardMaterial({
+      color: 0x546676,
+      roughness: 0.68,
+      metalness: 0.08,
+    }),
+  );
+  rockPrototype.scale.set(1.4, 0.7, 1.1);
+  const rockGroup = createScatterGroup(THREE, {
+    count: 26,
+    baseObject: rockPrototype,
+    radiusRange: [propOrigin * 0.38, propOrigin * 1.05],
+    heightRange: [-0.52, -0.34],
+    scaleRange: [0.9, 1.8],
+    tiltRange: [-8, 8],
+  });
+  root.add(rockGroup);
+
+  const cloudMaterial = new THREE.MeshStandardMaterial({
+    color: 0xf3f9ff,
+    roughness: 0.42,
+    metalness: 0.1,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+  });
+  const cloudGeometry = new THREE.SphereGeometry(1, 18, 14);
+  const cloudGroup = new THREE.Group();
+  const cloudCount = 6;
+  for (let i = 0; i < cloudCount; i += 1) {
+    const cloud = new THREE.Mesh(cloudGeometry, cloudMaterial);
+    const angle = (i / cloudCount) * Math.PI * 2 + randomInRange(-0.2, 0.2);
+    const radius = propOrigin * randomInRange(0.52, 0.78);
+    cloud.position.set(
+      Math.cos(angle) * radius,
+      randomInRange(1.2, 1.9),
+      Math.sin(angle) * radius,
+    );
+    const scale = randomInRange(1.1, 1.7);
+    cloud.scale.set(scale * 1.6, scale, scale * 1.4);
+    cloudGroup.add(cloud);
+  }
+  root.add(cloudGroup);
+}
+
 function disposeWorld(scene, root) {
   if (!root) return;
   scene.remove(root);
@@ -490,6 +616,36 @@ function buildCityEnvironment({ THREE, root, propOrigin, terrainScale }) {
 }
 
 const ENVIRONMENT_VARIANTS = [
+  {
+    id: "mountain",
+    label: "Mountain",
+    spaceScale: 3.2,
+    propSpread: 6.4,
+    terrainScale: 124,
+    backgroundColor: 0x0a1626,
+    fogColor: 0x0e2234,
+    fogNear: 22,
+    fogFar: 170,
+    sky: { top: 0x6aa0d9, bottom: 0x081425, glow: 0.32 },
+    hazeColor: 0x122638,
+    hazeLayers: [
+      { radius: 46, height: 26, opacity: 0.19 },
+      { radius: 60, height: 30, opacity: 0.15 },
+      { radius: 74, height: 34, opacity: 0.12 },
+    ],
+    groundColor: 0x102233,
+    floor: { color: 0x1a3a4a, opacity: 0.84 },
+    trail: { color: 0x65c6ff, opacity: 0.48 },
+    anchor: { color: 0x264866, opacity: 0.92 },
+    lighting: {
+      ambient: { sky: 0xd6ecff, ground: 0x162530, intensity: 1.02 },
+      key: { color: 0xf0f7ff, intensity: 1.28, position: [7.8, 9.2, 6.1] },
+      rim: { color: 0x6dc2ff, intensity: 0.54, position: [-6.6, 5.3, -5.2] },
+      fill: { color: 0x9bd4ff, intensity: 0.4, position: [1.6, 3.5, -6.4] },
+      glow: { color: 0x76d8ff, intensity: 1.45, distance: 14, decay: 2.2, position: [0.4, 2.1, 0.6] },
+    },
+    builder: buildMountainEnvironment,
+  },
   {
     id: "forest",
     label: "Forest",

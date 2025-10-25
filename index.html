@@ -108,6 +108,36 @@
         opacity: 0.7;
       }
 
+      .control-subheading {
+        margin: 0;
+        font-size: 0.62rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.62;
+      }
+
+      .control-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .control-button-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+      }
+
+      .control-button.is-active {
+        box-shadow: inset 0 0 0 1px rgba(132, 176, 255, 0.8), 0 10px 20px rgba(10, 18, 40, 0.55);
+        border-color: rgba(206, 230, 255, 0.78);
+        background: linear-gradient(135deg, rgba(86, 126, 204, 0.72), rgba(32, 54, 108, 0.95));
+      }
+
+      .control-button[data-action] {
+        white-space: nowrap;
+      }
+
       .control-button {
         appearance: none;
         border: 1px solid rgba(176, 209, 255, 0.36);
@@ -703,8 +733,59 @@
                     60%
                   </output>
                 </div>
+                <div class="control-section">
+                  <h3 class="control-subheading">Joystick Modes</h3>
+                  <div class="control-button-group" role="group" aria-label="Select movement mode">
+                    <button
+                      type="button"
+                      class="control-button"
+                      data-movement-mode="glide"
+                      aria-pressed="false"
+                    >
+                      Glide
+                    </button>
+                    <button
+                      type="button"
+                      class="control-button"
+                      data-movement-mode="fly"
+                      aria-pressed="false"
+                    >
+                      Fly
+                    </button>
+                    <button
+                      type="button"
+                      class="control-button"
+                      data-movement-mode="walk"
+                      aria-pressed="false"
+                    >
+                      Walk
+                    </button>
+                  </div>
+                </div>
+                <div class="control-section">
+                  <h3 class="control-subheading">Movement Actions</h3>
+                  <div class="control-button-group" role="group" aria-label="Movement actions">
+                    <button
+                      type="button"
+                      class="control-button"
+                      data-action="boost"
+                      aria-pressed="false"
+                      title="Hold to boost speed or run"
+                    >
+                      Hold Boost / Run
+                    </button>
+                    <button
+                      type="button"
+                      class="control-button"
+                      data-action="jump"
+                      title="Tap to jump while walking"
+                    >
+                      Jump
+                    </button>
+                  </div>
+                </div>
                 <button type="button" class="control-button" data-control="environment">
-                  Environment: Forest
+                  Environment: Mountain
                 </button>
                 <button type="button" class="control-button" data-control="reset">
                   Reset Camera
@@ -719,11 +800,15 @@
                     <span class="control-metrics__value" data-metric="throttle">60%</span>
                   </div>
                   <div class="control-metrics__row">
+                    <span class="control-metrics__label">Mode</span>
+                    <span class="control-metrics__value" data-metric="mode">Glide</span>
+                  </div>
+                  <div class="control-metrics__row">
                     <span class="control-metrics__label">FPS</span>
                     <span class="control-metrics__value" data-metric="fps">--</span>
                   </div>
                   <p class="control-metrics__note" data-metric="status">
-                    Ready for free flight. Use the left stick to move and the right stick to look.
+                    Ready for free flight. Use the left stick as a joystick and the right stick to look.
                   </p>
                 </div>
               </div>
@@ -789,7 +874,7 @@
                   d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25"
                 />
               </svg>
-              <span class="visually-hidden" data-environment-label>Environment: Forest</span>
+              <span class="visually-hidden" data-environment-label>Environment: Mountain</span>
             </button>
             <button
               type="button"
@@ -1521,6 +1606,11 @@
       const throttleMetric = document.querySelector('[data-metric="throttle"]');
       const fpsMetric = document.querySelector('[data-metric="fps"]');
       const statusMetric = document.querySelector('[data-metric="status"]');
+      const modeMetric = document.querySelector('[data-metric="mode"]');
+      const movementModeButtons = Array.from(document.querySelectorAll('[data-movement-mode]'));
+      const boostButton = document.querySelector('[data-action="boost"]');
+      const jumpButton = document.querySelector('[data-action="jump"]');
+      const liftButtonElements = Array.from(document.querySelectorAll('[data-lift-button]'));
       const panelToggleLabel = panelToggleButton
         ? panelToggleButton.querySelector('[data-settings-label]')
         : null;
@@ -1535,6 +1625,20 @@
         : null;
 
       const initialThrottle = clampThrottle(Number.parseFloat(glideSpeedInput?.value ?? ""));
+
+      const throttleState = { userOverride: false };
+      const movementState = {
+        mode: "glide",
+        boostActive: false,
+        actionMessage: null,
+        actionMessageUntil: 0,
+      };
+
+      const MOVEMENT_MODE_PRESETS = {
+        glide: { label: "Glide", throttle: Number.isFinite(initialThrottle) ? initialThrottle : 0.6 },
+        fly: { label: "Fly", throttle: 0.82 },
+        walk: { label: "Walk", throttle: 0.45 },
+      };
 
       const controlState = {
         manuallyPaused: false,
@@ -1582,6 +1686,10 @@
         }
       }
 
+      function getMovementModeLabel(mode) {
+        return MOVEMENT_MODE_PRESETS[mode]?.label ?? mode;
+      }
+
       function updateViewToggleUi(mode = cameraState?.getMode?.()) {
         if (!viewToggleButton) return;
         const modeLabel = getCameraModeLabel(mode);
@@ -1604,11 +1712,31 @@
         if (throttleMetric) {
           throttleMetric.textContent = `${throttlePercent}%`;
         }
+        if (modeMetric) {
+          modeMetric.textContent = getMovementModeLabel(movementState.mode);
+        }
         if (statusMetric) {
-          if (controlState.systemPaused) {
+          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+          const hasActionMessage =
+            typeof movementState.actionMessage === "string" && now < movementState.actionMessageUntil;
+          if (!hasActionMessage && movementState.actionMessage) {
+            movementState.actionMessage = null;
+          }
+
+          if (hasActionMessage) {
+            statusMetric.textContent = movementState.actionMessage;
+          } else if (controlState.systemPaused) {
             statusMetric.textContent = "Motion paused via system preference";
           } else if (!motionState.animate) {
             statusMetric.textContent = "Flight paused";
+          } else if (movementState.mode === "walk") {
+            if (flightController.isSprinting) {
+              statusMetric.textContent = "Running boost engaged";
+            } else if (typeof flightController.isGrounded === "function" && flightController.isGrounded()) {
+              statusMetric.textContent = "On foot — tap Jump to hop and hold Boost to run.";
+            } else {
+              statusMetric.textContent = "Airborne — steer to glide back down.";
+            }
           } else if (flightController.isSprinting) {
             statusMetric.textContent = "Speed boost engaged";
           } else if (safeSpeed < 0.25) {
@@ -1622,8 +1750,9 @@
             const environmentMessage = environmentState.label
               ? `the ${environmentState.label} environment`
               : "this environment";
+            const movementLabel = getMovementModeLabel(movementState.mode);
             statusMetric.textContent =
-              `Exploring ${environmentMessage}. (${modeLabel} — ${instruction})`;
+              `Exploring ${environmentMessage}. (${modeLabel} — ${instruction} · ${movementLabel})`;
           }
         }
       }
@@ -1989,29 +2118,224 @@
         flightController,
         leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
         rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
-        liftButtonElements: Array.from(document.querySelectorAll('[data-lift-button]')),
+        liftButtonElements,
         getCameraMode: () => cameraState?.getMode?.(),
         followMode: CAMERA_MODES.FOLLOW,
         onSprintChange: () => updateControlMetrics(),
         onThrustChange: () => updateControlMetrics(),
       });
 
-      const applyThrottleFromInput = () => {
-        if (!glideSpeedInput) return;
-        const value = clampThrottle(Number.parseFloat(glideSpeedInput.value));
-        flightController.setThrottle(value);
-        updateGlideSpeedDisplay(value);
+      function setThrottle(value, { updateInput = true, isUserOverride = false } = {}) {
+        const clamped = clampThrottle(Number.parseFloat(value));
+        flightController.setThrottle(clamped);
+        updateGlideSpeedDisplay(clamped);
+        if (glideSpeedInput && updateInput) {
+          glideSpeedInput.value = `${clamped}`;
+        }
+        throttleState.userOverride = Boolean(isUserOverride);
         updateControlMetrics();
-      };
+      }
+
+      function applyThrottleFromInput(isUserEvent = false) {
+        if (!glideSpeedInput) return;
+        setThrottle(glideSpeedInput.value, { updateInput: false, isUserOverride: isUserEvent });
+      }
 
       if (glideSpeedInput) {
-        updateGlideSpeedDisplay(initialThrottle);
-        glideSpeedInput.value = `${initialThrottle}`;
-        glideSpeedInput.addEventListener("input", applyThrottleFromInput);
-        glideSpeedInput.addEventListener("change", applyThrottleFromInput);
+        setThrottle(initialThrottle, { updateInput: true, isUserOverride: false });
+        glideSpeedInput.addEventListener("input", () => applyThrottleFromInput(true));
+        glideSpeedInput.addEventListener("change", () => applyThrottleFromInput(true));
       } else {
         updateGlideSpeedDisplay(initialThrottle);
       }
+
+      function setLiftButtonsDisabled(disabled) {
+        liftButtonElements.forEach((button) => {
+          if (!button) return;
+          if (disabled) {
+            button.setAttribute("disabled", "true");
+          } else {
+            button.removeAttribute("disabled");
+          }
+        });
+      }
+
+      function updateBoostButtonUi() {
+        if (!boostButton) return;
+        const active = movementState.boostActive;
+        const isWalkMode = movementState.mode === "walk";
+        boostButton.setAttribute("aria-pressed", active ? "true" : "false");
+        const idleLabel = "Hold Boost / Run";
+        const activeLabel = isWalkMode ? "Running…" : "Boosting…";
+        boostButton.textContent = active ? activeLabel : idleLabel;
+        boostButton.title = isWalkMode ? "Hold to run faster" : "Hold to boost speed";
+        boostButton.setAttribute(
+          "aria-label",
+          active ? (isWalkMode ? "Running" : "Boosting") : isWalkMode ? "Hold to run" : "Hold to boost",
+        );
+      }
+
+      function updateMovementModeUi() {
+        movementModeButtons.forEach((button) => {
+          if (!button) return;
+          const mode = button.dataset?.movementMode;
+          const isActive = mode === movementState.mode;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-pressed", isActive ? "true" : "false");
+        });
+        updateBoostButtonUi();
+      }
+
+      function showMovementMessage(message, duration = 2200) {
+        if (!message) return;
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        movementState.actionMessage = message;
+        movementState.actionMessageUntil = now + Math.max(0, duration);
+        updateControlMetrics();
+      }
+
+      function setBoostState(active) {
+        const next = Boolean(active);
+        if (movementState.boostActive === next) {
+          return;
+        }
+        movementState.boostActive = next;
+        if (typeof flightControls?.setSprintOverride === "function") {
+          flightControls.setSprintOverride(next);
+        } else {
+          flightController.setSprintActive(next);
+        }
+        updateBoostButtonUi();
+        if (next) {
+          showMovementMessage(
+            movementState.mode === "walk" ? "Running boost engaged." : "Boost engaged.",
+            1600,
+          );
+        }
+      }
+
+      function setMovementMode(mode, { userInitiated = false, applyPreset = userInitiated } = {}) {
+        let resolvedMode = mode;
+        if (typeof flightController.setMovementMode === "function") {
+          resolvedMode = flightController.setMovementMode(mode);
+        }
+        const controllerMode =
+          typeof flightController.getMovementMode === "function"
+            ? flightController.getMovementMode()
+            : resolvedMode;
+        movementState.mode = controllerMode;
+        setBoostState(false);
+        const isWalkMode = movementState.mode === "walk";
+        setLiftButtonsDisabled(isWalkMode);
+        if (jumpButton) {
+          if (isWalkMode) {
+            jumpButton.removeAttribute("disabled");
+          } else {
+            jumpButton.setAttribute("disabled", "true");
+          }
+        }
+
+        if (applyPreset) {
+          const preset = MOVEMENT_MODE_PRESETS[movementState.mode];
+          const shouldApplyPreset = isWalkMode || !throttleState.userOverride;
+          if (preset && shouldApplyPreset && typeof preset.throttle === "number") {
+            setThrottle(preset.throttle, { updateInput: true, isUserOverride: false });
+          }
+        }
+
+        updateMovementModeUi();
+        if (userInitiated) {
+          if (movementState.mode === "walk") {
+            showMovementMessage("Walk mode engaged — tap Jump or hold Boost to run.", 2600);
+          } else if (movementState.mode === "fly") {
+            showMovementMessage("Fly mode engaged — throttle up for powered flight.", 2400);
+          } else {
+            showMovementMessage("Glide mode engaged — smooth coasting with the joystick.", 2400);
+          }
+        } else {
+          updateControlMetrics();
+        }
+      }
+
+      setMovementMode(movementState.mode, { userInitiated: false, applyPreset: false });
+
+      movementModeButtons.forEach((button) => {
+        if (!button) return;
+        button.addEventListener("click", () => {
+          const mode = button.dataset?.movementMode;
+          if (!mode) return;
+          setMovementMode(mode, { userInitiated: true, applyPreset: true });
+        });
+      });
+
+      if (boostButton) {
+        const pointerListenerOptions = { passive: false };
+        const handleBoostDown = (event) => {
+          if (event) {
+            event.preventDefault();
+            if (typeof boostButton.setPointerCapture === "function") {
+              try {
+                boostButton.setPointerCapture(event.pointerId);
+              } catch (error) {
+                // Ignore pointer capture failures.
+              }
+            }
+          }
+          setBoostState(true);
+        };
+        const handleBoostEnd = (event) => {
+          if (event) {
+            if (
+              typeof boostButton.hasPointerCapture === "function" &&
+              boostButton.hasPointerCapture(event.pointerId) &&
+              typeof boostButton.releasePointerCapture === "function"
+            ) {
+              try {
+                boostButton.releasePointerCapture(event.pointerId);
+              } catch (error) {
+                // Ignore release failures.
+              }
+            }
+            event.preventDefault();
+          }
+          setBoostState(false);
+        };
+        boostButton.addEventListener("pointerdown", handleBoostDown, pointerListenerOptions);
+        ["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
+          boostButton.addEventListener(eventName, handleBoostEnd, pointerListenerOptions);
+        });
+        boostButton.addEventListener("keydown", (event) => {
+          if (event.code === "Space" || event.code === "Enter") {
+            event.preventDefault();
+            setBoostState(true);
+          }
+        });
+        boostButton.addEventListener("keyup", (event) => {
+          if (event.code === "Space" || event.code === "Enter") {
+            event.preventDefault();
+            setBoostState(false);
+          }
+        });
+      }
+
+      if (jumpButton) {
+        jumpButton.addEventListener("click", () => {
+          const jumped = typeof flightController.requestJump === "function"
+            ? flightController.requestJump()
+            : false;
+          if (jumped) {
+            showMovementMessage("Jump!", 1600);
+          } else if (movementState.mode === "walk") {
+            showMovementMessage("Already airborne — land to jump again.", 2000);
+          } else {
+            showMovementMessage("Jump is available in walk mode.", 2000);
+          }
+        });
+      }
+
+      window.addEventListener("blur", () => {
+        setBoostState(false);
+      });
 
       if (resetButton) {
         resetButton.addEventListener("click", () => {
@@ -2022,6 +2346,15 @@
           cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
           updateViewToggleUi(currentMode);
           flightControls.reset({ releasePointerLock: true });
+          setMovementMode(
+            typeof flightController.getMovementMode === "function"
+              ? flightController.getMovementMode()
+              : "glide",
+            { userInitiated: false, applyPreset: false },
+          );
+          setThrottle(initialThrottle, { updateInput: true, isUserOverride: false });
+          movementState.actionMessage = null;
+          movementState.actionMessageUntil = 0;
           updateControlMetrics();
         });
       }
