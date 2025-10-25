@@ -71,8 +71,13 @@ export function createFlightControls({
 
   const sprintSources = {
     keyboard: false,
-    leftStick: false,
+    touchStick: false,
+    analogStick: false,
   };
+
+  const touchPointers = new Set();
+  let primaryTouchPointerId = null;
+  let touchStickActive = false;
 
   let externalSprint = false;
 
@@ -92,6 +97,7 @@ export function createFlightControls({
   let sprintActive = false;
 
   const pointerListenerOptions = { passive: false };
+  const globalTouchListenerOptions = { passive: true };
 
   const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
@@ -122,7 +128,24 @@ export function createFlightControls({
   };
 
   const updateSprintState = () => {
-    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick || externalSprint));
+    setSprintActive(
+      Boolean(
+        sprintSources.keyboard || sprintSources.touchStick || sprintSources.analogStick || externalSprint
+      )
+    );
+  };
+
+  const updateTouchSprintState = () => {
+    if (!touchStickActive) {
+      sprintSources.touchStick = false;
+      updateSprintState();
+      return;
+    }
+    const hasPrimary =
+      primaryTouchPointerId !== null && touchPointers.has(primaryTouchPointerId);
+    const additionalTouches = hasPrimary ? touchPointers.size - 1 : touchPointers.size;
+    sprintSources.touchStick = Boolean(hasPrimary && additionalTouches > 0);
+    updateSprintState();
   };
 
   const updateKeyboardAxes = () => {
@@ -160,17 +183,28 @@ export function createFlightControls({
     axisSources.leftStick.lift = 0;
 
     const pointerType = context.pointerType ?? null;
-    const magnitudeForSprint = clamp(
-      pointerType === 'touch'
-        ? context.rawMagnitude ?? Math.hypot(value.x, value.y)
-        : context.magnitude ?? Math.hypot(value.x, value.y),
-      0,
-      1
-    );
-    sprintSources.leftStick = Boolean(
-      context.isActive && pointerType === 'touch' && magnitudeForSprint >= effectiveTouchSprintThreshold
-    );
-    updateSprintState();
+    if (pointerType === 'touch') {
+      touchStickActive = Boolean(context.isActive);
+      const pointerId = typeof context.pointerId === 'number' ? context.pointerId : null;
+      if (touchStickActive && pointerId !== null) {
+        primaryTouchPointerId = pointerId;
+        touchPointers.add(pointerId);
+      } else if (!touchStickActive && pointerId !== null && primaryTouchPointerId === pointerId) {
+        primaryTouchPointerId = null;
+      }
+      updateTouchSprintState();
+    } else {
+      touchStickActive = false;
+      const magnitudeForSprint = clamp(
+        context.magnitude ?? Math.hypot(value.x, value.y),
+        0,
+        1
+      );
+      sprintSources.analogStick = Boolean(
+        context.isActive && magnitudeForSprint >= effectiveTouchSprintThreshold
+      );
+      updateSprintState();
+    }
     applyThrustInput();
   };
 
@@ -189,26 +223,56 @@ export function createFlightControls({
   };
 
   const leftThumbstick =
-    createThumbstick(leftThumbstickElement, {
-      deadzone: 0.15,
-      onChange: handleLeftStickChange,
-    }) ??
-    createFloatingThumbstick(leftThumbstickElement, {
-      deadzone: 0.15,
-      expo: 0.32,
-      onChange: handleLeftStickChange,
-    });
+    (leftThumbstickElement &&
+      (createThumbstick(leftThumbstickElement, {
+        deadzone: 0.15,
+        onChange: handleLeftStickChange,
+      }) ||
+        createFloatingThumbstick(leftThumbstickElement, {
+          deadzone: 0.15,
+          expo: 0.32,
+          onChange: handleLeftStickChange,
+        }))) ||
+    null;
 
   const rightThumbstick =
-    createThumbstick(rightThumbstickElement, {
-      deadzone: 0.08,
-      onChange: handleRightStickChange,
-    }) ??
-    createFloatingThumbstick(rightThumbstickElement, {
-      deadzone: 0.08,
-      expo: 0.28,
-      onChange: handleRightStickChange,
-    });
+    (rightThumbstickElement &&
+      (createThumbstick(rightThumbstickElement, {
+        deadzone: 0.08,
+        onChange: handleRightStickChange,
+      }) ||
+        createFloatingThumbstick(rightThumbstickElement, {
+          deadzone: 0.08,
+          expo: 0.28,
+          onChange: handleRightStickChange,
+        }))) ||
+    null;
+
+  const handleGlobalTouchDown = (event) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+    touchPointers.add(event.pointerId);
+    if (!touchStickActive) {
+      return;
+    }
+    updateTouchSprintState();
+  };
+
+  const handleGlobalTouchEnd = (event) => {
+    if (event.pointerType !== 'touch') {
+      return;
+    }
+    touchPointers.delete(event.pointerId);
+    if (primaryTouchPointerId === event.pointerId) {
+      primaryTouchPointerId = null;
+      touchStickActive = false;
+    }
+    if (!touchStickActive) {
+      sprintSources.touchStick = false;
+    }
+    updateTouchSprintState();
+  };
 
   const handleLiftButtonDown = (event) => {
     event.preventDefault();
@@ -335,9 +399,14 @@ export function createFlightControls({
     applyThrustInput();
 
     sprintSources.keyboard = false;
-    sprintSources.leftStick = false;
+    sprintSources.touchStick = false;
+    sprintSources.analogStick = false;
     externalSprint = false;
     updateSprintState();
+
+    touchPointers.clear();
+    primaryTouchPointerId = null;
+    touchStickActive = false;
 
     analogLookState.x = 0;
     analogLookState.y = 0;
@@ -364,6 +433,12 @@ export function createFlightControls({
   }
   canvas.addEventListener('click', handleCanvasClick);
 
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', handleGlobalTouchDown, globalTouchListenerOptions);
+    window.addEventListener('pointerup', handleGlobalTouchEnd, globalTouchListenerOptions);
+    window.addEventListener('pointercancel', handleGlobalTouchEnd, globalTouchListenerOptions);
+  }
+
   const applyAnalogLook = (deltaTime = 0) => {
     if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
       return;
@@ -388,6 +463,11 @@ export function createFlightControls({
       document.removeEventListener('mousemove', handlePointerMove);
     }
     canvas.removeEventListener('click', handleCanvasClick);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pointerdown', handleGlobalTouchDown, globalTouchListenerOptions);
+      window.removeEventListener('pointerup', handleGlobalTouchEnd, globalTouchListenerOptions);
+      window.removeEventListener('pointercancel', handleGlobalTouchEnd, globalTouchListenerOptions);
+    }
     liftButtons.forEach((button) => {
       button.removeEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
       button.removeEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
