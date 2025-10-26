@@ -172,7 +172,21 @@ export function createFlightControls({
   };
 
   const updateKeyboardAxes = () => {
-    axisSources.keyboard.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
+    const movementMode = getMovementMode();
+    const isGlideMode = movementMode === 'glide';
+    const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+    const isFPV = currentCameraMode === 'FPV';
+
+    let forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
+
+    // Camera-aware keyboard controls for consistency
+    // FPV: W = pitch up (direct), S = pitch down
+    // Follow: W = dive (arcade), S = climb
+    if (!isGlideMode && !isFPV) {
+      forward = -forward; // Invert for follow/arcade mode
+    }
+
+    axisSources.keyboard.forward = forward;
     axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
     axisSources.keyboard.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
     axisSources.keyboard.roll = clamp(axisSources.keyboard.strafe * effectiveRollSensitivity, -1, 1);
@@ -202,21 +216,32 @@ export function createFlightControls({
     const movementMode = getMovementMode();
     const isGlideMode = movementMode === 'glide';
 
-    // NEW CONTROL SCHEME:
-    // - Vertical stick = pitch control (forward input controls pitch in physics)
-    // - Horizontal stick = turn/strafe
-    // - Lift is optional (from lift buttons or can be added here if needed)
+    // CAMERA-AWARE PITCH CONTROLS:
+    // FPV mode = Direct controls (like being in the cockpit)
+    //   - Push stick UP → nose UP → climb
+    //   - Push stick DOWN → nose DOWN → dive
+    //
+    // Follow/Third-person = Arcade controls (like controlling from outside)
+    //   - Push stick UP (back) → pull back → climb
+    //   - Push stick DOWN (forward) → push forward → dive
 
-    let forward = clamp(-value.y, -1, 1); // Negative Y = push forward = dive
+    const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+    const isFPV = currentCameraMode === 'FPV';
+
+    let forward = 0;
     let lift = 0;
 
     if (isGlideMode) {
       // In glide mode: vertical stick controls lift directly (altitude control)
       forward = 0;
       lift = clamp(-value.y, -1, 1);
+    } else if (isFPV) {
+      // FPV: Direct controls - stick up = nose up
+      forward = clamp(value.y, -1, 1); // Positive Y = push up = pitch up
+    } else {
+      // Follow/Arcade: Inverted - stick forward (down) = nose down
+      forward = clamp(-value.y, -1, 1); // Negative Y = push forward = dive
     }
-    // In FLY mode: forward input directly controls pitch (handled in physics)
-    // No auto-lift calculation - let the aerodynamics handle it!
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
