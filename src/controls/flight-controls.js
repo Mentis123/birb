@@ -88,6 +88,13 @@ export function createFlightControls({
     pointerType: null,
   };
 
+  const getMovementMode = () =>
+    typeof flightController.getMovementMode === 'function'
+      ? flightController.getMovementMode()
+      : null;
+
+  let lastMovementMode = getMovementMode();
+
   const touchLiftPresses = new Map();
   const liftButtons = Array.isArray(liftButtonElements)
     ? liftButtonElements.filter(Boolean)
@@ -105,8 +112,11 @@ export function createFlightControls({
   };
 
   const applyThrustInput = () => {
+    const movementMode = getMovementMode();
+    const isGlideMode = movementMode === 'glide';
+    lastMovementMode = movementMode;
     flightController.setThrustInput({
-      forward: combineAxis('forward'),
+      forward: isGlideMode ? 1 : combineAxis('forward'),
       strafe: combineAxis('strafe'),
       lift: combineAxis('lift'),
       roll: combineAxis('roll'),
@@ -114,6 +124,18 @@ export function createFlightControls({
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
     }
+  };
+
+  const syncMovementMode = () => {
+    const movementMode = getMovementMode();
+    if (movementMode === lastMovementMode) {
+      return;
+    }
+    lastMovementMode = movementMode;
+    if (movementMode === 'glide') {
+      axisSources.leftStick.forward = 0;
+    }
+    applyThrustInput();
   };
 
   const setSprintActive = (isActive) => {
@@ -175,11 +197,17 @@ export function createFlightControls({
   };
 
   const handleLeftStickChange = (value, context = {}) => {
-    const forward = clamp(-value.y, -1, 1);
     const strafe = clamp(value.x, -1, 1);
+    const movementMode = getMovementMode();
+    const isGlideMode = movementMode === 'glide';
 
+    let forward = clamp(-value.y, -1, 1);
     let lift = 0;
-    if (forward > 0) {
+
+    if (isGlideMode) {
+      forward = 0;
+      lift = clamp(-value.y, -1, 1);
+    } else if (forward > 0) {
       const climb = Math.min(1, forward * 1.2);
       lift = Math.pow(climb, 1.22) * 0.9;
     } else if (forward < 0) {
@@ -450,6 +478,7 @@ export function createFlightControls({
   }
 
   const applyAnalogLook = (deltaTime = 0) => {
+    syncMovementMode();
     if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
       return;
     }
