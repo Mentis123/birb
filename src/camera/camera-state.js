@@ -150,7 +150,7 @@ export function createCameraState({ three, scene, flightController }) {
       rotationDamping: 0.18,
     },
     [CAMERA_MODES.FOLLOW]: {
-      offset: new Vector3(0, 0.92, 2.2),
+      offset: new Vector3(0, 0.92, 1.8),
       positionDamping: 0.16,
       lookAtDamping: 0.24,
       rotationDamping: 0.2,
@@ -164,7 +164,7 @@ export function createCameraState({ three, scene, flightController }) {
     [CAMERA_MODES.SEQUENCE]: {
       anchorOffset: new Vector3(0, 0, 0),
       lookAtOffset: new Vector3(0, 0.66, 0),
-      orbitRadius: 4.85,
+      orbitRadius: 2.0,
       orbitSpeed: 0.18,
       verticalBias: 1.64,
       verticalAmplitude: 0.42,
