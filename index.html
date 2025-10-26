@@ -1191,10 +1191,10 @@
 
       // Align the sculpted bird (modeled along the +X axis) with the
       // controller's forward vector (-Z) so the beak points in the direction of
-      // travel. The asset needs a clockwise quarter turn around the up axis to
-      // match the flight controller's orientation.
+      // travel. The asset needs a counterclockwise quarter turn around the up
+      // axis to match the flight controller's orientation.
       const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, -Math.PI / 2, 0)
+        new THREE.Euler(0, Math.PI / 2, 0)
       );
 
       const gltfLoader = new GLTFLoader();
@@ -1331,7 +1331,7 @@
 
       const throttleState = { userOverride: false };
       const movementState = {
-        mode: "glide",
+        mode: "walk",
         boostActive: false,
         actionMessage: null,
         actionMessageUntil: 0,
@@ -1339,7 +1339,7 @@
 
       const MOVEMENT_MODE_PRESETS = {
         glide: { label: "Glide", throttle: Number.isFinite(initialThrottle) ? initialThrottle : 0.6 },
-        fly: { label: "Fly", throttle: 0.82 },
+        fly: { label: "Fly", throttle: 0.3 },
         walk: { label: "Walk", throttle: 0.45 },
       };
 
