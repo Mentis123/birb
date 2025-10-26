@@ -172,7 +172,21 @@ export function createFlightControls({
   };
 
   const updateKeyboardAxes = () => {
-    axisSources.keyboard.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
+    const movementMode = getMovementMode();
+    const isGlideMode = movementMode === 'glide';
+    const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+    const isFPV = currentCameraMode === 'FPV';
+
+    let forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
+
+    // Camera-aware keyboard controls for consistency
+    // FPV: W = pitch up (direct), S = pitch down
+    // Follow: W = dive (arcade), S = climb
+    if (!isGlideMode && !isFPV) {
+      forward = -forward; // Invert for follow/arcade mode
+    }
+
+    axisSources.keyboard.forward = forward;
     axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
     axisSources.keyboard.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
     axisSources.keyboard.roll = clamp(axisSources.keyboard.strafe * effectiveRollSensitivity, -1, 1);
@@ -202,18 +216,31 @@ export function createFlightControls({
     const movementMode = getMovementMode();
     const isGlideMode = movementMode === 'glide';
 
-    let forward = clamp(-value.y, -1, 1);
+    // CAMERA-AWARE PITCH CONTROLS:
+    // FPV mode = Direct controls (like being in the cockpit)
+    //   - Push stick UP → nose UP → climb
+    //   - Push stick DOWN → nose DOWN → dive
+    //
+    // Follow/Third-person = Arcade controls (like controlling from outside)
+    //   - Push stick UP (back) → pull back → climb
+    //   - Push stick DOWN (forward) → push forward → dive
+
+    const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+    const isFPV = currentCameraMode === 'FPV';
+
+    let forward = 0;
     let lift = 0;
 
     if (isGlideMode) {
+      // In glide mode: vertical stick controls lift directly (altitude control)
       forward = 0;
       lift = clamp(-value.y, -1, 1);
-    } else if (forward > 0) {
-      const climb = Math.min(1, forward * 1.2);
-      lift = Math.pow(climb, 1.22) * 0.9;
-    } else if (forward < 0) {
-      const dive = Math.min(1, -forward);
-      lift = -Math.pow(dive, 1.12) * 0.6;
+    } else if (isFPV) {
+      // FPV: Direct controls - stick up = nose up
+      forward = clamp(value.y, -1, 1); // Positive Y = push up = pitch up
+    } else {
+      // Follow/Arcade: Inverted - stick forward (down) = nose down
+      forward = clamp(-value.y, -1, 1); // Negative Y = push forward = dive
     }
 
     axisSources.leftStick.forward = forward;
