@@ -1191,10 +1191,9 @@
 
       // Align the sculpted bird (modeled along the +X axis) with the
       // controller's forward vector (-Z) so the beak points in the direction of
-      // travel. The asset needs a clockwise quarter turn around the up axis to
-      // match the flight controller's orientation.
+      // travel.
       const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, -Math.PI / 2, 0)
+        new THREE.Euler(0, 0, 0)
       );
 
       const gltfLoader = new GLTFLoader();
