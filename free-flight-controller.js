@@ -4,14 +4,14 @@
 
 // Core aerodynamics - these create the bird flight feel
 export const GRAVITY = 6.0; // Constant downward acceleration (reduced for easier flying)
-export const LIFT_COEFFICIENT = 14.0; // How much lift is generated from speed (reduced for smoother transitions)
+export const LIFT_COEFFICIENT = 7.5; // How much lift is generated from speed (balanced to prevent rocketing upward)
 export const MIN_FLIGHT_SPEED = 1.5; // Minimum speed to generate meaningful lift (lowered)
 export const OPTIMAL_GLIDE_SPEED = 6.5; // Sweet spot where lift ≈ gravity
 export const MAX_SAFE_SPEED = 25.0; // Terminal velocity limit
 
 // Drag system - tuned for graceful gliding
-export const BASE_DRAG = 0.10; // Base air resistance (lower = more gliding, easier to maintain speed)
-export const SPEED_DRAG = 0.016; // Speed-dependent drag (reduced for easier sustained flight)
+export const BASE_DRAG = 0.20; // Base air resistance (increased to provide more control)
+export const SPEED_DRAG = 0.020; // Speed-dependent drag (slightly increased for stability)
 export const FORM_DRAG = 0.22; // Drag from angle of attack (slightly reduced)
 
 // Pitch control - how the bird aims up/down
@@ -21,7 +21,7 @@ export const MAX_PITCH_DOWN = (75 * Math.PI) / 180; // Maximum dive angle
 export const PITCH_STABILITY = 0.8; // How much the bird wants to level out pitch
 
 // Thrust system - for flapping/powered flight
-export const FLAP_THRUST = 12.0; // Acceleration when flapping (sprint)
+export const FLAP_THRUST = 8.0; // Acceleration when flapping (sprint, reduced for gentler feel)
 export const THRUST_EFFICIENCY_AT_SPEED = 0.6; // Thrust efficiency vs speed
 
 // Banking and turning - smooth, realistic turns
@@ -250,7 +250,7 @@ export class FreeFlightController {
       // Use a gentle starting speed to avoid rapid vertical launch
       const currentSpeed = this.velocity.length();
       if (currentSpeed < MIN_FLIGHT_SPEED) {
-        const initialSpeed = 2.5; // Low gentle speed for smooth transition
+        const initialSpeed = 1.6; // Very gentle speed for smooth transition
         const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
         this.velocity.copy(forward).multiplyScalar(initialSpeed);
       }
