@@ -4,7 +4,7 @@
 
 // Core aerodynamics - these create the bird flight feel
 export const GRAVITY = 6.0; // Constant downward acceleration (reduced for easier flying)
-export const LIFT_COEFFICIENT = 16.0; // How much lift is generated from speed (increased)
+export const LIFT_COEFFICIENT = 14.0; // How much lift is generated from speed (reduced for smoother transitions)
 export const MIN_FLIGHT_SPEED = 1.5; // Minimum speed to generate meaningful lift (lowered)
 export const OPTIMAL_GLIDE_SPEED = 6.5; // Sweet spot where lift ≈ gravity
 export const MAX_SAFE_SPEED = 25.0; // Terminal velocity limit
@@ -247,10 +247,10 @@ export class FreeFlightController {
       this._walkState.isGrounded = false;
 
       // Give the bird initial flight velocity to prevent falling
-      // Start at optimal glide speed so lift can counteract gravity
+      // Use a gentle starting speed to avoid rapid vertical launch
       const currentSpeed = this.velocity.length();
       if (currentSpeed < MIN_FLIGHT_SPEED) {
-        const initialSpeed = OPTIMAL_GLIDE_SPEED * 0.85;
+        const initialSpeed = 2.5; // Low gentle speed for smooth transition
         const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
         this.velocity.copy(forward).multiplyScalar(initialSpeed);
       }
