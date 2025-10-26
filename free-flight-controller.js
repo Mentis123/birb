@@ -3,16 +3,16 @@
 // ============================================================================
 
 // Core aerodynamics - these create the bird flight feel
-export const GRAVITY = 7.5; // Constant downward acceleration
-export const LIFT_COEFFICIENT = 14.0; // How much lift is generated from speed
-export const MIN_FLIGHT_SPEED = 1.8; // Minimum speed to generate meaningful lift
+export const GRAVITY = 6.0; // Constant downward acceleration (reduced for easier flying)
+export const LIFT_COEFFICIENT = 16.0; // How much lift is generated from speed (increased)
+export const MIN_FLIGHT_SPEED = 1.5; // Minimum speed to generate meaningful lift (lowered)
 export const OPTIMAL_GLIDE_SPEED = 6.5; // Sweet spot where lift ≈ gravity
 export const MAX_SAFE_SPEED = 25.0; // Terminal velocity limit
 
 // Drag system - tuned for graceful gliding
-export const BASE_DRAG = 0.12; // Base air resistance (lower = more gliding)
-export const SPEED_DRAG = 0.018; // Speed-dependent drag (increases with velocity²)
-export const FORM_DRAG = 0.25; // Drag from angle of attack (pitched up = more drag)
+export const BASE_DRAG = 0.10; // Base air resistance (lower = more gliding, easier to maintain speed)
+export const SPEED_DRAG = 0.016; // Speed-dependent drag (reduced for easier sustained flight)
+export const FORM_DRAG = 0.22; // Drag from angle of attack (slightly reduced)
 
 // Pitch control - how the bird aims up/down
 export const PITCH_SPEED = 1.8; // Radians per second (how fast bird pitches)
@@ -242,8 +242,22 @@ export class FreeFlightController {
         this.position.y = this.walkGroundHeight;
       }
     } else {
+      // Transitioning TO flight mode (glide/fly)
       this._walkState.verticalVelocity = 0;
       this._walkState.isGrounded = false;
+
+      // Give the bird initial flight velocity to prevent falling
+      // Start at optimal glide speed so lift can counteract gravity
+      const currentSpeed = this.velocity.length();
+      if (currentSpeed < MIN_FLIGHT_SPEED) {
+        const initialSpeed = OPTIMAL_GLIDE_SPEED * 0.85;
+        const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+        this.velocity.copy(forward).multiplyScalar(initialSpeed);
+      }
+
+      // Reset pitch to level flight for smoother transition
+      this._pitch = 0;
+      this._pitchVelocity = 0;
     }
     return this._movementMode;
   }
