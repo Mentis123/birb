@@ -66,6 +66,7 @@ export function createFlightControls({
   const axisSources = {
     keyboard: createAxisRecord(),
     leftStick: createAxisRecord(),
+    rightStick: createAxisRecord(),
     liftButtons: createAxisRecord(),
   };
 
@@ -258,6 +259,13 @@ export function createFlightControls({
     analogLookState.y = clamp(shouldInvertY ? -value.y : value.y, -1, 1);
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
+
+    const rollInput = context.isActive
+      ? clamp(value.x * effectiveRollSensitivity, -1, 1)
+      : 0;
+    axisSources.rightStick.roll = rollInput;
+
+    applyThrustInput();
   };
 
   const leftThumbstick =
