@@ -202,19 +202,21 @@ export function createFlightControls({
     const movementMode = getMovementMode();
     const isGlideMode = movementMode === 'glide';
 
-    let forward = clamp(-value.y, -1, 1);
+    // NEW CONTROL SCHEME:
+    // - Vertical stick = pitch control (forward input controls pitch in physics)
+    // - Horizontal stick = turn/strafe
+    // - Lift is optional (from lift buttons or can be added here if needed)
+
+    let forward = clamp(-value.y, -1, 1); // Negative Y = push forward = dive
     let lift = 0;
 
     if (isGlideMode) {
+      // In glide mode: vertical stick controls lift directly (altitude control)
       forward = 0;
       lift = clamp(-value.y, -1, 1);
-    } else if (forward > 0) {
-      const climb = Math.min(1, forward * 1.2);
-      lift = Math.pow(climb, 1.22) * 0.9;
-    } else if (forward < 0) {
-      const dive = Math.min(1, -forward);
-      lift = -Math.pow(dive, 1.12) * 0.6;
     }
+    // In FLY mode: forward input directly controls pitch (handled in physics)
+    // No auto-lift calculation - let the aerodynamics handle it!
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
