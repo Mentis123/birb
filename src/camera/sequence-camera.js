@@ -45,7 +45,7 @@ export function createSequenceCameraRig(three, options = {}) {
     orbitAngle: 0,
     timeScale: options.timeScale ?? 1,
     orbitSpeed: options.orbitSpeed ?? 0.22,
-    orbitRadius: options.orbitRadius ?? 4.6,
+    orbitRadius: options.orbitRadius ?? 2.0,
     verticalBias: options.verticalBias ?? 1.52,
     verticalAmplitude: options.verticalAmplitude ?? 0.42,
     verticalFrequency: options.verticalFrequency ?? 1.1,
