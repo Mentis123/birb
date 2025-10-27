@@ -1843,21 +1843,34 @@
       let cameraModeIndex = 0;
 
       function getDisplayDimensions() {
-        const canvasRect = canvas.getBoundingClientRect();
-        let { width, height } = canvasRect;
+        let width = 0;
+        let height = 0;
 
+        // Try canvas bounding rect first
+        const canvasRect = canvas.getBoundingClientRect();
+        width = canvasRect.width;
+        height = canvasRect.height;
+
+        // Fallback to wrapper if canvas hasn't been sized yet
         if ((!width || !height) && canvasWrapper) {
           const wrapperRect = canvasWrapper.getBoundingClientRect();
           if (!width) width = wrapperRect.width;
           if (!height) height = wrapperRect.height;
         }
 
-        width = Math.max(1, width || window.innerWidth || 1);
-        height = Math.max(1, height || window.innerHeight || 1);
+        // Fallback to client dimensions
+        if (!width) width = canvas.clientWidth;
+        if (!height) height = canvas.clientHeight;
+
+        // Last resort: use window dimensions (important for mobile on initial load)
+        if (!width || !height) {
+          width = width || window.innerWidth || 1;
+          height = height || window.innerHeight || 1;
+        }
 
         return {
-          width,
-          height,
+          width: Math.max(1, Math.floor(width)),
+          height: Math.max(1, Math.floor(height)),
         };
       }
 
@@ -2381,8 +2394,13 @@
         flightControls.dispose();
       });
 
-      updateRendererSize(true);
-      renderFrame(0);
+      // Ensure DOM layout is complete before sizing renderer, especially on mobile
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          updateRendererSize(true);
+          renderFrame(0);
+        });
+      });
     </script>
   </body>
 </html>
