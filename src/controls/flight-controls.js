@@ -219,7 +219,9 @@ export function createFlightControls({
     const isFPV = currentCameraMode === 'FPV';
 
     // Same pitch control for both modes - stick works like a flight stick
-    const forward = clamp(value.y, -1, 1); // Positive Y = pull back = pitch up
+    // Invert Y axis: drag DOWN (positive screen Y) = push forward = pitch down (negative forward)
+    //                drag UP (negative screen Y) = pull back = pitch up (positive forward)
+    const forward = clamp(-value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
