@@ -150,15 +150,15 @@ export function createCameraState({ three, scene, flightController }) {
       rotationDamping: 0.18,
     },
     [CAMERA_MODES.FOLLOW]: {
-      offset: new Vector3(0, 0.92, 1.8),
-      positionDamping: 0.16,
-      lookAtDamping: 0.24,
-      rotationDamping: 0.2,
-      velocityLookAhead: 0.52,
+      offset: new Vector3(0, 1.2, 2.5),
+      positionDamping: 0.12,
+      lookAtDamping: 0.15,
+      rotationDamping: 0.12,
+      velocityLookAhead: 0.25,
       steeringLookAhead: {
-        forward: 0.75,
-        strafe: 0.55,
-        lift: 0.38,
+        forward: 0.45,
+        strafe: 0.35,
+        lift: 0.25,
       },
     },
     [CAMERA_MODES.SEQUENCE]: {
