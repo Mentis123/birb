@@ -1,4 +1,6 @@
 import * as THREEImported from "https://esm.sh/three@0.161.0";
+import { createCollectiblesSystem } from "./collectibles.js";
+import { createAmbientParticles } from "./ambient-particles.js";
 
 const DEG2RAD = Math.PI / 180;
 const BASE_SPACE_SCALE = 3.2;
@@ -920,11 +922,34 @@ export function createWorldShell(
     });
   }
 
+  // Create collectibles system
+  const collectibles = createCollectiblesSystem(THREE, scene, definition.id);
+
+  // Create ambient particles
+  const ambientParticles = createAmbientParticles(THREE, definition.id);
+  ambientParticles.addToScene(scene);
+
   return {
     root,
     glideTrail,
+    collectibles,
+    ambientParticles,
     config: definition,
+    update(delta, time) {
+      if (collectibles) {
+        collectibles.update(delta);
+      }
+      if (ambientParticles) {
+        ambientParticles.update(delta, time);
+      }
+    },
     dispose() {
+      if (collectibles) {
+        collectibles.dispose();
+      }
+      if (ambientParticles) {
+        ambientParticles.dispose();
+      }
       disposeWorld(scene, root);
     },
   };

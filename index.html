@@ -751,6 +751,10 @@
                     <span class="control-metrics__label">FPS</span>
                     <span class="control-metrics__value" data-metric="fps">--</span>
                   </div>
+                  <div class="control-metrics__row">
+                    <span class="control-metrics__label">Rings</span>
+                    <span class="control-metrics__value" data-metric="rings">0/20</span>
+                  </div>
                   <p class="control-metrics__note" data-metric="status">
                     Ready for free flight. Drag on the screen to steer and add a second touch to sprint.
                   </p>
@@ -907,6 +911,7 @@
         ENVIRONMENT_VARIANTS,
         getEnvironmentDefinition,
       } from "./src/environment/world-shell.js";
+      import { createSpeedTrail, createWingVortices } from "./src/environment/speed-trail.js";
 
       const canvasWrapper = document.querySelector(".canvas-wrapper");
       const canvasActions = document.querySelector("[data-draggable-panel]");
@@ -1073,7 +1078,16 @@
       };
       let environmentShell = null;
       let glideTrail = null;
+      let speedTrail = null;
+      let wingVortices = null;
       let flightControllerInitialized = false;
+
+      // Score tracking
+      const scoreState = {
+        ringsCollected: 0,
+        totalRings: 0,
+        distanceTraveled: 0,
+      };
 
       function updateEnvironmentControls(config) {
         if (!config) return;
@@ -1178,17 +1192,44 @@
           environmentShell.dispose();
         }
 
+        // Clean up old speed trail
+        if (speedTrail) {
+          scene.remove(speedTrail.particles);
+          speedTrail.dispose();
+        }
+        if (wingVortices) {
+          scene.remove(wingVortices.particles);
+          wingVortices.dispose();
+        }
+
         environmentShell = createWorldShell(scene, {
           three: THREE,
           variant: definition.id,
         });
         glideTrail = environmentShell.glideTrail;
+
+        // Create speed trail for this environment
+        speedTrail = createSpeedTrail(THREE, definition.id);
+        scene.add(speedTrail.particles);
+
+        // Create wing vortices
+        wingVortices = createWingVortices(THREE);
+        scene.add(wingVortices.particles);
+
         environmentState.id = definition.id;
         environmentState.label = definition.label;
         const resolvedIndex = environmentState.order.indexOf(definition.id);
         environmentState.index = resolvedIndex >= 0 ? resolvedIndex : 0;
         updateEnvironmentControls(definition);
         applyLightingPreset(definition);
+
+        // Reset score
+        if (environmentShell.collectibles) {
+          const stats = environmentShell.collectibles.getStats();
+          scoreState.totalRings = stats.total;
+          scoreState.ringsCollected = 0;
+        }
+
         if (flightControllerInitialized) {
           updateControlMetrics();
         }
@@ -1358,6 +1399,7 @@
       const fpsMetric = document.querySelector('[data-metric="fps"]');
       const statusMetric = document.querySelector('[data-metric="status"]');
       const modeMetric = document.querySelector('[data-metric="mode"]');
+      const ringsMetric = document.querySelector('[data-metric="rings"]');
       const movementModeButtons = Array.from(document.querySelectorAll('[data-movement-mode]'));
       const boostButton = document.querySelector('[data-action="boost"]');
       const jumpButton = document.querySelector('[data-action="jump"]');
@@ -1476,6 +1518,9 @@
         }
         if (modeMetric) {
           modeMetric.textContent = getMovementModeLabel(movementState.mode);
+        }
+        if (ringsMetric) {
+          ringsMetric.textContent = `${scoreState.ringsCollected}/${scoreState.totalRings}`;
         }
         if (statusMetric) {
           const now = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -2247,6 +2292,33 @@
 
         if (glideTrail) {
           glideTrail.rotation.z = motionState.elapsed * 0.32;
+        }
+
+        // Update environment systems
+        if (environmentShell && motionState.animate) {
+          environmentShell.update(delta, motionState.elapsed);
+
+          // Check ring collection
+          if (environmentShell.collectibles) {
+            const collectedIndices = environmentShell.collectibles.checkCollection(
+              birbAnchor.position,
+              0.5
+            );
+            if (collectedIndices.length > 0) {
+              scoreState.ringsCollected += collectedIndices.length;
+            }
+          }
+        }
+
+        // Update speed trail
+        if (speedTrail && motionState.animate) {
+          const velocity = flightController.getVelocity ? flightController.getVelocity() : new THREE.Vector3(0, 0, 0);
+          speedTrail.update(delta, birbAnchor.position, velocity, flightController.getSpeed());
+        }
+
+        // Update wing vortices
+        if (wingVortices && motionState.animate) {
+          wingVortices.update(delta, birbAnchor.position, birbRig.quaternion, flightController.getSpeed());
         }
 
         if (motionState.animate && !controlState.systemPaused) {
