@@ -677,35 +677,7 @@
                     60%
                   </output>
                 </div>
-                <div class="control-section">
-                  <h3 class="control-subheading">Joystick Modes</h3>
-                  <div class="control-button-group" role="group" aria-label="Select movement mode">
-                    <button
-                      type="button"
-                      class="control-button"
-                      data-movement-mode="glide"
-                      aria-pressed="false"
-                    >
-                      Glide
-                    </button>
-                    <button
-                      type="button"
-                      class="control-button"
-                      data-movement-mode="fly"
-                      aria-pressed="false"
-                    >
-                      Fly
-                    </button>
-                    <button
-                      type="button"
-                      class="control-button"
-                      data-movement-mode="walk"
-                      aria-pressed="false"
-                    >
-                      Walk
-                    </button>
-                  </div>
-                </div>
+                <!-- Movement mode is now automatic: grounded or flying based on physics -->
                 <div class="control-section">
                   <h3 class="control-subheading">Movement Actions</h3>
                   <div class="control-button-group" role="group" aria-label="Movement actions">
@@ -1432,16 +1404,15 @@
 
       const throttleState = { userOverride: false };
       const movementState = {
-        mode: "walk",
+        mode: "grounded",
         boostActive: false,
         actionMessage: null,
         actionMessageUntil: 0,
       };
 
       const MOVEMENT_MODE_PRESETS = {
-        glide: { label: "Glide", throttle: Number.isFinite(initialThrottle) ? initialThrottle : 0.6 },
-        fly: { label: "Fly", throttle: 0.3 },
-        walk: { label: "Walk", throttle: 0.45 },
+        grounded: { label: "Grounded", throttle: 0.45 },
+        flying: { label: "Flying", throttle: Number.isFinite(initialThrottle) ? initialThrottle : 0.6 },
       };
 
       const controlState = {
@@ -1536,11 +1507,11 @@
             statusMetric.textContent = "Motion paused via system preference";
           } else if (!motionState.animate) {
             statusMetric.textContent = "Flight paused";
-          } else if (movementState.mode === "walk") {
+          } else if (movementState.mode === "grounded") {
             if (flightController.isSprinting) {
               statusMetric.textContent = "Running boost engaged";
             } else if (typeof flightController.isGrounded === "function" && flightController.isGrounded()) {
-              statusMetric.textContent = "On foot — tap Jump to hop and hold Boost to run.";
+              statusMetric.textContent = "On foot — tap Take Off to fly, Jump to hop, Boost to run.";
             } else {
               statusMetric.textContent = "Airborne — steer to glide back down.";
             }
@@ -2000,37 +1971,39 @@
       function updateBoostButtonUi() {
         if (!boostButton) return;
         const active = movementState.boostActive;
-        const isWalkMode = movementState.mode === "walk";
+        const isGrounded = movementState.mode === "grounded";
         boostButton.setAttribute("aria-pressed", active ? "true" : "false");
         const idleLabel = "Hold Boost / Run";
-        const activeLabel = isWalkMode ? "Running…" : "Boosting…";
+        const activeLabel = isGrounded ? "Running…" : "Boosting…";
         boostButton.textContent = active ? activeLabel : idleLabel;
-        boostButton.title = isWalkMode ? "Hold to run faster" : "Hold to boost speed";
+        boostButton.title = isGrounded ? "Hold to run faster" : "Hold to boost speed";
         boostButton.setAttribute(
           "aria-label",
-          active ? (isWalkMode ? "Running" : "Boosting") : isWalkMode ? "Hold to run" : "Hold to boost",
+          active ? (isGrounded ? "Running" : "Boosting") : isGrounded ? "Hold to run" : "Hold to boost",
         );
       }
 
       function updateMovementToggleButton() {
         if (!movementToggleButton) return;
         const mode = movementState.mode;
-        const modeConfig = {
-          walk: { icon: "🚶", label: "Walk", action: "Tap to fly" },
-          fly: { icon: "🕊️", label: "Fly", action: "Tap to glide" },
-          glide: { icon: "✈️", label: "Glide", action: "Tap to walk" },
-        };
-        const config = modeConfig[mode] || modeConfig.walk;
+        const isGrounded = mode === "grounded";
 
-        movementToggleButton.setAttribute("aria-pressed", mode === "walk" ? "true" : "false");
-        if (movementToggleIcon) {
-          movementToggleIcon.textContent = config.icon;
+        // Show button only when grounded, hide when flying
+        if (isGrounded) {
+          movementToggleButton.style.display = "";
+          movementToggleButton.setAttribute("aria-pressed", "false");
+          if (movementToggleIcon) {
+            movementToggleIcon.textContent = "🕊️";
+          }
+          if (movementToggleLabel) {
+            movementToggleLabel.textContent = "Take Off";
+          }
+          movementToggleButton.setAttribute("aria-label", "Tap to take off and fly");
+          movementToggleButton.title = "Tap to take off and fly";
+        } else {
+          // Hide button when flying
+          movementToggleButton.style.display = "none";
         }
-        if (movementToggleLabel) {
-          movementToggleLabel.textContent = config.label;
-        }
-        movementToggleButton.setAttribute("aria-label", config.action);
-        movementToggleButton.title = config.action;
       }
 
       function updateModeCycleButton() {
@@ -2078,7 +2051,7 @@
         updateBoostButtonUi();
         if (next) {
           showMovementMessage(
-            movementState.mode === "walk" ? "Running boost engaged." : "Boost engaged.",
+            movementState.mode === "grounded" ? "Running boost engaged." : "Boost engaged.",
             1600,
           );
         }
@@ -2095,10 +2068,10 @@
             : resolvedMode;
         movementState.mode = controllerMode;
         setBoostState(false);
-        const isWalkMode = movementState.mode === "walk";
-        setLiftButtonsDisabled(isWalkMode);
+        const isGrounded = movementState.mode === "grounded";
+        setLiftButtonsDisabled(isGrounded);
         if (jumpButton) {
-          if (isWalkMode) {
+          if (isGrounded) {
             jumpButton.removeAttribute("disabled");
           } else {
             jumpButton.setAttribute("disabled", "true");
@@ -2107,7 +2080,7 @@
 
         if (applyPreset) {
           const preset = MOVEMENT_MODE_PRESETS[movementState.mode];
-          const shouldApplyPreset = isWalkMode || !throttleState.userOverride;
+          const shouldApplyPreset = isGrounded || !throttleState.userOverride;
           if (preset && shouldApplyPreset && typeof preset.throttle === "number") {
             setThrottle(preset.throttle, { updateInput: true, isUserOverride: false });
           }
@@ -2115,15 +2088,13 @@
 
         updateMovementModeUi();
         if (userInitiated) {
-          if (movementState.mode === "walk") {
+          if (movementState.mode === "grounded") {
             showMovementMessage(
-              "Walk mode engaged — tap Jump, hold Boost to run, tap the mode toggle to take off.",
+              "Grounded — tap Take Off button to fly, Jump to hop, hold Boost to run.",
               3200,
             );
-          } else if (movementState.mode === "fly") {
-            showMovementMessage("Fly mode engaged — drag to steer and tap the mode toggle to land.", 2800);
-          } else {
-            showMovementMessage("Glide mode engaged — smooth coasting as you drag to steer.", 2400);
+          } else if (movementState.mode === "flying") {
+            showMovementMessage("Flying — drag to steer, hold Boost to flap faster. Fly into ground to land.", 3200);
           }
         } else {
           updateControlMetrics();
@@ -2143,21 +2114,22 @@
 
       if (movementToggleButton) {
         movementToggleButton.addEventListener("click", () => {
-          // Cycle through all three modes for better mobile UX
-          const modes = ["walk", "fly", "glide"];
-          const currentIndex = modes.indexOf(movementState.mode);
-          const nextIndex = (currentIndex + 1) % modes.length;
-          const nextMode = modes[nextIndex];
-          setMovementMode(nextMode, { userInitiated: true, applyPreset: true });
+          // Simple toggle: if grounded, take off; if flying, this button is hidden
+          if (movementState.mode === "grounded") {
+            if (typeof flightController.requestTakeoff === "function") {
+              const tookOff = flightController.requestTakeoff();
+              if (tookOff) {
+                showMovementMessage("Taking off!", 1600);
+              }
+            }
+          }
         });
       }
 
       if (modeCycleButton) {
         modeCycleButton.addEventListener("click", () => {
-          const modes = ["walk", "fly", "glide"];
-          const currentIndex = modes.indexOf(movementState.mode);
-          const nextIndex = (currentIndex + 1) % modes.length;
-          const nextMode = modes[nextIndex];
+          // Toggle between grounded and flying
+          const nextMode = movementState.mode === "grounded" ? "flying" : "grounded";
           setMovementMode(nextMode, { userInitiated: true, applyPreset: true });
         });
       }
@@ -2219,10 +2191,10 @@
             : false;
           if (jumped) {
             showMovementMessage("Jump!", 1600);
-          } else if (movementState.mode === "walk") {
+          } else if (movementState.mode === "grounded") {
             showMovementMessage("Already airborne — land to jump again.", 2000);
           } else {
-            showMovementMessage("Jump is available in walk mode.", 2000);
+            showMovementMessage("Jump is available when grounded.", 2000);
           }
         });
       }
@@ -2310,7 +2282,7 @@
         const wingTiltFactor = 0.35; // How much the wings tilt relative to bank angle
         const baseWingAngle = Math.PI * 0.15; // 27 degrees base wing spread
 
-        if (wingRefs.left && wingRefs.right && movementState.mode !== "walk") {
+        if (wingRefs.left && wingRefs.right && movementState.mode !== "grounded") {
           // Left wing tilts down when banking right (positive bank), up when banking left
           wingRefs.left.rotation.z = baseWingAngle - (bankAngle * wingTiltFactor);
           // Right wing tilts down when banking left (negative bank), up when banking right

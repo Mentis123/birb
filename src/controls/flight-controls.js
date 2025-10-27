@@ -114,10 +114,9 @@ export function createFlightControls({
 
   const applyThrustInput = () => {
     const movementMode = getMovementMode();
-    const isGlideMode = movementMode === 'glide';
     lastMovementMode = movementMode;
     flightController.setThrustInput({
-      forward: isGlideMode ? 0 : combineAxis('forward'), // In glide mode, no forward input (use lift instead)
+      forward: combineAxis('forward'),
       strafe: combineAxis('strafe'),
       lift: combineAxis('lift'),
       roll: combineAxis('roll'),
@@ -133,9 +132,6 @@ export function createFlightControls({
       return;
     }
     lastMovementMode = movementMode;
-    if (movementMode === 'glide') {
-      axisSources.leftStick.forward = 0;
-    }
     applyThrustInput();
   };
 
@@ -172,8 +168,6 @@ export function createFlightControls({
   };
 
   const updateKeyboardAxes = () => {
-    const movementMode = getMovementMode();
-    const isGlideMode = movementMode === 'glide';
     const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
     const isFPV = currentCameraMode === 'FPV';
 
@@ -182,7 +176,7 @@ export function createFlightControls({
     // Camera-aware keyboard controls for consistency
     // FPV: W = pitch up (direct), S = pitch down
     // Follow: W = dive (arcade), S = climb
-    if (!isGlideMode && !isFPV) {
+    if (!isFPV) {
       forward = -forward; // Invert for follow/arcade mode
     }
 
@@ -213,8 +207,6 @@ export function createFlightControls({
 
   const handleLeftStickChange = (value, context = {}) => {
     const strafe = clamp(value.x, -1, 1);
-    const movementMode = getMovementMode();
-    const isGlideMode = movementMode === 'glide';
 
     // CAMERA-AWARE PITCH CONTROLS:
     // FPV mode = Direct controls (like being in the cockpit)
@@ -229,13 +221,8 @@ export function createFlightControls({
     const isFPV = currentCameraMode === 'FPV';
 
     let forward = 0;
-    let lift = 0;
 
-    if (isGlideMode) {
-      // In glide mode: vertical stick controls lift directly (altitude control)
-      forward = 0;
-      lift = clamp(-value.y, -1, 1);
-    } else if (isFPV) {
+    if (isFPV) {
       // FPV: Direct controls - stick up = nose up
       forward = clamp(value.y, -1, 1); // Positive Y = push up = pitch up
     } else {
@@ -246,7 +233,7 @@ export function createFlightControls({
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-    axisSources.leftStick.lift = clamp(lift, -1, 1);
+    axisSources.leftStick.lift = 0;
 
     const pointerType = context.pointerType ?? null;
     if (pointerType === 'touch') {
