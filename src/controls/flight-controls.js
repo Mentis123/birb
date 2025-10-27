@@ -117,7 +117,7 @@ export function createFlightControls({
     const isGlideMode = movementMode === 'glide';
     lastMovementMode = movementMode;
     flightController.setThrustInput({
-      forward: isGlideMode ? 1 : combineAxis('forward'),
+      forward: isGlideMode ? 0 : combineAxis('forward'), // In glide mode, no forward input (use lift instead)
       strafe: combineAxis('strafe'),
       lift: combineAxis('lift'),
       roll: combineAxis('roll'),

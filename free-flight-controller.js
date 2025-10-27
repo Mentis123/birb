@@ -5,19 +5,24 @@
 // Core aerodynamics - these create the bird flight feel
 export const GRAVITY = 4.5; // Constant downward acceleration (gentler for more controlled flight)
 export const LIFT_COEFFICIENT = 12.0; // How much lift is generated from speed (increased for hovering capability)
+export const GLIDE_LIFT_COEFFICIENT = 18.0; // Much higher lift in glide mode for gentle floating
 export const MIN_FLIGHT_SPEED = 0.05; // Minimum speed to generate meaningful lift (very low for hover-like control)
 export const OPTIMAL_GLIDE_SPEED = 6.5; // Sweet spot where lift ≈ gravity
+export const GLIDE_CRUISE_SPEED = 2.0; // Super slow cruise speed in glide mode
 export const MAX_SAFE_SPEED = 25.0; // Terminal velocity limit
 
 // Drag system - tuned for graceful gliding
 export const BASE_DRAG = 0.28; // Base air resistance (increased for more controlled, less extreme movement)
 export const SPEED_DRAG = 0.020; // Speed-dependent drag (slightly increased for stability)
 export const FORM_DRAG = 0.22; // Drag from angle of attack (slightly reduced)
+export const GLIDE_EXTRA_DRAG = 1.5; // Extra drag in glide mode for super gentle float
 
 // Pitch control - how the bird aims up/down
 export const PITCH_SPEED = 1.8; // Radians per second (how fast bird pitches)
+export const GLIDE_PITCH_SPEED = 0.4; // Much slower pitch in glide mode for gentle float
 export const MAX_PITCH_UP = (65 * Math.PI) / 180; // Maximum climb angle
 export const MAX_PITCH_DOWN = (75 * Math.PI) / 180; // Maximum dive angle
+export const GLIDE_MAX_PITCH = (20 * Math.PI) / 180; // Very limited pitch range in glide mode
 export const PITCH_STABILITY = 0.8; // How much the bird wants to level out pitch
 
 // Thrust system - for flapping/powered flight
@@ -246,12 +251,16 @@ export class FreeFlightController {
       this._walkState.verticalVelocity = 0;
       this._walkState.isGrounded = false;
 
-      // Start with near-zero velocity - flapping provides thrust
+      // Start with appropriate velocity based on mode
       const currentSpeed = this.velocity.length();
       if (currentSpeed < MIN_FLIGHT_SPEED) {
-        const initialSpeed = 0.1; // Near-zero speed - use flapping to gain speed
+        // In glide mode, start very slow for gentle floating
+        const initialSpeed = nextMode === MOVEMENT_MODES.GLIDE ? GLIDE_CRUISE_SPEED : 0.1;
         const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
         this.velocity.copy(forward).multiplyScalar(initialSpeed);
+      } else if (nextMode === MOVEMENT_MODES.GLIDE && currentSpeed > GLIDE_CRUISE_SPEED * 2) {
+        // If transitioning to glide mode with high speed, slow down
+        this.velocity.multiplyScalar(0.3);
       }
 
       // Reset pitch to level flight for smoother transition
@@ -351,11 +360,33 @@ export class FreeFlightController {
 
     const forwardInput = clamp(smoothed.forward, -1, 1, 0);
     const strafeInput = clamp(smoothed.strafe, -1, 1, 0);
+    const liftInput = clamp(smoothed.lift, -1, 1, 0);
+
+    // Detect glide mode
+    const isGlideMode = this._movementMode === MOVEMENT_MODES.GLIDE;
 
     // 1. PITCH CONTROL - Forward stick controls pitch (nose up/down)
-    // Negative forward = pitch down (dive), Positive forward = pitch up (climb)
-    const pitchInput = -forwardInput; // Invert so forward = nose down
-    const targetPitchVelocity = pitchInput * PITCH_SPEED;
+    // In glide mode: use lift input for gentle altitude control
+    // In fly mode: use forward input for direct pitch control
+    let pitchInput;
+    let activePitchSpeed;
+    let maxPitchLimit;
+
+    if (isGlideMode) {
+      // GLIDE MODE: Super gentle float control
+      // Lift input controls pitch with heavy damping
+      pitchInput = liftInput * 0.3; // Heavily reduced sensitivity (30% of lift input)
+      activePitchSpeed = GLIDE_PITCH_SPEED;
+      maxPitchLimit = GLIDE_MAX_PITCH;
+    } else {
+      // FLY MODE: Normal pitch control
+      // Negative forward = pitch down (dive), Positive forward = pitch up (climb)
+      pitchInput = -forwardInput;
+      activePitchSpeed = PITCH_SPEED;
+      maxPitchLimit = this._pitch > 0 ? MAX_PITCH_UP : MAX_PITCH_DOWN;
+    }
+
+    const targetPitchVelocity = pitchInput * activePitchSpeed;
 
     // Smooth pitch response
     const pitchAccelStep = 1 - Math.exp(-8.0 * deltaTime);
@@ -370,8 +401,12 @@ export class FreeFlightController {
       this._pitch += levelingForce;
     }
 
-    // Clamp pitch to safe limits
-    this._pitch = clamp(this._pitch, -MAX_PITCH_DOWN, MAX_PITCH_UP, this._pitch);
+    // Clamp pitch to safe limits (different limits for glide vs fly mode)
+    if (isGlideMode) {
+      this._pitch = clamp(this._pitch, -maxPitchLimit, maxPitchLimit, this._pitch);
+    } else {
+      this._pitch = clamp(this._pitch, -MAX_PITCH_DOWN, MAX_PITCH_UP, this._pitch);
+    }
 
     // 2. YAW AND BANK - Strafe input causes turning with automatic banking
     let turnInput = strafeInput;
@@ -443,7 +478,10 @@ export class FreeFlightController {
     // More speed = more lift, but pitched up too much increases drag and reduces efficiency
     const liftEfficiency = Math.max(0, Math.cos(this._pitch)); // Best at level, worse when pitched
     const speedAboveMin = Math.max(0, speed - MIN_FLIGHT_SPEED);
-    const liftMagnitude = LIFT_COEFFICIENT * speedAboveMin * liftEfficiency;
+
+    // Use higher lift coefficient in glide mode for easier floating
+    const activeLiftCoefficient = isGlideMode ? GLIDE_LIFT_COEFFICIENT : LIFT_COEFFICIENT;
+    const liftMagnitude = activeLiftCoefficient * speedAboveMin * liftEfficiency;
 
     // Lift acts perpendicular to velocity, upward relative to wings
     const wingUp = this._up.set(0, 1, 0).applyQuaternion(this.quaternion);
@@ -453,7 +491,12 @@ export class FreeFlightController {
     if (speed > 0.01) {
       const dragMagnitude = BASE_DRAG + SPEED_DRAG * speedSq;
       const angleOfAttackDrag = FORM_DRAG * Math.abs(Math.sin(this._pitch));
-      const totalDrag = dragMagnitude + angleOfAttackDrag;
+      let totalDrag = dragMagnitude + angleOfAttackDrag;
+
+      // In glide mode, add significant extra drag to keep things super gentle
+      if (isGlideMode) {
+        totalDrag += GLIDE_EXTRA_DRAG;
+      }
 
       this._dragForce.copy(this.velocity).normalize().multiplyScalar(-totalDrag * speed);
     } else {
