@@ -1842,9 +1842,27 @@
       ];
       let cameraModeIndex = 0;
 
+      function getDisplayDimensions() {
+        const canvasRect = canvas.getBoundingClientRect();
+        let { width, height } = canvasRect;
+
+        if ((!width || !height) && canvasWrapper) {
+          const wrapperRect = canvasWrapper.getBoundingClientRect();
+          if (!width) width = wrapperRect.width;
+          if (!height) height = wrapperRect.height;
+        }
+
+        width = Math.max(1, width || window.innerWidth || 1);
+        height = Math.max(1, height || window.innerHeight || 1);
+
+        return {
+          width,
+          height,
+        };
+      }
+
       function updateRendererSize(force = false) {
-        const clientWidth = canvas.clientWidth || window.innerWidth;
-        const clientHeight = canvas.clientHeight || window.innerHeight;
+        const { width: clientWidth, height: clientHeight } = getDisplayDimensions();
 
         if (!clientWidth || !clientHeight) return;
 
