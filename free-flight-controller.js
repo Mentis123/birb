@@ -4,8 +4,8 @@
 
 // Core aerodynamics - these create the bird flight feel
 export const GRAVITY = 4.5; // Constant downward acceleration (gentler for more controlled flight)
-export const LIFT_COEFFICIENT = 9.0; // How much lift is generated from speed (increased for better glide stability)
-export const MIN_FLIGHT_SPEED = 1.5; // Minimum speed to generate meaningful lift (lowered)
+export const LIFT_COEFFICIENT = 12.0; // How much lift is generated from speed (increased for hovering capability)
+export const MIN_FLIGHT_SPEED = 0.05; // Minimum speed to generate meaningful lift (very low for hover-like control)
 export const OPTIMAL_GLIDE_SPEED = 6.5; // Sweet spot where lift ≈ gravity
 export const MAX_SAFE_SPEED = 25.0; // Terminal velocity limit
 
@@ -21,7 +21,7 @@ export const MAX_PITCH_DOWN = (75 * Math.PI) / 180; // Maximum dive angle
 export const PITCH_STABILITY = 0.8; // How much the bird wants to level out pitch
 
 // Thrust system - for flapping/powered flight
-export const FLAP_THRUST = 5.5; // Acceleration when flapping (reduced for less aggressive powered flight)
+export const FLAP_THRUST = 8.0; // Acceleration when flapping (increased - flapping is primary speed control)
 export const THRUST_EFFICIENCY_AT_SPEED = 0.6; // Thrust efficiency vs speed
 
 // Banking and turning - smooth, realistic turns
@@ -246,11 +246,10 @@ export class FreeFlightController {
       this._walkState.verticalVelocity = 0;
       this._walkState.isGrounded = false;
 
-      // Give the bird initial flight velocity to prevent falling
-      // Use a gentle starting speed to avoid rapid vertical launch
+      // Start with near-zero velocity - flapping provides thrust
       const currentSpeed = this.velocity.length();
       if (currentSpeed < MIN_FLIGHT_SPEED) {
-        const initialSpeed = 1.6; // Very gentle speed for smooth transition
+        const initialSpeed = 0.1; // Near-zero speed - use flapping to gain speed
         const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
         this.velocity.copy(forward).multiplyScalar(initialSpeed);
       }
