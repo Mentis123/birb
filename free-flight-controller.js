@@ -2,45 +2,46 @@
 // AERODYNAMIC FLIGHT PHYSICS - Redesigned for intuitive, fun mobile flying
 // ============================================================================
 
-// Core aerodynamics - these create the bird flight feel
-export const GRAVITY = 4.5; // Constant downward acceleration (gentler for more controlled flight)
-export const LIFT_COEFFICIENT = 12.0; // How much lift is generated from speed (increased for hovering capability)
-export const GLIDE_LIFT_COEFFICIENT = 18.0; // Much higher lift in glide mode for gentle floating
+// Core aerodynamics - gentle, stable flight physics
+export const GRAVITY = 3.5; // Reduced gravity for more floaty, gentle flight
+export const LIFT_COEFFICIENT = 14.0; // Increased lift for stable, effortless gliding
+export const GLIDE_LIFT_COEFFICIENT = 20.0; // Even higher lift in glide mode for gentle floating
 export const MIN_FLIGHT_SPEED = 0.05; // Minimum speed to generate meaningful lift (very low for hover-like control)
-export const OPTIMAL_GLIDE_SPEED = 6.5; // Sweet spot where lift ≈ gravity
+export const OPTIMAL_GLIDE_SPEED = 5.5; // Lower optimal speed for calmer flight
 export const GLIDE_CRUISE_SPEED = 2.0; // Super slow cruise speed in glide mode
-export const MAX_SAFE_SPEED = 25.0; // Terminal velocity limit
+export const MAX_SAFE_SPEED = 20.0; // Lower speed limit for gentler overall movement
 
-// Drag system - tuned for graceful gliding
-export const BASE_DRAG = 0.28; // Base air resistance (increased for more controlled, less extreme movement)
-export const SPEED_DRAG = 0.020; // Speed-dependent drag (slightly increased for stability)
-export const FORM_DRAG = 0.22; // Drag from angle of attack (slightly reduced)
-export const GLIDE_EXTRA_DRAG = 1.5; // Extra drag in glide mode for super gentle float
+// Drag system - tuned for ultra-smooth, gentle gliding
+export const BASE_DRAG = 0.35; // Higher air resistance for slower, more controlled movement
+export const SPEED_DRAG = 0.025; // Increased speed-dependent drag for stability
+export const FORM_DRAG = 0.28; // More drag from angle of attack for gentle response
+export const GLIDE_EXTRA_DRAG = 2.0; // Extra drag in glide mode for super gentle float
 
-// Pitch control - how the bird aims up/down
-export const PITCH_SPEED = 1.8; // Radians per second (how fast bird pitches)
-export const GLIDE_PITCH_SPEED = 0.4; // Much slower pitch in glide mode for gentle float
-export const MAX_PITCH_UP = (65 * Math.PI) / 180; // Maximum climb angle
-export const MAX_PITCH_DOWN = (75 * Math.PI) / 180; // Maximum dive angle
-export const GLIDE_MAX_PITCH = (20 * Math.PI) / 180; // Very limited pitch range in glide mode
-export const PITCH_STABILITY = 0.8; // How much the bird wants to level out pitch
+// Pitch control - how the bird aims up/down (MUCH gentler for smooth, intuitive control)
+export const PITCH_SPEED = 0.25; // Radians per second (14°/s - gentle, realistic bird control)
+export const GLIDE_PITCH_SPEED = 0.15; // Even slower pitch in glide mode for gentle float
+export const MAX_PITCH_UP = (25 * Math.PI) / 180; // Gentle maximum climb angle
+export const MAX_PITCH_DOWN = (30 * Math.PI) / 180; // Gentle maximum dive angle
+export const GLIDE_MAX_PITCH = (15 * Math.PI) / 180; // Very limited pitch range in glide mode
+export const PITCH_STABILITY = 1.5; // Stronger auto-level for stable flight
 
 // Thrust system - for flapping/powered flight
 export const FLAP_THRUST = 8.0; // Acceleration when flapping (increased - flapping is primary speed control)
 export const THRUST_EFFICIENCY_AT_SPEED = 0.6; // Thrust efficiency vs speed
 
-// Banking and turning - smooth, realistic turns
-export const BANK_FROM_TURN_INPUT = 0.85; // How much turn input causes banking
-export const BANK_RESPONSIVENESS = 3.5; // How quickly wings bank
-export const BANK_ROLL_SPEED = Math.PI * 1.2; // Maximum roll velocity
-export const MAX_BANK_ANGLE = (55 * Math.PI) / 180; // Steeper banks for tighter turns
-export const BANK_LEVEL_STIFFNESS = 3.0; // Return to level flight
-export const TURN_SPEED = Math.PI * 0.95; // Base yaw rotation speed
-export const BANKED_TURN_BONUS = 1.8; // Banking makes turns tighter
+// Banking and turning - smooth, realistic turns (gentler for precise control)
+export const BANK_FROM_TURN_INPUT = 0.65; // Reduced turn input effect on banking
+export const BANK_RESPONSIVENESS = 2.5; // Slower, smoother banking
+export const BANK_ROLL_SPEED = Math.PI * 0.6; // Gentler maximum roll velocity
+export const MAX_BANK_ANGLE = (35 * Math.PI) / 180; // Gentle banks for smooth turns
+export const BANK_LEVEL_STIFFNESS = 4.0; // Stronger return to level flight
+export const TURN_SPEED = Math.PI * 0.4; // Much slower, gentler yaw rotation
+export const BANKED_TURN_BONUS = 1.4; // Reduced turn tightening bonus
 
-// Input and control feel
-export const INPUT_SMOOTHING = 14; // Smoother input for mobile
+// Input and control feel (heavily smoothed for gentle, precise control)
+export const INPUT_SMOOTHING = 22; // Very smooth input for gentle control
 export const LOOK_SENSITIVITY = 0.0025;
+export const PITCH_DAMPING = 4.5; // Strong damping for ultra-smooth pitch response
 
 // Ambient motion - subtle life when idle
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
@@ -368,27 +369,28 @@ export class FreeFlightController {
     const liftInput = clamp(smoothed.lift, -1, 1, 0);
 
     // 1. PITCH CONTROL - Forward stick controls pitch (nose up/down)
-    // Simple, intuitive control: forward input directly controls pitch
+    // Ultra-gentle, intuitive control: forward input smoothly adjusts pitch
     // Positive forward = pitch up (climb), Negative forward = pitch down (dive)
     const pitchInput = forwardInput;
     const activePitchSpeed = PITCH_SPEED;
 
+    // Target pitch velocity from input (much slower now)
     const targetPitchVelocity = pitchInput * activePitchSpeed;
 
-    // Smooth pitch response
-    const pitchAccelStep = 1 - Math.exp(-8.0 * deltaTime);
+    // Very strong damping for ultra-smooth, gentle pitch response
+    const pitchAccelStep = 1 - Math.exp(-PITCH_DAMPING * deltaTime);
     this._pitchVelocity += (targetPitchVelocity - this._pitchVelocity) * pitchAccelStep;
 
-    // Apply pitch velocity
+    // Apply pitch velocity with additional smoothing
     this._pitch += this._pitchVelocity * deltaTime;
 
-    // Gentle auto-level when no input (let pitch drift toward 0)
-    if (Math.abs(pitchInput) < 0.05) {
+    // Stronger auto-level when no input for stable, effortless flight
+    if (Math.abs(pitchInput) < 0.08) {
       const levelingForce = -this._pitch * PITCH_STABILITY * deltaTime;
       this._pitch += levelingForce;
     }
 
-    // Clamp pitch to safe limits
+    // Clamp pitch to gentle limits
     this._pitch = clamp(this._pitch, -MAX_PITCH_DOWN, MAX_PITCH_UP, this._pitch);
 
     // 2. YAW AND BANK - Strafe input causes turning with automatic banking
