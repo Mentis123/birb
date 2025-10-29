@@ -17,7 +17,7 @@ export const AUTO_LEVEL_STRENGTH = 2.0; // Returns to level when no input
 export const FORWARD_THRUST = 1.0; // Base forward acceleration (reduced to 25% for better control)
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
-export const LIFT_STRENGTH = 6.0; // Upward force when moving forward (increased to overcome gravity)
+export const LIFT_STRENGTH = 7.5; // Upward force when moving forward (increased to overcome gravity)
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
