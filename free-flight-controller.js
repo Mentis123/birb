@@ -14,14 +14,14 @@ export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
 export const AUTO_LEVEL_STRENGTH = 2.0; // Returns to level when no input
 
 // Movement forces
-export const FORWARD_THRUST = 12.0; // Base forward acceleration (increased for better lift)
+export const FORWARD_THRUST = 3.0; // Base forward acceleration (reduced to 25% for better control)
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
 export const LIFT_STRENGTH = 6.0; // Upward force when moving forward (increased to overcome gravity)
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
-export const BANK_SPEED = 2.0; // How fast we bank into turns
+export const BANK_SPEED = 8.0; // How fast we bank into turns (increased for smooth airplane-like banking)
 export const MAX_BANK_ANGLE = (30 * Math.PI) / 180; // Max roll angle
 
 // Input smoothing
