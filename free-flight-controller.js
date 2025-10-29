@@ -1,47 +1,32 @@
 // ============================================================================
-// AERODYNAMIC FLIGHT PHYSICS - Redesigned for intuitive, fun mobile flying
+// SIMPLIFIED FLIGHT PHYSICS - Clean, intuitive bird flight
 // ============================================================================
 
-// Core aerodynamics - balanced, responsive flight physics
-export const GRAVITY = 9.8; // Normalized gravity for proper weight and diving
-export const LIFT_COEFFICIENT = 6.0; // Balanced lift - enough for flight, not too floaty
-export const GLIDE_LIFT_COEFFICIENT = 8.0; // Slightly higher lift in glide mode
-export const MIN_FLIGHT_SPEED = 0.05; // Minimum speed to generate meaningful lift
-export const OPTIMAL_GLIDE_SPEED = 8.0; // Optimal cruising speed
-export const GLIDE_CRUISE_SPEED = 3.0; // Cruise speed in glide mode
-export const MAX_SAFE_SPEED = 25.0; // Maximum speed limit
+// Basic physics constants
+export const GRAVITY = 5.0; // Gentle downward pull
+export const MAX_SPEED = 20.0; // Maximum flight speed
+export const CRUISE_SPEED = 8.0; // Comfortable flying speed
 
-// Drag system - balanced for responsive flight
-export const BASE_DRAG = 0.25; // Balanced air resistance
-export const SPEED_DRAG = 0.018; // Speed-dependent drag for stability
-export const FORM_DRAG = 0.20; // Drag from angle of attack
-export const GLIDE_EXTRA_DRAG = 1.5; // Extra drag in glide mode
+// Direct control - simple and responsive
+export const PITCH_SPEED = 0.8; // How fast pitch changes (radians/sec)
+export const MAX_PITCH_UP = (30 * Math.PI) / 180; // Max climb angle (30°)
+export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
+export const AUTO_LEVEL_STRENGTH = 2.0; // Returns to level when no input
 
-// Pitch control - responsive and intuitive
-export const PITCH_SPEED = 0.45; // Radians per second (~26°/s - responsive control)
-export const GLIDE_PITCH_SPEED = 0.25; // Slower pitch in glide mode
-export const MAX_PITCH_UP = (35 * Math.PI) / 180; // Maximum climb angle
-export const MAX_PITCH_DOWN = (45 * Math.PI) / 180; // Maximum dive angle - steeper for proper diving
-export const GLIDE_MAX_PITCH = (20 * Math.PI) / 180; // Limited pitch range in glide mode
-export const PITCH_STABILITY = 1.2; // Auto-level for stable flight when hands off
+// Movement forces
+export const FORWARD_THRUST = 8.0; // Base forward acceleration
+export const FLAP_BOOST = 4.0; // Extra thrust when flapping (sprint)
+export const AIR_RESISTANCE = 0.3; // Air drag coefficient
+export const LIFT_STRENGTH = 3.0; // Upward force when moving forward
 
-// Thrust system - for flapping/powered flight
-export const FLAP_THRUST = 12.0; // Strong acceleration when flapping for climbing and maneuvering
-export const THRUST_EFFICIENCY_AT_SPEED = 0.6; // Thrust efficiency vs speed
+// Turning
+export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
+export const BANK_SPEED = 2.0; // How fast we bank into turns
+export const MAX_BANK_ANGLE = (30 * Math.PI) / 180; // Max roll angle
 
-// Banking and turning - smooth, realistic turns (gentler for precise control)
-export const BANK_FROM_TURN_INPUT = 0.65; // Reduced turn input effect on banking
-export const BANK_RESPONSIVENESS = 2.5; // Slower, smoother banking
-export const BANK_ROLL_SPEED = Math.PI * 0.6; // Gentler maximum roll velocity
-export const MAX_BANK_ANGLE = (35 * Math.PI) / 180; // Gentle banks for smooth turns
-export const BANK_LEVEL_STIFFNESS = 4.0; // Stronger return to level flight
-export const TURN_SPEED = Math.PI * 0.4; // Much slower, gentler yaw rotation
-export const BANKED_TURN_BONUS = 1.4; // Reduced turn tightening bonus
-
-// Input and control feel - responsive and natural
-export const INPUT_SMOOTHING = 15; // Smooth but responsive input
+// Input smoothing
+export const INPUT_SMOOTHING = 12; // Input smoothing factor
 export const LOOK_SENSITIVITY = 0.0025;
-export const PITCH_DAMPING = 3.0; // Balanced damping for responsive pitch
 
 // Ambient motion - subtle life when idle
 export const AMBIENT_BOB_AMPLITUDE = 0.16;
@@ -121,13 +106,8 @@ export class FreeFlightController {
 
     this.lookSensitivity = options.lookSensitivity ?? LOOK_SENSITIVITY;
     this.throttle = options.throttle ?? 1;
-    this.flapThrust = options.flapThrust ?? FLAP_THRUST;
     this.turnSpeed = options.turnSpeed ?? TURN_SPEED;
-    const providedMaxBankAngle = options.maxBankAngle;
-    this.maxBankAngle =
-      Number.isFinite(providedMaxBankAngle) && providedMaxBankAngle > 0
-        ? providedMaxBankAngle
-        : MAX_BANK_ANGLE;
+    this.maxBankAngle = options.maxBankAngle ?? MAX_BANK_ANGLE;
     this.isSprinting = false;
 
     const providedSmoothing = options.inputSmoothing;
@@ -248,20 +228,19 @@ export class FreeFlightController {
         this.position.y = this.walkGroundHeight;
       }
     } else {
-      // Taking off - transition TO flight mode
+      // Taking off - transition to flight mode smoothly
       this._walkState.verticalVelocity = 0;
       this._walkState.isGrounded = false;
 
-      // Give initial upward velocity for takeoff
+      // Start with gentle forward motion, no sudden boost
       const currentSpeed = this.velocity.length();
-      if (currentSpeed < MIN_FLIGHT_SPEED) {
+      if (currentSpeed < 1.0) {
         const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
-        // Start with slight upward angle and forward velocity
-        this.velocity.copy(forward).multiplyScalar(OPTIMAL_GLIDE_SPEED * 0.5);
-        this.velocity.y = 2.0; // Initial upward boost for takeoff
+        this.velocity.copy(forward).multiplyScalar(2.0); // Gentle start
+        this.velocity.y = 0; // No upward boost - let physics handle it
       }
 
-      // Reset pitch to level flight for smoother transition
+      // Reset pitch to level for smooth transition
       this._pitch = 0;
       this._pitchVelocity = 0;
     }
@@ -354,7 +333,7 @@ export class FreeFlightController {
     }
 
     // ========================================================================
-    // NEW AERODYNAMIC FLIGHT PHYSICS
+    // SIMPLIFIED FLIGHT PHYSICS - Arcade-style, easy to control
     // ========================================================================
 
     if (deltaTime <= 0) {
@@ -366,54 +345,30 @@ export class FreeFlightController {
 
     const forwardInput = clamp(smoothed.forward, -1, 1, 0);
     const strafeInput = clamp(smoothed.strafe, -1, 1, 0);
-    const liftInput = clamp(smoothed.lift, -1, 1, 0);
 
-    // 1. PITCH CONTROL - Forward stick controls pitch (nose up/down)
-    // Ultra-gentle, intuitive control: forward input smoothly adjusts pitch
-    // Positive forward = pitch up (climb), Negative forward = pitch down (dive)
-    const pitchInput = forwardInput;
-    const activePitchSpeed = PITCH_SPEED;
-
-    // Target pitch velocity from input (much slower now)
-    const targetPitchVelocity = pitchInput * activePitchSpeed;
-
-    // Very strong damping for ultra-smooth, gentle pitch response
-    const pitchAccelStep = 1 - Math.exp(-PITCH_DAMPING * deltaTime);
-    this._pitchVelocity += (targetPitchVelocity - this._pitchVelocity) * pitchAccelStep;
-
-    // Apply pitch velocity with additional smoothing
+    // 1. PITCH CONTROL - Simple and direct
+    // Forward input directly controls pitch angle
+    const targetPitchVelocity = forwardInput * PITCH_SPEED;
+    this._pitchVelocity = targetPitchVelocity;
     this._pitch += this._pitchVelocity * deltaTime;
 
-    // Stronger auto-level when no input for stable, effortless flight
-    if (Math.abs(pitchInput) < 0.08) {
-      const levelingForce = -this._pitch * PITCH_STABILITY * deltaTime;
-      this._pitch += levelingForce;
+    // Auto-level when no input
+    if (Math.abs(forwardInput) < 0.1) {
+      this._pitch -= this._pitch * AUTO_LEVEL_STRENGTH * deltaTime;
     }
 
-    // Clamp pitch to gentle limits
+    // Clamp pitch
     this._pitch = clamp(this._pitch, -MAX_PITCH_DOWN, MAX_PITCH_UP, this._pitch);
 
-    // 2. YAW AND BANK - Strafe input causes turning with automatic banking
-    let turnInput = strafeInput;
-    let effectiveTurnSpeed = this.turnSpeed;
-
-    // Banking makes turns tighter
-    const bankAmount = Math.abs(this.bank);
-    if (bankAmount > 0.1) {
-      const bankContribution = Math.sin(bankAmount);
-      effectiveTurnSpeed *= (1 + bankContribution * (BANKED_TURN_BONUS - 1));
-    }
-
-    const yawAngle = -turnInput * effectiveTurnSpeed * deltaTime;
+    // 2. YAW/TURNING - Strafe input turns the bird
+    const yawAngle = -strafeInput * this.turnSpeed * deltaTime;
     if (Math.abs(yawAngle) > 1e-6) {
       this._yawQuaternion.setFromAxisAngle(up, yawAngle);
       this.lookQuaternion.premultiply(this._yawQuaternion);
     }
-
     this.lookQuaternion.normalize();
 
-    // 3. BUILD ORIENTATION - Yaw, then Pitch, then Bank
-    // Start with yaw
+    // 3. BUILD ORIENTATION
     this.quaternion.copy(this.lookQuaternion);
 
     // Apply pitch
@@ -421,108 +376,60 @@ export class FreeFlightController {
     this._pitchQuaternion.setFromAxisAngle(right, this._pitch);
     this.quaternion.multiply(this._pitchQuaternion);
 
-    // Get forward direction after pitch
+    // Get forward direction
     const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
 
-    // 4. BANKING - Automatically bank based on turn input
-    const forwardZ = forward.z;
-    let bankOrientation = 1;
-    if (forwardZ > 1e-4) {
-      bankOrientation = -1;
-    } else if (forwardZ < -1e-4) {
-      bankOrientation = 1;
-    }
-
-    const targetBankFromTurn = -strafeInput * bankOrientation * BANK_FROM_TURN_INPUT * this.maxBankAngle;
-    const rollInput = smoothed.roll * bankOrientation;
-    const targetBankFromRoll = rollInput * this.maxBankAngle;
-
-    // Combine banking sources
-    const targetBank = clamp(targetBankFromTurn + targetBankFromRoll, -this.maxBankAngle, this.maxBankAngle, 0);
-
-    const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    const targetBankVelocity = (targetBank - this.bank) * BANK_LEVEL_STIFFNESS;
-    const clampedTargetVelocity = clamp(targetBankVelocity, -BANK_ROLL_SPEED, BANK_ROLL_SPEED, 0);
-
-    this._bankVelocity += (clampedTargetVelocity - this._bankVelocity) * bankStep;
-    this.bank += this._bankVelocity * deltaTime;
+    // 4. BANKING - Lean into turns
+    const targetBank = -strafeInput * this.maxBankAngle;
+    const bankDiff = targetBank - this.bank;
+    this.bank += bankDiff * BANK_SPEED * deltaTime;
     this.bank = clamp(this.bank, -this.maxBankAngle, this.maxBankAngle, this.bank);
 
-    // Apply bank rotation
+    // Apply bank
     this._bankQuaternion.setFromAxisAngle(forward, -this.bank);
     this.quaternion.multiply(this._bankQuaternion);
 
-    // 5. AERODYNAMIC FORCES
+    // 5. SIMPLE PHYSICS - Arcade-style forces
     const speed = this.velocity.length();
-    const speedSq = speed * speed;
 
-    // GRAVITY - always pulls down
-    this._gravityForce.set(0, -GRAVITY, 0);
+    // Always accelerate forward in the direction we're facing
+    let thrustAmount = FORWARD_THRUST * this.throttle;
 
-    // LIFT - generated by speed and wing orientation
-    // Lift is dramatically reduced (or eliminated) when diving
-    this._liftForce.set(0, 0, 0);
-    if (speed > MIN_FLIGHT_SPEED) {
-      const speedAboveMin = speed - MIN_FLIGHT_SPEED;
-
-      // Get wing up direction
-      const wingUp = this._up.set(0, 1, 0).applyQuaternion(this.quaternion);
-
-      // Wing orientation factor: when wings point up (+Y), generate lift
-      // When wings point down (-Y), ELIMINATE lift to allow diving
-      // Using a very aggressive power function so diving is actually possible
-      const wingUpAmount = Math.max(0, wingUp.y);
-      const wingOrientationFactor = Math.pow(wingUpAmount, 4.0); // Very aggressive - lift drops to near-zero quickly when tilting down
-
-      // Pitch angle factor: when pitched down significantly, ELIMINATE lift
-      const pitchFactor = this._pitch < 0
-        ? Math.max(0.0, 1 + (this._pitch / MAX_PITCH_DOWN) * 0.99) // Reduce by up to 99% when fully pitched down
-        : 1.0;
-
-      // When actively diving (moving downward), eliminate lift entirely to enable steep dives
-      const verticalVelocityFactor = this.velocity.y < -0.5
-        ? Math.max(0.0, 1 - Math.abs(this.velocity.y) / MAX_SAFE_SPEED)
-        : 1.0;
-
-      const liftEfficiency = wingOrientationFactor * pitchFactor * verticalVelocityFactor;
-      const liftMagnitude = LIFT_COEFFICIENT * speedAboveMin * liftEfficiency;
-
-      // Lift acts upward in world space
-      this._liftForce.set(0, liftMagnitude, 0);
+    // Extra thrust when flapping (sprinting)
+    if (this.isSprinting) {
+      thrustAmount += FLAP_BOOST;
     }
 
-    // DRAG - opposes motion, increases with speed² and angle of attack
+    // Apply forward thrust
+    this._thrustForce.copy(forward).multiplyScalar(thrustAmount);
+    this._acceleration.copy(this._thrustForce);
+
+    // Gravity pulls down
+    this._acceleration.y -= GRAVITY;
+
+    // Lift - upward force when moving forward
+    // More lift when level or climbing, less when diving
+    if (speed > 1.0) {
+      const liftAmount = LIFT_STRENGTH * Math.min(speed / CRUISE_SPEED, 1.5);
+      // Reduce lift when pitched down (diving)
+      const pitchFactor = this._pitch < 0 ? Math.max(0.3, 1.0 + this._pitch / MAX_PITCH_DOWN) : 1.0;
+      this._acceleration.y += liftAmount * pitchFactor;
+    }
+
+    // Air resistance - simple drag
+    const drag = speed * AIR_RESISTANCE;
     if (speed > 0.01) {
-      const dragMagnitude = BASE_DRAG + SPEED_DRAG * speedSq;
-      const angleOfAttackDrag = FORM_DRAG * Math.abs(Math.sin(this._pitch));
-      const totalDrag = dragMagnitude + angleOfAttackDrag;
-
-      this._dragForce.copy(this.velocity).normalize().multiplyScalar(-totalDrag * speed);
-    } else {
-      this._dragForce.set(0, 0, 0);
+      this._dragForce.copy(this.velocity).normalize().multiplyScalar(-drag);
+      this._acceleration.add(this._dragForce);
     }
 
-    // THRUST - flapping gives forward thrust
-    this._thrustForce.set(0, 0, 0);
-    if (this.isSprinting && this.throttle > 0) {
-      const thrustEfficiency = 1 - Math.min(1, speed / MAX_SAFE_SPEED) * THRUST_EFFICIENCY_AT_SPEED;
-      const thrustMagnitude = this.flapThrust * this.throttle * thrustEfficiency;
-      this._thrustForce.copy(forward).multiplyScalar(thrustMagnitude);
-    }
-
-    // 6. INTEGRATE FORCES
-    this._acceleration.set(0, 0, 0)
-      .add(this._gravityForce)
-      .add(this._liftForce)
-      .add(this._dragForce)
-      .add(this._thrustForce);
-
+    // 6. UPDATE VELOCITY
     this.velocity.addScaledVector(this._acceleration, deltaTime);
 
-    // Speed limiter for safety
+    // Speed limit
     const currentSpeed = this.velocity.length();
-    if (currentSpeed > MAX_SAFE_SPEED) {
-      this.velocity.multiplyScalar(MAX_SAFE_SPEED / currentSpeed);
+    if (currentSpeed > MAX_SPEED) {
+      this.velocity.multiplyScalar(MAX_SPEED / currentSpeed);
     }
 
     // 7. UPDATE POSITION
@@ -635,11 +542,10 @@ export class FreeFlightController {
     this.lookQuaternion.copy(this._initialQuaternion);
     this.quaternion.copy(this._initialQuaternion);
 
-    // Give bird initial forward velocity for flight mode so it doesn't fall immediately
+    // Start with gentle velocity in flight mode
     if (this._initialMovementMode === MOVEMENT_MODES.FLYING) {
-      const initialSpeed = OPTIMAL_GLIDE_SPEED * 0.8; // Start at 80% of optimal speed
       const forward = this._forward.set(0, 0, -1).applyQuaternion(this._initialQuaternion);
-      this.velocity.copy(forward).multiplyScalar(initialSpeed);
+      this.velocity.copy(forward).multiplyScalar(CRUISE_SPEED * 0.5); // Start slow
     } else {
       this.velocity.set(0, 0, 0);
     }
