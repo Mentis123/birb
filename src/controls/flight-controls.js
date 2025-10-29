@@ -208,20 +208,20 @@ export function createFlightControls({
   const handleLeftStickChange = (value, context = {}) => {
     const strafe = clamp(value.x, -1, 1);
 
-    // PITCH CONTROLS - Universal flight stick behavior:
-    // Both FPV and Follow modes use the same intuitive flight stick controls:
-    //   - Pull stick back (UP on screen) → pitch UP → climb
-    //   - Push stick forward (DOWN on screen) → pitch DOWN → dive
+    // PITCH CONTROLS - Arcade-style intuitive controls:
+    // Push stick UP (forward on screen) → dive DOWN
+    // Pull stick DOWN (back on screen) → climb UP
     //
+    // This matches the natural expectation: up on stick = go up in world
     // Note: Keyboard controls (W/S) use different semantics and are handled separately
 
     const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
     const isFPV = currentCameraMode === 'FPV';
 
-    // Same pitch control for both modes - stick works like a flight stick
-    // Invert Y axis: drag DOWN (positive screen Y) = push forward = pitch down (negative forward)
-    //                drag UP (negative screen Y) = pull back = pitch up (positive forward)
-    const forward = clamp(-value.y, -1, 1);
+    // Arcade-style control: stick Y directly maps to world vertical movement
+    // Push UP (negative screen Y) = dive (negative forward = pitch down)
+    // Pull DOWN (positive screen Y) = climb (positive forward = pitch up)
+    const forward = clamp(value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
