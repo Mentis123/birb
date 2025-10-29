@@ -267,10 +267,8 @@ export function createFlightControls({
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
 
-    const rollInput = context.isActive
-      ? clamp(value.x * effectiveRollSensitivity, -1, 1)
-      : 0;
-    axisSources.rightStick.roll = rollInput;
+    // Right stick is for camera look only, not roll control
+    axisSources.rightStick.roll = 0;
 
     applyThrustInput();
   };

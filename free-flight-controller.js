@@ -21,8 +21,8 @@ export const LIFT_STRENGTH = 6.0; // Upward force when moving forward (increased
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
-export const BANK_SPEED = 8.0; // How fast we bank into turns (increased for smooth airplane-like banking)
-export const MAX_BANK_ANGLE = (30 * Math.PI) / 180; // Max roll angle
+export const BANK_SPEED = 3.0; // How fast we bank into turns (smooth, stable banking)
+export const MAX_BANK_ANGLE = (25 * Math.PI) / 180; // Max roll angle (25° for stable turns)
 
 // Input smoothing
 export const INPUT_SMOOTHING = 12; // Input smoothing factor
@@ -385,6 +385,12 @@ export class FreeFlightController {
     const targetBank = -strafeInput * this.maxBankAngle;
     const bankDiff = targetBank - this.bank;
     this.bank += bankDiff * BANK_SPEED * deltaTime;
+
+    // Auto-level bank when no strafe input (prevents wobble)
+    if (Math.abs(strafeInput) < 0.05) {
+      this.bank -= this.bank * BANK_SPEED * 0.5 * deltaTime;
+    }
+
     this.bank = clamp(this.bank, -this.maxBankAngle, this.maxBankAngle, this.bank);
 
     // Apply bank
