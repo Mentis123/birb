@@ -2273,6 +2273,20 @@
         const pose = flightController.update(delta);
         const ambientOffsets = flightController.getAmbientOffsets();
 
+        // Check if movement mode changed (e.g., from ground collision)
+        const currentControllerMode = typeof flightController.getMovementMode === "function"
+          ? flightController.getMovementMode()
+          : movementState.mode;
+        if (currentControllerMode !== movementState.mode) {
+          // Mode changed (e.g., landed from collision) - sync UI
+          const wasFlying = movementState.mode === "flying";
+          setMovementMode(currentControllerMode, { userInitiated: false, applyPreset: false });
+          // Show message if we just landed from flying
+          if (wasFlying && currentControllerMode === "grounded") {
+            showMovementMessage("Landed! Tap Take Off to fly again.", 2800);
+          }
+        }
+
         birbAnchor.position.copy(pose.position).add(ambientOffsets.position);
         birbRig.quaternion.copy(pose.quaternion);
         birbRig.quaternion.multiply(modelOrientationOffset);

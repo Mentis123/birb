@@ -14,10 +14,10 @@ export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
 export const AUTO_LEVEL_STRENGTH = 2.0; // Returns to level when no input
 
 // Movement forces
-export const FORWARD_THRUST = 8.0; // Base forward acceleration
-export const FLAP_BOOST = 4.0; // Extra thrust when flapping (sprint)
+export const FORWARD_THRUST = 12.0; // Base forward acceleration (increased for better lift)
+export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
-export const LIFT_STRENGTH = 3.0; // Upward force when moving forward
+export const LIFT_STRENGTH = 6.0; // Upward force when moving forward (increased to overcome gravity)
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
@@ -232,12 +232,14 @@ export class FreeFlightController {
       this._walkState.verticalVelocity = 0;
       this._walkState.isGrounded = false;
 
-      // Start with gentle forward motion, no sudden boost
+      // Start with good forward motion to generate lift immediately
       const currentSpeed = this.velocity.length();
-      if (currentSpeed < 1.0) {
+      if (currentSpeed < CRUISE_SPEED * 0.6) {
         const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
-        this.velocity.copy(forward).multiplyScalar(2.0); // Gentle start
-        this.velocity.y = 0; // No upward boost - let physics handle it
+        // Start at ~60% cruise speed to quickly build lift
+        this.velocity.copy(forward).multiplyScalar(CRUISE_SPEED * 0.6);
+        // Add a small upward boost to help with takeoff
+        this.velocity.y = 1.5;
       }
 
       // Reset pitch to level for smooth transition
@@ -409,11 +411,22 @@ export class FreeFlightController {
 
     // Lift - upward force when moving forward
     // More lift when level or climbing, less when diving
-    if (speed > 1.0) {
-      const liftAmount = LIFT_STRENGTH * Math.min(speed / CRUISE_SPEED, 1.5);
-      // Reduce lift when pitched down (diving)
-      const pitchFactor = this._pitch < 0 ? Math.max(0.3, 1.0 + this._pitch / MAX_PITCH_DOWN) : 1.0;
-      this._acceleration.y += liftAmount * pitchFactor;
+    if (speed > 0.5) {
+      const speedFactor = Math.min(speed / CRUISE_SPEED, 1.5);
+      let liftAmount = LIFT_STRENGTH * speedFactor;
+
+      // Pitch affects lift: climbing increases lift, diving reduces it
+      if (this._pitch > 0) {
+        // Climbing: boost lift
+        const climbBoost = 1.0 + (this._pitch / MAX_PITCH_UP) * 0.5;
+        liftAmount *= climbBoost;
+      } else if (this._pitch < 0) {
+        // Diving: reduce lift but keep minimum for control
+        const divePenalty = Math.max(0.4, 1.0 + this._pitch / MAX_PITCH_DOWN);
+        liftAmount *= divePenalty;
+      }
+
+      this._acceleration.y += liftAmount;
     }
 
     // Air resistance - simple drag
