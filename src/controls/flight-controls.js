@@ -219,9 +219,9 @@ export function createFlightControls({
     const isFPV = currentCameraMode === 'FPV';
 
     // Arcade-style control: stick Y directly maps to world vertical movement
-    // Push UP (negative screen Y) = dive (negative forward = pitch down)
-    // Pull DOWN (positive screen Y) = climb (positive forward = pitch up)
-    const forward = clamp(value.y, -1, 1);
+    // Pull DOWN (back) = climb (positive forward = pitch up)
+    // Push UP (forward) = dive (negative forward = pitch down)
+    const forward = clamp(-value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;

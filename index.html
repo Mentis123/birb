@@ -2119,6 +2119,9 @@
             if (typeof flightController.requestTakeoff === "function") {
               const tookOff = flightController.requestTakeoff();
               if (tookOff) {
+                // Sync UI state with controller after takeoff
+                const newMode = flightController.getMovementMode();
+                setMovementMode(newMode, { userInitiated: true, applyPreset: false });
                 showMovementMessage("Taking off!", 1600);
               }
             }
