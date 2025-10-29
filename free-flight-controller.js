@@ -14,7 +14,7 @@ export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
 export const AUTO_LEVEL_STRENGTH = 2.0; // Returns to level when no input
 
 // Movement forces
-export const FORWARD_THRUST = 3.0; // Base forward acceleration (reduced to 25% for better control)
+export const FORWARD_THRUST = 1.0; // Base forward acceleration (reduced to 25% for better control)
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
 export const LIFT_STRENGTH = 6.0; // Upward force when moving forward (increased to overcome gravity)
