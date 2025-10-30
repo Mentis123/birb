@@ -2,27 +2,28 @@
 // SIMPLIFIED FLIGHT PHYSICS - Clean, intuitive bird flight
 // ============================================================================
 
-// Basic physics constants
-export const GRAVITY = 2.0; // Gentle downward pull
-export const MAX_SPEED = 20.0; // Maximum flight speed
+// Basic physics constants - MUCH simpler
+export const GRAVITY = 1.5; // Even gentler
+export const MAX_SPEED = 15; // Slower = more controllable
 export const CRUISE_SPEED = 8.0; // Comfortable flying speed
 
 // Direct control - simple and responsive
-export const PITCH_SPEED = 0.8; // How fast pitch changes (radians/sec)
+export const PITCH_SPEED = 0.3; // Very low sensitivity
 export const MAX_PITCH_UP = (30 * Math.PI) / 180; // Max climb angle (30°)
 export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
-export const AUTO_LEVEL_STRENGTH = 2.0; // Returns to level when no input
+export const AUTO_LEVEL_STRENGTH = 0.2; // Strong auto-leveling
 
 // Movement forces
-export const FORWARD_THRUST = 1.0; // Base forward acceleration (reduced to 25% for better control)
+export const FORWARD_THRUST = 0.5; // Very low, mostly gliding
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
-export const LIFT_STRENGTH = 12.0; // Upward force when moving forward (increased to overcome gravity)
+export const LIFT_STRENGTH = 6.0; // Less than before
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
-export const BANK_SPEED = 3.0; // How fast we bank into turns (smooth, stable banking)
-export const MAX_BANK_ANGLE = (25 * Math.PI) / 180; // Max roll angle (25° for stable turns)
+export const BANK_SPEED = 2.0; // Slower banking
+export const MAX_BANK_ANGLE = (20 * Math.PI) / 180; // Less aggressive (20° instead of 25°)
+export const YAW_FROM_BANK = 0.015; // Banking creates turning
 
 // Input smoothing
 export const INPUT_SMOOTHING = 12; // Input smoothing factor
@@ -396,6 +397,14 @@ export class FreeFlightController {
     // Apply bank
     this._bankQuaternion.setFromAxisAngle(forward, -this.bank);
     this.quaternion.multiply(this._bankQuaternion);
+
+    // Banking creates natural turning
+    const bankYaw = this.bank * YAW_FROM_BANK;
+    if (Math.abs(bankYaw) > 1e-6) {
+      this._yawQuaternion.setFromAxisAngle(up, bankYaw);
+      this.lookQuaternion.premultiply(this._yawQuaternion);
+      this.lookQuaternion.normalize();
+    }
 
     // 5. SIMPLE PHYSICS - Arcade-style forces
     const speed = this.velocity.length();
