@@ -372,9 +372,15 @@ export class FreeFlightController {
     this.lookQuaternion.normalize();
 
     // 3. BUILD ORIENTATION
-    this.quaternion.copy(this.lookQuaternion);
+    // Extract only YAW from lookQuaternion to apply pitch relative to level horizon
+    // This prevents pitch inversion when camera is looking up/down at extreme angles
+    const tempEuler = this._ambientEuler;
+    tempEuler.setFromQuaternion(this.lookQuaternion, 'YXZ');
+    const yawOnly = tempEuler.y; // Keep only yaw rotation
+    tempEuler.set(0, yawOnly, 0, 'YXZ'); // Zero out pitch and roll
+    this.quaternion.setFromEuler(tempEuler);
 
-    // Apply pitch
+    // Apply pitch relative to this level (yaw-only) orientation
     const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion);
     this._pitchQuaternion.setFromAxisAngle(right, this._pitch);
     this.quaternion.multiply(this._pitchQuaternion);
