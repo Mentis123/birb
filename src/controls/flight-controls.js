@@ -168,17 +168,14 @@ export function createFlightControls({
   };
 
   const updateKeyboardAxes = () => {
-    const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
-    const isFPV = currentCameraMode === 'FPV';
-
-    let forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
-
-    // Camera-aware keyboard controls for consistency
-    // FPV: W = pitch up (direct), S = pitch down
-    // Follow: W = dive (arcade), S = climb
-    if (!isFPV) {
-      forward = -forward; // Invert for follow/arcade mode
-    }
+    // KEYBOARD PITCH CONTROLS - Consistent arcade-style controls (matches thumbstick):
+    //
+    // Press W (forward key) → CLIMB (bird goes up)
+    // Press S (back key) → DIVE (bird goes down)
+    //
+    // This mapping is ALWAYS consistent regardless of camera angle or mode,
+    // matching the thumbstick behavior for intuitive arcade-style controls.
+    const forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
 
     axisSources.keyboard.forward = forward;
     axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
