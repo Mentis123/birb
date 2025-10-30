@@ -208,20 +208,20 @@ export function createFlightControls({
   const handleLeftStickChange = (value, context = {}) => {
     const strafe = clamp(value.x, -1, 1);
 
-    // PITCH CONTROLS - Arcade-style intuitive controls:
-    // Push stick UP (forward on screen) → dive DOWN
-    // Pull stick DOWN (back on screen) → climb UP
+    // PITCH CONTROLS - Aircraft-style intuitive controls:
+    // Pull stick DOWN (back toward you) → pitch down → DIVE
+    // Push stick UP (forward away from you) → pitch up → CLIMB
     //
-    // This matches the natural expectation: up on stick = go up in world
+    // This matches aircraft control expectations
     // Note: Keyboard controls (W/S) use different semantics and are handled separately
 
     const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
     const isFPV = currentCameraMode === 'FPV';
 
-    // Arcade-style control: stick Y directly maps to world vertical movement
-    // Pull DOWN (back) = climb (positive forward = pitch up)
-    // Push UP (forward) = dive (negative forward = pitch down)
-    const forward = clamp(-value.y, -1, 1);
+    // Aircraft-style control: pull back to dive, push forward to climb
+    // Pull DOWN (back) = dive (positive forward = pitch down)
+    // Push UP (forward) = climb (negative forward = pitch up)
+    const forward = clamp(value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
