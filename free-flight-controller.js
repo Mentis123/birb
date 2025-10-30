@@ -17,7 +17,7 @@ export const AUTO_LEVEL_STRENGTH = 0.2; // Strong auto-leveling
 export const FORWARD_THRUST = 0.5; // Very low, mostly gliding
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
-export const LIFT_STRENGTH = 6.0; // Less than before
+export const LIFT_STRENGTH = 2.7; // Tuned to balance against gravity
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
