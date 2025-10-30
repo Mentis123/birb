@@ -251,12 +251,13 @@
       .movement-toggle {
         appearance: none;
         border: 1px solid rgba(168, 204, 255, 0.32);
-        border-radius: 999px;
-        padding: 0.5rem 1.1rem;
-        font-size: 0.8rem;
-        font-weight: 600;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
+        border-radius: 50%;
+        width: 2.9rem;
+        height: 2.9rem;
+        padding: 0;
+        display: grid;
+        place-items: center;
+        font-size: 1.3rem;
         color: #f2f6ff;
         background: linear-gradient(135deg, rgba(66, 106, 188, 0.78), rgba(32, 52, 108, 0.9));
         box-shadow:
@@ -281,14 +282,9 @@
           inset 0 0 0 1px rgba(80, 122, 204, 0.58);
       }
 
-      .movement-toggle__label {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-
       .movement-toggle__icon {
-        font-size: 1.05em;
+        font-size: 1.4rem;
+        line-height: 1;
       }
 
       .touch-controls__hint {
@@ -426,8 +422,7 @@
 
       .settings-toggle__icon,
       .environment-toggle__icon,
-      .fullscreen-toggle__icon,
-      .mode-cycle__icon {
+      .fullscreen-toggle__icon {
         fill: none;
         stroke: currentColor;
         stroke-width: 1.35;
@@ -776,38 +771,6 @@
             </button>
             <button
               type="button"
-              class="canvas-action-button mode-cycle"
-              data-control="mode-cycle"
-              aria-label="Cycle movement mode"
-              title="Cycle movement mode"
-            >
-              <svg
-                class="mode-cycle__icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.35"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.364 6.364l-2.121-2.121M8.757 8.757L6.636 6.636m12.728 0l-2.121 2.121M8.757 15.243l-2.121 2.121"
-                />
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="3"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.35"
-                />
-              </svg>
-              <span class="visually-hidden" data-mode-cycle-label>Walk mode</span>
-            </button>
-            <button
-              type="button"
               class="canvas-action-button environment-toggle"
               data-control="environment-toggle"
               aria-label="Cycle environment"
@@ -857,10 +820,8 @@
               aria-pressed="false"
               aria-label="Tap to switch movement mode"
             >
-              <span class="movement-toggle__label">
-                <span class="movement-toggle__icon" aria-hidden="true" data-movement-toggle-icon>🕊️</span>
-                <span data-movement-toggle-label>Fly</span>
-              </span>
+              <span class="movement-toggle__icon" aria-hidden="true" data-movement-toggle-icon>🪽</span>
+              <span class="visually-hidden" data-movement-toggle-label>Take Off</span>
             </button>
             <div class="touch-controls__hint">Second touch: Sprint</div>
           </div>
@@ -1382,10 +1343,6 @@
         : null;
       const movementToggleLabel = movementToggleButton
         ? movementToggleButton.querySelector('[data-movement-toggle-label]')
-        : null;
-      const modeCycleButton = document.querySelector('[data-control="mode-cycle"]');
-      const modeCycleLabel = modeCycleButton
-        ? modeCycleButton.querySelector('[data-mode-cycle-label]')
         : null;
       const panelToggleLabel = panelToggleButton
         ? panelToggleButton.querySelector('[data-settings-label]')
@@ -1993,7 +1950,7 @@
           movementToggleButton.style.display = "";
           movementToggleButton.setAttribute("aria-pressed", "false");
           if (movementToggleIcon) {
-            movementToggleIcon.textContent = "🕊️";
+            movementToggleIcon.textContent = "🪽";
           }
           if (movementToggleLabel) {
             movementToggleLabel.textContent = "Take Off";
@@ -2006,16 +1963,6 @@
         }
       }
 
-      function updateModeCycleButton() {
-        if (!modeCycleButton) return;
-        const modeLabel = getMovementModeLabel(movementState.mode);
-        if (modeCycleLabel) {
-          modeCycleLabel.textContent = modeLabel;
-        }
-        modeCycleButton.setAttribute("aria-label", `Cycle movement mode (current: ${modeLabel})`);
-        modeCycleButton.setAttribute("title", `Cycle movement mode • ${modeLabel}`);
-      }
-
       function updateMovementModeUi() {
         movementModeButtons.forEach((button) => {
           if (!button) return;
@@ -2026,7 +1973,6 @@
         });
         updateBoostButtonUi();
         updateMovementToggleButton();
-        updateModeCycleButton();
       }
 
       function showMovementMessage(message, duration = 2200) {
@@ -2126,14 +2072,6 @@
               }
             }
           }
-        });
-      }
-
-      if (modeCycleButton) {
-        modeCycleButton.addEventListener("click", () => {
-          // Toggle between grounded and flying
-          const nextMode = movementState.mode === "grounded" ? "flying" : "grounded";
-          setMovementMode(nextMode, { userInitiated: true, applyPreset: true });
         });
       }
 
