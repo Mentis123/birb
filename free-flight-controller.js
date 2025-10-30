@@ -17,7 +17,7 @@ export const AUTO_LEVEL_STRENGTH = 0.2; // Strong auto-leveling
 export const FORWARD_THRUST = 0.5; // Very low, mostly gliding
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
-export const LIFT_STRENGTH = 6.0; // Less than before
+export const LIFT_STRENGTH = 1.8; // Balanced with gravity for proper diving/climbing
 
 // Turning
 export const TURN_SPEED = Math.PI * 0.5; // Yaw rotation speed
@@ -436,8 +436,8 @@ export class FreeFlightController {
         const climbBoost = 1.0 + (this._pitch / MAX_PITCH_UP) * 0.5;
         liftAmount *= climbBoost;
       } else if (this._pitch < 0) {
-        // Diving: reduce lift but keep minimum for control
-        const divePenalty = Math.max(0.4, 1.0 + this._pitch / MAX_PITCH_DOWN);
+        // Diving: reduce lift significantly to allow proper dives
+        const divePenalty = Math.max(0.2, 1.0 + this._pitch / MAX_PITCH_DOWN);
         liftAmount *= divePenalty;
       }
 
