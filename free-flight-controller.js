@@ -14,7 +14,7 @@ export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
 export const AUTO_LEVEL_STRENGTH = 0.2; // Strong auto-leveling
 
 // Movement forces
-export const FORWARD_THRUST = 0.5; // Very low, mostly gliding
+export const FORWARD_THRUST = 2.5; // Maintains forward momentum during glide
 export const FLAP_BOOST = 6.0; // Extra thrust when flapping (sprint)
 export const AIR_RESISTANCE = 0.3; // Air drag coefficient
 export const LIFT_STRENGTH = 2.7; // Tuned to balance against gravity
