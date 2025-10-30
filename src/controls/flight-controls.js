@@ -208,15 +208,18 @@ export function createFlightControls({
   const handleLeftStickChange = (value, context = {}) => {
     const strafe = clamp(value.x, -1, 1);
 
-    // PITCH CONTROLS - Arcade-style intuitive controls:
-    // Pull stick DOWN (toward bottom of screen) → pitch down → DIVE
-    // Push stick UP (toward top of screen) → pitch up → CLIMB
+    // PITCH CONTROLS - Arcade-style intuitive controls (consistent in ALL scenarios):
     //
-    // This is intuitive for touch/gamepad controls across all camera modes
-    // Note: Keyboard controls (W/S) may use different semantics and are handled separately
+    // Push stick UP (toward top of screen) → CLIMB (bird goes up)
+    // Pull stick DOWN (toward bottom of screen) → DIVE (bird goes down)
     //
-    // Thumbstick Y coordinates: up = negative, down = positive (screen space)
-    // We negate Y so: pull down → negative forward → pitch down (dive)
+    // This mapping is ALWAYS consistent regardless of camera angle or mode.
+    //
+    // Technical details:
+    // - Thumbstick reports: UP = negative Y, DOWN = positive Y (screen space)
+    // - We negate to convert: UP (-) → positive forward → climb, DOWN (+) → negative forward → dive
+    // - Positive forward input = pitch up + upward thrust = CLIMB
+    // - Negative forward input = pitch down + downward thrust = DIVE
     const forward = clamp(-value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
