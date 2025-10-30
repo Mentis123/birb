@@ -79,7 +79,7 @@
       .control-panel {
         position: absolute;
         top: calc(100% + 0.85rem);
-        right: 0;
+        left: 0;
         display: flex;
         flex-direction: column;
         gap: 0.55rem;
@@ -91,7 +91,7 @@
         box-shadow: 0 18px 46px rgba(7, 14, 32, 0.55);
         backdrop-filter: blur(18px);
         z-index: 4;
-        transform-origin: top right;
+        transform-origin: top left;
         transition: opacity 160ms ease, transform 200ms ease;
       }
 
@@ -351,7 +351,7 @@
 
       .canvas-actions {
         position: absolute;
-        inset: auto var(--space-2) var(--space-2) auto;
+        inset: auto auto var(--space-2) var(--space-2);
         z-index: 3;
         padding: 0.55rem;
         border-radius: 1.1rem;
@@ -550,7 +550,7 @@
       .canvas-wrapper:fullscreen .canvas-actions,
       .canvas-wrapper:-webkit-full-screen .canvas-actions,
       .canvas-wrapper.is-fullscreen-fallback .canvas-actions {
-        inset: auto clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem) auto;
+        inset: auto auto clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem);
       }
 
 
