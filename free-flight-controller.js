@@ -7,11 +7,11 @@ export const GRAVITY = 1.5; // Even gentler
 export const MAX_SPEED = 15; // Slower = more controllable
 export const CRUISE_SPEED = 8.0; // Comfortable flying speed
 
-// Direct control - simple and responsive
-export const PITCH_SPEED = 0.3; // Very low sensitivity
-export const MAX_PITCH_UP = (30 * Math.PI) / 180; // Max climb angle (30°)
-export const MAX_PITCH_DOWN = (40 * Math.PI) / 180; // Max dive angle (40°)
-export const AUTO_LEVEL_STRENGTH = 0.2; // Strong auto-leveling
+// Direct control - highly responsive for precise maneuvering
+export const PITCH_SPEED = 1.8; // High sensitivity for responsive dive/climb control
+export const MAX_PITCH_UP = (65 * Math.PI) / 180; // Max climb angle (65°) - steep climbs
+export const MAX_PITCH_DOWN = (75 * Math.PI) / 180; // Max dive angle (75°) - aggressive dives
+export const AUTO_LEVEL_STRENGTH = 0.12; // Gentle auto-leveling - allows sustained dives
 
 // Movement forces
 export const FORWARD_THRUST = 4.0; // Base thrust (60% throttle = cruise speed)
@@ -349,18 +349,20 @@ export class FreeFlightController {
     const forwardInput = clamp(smoothed.forward, -1, 1, 0);
     const strafeInput = clamp(smoothed.strafe, -1, 1, 0);
 
-    // 1. PITCH CONTROL - Simple and direct
-    // Forward input directly controls pitch angle
+    // 1. PITCH CONTROL - Highly responsive dive/climb control
+    // Positive forwardInput (stick UP) = pitch up = nose rises = CLIMB
+    // Negative forwardInput (stick DOWN) = pitch down = nose drops = DIVE
+    // This mapping is CONSISTENT regardless of camera angle
     const targetPitchVelocity = forwardInput * PITCH_SPEED;
     this._pitchVelocity = targetPitchVelocity;
     this._pitch += this._pitchVelocity * deltaTime;
 
-    // Auto-level when no input
-    if (Math.abs(forwardInput) < 0.1) {
+    // Auto-level when no input - gentle to allow sustained dives
+    if (Math.abs(forwardInput) < 0.08) {
       this._pitch -= this._pitch * AUTO_LEVEL_STRENGTH * deltaTime;
     }
 
-    // Clamp pitch
+    // Clamp pitch to allow steep maneuvers
     this._pitch = clamp(this._pitch, -MAX_PITCH_DOWN, MAX_PITCH_UP, this._pitch);
 
     // 2. YAW/TURNING - Strafe input turns the bird
@@ -426,6 +428,11 @@ export class FreeFlightController {
     // Apply forward thrust
     this._thrustForce.copy(forward).multiplyScalar(thrustAmount);
     this._acceleration.copy(this._thrustForce);
+
+    // Add direct vertical control for arcade-style responsiveness
+    // Positive input (stick up) = climb, negative input (stick down) = dive
+    const directLiftBoost = forwardInput * 1.5; // Direct vertical component
+    this._acceleration.y += directLiftBoost;
 
     // Gravity pulls down
     this._acceleration.y -= GRAVITY;
