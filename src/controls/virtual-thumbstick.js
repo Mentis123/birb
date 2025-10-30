@@ -23,7 +23,7 @@ const shapeAxis = (value, { deadzone = 0, expo = 0 } = {}) => {
 };
 
 const defaultOptions = {
-  radius: 80,
+  radius: 56,
   deadzone: 0.12,
   expo: 0.3,
   axis: { x: 1, y: 1 },
