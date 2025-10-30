@@ -208,20 +208,16 @@ export function createFlightControls({
   const handleLeftStickChange = (value, context = {}) => {
     const strafe = clamp(value.x, -1, 1);
 
-    // PITCH CONTROLS - Aircraft-style intuitive controls:
-    // Pull stick DOWN (back toward you) → pitch down → DIVE
-    // Push stick UP (forward away from you) → pitch up → CLIMB
+    // PITCH CONTROLS - Arcade-style intuitive controls:
+    // Pull stick DOWN (toward bottom of screen) → pitch down → DIVE
+    // Push stick UP (toward top of screen) → pitch up → CLIMB
     //
-    // This matches aircraft control expectations
-    // Note: Keyboard controls (W/S) use different semantics and are handled separately
-
-    const currentCameraMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
-    const isFPV = currentCameraMode === 'FPV';
-
-    // Aircraft-style control: pull back to dive, push forward to climb
-    // Pull DOWN (back) = dive (positive forward = pitch down)
-    // Push UP (forward) = climb (negative forward = pitch up)
-    const forward = clamp(value.y, -1, 1);
+    // This is intuitive for touch/gamepad controls across all camera modes
+    // Note: Keyboard controls (W/S) may use different semantics and are handled separately
+    //
+    // Thumbstick Y coordinates: up = negative, down = positive (screen space)
+    // We negate Y so: pull down → negative forward → pitch down (dive)
+    const forward = clamp(-value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
