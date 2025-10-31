@@ -168,13 +168,13 @@ export function createFlightControls({
   };
 
   const updateKeyboardAxes = () => {
-    // KEYBOARD PITCH CONTROLS - Consistent arcade-style controls (matches thumbstick):
+    // KEYBOARD PITCH CONTROLS - Arcade-style controls (matches left thumbstick):
     //
     // Press W (forward key) → CLIMB (bird goes up)
     // Press S (back key) → DIVE (bird goes down)
     //
-    // This mapping is ALWAYS consistent regardless of camera angle or mode,
-    // matching the thumbstick behavior for intuitive arcade-style controls.
+    // This mapping is ALWAYS consistent across ALL camera modes (FPV, FOLLOW, etc.),
+    // matching the left thumbstick behavior for intuitive arcade-style flight controls.
     const forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
 
     axisSources.keyboard.forward = forward;
@@ -205,18 +205,19 @@ export function createFlightControls({
   const handleLeftStickChange = (value, context = {}) => {
     const strafe = clamp(value.x, -1, 1);
 
-    // PITCH CONTROLS - Arcade-style intuitive controls (consistent in ALL scenarios):
+    // PITCH CONTROLS - Arcade-style intuitive controls (consistent in ALL camera modes):
     //
     // Push stick UP (toward top of screen) → CLIMB (bird goes up)
     // Pull stick DOWN (toward bottom of screen) → DIVE (bird goes down)
     //
-    // This mapping is ALWAYS consistent regardless of camera angle or mode.
+    // This mapping is ALWAYS consistent regardless of camera angle or mode,
+    // including FPV, FOLLOW, SEQUENCE, and FIXED modes.
     //
     // Technical details:
     // - Thumbstick reports: UP = negative Y, DOWN = positive Y (screen space)
-    // - We negate to convert: UP (-) → positive forward → climb, DOWN (+) → negative forward → dive
-    // - Positive forward input = pitch up + upward thrust = CLIMB
-    // - Negative forward input = pitch down + downward thrust = DIVE
+    // - We negate Y to convert to intuitive arcade controls:
+    //   * UP (-Y) → positive forward → pitch up + upward thrust → CLIMB
+    //   * DOWN (+Y) → negative forward → pitch down + downward thrust → DIVE
     const forward = clamp(-value.y, -1, 1);
 
     axisSources.leftStick.forward = forward;
@@ -253,10 +254,11 @@ export function createFlightControls({
   const handleRightStickChange = (value, context = {}) => {
     const pointerType = context.pointerType ?? null;
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
-    const shouldInvertY =
-      pointerType === 'touch' &&
-      followMode != null &&
-      currentMode === followMode;
+
+    // For analog inputs (touch thumbsticks), always invert Y-axis to match
+    // standard camera controls: push UP = look UP, push DOWN = look DOWN.
+    // This is consistent across all camera modes (FOLLOW, FPV, SEQUENCE).
+    const shouldInvertY = pointerType === 'touch';
 
     analogLookState.x = clamp(value.x, -1, 1);
     analogLookState.y = clamp(shouldInvertY ? -value.y : value.y, -1, 1);

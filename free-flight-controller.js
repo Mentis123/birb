@@ -349,10 +349,11 @@ export class FreeFlightController {
     const forwardInput = clamp(smoothed.forward, -1, 1, 0);
     const strafeInput = clamp(smoothed.strafe, -1, 1, 0);
 
-    // 1. PITCH CONTROL - Highly responsive dive/climb control
+    // 1. PITCH CONTROL - Arcade-style responsive dive/climb control
     // Positive forwardInput (stick UP) = pitch up = nose rises = CLIMB
     // Negative forwardInput (stick DOWN) = pitch down = nose drops = DIVE
-    // This mapping is CONSISTENT regardless of camera angle
+    // This mapping is CONSISTENT across ALL camera modes (FPV, FOLLOW, SEQUENCE, FIXED)
+    // and prevents pitch control inversion at extreme camera angles.
     const targetPitchVelocity = forwardInput * PITCH_SPEED;
     this._pitchVelocity = targetPitchVelocity;
     this._pitch += this._pitchVelocity * deltaTime;
