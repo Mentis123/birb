@@ -60,8 +60,8 @@ export class FreeFlightController {
   getVelocity() { return new this.THREE.Vector3(0, 0, 0); }
   getPitch() { return 0; }
   getPitchDegrees() { return 0; }
-  setMovementMode(mode) { return "floating"; }
-  getMovementMode() { return "floating"; }
+  setMovementMode(mode) { return "flying"; }
+  getMovementMode() { return "flying"; }
   requestJump(strength) { return false; }
   requestTakeoff() { return false; }
   isGrounded() { return false; }
