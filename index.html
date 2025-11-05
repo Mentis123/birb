@@ -1839,11 +1839,10 @@
       });
       window.addEventListener("resize", () => updateRendererSize(), { passive: true });
 
+      // Simplified controller - birb just floats at a fixed position
       const flightController = new FreeFlightController(THREE, {
-        position: new THREE.Vector3(1.1, 0.9, 0),
-        throttle: initialThrottle,
+        position: new THREE.Vector3(0, 1, 0),
       });
-      flightController.setThrottle(initialThrottle);
       flightControllerInitialized = true;
       updateControlMetrics();
 
@@ -1879,14 +1878,11 @@
 
       const blendedQuaternion = new THREE.Quaternion();
 
+      // Simplified controls - only left/right rotation
       const flightControls = createFlightControls({
         canvas,
         flightController,
         leftThumbstickElement: canvas,
-        liftButtonElements,
-        getCameraMode: () => cameraState?.getMode?.(),
-        followMode: CAMERA_MODES.FOLLOW,
-        onSprintChange: () => updateControlMetrics(),
         onThrustChange: () => updateControlMetrics(),
       });
 
@@ -2232,18 +2228,9 @@
         birbRig.quaternion.multiply(blendedQuaternion);
         birbRig.quaternion.normalize();
 
-        // Apply wing tilt based on banking
-        const bankAngle = flightController.bank || 0;
-        const wingTiltFactor = 0.35; // How much the wings tilt relative to bank angle
+        // Static wing position - no banking animation
         const baseWingAngle = Math.PI * 0.15; // 27 degrees base wing spread
-
-        if (wingRefs.left && wingRefs.right && movementState.mode !== "grounded") {
-          // Left wing tilts down when banking right (positive bank), up when banking left
-          wingRefs.left.rotation.z = baseWingAngle - (bankAngle * wingTiltFactor);
-          // Right wing tilts down when banking left (negative bank), up when banking right
-          wingRefs.right.rotation.z = -baseWingAngle + (bankAngle * wingTiltFactor);
-        } else if (wingRefs.left && wingRefs.right) {
-          // Reset wings when in walk mode
+        if (wingRefs.left && wingRefs.right) {
           wingRefs.left.rotation.z = baseWingAngle;
           wingRefs.right.rotation.z = -baseWingAngle;
         }
