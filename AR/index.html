@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>AR Shooter Game</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>AR Shooter Game</h1>
+
+        <div id="device-check" class="status-section">
+            <h2>Device Compatibility</h2>
+            <div id="check-results"></div>
+        </div>
+
+        <div class="button-group">
+            <h2>Test Pages</h2>
+            <a href="test-camera.html" class="btn btn-test">Test Camera</a>
+            <a href="test-gyro.html" class="btn btn-test">Test Gyroscope</a>
+            <a href="test-3d.html" class="btn btn-test">Test 3D Rendering</a>
+        </div>
+
+        <div class="button-group">
+            <a href="game.html" class="btn btn-primary" id="play-btn">Play Game</a>
+        </div>
+
+        <div class="info-section">
+            <h3>Requirements</h3>
+            <ul>
+                <li>Mobile device with camera</li>
+                <li>Gyroscope/accelerometer</li>
+                <li>HTTPS connection</li>
+                <li>Camera and motion permissions</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Device compatibility checks
+        const results = document.getElementById('check-results');
+        const playBtn = document.getElementById('play-btn');
+        let allChecksPass = true;
+
+        function addCheck(name, passed, message = '') {
+            const div = document.createElement('div');
+            div.className = `check-item ${passed ? 'pass' : 'fail'}`;
+            div.innerHTML = `
+                <span class="check-icon">${passed ? '✓' : '✗'}</span>
+                <span class="check-name">${name}</span>
+                ${message ? `<span class="check-message">${message}</span>` : ''}
+            `;
+            results.appendChild(div);
+            if (!passed) allChecksPass = false;
+        }
+
+        // Check HTTPS
+        const isSecure = window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+        addCheck('HTTPS', isSecure, isSecure ? '' : 'HTTPS required for camera/gyro access');
+
+        // Check if mobile
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        addCheck('Mobile Device', isMobile, isMobile ? '' : 'Desktop detected - mobile recommended');
+
+        // Check WebGL
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        addCheck('WebGL', !!gl);
+
+        // Check camera API
+        const hasCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        addCheck('Camera API', hasCamera);
+
+        // Check orientation API
+        const hasOrientation = 'DeviceOrientationEvent' in window;
+        addCheck('Gyroscope API', hasOrientation);
+
+        // Check iOS
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        if (isIOS) {
+            addCheck('iOS Device', true, 'Will require permission prompts');
+        }
+
+        // Enable/disable play button
+        if (!allChecksPass) {
+            playBtn.classList.add('disabled');
+            playBtn.onclick = (e) => {
+                e.preventDefault();
+                alert('Please resolve compatibility issues before playing');
+            };
+        }
+
+        // Show browser info
+        const browserInfo = document.createElement('div');
+        browserInfo.className = 'browser-info';
+        browserInfo.textContent = `Browser: ${navigator.userAgent}`;
+        results.appendChild(browserInfo);
+    </script>
+</body>
+</html>
