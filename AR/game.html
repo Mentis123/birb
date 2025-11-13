@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>AR Shooter Game</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <!-- Permission/Start Screen -->
+    <div class="permission-screen" id="startScreen">
+        <div class="permission-content">
+            <h2>AR Shooter</h2>
+            <p>Look around using your phone's camera and gyroscope to find and shoot floating targets!</p>
+
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+            <button class="btn btn-primary" id="startButton">Start Game</button>
+
+            <div style="margin-top: 20px; font-size: 0.85em; color: #666;">
+                <p>This game requires:</p>
+                <ul style="text-align: left; margin: 10px 0;">
+                    <li>Camera access</li>
+                    <li>Motion sensors (gyroscope)</li>
+                    <li>Portrait orientation</li>
+                </ul>
+            </div>
+
+            <a href="index.html" style="display: inline-block; margin-top: 15px; color: #667eea;">← Back to Menu</a>
+        </div>
+    </div>
+
+    <!-- AR Game View -->
+    <div class="ar-view" id="gameView" style="display: none;">
+        <!-- Camera feed -->
+        <video id="video" autoplay playsinline></video>
+
+        <!-- Three.js canvas overlay -->
+        <canvas id="canvas"></canvas>
+
+        <!-- Crosshair -->
+        <div class="crosshair"></div>
+
+        <!-- UI Overlays -->
+        <div class="ui-overlay score-display">
+            <div>Score: <span id="score">0</span></div>
+            <div style="font-size: 0.7em;">Targets: <span id="targetCount">0</span></div>
+        </div>
+
+        <div class="ui-overlay info-display">
+            <div id="fpsDisplay" style="font-size: 0.8em;">FPS: --</div>
+        </div>
+
+        <!-- Fire Button -->
+        <button class="fire-button" id="fireButton">FIRE</button>
+
+        <!-- Pause/Menu Button -->
+        <button style="position: fixed; top: 20px; right: 20px; z-index: 10; background: rgba(0,0,0,0.7); color: white; border: 2px solid white; border-radius: 8px; padding: 10px 15px; font-size: 0.9em;" id="pauseButton">
+            ⏸ Menu
+        </button>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="js/camera.js"></script>
+    <script src="js/gyro.js"></script>
+    <script src="js/scene.js"></script>
+    <script src="js/game.js"></script>
+    <script>
+        // Game state
+        const game = {
+            score: 0,
+            targets: [],
+            isPlaying: false,
+            cameraManager: null,
+            gyroManager: null,
+            sceneManager: null,
+            fps: 0,
+            lastShotTime: 0,
+            SHOOT_COOLDOWN: 200 // ms between shots
+        };
+
+        // DOM elements
+        const startScreen = document.getElementById('startScreen');
+        const gameView = document.getElementById('gameView');
+        const startButton = document.getElementById('startButton');
+        const errorMessage = document.getElementById('errorMessage');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const fireButton = document.getElementById('fireButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const scoreDisplay = document.getElementById('score');
+        const targetCountDisplay = document.getElementById('targetCount');
+        const fpsDisplay = document.getElementById('fpsDisplay');
+
+        // FPS tracking
+        let frameCount = 0;
+        let lastFPSUpdate = performance.now();
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        async function startGame() {
+            hideError();
+            startButton.disabled = true;
+            startButton.textContent = 'Loading...';
+
+            try {
+                // Step 1: Request camera
+                game.cameraManager = new CameraManager();
+                const cameraResult = await game.cameraManager.start(video, 'environment');
+
+                if (!cameraResult.success) {
+                    throw new Error('Camera access denied or unavailable');
+                }
+
+                console.log('✓ Camera started');
+
+                // Step 2: Request gyroscope (iOS needs permission)
+                game.gyroManager = new GyroManager();
+
+                if (game.gyroManager.needsPermission()) {
+                    const permResult = await game.gyroManager.requestPermission();
+                    if (!permResult.granted) {
+                        throw new Error('Gyroscope permission denied');
+                    }
+                }
+
+                console.log('✓ Gyro permission granted');
+
+                // Step 3: Initialize Three.js scene
+                game.sceneManager = new SceneManager(canvas);
+                game.sceneManager.init();
+
+                console.log('✓ Scene initialized');
+
+                // Step 4: Start gyroscope
+                game.gyroManager.start((orientation) => {
+                    // Apply orientation to camera
+                    GyroManager.applyToCamera(
+                        game.sceneManager.camera,
+                        orientation.alpha,
+                        orientation.beta,
+                        orientation.gamma
+                    );
+                });
+
+                console.log('✓ Gyro started');
+
+                // Step 5: Spawn targets
+                game.sceneManager.spawnTargets(8);
+                updateTargetCount();
+
+                console.log('✓ Targets spawned');
+
+                // Step 6: Start game
+                game.isPlaying = true;
+                startScreen.style.display = 'none';
+                gameView.style.display = 'block';
+
+                // Start animation loop
+                game.sceneManager.startAnimation((time, currentTime) => {
+                    updateFPS(currentTime);
+                });
+
+                console.log('✓ Game started!');
+
+            } catch (error) {
+                console.error('Failed to start game:', error);
+                showError(error.message);
+                startButton.disabled = false;
+                startButton.textContent = 'Try Again';
+            }
+        }
+
+        function shoot() {
+            if (!game.isPlaying) return;
+
+            const now = performance.now();
+            if (now - game.lastShotTime < game.SHOOT_COOLDOWN) {
+                return; // Cooldown active
+            }
+            game.lastShotTime = now;
+
+            // Raycast from center of screen
+            const hit = game.sceneManager.raycast();
+
+            if (hit) {
+                // Hit a target!
+                game.score += 10;
+                scoreDisplay.textContent = game.score;
+
+                // Remove target
+                game.sceneManager.removeTarget(hit.object);
+                updateTargetCount();
+
+                // Visual feedback
+                flashScreen('#4CAF50');
+
+                // Haptic feedback (if available)
+                if (navigator.vibrate) {
+                    navigator.vibrate(50);
+                }
+
+                // Spawn new target
+                spawnRandomTarget();
+
+                console.log('Hit! Score:', game.score);
+            } else {
+                // Miss
+                flashScreen('#f44336');
+                console.log('Miss!');
+            }
+        }
+
+        function spawnRandomTarget() {
+            const distance = 2 + Math.random() * 3;
+            const angleH = (Math.random() - 0.5) * Math.PI * 0.8;
+            const angleV = (Math.random() - 0.5) * Math.PI * 0.6;
+
+            const position = new THREE.Vector3(
+                Math.sin(angleH) * Math.cos(angleV) * distance,
+                Math.sin(angleV) * distance,
+                -Math.cos(angleH) * Math.cos(angleV) * distance
+            );
+
+            game.sceneManager.createTarget(position);
+            updateTargetCount();
+        }
+
+        function updateTargetCount() {
+            targetCountDisplay.textContent = game.sceneManager.targets.length;
+        }
+
+        function flashScreen(color) {
+            const flash = document.createElement('div');
+            flash.style.position = 'fixed';
+            flash.style.top = '0';
+            flash.style.left = '0';
+            flash.style.width = '100vw';
+            flash.style.height = '100vh';
+            flash.style.backgroundColor = color;
+            flash.style.opacity = '0.3';
+            flash.style.pointerEvents = 'none';
+            flash.style.zIndex = '100';
+            document.body.appendChild(flash);
+
+            setTimeout(() => {
+                flash.style.transition = 'opacity 0.3s';
+                flash.style.opacity = '0';
+                setTimeout(() => flash.remove(), 300);
+            }, 50);
+        }
+
+        function updateFPS(currentTime) {
+            frameCount++;
+            if (currentTime - lastFPSUpdate >= 1000) {
+                game.fps = frameCount;
+                fpsDisplay.textContent = `FPS: ${game.fps}`;
+                fpsDisplay.style.color = game.fps >= 30 ? 'white' : game.fps >= 20 ? '#FF9800' : '#f44336';
+                frameCount = 0;
+                lastFPSUpdate = currentTime;
+            }
+        }
+
+        function pauseGame() {
+            if (confirm('Return to menu? Your score will be lost.')) {
+                // Cleanup
+                if (game.cameraManager) {
+                    game.cameraManager.stop();
+                }
+                if (game.gyroManager) {
+                    game.gyroManager.stop();
+                }
+                if (game.sceneManager) {
+                    game.sceneManager.cleanup();
+                }
+
+                // Reset state
+                game.isPlaying = false;
+                game.score = 0;
+
+                // Show start screen
+                gameView.style.display = 'none';
+                startScreen.style.display = 'flex';
+                startButton.disabled = false;
+                startButton.textContent = 'Start Game';
+                scoreDisplay.textContent = '0';
+            }
+        }
+
+        // Event listeners
+        startButton.addEventListener('click', startGame);
+        fireButton.addEventListener('click', shoot);
+        pauseButton.addEventListener('click', pauseGame);
+
+        // Prevent default touch behavior
+        document.addEventListener('touchmove', (e) => {
+            if (game.isPlaying) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // Handle visibility change (pause when tab hidden)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && game.isPlaying) {
+                // Optionally pause when app backgrounded
+                console.log('App backgrounded');
+            }
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (game.cameraManager) {
+                game.cameraManager.stop();
+            }
+            if (game.gyroManager) {
+                game.gyroManager.stop();
+            }
+        });
+
+        // Check compatibility on load
+        window.addEventListener('load', () => {
+            if (!CameraManager.isSupported()) {
+                showError('Camera not supported on this device');
+                startButton.disabled = true;
+            } else if (!CameraManager.isSecure()) {
+                showError('HTTPS required for camera access');
+                startButton.disabled = true;
+            } else if (!GyroManager.isSupported()) {
+                showError('Gyroscope not supported on this device');
+                startButton.disabled = true;
+            }
+        });
+    </script>
+</body>
+</html>

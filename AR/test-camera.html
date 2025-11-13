@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Camera Test - AR Shooter</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .test-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .overlay-info {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 0.9em;
+            z-index: 10;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .control-btn {
+            padding: 12px 20px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+
+        .back-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 15px;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 0.9em;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <a href="index.html" class="back-btn">← Back</a>
+
+        <video id="video" autoplay playsinline></video>
+
+        <div class="overlay-info" id="info">
+            <div><strong>Camera Test</strong></div>
+            <div id="status">Initializing...</div>
+            <div id="resolution"></div>
+            <div id="facing"></div>
+        </div>
+
+        <div class="controls">
+            <button class="control-btn" id="switchCamera">Switch Camera</button>
+        </div>
+    </div>
+
+    <script src="js/camera.js"></script>
+    <script>
+        const video = document.getElementById('video');
+        const statusDiv = document.getElementById('status');
+        const resolutionDiv = document.getElementById('resolution');
+        const facingDiv = document.getElementById('facing');
+        const switchBtn = document.getElementById('switchCamera');
+
+        let currentFacingMode = 'environment'; // Start with rear camera
+        let stream = null;
+
+        async function startCamera(facingMode = 'environment') {
+            try {
+                statusDiv.textContent = 'Requesting camera access...';
+
+                // Stop existing stream if any
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+
+                // Request camera with specified facing mode
+                const constraints = {
+                    video: {
+                        facingMode: facingMode,
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                };
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+
+                statusDiv.textContent = '✓ Camera active';
+                statusDiv.style.color = '#4CAF50';
+
+                // Get actual video dimensions
+                video.onloadedmetadata = () => {
+                    resolutionDiv.textContent = `Resolution: ${video.videoWidth} x ${video.videoHeight}`;
+                };
+
+                // Get camera info
+                const videoTrack = stream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                facingDiv.textContent = `Facing: ${settings.facingMode || 'unknown'}`;
+                currentFacingMode = settings.facingMode || facingMode;
+
+                console.log('Camera settings:', settings);
+
+            } catch (error) {
+                console.error('Camera error:', error);
+                statusDiv.textContent = `✗ Error: ${error.name}`;
+                statusDiv.style.color = '#f44336';
+
+                if (error.name === 'NotAllowedError') {
+                    statusDiv.textContent = '✗ Camera permission denied. Please allow camera access.';
+                } else if (error.name === 'NotFoundError') {
+                    statusDiv.textContent = '✗ No camera found on this device.';
+                } else if (error.name === 'NotReadableError') {
+                    statusDiv.textContent = '✗ Camera is already in use by another app.';
+                } else if (error.name === 'OverconstrainedError') {
+                    statusDiv.textContent = '✗ Camera constraints not supported. Trying any camera...';
+                    // Fallback: try without facingMode
+                    setTimeout(() => startCameraFallback(), 1000);
+                }
+            }
+        }
+
+        async function startCameraFallback() {
+            try {
+                const constraints = {
+                    video: true,
+                    audio: false
+                };
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                statusDiv.textContent = '✓ Camera active (fallback mode)';
+                statusDiv.style.color = '#FF9800';
+            } catch (error) {
+                console.error('Fallback camera error:', error);
+            }
+        }
+
+        // Switch camera button
+        switchBtn.addEventListener('click', () => {
+            const newFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            startCamera(newFacingMode);
+        });
+
+        // Check if camera API is available
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            statusDiv.textContent = '✗ Camera API not supported in this browser';
+            statusDiv.style.color = '#f44336';
+        } else if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+            statusDiv.textContent = '✗ HTTPS required for camera access';
+            statusDiv.style.color = '#f44336';
+        } else {
+            // Start camera on load
+            startCamera(currentFacingMode);
+        }
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
