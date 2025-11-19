@@ -1315,6 +1315,7 @@
       };
 
       let previousTime = null;
+      let latestPose = null;
 
       const toggleButton = document.querySelector('[data-control="toggle"]');
       const resetButton = document.querySelector('[data-control="reset"]');
@@ -1357,7 +1358,9 @@
         ? fullscreenToggleButton.querySelector('[data-icon="exit"]')
         : null;
 
-      const initialThrottle = clampThrottle(Number.parseFloat(glideSpeedInput?.value ?? ""));
+      const fallbackThrottleInput = clampThrottle(
+        Number.parseFloat(glideSpeedInput?.value ?? ""),
+      );
 
       const throttleState = { userOverride: false };
       const movementState = {
@@ -1369,7 +1372,7 @@
 
       const MOVEMENT_MODE_PRESETS = {
         grounded: { label: "Grounded", throttle: 0.45 },
-        flying: { label: "Flying", throttle: Number.isFinite(initialThrottle) ? initialThrottle : 0.6 },
+        flying: { label: "Flying" },
       };
 
       const controlState = {
@@ -1435,11 +1438,21 @@
         viewToggleButton.setAttribute("title", `Cycle camera view • ${modeLabel}`);
       }
 
-      function updateControlMetrics(speed = flightController.getSpeed()) {
-        const throttlePercent = Math.round(flightController.getEffectiveThrottle() * 100);
-        const safeSpeed = Number.isFinite(speed) ? speed : 0;
+      function updateControlMetrics({ speed, pose } = {}) {
+        const controller = flightController ?? null;
+        const resolvedSpeed = Number.isFinite(speed)
+          ? speed
+          : typeof controller?.getSpeed === "function"
+            ? controller.getSpeed()
+            : Number.isFinite(controller?.speed)
+              ? controller.speed
+              : 0;
+        const effectiveThrottle = typeof controller?.getEffectiveThrottle === "function"
+          ? controller.getEffectiveThrottle()
+          : controller?.input?.throttle ?? 0;
+        const throttlePercent = Math.round(clampThrottle(effectiveThrottle) * 100);
         if (speedMetric) {
-          speedMetric.textContent = `${safeSpeed.toFixed(2)}u/s`;
+          speedMetric.textContent = `${resolvedSpeed.toFixed(2)}u/s`;
         }
         if (throttleMetric) {
           throttleMetric.textContent = `${throttlePercent}%`;
@@ -1451,6 +1464,16 @@
           ringsMetric.textContent = `${scoreState.ringsCollected}/${scoreState.totalRings}`;
         }
         if (statusMetric) {
+          const resolvedPose = pose ?? latestPose ?? null;
+          const altitudeValue = Number.isFinite(resolvedPose?.position?.y)
+            ? resolvedPose.position.y
+            : Number.isFinite(controller?.position?.y)
+              ? controller.position.y
+              : null;
+          const altitudeLine = Number.isFinite(altitudeValue)
+            ? `Altitude ${altitudeValue.toFixed(1)}u`
+            : null;
+          const withAltitude = (text) => (altitudeLine ? `${text} · ${altitudeLine}` : text);
           const now = typeof performance !== "undefined" ? performance.now() : Date.now();
           const hasActionMessage =
             typeof movementState.actionMessage === "string" && now < movementState.actionMessageUntil;
@@ -1460,35 +1483,69 @@
 
           if (hasActionMessage) {
             statusMetric.textContent = movementState.actionMessage;
-          } else if (controlState.systemPaused) {
-            statusMetric.textContent = "Motion paused via system preference";
-          } else if (!motionState.animate) {
-            statusMetric.textContent = "Flight paused";
-          } else if (movementState.mode === "grounded") {
-            if (flightController.isSprinting) {
-              statusMetric.textContent = "Running boost engaged";
-            } else if (typeof flightController.isGrounded === "function" && flightController.isGrounded()) {
-              statusMetric.textContent = "On foot — tap Take Off to fly, Jump to hop, Boost to run.";
-            } else {
-              statusMetric.textContent = "Airborne — steer to glide back down.";
-            }
-          } else if (flightController.isSprinting) {
-            statusMetric.textContent = "Speed boost engaged";
-          } else if (safeSpeed < 0.25) {
-            statusMetric.textContent = "Hovering in place. Drag forward to build speed.";
-          } else {
-            const mode = cameraState?.getMode?.();
-            const modeLabel = getCameraModeLabel(mode);
-            const instruction = viewToggleButton
-              ? "tap the eye icon or press V"
-              : "press V to change";
-            const environmentMessage = environmentState.label
-              ? `the ${environmentState.label} environment`
-              : "this environment";
-            const movementLabel = getMovementModeLabel(movementState.mode);
-            statusMetric.textContent =
-              `Exploring ${environmentMessage}. (${modeLabel} — ${instruction} · ${movementLabel})`;
+            return;
           }
+
+          if (controlState.systemPaused) {
+            statusMetric.textContent = withAltitude("Motion paused via system preference");
+            return;
+          }
+
+          if (!motionState.animate) {
+            statusMetric.textContent = withAltitude("Flight paused");
+            return;
+          }
+
+          const isHovering = Boolean(controller?.input?.hover);
+          const isDiving = Boolean(controller?.input?.dive);
+
+          if (movementState.mode === "grounded") {
+            let groundedMessage = "Airborne — steer to glide back down.";
+            if (controller?.isSprinting) {
+              groundedMessage = "Running boost engaged";
+            } else if (typeof controller?.isGrounded === "function" && controller.isGrounded()) {
+              groundedMessage = "On foot — tap Take Off to fly, Jump to hop, Boost to run.";
+            }
+            statusMetric.textContent = withAltitude(groundedMessage);
+            return;
+          }
+
+          if (isHovering) {
+            const hoverLine = altitudeLine ?? "Altitude steady";
+            statusMetric.textContent =
+              `Hovering silently — ${hoverLine}. Ease the throttle forward to start drifting.`;
+            return;
+          }
+
+          if (isDiving) {
+            const diveLine = altitudeLine ?? "watch the altitude";
+            statusMetric.textContent =
+              `Diving for speed — ${diveLine}. Ease off Boost to level out.`;
+            return;
+          }
+
+          if (controller?.isSprinting) {
+            statusMetric.textContent = withAltitude("Speed boost engaged");
+            return;
+          }
+
+          if (resolvedSpeed < 0.25) {
+            statusMetric.textContent = withAltitude("Gliding gently. Drag forward to build speed.");
+            return;
+          }
+
+          const mode = cameraState?.getMode?.();
+          const modeLabel = getCameraModeLabel(mode);
+          const instruction = viewToggleButton
+            ? "tap the eye icon or press V"
+            : "press V to change";
+          const environmentMessage = environmentState.label
+            ? `the ${environmentState.label} environment`
+            : "this environment";
+          const movementLabel = getMovementModeLabel(movementState.mode);
+          const explorationMessage =
+            `Exploring ${environmentMessage}. (${modeLabel} — ${instruction} · ${movementLabel})`;
+          statusMetric.textContent = withAltitude(explorationMessage);
         }
       }
 
@@ -1843,8 +1900,12 @@
       const flightController = new FreeFlightController(THREE, {
         position: new THREE.Vector3(0, 1, 0),
       });
+      const initialMovementMode =
+        typeof flightController.getMovementMode === "function"
+          ? flightController.getMovementMode()
+          : movementState.mode;
+      movementState.mode = initialMovementMode;
       flightControllerInitialized = true;
-      updateControlMetrics();
 
       cameraState = createCameraState({
         three: THREE,
@@ -1877,6 +1938,7 @@
       setCameraMode(CAMERA_MODE_SEQUENCE[cameraModeIndex]);
 
       const blendedQuaternion = new THREE.Quaternion();
+      const fallbackVelocity = new THREE.Vector3();
 
       // Simplified controls - only left/right rotation
       const flightControls = createFlightControls({
@@ -1902,12 +1964,31 @@
         setThrottle(glideSpeedInput.value, { updateInput: false, isUserOverride: isUserEvent });
       }
 
+      function getControllerThrottle() {
+        const effectiveThrottle =
+          typeof flightController.getEffectiveThrottle === "function"
+            ? flightController.getEffectiveThrottle()
+            : null;
+        if (Number.isFinite(effectiveThrottle)) {
+          return clampThrottle(effectiveThrottle);
+        }
+        const inputThrottle = flightController.input?.throttle;
+        if (Number.isFinite(inputThrottle)) {
+          return clampThrottle(inputThrottle);
+        }
+        return fallbackThrottleInput;
+      }
+
+      function syncThrottleFromController({ updateInput = true } = {}) {
+        setThrottle(getControllerThrottle(), { updateInput, isUserOverride: false });
+      }
+
       if (glideSpeedInput) {
-        setThrottle(initialThrottle, { updateInput: true, isUserOverride: false });
+        syncThrottleFromController({ updateInput: true });
         glideSpeedInput.addEventListener("input", () => applyThrottleFromInput(true));
         glideSpeedInput.addEventListener("change", () => applyThrottleFromInput(true));
       } else {
-        updateGlideSpeedDisplay(initialThrottle);
+        syncThrottleFromController({ updateInput: false });
       }
 
       function setLiftButtonsDisabled(disabled) {
@@ -2043,7 +2124,7 @@
         }
       }
 
-      setMovementMode(movementState.mode, { userInitiated: false, applyPreset: false });
+      setMovementMode(initialMovementMode, { userInitiated: false, applyPreset: false });
 
       movementModeButtons.forEach((button) => {
         if (!button) return;
@@ -2155,7 +2236,7 @@
               : "glide",
             { userInitiated: false, applyPreset: false },
           );
-          setThrottle(initialThrottle, { updateInput: true, isUserOverride: false });
+          syncThrottleFromController({ updateInput: true });
           movementState.actionMessage = null;
           movementState.actionMessageUntil = 0;
           updateControlMetrics();
@@ -2205,7 +2286,19 @@
         flightControls.applyAnalogLook(lookDeltaTime);
 
         const pose = flightController.update(delta);
+        latestPose = pose;
         const ambientOffsets = flightController.getAmbientOffsets();
+        const controllerVelocity =
+          flightController.velocity && flightController.velocity.isVector3
+            ? flightController.velocity
+            : typeof flightController.getVelocity === "function"
+              ? flightController.getVelocity()
+              : fallbackVelocity.set(0, 0, 0);
+        const controllerSpeed = Number.isFinite(flightController.speed)
+          ? flightController.speed
+          : typeof flightController.getSpeed === "function"
+            ? flightController.getSpeed()
+            : 0;
 
         // Check if movement mode changed (e.g., from ground collision)
         const currentControllerMode = typeof flightController.getMovementMode === "function"
@@ -2257,17 +2350,16 @@
 
         // Update speed trail
         if (speedTrail && motionState.animate) {
-          const velocity = flightController.getVelocity ? flightController.getVelocity() : new THREE.Vector3(0, 0, 0);
-          speedTrail.update(delta, birbAnchor.position, velocity, flightController.getSpeed());
+          speedTrail.update(delta, birbAnchor.position, controllerVelocity, controllerSpeed);
         }
 
         // Update wing vortices
         if (wingVortices && motionState.animate) {
-          wingVortices.update(delta, birbAnchor.position, birbRig.quaternion, flightController.getSpeed());
+          wingVortices.update(delta, birbAnchor.position, birbRig.quaternion, controllerSpeed);
         }
 
         if (motionState.animate && !controlState.systemPaused) {
-          updateControlMetrics(flightController.getSpeed());
+          updateControlMetrics({ speed: controllerSpeed, pose });
         }
 
         updateFpsReadout(time);
