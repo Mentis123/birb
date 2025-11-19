@@ -803,6 +803,7 @@ export function createWorldShell(
     fog: false,
     transparent: false,
     vertexShader: `
+      precision mediump float;
       varying float vGradient;
       void main() {
         vec4 worldPosition = modelMatrix * vec4(position, 1.0);
@@ -811,6 +812,7 @@ export function createWorldShell(
       }
     `,
     fragmentShader: `
+      precision mediump float;
       uniform vec3 topColor;
       uniform vec3 bottomColor;
       uniform float glowIntensity;

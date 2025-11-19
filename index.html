@@ -1889,7 +1889,9 @@
           ? new ResizeObserver(() => updateRendererSize())
           : null;
       if (resizeObserver) {
-        resizeObserver.observe(canvas);
+        // Observe wrapper instead of canvas - more reliable on mobile
+        // since canvas may not have explicit dimensions
+        resizeObserver.observe(canvasWrapper || canvas);
       }
       window.addEventListener("orientationchange", () => updateRendererSize(true), {
         passive: true,
@@ -2367,8 +2369,6 @@
         renderer.render(scene, cameraState.camera);
       };
 
-      renderer.setAnimationLoop(renderFrame);
-
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
           previousTime = null;
@@ -2400,11 +2400,27 @@
         flightControls.dispose();
       });
 
-      // Ensure DOM layout is complete before sizing renderer, especially on mobile
+      // Handle WebGL context loss (common on mobile)
+      canvas.addEventListener("webglcontextlost", (event) => {
+        event.preventDefault();
+        renderer.setAnimationLoop(null);
+        console.warn("WebGL context lost");
+      });
+
+      canvas.addEventListener("webglcontextrestored", () => {
+        console.log("WebGL context restored");
+        updateRendererSize(true);
+        renderer.setAnimationLoop(renderFrame);
+      });
+
+      // Ensure DOM layout is complete before sizing renderer and starting animation loop
+      // This is critical for mobile where layout computation is often deferred
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           updateRendererSize(true);
           renderFrame(0);
+          // Start animation loop AFTER sizing is complete
+          renderer.setAnimationLoop(renderFrame);
         });
       });
     </script>
