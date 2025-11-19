@@ -1816,10 +1816,17 @@
         glideSpeedDisplay.textContent = `${throttlePercent}%`;
       }
 
-      motionQuery.addEventListener("change", (event) => {
+      const handleMotionPreferenceChange = (event) => {
         controlState.systemPaused = event.matches;
         refreshAnimationState();
-      });
+      };
+
+      if (typeof motionQuery.addEventListener === "function") {
+        motionQuery.addEventListener("change", handleMotionPreferenceChange);
+      } else if (typeof motionQuery.addListener === "function") {
+        // Legacy Safari (iOS 13/14) only exposes addListener/removeListener.
+        motionQuery.addListener(handleMotionPreferenceChange);
+      }
 
       let cameraState = null;
       const CAMERA_MODE_SEQUENCE = [
