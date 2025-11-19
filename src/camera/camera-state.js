@@ -266,6 +266,36 @@ export function createCameraState({ three, scene, flightController }) {
     modeConfigurations[CAMERA_MODES.SEQUENCE],
   );
 
+  const resolveSteeringInput = () => {
+    if (!flightController || !flightController.input) {
+      return null;
+    }
+    const input = flightController.input;
+    const resolveAxis = (value, fallback = 0) =>
+      Number.isFinite(value) ? value : fallback;
+    const forwardValue = Number.isFinite(input.forward)
+      ? input.forward
+      : Number.isFinite(input.pitch)
+        ? -input.pitch
+        : 0;
+    const liftValue = Number.isFinite(input.lift)
+      ? input.lift
+      : input.hover
+        ? 1
+        : 0;
+    const strafeValue = resolveAxis(
+      input.strafe,
+      Number.isFinite(input.yaw) ? input.yaw : 0,
+    );
+    const yawValue = resolveAxis(input.yaw, strafeValue);
+    return {
+      forward: forwardValue,
+      strafe: strafeValue,
+      lift: liftValue,
+      yaw: yawValue,
+    };
+  };
+
   const applyTransitionFromFpv = ({
     rig,
     pose,
@@ -327,13 +357,7 @@ export function createCameraState({ three, scene, flightController }) {
     followState.rig.configure(modeConfigurations[CAMERA_MODES.FOLLOW]);
 
     const velocity = flightController?.velocity?.clone?.() ?? null;
-    const steering = flightController
-      ? {
-          forward: flightController.input?.forward ?? 0,
-          strafe: flightController.input?.strafe ?? 0,
-          lift: flightController.input?.lift ?? 0,
-        }
-      : null;
+    const steering = resolveSteeringInput();
 
     followState.rig.updateFromPose({
       pose,
@@ -482,13 +506,7 @@ export function createCameraState({ three, scene, flightController }) {
     const ambientOffsets = flightController?.getAmbientOffsets
       ? flightController.getAmbientOffsets()
       : null;
-    const steering = flightController
-      ? {
-          forward: flightController.input?.forward ?? 0,
-          strafe: flightController.input?.strafe ?? 0,
-          lift: flightController.input?.lift ?? 0,
-        }
-      : null;
+    const steering = resolveSteeringInput();
 
     if (targetRig?.configure) {
       targetRig.configure(modeConfigurations[state.mode]);
@@ -565,13 +583,7 @@ export function createCameraState({ three, scene, flightController }) {
     const ambientOffsets = flightController?.getAmbientOffsets
       ? flightController.getAmbientOffsets()
       : null;
-    const steering = flightController
-      ? {
-          forward: flightController.input?.forward ?? 0,
-          strafe: flightController.input?.strafe ?? 0,
-          lift: flightController.input?.lift ?? 0,
-        }
-      : null;
+    const steering = resolveSteeringInput();
 
     followState.rig.reset({
       camera,
