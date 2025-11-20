@@ -843,16 +843,6 @@
       }
     </script>
 
-    <!-- Mobile Console for debugging on device -->
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-    <script>
-      // Show mobile console only on mobile devices
-      if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-        eruda.init();
-        console.log('%c📱 Mobile Console Active', 'color: #00ff00; font-size: 16px; font-weight: bold');
-      }
-    </script>
-
     <script type="module">
       // ============================================================================
       // MODULE IMPORTS (Using import map for 'three')
@@ -919,22 +909,13 @@
       // Note: We let Three.js create the WebGL context directly - getting it here
       // would consume the canvas's single context and cause Three.js to fail!
       // ============================================================================
-      mobileLog('Creating Three.js renderer (this creates the WebGL context)...');
+      mobileLog('Creating Three.js renderer (let Three.js create the WebGL context naturally)...');
       let renderer;
       try {
-        // iOS Safari can have issues with WebGL2 - force WebGL1 on mobile
+        // Let Three.js create the context naturally - don't pre-create it!
+        // Pre-creating fails on iOS if anything else touched the canvas first
         renderer = new THREE.WebGLRenderer({
           canvas,
-          context: isMobile ? canvas.getContext('webgl', {
-            alpha: true,
-            antialias: false,
-            depth: true,
-            stencil: false,
-            premultipliedAlpha: true,
-            preserveDrawingBuffer: false,
-            powerPreference: 'default',
-            failIfMajorPerformanceCaveat: false
-          }) : null,
           antialias: !isMobile,
           alpha: true,
           powerPreference: isMobile ? 'default' : 'high-performance',
@@ -945,13 +926,25 @@
         });
 
         const gl = renderer.getContext();
-        mobileLog('Renderer created successfully', {
+        mobileLog('Renderer created successfully!', {
           webglVersion: gl.constructor.name,
           version: gl.getParameter(gl.VERSION),
           vendor: gl.getParameter(gl.VENDOR),
           renderer: gl.getParameter(gl.RENDERER),
           maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE)
         });
+
+        // NOW load Eruda after WebGL context is created
+        if (isMobile && typeof eruda === 'undefined') {
+          mobileLog('Loading Eruda console...');
+          const erudaScript = document.createElement('script');
+          erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda';
+          erudaScript.onload = function() {
+            eruda.init();
+            console.log('%c📱 Mobile Console Active', 'color: #00ff00; font-size: 16px; font-weight: bold');
+          };
+          document.body.appendChild(erudaScript);
+        }
       } catch (error) {
         mobileError('Failed to create renderer', error);
         throw error;
