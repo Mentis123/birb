@@ -939,11 +939,15 @@
       // RENDERER SETUP - Try NOT passing canvas, create fresh canvas instead
       // ============================================================================
       mobileLog('Attempting workaround: creating fresh canvas for Three.js...');
+
+      // Declare outside try-catch so accessible in catch block
+      let freshCanvas;
       let renderer;
+
       try {
         // WORKAROUND: Don't use the existing canvas - create a new one!
         // Something may have touched the original canvas
-        const freshCanvas = document.createElement('canvas');
+        freshCanvas = document.createElement('canvas');
         freshCanvas.id = 'three-canvas';
         freshCanvas.style.position = 'absolute';
         freshCanvas.style.top = '0';
@@ -955,12 +959,11 @@
 
         // Replace the old canvas with the fresh one
         canvas.parentNode.replaceChild(freshCanvas, canvas);
-        const newCanvas = freshCanvas;
 
         mobileLog('Fresh canvas created, now creating renderer...');
 
         renderer = new THREE.WebGLRenderer({
-          canvas: newCanvas,
+          canvas: freshCanvas,
           antialias: !isMobile,
           alpha: true,
           powerPreference: isMobile ? 'default' : 'high-performance',
@@ -978,9 +981,6 @@
           renderer: gl.getParameter(gl.RENDERER),
           maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE)
         });
-
-        // Update canvas reference
-        const canvas = newCanvas;
 
         // NOW load Eruda after WebGL context is created
         if (isMobile && typeof eruda === 'undefined') {
