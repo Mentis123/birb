@@ -868,23 +868,43 @@
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       const logPrefix = isMobile ? '[MOBILE]' : '[DESKTOP]';
 
+      // Store errors to replay after Eruda loads
+      const errorLog = [];
+
       function mobileLog(message, data) {
         console.log(`${logPrefix} ${message}`, data || '');
       }
 
       function mobileError(message, error) {
-        console.error(`${logPrefix} ERROR: ${message}`);
+        const errorData = [`${logPrefix} ERROR: ${message}`];
+        console.error(errorData[0]);
+
         if (error) {
-          console.error('Error details:', error);
-          console.error('Error message:', error.message);
-          console.error('Error stack:', error.stack);
-          console.error('Error toString:', error.toString());
+          const details = [
+            ['Error details:', error],
+            ['Error message:', error.message],
+            ['Error stack:', error.stack],
+            ['Error toString:', error.toString()]
+          ];
+
+          details.forEach(detail => {
+            errorData.push(detail);
+            console.error(...detail);
+          });
+
           try {
-            console.error('Error JSON:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+            const json = ['Error JSON:', JSON.stringify(error, Object.getOwnPropertyNames(error))];
+            errorData.push(json);
+            console.error(...json);
           } catch (e) {
-            console.error('Could not stringify error');
+            const msg = ['Could not stringify error'];
+            errorData.push(msg);
+            console.error(...msg);
           }
         }
+
+        // Store for replay after Eruda loads
+        errorLog.push(...errorData);
       }
 
       mobileLog('Starting initialization', {
@@ -974,6 +994,14 @@
           document.body.appendChild(erudaScript);
         }
       } catch (error) {
+        // Store all error info
+        errorLog.push(['=== RENDERER CREATION FAILED ===']);
+        errorLog.push(['Error caught:', error]);
+        errorLog.push(['Error type:', typeof error]);
+        errorLog.push(['Error constructor:', error?.constructor?.name]);
+        errorLog.push(['Error message:', error?.message]);
+        errorLog.push(['Error stack:', error?.stack]);
+
         console.error('=== RENDERER CREATION FAILED ===');
         console.error('Error caught:', error);
         console.error('Error type:', typeof error);
@@ -986,13 +1014,21 @@
         // Try to get any WebGL error info
         try {
           const testCtx = freshCanvas.getContext('webgl') || freshCanvas.getContext('experimental-webgl');
-          console.error('Can get context after error?', !!testCtx);
+          const ctxAvailable = ['Can get context after error?', !!testCtx];
+          errorLog.push(ctxAvailable);
+          console.error(...ctxAvailable);
+
           if (testCtx) {
-            console.error('Context error:', testCtx.getError());
-            console.error('Is context lost?', testCtx.isContextLost());
+            const ctxError = ['Context error:', testCtx.getError()];
+            const ctxLost = ['Is context lost?', testCtx.isContextLost()];
+            errorLog.push(ctxError, ctxLost);
+            console.error(...ctxError);
+            console.error(...ctxLost);
           }
         } catch (testError) {
-          console.error('Even test context failed:', testError);
+          const testErr = ['Even test context failed:', testError];
+          errorLog.push(testErr);
+          console.error(...testErr);
         }
 
         // Load Eruda even on error
@@ -1001,7 +1037,15 @@
           erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda';
           erudaScript.onload = function() {
             eruda.init();
-            console.log('%c📱 Console loaded after error - SCROLL UP TO SEE ERROR DETAILS', 'color: #ff0000; font-size: 16px; font-weight: bold');
+
+            // Replay all errors after Eruda is ready
+            setTimeout(() => {
+              console.error('%c=== ERRORS THAT OCCURRED BEFORE ERUDA LOADED ===', 'color: #ff0000; font-size: 18px; font-weight: bold; background: #fff; padding: 10px;');
+              errorLog.forEach(args => console.error(...args));
+              console.error('%c=== END OF ERROR LOG ===', 'color: #ff0000; font-size: 18px; font-weight: bold; background: #fff; padding: 10px;');
+            }, 200);
+
+            console.log('%c📱 Console loaded after error', 'color: #ff0000; font-size: 16px; font-weight: bold');
           };
           document.body.appendChild(erudaScript);
         }
