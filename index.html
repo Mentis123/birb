@@ -920,7 +920,7 @@
       mobileLog('Getting DOM elements...');
       const canvasWrapper = document.querySelector(".canvas-wrapper");
       const canvasActions = document.querySelector("[data-draggable-panel]");
-      const canvas = document.querySelector("#scene");
+      let canvas = document.querySelector("#scene"); // Changed to 'let' so we can update reference
 
       if (!canvasWrapper || !canvas) {
         mobileError('Critical DOM elements not found', { canvasWrapper: !!canvasWrapper, canvas: !!canvas });
@@ -957,15 +957,22 @@
         freshCanvas.style.display = 'block';
         freshCanvas.style.touchAction = 'none';
 
-        // CRITICAL: Set actual canvas element dimensions (not just CSS)
-        // Get the wrapper dimensions
+        // CRITICAL: Add canvas to DOM FIRST, then set dimensions
+        // This ensures layout is calculated before we query dimensions
+        canvas.parentNode.replaceChild(freshCanvas, canvas);
+
+        // Force synchronous layout calculation by accessing offsetWidth
+        // This ensures wrapper has computed dimensions
+        const forceLayout = canvasWrapper.offsetWidth;
+
+        // Now get the wrapper dimensions after layout is forced
         const wrapperWidth = canvasWrapper.clientWidth || window.innerWidth;
         const wrapperHeight = canvasWrapper.clientHeight || window.innerHeight;
 
         // Set the canvas element dimensions (rendering buffer size)
         // These must be set BEFORE creating the WebGLRenderer
-        freshCanvas.width = Math.max(1, wrapperWidth);
-        freshCanvas.height = Math.max(1, wrapperHeight);
+        freshCanvas.width = Math.max(1, Math.floor(wrapperWidth));
+        freshCanvas.height = Math.max(1, Math.floor(wrapperHeight));
 
         mobileLog('Canvas dimensions set', {
           elementWidth: freshCanvas.width,
@@ -973,13 +980,48 @@
           cssWidth: freshCanvas.style.width,
           cssHeight: freshCanvas.style.height,
           wrapperWidth,
-          wrapperHeight
+          wrapperHeight,
+          forcedLayout: forceLayout
         });
 
-        // Replace the old canvas with the fresh one
-        canvas.parentNode.replaceChild(freshCanvas, canvas);
+        // Test WebGL availability on a SEPARATE temporary canvas
+        // We can't test on freshCanvas because once getContext is called,
+        // we can't get a fresh context from the same canvas
+        const testCanvas = document.createElement('canvas');
+        testCanvas.width = 1;
+        testCanvas.height = 1;
+        const testGl = testCanvas.getContext('webgl', { failIfMajorPerformanceCaveat: false }) ||
+                       testCanvas.getContext('experimental-webgl', { failIfMajorPerformanceCaveat: false });
 
-        mobileLog('Fresh canvas created, now creating renderer...');
+        if (!testGl) {
+          throw new Error('WebGL not available - cannot get context');
+        }
+
+        // Check if context is valid
+        const contextValid = !testGl.isContextLost();
+        mobileLog('WebGL context test', {
+          contextAvailable: !!testGl,
+          contextValid,
+          version: testGl.getParameter(testGl.VERSION),
+          vendor: testGl.getParameter(testGl.VENDOR),
+          renderer: testGl.getParameter(testGl.RENDERER)
+        });
+
+        if (!contextValid) {
+          throw new Error('WebGL context is lost');
+        }
+
+        // Clean up test context - this canvas will be garbage collected
+        const loseContext = testGl.getExtension('WEBGL_lose_context');
+        if (loseContext) {
+          loseContext.loseContext();
+        }
+
+        // Update canvas reference to point to the new canvas
+        // This ensures all subsequent code uses the correct element
+        canvas = freshCanvas;
+
+        mobileLog('Creating Three.js renderer with validated WebGL...');
 
         renderer = new THREE.WebGLRenderer({
           canvas: freshCanvas,
@@ -1029,6 +1071,11 @@
         console.error('Error stack:', error?.stack);
 
         mobileError('Failed to create renderer', error);
+
+        // Update canvas reference even on error, if freshCanvas was created
+        if (freshCanvas) {
+          canvas = freshCanvas;
+        }
 
         // Try to get any WebGL error info
         try {
