@@ -833,6 +833,16 @@
     </main>
     <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
 
+    <!-- Import map to resolve 'three' module specifier to CDN URL -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+          "three/": "https://cdn.jsdelivr.net/npm/three@0.161.0/"
+        }
+      }
+    </script>
+
     <!-- Mobile Console for debugging on device -->
     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
     <script>
@@ -845,10 +855,10 @@
 
     <script type="module">
       // ============================================================================
-      // MODULE IMPORTS (Must be at the top of the module)
+      // MODULE IMPORTS (Using import map for 'three')
       // ============================================================================
-      import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js";
-      import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js";
+      import * as THREE from "three";
+      import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
       import { FreeFlightController } from "./free-flight-controller.js";
       import {
         createCameraState,
