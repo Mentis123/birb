@@ -905,17 +905,31 @@
       });
 
       // ============================================================================
-      // RENDERER SETUP WITH MOBILE OPTIMIZATIONS
-      // Note: We let Three.js create the WebGL context directly - getting it here
-      // would consume the canvas's single context and cause Three.js to fail!
+      // RENDERER SETUP - Try NOT passing canvas, create fresh canvas instead
       // ============================================================================
-      mobileLog('Creating Three.js renderer (let Three.js create the WebGL context naturally)...');
+      mobileLog('Attempting workaround: creating fresh canvas for Three.js...');
       let renderer;
       try {
-        // Let Three.js create the context naturally - don't pre-create it!
-        // Pre-creating fails on iOS if anything else touched the canvas first
+        // WORKAROUND: Don't use the existing canvas - create a new one!
+        // Something may have touched the original canvas
+        const freshCanvas = document.createElement('canvas');
+        freshCanvas.id = 'three-canvas';
+        freshCanvas.style.position = 'absolute';
+        freshCanvas.style.top = '0';
+        freshCanvas.style.left = '0';
+        freshCanvas.style.width = '100%';
+        freshCanvas.style.height = '100%';
+        freshCanvas.style.display = 'block';
+        freshCanvas.style.touchAction = 'none';
+
+        // Replace the old canvas with the fresh one
+        canvas.parentNode.replaceChild(freshCanvas, canvas);
+        const newCanvas = freshCanvas;
+
+        mobileLog('Fresh canvas created, now creating renderer...');
+
         renderer = new THREE.WebGLRenderer({
-          canvas,
+          canvas: newCanvas,
           antialias: !isMobile,
           alpha: true,
           powerPreference: isMobile ? 'default' : 'high-performance',
@@ -934,6 +948,9 @@
           maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE)
         });
 
+        // Update canvas reference
+        const canvas = newCanvas;
+
         // NOW load Eruda after WebGL context is created
         if (isMobile && typeof eruda === 'undefined') {
           mobileLog('Loading Eruda console...');
@@ -947,6 +964,18 @@
         }
       } catch (error) {
         mobileError('Failed to create renderer', error);
+
+        // Load Eruda even on error
+        if (isMobile && typeof eruda === 'undefined') {
+          const erudaScript = document.createElement('script');
+          erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda';
+          erudaScript.onload = function() {
+            eruda.init();
+            console.log('%c📱 Console loaded after error', 'color: #ff0000; font-size: 16px');
+          };
+          document.body.appendChild(erudaScript);
+        }
+
         throw error;
       }
 
