@@ -915,24 +915,11 @@
       });
 
       // ============================================================================
-      // WEBGL CONTEXT CHECK
-      // ============================================================================
-      mobileLog('Checking WebGL support...');
-      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (!gl) {
-        mobileError('WebGL not supported');
-        throw new Error('WebGL not supported on this device');
-      }
-      mobileLog('WebGL context available', {
-        version: gl.getParameter(gl.VERSION),
-        vendor: gl.getParameter(gl.VENDOR),
-        renderer: gl.getParameter(gl.RENDERER)
-      });
-
-      // ============================================================================
       // RENDERER SETUP WITH MOBILE OPTIMIZATIONS
+      // Note: We let Three.js create the WebGL context directly - getting it here
+      // would consume the canvas's single context and cause Three.js to fail!
       // ============================================================================
-      mobileLog('Creating Three.js renderer...');
+      mobileLog('Creating Three.js renderer (this creates the WebGL context)...');
       let renderer;
       try {
         renderer = new THREE.WebGLRenderer({
@@ -942,9 +929,18 @@
           powerPreference: isMobile ? 'default' : 'high-performance',
           preserveDrawingBuffer: false,
           stencil: false,
-          depth: true
+          depth: true,
+          failIfMajorPerformanceCaveat: false // Allow software rendering if needed
         });
-        mobileLog('Renderer created successfully');
+
+        const gl = renderer.getContext();
+        mobileLog('Renderer created successfully', {
+          webglVersion: gl.constructor.name,
+          version: gl.getParameter(gl.VERSION),
+          vendor: gl.getParameter(gl.VENDOR),
+          renderer: gl.getParameter(gl.RENDERER),
+          maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE)
+        });
       } catch (error) {
         mobileError('Failed to create renderer', error);
         throw error;
