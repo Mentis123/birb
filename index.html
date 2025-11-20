@@ -957,6 +957,25 @@
         freshCanvas.style.display = 'block';
         freshCanvas.style.touchAction = 'none';
 
+        // CRITICAL: Set actual canvas element dimensions (not just CSS)
+        // Get the wrapper dimensions
+        const wrapperWidth = canvasWrapper.clientWidth || window.innerWidth;
+        const wrapperHeight = canvasWrapper.clientHeight || window.innerHeight;
+
+        // Set the canvas element dimensions (rendering buffer size)
+        // These must be set BEFORE creating the WebGLRenderer
+        freshCanvas.width = Math.max(1, wrapperWidth);
+        freshCanvas.height = Math.max(1, wrapperHeight);
+
+        mobileLog('Canvas dimensions set', {
+          elementWidth: freshCanvas.width,
+          elementHeight: freshCanvas.height,
+          cssWidth: freshCanvas.style.width,
+          cssHeight: freshCanvas.style.height,
+          wrapperWidth,
+          wrapperHeight
+        });
+
         // Replace the old canvas with the fresh one
         canvas.parentNode.replaceChild(freshCanvas, canvas);
 
