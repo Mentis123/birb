@@ -922,15 +922,26 @@
       mobileLog('Creating Three.js renderer (this creates the WebGL context)...');
       let renderer;
       try {
+        // iOS Safari can have issues with WebGL2 - force WebGL1 on mobile
         renderer = new THREE.WebGLRenderer({
           canvas,
-          antialias: !isMobile, // Disable antialiasing on mobile for better performance
+          context: isMobile ? canvas.getContext('webgl', {
+            alpha: true,
+            antialias: false,
+            depth: true,
+            stencil: false,
+            premultipliedAlpha: true,
+            preserveDrawingBuffer: false,
+            powerPreference: 'default',
+            failIfMajorPerformanceCaveat: false
+          }) : null,
+          antialias: !isMobile,
           alpha: true,
           powerPreference: isMobile ? 'default' : 'high-performance',
           preserveDrawingBuffer: false,
           stencil: false,
           depth: true,
-          failIfMajorPerformanceCaveat: false // Allow software rendering if needed
+          failIfMajorPerformanceCaveat: false
         });
 
         const gl = renderer.getContext();
