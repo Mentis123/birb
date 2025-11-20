@@ -997,8 +997,35 @@
           throw new Error('WebGL not available - cannot get context');
         }
 
-        // Check if context is valid
-        const contextValid = !testGl.isContextLost();
+        // Check if context is valid, and attempt a soft recovery before failing hard.
+        let contextValid = !testGl.isContextLost();
+        if (!contextValid) {
+          mobileLog('WebGL context reported lost on first check - attempting recovery');
+
+          // Try to re-establish context via the WEBGL_lose_context extension if available.
+          const loseExtension = testGl.getExtension('WEBGL_lose_context');
+          if (loseExtension) {
+            loseExtension.loseContext();
+            loseExtension.restoreContext();
+            mobileLog('Requested context restore via WEBGL_lose_context');
+          }
+
+          // Recreate the test context after the restore request.
+          const retryGl = testCanvas.getContext('webgl', { failIfMajorPerformanceCaveat: false }) ||
+                          testCanvas.getContext('experimental-webgl', { failIfMajorPerformanceCaveat: false });
+          contextValid = !!retryGl && !retryGl.isContextLost();
+
+          mobileLog('WebGL context retry', {
+            contextAvailableAfterRetry: !!retryGl,
+            contextValidAfterRetry: contextValid
+          });
+
+          // If still invalid, proceed without throwing so the renderer can handle restoration later.
+          if (!contextValid) {
+            mobileError('WebGL context reported lost after retry - proceeding with caution');
+          }
+        }
+
         mobileLog('WebGL context test', {
           contextAvailable: !!testGl,
           contextValid,
@@ -1006,10 +1033,6 @@
           vendor: testGl.getParameter(testGl.VENDOR),
           renderer: testGl.getParameter(testGl.RENDERER)
         });
-
-        if (!contextValid) {
-          throw new Error('WebGL context is lost');
-        }
 
         // Clean up test context - this canvas will be garbage collected
         const loseContext = testGl.getExtension('WEBGL_lose_context');
