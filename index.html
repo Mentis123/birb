@@ -873,7 +873,18 @@
       }
 
       function mobileError(message, error) {
-        console.error(`${logPrefix} ERROR: ${message}`, error || '');
+        console.error(`${logPrefix} ERROR: ${message}`);
+        if (error) {
+          console.error('Error details:', error);
+          console.error('Error message:', error.message);
+          console.error('Error stack:', error.stack);
+          console.error('Error toString:', error.toString());
+          try {
+            console.error('Error JSON:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+          } catch (e) {
+            console.error('Could not stringify error');
+          }
+        }
       }
 
       mobileLog('Starting initialization', {
@@ -963,7 +974,26 @@
           document.body.appendChild(erudaScript);
         }
       } catch (error) {
+        console.error('=== RENDERER CREATION FAILED ===');
+        console.error('Error caught:', error);
+        console.error('Error type:', typeof error);
+        console.error('Error constructor:', error?.constructor?.name);
+        console.error('Error message:', error?.message);
+        console.error('Error stack:', error?.stack);
+
         mobileError('Failed to create renderer', error);
+
+        // Try to get any WebGL error info
+        try {
+          const testCtx = freshCanvas.getContext('webgl') || freshCanvas.getContext('experimental-webgl');
+          console.error('Can get context after error?', !!testCtx);
+          if (testCtx) {
+            console.error('Context error:', testCtx.getError());
+            console.error('Is context lost?', testCtx.isContextLost());
+          }
+        } catch (testError) {
+          console.error('Even test context failed:', testError);
+        }
 
         // Load Eruda even on error
         if (isMobile && typeof eruda === 'undefined') {
@@ -971,12 +1001,13 @@
           erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda';
           erudaScript.onload = function() {
             eruda.init();
-            console.log('%c📱 Console loaded after error', 'color: #ff0000; font-size: 16px');
+            console.log('%c📱 Console loaded after error - SCROLL UP TO SEE ERROR DETAILS', 'color: #ff0000; font-size: 16px; font-weight: bold');
           };
           document.body.appendChild(erudaScript);
         }
 
-        throw error;
+        // Don't throw - let's see if we can at least show the UI and logs
+        // throw error;
       }
 
       const DPR_CAP = 1.8;
