@@ -936,9 +936,9 @@
       });
 
       // ============================================================================
-      // RENDERER SETUP - SIMPLIFIED VERSION
+      // RENDERER SETUP - MANUALLY CREATE WEBGL CONTEXT
       // ============================================================================
-      mobileLog('Creating canvas and renderer (simplified)...');
+      mobileLog('Creating canvas and WebGL context manually...');
 
       let renderer;
 
@@ -969,12 +969,37 @@
           height: freshCanvas.height
         });
 
-        // Step 4: Create Three.js renderer with minimal options
+        // Step 4: MANUALLY create WebGL context FIRST
+        // Try webgl2 first, then webgl, then experimental-webgl
+        const contextAttributes = {
+          alpha: true,
+          antialias: false,
+          failIfMajorPerformanceCaveat: false,
+          powerPreference: 'default'
+        };
+
+        let gl = freshCanvas.getContext('webgl2', contextAttributes) ||
+                 freshCanvas.getContext('webgl', contextAttributes) ||
+                 freshCanvas.getContext('experimental-webgl', contextAttributes);
+
+        if (!gl) {
+          throw new Error('WebGL context creation failed - getContext returned null');
+        }
+
+        mobileLog('WebGL context created manually!', {
+          version: gl.getParameter(gl.VERSION),
+          vendor: gl.getParameter(gl.VENDOR),
+          renderer: gl.getParameter(gl.RENDERER),
+          contextLost: gl.isContextLost()
+        });
+
+        // Step 5: Create Three.js renderer with pre-created context
+        // Pass the context directly to Three.js
         renderer = new THREE.WebGLRenderer({
           canvas: freshCanvas,
+          context: gl,
           antialias: false,
-          alpha: true,
-          failIfMajorPerformanceCaveat: false
+          alpha: true
         });
 
         mobileLog('Renderer created successfully!');
