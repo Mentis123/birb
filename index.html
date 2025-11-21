@@ -969,9 +969,49 @@
           height: freshCanvas.height
         });
 
-        // Step 4: Create Three.js renderer with minimal options
+        // Step 4: Test WebGL availability before creating renderer
+        const testGl = freshCanvas.getContext('webgl', { failIfMajorPerformanceCaveat: false }) ||
+                       freshCanvas.getContext('experimental-webgl', { failIfMajorPerformanceCaveat: false });
+
+        if (!testGl) {
+          throw new Error('WebGL is not available on this device');
+        }
+
+        if (testGl.isContextLost()) {
+          throw new Error('WebGL context is lost');
+        }
+
+        mobileLog('WebGL is available', {
+          version: testGl.getParameter(testGl.VERSION),
+          vendor: testGl.getParameter(testGl.VENDOR)
+        });
+
+        // IMPORTANT: Lose the test context so Three.js can create its own
+        const loseExt = testGl.getExtension('WEBGL_lose_context');
+        if (loseExt) {
+          loseExt.loseContext();
+        }
+
+        // Create a NEW canvas for Three.js (can't reuse the test canvas after getting context)
+        const threeCanvas = document.createElement('canvas');
+        threeCanvas.id = 'three-canvas';
+        threeCanvas.style.position = 'absolute';
+        threeCanvas.style.top = '0';
+        threeCanvas.style.left = '0';
+        threeCanvas.style.width = '100%';
+        threeCanvas.style.height = '100%';
+        threeCanvas.style.display = 'block';
+        threeCanvas.style.touchAction = 'none';
+        threeCanvas.width = freshCanvas.width;
+        threeCanvas.height = freshCanvas.height;
+
+        // Replace the test canvas with the Three.js canvas
+        freshCanvas.parentNode.replaceChild(threeCanvas, freshCanvas);
+        canvas = threeCanvas;
+
+        // Step 5: Create Three.js renderer with minimal options
         renderer = new THREE.WebGLRenderer({
-          canvas: freshCanvas,
+          canvas: threeCanvas,
           antialias: false,
           alpha: true,
           failIfMajorPerformanceCaveat: false
