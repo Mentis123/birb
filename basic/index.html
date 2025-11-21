@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Basic Birb Flight - Mobile Thumbstick</title>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      position: fixed;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    #game-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    #game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #thumbstick-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      z-index: 10;
+    }
+
+    .thumbstick-base {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease-out;
+    }
+
+    .thumbstick-base.active {
+      opacity: 1;
+    }
+
+    .thumbstick-stick {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.5);
+      border: 2px solid rgba(255, 255, 255, 0.8);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease-out;
+    }
+
+    .thumbstick-stick.active {
+      opacity: 1;
+    }
+
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-size: 18px;
+      text-align: center;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 20px 40px;
+      border-radius: 10px;
+    }
+
+    #loading.hidden {
+      display: none;
+    }
+
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    #error {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ff6b6b;
+      font-size: 16px;
+      text-align: center;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.9);
+      padding: 30px;
+      border-radius: 10px;
+      max-width: 80%;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+    <div id="thumbstick-container"></div>
+    <div id="loading">Loading...</div>
+    <div id="error"></div>
+    <div id="info">
+      <div id="fps">FPS: --</div>
+      <div id="altitude">Altitude: --</div>
+      <div id="speed">Speed: --</div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ============================================================================
+    // VIRTUAL THUMBSTICK CLASS
+    // ============================================================================
+    class VirtualThumbstick {
+      constructor(container) {
+        this.container = container;
+        this.baseRadius = 80;
+        this.stickRadius = 30;
+        this.deadzone = 0.12;
+        this.active = false;
+        this.pointerId = null;
+
+        this.baseCenter = { x: 0, y: 0 };
+        this.stickPosition = { x: 0, y: 0 };
+        this.outputValue = { x: 0, y: 0 };
+
+        this.createElements();
+        this.attachEvents();
+      }
+
+      createElements() {
+        this.baseElement = document.createElement('div');
+        this.baseElement.className = 'thumbstick-base';
+        this.baseElement.style.width = `${this.baseRadius * 2}px`;
+        this.baseElement.style.height = `${this.baseRadius * 2}px`;
+
+        this.stickElement = document.createElement('div');
+        this.stickElement.className = 'thumbstick-stick';
+        this.stickElement.style.width = `${this.stickRadius * 2}px`;
+        this.stickElement.style.height = `${this.stickRadius * 2}px`;
+
+        this.container.appendChild(this.baseElement);
+        this.container.appendChild(this.stickElement);
+      }
+
+      attachEvents() {
+        this.container.addEventListener('touchstart', this.onStart.bind(this), { passive: false });
+        this.container.addEventListener('touchmove', this.onMove.bind(this), { passive: false });
+        this.container.addEventListener('touchend', this.onEnd.bind(this), { passive: false });
+        this.container.addEventListener('touchcancel', this.onEnd.bind(this), { passive: false });
+
+        // Mouse events for desktop testing
+        this.container.addEventListener('mousedown', this.onStart.bind(this));
+        this.container.addEventListener('mousemove', this.onMove.bind(this));
+        this.container.addEventListener('mouseup', this.onEnd.bind(this));
+        this.container.addEventListener('mouseleave', this.onEnd.bind(this));
+      }
+
+      onStart(event) {
+        event.preventDefault();
+
+        const touch = event.touches ? event.touches[0] : event;
+        if (event.touches) {
+          this.pointerId = touch.identifier;
+        }
+
+        this.baseCenter = { x: touch.clientX, y: touch.clientY };
+        this.stickPosition = { ...this.baseCenter };
+        this.active = true;
+        this.showThumbstick();
+      }
+
+      onMove(event) {
+        if (!this.active) return;
+        event.preventDefault();
+
+        let touch;
+        if (event.touches) {
+          // Find the correct touch
+          for (let i = 0; i < event.touches.length; i++) {
+            if (event.touches[i].identifier === this.pointerId) {
+              touch = event.touches[i];
+              break;
+            }
+          }
+          if (!touch) return;
+        } else {
+          touch = event;
+        }
+
+        const dx = touch.clientX - this.baseCenter.x;
+        const dy = touch.clientY - this.baseCenter.y;
+
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const maxDistance = this.baseRadius - this.stickRadius;
+
+        if (distance > maxDistance) {
+          const angle = Math.atan2(dy, dx);
+          this.stickPosition.x = this.baseCenter.x + Math.cos(angle) * maxDistance;
+          this.stickPosition.y = this.baseCenter.y + Math.sin(angle) * maxDistance;
+        } else {
+          this.stickPosition.x = touch.clientX;
+          this.stickPosition.y = touch.clientY;
+        }
+
+        const normalizedX = (this.stickPosition.x - this.baseCenter.x) / maxDistance;
+        const normalizedY = (this.stickPosition.y - this.baseCenter.y) / maxDistance;
+
+        const magnitude = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+
+        if (magnitude < this.deadzone) {
+          this.outputValue = { x: 0, y: 0 };
+        } else {
+          const scale = (magnitude - this.deadzone) / (1 - this.deadzone);
+          const finalMagnitude = Math.min(scale / magnitude, 1);
+          this.outputValue = {
+            x: normalizedX * finalMagnitude,
+            y: normalizedY * finalMagnitude
+          };
+        }
+
+        this.updateVisuals();
+      }
+
+      onEnd(event) {
+        if (!this.active) return;
+
+        if (event.touches && event.touches.length > 0) {
+          let stillActive = false;
+          for (let i = 0; i < event.touches.length; i++) {
+            if (event.touches[i].identifier === this.pointerId) {
+              stillActive = true;
+              break;
+            }
+          }
+          if (stillActive) return;
+        }
+
+        event.preventDefault();
+        this.active = false;
+        this.pointerId = null;
+        this.outputValue = { x: 0, y: 0 };
+        this.hideThumbstick();
+      }
+
+      showThumbstick() {
+        this.baseElement.classList.add('active');
+        this.stickElement.classList.add('active');
+        this.updateVisuals();
+      }
+
+      hideThumbstick() {
+        this.baseElement.classList.remove('active');
+        this.stickElement.classList.remove('active');
+      }
+
+      updateVisuals() {
+        this.baseElement.style.left = `${this.baseCenter.x - this.baseRadius}px`;
+        this.baseElement.style.top = `${this.baseCenter.y - this.baseRadius}px`;
+
+        this.stickElement.style.left = `${this.stickPosition.x - this.stickRadius}px`;
+        this.stickElement.style.top = `${this.stickPosition.y - this.stickRadius}px`;
+      }
+
+      getValue() {
+        return this.outputValue;
+      }
+    }
+
+    // ============================================================================
+    // BASIC FLIGHT CONTROLLER CLASS
+    // ============================================================================
+    class BasicFlightController {
+      constructor() {
+        this.position = new THREE.Vector3(0, 5, 0);
+        this.quaternion = new THREE.Quaternion();
+        this.velocity = new THREE.Vector3();
+
+        this.speed = 4.0;
+        this.turnSpeed = Math.PI / 2;
+        this.pitchSpeed = Math.PI / 4;
+        this.liftForce = 2.0;
+        this.gravity = 0.6;
+
+        this.yawInput = 0;
+        this.pitchInput = 0;
+      }
+
+      update(deltaTime) {
+        const yawDelta = this.yawInput * this.turnSpeed * deltaTime;
+        const pitchDelta = this.pitchInput * this.pitchSpeed * deltaTime;
+
+        const yawQuat = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          yawDelta
+        );
+
+        const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion);
+        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
+          rightAxis,
+          -pitchDelta
+        );
+
+        this.quaternion.premultiply(yawQuat).multiply(pitchQuat).normalize();
+
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
+
+        const lift = this.pitchInput * this.liftForce;
+        const verticalVelocity = lift - this.gravity;
+
+        this.velocity.copy(forward).multiplyScalar(this.speed);
+        this.velocity.y = verticalVelocity;
+
+        this.position.addScaledVector(this.velocity, deltaTime);
+
+        if (this.position.y < 0.5) {
+          this.position.y = 0.5;
+          if (this.velocity.y < 0) {
+            this.velocity.y = 0;
+          }
+        }
+
+        return {
+          position: this.position.clone(),
+          quaternion: this.quaternion.clone(),
+          velocity: this.velocity.clone()
+        };
+      }
+
+      setInputs(yaw, pitch) {
+        this.yawInput = THREE.MathUtils.clamp(yaw, -1, 1);
+        this.pitchInput = THREE.MathUtils.clamp(pitch, -1, 1);
+      }
+    }
+
+    // ============================================================================
+    // SIMPLE FOLLOW CAMERA CLASS
+    // ============================================================================
+    class SimpleFollowCamera {
+      constructor(camera) {
+        this.camera = camera;
+        this.distance = 8;
+        this.height = 3;
+        this.lookAhead = 2;
+        this.smoothing = 5;
+
+        this.currentPosition = new THREE.Vector3();
+        this.currentLookAt = new THREE.Vector3();
+      }
+
+      update(birdPosition, birdQuaternion, deltaTime) {
+        const back = new THREE.Vector3(0, 0, 1).applyQuaternion(birdQuaternion);
+        const targetPosition = birdPosition.clone()
+          .add(back.multiplyScalar(this.distance))
+          .add(new THREE.Vector3(0, this.height, 0));
+
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(birdQuaternion);
+        const targetLookAt = birdPosition.clone()
+          .add(forward.multiplyScalar(this.lookAhead));
+
+        const t = 1 - Math.exp(-this.smoothing * deltaTime);
+        this.currentPosition.lerp(targetPosition, t);
+        this.currentLookAt.lerp(targetLookAt, t);
+
+        this.camera.position.copy(this.currentPosition);
+        this.camera.lookAt(this.currentLookAt);
+      }
+    }
+
+    // ============================================================================
+    // CREATE SIMPLE BIRD MODEL
+    // ============================================================================
+    function createSimpleBird() {
+      const bird = new THREE.Group();
+
+      const bodyGeometry = new THREE.SphereGeometry(0.3, 16, 12);
+      bodyGeometry.scale(1, 0.8, 1.5);
+      const bodyMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4a9eff,
+        roughness: 0.7,
+        metalness: 0.1
+      });
+      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+      bird.add(body);
+
+      const headGeometry = new THREE.SphereGeometry(0.2, 12, 10);
+      const head = new THREE.Mesh(headGeometry, bodyMaterial);
+      head.position.set(0, 0.15, -0.4);
+      bird.add(head);
+
+      const beakGeometry = new THREE.ConeGeometry(0.08, 0.25, 8);
+      beakGeometry.rotateX(Math.PI / 2);
+      const beakMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffa500,
+        roughness: 0.8
+      });
+      const beak = new THREE.Mesh(beakGeometry, beakMaterial);
+      beak.position.set(0, 0.1, -0.6);
+      bird.add(beak);
+
+      const wingGeometry = new THREE.BoxGeometry(0.8, 0.05, 0.4);
+      const wingMaterial = new THREE.MeshStandardMaterial({
+        color: 0x3a7ecf,
+        roughness: 0.6
+      });
+
+      const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+      leftWing.position.set(-0.5, 0, 0);
+      leftWing.rotation.z = 0.2;
+      bird.add(leftWing);
+
+      const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+      rightWing.position.set(0.5, 0, 0);
+      rightWing.rotation.z = -0.2;
+      bird.add(rightWing);
+
+      const tailGeometry = new THREE.ConeGeometry(0.15, 0.4, 3);
+      tailGeometry.rotateX(Math.PI / 2);
+      const tail = new THREE.Mesh(tailGeometry, wingMaterial);
+      tail.position.set(0, 0.1, 0.5);
+      bird.add(tail);
+
+      return bird;
+    }
+
+    // ============================================================================
+    // CREATE ENVIRONMENT
+    // ============================================================================
+    function createEnvironment(scene) {
+      const groundGeometry = new THREE.PlaneGeometry(200, 200);
+      const groundMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4a7c59,
+        roughness: 0.9,
+        metalness: 0.0
+      });
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+
+      const gridHelper = new THREE.GridHelper(200, 40, 0x333333, 0x222222);
+      scene.add(gridHelper);
+
+      scene.background = new THREE.Color(0x87ceeb);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+
+      const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      sunLight.position.set(10, 20, 5);
+      sunLight.castShadow = true;
+      scene.add(sunLight);
+    }
+
+    // ============================================================================
+    // MOBILE-HARDENED WEBGL INITIALIZATION
+    // ============================================================================
+    function initializeRenderer() {
+      const canvas = document.getElementById('game-canvas');
+
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      canvas.width = width * window.devicePixelRatio;
+      canvas.height = height * window.devicePixelRatio;
+
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      if (!gl || !gl.getParameter) {
+        throw new Error('WebGL is not available on this device. Please try a different browser or device.');
+      }
+
+      const renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance'
+      });
+
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const maxPixelRatio = isMobile ? 1.5 : 2.0;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
+      renderer.setSize(width, height, false);
+
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+      canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        console.warn('WebGL context lost');
+        showError('WebGL context lost. Please reload the page.');
+      });
+
+      canvas.addEventListener('webglcontextrestored', () => {
+        console.log('WebGL context restored');
+        hideError();
+      });
+
+      return renderer;
+    }
+
+    // ============================================================================
+    // ERROR HANDLING
+    // ============================================================================
+    function showError(message) {
+      const errorDiv = document.getElementById('error');
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+    }
+
+    function hideError() {
+      const errorDiv = document.getElementById('error');
+      errorDiv.style.display = 'none';
+    }
+
+    function hideLoading() {
+      const loadingDiv = document.getElementById('loading');
+      loadingDiv.classList.add('hidden');
+    }
+
+    // ============================================================================
+    // MAIN INITIALIZATION
+    // ============================================================================
+    async function init() {
+      try {
+        console.log('Initializing Basic Birb Flight...');
+
+        const renderer = initializeRenderer();
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1000
+        );
+
+        createEnvironment(scene);
+
+        const bird = createSimpleBird();
+        scene.add(bird);
+
+        const flightController = new BasicFlightController();
+        const followCamera = new SimpleFollowCamera(camera);
+
+        const thumbstickContainer = document.getElementById('thumbstick-container');
+        const thumbstick = new VirtualThumbstick(thumbstickContainer);
+
+        // FPS counter
+        let frameCount = 0;
+        let lastFpsUpdate = 0;
+        let fps = 0;
+
+        // Resize handler
+        function handleResize() {
+          const width = window.innerWidth;
+          const height = window.innerHeight;
+
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+          renderer.setSize(width, height, false);
+        }
+
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', () => {
+          setTimeout(handleResize, 100);
+        });
+
+        // Game loop
+        let lastTime = 0;
+        function gameLoop(currentTime) {
+          requestAnimationFrame(gameLoop);
+
+          const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.05);
+          lastTime = currentTime;
+
+          if (deltaTime === 0) return;
+
+          // Update FPS
+          frameCount++;
+          if (currentTime - lastFpsUpdate > 1000) {
+            fps = Math.round(frameCount * 1000 / (currentTime - lastFpsUpdate));
+            frameCount = 0;
+            lastFpsUpdate = currentTime;
+            document.getElementById('fps').textContent = `FPS: ${fps}`;
+          }
+
+          const thumbstickValue = thumbstick.getValue();
+          flightController.setInputs(
+            thumbstickValue.x,
+            -thumbstickValue.y
+          );
+
+          const pose = flightController.update(deltaTime);
+
+          bird.position.copy(pose.position);
+          bird.quaternion.copy(pose.quaternion);
+
+          followCamera.update(pose.position, pose.quaternion, deltaTime);
+
+          document.getElementById('altitude').textContent = `Altitude: ${pose.position.y.toFixed(1)}m`;
+          document.getElementById('speed').textContent = `Speed: ${pose.velocity.length().toFixed(1)}m/s`;
+
+          renderer.render(scene, camera);
+        }
+
+        // Wait 2 frames before starting (GPU stabilization)
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        await new Promise(resolve => requestAnimationFrame(resolve));
+
+        hideLoading();
+        gameLoop(0);
+
+        console.log('Basic Birb Flight initialized successfully!');
+
+      } catch (error) {
+        console.error('Initialization error:', error);
+        showError(`Failed to initialize: ${error.message}`);
+      }
+    }
+
+    // Start when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  </script>
+</body>
+</html>
