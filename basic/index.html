@@ -499,22 +499,25 @@
       const width = window.innerWidth;
       const height = window.innerHeight;
 
-      canvas.width = width * window.devicePixelRatio;
-      canvas.height = height * window.devicePixelRatio;
-
-      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-      if (!gl || !gl.getParameter) {
+      // Test WebGL support without creating a context yet
+      // Let THREE.js create the context to avoid conflicts
+      const testCanvas = document.createElement('canvas');
+      const testGl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl');
+      if (!testGl || !testGl.getParameter) {
         throw new Error('WebGL is not available on this device. Please try a different browser or device.');
       }
 
+      // Create renderer and let THREE.js handle context creation
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
       const renderer = new THREE.WebGLRenderer({
         canvas: canvas,
-        antialias: true,
+        antialias: !isMobile, // Disable antialiasing on mobile for better performance
         alpha: false,
-        powerPreference: 'high-performance'
+        powerPreference: 'high-performance',
+        failIfMajorPerformanceCaveat: false
       });
 
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       const maxPixelRatio = isMobile ? 1.5 : 2.0;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
       renderer.setSize(width, height, false);
