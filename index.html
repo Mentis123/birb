@@ -152,6 +152,16 @@
 <body>
   <main>
     <header>Birb Flight Lab</header>
+
+    <!-- Loading Indicator -->
+    <div id="loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#0a1426;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#f0f6fc;font-family:'Inter',system-ui,sans-serif;">
+      <div style="text-align:center;">
+        <div style="font-size:1.2rem;margin-bottom:1rem;letter-spacing:0.1em;">LOADING BIRB...</div>
+        <div id="loading-progress" style="font-size:0.9rem;color:rgba(255,255,255,0.6);margin-bottom:1rem;">Initializing...</div>
+        <div id="loading-error" style="font-size:0.85rem;color:#ff6b6b;margin-top:1rem;max-width:80%;display:none;"></div>
+      </div>
+    </div>
+
     <div class="canvas-wrapper">
       <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
       <div class="canvas-actions" data-draggable-panel>
@@ -216,9 +226,12 @@
     import { createSpeedTrail, createWingVortices } from "./src/environment/speed-trail.js";
 
     // ============================================================================
-    // MOBILE DIAGNOSTIC LOGGING
+    // MOBILE DIAGNOSTIC LOGGING & LOADING UI
     // ============================================================================
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const loadingScreen = document.getElementById('loading-screen');
+    const loadingProgress = document.getElementById('loading-progress');
+    const loadingError = document.getElementById('loading-error');
 
     function mobileLog(message, data) {
       console.log(`[LOG] ${message}`, data || '');
@@ -228,7 +241,32 @@
       console.error(`[ERROR] ${message}`, error || '');
     }
 
+    function updateLoadingProgress(message) {
+      mobileLog(message);
+      if (loadingProgress) loadingProgress.textContent = message;
+    }
+
+    function showLoadingError(message) {
+      mobileError(message);
+      if (loadingError) {
+        loadingError.textContent = message;
+        loadingError.style.display = 'block';
+      }
+    }
+
+    function hideLoadingScreen() {
+      mobileLog('Hiding loading screen');
+      if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
+        loadingScreen.style.transition = 'opacity 0.5s ease-out';
+        setTimeout(() => {
+          loadingScreen.style.display = 'none';
+        }, 500);
+      }
+    }
+
     mobileLog('Starting initialization');
+    updateLoadingProgress('Starting initialization...');
 
     // ============================================================================
     // DOM ELEMENT SETUP
@@ -246,6 +284,8 @@
     // ============================================================================
     let renderer;
     try {
+      updateLoadingProgress('Creating WebGL renderer...');
+
       canvas.id = 'three-canvas';
       canvas.style.width = '100%';
       canvas.style.height = '100%';
@@ -271,14 +311,18 @@
       renderer.toneMappingExposure = 1.2;
 
       mobileLog('Renderer created successfully');
+      updateLoadingProgress('WebGL renderer created');
     } catch (error) {
       mobileError('Failed to create renderer', error);
+      showLoadingError('Failed to initialize WebGL. Your device may not support it.');
       throw error;
     }
 
     // ============================================================================
     // SCENE SETUP
     // ============================================================================
+    updateLoadingProgress('Setting up 3D scene...');
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a1426);
     scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
@@ -289,6 +333,8 @@
     const keyLight = new THREE.DirectionalLight(0xf3f0d2, 1.2);
     keyLight.position.set(7.5, 8.2, 5.2);
     scene.add(keyLight);
+
+    mobileLog('Scene and lighting created');
 
     // Environment
     let environmentShell = null;
@@ -313,7 +359,9 @@
       scene.add(wingVortices.particles);
     }
 
+    updateLoadingProgress('Creating environment...');
     setEnvironment("forest");
+    mobileLog('Environment created');
 
     function cycleEnvironment() {
       currentEnvIndex = (currentEnvIndex + 1) % ENVIRONMENT_VARIANTS.length;
@@ -323,6 +371,8 @@
     // ============================================================================
     // BIRB MODEL
     // ============================================================================
+    updateLoadingProgress('Loading birb model...');
+
     const birbAnchor = new THREE.Group();
     scene.add(birbAnchor);
     const birbRig = new THREE.Group();
@@ -331,27 +381,72 @@
     birbRig.add(birbModel);
 
     const wingRefs = { left: null, right: null };
-    const gltfLoader = new GLTFLoader();
-    gltfLoader.load('./birb.glb', (gltf) => {
-      const modelRoot = gltf.scene;
-      modelRoot.position.set(0, -0.2, 0);
-      birbModel.add(modelRoot);
+    let birbModelLoaded = false;
 
-      modelRoot.traverse((child) => {
-        if (child.isMesh) {
-          const name = (child.name || "").toLowerCase();
-          if (name.includes("wing")) {
-            if (name.includes("left") || name.includes("l_")) wingRefs.left = child;
-            else if (name.includes("right") || name.includes("r_")) wingRefs.right = child;
+    const gltfLoader = new GLTFLoader();
+
+    mobileLog('Starting GLTF load for birb.glb');
+
+    gltfLoader.load(
+      './birb.glb',
+      // onLoad - success callback
+      (gltf) => {
+        mobileLog('GLTF model loaded successfully');
+        updateLoadingProgress('Birb model loaded!');
+
+        const modelRoot = gltf.scene;
+        modelRoot.position.set(0, -0.2, 0);
+        birbModel.add(modelRoot);
+
+        modelRoot.traverse((child) => {
+          if (child.isMesh) {
+            const name = (child.name || "").toLowerCase();
+            if (name.includes("wing")) {
+              if (name.includes("left") || name.includes("l_")) wingRefs.left = child;
+              else if (name.includes("right") || name.includes("r_")) wingRefs.right = child;
+            }
           }
+        });
+
+        mobileLog('Wing references found:', { left: !!wingRefs.left, right: !!wingRefs.right });
+        birbModelLoaded = true;
+
+        // Hide loading screen after a short delay
+        setTimeout(() => {
+          hideLoadingScreen();
+        }, 500);
+      },
+      // onProgress callback
+      (xhr) => {
+        if (xhr.lengthComputable) {
+          const percentComplete = (xhr.loaded / xhr.total) * 100;
+          const message = `Loading birb model: ${Math.round(percentComplete)}%`;
+          updateLoadingProgress(message);
+          mobileLog(message);
+        } else {
+          mobileLog(`Loading birb model: ${xhr.loaded} bytes loaded`);
         }
-      });
-    });
+      },
+      // onError callback
+      (error) => {
+        mobileError('Failed to load birb.glb model', error);
+        const errorMsg = `Failed to load birb model. Error: ${error.message || 'Unknown error'}. Please check your network connection and try refreshing the page.`;
+        showLoadingError(errorMsg);
+
+        // Still hide loading screen after error is shown so user can see the page
+        setTimeout(() => {
+          if (loadingScreen) loadingScreen.style.opacity = '0.95'; // Keep it slightly visible with error
+        }, 3000);
+      }
+    );
+
     birbRig.scale.setScalar(0.5);
 
     // ============================================================================
     // CONTROLS & GAME LOOP
     // ============================================================================
+    updateLoadingProgress('Initializing controls...');
+
     const flightController = new SimpleFlightController();
     const cameraState = createCameraState({ three: THREE, scene, flightController });
     const camera = cameraState.camera;
@@ -360,13 +455,24 @@
     let currentCameraMode = CAMERA_MODES.FPV;
     cameraState.setMode(currentCameraMode);
 
+    mobileLog('Flight controller and camera initialized');
+
     // Virtual Thumbstick
     let thumbstickValue = { x: 0, y: 0 };
     createFloatingThumbstick(document.body, {
-      onStart: () => { },
-      onEnd: () => { thumbstickValue = { x: 0, y: 0 }; },
-      onChange: (val) => { thumbstickValue = val; }
+      onStart: () => {
+        mobileLog('Thumbstick started');
+      },
+      onEnd: () => {
+        thumbstickValue = { x: 0, y: 0 };
+        mobileLog('Thumbstick ended');
+      },
+      onChange: (val) => {
+        thumbstickValue = val;
+      }
     });
+
+    mobileLog('Virtual thumbstick created');
 
     // Draggable Panel Logic
     const panel = document.querySelector('[data-draggable-panel]');
@@ -514,8 +620,9 @@
       renderer.render(scene, camera);
     }
 
+    updateLoadingProgress('Starting animation loop...');
     renderer.setAnimationLoop(renderFrame);
-    mobileLog('Initialization complete');
+    mobileLog('Animation loop started - initialization complete (waiting for model to load)');
 
   </script>
 </body>
