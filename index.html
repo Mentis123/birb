@@ -283,7 +283,30 @@
     // RENDERER SETUP
     // ============================================================================
     let renderer;
+
+    // Check WebGL support
+    function isWebGLAvailable() {
+      try {
+        const testCanvas = document.createElement('canvas');
+        const context = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+        if (context) {
+          mobileLog('WebGL is supported', { vendor: context.getParameter(context.VENDOR) });
+          return true;
+        }
+        return false;
+      } catch (e) {
+        mobileError('WebGL availability check failed', e);
+        return false;
+      }
+    }
+
     try {
+      updateLoadingProgress('Checking WebGL support...');
+
+      if (!isWebGLAvailable()) {
+        throw new Error('WebGL is not supported on this device');
+      }
+
       updateLoadingProgress('Creating WebGL renderer...');
 
       canvas.id = 'three-canvas';
@@ -292,12 +315,43 @@
       canvas.style.display = 'block';
       canvas.style.touchAction = 'none';
 
-      renderer = new THREE.WebGLRenderer({
-        canvas,
-        antialias: !isMobile,
-        alpha: true,
-        powerPreference: 'high-performance',
-      });
+      // Try creating renderer with different options as fallbacks
+      let rendererOptions = [
+        // First attempt: Standard options for desktop
+        {
+          canvas,
+          antialias: !isMobile,
+          alpha: true,
+          powerPreference: 'high-performance',
+        },
+        // Second attempt: Remove powerPreference (iOS compatibility)
+        {
+          canvas,
+          antialias: false,
+          alpha: true,
+        },
+        // Third attempt: Minimal options
+        {
+          canvas,
+          alpha: false,
+        }
+      ];
+
+      let lastError = null;
+      for (let i = 0; i < rendererOptions.length; i++) {
+        try {
+          mobileLog(`Attempting renderer creation with option set ${i + 1}`);
+          renderer = new THREE.WebGLRenderer(rendererOptions[i]);
+          mobileLog(`Renderer created successfully with option set ${i + 1}`);
+          break;
+        } catch (e) {
+          lastError = e;
+          mobileError(`Renderer creation attempt ${i + 1} failed`, e);
+          if (i === rendererOptions.length - 1) {
+            throw lastError;
+          }
+        }
+      }
 
       const maxPixelRatio = isMobile ? 1.5 : 2.0;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
@@ -314,7 +368,8 @@
       updateLoadingProgress('WebGL renderer created');
     } catch (error) {
       mobileError('Failed to create renderer', error);
-      showLoadingError('Failed to initialize WebGL. Your device may not support it.');
+      const errorDetails = error.message || error.toString();
+      showLoadingError(`Failed to initialize WebGL: ${errorDetails}. Try closing other tabs or restarting your browser.`);
       throw error;
     }
 
