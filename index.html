@@ -309,13 +309,8 @@
 
       updateLoadingProgress('Creating WebGL renderer...');
 
-      canvas.id = 'three-canvas';
-      canvas.style.width = '100%';
-      canvas.style.height = '100%';
-      canvas.style.display = 'block';
-      canvas.style.touchAction = 'none';
-
       // Try creating renderer with different options as fallbacks
+      // Let THREE.js handle canvas and WebGL context creation to avoid conflicts
       let rendererOptions = [
         // First attempt: Standard options for desktop
         {
@@ -323,17 +318,20 @@
           antialias: !isMobile,
           alpha: true,
           powerPreference: 'high-performance',
+          failIfMajorPerformanceCaveat: false,
         },
         // Second attempt: Remove powerPreference (iOS compatibility)
         {
           canvas,
           antialias: false,
           alpha: true,
+          failIfMajorPerformanceCaveat: false,
         },
         // Third attempt: Minimal options
         {
           canvas,
           alpha: false,
+          failIfMajorPerformanceCaveat: false,
         }
       ];
 
