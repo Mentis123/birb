@@ -300,6 +300,31 @@
       }
     }
 
+    // Some browsers return null from getShaderPrecisionFormat; provide a safe fallback
+    function patchShaderPrecisionFormat() {
+      try {
+        const glProtos = [
+          typeof WebGLRenderingContext !== 'undefined' ? WebGLRenderingContext.prototype : null,
+          typeof WebGL2RenderingContext !== 'undefined' ? WebGL2RenderingContext.prototype : null
+        ].filter(Boolean);
+
+        glProtos.forEach((proto) => {
+          if (proto.__shaderPrecisionPatched) return;
+
+          const original = proto.getShaderPrecisionFormat;
+          proto.getShaderPrecisionFormat = function (...args) {
+            const result = original ? original.apply(this, args) : null;
+            if (result) return result;
+            return { rangeMin: 127, rangeMax: 127, precision: 23 };
+          };
+
+          proto.__shaderPrecisionPatched = true;
+        });
+      } catch (e) {
+        mobileError('Shader precision patch failed', e);
+      }
+    }
+
     try {
       updateLoadingProgress('Checking WebGL support...');
 
@@ -308,6 +333,9 @@
       }
 
       updateLoadingProgress('Creating WebGL renderer...');
+
+      // Guard against null getShaderPrecisionFormat on some mobile browsers
+      patchShaderPrecisionFormat();
 
       // Try creating renderer with different options as fallbacks
       // Let THREE.js handle canvas and WebGL context creation to avoid conflicts
