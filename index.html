@@ -1,2770 +1,523 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Birb Flight Lab</title>
-    <meta
-      name="description"
-      content="Mobile-first Three.js playground for experimenting with gliding birbs."
-    />
-    <meta name="theme-color" content="#0b0d17" />
-    <style>
-      :root {
-        color-scheme: dark;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        --space-2: clamp(0.75rem, 1.5vw + 0.35rem, 1.1rem);
-        --space-3: clamp(1rem, 1.5vw + 0.6rem, 1.5rem);
-        --space-4: clamp(1.25rem, 2vw + 0.75rem, 1.9rem);
-        --max-width: min(92vw, 42rem);
-        --header-size: clamp(0.75rem, 1vw + 0.65rem, 1.1rem);
-        --status-size: clamp(0.6rem, 0.7vw + 0.55rem, 0.75rem);
-        background-color: #0a1324;
-      }
 
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-      }
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Birb Flight Lab</title>
+  <style>
+    :root {
+      --glass-surface: rgba(20, 30, 50, 0.65);
+      --glass-border: rgba(255, 255, 255, 0.12);
+      --accent-primary: #4cc9f0;
+      --text-primary: #f0f6fc;
+    }
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-        min-height: 100dvh;
-        display: flex;
-        align-items: stretch;
-        justify-content: center;
-        background: radial-gradient(circle at 30% 20%, #273d68, #0a1324 68%);
-        color: #f6f8ff;
-      }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
-      main {
-        width: 100%;
-        max-width: var(--max-width);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-3) calc(var(--space-3) + 3rem);
-      }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #0a1426;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--text-primary);
+    }
 
-      header {
-        text-align: center;
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        font-size: var(--header-size);
-        opacity: 0.75;
-      }
+    main {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
 
-      .canvas-wrapper {
-        position: relative;
-        flex: 1;
-        min-height: clamp(18rem, 62vw, 32rem);
-        border-radius: 1.5rem;
-        overflow: hidden;
-        backdrop-filter: blur(16px);
-        border: 1px solid rgba(186, 210, 255, 0.12);
-        box-shadow: 0 26px 56px rgba(6, 14, 29, 0.6);
-        padding-bottom: clamp(2.5rem, 16vw, 5.25rem);
-      }
+    header {
+      position: absolute;
+      top: 1.5rem;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+      font-weight: 300;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+      opacity: 0.8;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
 
-      canvas {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        display: block;
-        background: transparent;
-        touch-action: none;
-      }
+    .canvas-wrapper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
 
-      .control-panel {
-        position: absolute;
-        top: calc(100% + 0.85rem);
-        left: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.55rem;
-        padding: 0.75rem 0.85rem 0.95rem;
-        width: min(16rem, 70vw);
-        background: rgba(14, 23, 41, 0.88);
-        border-radius: 1rem;
-        border: 1px solid rgba(124, 170, 255, 0.22);
-        box-shadow: 0 18px 46px rgba(7, 14, 32, 0.55);
-        backdrop-filter: blur(18px);
-        z-index: 4;
-        transform-origin: top left;
-        transition: opacity 160ms ease, transform 200ms ease;
-      }
+    canvas {
+      display: block;
+      outline: none;
+    }
 
-      .control-panel.is-collapsed {
-        opacity: 0;
-        transform: translateY(-0.65rem) scale(0.96);
-        pointer-events: none;
-      }
+    /* Controls UI */
+    .canvas-actions {
+      position: absolute;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      border-radius: 1.5rem;
+      background: var(--glass-surface);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+      touch-action: none;
+      cursor: grab;
+    }
 
-      .control-panel h2 {
-        margin: 0;
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.16em;
-        opacity: 0.7;
-      }
+    .canvas-actions:active {
+      cursor: grabbing;
+    }
 
-      .control-subheading {
-        margin: 0;
-        font-size: 0.62rem;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        opacity: 0.62;
-      }
+    .canvas-actions.is-dragging {
+      opacity: 0.9;
+      transform: scale(1.02) !important;
+      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+    }
 
-      .control-section {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-      }
+    .canvas-actions__tray {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.45rem;
+    }
 
-      .control-button-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.45rem;
-      }
-
-      .control-button.is-active {
-        box-shadow: inset 0 0 0 1px rgba(132, 176, 255, 0.8), 0 10px 20px rgba(10, 18, 40, 0.55);
-        border-color: rgba(206, 230, 255, 0.78);
-        background: linear-gradient(135deg, rgba(86, 126, 204, 0.72), rgba(32, 54, 108, 0.95));
-      }
-
-      .control-button[data-action] {
-        white-space: nowrap;
-      }
-
-      .control-button {
-        appearance: none;
-        border: 1px solid rgba(176, 209, 255, 0.36);
-        border-radius: 999px;
-        padding: 0.45rem 0.95rem;
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: #f3f7ff;
-        background: linear-gradient(135deg, rgba(64, 105, 184, 0.55), rgba(26, 44, 92, 0.9));
-        box-shadow: inset 0 0 0 1px rgba(32, 62, 124, 0.45);
-        cursor: pointer;
-        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-      }
-
-      .control-button[disabled] {
-        cursor: not-allowed;
-        opacity: 0.6;
-        border-color: rgba(176, 209, 255, 0.18);
-        box-shadow: none;
-      }
-
-      .control-button:focus-visible {
-        outline: 2px solid rgba(124, 170, 255, 0.75);
-        outline-offset: 2px;
-      }
-
-      .control-button:not([disabled]):hover {
-        box-shadow: inset 0 0 0 1px rgba(108, 150, 226, 0.6), 0 8px 16px rgba(8, 17, 40, 0.45);
-        border-color: rgba(206, 230, 255, 0.72);
-        transform: translateY(-1px);
-      }
-
-      .control-button:not([disabled]):active {
-        transform: translateY(0);
-      }
-
-      .control-slider {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        align-items: center;
-        gap: 0.4rem 0.6rem;
-        font-size: 0.7rem;
-        letter-spacing: 0.06em;
-        color: rgba(225, 233, 255, 0.85);
-      }
-
-      .control-slider label {
-        text-transform: uppercase;
-      }
-
-      .control-slider input[type="range"] {
-        -webkit-appearance: none;
-        width: 100%;
-        height: 0.3rem;
-        border-radius: 999px;
-        background: rgba(34, 56, 107, 0.7);
-        outline: none;
-        position: relative;
-      }
-
-      .control-slider input[type="range"]::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 1rem;
-        height: 1rem;
-        border-radius: 50%;
-        background: radial-gradient(circle at 30% 30%, #c4dcff, #5f8dff 60%, #2d4fa0 100%);
-        border: 1px solid rgba(184, 208, 255, 0.6);
-        box-shadow: 0 4px 10px rgba(13, 24, 53, 0.5);
-        cursor: pointer;
-      }
-
-      .control-slider input[type="range"]::-moz-range-thumb {
-        width: 1rem;
-        height: 1rem;
-        border-radius: 50%;
-        background: radial-gradient(circle at 30% 30%, #c4dcff, #5f8dff 60%, #2d4fa0 100%);
-        border: 1px solid rgba(184, 208, 255, 0.6);
-        box-shadow: 0 4px 10px rgba(13, 24, 53, 0.5);
-        cursor: pointer;
-      }
-
-      .control-slider output {
-        justify-self: end;
-        font-variant-numeric: tabular-nums;
-        opacity: 0.85;
-      }
-
-      .touch-controls {
-        position: absolute;
-        inset: auto 0 var(--space-2) 0;
-        display: none;
-        justify-content: center;
-        pointer-events: none;
-        z-index: 3;
-      }
-
-      .touch-controls__actions {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.45rem;
-        pointer-events: auto;
-      }
-
-      .movement-toggle {
-        appearance: none;
-        border: 1px solid rgba(168, 204, 255, 0.32);
-        border-radius: 50%;
-        width: 2.9rem;
-        height: 2.9rem;
-        padding: 0;
-        display: grid;
-        place-items: center;
-        font-size: 1.3rem;
-        color: #f2f6ff;
-        background: linear-gradient(135deg, rgba(66, 106, 188, 0.78), rgba(32, 52, 108, 0.9));
-        box-shadow:
-          0 12px 26px rgba(8, 16, 36, 0.55),
-          inset 0 0 0 1px rgba(30, 60, 126, 0.42);
-        cursor: pointer;
-        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
-      }
-
-      .movement-toggle:active {
-        transform: scale(0.97);
-        box-shadow:
-          0 8px 18px rgba(6, 12, 28, 0.6),
-          inset 0 0 0 1px rgba(56, 92, 162, 0.55);
-      }
-
-      .movement-toggle[aria-pressed='true'] {
-        border-color: rgba(206, 230, 255, 0.64);
-        background: linear-gradient(135deg, rgba(120, 164, 238, 0.82), rgba(48, 74, 132, 0.95));
-        box-shadow:
-          0 16px 32px rgba(10, 20, 44, 0.65),
-          inset 0 0 0 1px rgba(80, 122, 204, 0.58);
-      }
-
-      .movement-toggle__icon {
-        font-size: 1.4rem;
-        line-height: 1;
-      }
-
-      .touch-controls__hint {
-        padding: 0.25rem 0.65rem;
-        border-radius: 999px;
-        background: rgba(18, 28, 52, 0.55);
-        border: 1px solid rgba(116, 156, 220, 0.3);
-        font-size: 0.58rem;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        color: rgba(216, 230, 255, 0.78);
-        box-shadow: 0 10px 22px rgba(8, 14, 28, 0.5);
-      }
-
-      .virtual-stick {
-        position: fixed;
-        width: 98px;
-        height: 98px;
-        transform: translate(-50%, -50%);
-        pointer-events: none;
-        z-index: 6;
-        display: none;
-        opacity: 0;
-        transition: opacity 160ms ease;
-      }
-
-      .virtual-stick.is-active {
-        opacity: 1;
-      }
-
-      .virtual-stick__base {
-        position: absolute;
-        inset: 0;
-        border-radius: 50%;
-        background: radial-gradient(
-          circle at 50% 50%,
-          rgba(255, 255, 255, 0.22),
-          rgba(255, 255, 255, 0.08)
-        );
-        border: 1px solid rgba(255, 255, 255, 0.35);
-        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.25) inset;
-      }
-
-      .virtual-stick__thumb {
-        position: absolute;
-        width: 50px;
-        height: 50px;
-        left: 50%;
-        top: 50%;
-        transform: translate(-50%, -50%);
-        border-radius: 50%;
-        background: radial-gradient(
-          circle at 30% 30%,
-          rgba(255, 255, 255, 0.9),
-          rgba(255, 255, 255, 0.55)
-        );
-        border: 1px solid rgba(255, 255, 255, 0.6);
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
-      }
-
-      .canvas-actions {
-        position: absolute;
-        inset: auto auto var(--space-2) var(--space-2);
-        z-index: 3;
-        padding: 0.55rem;
-        border-radius: 1.1rem;
-        background: rgba(14, 23, 41, 0.76);
-        border: 1px solid rgba(132, 174, 255, 0.3);
-        box-shadow: 0 16px 42px rgba(6, 14, 31, 0.55);
-        backdrop-filter: blur(18px);
-        touch-action: none;
-        cursor: grab;
-        transition: box-shadow 180ms ease;
-      }
-
-      .canvas-actions:is(:hover, :focus-within) {
-        box-shadow: 0 20px 46px rgba(7, 15, 34, 0.6);
-      }
-
-      .canvas-actions.is-dragging {
-        cursor: grabbing;
-      }
-
+    @media (max-width: 32rem) {
       .canvas-actions__tray {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.45rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+    }
 
-      @media (max-width: 32rem) {
-        .canvas-actions__tray {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
+    .canvas-action-button {
+      padding: 0;
+      width: 2.6rem;
+      min-width: 2.6rem;
+      min-height: 2.6rem;
+      border-radius: 0.85rem;
+      background: linear-gradient(145deg, rgba(30, 47, 84, 0.9), rgba(20, 31, 56, 0.78));
+      border: 1px solid rgba(158, 196, 255, 0.32);
+      color: #f1f5ff;
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      appearance: none;
+      -webkit-appearance: none;
+    }
 
-      .settings-popover {
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
+    .canvas-action-button:active {
+      transform: scale(0.95);
+    }
 
-      .canvas-action-button {
-        padding: 0;
-        width: 2.6rem;
-        min-width: 2.6rem;
-        min-height: 2.6rem;
-        border-radius: 0.85rem;
-        background: linear-gradient(145deg, rgba(30, 47, 84, 0.9), rgba(20, 31, 56, 0.78));
-        border: 1px solid rgba(158, 196, 255, 0.32);
-        color: #f1f5ff;
-        font-size: 0.66rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        font-weight: 600;
-        cursor: pointer;
-        box-shadow: 0 12px 28px rgba(7, 14, 30, 0.55);
-        backdrop-filter: blur(18px);
-        -webkit-touch-callout: none;
-        user-select: none;
-        -webkit-user-select: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.35rem;
-        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease,
-          background 180ms ease;
-      }
+    .control-metrics {
+      margin-top: 0.5rem;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 0.7rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      width: 100%;
+      pointer-events: none;
+    }
+  </style>
+</head>
 
-      .canvas-action-button svg {
-        width: 1.1rem;
-        height: 1.1rem;
-        display: block;
-      }
-
-      .settings-toggle__icon,
-      .environment-toggle__icon,
-      .fullscreen-toggle__icon {
-        fill: none;
-        stroke: currentColor;
-        stroke-width: 1.35;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-      }
-
-      .environment-toggle__icon path:first-of-type {
-        stroke-width: 1.25;
-      }
-
-      .view-toggle__icon {
-        fill: currentColor;
-      }
-
-      .canvas-action-button:focus-visible {
-        outline: 2px solid rgba(124, 170, 255, 0.75);
-        outline-offset: 2px;
-      }
-
-      .canvas-action-button:not([disabled]):hover {
-        box-shadow: 0 16px 34px rgba(8, 15, 33, 0.6);
-        border-color: rgba(198, 224, 255, 0.7);
-        background: linear-gradient(145deg, rgba(38, 59, 102, 0.98), rgba(24, 37, 66, 0.88));
-      }
-
-      .canvas-action-button:not([disabled]):active {
-        transform: translateY(1px);
-      }
-
-      .control-toggle,
-      .fullscreen-toggle,
-      .environment-toggle,
-      .view-toggle {
-        border-color: rgba(124, 170, 255, 0.28);
-      }
-
-      .fullscreen-toggle svg[hidden] {
-        display: none;
-      }
-
-      .visually-hidden {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-      }
-
-      .control-metrics {
-        margin-top: 0.35rem;
-        padding: 0.6rem 0.75rem;
-        border-radius: 0.8rem;
-        background: rgba(20, 30, 54, 0.72);
-        border: 1px solid rgba(174, 206, 255, 0.2);
-        display: flex;
-        flex-direction: column;
-        gap: 0.45rem;
-      }
-
-      .control-metrics__row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        font-size: 0.68rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: rgba(232, 240, 255, 0.92);
-      }
-
-      .control-metrics__value {
-        font-variant-numeric: tabular-nums;
-      }
-
-      .control-metrics__note {
-        margin: 0.1rem 0 0;
-        font-size: 0.62rem;
-        letter-spacing: 0.05em;
-        color: rgba(210, 222, 252, 0.78);
-      }
-
-
-      body.is-fullscreen-fallback {
-        align-items: stretch;
-      }
-
-      body.is-fullscreen-fallback main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        max-width: none;
-        width: 100vw;
-        padding: 0;
-      }
-
-      body.is-fullscreen-fallback header {
-        display: none;
-      }
-
-      .canvas-wrapper:fullscreen,
-      .canvas-wrapper:-webkit-full-screen,
-      .canvas-wrapper.is-fullscreen-fallback {
-        max-width: none;
-        width: 100vw;
-        height: 100vh;
-        height: 100dvh;
-        min-height: 100vh;
-        min-height: 100dvh;
-        border-radius: 0;
-        border: none;
-        box-shadow: none;
-        padding-bottom: clamp(3rem, 14vw, 4.5rem);
-      }
-
-      .canvas-wrapper:fullscreen .canvas-actions,
-      .canvas-wrapper:-webkit-full-screen .canvas-actions,
-      .canvas-wrapper.is-fullscreen-fallback .canvas-actions {
-        inset: auto auto clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem);
-      }
-
-
-      @media (pointer: coarse) {
-        .touch-controls {
-          display: flex;
-        }
-      }
-
-      noscript {
-        position: fixed;
-        inset: auto 0 0 0;
-        padding: 1rem;
-        text-align: center;
-        font-size: 0.85rem;
-        background: rgba(6, 9, 18, 0.92);
-        color: #eff2fc;
-      }
-
-      @media (min-width: 48rem) {
-        main {
-          padding-bottom: calc(var(--space-4) + 5.5rem);
-        }
-
-        .canvas-wrapper {
-          min-height: clamp(24rem, 55vh, 38rem);
-          border-radius: 2rem;
-          padding-bottom: clamp(2rem, 8vw, 3.5rem);
-        }
-
-        .control-panel {
-          width: clamp(18rem, 32vw, 20rem);
-        }
-
-        .control-panel h2 {
-          font-size: 0.75rem;
-        }
-
-        .control-slider {
-          grid-template-columns: auto minmax(9rem, 1fr) auto;
-          column-gap: 0.9rem;
-        }
-
-        .control-button {
-          font-size: 0.75rem;
-        }
-
-        .touch-controls {
-          display: none;
-        }
-
-        .canvas-actions {
-          padding: 0.65rem;
-        }
-
-        .canvas-actions__tray {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 0.55rem;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>Birb Flight Lab</header>
-      <div class="canvas-wrapper">
-        <canvas
-          id="scene"
-          role="img"
-          aria-label="Stylized blue bird gliding through a dark sky"
-        ></canvas>
-        <div class="canvas-actions" data-draggable-panel>
-          <div class="canvas-actions__tray" role="group" aria-label="Display options">
-            <div class="settings-popover">
-              <button
-                type="button"
-                class="canvas-action-button control-toggle settings-toggle"
-                data-control="panel-toggle"
-                aria-pressed="false"
-                aria-expanded="false"
-                aria-controls="flight-control-panel"
-                aria-label="Show flight controls"
-              >
-                <svg
-                  class="settings-toggle__icon"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  focusable="false"
-                >
-                  <path
-                    d="M12 8.25a3.75 3.75 0 1 0 0 7.5 3.75 3.75 0 0 0 0-7.5Zm9 3.75a1.2 1.2 0 0 0-.84-1.14l-1.74-.58a7.47 7.47 0 0 0-.68-1.66l.87-1.67a1.2 1.2 0 0 0-1.05-1.75h-1.8a7.47 7.47 0 0 0-1.31-.9l-.32-1.82A1.2 1.2 0 0 0 12 1.5c-.57 0-1.06.4-1.17.95l-.32 1.82a7.47 7.47 0 0 0-1.31.9H7.4a1.2 1.2 0 0 0-1.05 1.75l.87 1.67a7.47 7.47 0 0 0-.68 1.66l-1.74.58a1.2 1.2 0 0 0 0 2.28l1.74.58c.16.57.39 1.12.68 1.66l-.87 1.67A1.2 1.2 0 0 0 7.4 19.5h1.8c.4.35.84.66 1.31.9l.32 1.82c.11.55.6.95 1.17.95s1.06-.4 1.17-.95l.32-1.82c.47-.24.91-.55 1.31-.9h1.8c.87 0 1.45-.92 1.05-1.75l-.87-1.67c.29-.54.52-1.09.68-1.66l1.74-.58c.49-.16.84-.62.84-1.14Z"
-                  />
-                </svg>
-                <span class="visually-hidden" data-settings-label>Show Controls</span>
-              </button>
-              <div
-                id="flight-control-panel"
-                class="control-panel is-collapsed"
-                role="group"
-                aria-label="Flight controls"
-                aria-hidden="true"
-              >
-                <h2>Controls</h2>
-                <button
-                  type="button"
-                  class="control-button"
-                  data-control="toggle"
-                  aria-pressed="true"
-                >
-                  Pause Flight
-                </button>
-                <div class="control-slider">
-                  <label for="glide-speed">Throttle</label>
-                  <input
-                    id="glide-speed"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value="0.6"
-                    aria-describedby="glide-speed-display"
-                  />
-                  <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-                    60%
-                  </output>
-                </div>
-                <!-- Movement mode is now automatic: grounded or flying based on physics -->
-                <div class="control-section">
-                  <h3 class="control-subheading">Movement Actions</h3>
-                  <div class="control-button-group" role="group" aria-label="Movement actions">
-                    <button
-                      type="button"
-                      class="control-button"
-                      data-action="boost"
-                      aria-pressed="false"
-                      title="Hold to boost speed or run"
-                    >
-                      Hold Boost / Run
-                    </button>
-                    <button
-                      type="button"
-                      class="control-button"
-                      data-action="jump"
-                      title="Tap to jump while walking"
-                    >
-                      Jump
-                    </button>
-                  </div>
-                </div>
-                <button type="button" class="control-button" data-control="environment">
-                  Environment: Mountain
-                </button>
-                <button type="button" class="control-button" data-control="reset">
-                  Reset Camera
-                </button>
-                <div class="control-metrics" aria-live="polite" aria-atomic="true">
-                  <div class="control-metrics__row">
-                    <span class="control-metrics__label">Speed</span>
-                    <span class="control-metrics__value" data-metric="speed">0.00u/s</span>
-                  </div>
-                  <div class="control-metrics__row">
-                    <span class="control-metrics__label">Throttle</span>
-                    <span class="control-metrics__value" data-metric="throttle">60%</span>
-                  </div>
-                  <div class="control-metrics__row">
-                    <span class="control-metrics__label">Mode</span>
-                    <span class="control-metrics__value" data-metric="mode">Glide</span>
-                  </div>
-                  <div class="control-metrics__row">
-                    <span class="control-metrics__label">FPS</span>
-                    <span class="control-metrics__value" data-metric="fps">--</span>
-                  </div>
-                  <div class="control-metrics__row">
-                    <span class="control-metrics__label">Rings</span>
-                    <span class="control-metrics__value" data-metric="rings">0/20</span>
-                  </div>
-                  <p class="control-metrics__note" data-metric="status">
-                    Ready for free flight. Drag on the screen to steer and add a second touch to sprint.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <button
-              type="button"
-              class="canvas-action-button fullscreen-toggle"
-              data-control="fullscreen"
-              aria-pressed="false"
-              aria-label="Enter fullscreen"
-            >
-              <svg
-                class="fullscreen-toggle__icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-                data-icon="enter"
-              >
-                <path
-                  d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <svg
-                class="fullscreen-toggle__icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-                data-icon="exit"
-                hidden
-              >
-                <path
-                  d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M15 9h4M15 15h4M5 9h4M5 15h4"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-              <span class="visually-hidden" data-fullscreen-label>Enter Fullscreen</span>
-            </button>
-            <button
-              type="button"
-              class="canvas-action-button environment-toggle"
-              data-control="environment-toggle"
-              aria-label="Cycle environment"
-            >
-              <svg
-                class="environment-toggle__icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path
-                  d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z"
-                />
-                <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
-                <path
-                  d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25"
-                />
-              </svg>
-              <span class="visually-hidden" data-environment-label>Environment: Mountain</span>
-            </button>
-            <button
-              type="button"
-              class="canvas-action-button view-toggle"
-              data-control="view-toggle"
-              aria-label="Cycle camera view"
-            >
-              <svg
-                class="view-toggle__icon"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path
-                  d="M2.25 12C4.2 7.7 7.8 5 12 5s7.8 2.7 9.75 7c-1.95 4.3-5.55 7-9.75 7s-7.8-2.7-9.75-7Zm9.75 4a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-1.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5Z"
-                />
-              </svg>
-              <span class="visually-hidden" data-view-label>Follow view</span>
-            </button>
-          </div>
+<body>
+  <main>
+    <header>Birb Flight Lab</header>
+    <div class="canvas-wrapper">
+      <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
+      <div class="canvas-actions" data-draggable-panel>
+        <div class="canvas-actions__tray" role="group" aria-label="Display options">
+          <button type="button" class="canvas-action-button" data-control="camera" title="Toggle Camera (FPV)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="width:1.2rem;height:1.2rem">
+              <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+              <path
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
+            </svg>
+          </button>
+          <button type="button" class="canvas-action-button" data-control="environment" title="Cycle Environment">
+            <svg class="environment-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+              style="width:1.2rem;height:1.2rem;fill:none;stroke:currentColor;stroke-width:1.5">
+              <path d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
+              <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
+              <path
+                d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25" />
+            </svg>
+          </button>
+          <button type="button" class="canvas-action-button" data-control="reset" title="Reset Position">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="width:1.2rem;height:1.2rem">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
+          <button type="button" class="canvas-action-button" data-control="fullscreen" title="Toggle Fullscreen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="width:1.2rem;height:1.2rem">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg>
+          </button>
         </div>
-        <div class="touch-controls">
-          <div class="touch-controls__actions">
-            <button
-              type="button"
-              class="movement-toggle"
-              data-control="movement-toggle"
-              aria-pressed="false"
-              aria-label="Tap to switch movement mode"
-            >
-              <span class="movement-toggle__icon" aria-hidden="true" data-movement-toggle-icon>🪽</span>
-              <span class="visually-hidden" data-movement-toggle-label>Take Off</span>
-            </button>
-            <div class="touch-controls__hint">Second touch: Sprint</div>
-          </div>
+        <div class="control-metrics">
+          <div style="display:flex; justify-content:space-between;"><span>SPEED</span><span
+              data-metric="speed">0.0m/s</span></div>
+          <div style="display:flex; justify-content:space-between;"><span>ALTITUDE</span><span
+              data-metric="throttle">5.0m</span></div>
         </div>
       </div>
-    </main>
-    <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
+    </div>
+  </main>
 
-    <!-- Import map to resolve 'three' module specifier to CDN URL -->
-    <script type="importmap">
+  <script type="importmap">
       {
         "imports": {
           "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
           "three/": "https://cdn.jsdelivr.net/npm/three@0.161.0/"
         }
       }
-    </script>
+  </script>
 
-    <script type="module">
-      // ============================================================================
-      // MODULE IMPORTS (Using import map for 'three')
-      // ============================================================================
-      import * as THREE from "three";
-      import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-      import { FreeFlightController } from "./free-flight-controller.js";
-      import {
-        createCameraState,
-        CAMERA_MODES,
-      } from "./src/camera/camera-state.js";
-      import { createFlightControls } from "./src/controls/flight-controls.js";
-      import {
-        createWorldShell,
-        ENVIRONMENT_VARIANTS,
-        getEnvironmentDefinition,
-      } from "./src/environment/world-shell.js";
-      import { createSpeedTrail, createWingVortices } from "./src/environment/speed-trail.js";
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+    import { SimpleFlightController } from "./src/controls/simple-flight-controller.js";
+    import { createCameraState, CAMERA_MODES } from "./src/camera/camera-state.js";
+    import { createFloatingThumbstick } from "./src/controls/virtual-thumbstick.js";
+    import { createWorldShell, ENVIRONMENT_VARIANTS, getEnvironmentDefinition } from "./src/environment/world-shell.js";
+    import { createSpeedTrail, createWingVortices } from "./src/environment/speed-trail.js";
 
-      // ============================================================================
-      // MOBILE DIAGNOSTIC LOGGING
-      // ============================================================================
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const logPrefix = isMobile ? '[MOBILE]' : '[DESKTOP]';
+    // ============================================================================
+    // MOBILE DIAGNOSTIC LOGGING
+    // ============================================================================
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-      // Store errors to replay after Eruda loads
-      const errorLog = [];
+    function mobileLog(message, data) {
+      console.log(`[LOG] ${message}`, data || '');
+    }
 
-      function mobileLog(message, data) {
-        console.log(`${logPrefix} ${message}`, data || '');
-      }
+    function mobileError(message, error) {
+      console.error(`[ERROR] ${message}`, error || '');
+    }
 
-      function mobileError(message, error) {
-        const errorData = [`${logPrefix} ERROR: ${message}`];
-        console.error(errorData[0]);
+    mobileLog('Starting initialization');
 
-        if (error) {
-          const details = [
-            ['Error details:', error],
-            ['Error message:', error.message],
-            ['Error stack:', error.stack],
-            ['Error toString:', error.toString()]
-          ];
+    // ============================================================================
+    // DOM ELEMENT SETUP
+    // ============================================================================
+    const canvasWrapper = document.querySelector(".canvas-wrapper");
+    let canvas = document.querySelector("#scene");
 
-          details.forEach(detail => {
-            errorData.push(detail);
-            console.error(...detail);
-          });
+    if (!canvasWrapper || !canvas) {
+      mobileError('Critical DOM elements not found');
+      throw new Error('Canvas or wrapper not found');
+    }
 
-          try {
-            const json = ['Error JSON:', JSON.stringify(error, Object.getOwnPropertyNames(error))];
-            errorData.push(json);
-            console.error(...json);
-          } catch (e) {
-            const msg = ['Could not stringify error'];
-            errorData.push(msg);
-            console.error(...msg);
-          }
-        }
+    // ============================================================================
+    // RENDERER SETUP
+    // ============================================================================
+    let renderer;
+    try {
+      canvas.id = 'three-canvas';
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      canvas.style.display = 'block';
+      canvas.style.touchAction = 'none';
 
-        // Store for replay after Eruda loads
-        errorLog.push(...errorData);
-      }
-
-      mobileLog('Starting initialization', {
-        userAgent: navigator.userAgent,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        devicePixelRatio: window.devicePixelRatio,
-        threeRevision: THREE.REVISION
+      renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: !isMobile,
+        alpha: true,
+        powerPreference: 'high-performance',
       });
 
-      // ============================================================================
-      // DOM ELEMENT SETUP
-      // ============================================================================
-      mobileLog('Getting DOM elements...');
-      const canvasWrapper = document.querySelector(".canvas-wrapper");
-      const canvasActions = document.querySelector("[data-draggable-panel]");
-      let canvas = document.querySelector("#scene"); // Changed to 'let' so we can update reference
+      const maxPixelRatio = isMobile ? 1.5 : 2.0;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
 
-      if (!canvasWrapper || !canvas) {
-        mobileError('Critical DOM elements not found', { canvasWrapper: !!canvasWrapper, canvas: !!canvas });
-        throw new Error('Canvas or wrapper not found');
-      }
+      // Initial size
+      const rect = canvasWrapper.getBoundingClientRect();
+      renderer.setSize(rect.width, rect.height, false);
 
-      mobileLog('DOM elements found', {
-        canvas: { width: canvas.width, height: canvas.height },
-        wrapper: {
-          width: canvasWrapper.clientWidth,
-          height: canvasWrapper.clientHeight
-        }
-      });
-
-      // ============================================================================
-      // RENDERER SETUP - SIMPLIFIED VERSION
-      // ============================================================================
-      mobileLog('Creating canvas and renderer (simplified)...');
-
-      let renderer;
-
-      try {
-        // Ensure the base canvas is configured for rendering
-        canvas.id = 'three-canvas';
-        canvas.style.position = 'absolute';
-        canvas.style.top = '0';
-        canvas.style.left = '0';
-        canvas.style.width = '100%';
-        canvas.style.height = '100%';
-        canvas.style.display = 'block';
-        canvas.style.touchAction = 'none';
-
-        const wrapperRect = canvasWrapper?.getBoundingClientRect();
-        const initialWidth = Math.max(
-          1,
-          Math.floor(wrapperRect?.width || canvas.clientWidth || window.innerWidth || 1)
-        );
-        const initialHeight = Math.max(
-          1,
-          Math.floor(wrapperRect?.height || canvas.clientHeight || window.innerHeight || 1)
-        );
-
-        const contextAttributes = {
-          alpha: true,
-          antialias: false,
-          powerPreference: 'high-performance',
-          failIfMajorPerformanceCaveat: false,
-          depth: true,
-          stencil: false,
-          preserveDrawingBuffer: false,
-        };
-
-        const gl =
-          canvas.getContext('webgl', contextAttributes) ||
-          canvas.getContext('experimental-webgl', contextAttributes);
-
-        if (!gl) {
-          throw new Error('WebGL is not available on this device');
-        }
-
-        if (typeof gl.isContextLost === 'function' && gl.isContextLost()) {
-          throw new Error('WebGL context is lost on initialization');
-        }
-
-        mobileLog('WebGL context created', {
-          version: gl.getParameter(gl.VERSION),
-          vendor: gl.getParameter(gl.VENDOR),
-        });
-
-        renderer = new THREE.WebGLRenderer({
-          canvas,
-          context: gl,
-          antialias: false,
-          alpha: true,
-          powerPreference: 'high-performance',
-          failIfMajorPerformanceCaveat: false,
-        });
-
-        renderer.setSize(initialWidth, initialHeight, false);
-
-        mobileLog('Renderer created successfully!', {
-          size: { width: initialWidth, height: initialHeight },
-        });
-
-        // Load Eruda console
-        if (isMobile && typeof eruda === 'undefined') {
-          mobileLog('Loading Eruda console...');
-          const erudaScript = document.createElement('script');
-          erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda';
-          erudaScript.onload = function() {
-            eruda.init();
-            console.log('%c📱 Mobile Console Active', 'color: #00ff00; font-size: 16px; font-weight: bold');
-          };
-          document.body.appendChild(erudaScript);
-        }
-      } catch (error) {
-        // Log error details
-        errorLog.push(['=== RENDERER CREATION FAILED ===']);
-        errorLog.push(['Error:', error?.message || error]);
-        errorLog.push(['Stack:', error?.stack]);
-
-        console.error('=== RENDERER CREATION FAILED ===');
-        console.error('Error:', error);
-
-        mobileError('Failed to create renderer', error);
-
-        // Load Eruda even on error
-        if (isMobile && typeof eruda === 'undefined') {
-          const erudaScript = document.createElement('script');
-          erudaScript.src = 'https://cdn.jsdelivr.net/npm/eruda';
-          erudaScript.onload = function() {
-            eruda.init();
-            setTimeout(() => {
-              console.error('%c=== ERRORS BEFORE ERUDA ===', 'color: #ff0000; font-size: 18px; font-weight: bold; background: #fff; padding: 10px;');
-              errorLog.forEach(args => console.error(...args));
-              console.error('%c=== END ERROR LOG ===', 'color: #ff0000; font-size: 18px; font-weight: bold; background: #fff; padding: 10px;');
-            }, 200);
-          };
-          document.body.appendChild(erudaScript);
-        }
-
-        throw error; // Re-throw to prevent further execution
-      }
-
-      const DPR_CAP = 1.8;
-      const resizeState = { width: 0, height: 0 };
-      const actionPaletteState = {
-        pointerId: null,
-        offsetX: 0,
-        offsetY: 0,
-        width: 0,
-        height: 0,
-        hasCustomPosition: false,
-        relativeX: 0,
-        relativeY: 0,
-      };
-
-      function clamp(value, min, max) {
-        if (!Number.isFinite(value)) {
-          return 0;
-        }
-        return Math.min(Math.max(value, min), max);
-      }
-
-      function repositionActionPalette() {
-        if (!canvasActions || !canvasWrapper || !actionPaletteState.hasCustomPosition)
-          return;
-        const wrapperRect = canvasWrapper.getBoundingClientRect();
-        const width = canvasActions.offsetWidth;
-        const height = canvasActions.offsetHeight;
-        const maxX = Math.max(0, wrapperRect.width - width);
-        const maxY = Math.max(0, wrapperRect.height - height);
-        const left = clamp(actionPaletteState.relativeX * maxX, 0, maxX);
-        const top = clamp(actionPaletteState.relativeY * maxY, 0, maxY);
-        canvasActions.style.left = `${left}px`;
-        canvasActions.style.top = `${top}px`;
-        canvasActions.style.right = "auto";
-        canvasActions.style.bottom = "auto";
-      }
-
-      if (canvasActions && canvasWrapper) {
-        const dragListenerOptions = { passive: false };
-
-        const handlePointerDown = (event) => {
-          if (event.button !== 0 && event.pointerType !== "touch") return;
-          const target = event.target;
-          if (target && target.closest("button")) return;
-          if (target && target.closest(".control-panel")) return;
-          const actionsRect = canvasActions.getBoundingClientRect();
-          actionPaletteState.pointerId = event.pointerId;
-          actionPaletteState.offsetX = event.clientX - actionsRect.left;
-          actionPaletteState.offsetY = event.clientY - actionsRect.top;
-          actionPaletteState.width = actionsRect.width;
-          actionPaletteState.height = actionsRect.height;
-          canvasActions.classList.add("is-dragging");
-          if (typeof canvasActions.setPointerCapture === "function") {
-            try {
-              canvasActions.setPointerCapture(event.pointerId);
-            } catch (error) {
-              // Ignore pointer capture errors in unsupported browsers.
-            }
-          }
-          event.preventDefault();
-        };
-
-        const handlePointerMove = (event) => {
-          if (actionPaletteState.pointerId !== event.pointerId) return;
-          event.preventDefault();
-          const wrapperRect = canvasWrapper.getBoundingClientRect();
-          const width = canvasActions.offsetWidth;
-          const height = canvasActions.offsetHeight;
-          const maxX = Math.max(0, wrapperRect.width - width);
-          const maxY = Math.max(0, wrapperRect.height - height);
-          const rawLeft = event.clientX - actionPaletteState.offsetX - wrapperRect.left;
-          const rawTop = event.clientY - actionPaletteState.offsetY - wrapperRect.top;
-          const clampedLeft = clamp(rawLeft, 0, maxX);
-          const clampedTop = clamp(rawTop, 0, maxY);
-          canvasActions.style.left = `${clampedLeft}px`;
-          canvasActions.style.top = `${clampedTop}px`;
-          canvasActions.style.right = "auto";
-          canvasActions.style.bottom = "auto";
-          actionPaletteState.width = width;
-          actionPaletteState.height = height;
-          actionPaletteState.hasCustomPosition = true;
-          actionPaletteState.relativeX = maxX > 0 ? clampedLeft / maxX : 0;
-          actionPaletteState.relativeY = maxY > 0 ? clampedTop / maxY : 0;
-        };
-
-        const handlePointerEnd = (event) => {
-          if (actionPaletteState.pointerId !== event.pointerId) return;
-          if (
-            typeof canvasActions.hasPointerCapture === "function" &&
-            canvasActions.hasPointerCapture(event.pointerId) &&
-            typeof canvasActions.releasePointerCapture === "function"
-          ) {
-            canvasActions.releasePointerCapture(event.pointerId);
-          }
-          canvasActions.classList.remove("is-dragging");
-          actionPaletteState.pointerId = null;
-          event.preventDefault();
-        };
-
-        canvasActions.addEventListener("pointerdown", handlePointerDown, dragListenerOptions);
-        canvasActions.addEventListener("pointermove", handlePointerMove, dragListenerOptions);
-        ["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
-          canvasActions.addEventListener(eventName, handlePointerEnd, dragListenerOptions);
-        });
-
-        window.addEventListener("resize", repositionActionPalette, { passive: true });
-      }
-
-      mobileLog('Configuring renderer color space and tone mapping');
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.22;
+      renderer.toneMappingExposure = 1.2;
 
-      mobileLog('Creating scene');
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0a1426);
-      scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
-      mobileLog('Scene created', {
-        background: scene.background.getHexString(),
-        fog: scene.fog ? 'enabled' : 'disabled'
+      mobileLog('Renderer created successfully');
+    } catch (error) {
+      mobileError('Failed to create renderer', error);
+      throw error;
+    }
+
+    // ============================================================================
+    // SCENE SETUP
+    // ============================================================================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a1426);
+    scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
+
+    // Lighting
+    const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
+    scene.add(ambient);
+    const keyLight = new THREE.DirectionalLight(0xf3f0d2, 1.2);
+    keyLight.position.set(7.5, 8.2, 5.2);
+    scene.add(keyLight);
+
+    // Environment
+    let environmentShell = null;
+    let speedTrail = null;
+    let wingVortices = null;
+    let currentEnvIndex = 0;
+
+    function setEnvironment(id) {
+      if (environmentShell) environmentShell.dispose(scene, environmentShell.root);
+
+      // Clean up particles
+      if (speedTrail) { scene.remove(speedTrail.particles); speedTrail.dispose(); }
+      if (wingVortices) { scene.remove(wingVortices.particles); wingVortices.dispose(); }
+
+      const definition = getEnvironmentDefinition(id);
+      environmentShell = createWorldShell(scene, { three: THREE, variant: id });
+
+      speedTrail = createSpeedTrail(THREE, id);
+      scene.add(speedTrail.particles);
+
+      wingVortices = createWingVortices(THREE);
+      scene.add(wingVortices.particles);
+    }
+
+    setEnvironment("forest");
+
+    function cycleEnvironment() {
+      currentEnvIndex = (currentEnvIndex + 1) % ENVIRONMENT_VARIANTS.length;
+      setEnvironment(ENVIRONMENT_VARIANTS[currentEnvIndex].id);
+    }
+
+    // ============================================================================
+    // BIRB MODEL
+    // ============================================================================
+    const birbAnchor = new THREE.Group();
+    scene.add(birbAnchor);
+    const birbRig = new THREE.Group();
+    birbAnchor.add(birbRig);
+    const birbModel = new THREE.Group();
+    birbRig.add(birbModel);
+
+    const wingRefs = { left: null, right: null };
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.load('./birb.glb', (gltf) => {
+      const modelRoot = gltf.scene;
+      modelRoot.position.set(0, -0.2, 0);
+      birbModel.add(modelRoot);
+
+      modelRoot.traverse((child) => {
+        if (child.isMesh) {
+          const name = (child.name || "").toLowerCase();
+          if (name.includes("wing")) {
+            if (name.includes("left") || name.includes("l_")) wingRefs.left = child;
+            else if (name.includes("right") || name.includes("r_")) wingRefs.right = child;
+          }
+        }
       });
+    });
+    birbRig.scale.setScalar(0.5);
 
-      mobileLog('Adding lights to scene');
-      const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
-      ambient.groundColor.set(0x1a2f32);
-      scene.add(ambient);
+    // ============================================================================
+    // CONTROLS & GAME LOOP
+    // ============================================================================
+    const flightController = new SimpleFlightController();
+    const cameraState = createCameraState({ three: THREE, scene, flightController });
+    const camera = cameraState.camera;
 
-      const keyLight = new THREE.DirectionalLight(0xf3f0d2, 1.2);
-      keyLight.position.set(7.5, 8.2, 5.2);
-      scene.add(keyLight);
+    // Set FPV by default
+    let currentCameraMode = CAMERA_MODES.FPV;
+    cameraState.setMode(currentCameraMode);
 
-      const rimLight = new THREE.DirectionalLight(0x78b6ff, 0.48);
-      rimLight.position.set(-6.2, 5.1, -5.4);
-      scene.add(rimLight);
+    // Virtual Thumbstick
+    let thumbstickValue = { x: 0, y: 0 };
+    createFloatingThumbstick(document.body, {
+      onStart: () => { },
+      onEnd: () => { thumbstickValue = { x: 0, y: 0 }; },
+      onChange: (val) => { thumbstickValue = val; }
+    });
 
-      const fillLight = new THREE.DirectionalLight(0x9fc8ff, 0.38);
-      fillLight.position.set(1.2, 3.1, -6.2);
-      scene.add(fillLight);
+    // Draggable Panel Logic
+    const panel = document.querySelector('[data-draggable-panel]');
+    let isDragging = false;
+    let currentX;
+    let currentY;
+    let initialX;
+    let initialY;
+    let xOffset = 0;
+    let yOffset = 0;
 
-      const glowLight = new THREE.PointLight(0x63d0ff, 1.35, 12, 2.1);
-      glowLight.position.set(0.3, 1.6, 0.8);
-      scene.add(glowLight);
+    if (panel) {
+      panel.addEventListener('pointerdown', (e) => e.stopPropagation());
+      panel.addEventListener('pointermove', (e) => e.stopPropagation());
+      panel.addEventListener('pointerup', (e) => e.stopPropagation());
+      panel.addEventListener('touchstart', (e) => e.stopPropagation());
+      panel.addEventListener('touchmove', (e) => e.stopPropagation());
+      panel.addEventListener('touchend', (e) => e.stopPropagation());
 
-      const lightingRig = { ambient, keyLight, rimLight, fillLight, glowLight };
-      mobileLog('Lights added to scene', { lightCount: 5 });
+      panel.addEventListener("pointerdown", dragStart);
+      window.addEventListener("pointerup", dragEnd);
+      window.addEventListener("pointermove", drag);
+    }
 
-      const environmentButton = document.querySelector('[data-control="environment"]');
-      const environmentToggleButton = document.querySelector(
-        '[data-control="environment-toggle"]'
-      );
-      const environmentOrder = ENVIRONMENT_VARIANTS.map((variant) => variant.id);
-      const defaultEnvironmentId = environmentOrder[0] ?? "forest";
-      const defaultEnvironment =
-        getEnvironmentDefinition(defaultEnvironmentId) ?? {
-          id: defaultEnvironmentId,
-          label: defaultEnvironmentId,
-        };
-      const environmentState = {
-        order: environmentOrder,
-        index: Math.max(0, environmentOrder.indexOf(defaultEnvironmentId)),
-        id: defaultEnvironment.id,
-        label: defaultEnvironment.label,
-      };
-      let environmentShell = null;
-      let glideTrail = null;
-      let speedTrail = null;
-      let wingVortices = null;
-      let flightControllerInitialized = false;
+    function dragStart(e) {
+      if (e.target.closest('button')) return;
 
-      // Score tracking
-      const scoreState = {
-        ringsCollected: 0,
-        totalRings: 0,
-        distanceTraveled: 0,
-      };
+      initialX = e.clientX - xOffset;
+      initialY = e.clientY - yOffset;
 
-      function updateEnvironmentControls(config) {
-        if (!config) return;
-        const label = config.label ?? config.id;
-        if (environmentButton) {
-          environmentButton.textContent = `Environment: ${label}`;
-          environmentButton.setAttribute(
-            "aria-label",
-            `Cycle environment (current: ${label})`
-          );
-          environmentButton.setAttribute("title", `Cycle environment • ${label}`);
-        }
-        if (environmentToggleButton) {
-          const toggleLabel = environmentToggleButton.querySelector(
-            '[data-environment-label]'
-          );
-          if (toggleLabel) {
-            toggleLabel.textContent = `Environment: ${label}`;
-          }
-          environmentToggleButton.setAttribute(
-            "aria-label",
-            `Cycle environment (current: ${label})`
-          );
-          environmentToggleButton.setAttribute(
-            "title",
-            `Cycle environment • ${label}`
-          );
-        }
+      if (e.target === panel || panel.contains(e.target)) {
+        isDragging = true;
+        panel.classList.add('is-dragging');
       }
+    }
 
-      function applyLightingPreset(config) {
-        if (!config || !config.lighting) return;
-        const { ambient, key, rim, fill, glow } = config.lighting;
-        if (ambient && lightingRig.ambient) {
-          if (ambient.sky !== undefined) {
-            lightingRig.ambient.color.setHex(ambient.sky);
-          }
-          if (ambient.ground !== undefined) {
-            lightingRig.ambient.groundColor.setHex(ambient.ground);
-          }
-          if (ambient.intensity !== undefined) {
-            lightingRig.ambient.intensity = ambient.intensity;
-          }
-        }
-        if (key && lightingRig.keyLight) {
-          if (key.color !== undefined) {
-            lightingRig.keyLight.color.setHex(key.color);
-          }
-          if (key.intensity !== undefined) {
-            lightingRig.keyLight.intensity = key.intensity;
-          }
-          if (Array.isArray(key.position)) {
-            lightingRig.keyLight.position.set(...key.position);
-          }
-        }
-        if (rim && lightingRig.rimLight) {
-          if (rim.color !== undefined) {
-            lightingRig.rimLight.color.setHex(rim.color);
-          }
-          if (rim.intensity !== undefined) {
-            lightingRig.rimLight.intensity = rim.intensity;
-          }
-          if (Array.isArray(rim.position)) {
-            lightingRig.rimLight.position.set(...rim.position);
-          }
-        }
-        if (fill && lightingRig.fillLight) {
-          if (fill.color !== undefined) {
-            lightingRig.fillLight.color.setHex(fill.color);
-          }
-          if (fill.intensity !== undefined) {
-            lightingRig.fillLight.intensity = fill.intensity;
-          }
-          if (Array.isArray(fill.position)) {
-            lightingRig.fillLight.position.set(...fill.position);
-          }
-        }
-        if (glow && lightingRig.glowLight) {
-          if (glow.color !== undefined) {
-            lightingRig.glowLight.color.setHex(glow.color);
-          }
-          if (glow.intensity !== undefined) {
-            lightingRig.glowLight.intensity = glow.intensity;
-          }
-          if (glow.distance !== undefined) {
-            lightingRig.glowLight.distance = glow.distance;
-          }
-          if (glow.decay !== undefined) {
-            lightingRig.glowLight.decay = glow.decay;
-          }
-          if (Array.isArray(glow.position)) {
-            lightingRig.glowLight.position.set(...glow.position);
-          }
-        }
+    function dragEnd(e) {
+      initialX = currentX;
+      initialY = currentY;
+      isDragging = false;
+      if (panel) panel.classList.remove('is-dragging');
+    }
+
+    function drag(e) {
+      if (isDragging && panel) {
+        e.preventDefault();
+        currentX = e.clientX - initialX;
+        currentY = e.clientY - initialY;
+
+        xOffset = currentX;
+        yOffset = currentY;
+
+        setTranslate(currentX, currentY, panel);
       }
-
-      function setEnvironment(variantId) {
-        const definition = getEnvironmentDefinition(variantId);
-        if (!definition) return;
-
-        if (environmentShell) {
-          environmentShell.dispose();
-        }
-
-        // Clean up old speed trail
-        if (speedTrail) {
-          scene.remove(speedTrail.particles);
-          speedTrail.dispose();
-        }
-        if (wingVortices) {
-          scene.remove(wingVortices.particles);
-          wingVortices.dispose();
-        }
-
-        environmentShell = createWorldShell(scene, {
-          three: THREE,
-          variant: definition.id,
-        });
-        glideTrail = environmentShell.glideTrail;
-
-        // Create speed trail for this environment
-        speedTrail = createSpeedTrail(THREE, definition.id);
-        scene.add(speedTrail.particles);
-
-        // Create wing vortices
-        wingVortices = createWingVortices(THREE);
-        scene.add(wingVortices.particles);
-
-        environmentState.id = definition.id;
-        environmentState.label = definition.label;
-        const resolvedIndex = environmentState.order.indexOf(definition.id);
-        environmentState.index = resolvedIndex >= 0 ? resolvedIndex : 0;
-        updateEnvironmentControls(definition);
-        applyLightingPreset(definition);
-
-        // Reset score
-        if (environmentShell.collectibles) {
-          const stats = environmentShell.collectibles.getStats();
-          scoreState.totalRings = stats.total;
-          scoreState.ringsCollected = 0;
-        }
-
-        if (flightControllerInitialized) {
-          updateControlMetrics();
-        }
-      }
-
-      function cycleEnvironment(step = 1) {
-        const { order } = environmentState;
-        if (!order || order.length === 0) {
-          return;
-        }
-
-        const total = order.length;
-        const nextIndex = (environmentState.index + step + total) % total;
-        const nextId = order[nextIndex];
-        setEnvironment(nextId);
-      }
-
-      mobileLog('Setting initial environment', { id: defaultEnvironment.id, label: defaultEnvironment.label });
-      setEnvironment(defaultEnvironment.id);
-      mobileLog('Initial environment set');
-
-      if (environmentButton) {
-        environmentButton.addEventListener("click", () => {
-          cycleEnvironment(1);
-        });
-      }
-
-      if (environmentToggleButton) {
-        environmentToggleButton.addEventListener("click", () => {
-          cycleEnvironment(1);
-        });
-      }
-
-      const birbAnchor = new THREE.Group();
-      scene.add(birbAnchor);
-
-      const birbRig = new THREE.Group();
-      birbAnchor.add(birbRig);
-
-      const birbModel = new THREE.Group();
-      birbRig.add(birbModel);
-
-      // Align the sculpted bird (modeled along the +X axis) with the
-      // controller's forward vector (-Z) so the beak points in the direction of
-      // travel.
-      const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, 0, 0)
-      );
-
-      // Wing references for tilt animation
-      const wingRefs = {
-        left: null,
-        right: null,
-      };
-
-      const gltfLoader = new GLTFLoader();
-      const birbModelUrl = new URL("./birb.glb", import.meta.url).href;
-      const birbCenter = new THREE.Vector3();
-      const birbVertex = new THREE.Vector3();
-      const birbBounds = new THREE.Box3();
-
-      function recenterBirbModel() {
-        birbModel.position.set(0, 0, 0);
-        birbModel.updateMatrixWorld(true);
-
-        birbCenter.set(0, 0, 0);
-        let vertexCount = 0;
-
-        birbModel.traverse((child) => {
-          if (!child.isMesh) {
-            return;
-          }
-          const positionAttribute = child.geometry?.attributes?.position;
-          if (!positionAttribute) {
-            return;
-          }
-          for (let index = 0; index < positionAttribute.count; index += 1) {
-            birbVertex.fromBufferAttribute(positionAttribute, index);
-            child.localToWorld(birbVertex);
-            birbCenter.add(birbVertex);
-          }
-          vertexCount += positionAttribute.count;
-        });
-
-        if (vertexCount > 0) {
-          birbCenter.multiplyScalar(1 / vertexCount);
-          birbModel.worldToLocal(birbCenter);
-        } else {
-          birbBounds.setFromObject(birbModel).getCenter(birbCenter);
-        }
-
-        // Re-center the bird so yaw/roll rotations pivot around its body.
-        birbModel.position.sub(birbCenter);
-      }
-
-      function loadBirbModel() {
-        mobileLog('Starting birb model load', { url: birbModelUrl });
-        gltfLoader.load(
-          birbModelUrl,
-          (gltf) => {
-            mobileLog('Birb model loaded successfully', {
-              scenes: gltf.scenes?.length || 0,
-              hasScene: !!gltf.scene
-            });
-
-            const modelRoot = gltf.scene ?? gltf.scenes?.[0];
-            if (!modelRoot) {
-              mobileError("Birb model did not contain a usable scene");
-              return;
-            }
-
-            birbModel.clear();
-            modelRoot.position.set(0, 0, 0);
-            modelRoot.rotation.set(0, 0, 0);
-            modelRoot.scale.setScalar(1);
-            birbModel.add(modelRoot);
-
-            let meshCount = 0;
-            modelRoot.traverse((child) => {
-              if (child.isMesh) {
-                meshCount++;
-                child.castShadow = false;
-                child.receiveShadow = false;
-
-                // Store wing references for tilt animation
-                const name = (child.name || "").toLowerCase();
-                if (name.includes("wing")) {
-                  if (name.includes("left") || name.includes("l_")) {
-                    wingRefs.left = child;
-                  } else if (name.includes("right") || name.includes("r_")) {
-                    wingRefs.right = child;
-                  }
-                }
-              }
-            });
-
-            mobileLog('Birb model processed', {
-              meshCount,
-              hasLeftWing: !!wingRefs.left,
-              hasRightWing: !!wingRefs.right
-            });
-
-            recenterBirbModel();
-            mobileLog('Birb model centered and ready');
-          },
-          (progress) => {
-            if (isMobile && progress.total) {
-              const percent = Math.round((progress.loaded / progress.total) * 100);
-              mobileLog(`Birb model loading: ${percent}%`, {
-                loaded: progress.loaded,
-                total: progress.total
-              });
-            }
-          },
-          (error) => {
-            mobileError("Failed to load birb model", error);
-          }
-        );
-      }
-
-      mobileLog('Creating birb anchor and rig');
-      loadBirbModel();
-
-      birbRig.scale.setScalar(0.52);
-
-      const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const motionState = {
-        animate: !motionQuery.matches,
-        elapsed: 0,
-      };
-
-      const fpsState = {
-        lastSampleTime: null,
-        frames: 0,
-        value: 0,
-      };
-
-      let previousTime = null;
-      let latestPose = null;
-
-      const toggleButton = document.querySelector('[data-control="toggle"]');
-      const resetButton = document.querySelector('[data-control="reset"]');
-      const controlPanel = document.querySelector("#flight-control-panel");
-      const panelToggleButton = document.querySelector('[data-control="panel-toggle"]');
-      const fullscreenToggleButton = document.querySelector('[data-control="fullscreen"]');
-      const viewToggleButton = document.querySelector('[data-control="view-toggle"]');
-      const viewToggleLabel = viewToggleButton
-        ? viewToggleButton.querySelector('[data-view-label]')
-        : null;
-      const glideSpeedInput = document.querySelector("#glide-speed");
-      const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
-      const speedMetric = document.querySelector('[data-metric="speed"]');
-      const throttleMetric = document.querySelector('[data-metric="throttle"]');
-      const fpsMetric = document.querySelector('[data-metric="fps"]');
-      const statusMetric = document.querySelector('[data-metric="status"]');
-      const modeMetric = document.querySelector('[data-metric="mode"]');
-      const ringsMetric = document.querySelector('[data-metric="rings"]');
-      const movementModeButtons = Array.from(document.querySelectorAll('[data-movement-mode]'));
-      const boostButton = document.querySelector('[data-action="boost"]');
-      const jumpButton = document.querySelector('[data-action="jump"]');
-      const liftButtonElements = Array.from(document.querySelectorAll('[data-lift-button]'));
-      const movementToggleButton = document.querySelector('[data-control="movement-toggle"]');
-      const movementToggleIcon = movementToggleButton
-        ? movementToggleButton.querySelector('[data-movement-toggle-icon]')
-        : null;
-      const movementToggleLabel = movementToggleButton
-        ? movementToggleButton.querySelector('[data-movement-toggle-label]')
-        : null;
-      const panelToggleLabel = panelToggleButton
-        ? panelToggleButton.querySelector('[data-settings-label]')
-        : null;
-      const fullscreenToggleLabel = fullscreenToggleButton
-        ? fullscreenToggleButton.querySelector('[data-fullscreen-label]')
-        : null;
-      const fullscreenEnterIcon = fullscreenToggleButton
-        ? fullscreenToggleButton.querySelector('[data-icon="enter"]')
-        : null;
-      const fullscreenExitIcon = fullscreenToggleButton
-        ? fullscreenToggleButton.querySelector('[data-icon="exit"]')
-        : null;
-
-      const fallbackThrottleInput = clampThrottle(
-        Number.parseFloat(glideSpeedInput?.value ?? ""),
-      );
-
-      const throttleState = { userOverride: false };
-      const movementState = {
-        mode: "grounded",
-        boostActive: false,
-        actionMessage: null,
-        actionMessageUntil: 0,
-      };
-
-      const MOVEMENT_MODE_PRESETS = {
-        grounded: { label: "Grounded", throttle: 0.45 },
-        flying: { label: "Flying" },
-      };
-
-      const controlState = {
-        manuallyPaused: false,
-        systemPaused: motionQuery.matches,
-      };
-
-      const fullscreenState = {
-        fallbackActive: false,
-      };
-
-      function updateFpsReadout(time) {
-        if (!fpsMetric) return;
-
-        if (fpsState.lastSampleTime === null) {
-          fpsState.lastSampleTime = time;
-          fpsState.frames = 0;
-          return;
-        }
-
-        fpsState.frames += 1;
-        const elapsed = time - fpsState.lastSampleTime;
-        if (elapsed < 250) {
-          return;
-        }
-
-        const fps = (fpsState.frames / elapsed) * 1000;
-        fpsState.value = fps;
-        fpsState.frames = 0;
-        fpsState.lastSampleTime = time;
-        const formatted = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
-        fpsMetric.textContent = formatted;
-      }
-
-      function getCameraModeLabel(mode) {
-        switch (mode) {
-          case CAMERA_MODES.SEQUENCE:
-            return "Sequence view";
-          case CAMERA_MODES.FPV:
-            return "FPV view";
-          case CAMERA_MODES.FIXED:
-            return "Fixed view";
-          case CAMERA_MODES.FOLLOW:
-          default:
-            return "Follow view";
-        }
-      }
-
-      function getMovementModeLabel(mode) {
-        return MOVEMENT_MODE_PRESETS[mode]?.label ?? mode;
-      }
-
-      function updateViewToggleUi(mode = cameraState?.getMode?.()) {
-        if (!viewToggleButton) return;
-        const modeLabel = getCameraModeLabel(mode);
-        if (viewToggleLabel) {
-          viewToggleLabel.textContent = modeLabel;
-        }
-        viewToggleButton.setAttribute(
-          "aria-label",
-          `Cycle camera view (current: ${modeLabel})`
-        );
-        viewToggleButton.setAttribute("title", `Cycle camera view • ${modeLabel}`);
-      }
-
-      function updateControlMetrics({ speed, pose } = {}) {
-        const controller = flightController ?? null;
-        const resolvedSpeed = Number.isFinite(speed)
-          ? speed
-          : typeof controller?.getSpeed === "function"
-            ? controller.getSpeed()
-            : Number.isFinite(controller?.speed)
-              ? controller.speed
-              : 0;
-        const effectiveThrottle = typeof controller?.getEffectiveThrottle === "function"
-          ? controller.getEffectiveThrottle()
-          : controller?.input?.throttle ?? 0;
-        const throttlePercent = Math.round(clampThrottle(effectiveThrottle) * 100);
-        if (speedMetric) {
-          speedMetric.textContent = `${resolvedSpeed.toFixed(2)}u/s`;
-        }
-        if (throttleMetric) {
-          throttleMetric.textContent = `${throttlePercent}%`;
-        }
-        if (modeMetric) {
-          modeMetric.textContent = getMovementModeLabel(movementState.mode);
-        }
-        if (ringsMetric) {
-          ringsMetric.textContent = `${scoreState.ringsCollected}/${scoreState.totalRings}`;
-        }
-        if (statusMetric) {
-          const resolvedPose = pose ?? latestPose ?? null;
-          const altitudeValue = Number.isFinite(resolvedPose?.position?.y)
-            ? resolvedPose.position.y
-            : Number.isFinite(controller?.position?.y)
-              ? controller.position.y
-              : null;
-          const altitudeLine = Number.isFinite(altitudeValue)
-            ? `Altitude ${altitudeValue.toFixed(1)}u`
-            : null;
-          const withAltitude = (text) => (altitudeLine ? `${text} · ${altitudeLine}` : text);
-          const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-          const hasActionMessage =
-            typeof movementState.actionMessage === "string" && now < movementState.actionMessageUntil;
-          if (!hasActionMessage && movementState.actionMessage) {
-            movementState.actionMessage = null;
-          }
-
-          if (hasActionMessage) {
-            statusMetric.textContent = movementState.actionMessage;
-            return;
-          }
-
-          if (controlState.systemPaused) {
-            statusMetric.textContent = withAltitude("Motion paused via system preference");
-            return;
-          }
-
-          if (!motionState.animate) {
-            statusMetric.textContent = withAltitude("Flight paused");
-            return;
-          }
-
-          const isHovering = Boolean(controller?.input?.hover);
-          const isDiving = Boolean(controller?.input?.dive);
-
-          if (movementState.mode === "grounded") {
-            let groundedMessage = "Airborne — steer to glide back down.";
-            if (controller?.isSprinting) {
-              groundedMessage = "Running boost engaged";
-            } else if (typeof controller?.isGrounded === "function" && controller.isGrounded()) {
-              groundedMessage = "On foot — tap Take Off to fly, Jump to hop, Boost to run.";
-            }
-            statusMetric.textContent = withAltitude(groundedMessage);
-            return;
-          }
-
-          if (isHovering) {
-            const hoverLine = altitudeLine ?? "Altitude steady";
-            statusMetric.textContent =
-              `Hovering silently — ${hoverLine}. Ease the throttle forward to start drifting.`;
-            return;
-          }
-
-          if (isDiving) {
-            const diveLine = altitudeLine ?? "watch the altitude";
-            statusMetric.textContent =
-              `Diving for speed — ${diveLine}. Ease off Boost to level out.`;
-            return;
-          }
-
-          if (controller?.isSprinting) {
-            statusMetric.textContent = withAltitude("Speed boost engaged");
-            return;
-          }
-
-          if (resolvedSpeed < 0.25) {
-            statusMetric.textContent = withAltitude("Gliding gently. Drag forward to build speed.");
-            return;
-          }
-
-          const mode = cameraState?.getMode?.();
-          const modeLabel = getCameraModeLabel(mode);
-          const instruction = viewToggleButton
-            ? "tap the eye icon or press V"
-            : "press V to change";
-          const environmentMessage = environmentState.label
-            ? `the ${environmentState.label} environment`
-            : "this environment";
-          const movementLabel = getMovementModeLabel(movementState.mode);
-          const explorationMessage =
-            `Exploring ${environmentMessage}. (${modeLabel} — ${instruction} · ${movementLabel})`;
-          statusMetric.textContent = withAltitude(explorationMessage);
-        }
-      }
-
-      function updateToggleButton() {
-        if (controlState.systemPaused) {
-          toggleButton.disabled = true;
-          toggleButton.setAttribute("aria-pressed", "false");
-          toggleButton.textContent = "Motion Disabled";
-        } else {
-          toggleButton.disabled = false;
-          toggleButton.textContent = motionState.animate ? "Pause Flight" : "Resume Flight";
-          toggleButton.setAttribute("aria-pressed", motionState.animate ? "true" : "false");
-        }
-      }
-
-      function refreshAnimationState() {
-        motionState.animate = !(controlState.manuallyPaused || controlState.systemPaused);
-        if (!motionState.animate) {
-          previousTime = null;
-        }
-        updateToggleButton();
-        updateControlMetrics();
-      }
-
-      function updatePanelToggle() {
-        if (!panelToggleButton || !controlPanel) return;
-        const isCollapsed = controlPanel.classList.contains("is-collapsed");
-        if (panelToggleLabel) {
-          panelToggleLabel.textContent = isCollapsed ? "Show Controls" : "Hide Controls";
-        }
-        panelToggleButton.setAttribute("aria-pressed", isCollapsed ? "false" : "true");
-        panelToggleButton.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
-        panelToggleButton.setAttribute(
-          "aria-label",
-          isCollapsed ? "Show flight controls" : "Hide flight controls"
-        );
-        controlPanel.setAttribute("aria-hidden", isCollapsed ? "true" : "false");
-      }
-
-      function setControlPanelCollapsed(collapsed) {
-        if (!controlPanel) return;
-        controlPanel.classList.toggle("is-collapsed", Boolean(collapsed));
-        updatePanelToggle();
-      }
-
-      function toggleControlPanel() {
-        if (!controlPanel) return;
-        const shouldCollapse = !controlPanel.classList.contains("is-collapsed");
-        setControlPanelCollapsed(shouldCollapse);
-      }
-
-      if (panelToggleButton) {
-        panelToggleButton.addEventListener("click", () => {
-          toggleControlPanel();
-        });
-      }
-
-      updatePanelToggle();
-
-      function getFullscreenElement() {
-        return (
-          document.fullscreenElement ||
-          document.webkitFullscreenElement ||
-          document.mozFullScreenElement ||
-          document.msFullscreenElement ||
-          null
-        );
-      }
-
-      function callFullscreenMethod(target, methodNames) {
-        if (!target) return null;
-        for (const methodName of methodNames) {
-          const method = target[methodName];
-          if (typeof method === "function") {
-            return method.call(target);
-          }
-        }
-        return null;
-      }
-
-      function ensurePromise(result) {
-        if (result && typeof result.then === "function") {
-          return result;
-        }
-        return Promise.resolve();
-      }
-
-      function requestFullscreen(element) {
-        const targets = [element, document.documentElement, document.body].filter(Boolean);
-        let lastError = null;
-
-        const attemptAtIndex = (index = 0) => {
-          if (index >= targets.length) {
-            return Promise.reject(lastError ?? new Error("Fullscreen not supported"));
-          }
-
-          const target = targets[index];
-          const result = callFullscreenMethod(target, [
-            "requestFullscreen",
-            "webkitRequestFullscreen",
-            "mozRequestFullScreen",
-            "msRequestFullscreen",
-          ]);
-
-          if (result === null) {
-            return attemptAtIndex(index + 1);
-          }
-
-          return ensurePromise(result)
-            .then(() => target)
-            .catch((error) => {
-              lastError = error;
-              return attemptAtIndex(index + 1);
-            });
-        };
-
-        return attemptAtIndex();
-      }
-
-      function exitFullscreen() {
-        const result = callFullscreenMethod(document, [
-          "exitFullscreen",
-          "webkitExitFullscreen",
-          "mozCancelFullScreen",
-          "msExitFullscreen",
-        ]);
-
-        if (!result) {
-          return Promise.resolve();
-        }
-
-        return ensurePromise(result);
-      }
-
-      function isFullscreenActive() {
-        if (fullscreenState.fallbackActive) {
-          return true;
-        }
-        const fullscreenElement = getFullscreenElement();
-        if (!fullscreenElement) {
-          return false;
-        }
-        return (
-          fullscreenElement === canvasWrapper ||
-          fullscreenElement === document.documentElement ||
-          fullscreenElement === document.body
-        );
-      }
-
-      function syncFullscreenUi() {
-        if (!fullscreenToggleButton) return;
-        const fullscreenElement = getFullscreenElement();
-        const isDocumentFullscreen =
-          fullscreenElement === document.documentElement || fullscreenElement === document.body;
-        const isFallbackFullscreen = fullscreenState.fallbackActive && !fullscreenElement;
-        const isFullscreen =
-          fullscreenElement === canvasWrapper || isDocumentFullscreen || isFallbackFullscreen;
-        const labelText = isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen";
-        fullscreenToggleButton.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
-        fullscreenToggleButton.setAttribute("aria-label", labelText);
-        if (fullscreenToggleLabel) {
-          fullscreenToggleLabel.textContent = labelText;
-        }
-        if (fullscreenEnterIcon && fullscreenExitIcon) {
-          fullscreenEnterIcon.toggleAttribute("hidden", isFullscreen);
-          fullscreenExitIcon.toggleAttribute("hidden", !isFullscreen);
-        }
-        if (canvasWrapper) {
-          const shouldApplyFallback = isDocumentFullscreen || isFallbackFullscreen;
-          canvasWrapper.classList.toggle("is-fullscreen-fallback", shouldApplyFallback);
-        }
-        if (document.body) {
-          const shouldApplyFallback = isDocumentFullscreen || isFallbackFullscreen;
-          document.body.classList.toggle("is-fullscreen-fallback", shouldApplyFallback);
-        }
-      }
-
-      function enterFullscreenFallback() {
-        if (fullscreenState.fallbackActive) return;
-        fullscreenState.fallbackActive = true;
-        syncFullscreenUi();
-      }
-
-      function exitFullscreenFallback() {
-        if (!fullscreenState.fallbackActive) {
-          syncFullscreenUi();
-          return;
-        }
-        fullscreenState.fallbackActive = false;
-        syncFullscreenUi();
-      }
-
-      function toggleFullscreen() {
-        if (!canvasWrapper) return;
-
-        if (isFullscreenActive()) {
-          const exitResult = exitFullscreen();
-          if (exitResult && typeof exitResult.then === "function") {
-            exitResult
-              .catch(() => {})
-              .finally(() => {
-                exitFullscreenFallback();
-              });
-          } else {
-            exitFullscreenFallback();
-          }
-          return;
-        }
-
-        requestFullscreen(canvasWrapper)
-          .then(() => {
-            fullscreenState.fallbackActive = false;
-            syncFullscreenUi();
-          })
-          .catch(() => {
-            enterFullscreenFallback();
+    }
+
+    function setTranslate(xPos, yPos, el) {
+      el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
+    }
+
+    // UI Events
+    const cameraBtn = document.querySelector('[data-control="camera"]');
+    if (cameraBtn) {
+      cameraBtn.addEventListener('click', () => {
+        // Toggle between FPV and FOLLOW
+        currentCameraMode = currentCameraMode === CAMERA_MODES.FPV ? CAMERA_MODES.FOLLOW : CAMERA_MODES.FPV;
+        cameraState.setMode(currentCameraMode);
+        cameraBtn.title = `Toggle Camera (${currentCameraMode})`;
+        mobileLog(`Camera mode changed to: ${currentCameraMode}`);
+      });
+    }
+
+    const envBtn = document.querySelector('[data-control="environment"]');
+    if (envBtn) envBtn.addEventListener('click', cycleEnvironment);
+
+    const resetBtn = document.querySelector('[data-control="reset"]');
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+      flightController.position.set(0, 5, 0);
+      flightController.velocity.set(0, 0, 0);
+      flightController.quaternion.identity();
+      cameraState.reset();
+    });
+
+    const fullscreenBtn = document.querySelector('[data-control="fullscreen"]');
+    if (fullscreenBtn) {
+      fullscreenBtn.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(err => {
+            console.log(`Error attempting to enable fullscreen: ${err.message}`);
           });
-      }
-
-      const fullscreenChangeEvents = [
-        "fullscreenchange",
-        "webkitfullscreenchange",
-        "mozfullscreenchange",
-        "MSFullscreenChange",
-      ];
-      fullscreenChangeEvents.forEach((eventName) => {
-        document.addEventListener(eventName, () => {
-          fullscreenState.fallbackActive = false;
-          syncFullscreenUi();
-        });
-      });
-
-      const fullscreenErrorEvents = [
-        "fullscreenerror",
-        "webkitfullscreenerror",
-        "mozfullscreenerror",
-        "MSFullscreenError",
-      ];
-      fullscreenErrorEvents.forEach((eventName) => {
-        document.addEventListener(eventName, () => {
-          if (!isFullscreenActive()) {
-            enterFullscreenFallback();
-          }
-        });
-      });
-
-      if (fullscreenToggleButton) {
-        fullscreenToggleButton.addEventListener("click", () => {
-          toggleFullscreen();
-        });
-      }
-
-      syncFullscreenUi();
-
-      function clampThrottle(value, fallback = 0.6) {
-        if (!Number.isFinite(value)) {
-          return fallback;
-        }
-        return Math.min(Math.max(value, 0), 1);
-      }
-
-      function updateGlideSpeedDisplay(value) {
-        if (!glideSpeedDisplay) return;
-        const throttlePercent = Math.round(value * 100);
-        glideSpeedDisplay.textContent = `${throttlePercent}%`;
-      }
-
-      const handleMotionPreferenceChange = (event) => {
-        controlState.systemPaused = event.matches;
-        refreshAnimationState();
-      };
-
-      if (typeof motionQuery.addEventListener === "function") {
-        motionQuery.addEventListener("change", handleMotionPreferenceChange);
-      } else if (typeof motionQuery.addListener === "function") {
-        // Legacy Safari (iOS 13/14) only exposes addListener/removeListener.
-        motionQuery.addListener(handleMotionPreferenceChange);
-      }
-
-      let cameraState = null;
-      const CAMERA_MODE_SEQUENCE = [
-        CAMERA_MODES.FOLLOW,
-        CAMERA_MODES.FPV,
-        CAMERA_MODES.SEQUENCE,
-        CAMERA_MODES.FIXED,
-      ];
-      let cameraModeIndex = 0;
-
-      function getDisplayDimensions() {
-        let width = 0;
-        let height = 0;
-
-        // For mobile, always use wrapper dimensions
-        if (isMobile && canvasWrapper) {
-          const wrapperRect = canvasWrapper.getBoundingClientRect();
-          width = wrapperRect.width;
-          height = wrapperRect.height;
-          mobileLog('Using wrapper dimensions on mobile', { width, height });
-        }
-
-        // Try canvas bounding rect if not mobile or no wrapper
-        if (!width || !height) {
-          const canvasRect = canvas.getBoundingClientRect();
-          width = canvasRect.width;
-          height = canvasRect.height;
-        }
-
-        // Fallback to wrapper if canvas hasn't been sized yet
-        if ((!width || !height) && canvasWrapper) {
-          const wrapperRect = canvasWrapper.getBoundingClientRect();
-          if (!width) width = wrapperRect.width;
-          if (!height) height = wrapperRect.height;
-        }
-
-        // Fallback to client dimensions
-        if (!width) width = canvas.clientWidth;
-        if (!height) height = canvas.clientHeight;
-
-        // Last resort: use window dimensions (important for mobile on initial load)
-        if (!width || !height) {
-          width = width || window.innerWidth || 1;
-          height = height || window.innerHeight || 1;
-        }
-
-        const dimensions = {
-          width: Math.max(1, Math.floor(width)),
-          height: Math.max(1, Math.floor(height)),
-        };
-
-        if (isMobile) {
-          mobileLog('Final dimensions', dimensions);
-        }
-
-        return dimensions;
-      }
-
-      function updateRendererSize(force = false) {
-        const { width: clientWidth, height: clientHeight } = getDisplayDimensions();
-
-        if (!clientWidth || !clientHeight) {
-          mobileLog('Cannot update renderer size - invalid dimensions', { clientWidth, clientHeight });
-          return;
-        }
-
-        const nextWidth = Math.floor(clientWidth);
-        const nextHeight = Math.floor(clientHeight);
-
-        if (!force && resizeState.width === nextWidth && resizeState.height === nextHeight) {
-          return;
-        }
-
-        mobileLog('Updating renderer size', {
-          from: { width: resizeState.width, height: resizeState.height },
-          to: { width: nextWidth, height: nextHeight },
-          force
-        });
-
-        resizeState.width = nextWidth;
-        resizeState.height = nextHeight;
-
-        // Use lower pixel ratio on mobile for better performance
-        const pixelRatio = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : DPR_CAP);
-        renderer.setPixelRatio(pixelRatio);
-        renderer.setSize(nextWidth, nextHeight, false);
-
-        mobileLog('Renderer sized', {
-          size: { width: nextWidth, height: nextHeight },
-          pixelRatio,
-          drawingBufferSize: {
-            width: renderer.domElement.width,
-            height: renderer.domElement.height
-          }
-        });
-
-        if (cameraState) {
-          const camera = cameraState.camera;
-          camera.aspect = nextWidth / nextHeight;
-          camera.updateProjectionMatrix();
-          mobileLog('Camera aspect updated', { aspect: camera.aspect });
-        }
-      }
-
-      const resizeObserver =
-        typeof ResizeObserver !== "undefined"
-          ? new ResizeObserver(() => updateRendererSize())
-          : null;
-      if (resizeObserver) {
-        // Observe wrapper instead of canvas - more reliable on mobile
-        // since canvas may not have explicit dimensions
-        resizeObserver.observe(canvasWrapper || canvas);
-      }
-      window.addEventListener("orientationchange", () => updateRendererSize(true), {
-        passive: true,
-      });
-      window.addEventListener("resize", () => updateRendererSize(), { passive: true });
-
-      // Simplified controller - birb just floats at a fixed position
-      mobileLog('Creating flight controller');
-      const flightController = new FreeFlightController(THREE, {
-        position: new THREE.Vector3(0, 1, 0),
-      });
-      const initialMovementMode =
-        typeof flightController.getMovementMode === "function"
-          ? flightController.getMovementMode()
-          : movementState.mode;
-      movementState.mode = initialMovementMode;
-      flightControllerInitialized = true;
-      mobileLog('Flight controller created', { movementMode: initialMovementMode });
-
-      mobileLog('Creating camera state');
-      cameraState = createCameraState({
-        three: THREE,
-        scene,
-        flightController,
-      });
-      mobileLog('Camera state created', { mode: cameraState.getMode?.() });
-
-      const syncAvatarVisibility = (mode) => {
-        if (!birbAnchor) return;
-        birbAnchor.visible = mode !== CAMERA_MODES.FPV;
-      };
-
-      const setCameraMode = (mode) => {
-        if (!cameraState) return;
-        cameraState.setMode(mode);
-        const index = CAMERA_MODE_SEQUENCE.indexOf(mode);
-        if (index !== -1) {
-          cameraModeIndex = index;
-        }
-        syncAvatarVisibility(mode);
-        updateControlMetrics();
-        updateViewToggleUi(mode);
-      };
-
-      const cycleCameraMode = () => {
-        const nextIndex = (cameraModeIndex + 1) % CAMERA_MODE_SEQUENCE.length;
-        setCameraMode(CAMERA_MODE_SEQUENCE[nextIndex]);
-      };
-
-      setCameraMode(CAMERA_MODE_SEQUENCE[cameraModeIndex]);
-
-      const blendedQuaternion = new THREE.Quaternion();
-      const fallbackVelocity = new THREE.Vector3();
-
-      // Simplified controls - only left/right rotation
-      mobileLog('Creating flight controls');
-      const flightControls = createFlightControls({
-        canvas,
-        flightController,
-        leftThumbstickElement: canvas,
-        onThrustChange: () => updateControlMetrics(),
-      });
-      mobileLog('Flight controls created');
-
-      function setThrottle(value, { updateInput = true, isUserOverride = false } = {}) {
-        const clamped = clampThrottle(Number.parseFloat(value));
-        flightController.setThrottle(clamped);
-        updateGlideSpeedDisplay(clamped);
-        if (glideSpeedInput && updateInput) {
-          glideSpeedInput.value = `${clamped}`;
-        }
-        throttleState.userOverride = Boolean(isUserOverride);
-        updateControlMetrics();
-      }
-
-      function applyThrottleFromInput(isUserEvent = false) {
-        if (!glideSpeedInput) return;
-        setThrottle(glideSpeedInput.value, { updateInput: false, isUserOverride: isUserEvent });
-      }
-
-      function getControllerThrottle() {
-        const effectiveThrottle =
-          typeof flightController.getEffectiveThrottle === "function"
-            ? flightController.getEffectiveThrottle()
-            : null;
-        if (Number.isFinite(effectiveThrottle)) {
-          return clampThrottle(effectiveThrottle);
-        }
-        const inputThrottle = flightController.input?.throttle;
-        if (Number.isFinite(inputThrottle)) {
-          return clampThrottle(inputThrottle);
-        }
-        return fallbackThrottleInput;
-      }
-
-      function syncThrottleFromController({ updateInput = true } = {}) {
-        setThrottle(getControllerThrottle(), { updateInput, isUserOverride: false });
-      }
-
-      if (glideSpeedInput) {
-        syncThrottleFromController({ updateInput: true });
-        glideSpeedInput.addEventListener("input", () => applyThrottleFromInput(true));
-        glideSpeedInput.addEventListener("change", () => applyThrottleFromInput(true));
-      } else {
-        syncThrottleFromController({ updateInput: false });
-      }
-
-      function setLiftButtonsDisabled(disabled) {
-        liftButtonElements.forEach((button) => {
-          if (!button) return;
-          if (disabled) {
-            button.setAttribute("disabled", "true");
-          } else {
-            button.removeAttribute("disabled");
-          }
-        });
-      }
-
-      function updateBoostButtonUi() {
-        if (!boostButton) return;
-        const active = movementState.boostActive;
-        const isGrounded = movementState.mode === "grounded";
-        boostButton.setAttribute("aria-pressed", active ? "true" : "false");
-        const idleLabel = "Hold Boost / Run";
-        const activeLabel = isGrounded ? "Running…" : "Boosting…";
-        boostButton.textContent = active ? activeLabel : idleLabel;
-        boostButton.title = isGrounded ? "Hold to run faster" : "Hold to boost speed";
-        boostButton.setAttribute(
-          "aria-label",
-          active ? (isGrounded ? "Running" : "Boosting") : isGrounded ? "Hold to run" : "Hold to boost",
-        );
-      }
-
-      function updateMovementToggleButton() {
-        if (!movementToggleButton) return;
-        const mode = movementState.mode;
-        const isGrounded = mode === "grounded";
-
-        // Show button only when grounded, hide when flying
-        if (isGrounded) {
-          movementToggleButton.style.display = "";
-          movementToggleButton.setAttribute("aria-pressed", "false");
-          if (movementToggleIcon) {
-            movementToggleIcon.textContent = "🪽";
-          }
-          if (movementToggleLabel) {
-            movementToggleLabel.textContent = "Take Off";
-          }
-          movementToggleButton.setAttribute("aria-label", "Tap to take off and fly");
-          movementToggleButton.title = "Tap to take off and fly";
         } else {
-          // Hide button when flying
-          movementToggleButton.style.display = "none";
-        }
-      }
-
-      function updateMovementModeUi() {
-        movementModeButtons.forEach((button) => {
-          if (!button) return;
-          const mode = button.dataset?.movementMode;
-          const isActive = mode === movementState.mode;
-          button.classList.toggle("is-active", isActive);
-          button.setAttribute("aria-pressed", isActive ? "true" : "false");
-        });
-        updateBoostButtonUi();
-        updateMovementToggleButton();
-      }
-
-      function showMovementMessage(message, duration = 2200) {
-        if (!message) return;
-        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-        movementState.actionMessage = message;
-        movementState.actionMessageUntil = now + Math.max(0, duration);
-        updateControlMetrics();
-      }
-
-      function setBoostState(active) {
-        const next = Boolean(active);
-        if (movementState.boostActive === next) {
-          return;
-        }
-        movementState.boostActive = next;
-        if (typeof flightControls?.setSprintOverride === "function") {
-          flightControls.setSprintOverride(next);
-        } else {
-          flightController.setSprintActive(next);
-        }
-        updateBoostButtonUi();
-        if (next) {
-          showMovementMessage(
-            movementState.mode === "grounded" ? "Running boost engaged." : "Boost engaged.",
-            1600,
-          );
-        }
-      }
-
-      function setMovementMode(mode, { userInitiated = false, applyPreset = userInitiated } = {}) {
-        let resolvedMode = mode;
-        if (typeof flightController.setMovementMode === "function") {
-          resolvedMode = flightController.setMovementMode(mode);
-        }
-        const controllerMode =
-          typeof flightController.getMovementMode === "function"
-            ? flightController.getMovementMode()
-            : resolvedMode;
-        movementState.mode = controllerMode;
-        setBoostState(false);
-        const isGrounded = movementState.mode === "grounded";
-        setLiftButtonsDisabled(isGrounded);
-        if (jumpButton) {
-          if (isGrounded) {
-            jumpButton.removeAttribute("disabled");
-          } else {
-            jumpButton.setAttribute("disabled", "true");
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
           }
-        }
-
-        if (applyPreset) {
-          const preset = MOVEMENT_MODE_PRESETS[movementState.mode];
-          const shouldApplyPreset = isGrounded || !throttleState.userOverride;
-          if (preset && shouldApplyPreset && typeof preset.throttle === "number") {
-            setThrottle(preset.throttle, { updateInput: true, isUserOverride: false });
-          }
-        }
-
-        updateMovementModeUi();
-        if (userInitiated) {
-          if (movementState.mode === "grounded") {
-            showMovementMessage(
-              "Grounded — tap Take Off button to fly, Jump to hop, hold Boost to run.",
-              3200,
-            );
-          } else if (movementState.mode === "flying") {
-            showMovementMessage("Flying — drag to steer, hold Boost to flap faster. Fly into ground to land.", 3200);
-          }
-        } else {
-          updateControlMetrics();
-        }
-      }
-
-      setMovementMode(initialMovementMode, { userInitiated: false, applyPreset: false });
-
-      movementModeButtons.forEach((button) => {
-        if (!button) return;
-        button.addEventListener("click", () => {
-          const mode = button.dataset?.movementMode;
-          if (!mode) return;
-          setMovementMode(mode, { userInitiated: true, applyPreset: true });
-        });
-      });
-
-      if (movementToggleButton) {
-        movementToggleButton.addEventListener("click", () => {
-          // Simple toggle: if grounded, take off; if flying, this button is hidden
-          if (movementState.mode === "grounded") {
-            if (typeof flightController.requestTakeoff === "function") {
-              const tookOff = flightController.requestTakeoff();
-              if (tookOff) {
-                // Sync UI state with controller after takeoff
-                const newMode = flightController.getMovementMode();
-                setMovementMode(newMode, { userInitiated: true, applyPreset: false });
-                showMovementMessage("Taking off!", 1600);
-              }
-            }
-          }
-        });
-      }
-
-      if (boostButton) {
-        const pointerListenerOptions = { passive: false };
-        const handleBoostDown = (event) => {
-          if (event) {
-            event.preventDefault();
-            if (typeof boostButton.setPointerCapture === "function") {
-              try {
-                boostButton.setPointerCapture(event.pointerId);
-              } catch (error) {
-                // Ignore pointer capture failures.
-              }
-            }
-          }
-          setBoostState(true);
-        };
-        const handleBoostEnd = (event) => {
-          if (event) {
-            if (
-              typeof boostButton.hasPointerCapture === "function" &&
-              boostButton.hasPointerCapture(event.pointerId) &&
-              typeof boostButton.releasePointerCapture === "function"
-            ) {
-              try {
-                boostButton.releasePointerCapture(event.pointerId);
-              } catch (error) {
-                // Ignore release failures.
-              }
-            }
-            event.preventDefault();
-          }
-          setBoostState(false);
-        };
-        boostButton.addEventListener("pointerdown", handleBoostDown, pointerListenerOptions);
-        ["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
-          boostButton.addEventListener(eventName, handleBoostEnd, pointerListenerOptions);
-        });
-        boostButton.addEventListener("keydown", (event) => {
-          if (event.code === "Space" || event.code === "Enter") {
-            event.preventDefault();
-            setBoostState(true);
-          }
-        });
-        boostButton.addEventListener("keyup", (event) => {
-          if (event.code === "Space" || event.code === "Enter") {
-            event.preventDefault();
-            setBoostState(false);
-          }
-        });
-      }
-
-      if (jumpButton) {
-        jumpButton.addEventListener("click", () => {
-          const jumped = typeof flightController.requestJump === "function"
-            ? flightController.requestJump()
-            : false;
-          if (jumped) {
-            showMovementMessage("Jump!", 1600);
-          } else if (movementState.mode === "grounded") {
-            showMovementMessage("Already airborne — land to jump again.", 2000);
-          } else {
-            showMovementMessage("Jump is available when grounded.", 2000);
-          }
-        });
-      }
-
-      window.addEventListener("blur", () => {
-        setBoostState(false);
-      });
-
-      if (resetButton) {
-        resetButton.addEventListener("click", () => {
-          flightController.reset();
-          cameraState.reset();
-          const currentMode = cameraState.getMode();
-          const currentIndex = CAMERA_MODE_SEQUENCE.indexOf(currentMode);
-          cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
-          updateViewToggleUi(currentMode);
-          flightControls.reset({ releasePointerLock: true });
-          setMovementMode(
-            typeof flightController.getMovementMode === "function"
-              ? flightController.getMovementMode()
-              : "glide",
-            { userInitiated: false, applyPreset: false },
-          );
-          syncThrottleFromController({ updateInput: true });
-          movementState.actionMessage = null;
-          movementState.actionMessageUntil = 0;
-          updateControlMetrics();
-        });
-      }
-
-      if (viewToggleButton) {
-        viewToggleButton.addEventListener("click", () => {
-          cycleCameraMode();
-        });
-      }
-
-      document.addEventListener("keydown", (event) => {
-        const { code } = event;
-        if (
-          event.target &&
-          (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(event.target.tagName))
-        ) {
-          return;
-        }
-        if (code === "KeyV" && !event.repeat) {
-          cycleCameraMode();
-          event.preventDefault();
         }
       });
+    }
 
-      window.addEventListener("blur", () => {
-        flightControls.reset({ releasePointerLock: true });
-      });
-
-      let renderFrameCount = 0;
-      let lastLogTime = 0;
-
-      const renderFrame = (time = 0) => {
-        renderFrameCount++;
-
-        // Log every 60 frames (about once per second at 60fps) on mobile
-        if (isMobile && time - lastLogTime > 1000) {
-          mobileLog(`Rendering (${renderFrameCount} frames)`, {
-            time,
-            delta: time - lastLogTime,
-            fps: Math.round((renderFrameCount * 1000) / (time - lastLogTime || 1)),
-            animate: motionState.animate,
-            sceneChildren: scene.children.length
-          });
-          lastLogTime = time;
-          renderFrameCount = 0;
-        }
-
-        updateRendererSize();
-
-        let delta = 0;
-        if (motionState.animate) {
-          if (previousTime === null) {
-            previousTime = time;
-          }
-          delta = (time - previousTime) * 0.001;
-          motionState.elapsed += delta;
-          previousTime = time;
-        } else {
-          previousTime = null;
-        }
-
-        const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
-        flightControls.applyAnalogLook(lookDeltaTime);
-
-        const pose = flightController.update(delta);
-        latestPose = pose;
-        const ambientOffsets = flightController.getAmbientOffsets();
-        const controllerVelocity =
-          flightController.velocity && flightController.velocity.isVector3
-            ? flightController.velocity
-            : typeof flightController.getVelocity === "function"
-              ? flightController.getVelocity()
-              : fallbackVelocity.set(0, 0, 0);
-        const controllerSpeed = Number.isFinite(flightController.speed)
-          ? flightController.speed
-          : typeof flightController.getSpeed === "function"
-            ? flightController.getSpeed()
-            : 0;
-
-        // Check if movement mode changed (e.g., from ground collision)
-        const currentControllerMode = typeof flightController.getMovementMode === "function"
-          ? flightController.getMovementMode()
-          : movementState.mode;
-        if (currentControllerMode !== movementState.mode) {
-          // Mode changed (e.g., landed from collision) - sync UI
-          const wasFlying = movementState.mode === "flying";
-          setMovementMode(currentControllerMode, { userInitiated: false, applyPreset: false });
-          // Show message if we just landed from flying
-          if (wasFlying && currentControllerMode === "grounded") {
-            showMovementMessage("Landed! Tap Take Off to fly again.", 2800);
-          }
-        }
-
-        birbAnchor.position.copy(pose.position).add(ambientOffsets.position);
-        birbRig.quaternion.copy(pose.quaternion);
-        birbRig.quaternion.multiply(modelOrientationOffset);
-        blendedQuaternion.copy(ambientOffsets.quaternion);
-        birbRig.quaternion.multiply(blendedQuaternion);
-        birbRig.quaternion.normalize();
-
-        // Static wing position - no banking animation
-        const baseWingAngle = Math.PI * 0.15; // 27 degrees base wing spread
-        if (wingRefs.left && wingRefs.right) {
-          wingRefs.left.rotation.z = baseWingAngle;
-          wingRefs.right.rotation.z = -baseWingAngle;
-        }
-
-        if (glideTrail) {
-          glideTrail.rotation.z = motionState.elapsed * 0.32;
-        }
-
-        // Update environment systems
-        if (environmentShell && motionState.animate) {
-          environmentShell.update(delta, motionState.elapsed);
-
-          // Check ring collection
-          if (environmentShell.collectibles) {
-            const collectedIndices = environmentShell.collectibles.checkCollection(
-              birbAnchor.position,
-              0.5
-            );
-            if (collectedIndices.length > 0) {
-              scoreState.ringsCollected += collectedIndices.length;
-            }
-          }
-        }
-
-        // Update speed trail
-        if (speedTrail && motionState.animate) {
-          speedTrail.update(delta, birbAnchor.position, controllerVelocity, controllerSpeed);
-        }
-
-        // Update wing vortices
-        if (wingVortices && motionState.animate) {
-          wingVortices.update(delta, birbAnchor.position, birbRig.quaternion, controllerSpeed);
-        }
-
-        if (motionState.animate && !controlState.systemPaused) {
-          updateControlMetrics({ speed: controllerSpeed, pose });
-        }
-
-        updateFpsReadout(time);
-        cameraState.updateActiveCamera({ pose, ambientOffsets, delta });
-
-        try {
-          renderer.render(scene, cameraState.camera);
-        } catch (renderError) {
-          mobileError('Render error', renderError);
-        }
-      };
-
-      document.addEventListener("visibilitychange", () => {
-        if (document.hidden) {
-          previousTime = null;
-          flightControls.reset({ releasePointerLock: true });
-          fpsState.lastSampleTime = null;
-          fpsState.frames = 0;
-          if (fpsMetric) {
-            fpsMetric.textContent = "--";
-          }
-        } else {
-          flightControls.reset();
-        }
-        renderer.setAnimationLoop(document.hidden ? null : renderFrame);
-      });
-
-      window.addEventListener("beforeunload", () => {
-        renderer.setAnimationLoop(null);
-        if (resizeObserver) {
-          resizeObserver.disconnect();
-        }
-        if (cameraState) {
-          cameraState.dispose();
-        }
-        renderer.dispose();
-        if (environmentShell) {
-          environmentShell.dispose();
-          environmentShell = null;
-        }
-        flightControls.dispose();
-      });
-
-      // Handle WebGL context loss (common on mobile)
-      canvas.addEventListener("webglcontextlost", (event) => {
-        event.preventDefault();
-        renderer.setAnimationLoop(null);
-        mobileError("WebGL context lost");
-      });
-
-      canvas.addEventListener("webglcontextrestored", () => {
-        mobileLog("WebGL context restored - reinitializing");
-        updateRendererSize(true);
-        renderer.setAnimationLoop(renderFrame);
-      });
-
-      // ============================================================================
-      // MOBILE-OPTIMIZED INITIALIZATION SEQUENCE
-      // ============================================================================
-      mobileLog('Starting initialization sequence...');
-
-      async function initializeMobileDisplay() {
-        try {
-          mobileLog('Step 1: Waiting for DOM to be fully ready');
-          await new Promise(resolve => {
-            if (document.readyState === 'complete') {
-              resolve();
-            } else {
-              window.addEventListener('load', resolve, { once: true });
-            }
-          });
-
-          mobileLog('Step 2: Waiting for layout to stabilize');
-          await new Promise(resolve => {
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                setTimeout(resolve, isMobile ? 100 : 0); // Extra delay on mobile
-              });
-            });
-          });
-
-          mobileLog('Step 3: Setting up renderer size');
-          updateRendererSize(true);
-
-          if (resizeState.width === 0 || resizeState.height === 0) {
-            mobileError('Renderer size is still 0 after initialization', resizeState);
-            throw new Error('Failed to initialize renderer dimensions');
-          }
-
-          mobileLog('Step 4: Running first render frame');
-          renderFrame(0);
-
-          mobileLog('Step 5: Starting animation loop');
-          renderer.setAnimationLoop(renderFrame);
-
-          mobileLog('Initialization complete! Scene should be visible.');
-
-        } catch (error) {
-          mobileError('Initialization failed', error);
-          // Try to show something even if there was an error
-          try {
-            updateRendererSize(true);
-            renderer.setAnimationLoop(renderFrame);
-          } catch (fallbackError) {
-            mobileError('Fallback initialization also failed', fallbackError);
-          }
-        }
+    // Resize
+    function updateRendererSize() {
+      const rect = canvasWrapper.getBoundingClientRect();
+      if (canvas.width !== rect.width || canvas.height !== rect.height) {
+        renderer.setSize(rect.width, rect.height, false);
+        camera.aspect = rect.width / rect.height;
+        camera.updateProjectionMatrix();
       }
+    }
+    window.addEventListener('resize', updateRendererSize);
 
-      // Start the initialization
-      initializeMobileDisplay();
-    </script>
-  </body>
+    // Loop
+    let lastTime = performance.now();
+
+    function renderFrame(time) {
+      const deltaTime = Math.min((time - lastTime) / 1000, 0.05);
+      lastTime = time;
+
+      updateRendererSize();
+
+      // Physics
+      flightController.setInputs(-thumbstickValue.x, -thumbstickValue.y);
+      const pose = flightController.update(deltaTime);
+      const speed = pose.velocity.length();
+
+      // Visuals
+      birbAnchor.position.copy(pose.position);
+      birbAnchor.quaternion.copy(pose.quaternion);
+
+      const bankAngle = -thumbstickValue.x * 0.5;
+      birbRig.rotation.z = THREE.MathUtils.lerp(birbRig.rotation.z, bankAngle, deltaTime * 5);
+
+      // Camera
+      cameraState.update({ pose, delta: deltaTime });
+
+      // Environment
+      if (environmentShell && environmentShell.update) environmentShell.update(deltaTime, pose.position);
+      if (speedTrail) speedTrail.update(deltaTime, pose.position, pose.velocity, speed);
+      if (wingVortices) wingVortices.update(deltaTime, pose.position, pose.quaternion, speed);
+
+      // UI
+      const speedEl = document.querySelector('[data-metric="speed"]');
+      if (speedEl) speedEl.textContent = `${speed.toFixed(1)}m/s`;
+      const altEl = document.querySelector('[data-metric="throttle"]');
+      if (altEl) altEl.textContent = `${pose.position.y.toFixed(1)}m`;
+
+      renderer.render(scene, camera);
+    }
+
+    renderer.setAnimationLoop(renderFrame);
+    mobileLog('Initialization complete');
+
+  </script>
+</body>
+
 </html>
