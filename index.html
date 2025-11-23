@@ -290,7 +290,22 @@
         const testCanvas = document.createElement('canvas');
         const context = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
         if (context) {
-          mobileLog('WebGL is supported', { vendor: context.getParameter(context.VENDOR) });
+          const glVersion = context.getParameter(context.VERSION);
+          const glslVersion = context.getParameter(context.SHADING_LANGUAGE_VERSION);
+
+          // Some mobile browsers return null for VERSION/SHADING_LANGUAGE_VERSION, which later
+          // breaks Three.js when it tries to parse the version string. Treat that as unavailable
+          // so we can surface a clean error instead of crashing during renderer creation.
+          if (typeof glVersion !== 'string' || typeof glslVersion !== 'string') {
+            mobileError('WebGL version strings are unavailable', { glVersion, glslVersion });
+            return false;
+          }
+
+          mobileLog('WebGL is supported', {
+            vendor: context.getParameter(context.VENDOR),
+            version: glVersion,
+            glsl: glslVersion
+          });
           return true;
         }
         return false;
@@ -325,6 +340,37 @@
       }
     }
 
+    // Guard against browsers returning null for VERSION/SHADING_LANGUAGE_VERSION
+    function patchGetParameter() {
+      try {
+        const glProtos = [
+          typeof WebGLRenderingContext !== 'undefined' ? WebGLRenderingContext.prototype : null,
+          typeof WebGL2RenderingContext !== 'undefined' ? WebGL2RenderingContext.prototype : null
+        ].filter(Boolean);
+
+        glProtos.forEach((proto) => {
+          if (proto.__getParameterPatched) return;
+
+          const original = proto.getParameter;
+          proto.getParameter = function (...args) {
+            const result = original ? original.apply(this, args) : null;
+            const target = args[0];
+
+            if ((target === this.VERSION || target === this.SHADING_LANGUAGE_VERSION) && result == null) {
+              mobileError('WebGL getParameter returned null; providing fallback', { target });
+              return 'WebGL (fallback)';
+            }
+
+            return result;
+          };
+
+          proto.__getParameterPatched = true;
+        });
+      } catch (e) {
+        mobileError('WebGL getParameter patch failed', e);
+      }
+    }
+
     try {
       updateLoadingProgress('Checking WebGL support...');
 
@@ -336,6 +382,8 @@
 
       // Guard against null getShaderPrecisionFormat on some mobile browsers
       patchShaderPrecisionFormat();
+      // Guard against null VERSION/SHADING_LANGUAGE_VERSION responses
+      patchGetParameter();
 
       // Try creating renderer with different options as fallbacks
       // Let THREE.js handle canvas and WebGL context creation to avoid conflicts
