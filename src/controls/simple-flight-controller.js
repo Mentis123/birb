@@ -13,6 +13,17 @@ export class SimpleFlightController {
     this.pitchSpeed = Math.PI / 4; // Half of turn speed
     this.liftForce = 2.0;          // Upward lift from pitch
     this.gravity = 0.6;            // Downward pull
+    this.neutralLift = 0.25;       // Keeps glide from feeling too sink-heavy
+
+    // Responsiveness
+    this.yawResponse = 3.5;
+    this.pitchResponse = 3.2;
+    this.verticalResponse = 2.75;
+    this.rollResponse = 4.5;
+    this.maxRoll = Math.PI / 4.5;
+    this.smoothedYaw = 0;
+    this.smoothedPitch = 0;
+    this.rollAngle = 0;
 
     // Control inputs
     this.input = {
@@ -24,9 +35,23 @@ export class SimpleFlightController {
   }
 
   update(deltaTime) {
+    this.smoothedYaw = THREE.MathUtils.damp(
+      this.smoothedYaw,
+      this.input.yaw,
+      this.yawResponse,
+      deltaTime,
+    );
+
+    this.smoothedPitch = THREE.MathUtils.damp(
+      this.smoothedPitch,
+      this.input.pitch,
+      this.pitchResponse,
+      deltaTime,
+    );
+
     // 1. Apply rotation from inputs
-    const yawDelta = this.input.yaw * this.turnSpeed * deltaTime;
-    const pitchDelta = this.input.pitch * this.pitchSpeed * deltaTime;
+    const yawDelta = this.smoothedYaw * this.turnSpeed * deltaTime;
+    const pitchDelta = this.smoothedPitch * this.pitchSpeed * deltaTime;
 
     const yawQuat = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), // Y-axis (world up)
@@ -45,12 +70,26 @@ export class SimpleFlightController {
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
 
     // 3. Calculate vertical velocity (lift vs gravity)
-    const lift = this.input.pitch * this.liftForce;
-    const verticalVelocity = lift - this.gravity;
+    const lift = this.smoothedPitch * this.liftForce + this.neutralLift;
+    const verticalTarget = lift - this.gravity;
 
     // 4. Update velocity
     this.velocity.copy(forward).multiplyScalar(this.speed);
-    this.velocity.y = verticalVelocity;
+    this.velocity.y = THREE.MathUtils.damp(
+      this.velocity.y,
+      verticalTarget,
+      this.verticalResponse,
+      deltaTime,
+    );
+
+    // 4b. Bank roll for visuals
+    const targetRoll = -this.smoothedYaw * this.maxRoll;
+    this.rollAngle = THREE.MathUtils.damp(
+      this.rollAngle,
+      targetRoll,
+      this.rollResponse,
+      deltaTime,
+    );
 
     // 5. Update position
     this.position.addScaledVector(this.velocity, deltaTime);
@@ -66,7 +105,8 @@ export class SimpleFlightController {
     return {
       position: this.position.clone(),
       quaternion: this.quaternion.clone(),
-      velocity: this.velocity.clone()
+      velocity: this.velocity.clone(),
+      roll: this.rollAngle,
     };
   }
 

@@ -371,8 +371,63 @@
       }
     }
 
+    // As an extra safety net for browsers with quirky contexts (notably
+    // iOS Safari), patch the canvas getContext flow so every context we hand to
+    // Three.js has the defensive getParameter/getShaderPrecisionFormat
+    // behaviour baked in.
+    function patchCanvasGetContext() {
+      try {
+        const proto = HTMLCanvasElement?.prototype;
+        if (!proto || proto.__webglContextPatched) return;
+
+        const originalGetContext = proto.getContext;
+        proto.getContext = function patchedGetContext(type, attributes) {
+          const context = originalGetContext ? originalGetContext.call(this, type, attributes) : null;
+          if (!context) return context;
+
+          if (!context.__getParameterPatched) {
+            const originalGetParameter = context.getParameter ? context.getParameter.bind(context) : null;
+            context.getParameter = function (...args) {
+              const result = originalGetParameter ? originalGetParameter(...args) : null;
+              const target = args[0];
+
+              if ((target === context.VERSION || target === context.SHADING_LANGUAGE_VERSION) && result == null) {
+                mobileError('Canvas context getParameter returned null; providing fallback', { target });
+                return 'WebGL (fallback)';
+              }
+
+              return result;
+            };
+
+            context.__getParameterPatched = true;
+          }
+
+          if (!context.__shaderPrecisionPatched) {
+            const originalPrecision = context.getShaderPrecisionFormat ? context.getShaderPrecisionFormat.bind(context) : null;
+            context.getShaderPrecisionFormat = function (...args) {
+              const result = originalPrecision ? originalPrecision(...args) : null;
+              if (result) return result;
+              return { rangeMin: 127, rangeMax: 127, precision: 23 };
+            };
+
+            context.__shaderPrecisionPatched = true;
+          }
+
+          return context;
+        };
+
+        proto.__webglContextPatched = true;
+      } catch (e) {
+        mobileError('Canvas getContext patch failed', e);
+      }
+    }
+
     try {
       updateLoadingProgress('Checking WebGL support...');
+
+      // Ensure any capability checks see the defensive fallbacks
+      patchCanvasGetContext();
+      patchGetParameter();
 
       if (!isWebGLAvailable()) {
         throw new Error('WebGL is not supported on this device');
@@ -729,8 +784,8 @@
       birbAnchor.position.copy(pose.position);
       birbAnchor.quaternion.copy(pose.quaternion);
 
-      const bankAngle = -thumbstickValue.x * 0.5;
-      birbRig.rotation.z = THREE.MathUtils.lerp(birbRig.rotation.z, bankAngle, deltaTime * 5);
+      const bankAngle = typeof pose.roll === 'number' ? pose.roll : -thumbstickValue.x * 0.5;
+      birbRig.rotation.z = THREE.MathUtils.lerp(birbRig.rotation.z, bankAngle, deltaTime * 6);
 
       // Camera
       cameraState.update({ pose, delta: deltaTime });
