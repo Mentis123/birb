@@ -359,7 +359,7 @@
 
             if ((target === this.VERSION || target === this.SHADING_LANGUAGE_VERSION) && result == null) {
               mobileError('WebGL getParameter returned null; providing fallback', { target });
-              return 'WebGL (fallback)';
+              return 'WebGL 1.0 (fallback)';
             }
 
             return result;
@@ -394,7 +394,8 @@
 
               if ((target === context.VERSION || target === context.SHADING_LANGUAGE_VERSION) && result == null) {
                 mobileError('Canvas context getParameter returned null; providing fallback', { target });
-                return 'WebGL (fallback)';
+                const inferredVersion = type === 'webgl2' ? 'WebGL 2.0 (fallback)' : 'WebGL 1.0 (fallback)';
+                return inferredVersion;
               }
 
               return result;
@@ -445,7 +446,8 @@
               const target = args[0];
               if ((target === context.VERSION || target === context.SHADING_LANGUAGE_VERSION) && result == null) {
                 mobileError('Context getParameter returned null; providing fallback', { target, type: attempt.type });
-                return 'WebGL (fallback)';
+                const inferredVersion = attempt.type === 'webgl2' ? 'WebGL 2.0 (fallback)' : 'WebGL 1.0 (fallback)';
+                return inferredVersion;
               }
               return result;
             };
