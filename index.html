@@ -283,6 +283,7 @@
     // RENDERER SETUP
     // ============================================================================
     let renderer;
+    let glContext;
 
     // Check WebGL support
     function isWebGLAvailable() {
@@ -422,6 +423,54 @@
       }
     }
 
+    // Create a patched WebGL context first so Three.js never receives a null
+    // VERSION/SHADING_LANGUAGE_VERSION, which can happen on iOS Safari.
+    function createPatchedContext(targetCanvas) {
+      const contextAttempts = [
+        { type: 'webgl2', attributes: { antialias: !isMobile, alpha: true, failIfMajorPerformanceCaveat: false } },
+        { type: 'webgl', attributes: { antialias: !isMobile, alpha: true, failIfMajorPerformanceCaveat: false } },
+        { type: 'experimental-webgl', attributes: { alpha: true, failIfMajorPerformanceCaveat: false } }
+      ];
+
+      for (const attempt of contextAttempts) {
+        try {
+          mobileLog(`Attempting to acquire ${attempt.type} context`);
+          const context = targetCanvas.getContext(attempt.type, attempt.attributes);
+          if (!context) continue;
+
+          if (!context.__getParameterPatched) {
+            const originalGetParameter = context.getParameter.bind(context);
+            context.getParameter = function (...args) {
+              const result = originalGetParameter(...args);
+              const target = args[0];
+              if ((target === context.VERSION || target === context.SHADING_LANGUAGE_VERSION) && result == null) {
+                mobileError('Context getParameter returned null; providing fallback', { target, type: attempt.type });
+                return 'WebGL (fallback)';
+              }
+              return result;
+            };
+            context.__getParameterPatched = true;
+          }
+
+          if (!context.__shaderPrecisionPatched) {
+            const originalPrecision = context.getShaderPrecisionFormat?.bind(context);
+            context.getShaderPrecisionFormat = function (...args) {
+              const result = originalPrecision ? originalPrecision(...args) : null;
+              if (result) return result;
+              return { rangeMin: 127, rangeMax: 127, precision: 23 };
+            };
+            context.__shaderPrecisionPatched = true;
+          }
+
+          return context;
+        } catch (contextError) {
+          mobileError(`Context acquisition for ${attempt.type} failed`, contextError);
+        }
+      }
+
+      return null;
+    }
+
     try {
       updateLoadingProgress('Checking WebGL support...');
 
@@ -440,12 +489,18 @@
       // Guard against null VERSION/SHADING_LANGUAGE_VERSION responses
       patchGetParameter();
 
+      // Acquire a context first so we can guarantee patched methods are present
+      glContext = createPatchedContext(canvas);
+      if (!glContext) {
+        throw new Error('Unable to create a WebGL context');
+      }
+
       // Try creating renderer with different options as fallbacks
-      // Let THREE.js handle canvas and WebGL context creation to avoid conflicts
       let rendererOptions = [
         // First attempt: Standard options for desktop
         {
           canvas,
+          context: glContext,
           antialias: !isMobile,
           alpha: true,
           powerPreference: 'high-performance',
@@ -454,6 +509,7 @@
         // Second attempt: Remove powerPreference (iOS compatibility)
         {
           canvas,
+          context: glContext,
           antialias: false,
           alpha: true,
           failIfMajorPerformanceCaveat: false,
@@ -461,6 +517,7 @@
         // Third attempt: Minimal options
         {
           canvas,
+          context: glContext,
           alpha: false,
           failIfMajorPerformanceCaveat: false,
         }
