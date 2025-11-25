@@ -1,25 +1,31 @@
 import { createThumbstick } from './thumbstick.js';
-import { createFloatingThumbstick } from './virtual-thumbstick.js';
 
-const DEFAULT_HOVER_THROTTLE = 0.05;
-const DEFAULT_FLAP_THROTTLE = 0.7;
-const DIVE_SWIPE_THRESHOLD = 48;
+const DEFAULT_ANALOG_LOOK_SPEED = 480;
+const DEFAULT_ROLL_SENSITIVITY = 0.65;
+const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 
-const FLAP_KEYS = ['ShiftLeft', 'ShiftRight'];
-const DIVE_KEYS = ['Space'];
+const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
 
 const THRUST_AXIS_KEYS = {
-  yaw: {
+  forward: {
+    positive: ['KeyW', 'ArrowUp'],
+    negative: ['KeyS', 'ArrowDown'],
+  },
+  strafe: {
     positive: ['KeyD', 'ArrowRight'],
     negative: ['KeyA', 'ArrowLeft'],
   },
-  pitch: {
-    positive: ['KeyS', 'ArrowDown'],
-    negative: ['KeyW', 'ArrowUp'],
+  lift: {
+    positive: ['Space', 'KeyE'],
+    negative: ['KeyQ'],
   },
 };
 
+const THRUST_AXIS_LIST = Object.values(THRUST_AXIS_KEYS);
+
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
 
 const isEditableTarget = (target) => {
   if (!target) return false;
@@ -32,6 +38,14 @@ export function createFlightControls({
   canvas,
   flightController,
   leftThumbstickElement,
+  rightThumbstickElement,
+  liftButtonElements = [],
+  analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
+  rollSensitivity = DEFAULT_ROLL_SENSITIVITY,
+  touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
+  getCameraMode,
+  followMode,
+  onSprintChange,
   onThrustChange,
 } = {}) {
   if (!flightController) {
@@ -41,86 +55,78 @@ export function createFlightControls({
     throw new Error('createFlightControls requires a canvas element');
   }
 
-  const createAxisRecord = (throttleDefault = 0) => ({
-    strafe: 0,
-    yaw: 0,
-    pitch: 0,
-    throttle: throttleDefault,
-    dive: 0,
-  });
+  const effectiveRollSensitivity = Number.isFinite(rollSensitivity)
+    ? clamp(rollSensitivity, 0, 1)
+    : DEFAULT_ROLL_SENSITIVITY;
+  const effectiveTouchSprintThreshold = Number.isFinite(touchSprintThreshold)
+    ? clamp(touchSprintThreshold, 0, 1)
+    : DEFAULT_TOUCH_SPRINT_THRESHOLD;
 
   const axisSources = {
-    base: createAxisRecord(-1),
     keyboard: createAxisRecord(),
     leftStick: createAxisRecord(),
-    gestures: createAxisRecord(),
-    override: createAxisRecord(),
+    liftButtons: createAxisRecord(),
   };
 
+  const sprintSources = {
+    keyboard: false,
+    leftStick: false,
+  };
+
+  const analogLookState = {
+    x: 0,
+    y: 0,
+    isActive: false,
+    pointerType: null,
+  };
+
+  const touchLiftPresses = new Map();
+  const liftButtons = Array.isArray(liftButtonElements)
+    ? liftButtonElements.filter(Boolean)
+    : [];
   const thrustKeys = new Set();
-  const pointerMeta = new Map();
-  const pointerFlapIds = new Set();
-  const touchPointerIds = new Set();
 
-  const gestureState = {
-    keyboardFlapActive: false,
-    keyboardDiveActive: false,
-  };
+  let sprintActive = false;
 
-  const initialThrottle = clamp(flightController.input?.throttle ?? DEFAULT_FLAP_THROTTLE, 0, 1);
-  const throttleState = {
-    hover: clamp(initialThrottle * 0.25, 0.02, 0.08),
-    flap: Math.max(initialThrottle, DEFAULT_FLAP_THROTTLE),
-    current: initialThrottle,
-  };
+  const pointerListenerOptions = { passive: false };
 
-  const diveState = { current: Boolean(flightController.input?.dive ?? false) };
-
-  const combineAxis = (axis, { min = -1, max = 1 } = {}) => {
+  const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
-    return clamp(total, min, max);
-  };
-
-  const getThrottleForAxis = (value) => (value >= 0 ? throttleState.flap : throttleState.hover);
-
-  const applyDiveState = (isActive) => {
-    if (diveState.current === isActive) {
-      return;
-    }
-    diveState.current = isActive;
-    flightController.setSprintActive(isActive);
+    return clamp(total, -1, 1);
   };
 
   const applyThrustInput = () => {
-    const strafe = combineAxis('strafe');
-    const yaw = combineAxis('yaw');
-    const pitch = combineAxis('pitch');
-
     flightController.setThrustInput({
-      strafe,
-      yaw,
-      pitch,
+      forward: combineAxis('forward'),
+      strafe: combineAxis('strafe'),
+      lift: combineAxis('lift'),
+      roll: combineAxis('roll'),
     });
-
-    const throttleAxis = combineAxis('throttle');
-    const nextThrottle = getThrottleForAxis(throttleAxis);
-    if (Math.abs(nextThrottle - throttleState.current) > 1e-4) {
-      throttleState.current = nextThrottle;
-      flightController.setThrottle(nextThrottle);
-    }
-
-    const diveAxis = combineAxis('dive', { min: 0, max: 1 });
-    applyDiveState(diveAxis >= 0.5);
-
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
     }
   };
 
+  const setSprintActive = (isActive) => {
+    if (sprintActive === isActive) {
+      return;
+    }
+    sprintActive = isActive;
+    flightController.setSprintActive(isActive);
+    if (typeof onSprintChange === 'function') {
+      onSprintChange(isActive);
+    }
+  };
+
+  const updateSprintState = () => {
+    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick));
+  };
+
   const updateKeyboardAxes = () => {
-    axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.yaw);
-    axisSources.keyboard.yaw = axisSources.keyboard.strafe;
-    axisSources.keyboard.pitch = computeAxisValue(THRUST_AXIS_KEYS.pitch);
+    axisSources.keyboard.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
+    axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
+    axisSources.keyboard.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
+    axisSources.keyboard.roll = clamp(axisSources.keyboard.strafe * effectiveRollSensitivity, -1, 1);
     applyThrustInput();
   };
 
@@ -133,68 +139,132 @@ export function createFlightControls({
     return 0;
   };
 
+  const updateLiftFromButtons = () => {
+    let lift = 0;
+    touchLiftPresses.forEach((value) => {
+      lift += value;
+    });
+    axisSources.liftButtons.lift = clamp(lift, -1, 1);
+    applyThrustInput();
+  };
+
   const handleLeftStickChange = (value, context = {}) => {
-    const yaw = clamp(value.x, -1, 1);
-    const pitch = clamp(value.y, -1, 1);
-    axisSources.leftStick.strafe = yaw;
-    axisSources.leftStick.yaw = yaw;
-    axisSources.leftStick.pitch = clamp(-pitch, -1, 1);
+    const forward = clamp(-value.y, -1, 1);
+    const strafe = clamp(value.x, -1, 1);
+    axisSources.leftStick.forward = forward;
+    axisSources.leftStick.strafe = strafe;
+    axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
+    axisSources.leftStick.lift = 0;
+
+    const pointerType = context.pointerType ?? null;
+    const magnitudeForSprint = clamp(
+      pointerType === 'touch'
+        ? context.rawMagnitude ?? Math.hypot(value.x, value.y)
+        : context.magnitude ?? Math.hypot(value.x, value.y),
+      0,
+      1
+    );
+    sprintSources.leftStick = Boolean(
+      context.isActive && pointerType === 'touch' && magnitudeForSprint >= effectiveTouchSprintThreshold
+    );
+    updateSprintState();
     applyThrustInput();
   };
 
-  const leftThumbstick =
-    (leftThumbstickElement &&
-      (createThumbstick(leftThumbstickElement, {
-        deadzone: 0.15,
-        onChange: handleLeftStickChange,
-      }) ||
-        createFloatingThumbstick(leftThumbstickElement, {
-          deadzone: 0.15,
-          expo: 0.32,
-          onChange: handleLeftStickChange,
-        }))) ||
-    null;
+  const handleRightStickChange = (value, context = {}) => {
+    const pointerType = context.pointerType ?? null;
+    const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
+    const shouldInvertY =
+      pointerType === 'touch' &&
+      followMode != null &&
+      currentMode === followMode;
 
-  const updateGestureAxes = () => {
-    const pointerDiveActive = touchPointerIds.size >= 2;
-    const swipeDiveActive = Array.from(pointerMeta.values()).some((meta) => meta.swipeDive);
-
-    const flapActive = pointerFlapIds.size > 0 || gestureState.keyboardFlapActive;
-    axisSources.gestures.throttle = flapActive ? 1 : 0;
-
-    const diveActive = gestureState.keyboardDiveActive || pointerDiveActive || swipeDiveActive;
-    axisSources.gestures.dive = diveActive ? 1 : 0;
-    applyThrustInput();
+    analogLookState.x = clamp(value.x, -1, 1);
+    analogLookState.y = clamp(shouldInvertY ? -value.y : value.y, -1, 1);
+    analogLookState.pointerType = pointerType;
+    analogLookState.isActive = Boolean(context.isActive);
   };
+
+  const leftThumbstick = createThumbstick(leftThumbstickElement, {
+    deadzone: 0.15,
+    onChange: handleLeftStickChange,
+  });
+
+  const rightThumbstick = createThumbstick(rightThumbstickElement, {
+    deadzone: 0.08,
+    onChange: handleRightStickChange,
+  });
+
+  const handleLiftButtonDown = (event) => {
+    event.preventDefault();
+    const { currentTarget } = event;
+    const direction = Number.parseFloat(currentTarget?.dataset?.lift ?? '0');
+    if (!Number.isFinite(direction) || direction === 0) {
+      return;
+    }
+    if (typeof currentTarget?.setPointerCapture === 'function') {
+      try {
+        currentTarget.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore capture failures.
+      }
+    }
+    touchLiftPresses.set(event.pointerId, direction);
+    currentTarget?.classList.add('is-active');
+    updateLiftFromButtons();
+  };
+
+  const handleLiftButtonEnd = (event) => {
+    const { currentTarget } = event;
+    if (
+      typeof currentTarget?.hasPointerCapture === 'function' &&
+      currentTarget.hasPointerCapture(event.pointerId) &&
+      typeof currentTarget.releasePointerCapture === 'function'
+    ) {
+      try {
+        currentTarget.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore release failures.
+      }
+    }
+    event.preventDefault();
+    touchLiftPresses.delete(event.pointerId);
+    currentTarget?.classList.remove('is-active');
+    updateLiftFromButtons();
+  };
+
+  const handleLiftContextMenu = (event) => {
+    event.preventDefault();
+  };
+
+  liftButtons.forEach((button) => {
+    button.addEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
+    button.addEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
+    button.addEventListener('pointercancel', handleLiftButtonEnd, pointerListenerOptions);
+    button.addEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
+    button.addEventListener('contextmenu', handleLiftContextMenu);
+  });
 
   const handleKeyDown = (event) => {
     const { code } = event;
     if (!code || isEditableTarget(event.target)) {
       return;
     }
-    let handled = false;
-    const isYawKey =
-      THRUST_AXIS_KEYS.yaw.positive.includes(code) || THRUST_AXIS_KEYS.yaw.negative.includes(code);
-    const isPitchKey =
-      THRUST_AXIS_KEYS.pitch.positive.includes(code) ||
-      THRUST_AXIS_KEYS.pitch.negative.includes(code);
-    if (isYawKey || isPitchKey) {
+    const isShift = SHIFT_CODES.has(code);
+    const isThrustKey = THRUST_AXIS_LIST.some(
+      (axis) => axis.positive.includes(code) || axis.negative.includes(code)
+    );
+    if (!isThrustKey && !isShift) {
+      return;
+    }
+    event.preventDefault();
+    if (isThrustKey) {
       thrustKeys.add(code);
       updateKeyboardAxes();
-      handled = true;
     }
-    if (FLAP_KEYS.includes(code) && !gestureState.keyboardFlapActive) {
-      gestureState.keyboardFlapActive = true;
-      updateGestureAxes();
-      handled = true;
-    }
-    if (DIVE_KEYS.includes(code) && !gestureState.keyboardDiveActive) {
-      gestureState.keyboardDiveActive = true;
-      updateGestureAxes();
-      handled = true;
-    }
-    if (handled) {
-      event.preventDefault();
+    if (isShift) {
+      sprintSources.keyboard = true;
+      updateSprintState();
     }
   };
 
@@ -203,151 +273,122 @@ export function createFlightControls({
     if (!code || isEditableTarget(event.target)) {
       return;
     }
-    let handled = false;
-    const isYawKey =
-      THRUST_AXIS_KEYS.yaw.positive.includes(code) || THRUST_AXIS_KEYS.yaw.negative.includes(code);
-    const isPitchKey =
-      THRUST_AXIS_KEYS.pitch.positive.includes(code) ||
-      THRUST_AXIS_KEYS.pitch.negative.includes(code);
-    if (isYawKey || isPitchKey) {
+    const isShift = SHIFT_CODES.has(code);
+    const isThrustKey = THRUST_AXIS_LIST.some(
+      (axis) => axis.positive.includes(code) || axis.negative.includes(code)
+    );
+    if (!isThrustKey && !isShift) {
+      return;
+    }
+    event.preventDefault();
+    if (isThrustKey) {
       thrustKeys.delete(code);
       updateKeyboardAxes();
-      handled = true;
     }
-    if (FLAP_KEYS.includes(code) && gestureState.keyboardFlapActive) {
-      gestureState.keyboardFlapActive = false;
-      updateGestureAxes();
-      handled = true;
-    }
-    if (DIVE_KEYS.includes(code) && gestureState.keyboardDiveActive) {
-      gestureState.keyboardDiveActive = false;
-      updateGestureAxes();
-      handled = true;
-    }
-    if (handled) {
-      event.preventDefault();
+    if (isShift) {
+      sprintSources.keyboard = false;
+      updateSprintState();
     }
   };
 
-  const handlePointerDown = (event) => {
-    if (event.button != null && event.button !== 0 && event.pointerType !== 'touch') {
+  const handleCanvasClick = () => {
+    if (typeof window === 'undefined') return;
+    if (!window.matchMedia('(pointer: fine)').matches) {
       return;
     }
-    const pointerType = (event.pointerType || 'mouse').toLowerCase();
-    pointerMeta.set(event.pointerId, {
-      pointerType,
-      startY: event.clientY,
-      swipeDive: false,
-    });
-    pointerFlapIds.add(event.pointerId);
-    if (pointerType === 'touch') {
-      touchPointerIds.add(event.pointerId);
+    if (canvas.requestPointerLock && document.pointerLockElement !== canvas) {
+      canvas.requestPointerLock();
     }
-    updateGestureAxes();
-    event.preventDefault();
   };
 
   const handlePointerMove = (event) => {
-    const meta = pointerMeta.get(event.pointerId);
-    if (!meta) return;
-    if (!meta.swipeDive && event.clientY - meta.startY >= DIVE_SWIPE_THRESHOLD) {
-      meta.swipeDive = true;
-      updateGestureAxes();
+    if (document.pointerLockElement === canvas) {
+      flightController.addLookDelta(event.movementX, event.movementY);
     }
   };
 
-  const clearPointer = (pointerId) => {
-    const meta = pointerMeta.get(pointerId);
-    if (!meta) return;
-    pointerMeta.delete(pointerId);
-    pointerFlapIds.delete(pointerId);
-    if (meta.pointerType === 'touch') {
-      touchPointerIds.delete(pointerId);
-    }
-  };
-
-  const handlePointerEnd = (event) => {
-    if (!pointerMeta.has(event.pointerId)) {
-      return;
-    }
-    clearPointer(event.pointerId);
-    updateGestureAxes();
-  };
-
-  const resetAxisRecord = (record, { throttleDefault = 0 } = {}) => {
+  const resetAxisRecord = (record) => {
+    record.forward = 0;
     record.strafe = 0;
-    record.yaw = 0;
-    record.pitch = 0;
-    record.throttle = throttleDefault;
-    record.dive = 0;
+    record.lift = 0;
+    record.roll = 0;
   };
 
-  const resetInputs = () => {
+  const resetInputs = ({ releasePointerLock = false } = {}) => {
     thrustKeys.clear();
-    pointerMeta.clear();
-    pointerFlapIds.clear();
-    touchPointerIds.clear();
-    gestureState.keyboardFlapActive = false;
-    gestureState.keyboardDiveActive = false;
-    resetAxisRecord(axisSources.base, { throttleDefault: -1 });
-    resetAxisRecord(axisSources.keyboard);
-    resetAxisRecord(axisSources.leftStick);
-    resetAxisRecord(axisSources.gestures);
-    resetAxisRecord(axisSources.override);
+    Object.values(axisSources).forEach(resetAxisRecord);
     applyThrustInput();
+
+    sprintSources.keyboard = false;
+    sprintSources.leftStick = false;
+    updateSprintState();
+
+    analogLookState.x = 0;
+    analogLookState.y = 0;
+    analogLookState.isActive = false;
+    analogLookState.pointerType = null;
+
+    touchLiftPresses.clear();
+    liftButtons.forEach((button) => button.classList.remove('is-active'));
+
     leftThumbstick?.reset?.();
+    rightThumbstick?.reset?.();
+
+    if (releasePointerLock && document.pointerLockElement === canvas) {
+      if (typeof document.exitPointerLock === 'function') {
+        document.exitPointerLock();
+      }
+    }
   };
 
   if (typeof document !== 'undefined') {
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
+    document.addEventListener('mousemove', handlePointerMove);
   }
+  canvas.addEventListener('click', handleCanvasClick);
 
-  const pointerListenerOptions = { passive: false };
-
-  if (canvas) {
-    canvas.addEventListener('pointerdown', handlePointerDown, pointerListenerOptions);
-  }
-
-  const globalPointerTarget = typeof window !== 'undefined' ? window : null;
-  if (globalPointerTarget) {
-    globalPointerTarget.addEventListener('pointermove', handlePointerMove, pointerListenerOptions);
-    globalPointerTarget.addEventListener('pointerup', handlePointerEnd, pointerListenerOptions);
-    globalPointerTarget.addEventListener('pointercancel', handlePointerEnd, pointerListenerOptions);
-    globalPointerTarget.addEventListener('pointerleave', handlePointerEnd, pointerListenerOptions);
-  }
+  const applyAnalogLook = (deltaTime = 0) => {
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      return;
+    }
+    const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
+    const lookX = analogLookState.x;
+    const lookY = -analogLookState.y;
+    if (lookX === 0 && lookY === 0) {
+      return;
+    }
+    flightController.addLookDelta(
+      lookX * analogLookSpeed * limitedDelta,
+      lookY * analogLookSpeed * limitedDelta
+    );
+  };
 
   const dispose = () => {
-    resetInputs();
+    resetInputs({ releasePointerLock: true });
     if (typeof document !== 'undefined') {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('keyup', handleKeyUp);
+      document.removeEventListener('mousemove', handlePointerMove);
     }
-    if (canvas) {
-      canvas.removeEventListener('pointerdown', handlePointerDown, pointerListenerOptions);
-    }
-    if (globalPointerTarget) {
-      globalPointerTarget.removeEventListener('pointermove', handlePointerMove, pointerListenerOptions);
-      globalPointerTarget.removeEventListener('pointerup', handlePointerEnd, pointerListenerOptions);
-      globalPointerTarget.removeEventListener('pointercancel', handlePointerEnd, pointerListenerOptions);
-      globalPointerTarget.removeEventListener('pointerleave', handlePointerEnd, pointerListenerOptions);
-    }
+    canvas.removeEventListener('click', handleCanvasClick);
+    liftButtons.forEach((button) => {
+      button.removeEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
+      button.removeEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
+      button.removeEventListener('pointercancel', handleLiftButtonEnd, pointerListenerOptions);
+      button.removeEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
+      button.removeEventListener('contextmenu', handleLiftContextMenu);
+    });
     leftThumbstick?.destroy?.();
+    rightThumbstick?.destroy?.();
   };
 
   applyThrustInput();
+  updateSprintState();
 
   return {
-    applyAnalogLook: () => {}, // Dummy for compatibility
+    applyAnalogLook,
     reset: resetInputs,
     dispose,
-    setSprintOverride(value) {
-      if (value == null) {
-        axisSources.override.dive = 0;
-      } else {
-        axisSources.override.dive = value ? 1 : 0;
-      }
-      applyThrustInput();
-    },
   };
 }
