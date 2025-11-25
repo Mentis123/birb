@@ -1,8 +1,22 @@
-// ============================================================================
-// Simplified free flight controller used across the demo scenes
-// ============================================================================
+// Relaxed, chill gliding feel
+export const MOVEMENT_ACCELERATION = 2.8;
+export const LINEAR_DRAG = 1.2;
+export const SPRINT_MULTIPLIER = 1.4;
+// Controls how quickly the bird eases toward new roll velocities when strafing.
+export const BANK_RESPONSIVENESS = 2.5;
+// Maximum roll velocity (radians per second) that sustained input can achieve.
+export const BANK_ROLL_SPEED = Math.PI * 0.8;
+export const LOOK_SENSITIVITY = 0.002;
+export const AMBIENT_BOB_AMPLITUDE = 0.12;
+export const AMBIENT_BOB_SPEED = 0.8;
+export const AMBIENT_ROLL_AMPLITUDE = 0.05;
+export const AMBIENT_ROLL_SPEED = 0.6;
+export const AMBIENT_YAW_AMPLITUDE = 0.03;
+export const AMBIENT_YAW_SPEED = 0.5;
 
-export const TURN_SPEED = Math.PI * 0.5;
+export const INPUT_SMOOTHING = 8;
+export const STRAFE_DAMPING = 0.5;
+export const IDLE_LINEAR_DRAG = 2.5;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -13,6 +27,8 @@ const clamp = (value, min, max, fallback) => {
   return value;
 };
 
+const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
+
 export class FreeFlightController {
   constructor(three, options = {}) {
     if (!three) {
@@ -20,141 +36,108 @@ export class FreeFlightController {
     }
 
     this.THREE = three;
-    const { Vector3, Quaternion } = three;
+    const { Vector3, Quaternion, Euler } = three;
 
-    this.lookQuaternion = options.orientation?.clone?.() ?? new Quaternion();
-    this.quaternion = this.lookQuaternion.clone();
-    this.position = options.position?.clone?.() ?? new Vector3(0, 1, 0);
-
+    this.position = new Vector3();
     this.velocity = new Vector3();
-    this.acceleration = new Vector3();
-    this.speed = 0;
-    this.lift = 0;
-    this.gravity = 0;
+    this.quaternion = new Quaternion();
+    this.lookQuaternion = new Quaternion();
 
-    this._up = new Vector3(0, 1, 0);
+    this._forward = new Vector3(0, 0, -1);
     this._right = new Vector3(1, 0, 0);
-    this._direction = new Vector3(0, 0, -1);
+    this._up = new Vector3(0, 1, 0);
+    this._acceleration = new Vector3();
+    this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
     this._pitchQuaternion = new Quaternion();
-    this._rollAxis = new Vector3(0, 0, 1);
-    this._velocityBuffer = new Vector3();
+    this._ambientPosition = new Vector3();
+    this._ambientQuaternion = new Quaternion();
+    this._ambientEuler = new Euler(0, 0, 0, "YXZ");
 
-    this._ambientOffsets = {
-      position: new Vector3(),
-      quaternion: new Quaternion(),
-    };
+    this._initialPosition = options.position ? options.position.clone() : new Vector3(0, 0.65, 0);
+    this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
 
-    this._initialPosition = this.position.clone();
-    this._initialQuaternion = this.lookQuaternion.clone();
-
-    this.turnSpeed = options.turnSpeed ?? TURN_SPEED;
-
-    const speedMin = Math.max(0, Number.isFinite(options.speedMin) ? options.speedMin : 0.35);
-    const speedMaxCandidate = Number.isFinite(options.speedMax) ? options.speedMax : 7.5;
-    const speedMax = Math.max(speedMaxCandidate, speedMin + 0.5);
-
-    this.config = {
-      speedMin,
-      speedMax,
-      lift: Math.max(0.05, Number.isFinite(options.lift) ? options.lift : 1.25),
-      gravity: Math.max(0.05, Number.isFinite(options.gravity) ? options.gravity : 0.45),
-      flapStrength: Math.max(
-        0.05,
-        Number.isFinite(options.flapStrength) ? options.flapStrength : 1.1,
-      ),
-    };
-
-    this.gravity = this.config.gravity;
-
-    const initialThrottle = Number.isFinite(options.initialThrottle)
-      ? Math.min(Math.max(options.initialThrottle, 0), 1)
-      : 0.6;
-
-    this.input = {
-      strafe: 0,
-      yaw: 0,
-      pitch: 0,
-      throttle: initialThrottle,
-      dive: false,
-      hover: initialThrottle <= 0.08,
-    };
-
-    this._smoothedInput = { yaw: 0, pitch: 0 };
-
-    this.elapsed = 0;
-    this.bank = 0;
+    this.lookSensitivity = options.lookSensitivity ?? LOOK_SENSITIVITY;
+    this.throttle = options.throttle ?? 1;
+    this.sprintMultiplier = options.sprintMultiplier ?? SPRINT_MULTIPLIER;
     this.isSprinting = false;
+
+    const providedSmoothing = options.inputSmoothing;
+    this.inputSmoothing = Number.isFinite(providedSmoothing)
+      ? Math.max(0, providedSmoothing)
+      : INPUT_SMOOTHING;
+
+    const providedStrafeDamping = options.strafeDamping;
+    this.strafeDamping = Number.isFinite(providedStrafeDamping)
+      ? clamp(providedStrafeDamping, 0, 1, STRAFE_DAMPING)
+      : STRAFE_DAMPING;
+
+    const providedIdleDrag = options.idleLinearDrag;
+    this.idleLinearDrag = Number.isFinite(providedIdleDrag) && providedIdleDrag >= 0
+      ? providedIdleDrag
+      : IDLE_LINEAR_DRAG;
+
+    this.input = createAxisRecord();
+    this._smoothedInput = createAxisRecord();
+
+    this.bank = 0;
+    this._bankVelocity = 0;
+    this.elapsed = 0;
 
     this.reset();
   }
 
   setThrustInput({
+    forward = this.input.forward,
     strafe = this.input.strafe,
-    yaw = Number.isFinite(strafe) ? strafe : this.input.yaw,
-    pitch = this.input.pitch,
+    lift = this.input.lift,
+    roll = this.input.roll,
   } = {}) {
-    const nextStrafe = clamp(strafe, -1, 1, this.input.strafe);
-    this.input.strafe = nextStrafe;
-    this.input.yaw = clamp(Number.isFinite(yaw) ? yaw : nextStrafe, -1, 1, this.input.yaw);
-    this.input.pitch = clamp(pitch, -1, 1, this.input.pitch);
+    this.input.forward = clamp(forward, -1, 1, this.input.forward);
+    this.input.strafe = clamp(strafe, -1, 1, this.input.strafe);
+    this.input.lift = clamp(lift, -1, 1, this.input.lift);
+    this.input.roll = clamp(roll, -1, 1, this.input.roll);
   }
 
   setThrottle(value) {
-    const normalized = clamp(Number.parseFloat(value), 0, 1, this.input.throttle);
-    this.input.throttle = normalized;
-    this.input.hover = normalized <= 0.08;
+    const nextValue = clamp(value, 0, 1, this.throttle);
+    this.throttle = nextValue;
   }
 
   setSprintActive(isActive) {
-    const next = Boolean(isActive);
-    this.isSprinting = next;
-    this.input.dive = next;
-    if (next) {
-      this.input.hover = false;
-    }
+    this.isSprinting = Boolean(isActive);
   }
 
   getEffectiveThrottle() {
-    return this.input.throttle;
+    const baseThrottle = this.throttle;
+    const multiplier = this.isSprinting ? this.sprintMultiplier : 1;
+    return baseThrottle * multiplier;
   }
 
-  addLookDelta(deltaX, deltaY) {}
+  addLookDelta(deltaX, deltaY) {
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+      return;
+    }
+
+    const yawAngle = -deltaX * this.lookSensitivity;
+    const pitchAngle = deltaY * this.lookSensitivity;
+
+    if (yawAngle !== 0) {
+      this._yawQuaternion.setFromAxisAngle(this._up, yawAngle);
+      this.lookQuaternion.premultiply(this._yawQuaternion);
+    }
+
+    if (pitchAngle !== 0) {
+      const right = this._right.set(1, 0, 0).applyQuaternion(this.lookQuaternion).normalize();
+      this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
+      this.lookQuaternion.multiply(this._pitchQuaternion);
+    }
+
+    this.lookQuaternion.normalize();
+  }
 
   getSpeed() {
-    return this.speed;
-  }
-
-  getVelocity() {
-    return this.velocity.clone();
-  }
-
-  getPitch() {
-    return 0;
-  }
-
-  getPitchDegrees() {
-    return 0;
-  }
-
-  setMovementMode(mode) {
-    return "flying";
-  }
-
-  getMovementMode() {
-    return "flying";
-  }
-
-  requestJump(strength) {
-    return false;
-  }
-
-  requestTakeoff() {
-    return false;
-  }
-
-  isGrounded() {
-    return false;
+    return this.velocity.length();
   }
 
   update(deltaTime = 0) {
@@ -164,67 +147,91 @@ export class FreeFlightController {
 
     this.elapsed += deltaTime;
 
-    const smoothingStrength = deltaTime > 0 ? 1 - Math.exp(-10 * deltaTime) : 1;
-    this._smoothedInput.yaw += (this.input.yaw - this._smoothedInput.yaw) * smoothingStrength;
-    this._smoothedInput.pitch += (this.input.pitch - this._smoothedInput.pitch) * smoothingStrength;
-
-    if (deltaTime <= 0) {
-      return {
-        position: this.position,
-        quaternion: this.quaternion,
-      };
-    }
-
-    const yawDelta = clamp(this._smoothedInput.yaw, -1, 1, 0) * this.turnSpeed * deltaTime;
-    const pitchDelta = clamp(this._smoothedInput.pitch, -1, 1, 0) * (this.turnSpeed * 0.5) * deltaTime;
-
-    if (Math.abs(yawDelta) > 1e-6) {
-      this._yawQuaternion.setFromAxisAngle(this._up, -yawDelta);
-      this.lookQuaternion.premultiply(this._yawQuaternion);
-    }
-
-    if (Math.abs(pitchDelta) > 1e-6) {
-      this._right.set(1, 0, 0).applyQuaternion(this.lookQuaternion).normalize();
-      this._pitchQuaternion.setFromAxisAngle(this._right, pitchDelta);
-      this.lookQuaternion.multiply(this._pitchQuaternion);
-    }
-
-    this.lookQuaternion.normalize();
     this.quaternion.copy(this.lookQuaternion);
 
-    const speedRange = Math.max(this.config.speedMax - this.config.speedMin, 0.0001);
-    const throttle = clamp(this.input.throttle, 0, 1, 0.6);
-    const flapDelta = this.input.dive ? this.config.flapStrength : 0;
-    const hoverDrag = this.input.hover ? this.config.flapStrength * 0.5 : 0;
-    const targetSpeed = this.config.speedMin + speedRange * throttle + flapDelta - hoverDrag;
-    const clampedTargetSpeed = clamp(targetSpeed, this.config.speedMin, this.config.speedMax);
-    this.speed += (clampedTargetSpeed - this.speed) * smoothingStrength;
+    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+    const up = this._up.set(0, 1, 0);
 
-    this._direction.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    // Ease input changes over time so gamepad and keyboard controls feel less twitchy.
+    const smoothingStrength = this.inputSmoothing > 0 ? 1 - Math.exp(-this.inputSmoothing * deltaTime) : 1;
+    const smoothed = this._smoothedInput;
 
-    const pitchLift = clamp(-this._smoothedInput.pitch * this.config.lift, -this.config.lift, this.config.lift);
-    const hoverLift = this.input.hover ? this.config.lift * 0.75 : 0;
-    const diveDrop = this.input.dive ? -this.config.lift * 0.35 : 0;
-    const targetLift = pitchLift + hoverLift + diveDrop;
-    this.lift += (targetLift - this.lift) * smoothingStrength;
-
-    const verticalVelocity = this.lift - this.gravity;
-
-    this._velocityBuffer.copy(this._direction).multiplyScalar(this.speed);
-    this._velocityBuffer.y += verticalVelocity;
-
-    if (deltaTime > 0) {
-      this.acceleration.copy(this._velocityBuffer).sub(this.velocity).divideScalar(deltaTime);
-    } else {
-      this.acceleration.set(0, 0, 0);
+    if (smoothingStrength >= 1) {
+      smoothed.forward = this.input.forward;
+      smoothed.strafe = this.input.strafe;
+      smoothed.lift = this.input.lift;
+      smoothed.roll = this.input.roll;
+    } else if (smoothingStrength > 0) {
+      smoothed.forward += (this.input.forward - smoothed.forward) * smoothingStrength;
+      smoothed.strafe += (this.input.strafe - smoothed.strafe) * smoothingStrength;
+      smoothed.lift += (this.input.lift - smoothed.lift) * smoothingStrength;
+      smoothed.roll += (this.input.roll - smoothed.roll) * smoothingStrength;
     }
 
-    this.velocity.copy(this._velocityBuffer);
+    const acceleration = this._acceleration.set(0, 0, 0);
+    acceleration.addScaledVector(forward, smoothed.forward);
+    acceleration.addScaledVector(right, smoothed.strafe * this.strafeDamping);
+    acceleration.addScaledVector(up, smoothed.lift);
+
+    if (acceleration.lengthSq() > 1) {
+      acceleration.normalize();
+    }
+
+    const hasTranslationInput =
+      Math.abs(smoothed.forward) > 1e-3 ||
+      Math.abs(smoothed.strafe) > 1e-3 ||
+      Math.abs(smoothed.lift) > 1e-3;
+
+    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.getEffectiveThrottle());
+
+    this.velocity.addScaledVector(acceleration, deltaTime);
+
+    const dragMultiplier = Math.exp(-LINEAR_DRAG * deltaTime);
+    this.velocity.multiplyScalar(dragMultiplier);
+
+    if (!hasTranslationInput) {
+      const idleDragMultiplier = Math.exp(-this.idleLinearDrag * deltaTime);
+      this.velocity.multiplyScalar(idleDragMultiplier);
+    }
+
+    if (Math.abs(smoothed.strafe) < 0.05) {
+      const sidewaysSpeed = this.velocity.dot(right);
+      if (Math.abs(sidewaysSpeed) > 1e-3) {
+        const correctionRate = MOVEMENT_ACCELERATION * 0.45;
+        const maxCorrection = correctionRate * deltaTime;
+        const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
+        this.velocity.addScaledVector(right, -correction);
+      }
+    }
+
     this.position.addScaledVector(this.velocity, deltaTime);
 
-    const speedFactor = clamp(this.speed / Math.max(this.config.speedMax, 0.0001), 0, 1, 0);
-    const bankTarget = clamp(-this._smoothedInput.yaw, -1, 1, 0) * (0.35 + 0.25 * speedFactor);
-    this.bank += (bankTarget - this.bank) * smoothingStrength;
+    const forwardZ = forward.z;
+    let bankOrientation = 1;
+    // When the bird is facing back toward the camera (positive Z), invert the
+    // roll direction so strafing left still lowers the left wing.
+    if (forwardZ > 1e-4) {
+      bankOrientation = -1;
+    } else if (forwardZ < -1e-4) {
+      bankOrientation = 1;
+    }
+
+    const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
+    const rollInput = smoothed.roll * bankOrientation;
+
+    if (Math.abs(rollInput) > 1e-4) {
+      const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
+      this._bankVelocity += (targetAngularVelocity - this._bankVelocity) * bankStep;
+    } else {
+      const targetAngularVelocity = -this._bankVelocity;
+      this._bankVelocity += targetAngularVelocity * bankStep;
+    }
+
+    this.bank += this._bankVelocity * deltaTime;
+
+    this._bankQuaternion.setFromAxisAngle(forward, this.bank);
+    this.quaternion.multiply(this._bankQuaternion);
 
     return {
       position: this.position,
@@ -233,39 +240,31 @@ export class FreeFlightController {
   }
 
   getAmbientOffsets() {
-    const speedFactor = clamp(this.speed / Math.max(this.config.speedMax, 0.0001), 0, 1, 0);
-    const wobble = 0.01 + 0.015 * speedFactor;
-    const bob = Math.sin(this.elapsed * 2.1) * wobble;
-    const sway = Math.sin(this.elapsed * 1.1) * wobble * 0.5;
-    this._ambientOffsets.position.set(sway, bob, 0);
+    const bob = Math.sin(this.elapsed * AMBIENT_BOB_SPEED) * AMBIENT_BOB_AMPLITUDE;
+    const roll = Math.sin(this.elapsed * AMBIENT_ROLL_SPEED) * AMBIENT_ROLL_AMPLITUDE;
+    const yaw = Math.cos(this.elapsed * AMBIENT_YAW_SPEED) * AMBIENT_YAW_AMPLITUDE;
 
-    this._rollAxis.copy(this._direction).normalize();
-    const rollAngle = this.bank * (0.5 + 0.25 * speedFactor);
-    this._ambientOffsets.quaternion.setFromAxisAngle(this._rollAxis, rollAngle);
+    this._ambientPosition.set(0, bob, 0);
+    this._ambientEuler.set(0, yaw, roll);
+    this._ambientQuaternion.setFromEuler(this._ambientEuler);
 
-    return this._ambientOffsets;
+    return {
+      position: this._ambientPosition,
+      quaternion: this._ambientQuaternion,
+    };
   }
 
   reset() {
     this.position.copy(this._initialPosition);
+    this.velocity.set(0, 0, 0);
     this.lookQuaternion.copy(this._initialQuaternion);
     this.quaternion.copy(this._initialQuaternion);
-    this.velocity.set(0, 0, 0);
-    this.acceleration.set(0, 0, 0);
-    const normalizedThrottle = clamp(this.input.throttle, 0, 1, 0.6);
-    const speedRange = Math.max(this.config.speedMax - this.config.speedMin, 0.0001);
-    this.speed = this.config.speedMin + speedRange * normalizedThrottle;
-    this.lift = 0;
-    this.gravity = this.config.gravity;
-    this.elapsed = 0;
-    this.input.strafe = 0;
-    this.input.yaw = 0;
-    this.input.pitch = 0;
-    this.input.dive = false;
-    this.input.hover = normalizedThrottle <= 0.08;
-    this._smoothedInput.yaw = 0;
-    this._smoothedInput.pitch = 0;
     this.bank = 0;
-    this._direction.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    this._bankVelocity = 0;
+    this.elapsed = 0;
+    Object.assign(this.input, createAxisRecord());
+    Object.assign(this._smoothedInput, createAxisRecord());
+    this.setThrustInput({ forward: 0, strafe: 0, lift: 0, roll: 0 });
+    this.setSprintActive(false);
   }
 }
