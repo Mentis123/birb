@@ -638,7 +638,7 @@
                     <span class="control-metrics__value" data-metric="fps">--</span>
                   </div>
                   <p class="control-metrics__note" data-metric="status">
-                    Ready for free flight. Use the left stick to move and the right stick to look.
+                    Loading...
                   </p>
                 </div>
               </div>
@@ -736,18 +736,54 @@
     <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
 
     <script type="module">
-      import * as THREE from "https://esm.sh/three@0.161.0";
-      import { FreeFlightController } from "./free-flight-controller.js";
-      import {
-        createCameraState,
-        CAMERA_MODES,
-      } from "./src/camera/camera-state.js";
-      import { createFlightControls } from "./src/controls/flight-controls.js";
-      import {
-        createWorldShell,
-        ENVIRONMENT_VARIANTS,
-        getEnvironmentDefinition,
-      } from "./src/environment/world-shell.js";
+      // Global error handler for mobile debugging
+      window.addEventListener("error", (event) => {
+        const statusEl = document.querySelector('[data-metric="status"]');
+        if (statusEl) {
+          statusEl.textContent = `Error: ${event.message || "Unknown error"}`;
+        }
+        console.error("Global error:", event);
+      });
+
+      window.addEventListener("unhandledrejection", (event) => {
+        const statusEl = document.querySelector('[data-metric="status"]');
+        if (statusEl) {
+          statusEl.textContent = `Load error: ${event.reason?.message || "Module failed to load"}`;
+        }
+        console.error("Unhandled rejection:", event);
+      });
+
+      let THREE, FreeFlightController, createCameraState, CAMERA_MODES, createFlightControls, createWorldShell, ENVIRONMENT_VARIANTS, getEnvironmentDefinition;
+
+      try {
+        THREE = await import("https://esm.sh/three@0.161.0");
+        const flightModule = await import("./free-flight-controller.js");
+        FreeFlightController = flightModule.FreeFlightController;
+        const cameraModule = await import("./src/camera/camera-state.js");
+        createCameraState = cameraModule.createCameraState;
+        CAMERA_MODES = cameraModule.CAMERA_MODES;
+        const controlsModule = await import("./src/controls/flight-controls.js");
+        createFlightControls = controlsModule.createFlightControls;
+        const worldModule = await import("./src/environment/world-shell.js");
+        createWorldShell = worldModule.createWorldShell;
+        ENVIRONMENT_VARIANTS = worldModule.ENVIRONMENT_VARIANTS;
+        getEnvironmentDefinition = worldModule.getEnvironmentDefinition;
+      } catch (importError) {
+        const statusEl = document.querySelector('[data-metric="status"]');
+        if (statusEl) {
+          statusEl.textContent = `Failed to load modules: ${importError.message}`;
+        }
+        console.error("Import error:", importError);
+        throw importError;
+      }
+
+      // Update status after successful module load
+      {
+        const statusEl = document.querySelector('[data-metric="status"]');
+        if (statusEl) {
+          statusEl.textContent = "Modules loaded. Initializing renderer...";
+        }
+      }
 
       const canvasWrapper = document.querySelector(".canvas-wrapper");
       const canvasActions = document.querySelector("[data-draggable-panel]");
@@ -777,6 +813,10 @@
 
       if (!renderer?.getContext()) {
         showFatalError("WebGL context unavailable. Please enable hardware acceleration.");
+      }
+
+      if (statusMetric) {
+        statusMetric.textContent = "Renderer ready. Building scene...";
       }
 
       const contextState = { lost: false };
@@ -1040,14 +1080,24 @@
         if (!definition) return;
 
         if (environmentShell) {
-          environmentShell.dispose();
+          try {
+            environmentShell.dispose();
+          } catch (disposeError) {
+            console.warn("Environment dispose error:", disposeError);
+          }
         }
 
-        environmentShell = createWorldShell(scene, {
-          three: THREE,
-          variant: definition.id,
-        });
-        glideTrail = environmentShell.glideTrail;
+        try {
+          environmentShell = createWorldShell(scene, {
+            three: THREE,
+            variant: definition.id,
+          });
+          glideTrail = environmentShell.glideTrail;
+        } catch (envError) {
+          console.warn("Environment creation failed:", envError);
+          environmentShell = null;
+          glideTrail = null;
+        }
         environmentState.id = definition.id;
         environmentState.label = definition.label;
         const resolvedIndex = environmentState.order.indexOf(definition.id);
@@ -1071,7 +1121,11 @@
         setEnvironment(nextId);
       }
 
-      setEnvironment(defaultEnvironment.id);
+      try {
+        setEnvironment(defaultEnvironment.id);
+      } catch (initEnvError) {
+        console.warn("Initial environment setup failed:", initEnvError);
+      }
 
       if (environmentButton) {
         environmentButton.addEventListener("click", () => {
@@ -1998,7 +2052,7 @@
         birbAnchor.quaternion.multiply(blendedQuaternion);
         birbAnchor.quaternion.normalize();
 
-        if (glideTrail) {
+        if (glideTrail && glideTrail.rotation) {
           glideTrail.rotation.z = motionState.elapsed * 0.32;
         }
 
@@ -2037,6 +2091,10 @@
       canvas.addEventListener("webglcontextrestored", handleContextRestored, false);
 
       renderer.setAnimationLoop(renderFrame);
+
+      if (statusMetric) {
+        statusMetric.textContent = "Ready to fly! Use touch controls or arrow keys.";
+      }
 
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {

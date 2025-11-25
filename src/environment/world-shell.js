@@ -635,35 +635,45 @@ export function createWorldShell(
   scene.add(root);
 
   const skyGeometry = new THREE.SphereGeometry(70 * spaceScale, 64, 48);
-  const skyMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      topColor: { value: new THREE.Color(definition.sky?.top ?? 0x2f4f86) },
-      bottomColor: { value: new THREE.Color(definition.sky?.bottom ?? 0x08152a) },
-      glowIntensity: { value: definition.sky?.glow ?? 0.24 },
-    },
-    side: THREE.BackSide,
-    fog: false,
-    transparent: false,
-    vertexShader: `
-      varying float vGradient;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vGradient = smoothstep(-0.2, 0.8, normalize(worldPosition.xyz).y);
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 topColor;
-      uniform vec3 bottomColor;
-      uniform float glowIntensity;
-      varying float vGradient;
-      void main() {
-        vec3 base = mix(bottomColor, topColor, vGradient);
-        base += glowIntensity * 0.4 * vec3(0.18, 0.3, 0.55) * pow(vGradient, 2.5);
-        gl_FragColor = vec4(base, 1.0);
-      }
-    `,
-  });
+  let skyMaterial;
+  try {
+    skyMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        topColor: { value: new THREE.Color(definition.sky?.top ?? 0x2f4f86) },
+        bottomColor: { value: new THREE.Color(definition.sky?.bottom ?? 0x08152a) },
+        glowIntensity: { value: definition.sky?.glow ?? 0.24 },
+      },
+      side: THREE.BackSide,
+      fog: false,
+      transparent: false,
+      vertexShader: `
+        varying float vGradient;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vGradient = smoothstep(-0.2, 0.8, normalize(worldPosition.xyz).y);
+          gl_Position = projectionMatrix * viewMatrix * worldPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 bottomColor;
+        uniform float glowIntensity;
+        varying float vGradient;
+        void main() {
+          vec3 base = mix(bottomColor, topColor, vGradient);
+          base += glowIntensity * 0.4 * vec3(0.18, 0.3, 0.55) * pow(vGradient, 2.5);
+          gl_FragColor = vec4(base, 1.0);
+        }
+      `,
+    });
+  } catch (shaderError) {
+    // Fallback to simple material if shader compilation fails (common on mobile)
+    skyMaterial = new THREE.MeshBasicMaterial({
+      color: definition.sky?.top ?? 0x2f4f86,
+      side: THREE.BackSide,
+      fog: false,
+    });
+  }
   const skydome = new THREE.Mesh(skyGeometry, skyMaterial);
   skydome.renderOrder = -5;
   root.add(skydome);
@@ -754,14 +764,19 @@ export function createWorldShell(
 
   const builder = definition.builder;
   if (typeof builder === "function") {
-    builder({
-      THREE,
-      root,
-      config: definition,
-      propOrigin: propSpread * spaceScale,
-      terrainScale: terrainScale * spaceScale,
-      spaceScale,
-    });
+    try {
+      builder({
+        THREE,
+        root,
+        config: definition,
+        propOrigin: propSpread * spaceScale,
+        terrainScale: terrainScale * spaceScale,
+        spaceScale,
+      });
+    } catch (builderError) {
+      // Environment props failed to build - base scene will still render
+      console.warn("Environment builder failed:", builderError);
+    }
   }
 
   return {
