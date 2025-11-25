@@ -758,6 +758,8 @@
         alpha: true,
       });
 
+      const contextState = { lost: false };
+
       const DPR_CAP = 1.8;
       const resizeState = { width: 0, height: 0 };
       const actionPaletteState = {
@@ -1499,7 +1501,9 @@
           throttleMetric.textContent = `${throttlePercent}%`;
         }
         if (statusMetric) {
-          if (controlState.systemPaused) {
+          if (contextState.lost) {
+            statusMetric.textContent = "Rendering paused while recovering graphics context...";
+          } else if (controlState.systemPaused) {
             statusMetric.textContent = "Motion paused via system preference";
           } else if (!motionState.animate) {
             statusMetric.textContent = "Flight paused";
@@ -1943,6 +1947,9 @@
       });
 
       const renderFrame = (time = 0) => {
+        if (contextState.lost) {
+          return;
+        }
         updateRendererSize();
 
         let delta = 0;
@@ -1982,6 +1989,31 @@
         cameraState.updateActiveCamera({ pose, ambientOffsets, delta });
         renderer.render(scene, cameraState.camera);
       };
+
+      function handleContextLost(event) {
+        event.preventDefault();
+        contextState.lost = true;
+        previousTime = null;
+        flightControls?.reset?.({ releasePointerLock: true });
+        renderer.setAnimationLoop(null);
+        if (statusMetric) {
+          statusMetric.textContent = "Graphics context lost — attempting to restore...";
+        }
+      }
+
+      function handleContextRestored() {
+        contextState.lost = false;
+        renderer.state?.reset?.();
+        updateRendererSize(true);
+        renderer.setAnimationLoop(document.hidden ? null : renderFrame);
+        renderFrame(0);
+        if (statusMetric) {
+          statusMetric.textContent = "Graphics restored. Ready to fly.";
+        }
+      }
+
+      canvas.addEventListener("webglcontextlost", handleContextLost, false);
+      canvas.addEventListener("webglcontextrestored", handleContextRestored, false);
 
       renderer.setAnimationLoop(renderFrame);
 
