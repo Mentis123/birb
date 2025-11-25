@@ -752,15 +752,37 @@
       const canvasWrapper = document.querySelector(".canvas-wrapper");
       const canvasActions = document.querySelector("[data-draggable-panel]");
       const canvas = document.querySelector("#scene");
-      const renderer = new THREE.WebGLRenderer({
-        canvas,
-        antialias: true,
-        alpha: true,
-      });
+
+      const statusMetric = document.querySelector('[data-metric="status"]');
+
+      const showFatalError = (message) => {
+        if (statusMetric) {
+          statusMetric.textContent = message;
+        }
+        throw new Error(message);
+      };
+
+      let renderer;
+      try {
+        renderer = new THREE.WebGLRenderer({
+          canvas,
+          antialias: true,
+          alpha: true,
+          powerPreference: "low-power",
+          failIfMajorPerformanceCaveat: false,
+        });
+      } catch (error) {
+        showFatalError("Unable to start WebGL — your browser may not support it.");
+      }
+
+      if (!renderer?.getContext()) {
+        showFatalError("WebGL context unavailable. Please enable hardware acceleration.");
+      }
 
       const contextState = { lost: false };
 
-      const DPR_CAP = 1.8;
+      const prefersCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
+      const DPR_CAP = prefersCoarsePointer ? 1.4 : 1.8;
       const resizeState = { width: 0, height: 0 };
       const actionPaletteState = {
         pointerId: null,
@@ -1416,7 +1438,6 @@
       const speedMetric = document.querySelector('[data-metric="speed"]');
       const throttleMetric = document.querySelector('[data-metric="throttle"]');
       const fpsMetric = document.querySelector('[data-metric="fps"]');
-      const statusMetric = document.querySelector('[data-metric="status"]');
       const panelToggleLabel = panelToggleButton
         ? panelToggleButton.querySelector('[data-settings-label]')
         : null;
