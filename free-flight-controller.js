@@ -1,21 +1,22 @@
-export const MOVEMENT_ACCELERATION = 5.25;
-export const LINEAR_DRAG = 0.6;
-export const SPRINT_MULTIPLIER = 1.75;
+// Relaxed, chill gliding feel
+export const MOVEMENT_ACCELERATION = 2.8;
+export const LINEAR_DRAG = 1.2;
+export const SPRINT_MULTIPLIER = 1.4;
 // Controls how quickly the bird eases toward new roll velocities when strafing.
-export const BANK_RESPONSIVENESS = 4.25;
+export const BANK_RESPONSIVENESS = 2.5;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
-export const BANK_ROLL_SPEED = Math.PI * 1.55;
-export const LOOK_SENSITIVITY = 0.0025;
-export const AMBIENT_BOB_AMPLITUDE = 0.16;
-export const AMBIENT_BOB_SPEED = 1.15;
-export const AMBIENT_ROLL_AMPLITUDE = 0.08;
-export const AMBIENT_ROLL_SPEED = 0.9;
-export const AMBIENT_YAW_AMPLITUDE = 0.05;
-export const AMBIENT_YAW_SPEED = 0.7;
+export const BANK_ROLL_SPEED = Math.PI * 0.8;
+export const LOOK_SENSITIVITY = 0.002;
+export const AMBIENT_BOB_AMPLITUDE = 0.12;
+export const AMBIENT_BOB_SPEED = 0.8;
+export const AMBIENT_ROLL_AMPLITUDE = 0.05;
+export const AMBIENT_ROLL_SPEED = 0.6;
+export const AMBIENT_YAW_AMPLITUDE = 0.03;
+export const AMBIENT_YAW_SPEED = 0.5;
 
-export const INPUT_SMOOTHING = 12;
-export const STRAFE_DAMPING = 0.65;
-export const IDLE_LINEAR_DRAG = 4.2;
+export const INPUT_SMOOTHING = 8;
+export const STRAFE_DAMPING = 0.5;
+export const IDLE_LINEAR_DRAG = 2.5;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {

@@ -204,9 +204,8 @@
         position: absolute;
         inset: auto 0 var(--space-2) 0;
         display: none;
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        justify-content: center;
         align-items: end;
-        gap: var(--space-2);
         padding: 0 var(--space-2);
         pointer-events: none;
         z-index: 3;
@@ -612,11 +611,11 @@
                     min="0"
                     max="1"
                     step="0.01"
-                    value="0.6"
+                    value="0.4"
                     aria-describedby="glide-speed-display"
                   />
                   <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-                    60%
+                    40%
                   </output>
                 </div>
                 <button type="button" class="control-button" data-control="environment">
@@ -632,7 +631,7 @@
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">Throttle</span>
-                    <span class="control-metrics__value" data-metric="throttle">60%</span>
+                    <span class="control-metrics__value" data-metric="throttle">40%</span>
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">FPS</span>
@@ -729,19 +728,6 @@
         </div>
         <div class="touch-controls" aria-hidden="true">
           <div class="thumbstick" data-thumbstick="left">
-            <div class="thumbstick__handle" data-thumbstick-handle></div>
-          </div>
-          <div class="lift-controls">
-            <button type="button" class="lift-button" data-lift-button data-lift="1">
-              <span aria-hidden="true" class="lift-button__icon">▲</span>
-              <span class="visually-hidden">Ascend (Space/E)</span>
-            </button>
-            <button type="button" class="lift-button" data-lift-button data-lift="-1">
-              <span aria-hidden="true" class="lift-button__icon">▼</span>
-              <span class="visually-hidden">Descend (Shift/Q)</span>
-            </button>
-          </div>
-          <div class="thumbstick" data-thumbstick="right">
             <div class="thumbstick__handle" data-thumbstick-handle></div>
           </div>
         </div>
@@ -1808,9 +1794,7 @@
       let cameraState = null;
       const CAMERA_MODE_SEQUENCE = [
         CAMERA_MODES.FOLLOW,
-        CAMERA_MODES.SEQUENCE,
         CAMERA_MODES.FPV,
-        CAMERA_MODES.FIXED,
       ];
       let cameraModeIndex = 0;
 
