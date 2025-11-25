@@ -1,991 +1,435 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Birb Flight Lab</title>
+  <title>Birb Glide</title>
   <style>
-    :root {
-      --glass-surface: rgba(20, 30, 50, 0.65);
-      --glass-border: rgba(255, 255, 255, 0.12);
-      --accent-primary: #4cc9f0;
-      --text-primary: #f0f6fc;
-    }
-
     * {
+      margin: 0;
+      padding: 0;
       box-sizing: border-box;
       -webkit-tap-highlight-color: transparent;
       user-select: none;
-      -webkit-user-select: none;
     }
 
     body {
-      margin: 0;
-      padding: 0;
       width: 100vw;
-      height: 100vh;
+      height: 100dvh;
       overflow: hidden;
-      background-color: #0a1426;
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      color: var(--text-primary);
-    }
-
-    main {
-      position: relative;
-      width: 100%;
-      height: 100%;
-    }
-
-    header {
-      position: absolute;
-      top: 1.5rem;
-      left: 0;
-      width: 100%;
-      text-align: center;
-      pointer-events: none;
-      z-index: 10;
-      font-weight: 300;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      font-size: 0.85rem;
-      opacity: 0.8;
-      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-    }
-
-    .canvas-wrapper {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 1;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 50%, #98D8AA 100%);
     }
 
     canvas {
       display: block;
-      outline: none;
-    }
-
-    /* Controls UI */
-    .canvas-actions {
-      position: absolute;
-      bottom: 2rem;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1rem;
-      padding: 1rem;
-      border-radius: 1.5rem;
-      background: var(--glass-surface);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--glass-border);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-      touch-action: none;
-      cursor: grab;
-    }
-
-    .canvas-actions:active {
-      cursor: grabbing;
-    }
-
-    .canvas-actions.is-dragging {
-      opacity: 0.9;
-      transform: scale(1.02) !important;
-      box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
-    }
-
-    .canvas-actions__tray {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.45rem;
-    }
-
-    @media (max-width: 32rem) {
-      .canvas-actions__tray {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-
-    .canvas-action-button {
-      padding: 0;
-      width: 2.6rem;
-      min-width: 2.6rem;
-      min-height: 2.6rem;
-      border-radius: 0.85rem;
-      background: linear-gradient(145deg, rgba(30, 47, 84, 0.9), rgba(20, 31, 56, 0.78));
-      border: 1px solid rgba(158, 196, 255, 0.32);
-      color: #f1f5ff;
-      font-size: 0.66rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      appearance: none;
-      -webkit-appearance: none;
-    }
-
-    .canvas-action-button:active {
-      transform: scale(0.95);
-    }
-
-    .control-metrics {
-      margin-top: 0.5rem;
-      color: rgba(255, 255, 255, 0.7);
-      font-size: 0.7rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
       width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    #ui {
+      position: fixed;
+      top: 20px;
+      left: 0;
+      right: 0;
+      text-align: center;
       pointer-events: none;
+      z-index: 10;
+    }
+
+    #score {
+      font-size: 24px;
+      font-weight: 600;
+      color: #fff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    #hint {
+      position: fixed;
+      bottom: 40px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 16px;
+      color: rgba(255,255,255,0.8);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      pointer-events: none;
+      transition: opacity 0.5s;
     }
   </style>
 </head>
-
 <body>
-  <main>
-    <header>Birb Flight Lab</header>
+  <canvas id="game"></canvas>
+  <div id="ui">
+    <div id="score">🌟 0</div>
+  </div>
+  <div id="hint">Tilt or drag to glide</div>
 
-    <!-- Loading Indicator -->
-    <div id="loading-screen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:#0a1426;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#f0f6fc;font-family:'Inter',system-ui,sans-serif;">
-      <div style="text-align:center;">
-        <div style="font-size:1.2rem;margin-bottom:1rem;letter-spacing:0.1em;">LOADING BIRB...</div>
-        <div id="loading-progress" style="font-size:0.9rem;color:rgba(255,255,255,0.6);margin-bottom:1rem;">Initializing...</div>
-        <div id="loading-error" style="font-size:0.85rem;color:#ff6b6b;margin-top:1rem;max-width:80%;display:none;"></div>
-      </div>
-    </div>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const hint = document.getElementById('hint');
+    const scoreEl = document.getElementById('score');
 
-    <div class="canvas-wrapper">
-      <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
-      <div class="canvas-actions" data-draggable-panel>
-        <div class="canvas-actions__tray" role="group" aria-label="Display options">
-          <button type="button" class="canvas-action-button" data-control="camera" title="Toggle Camera (FPV)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              style="width:1.2rem;height:1.2rem">
-              <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-              <path
-                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
-            </svg>
-          </button>
-          <button type="button" class="canvas-action-button" data-control="environment" title="Cycle Environment">
-            <svg class="environment-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
-              style="width:1.2rem;height:1.2rem;fill:none;stroke:currentColor;stroke-width:1.5">
-              <path d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
-              <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
-              <path
-                d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25" />
-            </svg>
-          </button>
-          <button type="button" class="canvas-action-button" data-control="reset" title="Reset Position">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              style="width:1.2rem;height:1.2rem">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
-            </svg>
-          </button>
-          <button type="button" class="canvas-action-button" data-control="fullscreen" title="Toggle Fullscreen">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              style="width:1.2rem;height:1.2rem">
-              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-            </svg>
-          </button>
-        </div>
-        <div class="control-metrics">
-          <div style="display:flex; justify-content:space-between;"><span>SPEED</span><span
-              data-metric="speed">0.0m/s</span></div>
-          <div style="display:flex; justify-content:space-between;"><span>ALTITUDE</span><span
-              data-metric="throttle">5.0m</span></div>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <script type="importmap">
-      {
-        "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
-          "three/": "https://cdn.jsdelivr.net/npm/three@0.161.0/"
-        }
-      }
-  </script>
-
-  <script type="module">
-    import * as THREE from "three";
-    import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-    import { SimpleFlightController } from "./src/controls/simple-flight-controller.js";
-    import { createCameraState, CAMERA_MODES } from "./src/camera/camera-state.js";
-    import { createFloatingThumbstick } from "./src/controls/virtual-thumbstick.js";
-    import { createWorldShell, ENVIRONMENT_VARIANTS, getEnvironmentDefinition } from "./src/environment/world-shell.js";
-    import { createSpeedTrail, createWingVortices } from "./src/environment/speed-trail.js";
-
-    // ============================================================================
-    // MOBILE DIAGNOSTIC LOGGING & LOADING UI
-    // ============================================================================
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const loadingScreen = document.getElementById('loading-screen');
-    const loadingProgress = document.getElementById('loading-progress');
-    const loadingError = document.getElementById('loading-error');
-
-    function mobileLog(message, data) {
-      console.log(`[LOG] ${message}`, data || '');
+    // High DPI support
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      ctx.scale(dpr, dpr);
     }
-
-    function mobileError(message, error) {
-      console.error(`[ERROR] ${message}`, error || '');
-    }
-
-    function updateLoadingProgress(message) {
-      mobileLog(message);
-      if (loadingProgress) loadingProgress.textContent = message;
-    }
-
-    function showLoadingError(message) {
-      mobileError(message);
-      if (loadingError) {
-        loadingError.textContent = message;
-        loadingError.style.display = 'block';
-      }
-    }
-
-    function hideLoadingScreen() {
-      mobileLog('Hiding loading screen');
-      if (loadingScreen) {
-        loadingScreen.style.opacity = '0';
-        loadingScreen.style.transition = 'opacity 0.5s ease-out';
-        setTimeout(() => {
-          loadingScreen.style.display = 'none';
-        }, 500);
-      }
-    }
-
-    // ============================================================================
-    // TOTAL MOBILE WEBGL REBUILD - Defensive initialization that handles ALL edge cases
-    // ============================================================================
-
-    mobileLog('Starting initialization');
-    updateLoadingProgress('Starting initialization...');
-
-    // ============================================================================
-    // DOM ELEMENT SETUP
-    // ============================================================================
-    const canvasWrapper = document.querySelector(".canvas-wrapper");
-
-    // CRITICAL FIX: Create a fresh canvas to avoid context conflicts
-    // Some mobile browsers fail if the canvas has been touched by anything before
-    const existingCanvas = document.querySelector("#scene");
-    let canvas;
-
-    if (isMobile) {
-      // On mobile: create a completely fresh canvas
-      canvas = document.createElement('canvas');
-      canvas.id = 'scene';
-      canvas.setAttribute('role', 'img');
-      canvas.setAttribute('aria-label', 'Stylized blue bird gliding through a dark sky');
-      if (existingCanvas && existingCanvas.parentNode) {
-        existingCanvas.parentNode.replaceChild(canvas, existingCanvas);
-      }
-      mobileLog('Created fresh canvas for mobile');
-    } else {
-      canvas = existingCanvas;
-    }
-
-    if (!canvasWrapper || !canvas) {
-      mobileError('Critical DOM elements not found');
-      throw new Error('Canvas or wrapper not found');
-    }
-
-    // ============================================================================
-    // WEBGL DEFENSIVE PATCHES - Applied BEFORE any WebGL operations
-    // These patches prevent crashes from null/invalid returns on mobile browsers
-    // ============================================================================
-
-    // Helper: Check if a WebGL version string is valid for Three.js
-    // Three.js expects: /^WebGL (\d)/ to match
-    function isValidVersionString(str) {
-      if (str == null) return false;
-      if (typeof str !== 'string') return false;
-      if (str === '') return false;
-      return /^WebGL\s+\d/.test(str) || /^OpenGL\s+ES\s+\d/.test(str);
-    }
-
-    // Helper: Get safe fallback version string
-    function getSafeVersionString(contextType) {
-      return contextType === 'webgl2' ? 'WebGL 2.0' : 'WebGL 1.0';
-    }
-
-    // Helper: Get safe fallback for context attributes
-    function getSafeContextAttributes() {
-      return {
-        alpha: true,
-        antialias: false,
-        depth: true,
-        failIfMajorPerformanceCaveat: false,
-        powerPreference: 'default',
-        premultipliedAlpha: true,
-        preserveDrawingBuffer: false,
-        stencil: false,
-        desynchronized: false
-      };
-    }
-
-    // PATCH 1: WebGLRenderingContext.prototype.getParameter
-    // Fixes: null/invalid VERSION and SHADING_LANGUAGE_VERSION strings
-    // Also fixes: null returns for array-type parameters (causes "array[offset]" error)
-    function applyGetParameterPatch() {
-      const protos = [];
-      if (typeof WebGLRenderingContext !== 'undefined') {
-        protos.push({ proto: WebGLRenderingContext.prototype, type: 'webgl' });
-      }
-      if (typeof WebGL2RenderingContext !== 'undefined') {
-        protos.push({ proto: WebGL2RenderingContext.prototype, type: 'webgl2' });
-      }
-
-      // Parameters that return typed arrays - must return empty array, not null
-      // COMPRESSED_TEXTURE_FORMATS (0x86A3) returns Uint32Array
-      // Some drivers return null on error, causing "null is not an object (evaluating 'array[offset]')"
-      const ARRAY_PARAMETERS = {
-        0x86A3: () => new Uint32Array(0), // COMPRESSED_TEXTURE_FORMATS
-      };
-
-      // Parameters that return integers with safe fallback values
-      const INTEGER_PARAMETERS = {
-        0x0D33: 16384,  // MAX_TEXTURE_SIZE
-        0x851C: 16,     // MAX_CUBE_MAP_TEXTURE_SIZE
-        0x8872: 16,     // MAX_TEXTURE_IMAGE_UNITS
-        0x8B4C: 32,     // MAX_VERTEX_TEXTURE_IMAGE_UNITS
-        0x8B4D: 48,     // MAX_COMBINED_TEXTURE_IMAGE_UNITS
-        0x8869: 16,     // MAX_VERTEX_ATTRIBS
-        0x8DFB: 16,     // MAX_VARYING_VECTORS (WebGL1)
-        0x8DFC: 256,    // MAX_VERTEX_UNIFORM_VECTORS
-        0x8DFD: 512,    // MAX_FRAGMENT_UNIFORM_VECTORS
-        0x84E8: 8,      // MAX_RENDERBUFFER_SIZE
-        0x0D32: 2,      // MAX_VIEWPORT_DIMS (returns array but 2 is safe int fallback)
-      };
-
-      protos.forEach(({ proto, type }) => {
-        if (proto._patchedGetParameter) return;
-
-        const original = proto.getParameter;
-        proto.getParameter = function(pname) {
-          try {
-            const result = original.call(this, pname);
-
-            // VERSION (0x1F02) and SHADING_LANGUAGE_VERSION (0x8B8C)
-            if (pname === 0x1F02 || pname === this.VERSION) {
-              if (!isValidVersionString(result)) {
-                mobileLog(`getParameter VERSION returned invalid: ${result}, using fallback`);
-                return getSafeVersionString(type);
-              }
-            }
-            if (pname === 0x8B8C || pname === this.SHADING_LANGUAGE_VERSION) {
-              if (!isValidVersionString(result)) {
-                mobileLog(`getParameter SHADING_LANGUAGE_VERSION returned invalid: ${result}, using fallback`);
-                return getSafeVersionString(type);
-              }
-            }
-
-            // Handle null results for array parameters (critical fix for "array[offset]" error)
-            if (result === null && ARRAY_PARAMETERS[pname]) {
-              mobileLog(`getParameter(${pname.toString(16)}) returned null, using empty array fallback`);
-              return ARRAY_PARAMETERS[pname]();
-            }
-
-            // Handle null results for integer parameters
-            if (result === null && INTEGER_PARAMETERS[pname] !== undefined) {
-              mobileLog(`getParameter(${pname.toString(16)}) returned null, using integer fallback`);
-              return INTEGER_PARAMETERS[pname];
-            }
-
-            return result;
-          } catch (e) {
-            mobileError('getParameter threw error for pname ' + pname, e);
-            // Return safe fallback for version queries
-            if (pname === 0x1F02 || pname === this.VERSION) return getSafeVersionString(type);
-            if (pname === 0x8B8C || pname === this.SHADING_LANGUAGE_VERSION) return getSafeVersionString(type);
-            // Return safe fallback for array parameters
-            if (ARRAY_PARAMETERS[pname]) return ARRAY_PARAMETERS[pname]();
-            // Return safe fallback for integer parameters
-            if (INTEGER_PARAMETERS[pname] !== undefined) return INTEGER_PARAMETERS[pname];
-            return null;
-          }
-        };
-        proto._patchedGetParameter = true;
-        mobileLog(`Patched ${type} getParameter`);
-      });
-    }
-
-    // PATCH 2: WebGLRenderingContext.prototype.getContextAttributes
-    // Fixes: null return on some mobile browsers (causes "null is not an object" error)
-    function applyGetContextAttributesPatch() {
-      const protos = [];
-      if (typeof WebGLRenderingContext !== 'undefined') {
-        protos.push(WebGLRenderingContext.prototype);
-      }
-      if (typeof WebGL2RenderingContext !== 'undefined') {
-        protos.push(WebGL2RenderingContext.prototype);
-      }
-
-      protos.forEach((proto) => {
-        if (proto._patchedGetContextAttributes) return;
-
-        const original = proto.getContextAttributes;
-        proto.getContextAttributes = function() {
-          try {
-            const result = original ? original.call(this) : null;
-            if (result && typeof result === 'object') {
-              return result;
-            }
-            mobileLog('getContextAttributes returned null/invalid, using fallback');
-            return getSafeContextAttributes();
-          } catch (e) {
-            mobileError('getContextAttributes threw error', e);
-            return getSafeContextAttributes();
-          }
-        };
-        proto._patchedGetContextAttributes = true;
-        mobileLog('Patched getContextAttributes');
-      });
-    }
-
-    // PATCH 3: WebGLRenderingContext.prototype.getShaderPrecisionFormat
-    // Fixes: null return on some iOS/mobile browsers
-    function applyShaderPrecisionPatch() {
-      const protos = [];
-      if (typeof WebGLRenderingContext !== 'undefined') {
-        protos.push(WebGLRenderingContext.prototype);
-      }
-      if (typeof WebGL2RenderingContext !== 'undefined') {
-        protos.push(WebGL2RenderingContext.prototype);
-      }
-
-      protos.forEach((proto) => {
-        if (proto._patchedShaderPrecision) return;
-
-        const original = proto.getShaderPrecisionFormat;
-        proto.getShaderPrecisionFormat = function(shaderType, precisionType) {
-          try {
-            const result = original ? original.call(this, shaderType, precisionType) : null;
-            if (result && typeof result === 'object' && 'precision' in result) {
-              return result;
-            }
-            mobileLog('getShaderPrecisionFormat returned null/invalid, using fallback');
-            return { rangeMin: 127, rangeMax: 127, precision: 23 };
-          } catch (e) {
-            mobileError('getShaderPrecisionFormat threw error', e);
-            return { rangeMin: 127, rangeMax: 127, precision: 23 };
-          }
-        };
-        proto._patchedShaderPrecision = true;
-        mobileLog('Patched getShaderPrecisionFormat');
-      });
-    }
-
-    // PATCH 4: WebGLRenderingContext.prototype.getExtension
-    // Fixes: errors when querying unsupported extensions
-    function applyGetExtensionPatch() {
-      const protos = [];
-      if (typeof WebGLRenderingContext !== 'undefined') {
-        protos.push(WebGLRenderingContext.prototype);
-      }
-      if (typeof WebGL2RenderingContext !== 'undefined') {
-        protos.push(WebGL2RenderingContext.prototype);
-      }
-
-      protos.forEach((proto) => {
-        if (proto._patchedGetExtension) return;
-
-        const original = proto.getExtension;
-        proto.getExtension = function(name) {
-          try {
-            return original ? original.call(this, name) : null;
-          } catch (e) {
-            mobileError(`getExtension(${name}) threw error`, e);
-            return null;
-          }
-        };
-        proto._patchedGetExtension = true;
-        mobileLog('Patched getExtension');
-      });
-    }
-
-    // Apply all patches immediately
-    mobileLog('Applying WebGL defensive patches...');
-    updateLoadingProgress('Applying WebGL patches...');
-
-    try {
-      applyGetParameterPatch();
-      applyGetContextAttributesPatch();
-      applyShaderPrecisionPatch();
-      applyGetExtensionPatch();
-      mobileLog('All WebGL patches applied successfully');
-    } catch (patchError) {
-      mobileError('Failed to apply WebGL patches', patchError);
-      // Continue anyway - some patches may have worked
-    }
-
-    // ============================================================================
-    // RENDERER SETUP - Let Three.js create the context, but with safe options
-    // ============================================================================
-    let renderer;
-
-    // Check basic WebGL availability
-    function checkWebGLSupport() {
-      try {
-        const testCanvas = document.createElement('canvas');
-        const gl = testCanvas.getContext('webgl2') ||
-                   testCanvas.getContext('webgl') ||
-                   testCanvas.getContext('experimental-webgl');
-
-        if (!gl) {
-          mobileLog('No WebGL context available');
-          return false;
-        }
-
-        // Test that our patches work
-        const version = gl.getParameter(gl.VERSION);
-        const attrs = gl.getContextAttributes();
-
-        mobileLog('WebGL support check passed', {
-          version,
-          hasAttributes: !!attrs,
-          isWebGL2: gl instanceof WebGL2RenderingContext
-        });
-
-        return true;
-      } catch (e) {
-        mobileError('WebGL support check failed', e);
-        return false;
-      }
-    }
-
-    try {
-      updateLoadingProgress('Checking WebGL support...');
-
-      if (!checkWebGLSupport()) {
-        throw new Error('WebGL is not supported on this device');
-      }
-
-      updateLoadingProgress('Creating WebGL renderer...');
-
-      // CRITICAL: Let Three.js create the context itself
-      // Do NOT pass a pre-created context - this causes issues on mobile
-      // Three.js will use our patched prototypes automatically
-
-      const rendererConfigs = [
-        // Config 1: Mobile-optimized (most compatible)
-        {
-          canvas,
-          antialias: false,
-          alpha: true,
-          depth: true,
-          stencil: false,
-          powerPreference: 'default',
-          failIfMajorPerformanceCaveat: false,
-          preserveDrawingBuffer: false
-        },
-        // Config 2: Even more minimal
-        {
-          canvas,
-          antialias: false,
-          alpha: false,
-          depth: true,
-          stencil: false,
-          powerPreference: 'low-power',
-          failIfMajorPerformanceCaveat: false
-        },
-        // Config 3: Absolute minimum
-        {
-          canvas,
-          antialias: false,
-          alpha: false,
-          failIfMajorPerformanceCaveat: false
-        }
-      ];
-
-      let lastError = null;
-
-      for (let i = 0; i < rendererConfigs.length; i++) {
-        try {
-          mobileLog(`Trying renderer config ${i + 1}/${rendererConfigs.length}`, rendererConfigs[i]);
-          renderer = new THREE.WebGLRenderer(rendererConfigs[i]);
-
-          // Verify the renderer actually works
-          if (!renderer || !renderer.getContext()) {
-            throw new Error('Renderer created but context is null');
-          }
-
-          mobileLog(`Renderer created successfully with config ${i + 1}`);
-          break;
-        } catch (e) {
-          lastError = e;
-          mobileError(`Renderer config ${i + 1} failed: ${e.message}`);
-
-          // If canvas got a context that failed, we need a fresh canvas
-          if (i < rendererConfigs.length - 1) {
-            try {
-              const freshCanvas = document.createElement('canvas');
-              freshCanvas.id = 'scene';
-              freshCanvas.setAttribute('role', 'img');
-              freshCanvas.setAttribute('aria-label', 'Stylized blue bird gliding through a dark sky');
-              if (canvas.parentNode) {
-                canvas.parentNode.replaceChild(freshCanvas, canvas);
-                canvas = freshCanvas;
-                rendererConfigs[i + 1].canvas = freshCanvas;
-                mobileLog('Created fresh canvas for retry');
-              }
-            } catch (canvasError) {
-              mobileError('Failed to create fresh canvas', canvasError);
-            }
-          }
-        }
-      }
-
-      if (!renderer) {
-        throw lastError || new Error('All renderer configurations failed');
-      }
-
-      // Configure renderer for mobile
-      const maxPixelRatio = isMobile ? 1.5 : 2.0;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
-
-      const rect = canvasWrapper.getBoundingClientRect();
-      renderer.setSize(rect.width, rect.height, false);
-
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.2;
-
-      mobileLog('Renderer fully configured', {
-        isWebGL2: renderer.capabilities?.isWebGL2,
-        maxTextures: renderer.capabilities?.maxTextures,
-        pixelRatio: renderer.getPixelRatio()
-      });
-
-      updateLoadingProgress('WebGL renderer created');
-
-    } catch (error) {
-      mobileError('Failed to create renderer', {
-        message: error.message,
-        stack: error.stack
-      });
-      showLoadingError(`Failed to initialize WebGL: ${error.message}. Try closing other tabs or restarting your browser.`);
-      throw error;
-    }
-
-    // ============================================================================
-    // SCENE SETUP
-    // ============================================================================
-    updateLoadingProgress('Setting up 3D scene...');
-
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a1426);
-    scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
-
-    // Lighting
-    const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
-    scene.add(ambient);
-    const keyLight = new THREE.DirectionalLight(0xf3f0d2, 1.2);
-    keyLight.position.set(7.5, 8.2, 5.2);
-    scene.add(keyLight);
-
-    mobileLog('Scene and lighting created');
-
-    // Environment
-    let environmentShell = null;
-    let speedTrail = null;
-    let wingVortices = null;
-    let currentEnvIndex = 0;
-
-    function setEnvironment(id) {
-      if (environmentShell) environmentShell.dispose(scene, environmentShell.root);
-
-      // Clean up particles
-      if (speedTrail) { scene.remove(speedTrail.particles); speedTrail.dispose(); }
-      if (wingVortices) { scene.remove(wingVortices.particles); wingVortices.dispose(); }
-
-      const definition = getEnvironmentDefinition(id);
-      environmentShell = createWorldShell(scene, { three: THREE, variant: id });
-
-      speedTrail = createSpeedTrail(THREE, id);
-      scene.add(speedTrail.particles);
-
-      wingVortices = createWingVortices(THREE);
-      scene.add(wingVortices.particles);
-    }
-
-    updateLoadingProgress('Creating environment...');
-    setEnvironment("forest");
-    mobileLog('Environment created');
-
-    function cycleEnvironment() {
-      currentEnvIndex = (currentEnvIndex + 1) % ENVIRONMENT_VARIANTS.length;
-      setEnvironment(ENVIRONMENT_VARIANTS[currentEnvIndex].id);
-    }
-
-    // ============================================================================
-    // BIRB MODEL
-    // ============================================================================
-    updateLoadingProgress('Loading birb model...');
-
-    const birbAnchor = new THREE.Group();
-    scene.add(birbAnchor);
-    const birbRig = new THREE.Group();
-    birbAnchor.add(birbRig);
-    const birbModel = new THREE.Group();
-    birbRig.add(birbModel);
-
-    const wingRefs = { left: null, right: null };
-    let birbModelLoaded = false;
-
-    const gltfLoader = new GLTFLoader();
-
-    mobileLog('Starting GLTF load for birb.glb');
-
-    gltfLoader.load(
-      './birb.glb',
-      // onLoad - success callback
-      (gltf) => {
-        mobileLog('GLTF model loaded successfully');
-        updateLoadingProgress('Birb model loaded!');
-
-        const modelRoot = gltf.scene;
-        modelRoot.position.set(0, -0.2, 0);
-        birbModel.add(modelRoot);
-
-        modelRoot.traverse((child) => {
-          if (child.isMesh) {
-            const name = (child.name || "").toLowerCase();
-            if (name.includes("wing")) {
-              if (name.includes("left") || name.includes("l_")) wingRefs.left = child;
-              else if (name.includes("right") || name.includes("r_")) wingRefs.right = child;
-            }
-          }
-        });
-
-        mobileLog('Wing references found:', { left: !!wingRefs.left, right: !!wingRefs.right });
-        birbModelLoaded = true;
-
-        // Hide loading screen after a short delay
-        setTimeout(() => {
-          hideLoadingScreen();
-        }, 500);
-      },
-      // onProgress callback
-      (xhr) => {
-        if (xhr.lengthComputable) {
-          const percentComplete = (xhr.loaded / xhr.total) * 100;
-          const message = `Loading birb model: ${Math.round(percentComplete)}%`;
-          updateLoadingProgress(message);
-          mobileLog(message);
-        } else {
-          mobileLog(`Loading birb model: ${xhr.loaded} bytes loaded`);
-        }
-      },
-      // onError callback
-      (error) => {
-        mobileError('Failed to load birb.glb model', error);
-        const errorMsg = `Failed to load birb model. Error: ${error.message || 'Unknown error'}. Please check your network connection and try refreshing the page.`;
-        showLoadingError(errorMsg);
-
-        // Still hide loading screen after error is shown so user can see the page
-        setTimeout(() => {
-          if (loadingScreen) loadingScreen.style.opacity = '0.95'; // Keep it slightly visible with error
-        }, 3000);
-      }
-    );
-
-    birbRig.scale.setScalar(0.5);
-
-    // ============================================================================
-    // CONTROLS & GAME LOOP
-    // ============================================================================
-    updateLoadingProgress('Initializing controls...');
-
-    const flightController = new SimpleFlightController();
-    const cameraState = createCameraState({ three: THREE, scene, flightController });
-    const camera = cameraState.camera;
-
-    // Set FPV by default
-    let currentCameraMode = CAMERA_MODES.FPV;
-    cameraState.setMode(currentCameraMode);
-
-    mobileLog('Flight controller and camera initialized');
-
-    // Virtual Thumbstick
-    let thumbstickValue = { x: 0, y: 0 };
-    createFloatingThumbstick(document.body, {
-      onStart: () => {
-        mobileLog('Thumbstick started');
-      },
-      onEnd: () => {
-        thumbstickValue = { x: 0, y: 0 };
-        mobileLog('Thumbstick ended');
-      },
-      onChange: (val) => {
-        thumbstickValue = val;
-      }
-    });
-
-    mobileLog('Virtual thumbstick created');
-
-    // Draggable Panel Logic
-    const panel = document.querySelector('[data-draggable-panel]');
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Game state
+    const bird = {
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 3,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      wingPhase: 0
+    };
+
+    let score = 0;
+    let targetX = bird.x;
+    let targetY = bird.y;
     let isDragging = false;
-    let currentX;
-    let currentY;
-    let initialX;
-    let initialY;
-    let xOffset = 0;
-    let yOffset = 0;
+    let hasInteracted = false;
 
-    if (panel) {
-      panel.addEventListener('pointerdown', (e) => e.stopPropagation());
-      panel.addEventListener('pointermove', (e) => e.stopPropagation());
-      panel.addEventListener('pointerup', (e) => e.stopPropagation());
-      panel.addEventListener('touchstart', (e) => e.stopPropagation());
-      panel.addEventListener('touchmove', (e) => e.stopPropagation());
-      panel.addEventListener('touchend', (e) => e.stopPropagation());
+    // Clouds and stars (collectibles)
+    const clouds = [];
+    const stars = [];
 
-      panel.addEventListener("pointerdown", dragStart);
-      window.addEventListener("pointerup", dragEnd);
-      window.addEventListener("pointermove", drag);
-    }
-
-    function dragStart(e) {
-      if (e.target.closest('button')) return;
-
-      initialX = e.clientX - xOffset;
-      initialY = e.clientY - yOffset;
-
-      if (e.target === panel || panel.contains(e.target)) {
-        isDragging = true;
-        panel.classList.add('is-dragging');
-      }
-    }
-
-    function dragEnd(e) {
-      initialX = currentX;
-      initialY = currentY;
-      isDragging = false;
-      if (panel) panel.classList.remove('is-dragging');
-    }
-
-    function drag(e) {
-      if (isDragging && panel) {
-        e.preventDefault();
-        currentX = e.clientX - initialX;
-        currentY = e.clientY - initialY;
-
-        xOffset = currentX;
-        yOffset = currentY;
-
-        setTranslate(currentX, currentY, panel);
-      }
-    }
-
-    function setTranslate(xPos, yPos, el) {
-      el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
-    }
-
-    // UI Events
-    const cameraBtn = document.querySelector('[data-control="camera"]');
-    if (cameraBtn) {
-      cameraBtn.addEventListener('click', () => {
-        // Toggle between FPV and FOLLOW
-        currentCameraMode = currentCameraMode === CAMERA_MODES.FPV ? CAMERA_MODES.FOLLOW : CAMERA_MODES.FPV;
-        cameraState.setMode(currentCameraMode);
-        cameraBtn.title = `Toggle Camera (${currentCameraMode})`;
-        mobileLog(`Camera mode changed to: ${currentCameraMode}`);
+    function spawnCloud() {
+      clouds.push({
+        x: Math.random() * window.innerWidth,
+        y: -100 + Math.random() * window.innerHeight * 0.6,
+        size: 40 + Math.random() * 60,
+        speed: 0.2 + Math.random() * 0.3
       });
     }
 
-    const envBtn = document.querySelector('[data-control="environment"]');
-    if (envBtn) envBtn.addEventListener('click', cycleEnvironment);
+    function spawnStar() {
+      stars.push({
+        x: Math.random() * window.innerWidth,
+        y: -50,
+        size: 15 + Math.random() * 10,
+        speed: 1 + Math.random() * 2,
+        collected: false,
+        pulse: Math.random() * Math.PI * 2
+      });
+    }
 
-    const resetBtn = document.querySelector('[data-control="reset"]');
-    if (resetBtn) resetBtn.addEventListener('click', () => {
-      flightController.position.set(0, 5, 0);
-      flightController.velocity.set(0, 0, 0);
-      flightController.quaternion.identity();
-      cameraState.reset();
-    });
+    // Initialize
+    for (let i = 0; i < 5; i++) {
+      spawnCloud();
+      clouds[i].y = Math.random() * window.innerHeight * 0.5;
+    }
 
-    const fullscreenBtn = document.querySelector('[data-control="fullscreen"]');
-    if (fullscreenBtn) {
-      fullscreenBtn.addEventListener('click', () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch(err => {
-            console.log(`Error attempting to enable fullscreen: ${err.message}`);
-          });
-        } else {
-          if (document.exitFullscreen) {
-            document.exitFullscreen();
+    // Touch/Mouse controls
+    function handleStart(x, y) {
+      isDragging = true;
+      targetX = x;
+      targetY = y;
+      if (!hasInteracted) {
+        hasInteracted = true;
+        hint.style.opacity = '0';
+      }
+    }
+
+    function handleMove(x, y) {
+      if (isDragging) {
+        targetX = x;
+        targetY = y;
+      }
+    }
+
+    function handleEnd() {
+      isDragging = false;
+    }
+
+    canvas.addEventListener('mousedown', e => handleStart(e.clientX, e.clientY));
+    canvas.addEventListener('mousemove', e => handleMove(e.clientX, e.clientY));
+    canvas.addEventListener('mouseup', handleEnd);
+    canvas.addEventListener('mouseleave', handleEnd);
+
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      const t = e.touches[0];
+      handleStart(t.clientX, t.clientY);
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const t = e.touches[0];
+      handleMove(t.clientX, t.clientY);
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', handleEnd);
+
+    // Gyroscope (tilt) controls
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener('deviceorientation', e => {
+        if (e.gamma !== null && e.beta !== null) {
+          if (!hasInteracted) {
+            hasInteracted = true;
+            hint.style.opacity = '0';
+          }
+          // gamma: left-right tilt (-90 to 90)
+          // beta: front-back tilt (-180 to 180)
+          const tiltX = Math.max(-30, Math.min(30, e.gamma)) / 30;
+          const tiltY = Math.max(-30, Math.min(30, e.beta - 30)) / 30;
+
+          if (!isDragging) {
+            targetX = bird.x + tiltX * 100;
+            targetY = bird.y + tiltY * 100;
           }
         }
       });
     }
 
-    // Resize
-    function updateRendererSize() {
-      const rect = canvasWrapper.getBoundingClientRect();
-      if (canvas.width !== rect.width || canvas.height !== rect.height) {
-        renderer.setSize(rect.width, rect.height, false);
-        camera.aspect = rect.width / rect.height;
-        camera.updateProjectionMatrix();
+    // Draw bird
+    function drawBird() {
+      ctx.save();
+      ctx.translate(bird.x, bird.y);
+      ctx.rotate(bird.angle);
+
+      // Wing animation
+      bird.wingPhase += 0.15;
+      const wingFlap = Math.sin(bird.wingPhase) * 0.3;
+
+      // Body
+      ctx.fillStyle = '#FFD93D';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 25, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wing (left)
+      ctx.fillStyle = '#FFC107';
+      ctx.save();
+      ctx.rotate(-0.3 + wingFlap);
+      ctx.beginPath();
+      ctx.ellipse(-10, -5, 20, 8, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Wing (right)
+      ctx.save();
+      ctx.rotate(0.3 - wingFlap);
+      ctx.beginPath();
+      ctx.ellipse(-10, 5, 20, 8, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Beak
+      ctx.fillStyle = '#FF6B35';
+      ctx.beginPath();
+      ctx.moveTo(20, 0);
+      ctx.lineTo(35, -3);
+      ctx.lineTo(35, 3);
+      ctx.closePath();
+      ctx.fill();
+
+      // Eye
+      ctx.fillStyle = '#333';
+      ctx.beginPath();
+      ctx.arc(12, -5, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(13, -6, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tail feathers
+      ctx.fillStyle = '#FFC107';
+      ctx.beginPath();
+      ctx.moveTo(-20, 0);
+      ctx.lineTo(-35, -8);
+      ctx.lineTo(-30, 0);
+      ctx.lineTo(-35, 8);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Draw cloud
+    function drawCloud(cloud) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      const s = cloud.size;
+      ctx.beginPath();
+      ctx.arc(cloud.x, cloud.y, s * 0.5, 0, Math.PI * 2);
+      ctx.arc(cloud.x - s * 0.4, cloud.y + s * 0.1, s * 0.35, 0, Math.PI * 2);
+      ctx.arc(cloud.x + s * 0.4, cloud.y + s * 0.1, s * 0.4, 0, Math.PI * 2);
+      ctx.arc(cloud.x - s * 0.2, cloud.y + s * 0.3, s * 0.3, 0, Math.PI * 2);
+      ctx.arc(cloud.x + s * 0.2, cloud.y + s * 0.3, s * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw star
+    function drawStar(star) {
+      if (star.collected) return;
+
+      star.pulse += 0.1;
+      const pulse = 1 + Math.sin(star.pulse) * 0.2;
+      const s = star.size * pulse;
+
+      ctx.fillStyle = '#FFD700';
+      ctx.shadowColor = '#FFD700';
+      ctx.shadowBlur = 15;
+
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const angle = (i * Math.PI * 2) / 5 - Math.PI / 2;
+        const outerX = star.x + Math.cos(angle) * s;
+        const outerY = star.y + Math.sin(angle) * s;
+        const innerAngle = angle + Math.PI / 5;
+        const innerX = star.x + Math.cos(innerAngle) * s * 0.4;
+        const innerY = star.y + Math.sin(innerAngle) * s * 0.4;
+
+        if (i === 0) ctx.moveTo(outerX, outerY);
+        else ctx.lineTo(outerX, outerY);
+        ctx.lineTo(innerX, innerY);
       }
-    }
-    window.addEventListener('resize', updateRendererSize);
-
-    // Loop
-    let lastTime = performance.now();
-
-    function renderFrame(time) {
-      const deltaTime = Math.min((time - lastTime) / 1000, 0.05);
-      lastTime = time;
-
-      updateRendererSize();
-
-      // Physics
-      flightController.setInputs(-thumbstickValue.x, -thumbstickValue.y);
-      const pose = flightController.update(deltaTime);
-      const speed = pose.velocity.length();
-
-      // Visuals
-      birbAnchor.position.copy(pose.position);
-      birbAnchor.quaternion.copy(pose.quaternion);
-
-      const bankAngle = typeof pose.roll === 'number' ? pose.roll : -thumbstickValue.x * 0.5;
-      birbRig.rotation.z = THREE.MathUtils.lerp(birbRig.rotation.z, bankAngle, deltaTime * 6);
-
-      // Camera
-      cameraState.update({ pose, delta: deltaTime });
-
-      // Environment
-      if (environmentShell && environmentShell.update) environmentShell.update(deltaTime, pose.position);
-      if (speedTrail) speedTrail.update(deltaTime, pose.position, pose.velocity, speed);
-      if (wingVortices) wingVortices.update(deltaTime, pose.position, pose.quaternion, speed);
-
-      // UI
-      const speedEl = document.querySelector('[data-metric="speed"]');
-      if (speedEl) speedEl.textContent = `${speed.toFixed(1)}m/s`;
-      const altEl = document.querySelector('[data-metric="throttle"]');
-      if (altEl) altEl.textContent = `${pose.position.y.toFixed(1)}m`;
-
-      renderer.render(scene, camera);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
     }
 
-    updateLoadingProgress('Starting animation loop...');
-    renderer.setAnimationLoop(renderFrame);
-    mobileLog('Animation loop started - initialization complete (waiting for model to load)');
+    // Draw ground/hills
+    function drawGround(time) {
+      const h = window.innerHeight;
+      const w = window.innerWidth;
 
+      // Back hills
+      ctx.fillStyle = '#7CB342';
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (let x = 0; x <= w; x += 50) {
+        const y = h - 80 + Math.sin((x + time * 20) * 0.01) * 30;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+      ctx.fill();
+
+      // Front hills
+      ctx.fillStyle = '#8BC34A';
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (let x = 0; x <= w; x += 50) {
+        const y = h - 40 + Math.sin((x + time * 40) * 0.015) * 20;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Game loop
+    let lastTime = 0;
+    let gameTime = 0;
+
+    function update(timestamp) {
+      const dt = Math.min((timestamp - lastTime) / 16.67, 3);
+      lastTime = timestamp;
+      gameTime += dt;
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      // Clear
+      ctx.clearRect(0, 0, w, h);
+
+      // Draw background gradient
+      const gradient = ctx.createLinearGradient(0, 0, 0, h);
+      gradient.addColorStop(0, '#87CEEB');
+      gradient.addColorStop(0.5, '#B8E4F9');
+      gradient.addColorStop(1, '#98D8AA');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, w, h);
+
+      // Update and draw clouds
+      clouds.forEach(cloud => {
+        cloud.y += cloud.speed * dt;
+        if (cloud.y > h + 100) {
+          cloud.y = -100;
+          cloud.x = Math.random() * w;
+        }
+        drawCloud(cloud);
+      });
+
+      // Spawn stars occasionally
+      if (Math.random() < 0.02 * dt) {
+        spawnStar();
+      }
+
+      // Update and draw stars
+      stars.forEach(star => {
+        if (!star.collected) {
+          star.y += star.speed * dt;
+
+          // Check collision with bird
+          const dx = star.x - bird.x;
+          const dy = star.y - bird.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < 40) {
+            star.collected = true;
+            score++;
+            scoreEl.textContent = '🌟 ' + score;
+          }
+        }
+        drawStar(star);
+      });
+
+      // Remove old stars
+      for (let i = stars.length - 1; i >= 0; i--) {
+        if (stars[i].y > h + 50 || stars[i].collected) {
+          stars.splice(i, 1);
+        }
+      }
+
+      // Bird physics - smooth gliding toward target
+      const dx = targetX - bird.x;
+      const dy = targetY - bird.y;
+
+      bird.vx += dx * 0.002 * dt;
+      bird.vy += dy * 0.002 * dt;
+
+      // Add gentle floating motion when idle
+      if (!isDragging && !hasInteracted) {
+        bird.vy += Math.sin(gameTime * 0.05) * 0.1;
+      }
+
+      // Damping
+      bird.vx *= 0.95;
+      bird.vy *= 0.95;
+
+      // Apply velocity
+      bird.x += bird.vx * dt;
+      bird.y += bird.vy * dt;
+
+      // Keep bird on screen
+      bird.x = Math.max(40, Math.min(w - 40, bird.x));
+      bird.y = Math.max(40, Math.min(h - 100, bird.y));
+
+      // Bird angle based on velocity
+      const targetAngle = Math.atan2(bird.vy, Math.max(bird.vx, 1)) * 0.5;
+      bird.angle += (targetAngle - bird.angle) * 0.1;
+
+      // Draw ground
+      drawGround(gameTime);
+
+      // Draw bird
+      drawBird();
+
+      requestAnimationFrame(update);
+    }
+
+    requestAnimationFrame(update);
   </script>
 </body>
-
 </html>
