@@ -266,35 +266,8 @@
     }
 
     // ============================================================================
-    // CRITICAL: WebGL Version String Validation
-    // Three.js parses version with: /^WebGL (\d)/.exec(glVersion)[1]
-    // If the regex doesn't match, it throws "null is not an object"
+    // TOTAL MOBILE WEBGL REBUILD - Defensive initialization that handles ALL edge cases
     // ============================================================================
-    function isValidWebGLVersionString(str) {
-      // Must be a non-empty string that matches Three.js expected format
-      if (typeof str !== 'string' || str === '') return false;
-      // Three.js expects either "WebGL X.X" or "OpenGL ES X.X" format
-      return /^WebGL\s+\d/.test(str) || /^OpenGL\s+ES\s+\d/.test(str);
-    }
-
-    function getWebGLFallbackVersion(contextType) {
-      // Return a version string that EXACTLY matches what Three.js expects
-      // Format must be "WebGL X.X" where X is a digit
-      if (contextType === 'webgl2') {
-        return 'WebGL 2.0 (OpenGL ES 3.0 fallback)';
-      }
-      return 'WebGL 1.0 (OpenGL ES 2.0 fallback)';
-    }
-
-    function needsVersionFallback(result) {
-      // Returns true if the result needs to be replaced with fallback
-      // This is the KEY fix: check for ALL invalid values, not just null
-      if (result == null) return true;  // null or undefined
-      if (typeof result !== 'string') return true;  // numbers, booleans, objects
-      if (result === '') return true;  // empty string
-      if (!isValidWebGLVersionString(result)) return true;  // invalid format
-      return false;
-    }
 
     mobileLog('Starting initialization');
     updateLoadingProgress('Starting initialization...');
@@ -303,7 +276,25 @@
     // DOM ELEMENT SETUP
     // ============================================================================
     const canvasWrapper = document.querySelector(".canvas-wrapper");
-    let canvas = document.querySelector("#scene");
+
+    // CRITICAL FIX: Create a fresh canvas to avoid context conflicts
+    // Some mobile browsers fail if the canvas has been touched by anything before
+    const existingCanvas = document.querySelector("#scene");
+    let canvas;
+
+    if (isMobile) {
+      // On mobile: create a completely fresh canvas
+      canvas = document.createElement('canvas');
+      canvas.id = 'scene';
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', 'Stylized blue bird gliding through a dark sky');
+      if (existingCanvas && existingCanvas.parentNode) {
+        existingCanvas.parentNode.replaceChild(canvas, existingCanvas);
+      }
+      mobileLog('Created fresh canvas for mobile');
+    } else {
+      canvas = existingCanvas;
+    }
 
     if (!canvasWrapper || !canvas) {
       mobileError('Critical DOM elements not found');
@@ -311,372 +302,320 @@
     }
 
     // ============================================================================
-    // RENDERER SETUP
+    // WEBGL DEFENSIVE PATCHES - Applied BEFORE any WebGL operations
+    // These patches prevent crashes from null/invalid returns on mobile browsers
     // ============================================================================
-    let renderer;
-    let glContext;
 
-    // Check WebGL support - NOTE: This runs AFTER patches are applied,
-    // so if the browser returns invalid values, our patches should fix them.
-    // This check now validates the patched result works correctly.
-    function isWebGLAvailable() {
-      try {
-        const testCanvas = document.createElement('canvas');
-        // Try webgl2 first, then webgl, then experimental-webgl
-        const context = testCanvas.getContext('webgl2') ||
-                       testCanvas.getContext('webgl') ||
-                       testCanvas.getContext('experimental-webgl');
-        if (context) {
-          const glVersion = context.getParameter(context.VERSION);
-          const glslVersion = context.getParameter(context.SHADING_LANGUAGE_VERSION);
-
-          // Log what we got (after patching)
-          mobileLog('WebGL version check', {
-            glVersion,
-            glslVersion,
-            glVersionType: typeof glVersion,
-            glslVersionType: typeof glslVersion
-          });
-
-          // Validate version strings are usable by Three.js
-          // After our patches, these should always be valid strings
-          if (!isValidWebGLVersionString(glVersion)) {
-            mobileError('WebGL VERSION string is invalid after patching', {
-              glVersion,
-              type: typeof glVersion,
-              isValid: isValidWebGLVersionString(glVersion)
-            });
-            // Don't return false - the patches should have fixed this
-            // If we get here, something is very wrong with the patching
-          }
-
-          mobileLog('WebGL is supported', {
-            vendor: context.getParameter(context.VENDOR),
-            version: glVersion,
-            glsl: glslVersion,
-            renderer: context.getParameter(context.RENDERER)
-          });
-          return true;
-        }
-        mobileError('No WebGL context could be created');
-        return false;
-      } catch (e) {
-        mobileError('WebGL availability check failed', e);
-        return false;
-      }
+    // Helper: Check if a WebGL version string is valid for Three.js
+    // Three.js expects: /^WebGL (\d)/ to match
+    function isValidVersionString(str) {
+      if (str == null) return false;
+      if (typeof str !== 'string') return false;
+      if (str === '') return false;
+      return /^WebGL\s+\d/.test(str) || /^OpenGL\s+ES\s+\d/.test(str);
     }
 
-    // Some browsers return null from getShaderPrecisionFormat; provide a safe fallback
-    function patchShaderPrecisionFormat() {
-      try {
-        const glProtos = [
-          typeof WebGLRenderingContext !== 'undefined' ? WebGLRenderingContext.prototype : null,
-          typeof WebGL2RenderingContext !== 'undefined' ? WebGL2RenderingContext.prototype : null
-        ].filter(Boolean);
-
-        glProtos.forEach((proto) => {
-          if (proto.__shaderPrecisionPatched) return;
-
-          const original = proto.getShaderPrecisionFormat;
-          proto.getShaderPrecisionFormat = function (...args) {
-            const result = original ? original.apply(this, args) : null;
-            if (result) return result;
-            return { rangeMin: 127, rangeMax: 127, precision: 23 };
-          };
-
-          proto.__shaderPrecisionPatched = true;
-        });
-      } catch (e) {
-        mobileError('Shader precision patch failed', e);
-      }
+    // Helper: Get safe fallback version string
+    function getSafeVersionString(contextType) {
+      return contextType === 'webgl2' ? 'WebGL 2.0' : 'WebGL 1.0';
     }
 
-    // Guard against browsers returning invalid values for VERSION/SHADING_LANGUAGE_VERSION
-    // This is the CRITICAL patch that prevents Three.js from crashing
-    function patchGetParameter() {
-      try {
-        const glProtos = [
-          typeof WebGLRenderingContext !== 'undefined' ? WebGLRenderingContext.prototype : null,
-          typeof WebGL2RenderingContext !== 'undefined' ? WebGL2RenderingContext.prototype : null
-        ].filter(Boolean);
+    // Helper: Get safe fallback for context attributes
+    function getSafeContextAttributes() {
+      return {
+        alpha: true,
+        antialias: false,
+        depth: true,
+        failIfMajorPerformanceCaveat: false,
+        powerPreference: 'default',
+        premultipliedAlpha: true,
+        preserveDrawingBuffer: false,
+        stencil: false,
+        desynchronized: false
+      };
+    }
 
-        glProtos.forEach((proto, index) => {
-          if (proto.__getParameterPatched) return;
+    // PATCH 1: WebGLRenderingContext.prototype.getParameter
+    // Fixes: null/invalid VERSION and SHADING_LANGUAGE_VERSION strings
+    function applyGetParameterPatch() {
+      const protos = [];
+      if (typeof WebGLRenderingContext !== 'undefined') {
+        protos.push({ proto: WebGLRenderingContext.prototype, type: 'webgl' });
+      }
+      if (typeof WebGL2RenderingContext !== 'undefined') {
+        protos.push({ proto: WebGL2RenderingContext.prototype, type: 'webgl2' });
+      }
 
-          const original = proto.getParameter;
-          const isWebGL2 = index === 1; // WebGL2RenderingContext is second in array
-          const contextType = isWebGL2 ? 'webgl2' : 'webgl';
+      protos.forEach(({ proto, type }) => {
+        if (proto._patchedGetParameter) return;
 
-          proto.getParameter = function (...args) {
-            const result = original ? original.apply(this, args) : null;
-            const target = args[0];
+        const original = proto.getParameter;
+        proto.getParameter = function(pname) {
+          try {
+            const result = original.call(this, pname);
 
-            // Check if this is a VERSION or SHADING_LANGUAGE_VERSION request
-            if (target === this.VERSION || target === this.SHADING_LANGUAGE_VERSION) {
-              // Use comprehensive validation - not just null check!
-              if (needsVersionFallback(result)) {
-                mobileError('WebGL getParameter returned invalid value; providing fallback', {
-                  target,
-                  originalValue: result,
-                  originalType: typeof result,
-                  contextType
-                });
-                return getWebGLFallbackVersion(contextType);
+            // VERSION (0x1F02) and SHADING_LANGUAGE_VERSION (0x8B8C)
+            if (pname === 0x1F02 || pname === this.VERSION) {
+              if (!isValidVersionString(result)) {
+                mobileLog(`getParameter VERSION returned invalid: ${result}, using fallback`);
+                return getSafeVersionString(type);
+              }
+            }
+            if (pname === 0x8B8C || pname === this.SHADING_LANGUAGE_VERSION) {
+              if (!isValidVersionString(result)) {
+                mobileLog(`getParameter SHADING_LANGUAGE_VERSION returned invalid: ${result}, using fallback`);
+                return getSafeVersionString(type);
               }
             }
 
             return result;
-          };
-
-          proto.__getParameterPatched = true;
-          mobileLog(`Patched ${contextType} prototype getParameter`);
-        });
-      } catch (e) {
-        mobileError('WebGL getParameter patch failed', e);
-      }
-    }
-
-    // As an extra safety net for browsers with quirky contexts (notably
-    // iOS Safari), patch the canvas getContext flow so every context we hand to
-    // Three.js has the defensive getParameter/getShaderPrecisionFormat
-    // behaviour baked in. This catches cases where the prototype patch doesn't work.
-    function patchCanvasGetContext() {
-      try {
-        const proto = HTMLCanvasElement?.prototype;
-        if (!proto || proto.__webglContextPatched) return;
-
-        const originalGetContext = proto.getContext;
-        proto.getContext = function patchedGetContext(type, attributes) {
-          const context = originalGetContext ? originalGetContext.call(this, type, attributes) : null;
-          if (!context) return context;
-
-          // Only patch WebGL contexts
-          const isWebGLContext = type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl';
-          if (!isWebGLContext) return context;
-
-          const contextType = type === 'webgl2' ? 'webgl2' : 'webgl';
-
-          if (!context.__getParameterPatched) {
-            const originalGetParameter = context.getParameter ? context.getParameter.bind(context) : null;
-            context.getParameter = function (...args) {
-              const result = originalGetParameter ? originalGetParameter(...args) : null;
-              const target = args[0];
-
-              // Check if this is a VERSION or SHADING_LANGUAGE_VERSION request
-              if (target === context.VERSION || target === context.SHADING_LANGUAGE_VERSION) {
-                // Use comprehensive validation - not just null check!
-                if (needsVersionFallback(result)) {
-                  mobileError('Canvas context getParameter returned invalid value; providing fallback', {
-                    target,
-                    originalValue: result,
-                    originalType: typeof result,
-                    contextType
-                  });
-                  return getWebGLFallbackVersion(contextType);
-                }
-              }
-
-              return result;
-            };
-
-            context.__getParameterPatched = true;
+          } catch (e) {
+            mobileError('getParameter threw error', e);
+            // Return safe fallback for version queries
+            if (pname === 0x1F02 || pname === this.VERSION) return getSafeVersionString(type);
+            if (pname === 0x8B8C || pname === this.SHADING_LANGUAGE_VERSION) return getSafeVersionString(type);
+            return null;
           }
-
-          if (!context.__shaderPrecisionPatched) {
-            const originalPrecision = context.getShaderPrecisionFormat ? context.getShaderPrecisionFormat.bind(context) : null;
-            context.getShaderPrecisionFormat = function (...args) {
-              const result = originalPrecision ? originalPrecision(...args) : null;
-              if (result) return result;
-              return { rangeMin: 127, rangeMax: 127, precision: 23 };
-            };
-
-            context.__shaderPrecisionPatched = true;
-          }
-
-          return context;
         };
-
-        proto.__webglContextPatched = true;
-        mobileLog('Patched HTMLCanvasElement.prototype.getContext');
-      } catch (e) {
-        mobileError('Canvas getContext patch failed', e);
-      }
+        proto._patchedGetParameter = true;
+        mobileLog(`Patched ${type} getParameter`);
+      });
     }
 
-    // Create a patched WebGL context first so Three.js never receives invalid
-    // VERSION/SHADING_LANGUAGE_VERSION values, which can happen on iOS Safari
-    // and other mobile browsers.
-    function createPatchedContext(targetCanvas) {
-      const contextAttempts = [
-        { type: 'webgl2', attributes: { antialias: !isMobile, alpha: true, failIfMajorPerformanceCaveat: false, powerPreference: 'default' } },
-        { type: 'webgl', attributes: { antialias: !isMobile, alpha: true, failIfMajorPerformanceCaveat: false, powerPreference: 'default' } },
-        { type: 'experimental-webgl', attributes: { alpha: true, failIfMajorPerformanceCaveat: false } }
-      ];
-
-      for (const attempt of contextAttempts) {
-        try {
-          mobileLog(`Attempting to acquire ${attempt.type} context`);
-          const context = targetCanvas.getContext(attempt.type, attempt.attributes);
-          if (!context) {
-            mobileLog(`${attempt.type} context returned null, trying next`);
-            continue;
-          }
-
-          const contextType = attempt.type === 'webgl2' ? 'webgl2' : 'webgl';
-
-          // Apply instance-level patch as final safety net
-          if (!context.__getParameterPatched) {
-            const originalGetParameter = context.getParameter.bind(context);
-            context.getParameter = function (...args) {
-              const result = originalGetParameter(...args);
-              const target = args[0];
-
-              // Check if this is a VERSION or SHADING_LANGUAGE_VERSION request
-              if (target === context.VERSION || target === context.SHADING_LANGUAGE_VERSION) {
-                // Use comprehensive validation - not just null check!
-                if (needsVersionFallback(result)) {
-                  mobileError('Instance getParameter returned invalid value; providing fallback', {
-                    target,
-                    originalValue: result,
-                    originalType: typeof result,
-                    contextType
-                  });
-                  return getWebGLFallbackVersion(contextType);
-                }
-              }
-              return result;
-            };
-            context.__getParameterPatched = true;
-          }
-
-          if (!context.__shaderPrecisionPatched) {
-            const originalPrecision = context.getShaderPrecisionFormat?.bind(context);
-            context.getShaderPrecisionFormat = function (...args) {
-              const result = originalPrecision ? originalPrecision(...args) : null;
-              if (result) return result;
-              return { rangeMin: 127, rangeMax: 127, precision: 23 };
-            };
-            context.__shaderPrecisionPatched = true;
-          }
-
-          // Verify the context works before returning
-          const testVersion = context.getParameter(context.VERSION);
-          mobileLog(`Context ${attempt.type} acquired successfully`, {
-            version: testVersion,
-            isValid: isValidWebGLVersionString(testVersion)
-          });
-
-          return context;
-        } catch (contextError) {
-          mobileError(`Context acquisition for ${attempt.type} failed`, contextError);
-        }
+    // PATCH 2: WebGLRenderingContext.prototype.getContextAttributes
+    // Fixes: null return on some mobile browsers (causes "null is not an object" error)
+    function applyGetContextAttributesPatch() {
+      const protos = [];
+      if (typeof WebGLRenderingContext !== 'undefined') {
+        protos.push(WebGLRenderingContext.prototype);
+      }
+      if (typeof WebGL2RenderingContext !== 'undefined') {
+        protos.push(WebGL2RenderingContext.prototype);
       }
 
-      mobileError('All context acquisition attempts failed');
-      return null;
+      protos.forEach((proto) => {
+        if (proto._patchedGetContextAttributes) return;
+
+        const original = proto.getContextAttributes;
+        proto.getContextAttributes = function() {
+          try {
+            const result = original ? original.call(this) : null;
+            if (result && typeof result === 'object') {
+              return result;
+            }
+            mobileLog('getContextAttributes returned null/invalid, using fallback');
+            return getSafeContextAttributes();
+          } catch (e) {
+            mobileError('getContextAttributes threw error', e);
+            return getSafeContextAttributes();
+          }
+        };
+        proto._patchedGetContextAttributes = true;
+        mobileLog('Patched getContextAttributes');
+      });
+    }
+
+    // PATCH 3: WebGLRenderingContext.prototype.getShaderPrecisionFormat
+    // Fixes: null return on some iOS/mobile browsers
+    function applyShaderPrecisionPatch() {
+      const protos = [];
+      if (typeof WebGLRenderingContext !== 'undefined') {
+        protos.push(WebGLRenderingContext.prototype);
+      }
+      if (typeof WebGL2RenderingContext !== 'undefined') {
+        protos.push(WebGL2RenderingContext.prototype);
+      }
+
+      protos.forEach((proto) => {
+        if (proto._patchedShaderPrecision) return;
+
+        const original = proto.getShaderPrecisionFormat;
+        proto.getShaderPrecisionFormat = function(shaderType, precisionType) {
+          try {
+            const result = original ? original.call(this, shaderType, precisionType) : null;
+            if (result && typeof result === 'object' && 'precision' in result) {
+              return result;
+            }
+            mobileLog('getShaderPrecisionFormat returned null/invalid, using fallback');
+            return { rangeMin: 127, rangeMax: 127, precision: 23 };
+          } catch (e) {
+            mobileError('getShaderPrecisionFormat threw error', e);
+            return { rangeMin: 127, rangeMax: 127, precision: 23 };
+          }
+        };
+        proto._patchedShaderPrecision = true;
+        mobileLog('Patched getShaderPrecisionFormat');
+      });
+    }
+
+    // PATCH 4: WebGLRenderingContext.prototype.getExtension
+    // Fixes: errors when querying unsupported extensions
+    function applyGetExtensionPatch() {
+      const protos = [];
+      if (typeof WebGLRenderingContext !== 'undefined') {
+        protos.push(WebGLRenderingContext.prototype);
+      }
+      if (typeof WebGL2RenderingContext !== 'undefined') {
+        protos.push(WebGL2RenderingContext.prototype);
+      }
+
+      protos.forEach((proto) => {
+        if (proto._patchedGetExtension) return;
+
+        const original = proto.getExtension;
+        proto.getExtension = function(name) {
+          try {
+            return original ? original.call(this, name) : null;
+          } catch (e) {
+            mobileError(`getExtension(${name}) threw error`, e);
+            return null;
+          }
+        };
+        proto._patchedGetExtension = true;
+        mobileLog('Patched getExtension');
+      });
+    }
+
+    // Apply all patches immediately
+    mobileLog('Applying WebGL defensive patches...');
+    updateLoadingProgress('Applying WebGL patches...');
+
+    try {
+      applyGetParameterPatch();
+      applyGetContextAttributesPatch();
+      applyShaderPrecisionPatch();
+      applyGetExtensionPatch();
+      mobileLog('All WebGL patches applied successfully');
+    } catch (patchError) {
+      mobileError('Failed to apply WebGL patches', patchError);
+      // Continue anyway - some patches may have worked
+    }
+
+    // ============================================================================
+    // RENDERER SETUP - Let Three.js create the context, but with safe options
+    // ============================================================================
+    let renderer;
+
+    // Check basic WebGL availability
+    function checkWebGLSupport() {
+      try {
+        const testCanvas = document.createElement('canvas');
+        const gl = testCanvas.getContext('webgl2') ||
+                   testCanvas.getContext('webgl') ||
+                   testCanvas.getContext('experimental-webgl');
+
+        if (!gl) {
+          mobileLog('No WebGL context available');
+          return false;
+        }
+
+        // Test that our patches work
+        const version = gl.getParameter(gl.VERSION);
+        const attrs = gl.getContextAttributes();
+
+        mobileLog('WebGL support check passed', {
+          version,
+          hasAttributes: !!attrs,
+          isWebGL2: gl instanceof WebGL2RenderingContext
+        });
+
+        return true;
+      } catch (e) {
+        mobileError('WebGL support check failed', e);
+        return false;
+      }
     }
 
     try {
-      updateLoadingProgress('Applying WebGL patches...');
-
-      // CRITICAL: Apply ALL patches BEFORE any WebGL operations
-      // These patches ensure Three.js never sees invalid version strings
-      mobileLog('Applying WebGL patches for mobile compatibility');
-
-      // 1. Patch WebGL prototypes first (catches all contexts)
-      patchGetParameter();
-
-      // 2. Patch canvas getContext (catches context creation)
-      patchCanvasGetContext();
-
-      // 3. Patch shader precision format
-      patchShaderPrecisionFormat();
-
-      mobileLog('All WebGL patches applied');
       updateLoadingProgress('Checking WebGL support...');
 
-      if (!isWebGLAvailable()) {
-        throw new Error('WebGL is not supported on this device. Please try a different browser.');
+      if (!checkWebGLSupport()) {
+        throw new Error('WebGL is not supported on this device');
       }
 
       updateLoadingProgress('Creating WebGL renderer...');
 
-      // Acquire a patched context first so Three.js never sees invalid values
-      glContext = createPatchedContext(canvas);
-      if (!glContext) {
-        throw new Error('Unable to create a WebGL context. Please close other tabs or restart your browser.');
-      }
+      // CRITICAL: Let Three.js create the context itself
+      // Do NOT pass a pre-created context - this causes issues on mobile
+      // Three.js will use our patched prototypes automatically
 
-      // Final verification: ensure version string is valid before giving to Three.js
-      const preCheckVersion = glContext.getParameter(glContext.VERSION);
-      mobileLog('Pre-renderer version check', {
-        version: preCheckVersion,
-        isValid: isValidWebGLVersionString(preCheckVersion)
-      });
-
-      if (!isValidWebGLVersionString(preCheckVersion)) {
-        mobileError('CRITICAL: Version string still invalid after all patches!', {
-          version: preCheckVersion,
-          type: typeof preCheckVersion
-        });
-        // Force the fallback one more time
-        const contextType = glContext instanceof WebGL2RenderingContext ? 'webgl2' : 'webgl';
-        throw new Error(`WebGL version string is invalid: "${preCheckVersion}". Expected format like "WebGL 1.0" or "WebGL 2.0".`);
-      }
-
-      // Try creating renderer with different options as fallbacks
-      let rendererOptions = [
-        // First attempt: Standard options
+      const rendererConfigs = [
+        // Config 1: Mobile-optimized (most compatible)
         {
           canvas,
-          context: glContext,
-          antialias: !isMobile,
-          alpha: true,
-          powerPreference: isMobile ? 'default' : 'high-performance',
-          failIfMajorPerformanceCaveat: false,
-        },
-        // Second attempt: Disable antialias (iOS compatibility)
-        {
-          canvas,
-          context: glContext,
           antialias: false,
           alpha: true,
+          depth: true,
+          stencil: false,
           powerPreference: 'default',
           failIfMajorPerformanceCaveat: false,
+          preserveDrawingBuffer: false
         },
-        // Third attempt: Minimal options
+        // Config 2: Even more minimal
         {
           canvas,
-          context: glContext,
           antialias: false,
           alpha: false,
-          failIfMajorPerformanceCaveat: false,
+          depth: true,
+          stencil: false,
+          powerPreference: 'low-power',
+          failIfMajorPerformanceCaveat: false
+        },
+        // Config 3: Absolute minimum
+        {
+          canvas,
+          antialias: false,
+          alpha: false,
+          failIfMajorPerformanceCaveat: false
         }
       ];
 
       let lastError = null;
-      for (let i = 0; i < rendererOptions.length; i++) {
+
+      for (let i = 0; i < rendererConfigs.length; i++) {
         try {
-          mobileLog(`Attempting renderer creation with option set ${i + 1}`, rendererOptions[i]);
-          renderer = new THREE.WebGLRenderer(rendererOptions[i]);
-          mobileLog(`Renderer created successfully with option set ${i + 1}`);
+          mobileLog(`Trying renderer config ${i + 1}/${rendererConfigs.length}`, rendererConfigs[i]);
+          renderer = new THREE.WebGLRenderer(rendererConfigs[i]);
+
+          // Verify the renderer actually works
+          if (!renderer || !renderer.getContext()) {
+            throw new Error('Renderer created but context is null');
+          }
+
+          mobileLog(`Renderer created successfully with config ${i + 1}`);
           break;
         } catch (e) {
           lastError = e;
-          mobileError(`Renderer creation attempt ${i + 1} failed`, {
-            error: e.message,
-            stack: e.stack
-          });
-          if (i === rendererOptions.length - 1) {
-            throw lastError;
+          mobileError(`Renderer config ${i + 1} failed: ${e.message}`);
+
+          // If canvas got a context that failed, we need a fresh canvas
+          if (i < rendererConfigs.length - 1) {
+            try {
+              const freshCanvas = document.createElement('canvas');
+              freshCanvas.id = 'scene';
+              freshCanvas.setAttribute('role', 'img');
+              freshCanvas.setAttribute('aria-label', 'Stylized blue bird gliding through a dark sky');
+              if (canvas.parentNode) {
+                canvas.parentNode.replaceChild(freshCanvas, canvas);
+                canvas = freshCanvas;
+                rendererConfigs[i + 1].canvas = freshCanvas;
+                mobileLog('Created fresh canvas for retry');
+              }
+            } catch (canvasError) {
+              mobileError('Failed to create fresh canvas', canvasError);
+            }
           }
         }
       }
 
+      if (!renderer) {
+        throw lastError || new Error('All renderer configurations failed');
+      }
+
+      // Configure renderer for mobile
       const maxPixelRatio = isMobile ? 1.5 : 2.0;
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxPixelRatio));
 
-      // Initial size
       const rect = canvasWrapper.getBoundingClientRect();
       renderer.setSize(rect.width, rect.height, false);
 
@@ -684,22 +623,20 @@
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.2;
 
-      mobileLog('Renderer fully initialized', {
-        capabilities: {
-          isWebGL2: renderer.capabilities?.isWebGL2,
-          maxTextures: renderer.capabilities?.maxTextures,
-          maxVertexUniforms: renderer.capabilities?.maxVertexUniforms
-        }
+      mobileLog('Renderer fully configured', {
+        isWebGL2: renderer.capabilities?.isWebGL2,
+        maxTextures: renderer.capabilities?.maxTextures,
+        pixelRatio: renderer.getPixelRatio()
       });
+
       updateLoadingProgress('WebGL renderer created');
+
     } catch (error) {
       mobileError('Failed to create renderer', {
         message: error.message,
-        stack: error.stack,
-        name: error.name
+        stack: error.stack
       });
-      const errorDetails = error.message || error.toString();
-      showLoadingError(`Failed to initialize WebGL: ${errorDetails}. Try closing other tabs or restarting your browser.`);
+      showLoadingError(`Failed to initialize WebGL: ${error.message}. Try closing other tabs or restarting your browser.`);
       throw error;
     }
 
