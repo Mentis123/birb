@@ -337,6 +337,7 @@
 
     // PATCH 1: WebGLRenderingContext.prototype.getParameter
     // Fixes: null/invalid VERSION and SHADING_LANGUAGE_VERSION strings
+    // Also fixes: null returns for array-type parameters (causes "array[offset]" error)
     function applyGetParameterPatch() {
       const protos = [];
       if (typeof WebGLRenderingContext !== 'undefined') {
@@ -345,6 +346,28 @@
       if (typeof WebGL2RenderingContext !== 'undefined') {
         protos.push({ proto: WebGL2RenderingContext.prototype, type: 'webgl2' });
       }
+
+      // Parameters that return typed arrays - must return empty array, not null
+      // COMPRESSED_TEXTURE_FORMATS (0x86A3) returns Uint32Array
+      // Some drivers return null on error, causing "null is not an object (evaluating 'array[offset]')"
+      const ARRAY_PARAMETERS = {
+        0x86A3: () => new Uint32Array(0), // COMPRESSED_TEXTURE_FORMATS
+      };
+
+      // Parameters that return integers with safe fallback values
+      const INTEGER_PARAMETERS = {
+        0x0D33: 16384,  // MAX_TEXTURE_SIZE
+        0x851C: 16,     // MAX_CUBE_MAP_TEXTURE_SIZE
+        0x8872: 16,     // MAX_TEXTURE_IMAGE_UNITS
+        0x8B4C: 32,     // MAX_VERTEX_TEXTURE_IMAGE_UNITS
+        0x8B4D: 48,     // MAX_COMBINED_TEXTURE_IMAGE_UNITS
+        0x8869: 16,     // MAX_VERTEX_ATTRIBS
+        0x8DFB: 16,     // MAX_VARYING_VECTORS (WebGL1)
+        0x8DFC: 256,    // MAX_VERTEX_UNIFORM_VECTORS
+        0x8DFD: 512,    // MAX_FRAGMENT_UNIFORM_VECTORS
+        0x84E8: 8,      // MAX_RENDERBUFFER_SIZE
+        0x0D32: 2,      // MAX_VIEWPORT_DIMS (returns array but 2 is safe int fallback)
+      };
 
       protos.forEach(({ proto, type }) => {
         if (proto._patchedGetParameter) return;
@@ -368,12 +391,28 @@
               }
             }
 
+            // Handle null results for array parameters (critical fix for "array[offset]" error)
+            if (result === null && ARRAY_PARAMETERS[pname]) {
+              mobileLog(`getParameter(${pname.toString(16)}) returned null, using empty array fallback`);
+              return ARRAY_PARAMETERS[pname]();
+            }
+
+            // Handle null results for integer parameters
+            if (result === null && INTEGER_PARAMETERS[pname] !== undefined) {
+              mobileLog(`getParameter(${pname.toString(16)}) returned null, using integer fallback`);
+              return INTEGER_PARAMETERS[pname];
+            }
+
             return result;
           } catch (e) {
-            mobileError('getParameter threw error', e);
+            mobileError('getParameter threw error for pname ' + pname, e);
             // Return safe fallback for version queries
             if (pname === 0x1F02 || pname === this.VERSION) return getSafeVersionString(type);
             if (pname === 0x8B8C || pname === this.SHADING_LANGUAGE_VERSION) return getSafeVersionString(type);
+            // Return safe fallback for array parameters
+            if (ARRAY_PARAMETERS[pname]) return ARRAY_PARAMETERS[pname]();
+            // Return safe fallback for integer parameters
+            if (INTEGER_PARAMETERS[pname] !== undefined) return INTEGER_PARAMETERS[pname];
             return null;
           }
         };
