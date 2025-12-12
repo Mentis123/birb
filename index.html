@@ -823,7 +823,12 @@
 
       const prefersCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
       const DPR_CAP = prefersCoarsePointer ? 1.4 : 1.8;
-      const resizeState = { width: 0, height: 0 };
+      const resizeState = {
+        width: 0,
+        height: 0,
+        pixelRatio: 1,
+        dirty: true,
+      };
       const actionPaletteState = {
         pointerId: null,
         offsetX: 0,
@@ -1877,7 +1882,15 @@
       ];
       let cameraModeIndex = 0;
 
+      function invalidateRendererSize() {
+        resizeState.dirty = true;
+      }
+
       function updateRendererSize(force = false) {
+        if (!resizeState.dirty && !force) {
+          return;
+        }
+
         const clientWidth = canvas.clientWidth || window.innerWidth;
         const clientHeight = canvas.clientHeight || window.innerHeight;
 
@@ -1885,15 +1898,23 @@
 
         const nextWidth = Math.floor(clientWidth);
         const nextHeight = Math.floor(clientHeight);
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, DPR_CAP);
 
-        if (!force && resizeState.width === nextWidth && resizeState.height === nextHeight) {
+        if (
+          !force &&
+          resizeState.width === nextWidth &&
+          resizeState.height === nextHeight &&
+          resizeState.pixelRatio === pixelRatio
+        ) {
+          resizeState.dirty = false;
           return;
         }
 
         resizeState.width = nextWidth;
         resizeState.height = nextHeight;
+        resizeState.pixelRatio = pixelRatio;
+        resizeState.dirty = false;
 
-        const pixelRatio = Math.min(window.devicePixelRatio || 1, DPR_CAP);
         renderer.setPixelRatio(pixelRatio);
         renderer.setSize(nextWidth, nextHeight, false);
         if (cameraState) {
@@ -1905,15 +1926,32 @@
 
       const resizeObserver =
         typeof ResizeObserver !== "undefined"
-          ? new ResizeObserver(() => updateRendererSize())
+          ? new ResizeObserver(() => {
+              invalidateRendererSize();
+              updateRendererSize();
+            })
           : null;
       if (resizeObserver) {
         resizeObserver.observe(canvas);
       }
-      window.addEventListener("orientationchange", () => updateRendererSize(true), {
-        passive: true,
-      });
-      window.addEventListener("resize", () => updateRendererSize(), { passive: true });
+      window.addEventListener(
+        "orientationchange",
+        () => {
+          invalidateRendererSize();
+          updateRendererSize(true);
+        },
+        {
+          passive: true,
+        }
+      );
+      window.addEventListener(
+        "resize",
+        () => {
+          invalidateRendererSize();
+          updateRendererSize();
+        },
+        { passive: true }
+      );
 
       const flightController = new FreeFlightController(THREE, {
         position: new THREE.Vector3(1.1, 0.9, 0),
@@ -2025,8 +2063,6 @@
         if (contextState.lost) {
           return;
         }
-        updateRendererSize();
-
         let delta = 0;
         if (motionState.animate) {
           if (previousTime === null) {
@@ -2079,6 +2115,7 @@
       function handleContextRestored() {
         contextState.lost = false;
         renderer.state?.reset?.();
+        invalidateRendererSize();
         updateRendererSize(true);
         renderer.setAnimationLoop(document.hidden ? null : renderFrame);
         renderFrame(0);
@@ -2127,6 +2164,7 @@
         flightControls.dispose();
       });
 
+      invalidateRendererSize();
       updateRendererSize(true);
       renderFrame(0);
     </script>
