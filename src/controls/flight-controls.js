@@ -174,15 +174,13 @@ export function createFlightControls({
   const handleRightStickChange = (value, context = {}) => {
     const pointerType = context.pointerType ?? null;
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
-    const shouldInvertY =
-      pointerType === 'touch' &&
-      followMode != null &&
-      currentMode === followMode;
+    const isFollowMode = followMode != null && currentMode === followMode;
 
     analogLookState.x = clamp(value.x, -1, 1);
-    analogLookState.y = clamp(shouldInvertY ? -value.y : value.y, -1, 1);
+    analogLookState.y = clamp(value.y, -1, 1);
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
+    analogLookState.isFollowMode = isFollowMode;
   };
 
   const leftThumbstick = createThumbstick(leftThumbstickElement, {
@@ -354,7 +352,7 @@ export function createFlightControls({
     }
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
     const lookX = analogLookState.x;
-    const lookY = -analogLookState.y;
+    const lookY = analogLookState.y;
     if (lookX === 0 && lookY === 0) {
       return;
     }

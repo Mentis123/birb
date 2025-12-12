@@ -6,6 +6,10 @@ export const SPRINT_MULTIPLIER = 1.4;
 export const BANK_RESPONSIVENESS = 2.5;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
 export const BANK_ROLL_SPEED = Math.PI * 0.8;
+// How quickly the bird levels its wings when roll input stops.
+export const BANK_RETURN_RATE = 1.6;
+// Minimum desired forward speed so the bird always keeps gliding.
+export const CRUISE_FORWARD_SPEED = 2.1;
 export const LOOK_SENSITIVITY = 0.002;
 export const AMBIENT_BOB_AMPLITUDE = 0.12;
 export const AMBIENT_BOB_SPEED = 0.8;
@@ -53,6 +57,7 @@ export class FreeFlightController {
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
+    this._bankOrientation = 1;
 
     this._initialPosition = options.position ? options.position.clone() : new Vector3(0, 0.65, 0);
     this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
@@ -195,6 +200,13 @@ export class FreeFlightController {
       this.velocity.multiplyScalar(idleDragMultiplier);
     }
 
+    const forwardSpeed = this.velocity.dot(forward);
+    const wantsForwardGlide = smoothed.forward >= -0.1;
+    if (wantsForwardGlide && forwardSpeed < CRUISE_FORWARD_SPEED) {
+      const cruiseAcceleration = (CRUISE_FORWARD_SPEED - forwardSpeed) * MOVEMENT_ACCELERATION * 0.35;
+      this.velocity.addScaledVector(forward, cruiseAcceleration * deltaTime);
+    }
+
     if (Math.abs(smoothed.strafe) < 0.05) {
       const sidewaysSpeed = this.velocity.dot(right);
       if (Math.abs(sidewaysSpeed) > 1e-3) {
@@ -218,15 +230,16 @@ export class FreeFlightController {
     }
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    const rollInput = smoothed.roll * bankOrientation;
+    const orientationStep = 1 - Math.exp(-BANK_RESPONSIVENESS * 0.6 * deltaTime);
+    this._bankOrientation += (bankOrientation - this._bankOrientation) * orientationStep;
 
-    if (Math.abs(rollInput) > 1e-4) {
-      const targetAngularVelocity = rollInput * BANK_ROLL_SPEED;
-      this._bankVelocity += (targetAngularVelocity - this._bankVelocity) * bankStep;
-    } else {
-      const targetAngularVelocity = -this._bankVelocity;
-      this._bankVelocity += targetAngularVelocity * bankStep;
-    }
+    const rollInput = smoothed.roll * this._bankOrientation;
+    const hasRollInput = Math.abs(rollInput) > 1e-4;
+    const targetAngularVelocity = hasRollInput
+      ? rollInput * BANK_ROLL_SPEED
+      : -this.bank * BANK_RETURN_RATE - this._bankVelocity;
+
+    this._bankVelocity += targetAngularVelocity * bankStep;
 
     this.bank += this._bankVelocity * deltaTime;
 
@@ -261,6 +274,7 @@ export class FreeFlightController {
     this.quaternion.copy(this._initialQuaternion);
     this.bank = 0;
     this._bankVelocity = 0;
+    this._bankOrientation = 1;
     this.elapsed = 0;
     Object.assign(this.input, createAxisRecord());
     Object.assign(this._smoothedInput, createAxisRecord());
