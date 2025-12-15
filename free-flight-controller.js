@@ -6,6 +6,10 @@ export const SPRINT_MULTIPLIER = 1.4;
 export const BANK_RESPONSIVENESS = 2.5;
 // Maximum roll velocity (radians per second) that sustained input can achieve.
 export const BANK_ROLL_SPEED = Math.PI * 0.8;
+// Upper bound on how far the bird can bank for readability and comfort.
+export const MAX_BANK_ANGLE = Math.PI / 3;
+// How quickly a banked input should translate into a gentle yaw turn.
+export const BANK_TURN_RATE = Math.PI * 0.45;
 // How quickly the bird levels its wings when roll input stops.
 export const BANK_RETURN_RATE = 1.6;
 // Minimum desired forward speed so the bird always keeps gliding.
@@ -152,11 +156,18 @@ export class FreeFlightController {
 
     this.elapsed += deltaTime;
 
+    const up = this._up.set(0, 1, 0);
+
+    const bankedYaw = smoothed.roll * BANK_TURN_RATE;
+    if (bankedYaw !== 0) {
+      this._yawQuaternion.setFromAxisAngle(up, bankedYaw * deltaTime);
+      this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
+    }
+
     this.quaternion.copy(this.lookQuaternion);
 
     const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
-    const up = this._up.set(0, 1, 0);
 
     // Ease input changes over time so gamepad and keyboard controls feel less twitchy.
     const smoothingStrength = this.inputSmoothing > 0 ? 1 - Math.exp(-this.inputSmoothing * deltaTime) : 1;
@@ -242,6 +253,11 @@ export class FreeFlightController {
     this._bankVelocity += targetAngularVelocity * bankStep;
 
     this.bank += this._bankVelocity * deltaTime;
+    this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+    // Prevent the clamp from fighting the easing by clearing residual velocity at the limits.
+    if (Math.abs(this.bank) >= MAX_BANK_ANGLE && Math.sign(this.bank) === Math.sign(this._bankVelocity)) {
+      this._bankVelocity = 0;
+    }
 
     this._bankQuaternion.setFromAxisAngle(forward, this.bank);
     this.quaternion.multiply(this._bankQuaternion);
