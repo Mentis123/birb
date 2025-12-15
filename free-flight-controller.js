@@ -158,17 +158,6 @@ export class FreeFlightController {
 
     const up = this._up.set(0, 1, 0);
 
-    const bankedYaw = smoothed.roll * BANK_TURN_RATE;
-    if (bankedYaw !== 0) {
-      this._yawQuaternion.setFromAxisAngle(up, bankedYaw * deltaTime);
-      this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
-    }
-
-    this.quaternion.copy(this.lookQuaternion);
-
-    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
-    const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
-
     // Ease input changes over time so gamepad and keyboard controls feel less twitchy.
     const smoothingStrength = this.inputSmoothing > 0 ? 1 - Math.exp(-this.inputSmoothing * deltaTime) : 1;
     const smoothed = this._smoothedInput;
@@ -184,6 +173,17 @@ export class FreeFlightController {
       smoothed.lift += (this.input.lift - smoothed.lift) * smoothingStrength;
       smoothed.roll += (this.input.roll - smoothed.roll) * smoothingStrength;
     }
+
+    const bankedYaw = smoothed.roll * BANK_TURN_RATE;
+    if (bankedYaw !== 0) {
+      this._yawQuaternion.setFromAxisAngle(up, bankedYaw * deltaTime);
+      this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
+    }
+
+    this.quaternion.copy(this.lookQuaternion);
+
+    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
 
     const acceleration = this._acceleration.set(0, 0, 0);
     acceleration.addScaledVector(forward, smoothed.forward);
