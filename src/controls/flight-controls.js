@@ -150,7 +150,7 @@ export function createFlightControls({
 
   const handleLeftStickChange = (value, context = {}) => {
     const forward = clamp(-value.y, -1, 1);
-    const strafe = clamp(value.x, -1, 1);
+    const strafe = clamp(-value.x, -1, 1);
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
@@ -176,7 +176,7 @@ export function createFlightControls({
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
     const isFollowMode = followMode != null && currentMode === followMode;
 
-    analogLookState.x = clamp(value.x, -1, 1);
+    analogLookState.x = clamp(-value.x, -1, 1);
     analogLookState.y = clamp(value.y, -1, 1);
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);

@@ -150,7 +150,7 @@ export function createCameraState({ three, scene, flightController }) {
       rotationDamping: 0.18,
     },
     [CAMERA_MODES.FOLLOW]: {
-      offset: new Vector3(0, 1.2, 4.2),
+      offset: new Vector3(0, 0.6, 2.1),
       positionDamping: 0.16,
       lookAtDamping: 0.24,
       rotationDamping: 0.2,

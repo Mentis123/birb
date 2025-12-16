@@ -1153,10 +1153,10 @@
       scene.add(birbAnchor);
 
       // Align the sculpted bird (modeled along the +X axis) with the
-      // controller's forward vector (-Z) so the beak points in the direction of
-      // travel.
+      // controller's forward vector (-Z) by rotating 90° clockwise so the beak
+      // points in the direction of travel.
       const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, Math.PI / 2, 0)
+        new THREE.Euler(0, -Math.PI / 2, 0)
       );
 
       const positionBirbModel = (model) => {
