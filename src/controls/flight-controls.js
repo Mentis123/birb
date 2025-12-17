@@ -89,6 +89,13 @@ export function createFlightControls({
     throw new Error('createFlightControls requires a canvas element');
   }
 
+  if (canvas?.style) {
+    canvas.style.touchAction = 'none';
+  }
+  if (touchZoneElement?.style) {
+    touchZoneElement.style.touchAction = 'none';
+  }
+
   const effectiveRollSensitivity = Number.isFinite(rollSensitivity)
     ? clamp(rollSensitivity, 0, 1)
     : DEFAULT_ROLL_SENSITIVITY;
@@ -128,6 +135,7 @@ export function createFlightControls({
   const touchJoystickState = {
     manager: null,
     nipples: new Map(),
+    activeTouchOrder: [],
   };
 
   let sprintActive = false;
@@ -266,7 +274,43 @@ export function createFlightControls({
     }
   };
 
-  const getTouchJoystickId = (nipple) => nipple?.identifier ?? nipple?.id ?? nipple?.options?.identifier ?? null;
+  const normalizePointerId = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string' || typeof value === 'number') return `${value}`;
+    return null;
+  };
+
+  const addActiveTouchId = (pointerId) => {
+    const id = normalizePointerId(pointerId);
+    if (!id) return;
+    if (!touchJoystickState.activeTouchOrder.includes(id)) {
+      touchJoystickState.activeTouchOrder.push(id);
+    }
+  };
+
+  const removeActiveTouchId = (pointerId) => {
+    const id = normalizePointerId(pointerId);
+    const index = id ? touchJoystickState.activeTouchOrder.indexOf(id) : -1;
+    if (index !== -1) {
+      touchJoystickState.activeTouchOrder.splice(index, 1);
+    }
+  };
+
+  const getTouchJoystickId = (nipple, event) =>
+    normalizePointerId(
+      event?.identifier ?? event?.pointerId ?? nipple?.identifier ?? nipple?.id ?? nipple?.options?.identifier
+    );
+
+  const getTouchJoystickRole = (pointerId) => {
+    const id = normalizePointerId(pointerId);
+    const orderIndex = id != null ? touchJoystickState.activeTouchOrder.indexOf(id) : -1;
+    const preferredRole = orderIndex === 0 ? 'left' : orderIndex === 1 ? 'right' : null;
+    const nextRole = getNextTouchJoystickRole();
+    if (!nextRole) return null;
+    if (preferredRole === 'left' && nextRole === 'left') return 'left';
+    if (preferredRole === 'right' && nextRole === 'right') return 'right';
+    return nextRole;
+  };
 
   const attachTouchJoystick = (nipple, role) => {
     if (!nipple) return;
@@ -288,6 +332,7 @@ export function createFlightControls({
       record.nipple.off('move', record.move);
       record.nipple.off('end', record.end);
       touchJoystickState.nipples.delete(id);
+      removeActiveTouchId(id);
       resetTouchJoystickRole(record.role);
     }
   };
@@ -302,6 +347,16 @@ export function createFlightControls({
     if (!hasLeft) return 'left';
     if (!hasRight) return 'right';
     return null;
+  };
+
+  const handleTouchZonePointerDown = (event) => {
+    if (!event || (event.pointerType !== 'touch' && event.pointerType !== 'pen')) return;
+    addActiveTouchId(event.pointerId);
+  };
+
+  const handleTouchZonePointerUp = (event) => {
+    if (!event || (event.pointerType !== 'touch' && event.pointerType !== 'pen')) return;
+    removeActiveTouchId(event.pointerId);
   };
 
   const setupTouchJoysticks = () => {
@@ -324,10 +379,17 @@ export function createFlightControls({
       });
 
       touchZoneElement.classList.add('has-dynamic-joystick');
+      touchZoneElement.style.touchAction = 'none';
+
+      touchZoneElement.addEventListener('pointerdown', handleTouchZonePointerDown, pointerListenerOptions);
+      touchZoneElement.addEventListener('pointerup', handleTouchZonePointerUp, pointerListenerOptions);
+      touchZoneElement.addEventListener('pointercancel', handleTouchZonePointerUp, pointerListenerOptions);
 
       touchJoystickState.manager.on('added', (event, nipple) => {
-        const role = getNextTouchJoystickRole();
-        if (!role) {
+        const pointerId = getTouchJoystickId(nipple, event);
+        const role = getTouchJoystickRole(pointerId);
+        const orderIndex = pointerId != null ? touchJoystickState.activeTouchOrder.indexOf(pointerId) : -1;
+        if (!role || (role === 'right' && orderIndex !== 1)) {
           nipple?.destroy?.();
           return;
         }
@@ -501,6 +563,8 @@ export function createFlightControls({
       detachTouchJoystick(nipple);
     });
 
+    touchJoystickState.activeTouchOrder.length = 0;
+
     leftThumbstick?.reset?.();
     rightThumbstick?.reset?.();
 
@@ -566,6 +630,11 @@ export function createFlightControls({
       touchJoystickState.manager.destroy();
       touchJoystickState.manager = null;
       touchJoystickState.nipples.clear();
+    }
+    if (touchZoneElement) {
+      touchZoneElement.removeEventListener('pointerdown', handleTouchZonePointerDown, pointerListenerOptions);
+      touchZoneElement.removeEventListener('pointerup', handleTouchZonePointerUp, pointerListenerOptions);
+      touchZoneElement.removeEventListener('pointercancel', handleTouchZonePointerUp, pointerListenerOptions);
     }
     if (touchZoneElement?.classList) {
       touchZoneElement.classList.remove('has-dynamic-joystick');
