@@ -25,6 +25,7 @@ export const AMBIENT_YAW_SPEED = 0.5;
 export const INPUT_SMOOTHING = 8;
 export const STRAFE_DAMPING = 0.5;
 export const IDLE_LINEAR_DRAG = 2.5;
+export const LIFT_ACCELERATION_MULTIPLIER = 1.8;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -188,7 +189,7 @@ export class FreeFlightController {
     const acceleration = this._acceleration.set(0, 0, 0);
     acceleration.addScaledVector(forward, smoothed.forward);
     acceleration.addScaledVector(right, smoothed.strafe * this.strafeDamping);
-    acceleration.addScaledVector(up, smoothed.lift);
+    acceleration.addScaledVector(up, smoothed.lift * LIFT_ACCELERATION_MULTIPLIER);
 
     if (acceleration.lengthSq() > 1) {
       acceleration.normalize();
