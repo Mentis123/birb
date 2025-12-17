@@ -156,6 +156,7 @@ export class FreeFlightController {
     }
 
     this.elapsed += deltaTime;
+    const effectiveThrottle = this.getEffectiveThrottle();
 
     const up = this._up.set(0, 1, 0);
 
@@ -200,7 +201,7 @@ export class FreeFlightController {
       Math.abs(smoothed.strafe) > 1e-3 ||
       Math.abs(smoothed.lift) > 1e-3;
 
-    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * this.getEffectiveThrottle());
+    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * effectiveThrottle);
 
     this.velocity.addScaledVector(acceleration, deltaTime);
 
@@ -213,10 +214,14 @@ export class FreeFlightController {
     }
 
     const forwardSpeed = this.velocity.dot(forward);
+    const cruiseTargetSpeed = CRUISE_FORWARD_SPEED * effectiveThrottle;
     const wantsForwardGlide = smoothed.forward >= -0.1;
-    if (wantsForwardGlide && forwardSpeed < CRUISE_FORWARD_SPEED) {
-      const cruiseAcceleration = (CRUISE_FORWARD_SPEED - forwardSpeed) * MOVEMENT_ACCELERATION * 0.35;
+    if (wantsForwardGlide && cruiseTargetSpeed > 0) {
+      const cruiseAcceleration = (cruiseTargetSpeed - forwardSpeed) * MOVEMENT_ACCELERATION * 0.35;
       this.velocity.addScaledVector(forward, cruiseAcceleration * deltaTime);
+    } else if (wantsForwardGlide && forwardSpeed > cruiseTargetSpeed) {
+      const brakingAcceleration = (cruiseTargetSpeed - forwardSpeed) * MOVEMENT_ACCELERATION * 0.18;
+      this.velocity.addScaledVector(forward, brakingAcceleration * deltaTime);
     }
 
     if (Math.abs(smoothed.strafe) < 0.05) {
