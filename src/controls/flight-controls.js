@@ -154,7 +154,8 @@ export function createFlightControls({
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-    axisSources.leftStick.lift = 0;
+    // Map forward input to lift so pushing up on joystick causes climb
+    axisSources.leftStick.lift = forward * 0.6;
 
     const pointerType = context.pointerType ?? null;
     const magnitudeForSprint = clamp(
