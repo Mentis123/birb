@@ -1153,10 +1153,11 @@
       scene.add(birbAnchor);
 
       // Align the sculpted bird (modeled along the +X axis) with the
-      // controller's forward vector (-Z) by rotating 90° anticlockwise so the
-      // beak points in the direction of travel.
+      // controller's forward vector (-Z). Previous attempts at 90° rotations
+      // (both clockwise and anticlockwise) didn't work. Trying 180° to test
+      // if the model orientation assumption is incorrect.
       const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, Math.PI / 2, 0)
+        new THREE.Euler(0, Math.PI, 0)
       );
 
       const positionBirbModel = (model) => {
@@ -2073,6 +2074,7 @@
 
         const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
         flightControls.applyAnalogLook(lookDeltaTime);
+        flightControls.applyLeftStickPitch(lookDeltaTime);
 
         const pose = flightController.update(delta);
         const ambientOffsets = flightController.getAmbientOffsets();

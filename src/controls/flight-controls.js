@@ -1,6 +1,7 @@
 import { createThumbstick } from './thumbstick.js';
 
 const DEFAULT_ANALOG_LOOK_SPEED = 480;
+const DEFAULT_LEFT_STICK_PITCH_SPEED = 320;
 const DEFAULT_ROLL_SENSITIVITY = 0.65;
 const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 
@@ -80,6 +81,11 @@ export function createFlightControls({
     pointerType: null,
   };
 
+  const leftStickPitchState = {
+    pitch: 0,
+    isActive: false,
+  };
+
   const touchLiftPresses = new Map();
   const liftButtons = Array.isArray(liftButtonElements)
     ? liftButtonElements.filter(Boolean)
@@ -155,6 +161,10 @@ export function createFlightControls({
     axisSources.leftStick.strafe = strafe;
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
     axisSources.leftStick.lift = 0;
+
+    // Track pitch input: pushing up pitches nose up (negative Y in look delta)
+    leftStickPitchState.pitch = forward;
+    leftStickPitchState.isActive = Boolean(context.isActive);
 
     const pointerType = context.pointerType ?? null;
     const magnitudeForSprint = clamp(
@@ -326,6 +336,9 @@ export function createFlightControls({
     analogLookState.isActive = false;
     analogLookState.pointerType = null;
 
+    leftStickPitchState.pitch = 0;
+    leftStickPitchState.isActive = false;
+
     touchLiftPresses.clear();
     liftButtons.forEach((button) => button.classList.remove('is-active'));
 
@@ -362,6 +375,19 @@ export function createFlightControls({
     );
   };
 
+  const applyLeftStickPitch = (deltaTime = 0) => {
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      return;
+    }
+    const pitch = leftStickPitchState.pitch;
+    if (pitch === 0) {
+      return;
+    }
+    const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
+    // Negative pitch delta = nose up (pushing joystick up should climb)
+    flightController.addLookDelta(0, -pitch * DEFAULT_LEFT_STICK_PITCH_SPEED * limitedDelta);
+  };
+
   const dispose = () => {
     resetInputs({ releasePointerLock: true });
     if (typeof document !== 'undefined') {
@@ -386,6 +412,7 @@ export function createFlightControls({
 
   return {
     applyAnalogLook,
+    applyLeftStickPitch,
     reset: resetInputs,
     dispose,
   };
