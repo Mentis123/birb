@@ -92,8 +92,9 @@ Lift is only controlled by:
 | PR | Commit | Change | Result |
 |----|--------|--------|--------|
 | #186 | 1cfd753 | Added `LIFT_ACCELERATION_MULTIPLIER = 1.8` | Only affects lift buttons/keys, not joystick |
+| This branch | TBD | Pitch-up approach: joystick Y applies pitch via `addLookDelta` | Testing |
 
-### Current State (as of commit 1cfd753)
+### Current State (as of this branch)
 ```javascript
 // free-flight-controller.js:28,192
 export const LIFT_ACCELERATION_MULTIPLIER = 1.8;
@@ -109,24 +110,25 @@ The multiplier increases lift **authority**, but the left joystick never sends l
 2. **Mobile flight game conventions**: Research how other mobile gliding games handle single-joystick climb input
 3. **User testing**: Determine if users expect pitch control or altitude control from joystick Y
 
-### Next Fixes to Try
+### Current Implementation (Option B: Pitch-up approach)
+
+The pitch-up approach is now implemented:
+```javascript
+// flight-controls.js - tracks pitch from left stick
+leftStickPitchState.pitch = forward;  // joystick Y → pitch state
+
+// applyLeftStickPitch called each frame applies pitch rotation
+flightController.addLookDelta(0, -pitch * DEFAULT_LEFT_STICK_PITCH_SPEED * limitedDelta);
+```
+
+This causes the bird's nose to pitch up when pushing joystick up, which combined with the cruise forward speed results in natural climbing.
+
+### Alternative Approaches (if pitch doesn't feel right)
 
 **Option A: Map joystick Y to lift (helicopter-style)**
 ```javascript
-// flight-controls.js - handleLeftStickChange
-const handleLeftStickChange = (value, context = {}) => {
-  const forward = clamp(-value.y, -1, 1);
-  const strafe = clamp(-value.x, -1, 1);
-  axisSources.leftStick.forward = forward;
-  axisSources.leftStick.strafe = strafe;
-  axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-  // ADD: Map Y-axis to lift as well
-  axisSources.leftStick.lift = forward * 0.5;  // Partial lift when pushing forward
-};
+axisSources.leftStick.lift = forward * 0.5;  // Direct vertical lift
 ```
-
-**Option B: Add pitch input to flight controller**
-Modify `FreeFlightController` to accept pitch input that rotates the look quaternion up/down, causing natural climb when combined with forward thrust.
 
 **Option C: Split joystick axes**
 - Y-axis upper half → lift (climbing)

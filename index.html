@@ -2074,6 +2074,7 @@
 
         const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
         flightControls.applyAnalogLook(lookDeltaTime);
+        flightControls.applyLeftStickPitch(lookDeltaTime);
 
         const pose = flightController.update(delta);
         const ambientOffsets = flightController.getAmbientOffsets();
