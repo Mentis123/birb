@@ -204,15 +204,30 @@
         position: absolute;
         inset: auto 0 var(--space-2) 0;
         display: none;
-        justify-content: center;
-        align-items: end;
+        justify-content: stretch;
+        align-items: stretch;
         padding: 0 var(--space-2);
         pointer-events: none;
         z-index: 3;
       }
 
-      .touch-controls > * {
+      .touch-controls__zone {
+        width: 100%;
+        min-height: clamp(6.5rem, 28vw, 8.5rem);
+        border-radius: 1.1rem;
+        background: radial-gradient(circle at 35% 35%, rgba(93, 146, 238, 0.14), rgba(14, 23, 41, 0.6));
+        border: 1px solid rgba(132, 174, 255, 0.22);
+        box-shadow: inset 0 0 0 1px rgba(68, 107, 182, 0.22), 0 8px 24px rgba(6, 12, 28, 0.55);
+        display: grid;
+        align-items: end;
+        justify-items: center;
+        padding: 0.85rem;
         pointer-events: auto;
+        touch-action: none;
+      }
+
+      .touch-controls__zone.has-dynamic-joystick .thumbstick {
+        display: none;
       }
 
       .thumbstick {
@@ -727,8 +742,10 @@
           </div>
         </div>
         <div class="touch-controls" aria-hidden="true">
-          <div class="thumbstick" data-thumbstick="left">
-            <div class="thumbstick__handle" data-thumbstick-handle></div>
+          <div class="touch-controls__zone" data-touch-zone>
+            <div class="thumbstick" data-thumbstick="left">
+              <div class="thumbstick__handle" data-thumbstick-handle></div>
+            </div>
           </div>
         </div>
       </div>
@@ -753,7 +770,16 @@
         console.error("Unhandled rejection:", event);
       });
 
-      let THREE, GLTFLoader, FreeFlightController, createCameraState, CAMERA_MODES, createFlightControls, createWorldShell, ENVIRONMENT_VARIANTS, getEnvironmentDefinition;
+      let THREE,
+        GLTFLoader,
+        FreeFlightController,
+        createCameraState,
+        CAMERA_MODES,
+        createFlightControls,
+        createWorldShell,
+        ENVIRONMENT_VARIANTS,
+        getEnvironmentDefinition,
+        nipplejs;
 
       try {
         THREE = await import("https://esm.sh/three@0.161.0");
@@ -772,6 +798,12 @@
           "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
         );
         GLTFLoader = gltfLoaderModule.GLTFLoader;
+        try {
+          const nippleModule = await import("https://esm.sh/nipplejs@0.10.1");
+          nipplejs = nippleModule?.default ?? nippleModule;
+        } catch (nippleImportError) {
+          console.warn("Failed to load nipplejs:", nippleImportError);
+        }
       } catch (importError) {
         const statusEl = document.querySelector('[data-metric="status"]');
         if (statusEl) {
@@ -1996,6 +2028,8 @@
         leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
         rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
         liftButtonElements: Array.from(document.querySelectorAll('[data-lift-button]')),
+        touchZoneElement: document.querySelector('[data-touch-zone]'),
+        nipplejs,
         getCameraMode: () => cameraState?.getMode?.(),
         followMode: CAMERA_MODES.FOLLOW,
         onSprintChange: () => updateControlMetrics(),

@@ -4,6 +4,9 @@ const DEFAULT_ANALOG_LOOK_SPEED = 480;
 const DEFAULT_LEFT_STICK_PITCH_SPEED = 320;
 const DEFAULT_ROLL_SENSITIVITY = 0.65;
 const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
+const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.15;
+const DEFAULT_TOUCH_LOOK_DEADZONE = 0.08;
+const TOUCH_JOYSTICK_SIZE = 120;
 
 const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
 
@@ -28,6 +31,34 @@ const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
 
+const applyDeadzoneWithMetadata = (x, y, deadzone = 0) => {
+  const clampedX = clamp(Number.isFinite(x) ? x : 0, -1, 1);
+  const clampedY = clamp(Number.isFinite(y) ? y : 0, -1, 1);
+  const rawMagnitude = clamp(Math.hypot(clampedX, clampedY), 0, 1);
+  if (rawMagnitude <= deadzone) {
+    return { x: 0, y: 0, magnitude: 0, rawMagnitude };
+  }
+  const scaledMagnitude = clamp((rawMagnitude - deadzone) / (1 - deadzone), 0, 1);
+  const directionX = rawMagnitude === 0 ? 0 : clampedX / rawMagnitude;
+  const directionY = rawMagnitude === 0 ? 0 : clampedY / rawMagnitude;
+  return {
+    x: directionX * scaledMagnitude,
+    y: directionY * scaledMagnitude,
+    magnitude: scaledMagnitude,
+    rawMagnitude,
+  };
+};
+
+const normalizeNippleData = (data = {}, deadzone = DEFAULT_TOUCH_JOYSTICK_DEADZONE) => {
+  const vectorX = Number.isFinite(data?.vector?.x) ? data.vector.x : null;
+  const vectorY = Number.isFinite(data?.vector?.y) ? data.vector.y : null;
+  const angle = Number.isFinite(data?.angle?.radian) ? data.angle.radian : null;
+  const force = clamp(Number.isFinite(data?.force) ? data.force : 0, 0, 1);
+  const rawX = vectorX ?? (angle !== null ? Math.cos(angle) * force : 0);
+  const rawY = vectorY ?? (angle !== null ? Math.sin(angle) * force : 0);
+  return applyDeadzoneWithMetadata(rawX, rawY, deadzone);
+};
+
 const isEditableTarget = (target) => {
   if (!target) return false;
   if (target.isContentEditable) return true;
@@ -41,6 +72,8 @@ export function createFlightControls({
   leftThumbstickElement,
   rightThumbstickElement,
   liftButtonElements = [],
+  touchZoneElement,
+  nipplejs,
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
   rollSensitivity = DEFAULT_ROLL_SENSITIVITY,
   touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
@@ -92,7 +125,14 @@ export function createFlightControls({
     : [];
   const thrustKeys = new Set();
 
+  const touchJoystickState = {
+    manager: null,
+    nipples: new Map(),
+  };
+
   let sprintActive = false;
+
+  const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
 
   const pointerListenerOptions = { passive: false };
 
@@ -193,15 +233,130 @@ export function createFlightControls({
     analogLookState.isFollowMode = isFollowMode;
   };
 
-  const leftThumbstick = createThumbstick(leftThumbstickElement, {
-    deadzone: 0.15,
-    onChange: handleLeftStickChange,
-  });
+  const resetTouchJoystickRole = (role) => {
+    if (role === 'right') {
+      handleRightStickChange(
+        { x: 0, y: 0 },
+        { isActive: false, pointerType: 'touch', magnitude: 0, rawMagnitude: 0 }
+      );
+      return;
+    }
+    handleLeftStickChange(
+      { x: 0, y: 0 },
+      { isActive: false, pointerType: 'touch', magnitude: 0, rawMagnitude: 0 }
+    );
+  };
 
-  const rightThumbstick = createThumbstick(rightThumbstickElement, {
-    deadzone: 0.08,
-    onChange: handleRightStickChange,
-  });
+  const handleTouchJoystickMove = (role, data) => {
+    const normalized = normalizeNippleData(
+      data,
+      role === 'right' ? DEFAULT_TOUCH_LOOK_DEADZONE : DEFAULT_TOUCH_JOYSTICK_DEADZONE
+    );
+    const payload = { x: normalized.x, y: normalized.y };
+    const context = {
+      isActive: true,
+      pointerType: 'touch',
+      magnitude: normalized.magnitude,
+      rawMagnitude: normalized.rawMagnitude,
+    };
+    if (role === 'right') {
+      handleRightStickChange(payload, context);
+    } else {
+      handleLeftStickChange(payload, context);
+    }
+  };
+
+  const getTouchJoystickId = (nipple) => nipple?.identifier ?? nipple?.id ?? nipple?.options?.identifier ?? null;
+
+  const attachTouchJoystick = (nipple, role) => {
+    if (!nipple) return;
+    const move = (event, data) => handleTouchJoystickMove(role, data);
+    const end = () => resetTouchJoystickRole(role);
+    nipple.on('move', move);
+    nipple.on('end', end);
+    const id = getTouchJoystickId(nipple);
+    if (id !== null) {
+      touchJoystickState.nipples.set(id, { nipple, role, move, end });
+    }
+  };
+
+  const detachTouchJoystick = (nipple) => {
+    if (!nipple) return;
+    const id = getTouchJoystickId(nipple);
+    const record = id !== null ? touchJoystickState.nipples.get(id) : null;
+    if (record?.nipple) {
+      record.nipple.off('move', record.move);
+      record.nipple.off('end', record.end);
+      touchJoystickState.nipples.delete(id);
+      resetTouchJoystickRole(record.role);
+    }
+  };
+
+  const getNextTouchJoystickRole = () => {
+    let hasLeft = false;
+    let hasRight = false;
+    touchJoystickState.nipples.forEach((record) => {
+      if (record.role === 'left') hasLeft = true;
+      if (record.role === 'right') hasRight = true;
+    });
+    if (!hasLeft) return 'left';
+    if (!hasRight) return 'right';
+    return null;
+  };
+
+  const setupTouchJoysticks = () => {
+    const prefersCoarsePointer =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(pointer: coarse)').matches
+        : true;
+    if (!useDynamicTouchJoysticks || !touchZoneElement || !nipplejs || !prefersCoarsePointer) return;
+    try {
+      touchJoystickState.manager = nipplejs.create({
+        zone: touchZoneElement,
+        mode: 'dynamic',
+        multitouch: true,
+        maxNumberOfNipples: 2,
+        size: TOUCH_JOYSTICK_SIZE,
+        color: '#aac8ff',
+        fadeTime: 120,
+        restOpacity: 0.2,
+        threshold: 0.05,
+      });
+
+      touchZoneElement.classList.add('has-dynamic-joystick');
+
+      touchJoystickState.manager.on('added', (event, nipple) => {
+        const role = getNextTouchJoystickRole();
+        if (!role) {
+          nipple?.destroy?.();
+          return;
+        }
+        attachTouchJoystick(nipple, role);
+      });
+
+      touchJoystickState.manager.on('removed', (event, nipple) => {
+        detachTouchJoystick(nipple);
+      });
+    } catch (error) {
+      console.error('Failed to initialize touch joysticks', error);
+    }
+  };
+
+  const leftThumbstick = useDynamicTouchJoysticks
+    ? null
+    : createThumbstick(leftThumbstickElement, {
+        deadzone: 0.15,
+        onChange: handleLeftStickChange,
+      });
+
+  const rightThumbstick = useDynamicTouchJoysticks
+    ? null
+    : createThumbstick(rightThumbstickElement, {
+        deadzone: 0.08,
+        onChange: handleRightStickChange,
+      });
+
+  setupTouchJoysticks();
 
   const handleLiftButtonDown = (event) => {
     event.preventDefault();
@@ -342,6 +497,10 @@ export function createFlightControls({
     touchLiftPresses.clear();
     liftButtons.forEach((button) => button.classList.remove('is-active'));
 
+    Array.from(touchJoystickState.nipples.values()).forEach(({ nipple }) => {
+      detachTouchJoystick(nipple);
+    });
+
     leftThumbstick?.reset?.();
     rightThumbstick?.reset?.();
 
@@ -403,6 +562,14 @@ export function createFlightControls({
       button.removeEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
       button.removeEventListener('contextmenu', handleLiftContextMenu);
     });
+    if (touchJoystickState.manager) {
+      touchJoystickState.manager.destroy();
+      touchJoystickState.manager = null;
+      touchJoystickState.nipples.clear();
+    }
+    if (touchZoneElement?.classList) {
+      touchZoneElement.classList.remove('has-dynamic-joystick');
+    }
     leftThumbstick?.destroy?.();
     rightThumbstick?.destroy?.();
   };
