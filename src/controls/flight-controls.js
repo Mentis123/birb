@@ -1,4 +1,5 @@
 import { createThumbstick } from './thumbstick.js';
+import { inputShaping } from './virtual-thumbstick.js';
 
 const DEFAULT_ANALOG_LOOK_SPEED = 480;
 const DEFAULT_LEFT_STICK_PITCH_SPEED = 320;
@@ -6,6 +7,8 @@ const DEFAULT_ROLL_SENSITIVITY = 0.65;
 const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.15;
 const DEFAULT_TOUCH_LOOK_DEADZONE = 0.08;
+const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.32;
+const DEFAULT_TOUCH_LOOK_EXPO = 0.18;
 const TOUCH_JOYSTICK_SIZE = 120;
 
 const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
@@ -29,34 +32,67 @@ const THRUST_AXIS_LIST = Object.values(THRUST_AXIS_KEYS);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+const DEFAULT_THRUST_SHAPING = {
+  deadzone: DEFAULT_TOUCH_JOYSTICK_DEADZONE,
+  expo: DEFAULT_TOUCH_JOYSTICK_EXPO,
+};
+
+const DEFAULT_LOOK_SHAPING = {
+  deadzone: DEFAULT_TOUCH_LOOK_DEADZONE,
+  expo: DEFAULT_TOUCH_LOOK_EXPO,
+};
+
 const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
 
-const applyDeadzoneWithMetadata = (x, y, deadzone = 0) => {
-  const clampedX = clamp(Number.isFinite(x) ? x : 0, -1, 1);
-  const clampedY = clamp(Number.isFinite(y) ? y : 0, -1, 1);
-  const rawMagnitude = clamp(Math.hypot(clampedX, clampedY), 0, 1);
-  if (rawMagnitude <= deadzone) {
-    return { x: 0, y: 0, magnitude: 0, rawMagnitude };
-  }
-  const scaledMagnitude = clamp((rawMagnitude - deadzone) / (1 - deadzone), 0, 1);
-  const directionX = rawMagnitude === 0 ? 0 : clampedX / rawMagnitude;
-  const directionY = rawMagnitude === 0 ? 0 : clampedY / rawMagnitude;
+const normalizeShapingConfig = (config = {}, fallback = DEFAULT_THRUST_SHAPING) => ({
+  deadzone: clamp(
+    Number.isFinite(config.deadzone) ? config.deadzone : fallback.deadzone,
+    0,
+    0.95
+  ),
+  expo: clamp(Number.isFinite(config.expo) ? config.expo : fallback.expo, 0, 1),
+});
+
+const { shapeAxis } = inputShaping;
+
+const shapeStickInput = (x, y, config = DEFAULT_THRUST_SHAPING) => {
+  const rawX = clamp(Number.isFinite(x) ? x : 0, -1, 1);
+  const rawY = clamp(Number.isFinite(y) ? y : 0, -1, 1);
+  const rawMagnitude = clamp(Math.hypot(rawX, rawY), 0, 1);
+  const shapedX = shapeAxis(rawX, config);
+  const shapedY = shapeAxis(rawY, config);
+  const magnitude = clamp(Math.hypot(shapedX, shapedY), 0, 1);
   return {
-    x: directionX * scaledMagnitude,
-    y: directionY * scaledMagnitude,
-    magnitude: scaledMagnitude,
+    x: shapedX,
+    y: shapedY,
+    magnitude,
+    angle: Math.atan2(shapedY, shapedX),
+    raw: { x: rawX, y: rawY },
     rawMagnitude,
   };
 };
 
-const normalizeNippleData = (data = {}, deadzone = DEFAULT_TOUCH_JOYSTICK_DEADZONE) => {
+const normalizeNippleData = (data = {}) => {
   const vectorX = Number.isFinite(data?.vector?.x) ? data.vector.x : null;
   const vectorY = Number.isFinite(data?.vector?.y) ? data.vector.y : null;
   const angle = Number.isFinite(data?.angle?.radian) ? data.angle.radian : null;
   const force = clamp(Number.isFinite(data?.force) ? data.force : 0, 0, 1);
-  const rawX = vectorX ?? (angle !== null ? Math.cos(angle) * force : 0);
-  const rawY = vectorY ?? (angle !== null ? Math.sin(angle) * force : 0);
-  return applyDeadzoneWithMetadata(rawX, rawY, deadzone);
+  const rawX = clamp(vectorX ?? (angle !== null ? Math.cos(angle) * force : 0), -1, 1);
+  const rawY = clamp(vectorY ?? (angle !== null ? Math.sin(angle) * force : 0), -1, 1);
+  return {
+    raw: { x: rawX, y: rawY },
+    rawMagnitude: clamp(Math.hypot(rawX, rawY), 0, 1),
+  };
+};
+
+const shapeStickWithContext = (value = {}, context = {}, config = DEFAULT_THRUST_SHAPING) => {
+  const rawX = context?.raw?.x ?? value?.x ?? 0;
+  const rawY = context?.raw?.y ?? value?.y ?? 0;
+  const shaped = shapeStickInput(rawX, rawY, config);
+  if (Number.isFinite(context?.rawMagnitude)) {
+    shaped.rawMagnitude = clamp(context.rawMagnitude, 0, 1);
+  }
+  return shaped;
 };
 
 const isEditableTarget = (target) => {
@@ -77,6 +113,8 @@ export function createFlightControls({
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
   rollSensitivity = DEFAULT_ROLL_SENSITIVITY,
   touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
+  thrustShaping = DEFAULT_THRUST_SHAPING,
+  lookShaping = DEFAULT_LOOK_SHAPING,
   getCameraMode,
   followMode,
   onSprintChange,
@@ -102,6 +140,8 @@ export function createFlightControls({
   const effectiveTouchSprintThreshold = Number.isFinite(touchSprintThreshold)
     ? clamp(touchSprintThreshold, 0, 1)
     : DEFAULT_TOUCH_SPRINT_THRESHOLD;
+  const thrustInputShaping = normalizeShapingConfig(thrustShaping, DEFAULT_THRUST_SHAPING);
+  const lookInputShaping = normalizeShapingConfig(lookShaping, DEFAULT_LOOK_SHAPING);
 
   const axisSources = {
     keyboard: createAxisRecord(),
@@ -203,8 +243,9 @@ export function createFlightControls({
   };
 
   const handleLeftStickChange = (value, context = {}) => {
-    const forward = clamp(-value.y, -1, 1);
-    const strafe = clamp(-value.x, -1, 1);
+    const shaped = shapeStickWithContext(value, context, thrustInputShaping);
+    const forward = clamp(-shaped.y, -1, 1);
+    const strafe = clamp(-shaped.x, -1, 1);
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
@@ -217,8 +258,8 @@ export function createFlightControls({
     const pointerType = context.pointerType ?? null;
     const magnitudeForSprint = clamp(
       pointerType === 'touch'
-        ? context.rawMagnitude ?? Math.hypot(value.x, value.y)
-        : context.magnitude ?? Math.hypot(value.x, value.y),
+        ? context.rawMagnitude ?? shaped.rawMagnitude
+        : context.magnitude ?? shaped.magnitude,
       0,
       1
     );
@@ -230,12 +271,13 @@ export function createFlightControls({
   };
 
   const handleRightStickChange = (value, context = {}) => {
+    const shaped = shapeStickWithContext(value, context, lookInputShaping);
     const pointerType = context.pointerType ?? null;
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
     const isFollowMode = followMode != null && currentMode === followMode;
 
-    analogLookState.x = clamp(-value.x, -1, 1);
-    analogLookState.y = clamp(value.y, -1, 1);
+    analogLookState.x = clamp(-shaped.x, -1, 1);
+    analogLookState.y = clamp(shaped.y, -1, 1);
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
     analogLookState.isFollowMode = isFollowMode;
@@ -256,15 +298,12 @@ export function createFlightControls({
   };
 
   const handleTouchJoystickMove = (role, data) => {
-    const normalized = normalizeNippleData(
-      data,
-      role === 'right' ? DEFAULT_TOUCH_LOOK_DEADZONE : DEFAULT_TOUCH_JOYSTICK_DEADZONE
-    );
-    const payload = { x: normalized.x, y: normalized.y };
+    const normalized = normalizeNippleData(data);
+    const payload = { x: normalized.raw.x, y: normalized.raw.y };
     const context = {
       isActive: true,
       pointerType: 'touch',
-      magnitude: normalized.magnitude,
+      raw: normalized.raw,
       rawMagnitude: normalized.rawMagnitude,
     };
     if (role === 'right') {
@@ -407,14 +446,14 @@ export function createFlightControls({
   const leftThumbstick = useDynamicTouchJoysticks
     ? null
     : createThumbstick(leftThumbstickElement, {
-        deadzone: 0.15,
+        deadzone: 0,
         onChange: handleLeftStickChange,
       });
 
   const rightThumbstick = useDynamicTouchJoysticks
     ? null
     : createThumbstick(rightThumbstickElement, {
-        deadzone: 0.08,
+        deadzone: 0,
         onChange: handleRightStickChange,
       });
 
