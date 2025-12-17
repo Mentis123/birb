@@ -213,22 +213,24 @@
       }
 
       .touch-controls__zone {
+        position: relative;
         width: 100%;
         min-height: clamp(6.5rem, 28vw, 8.5rem);
         border-radius: 1.1rem;
         background: radial-gradient(circle at 35% 35%, rgba(93, 146, 238, 0.14), rgba(14, 23, 41, 0.6));
         border: 1px solid rgba(132, 174, 255, 0.22);
         box-shadow: inset 0 0 0 1px rgba(68, 107, 182, 0.22), 0 8px 24px rgba(6, 12, 28, 0.55);
-        display: grid;
-        align-items: end;
-        justify-items: center;
-        padding: 0.85rem;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        gap: clamp(0.75rem, 3vw, 1.25rem);
+        padding: 0.85rem 1rem;
         pointer-events: auto;
         touch-action: none;
       }
 
-      .touch-controls__zone.has-dynamic-joystick .thumbstick {
-        display: none;
+      .touch-controls__zone.has-dynamic-joystick {
+        justify-content: space-between;
       }
 
       .thumbstick {
@@ -268,8 +270,49 @@
         transition: transform 160ms ease;
       }
 
+      .touch-controls__zone.has-dynamic-joystick .thumbstick {
+        pointer-events: none;
+        opacity: 0.9;
+      }
+
       .thumbstick.is-active .thumbstick__handle {
         transition: none;
+      }
+
+      .touch-controls__look-hint {
+        display: none;
+        align-self: flex-end;
+        justify-self: end;
+        pointer-events: none;
+        text-align: center;
+        color: rgba(217, 230, 255, 0.82);
+        font-size: 0.68rem;
+        letter-spacing: 0.04em;
+        line-height: 1.35;
+        gap: 0.35rem;
+      }
+
+      .touch-controls__zone.has-dynamic-joystick .touch-controls__look-hint {
+        display: grid;
+        justify-items: center;
+      }
+
+      .touch-controls__hint-ring {
+        width: clamp(3.1rem, 14vw, 4.2rem);
+        aspect-ratio: 1;
+        border-radius: 50%;
+        border: 1px dashed rgba(163, 199, 255, 0.42);
+        background: radial-gradient(circle at 45% 40%, rgba(140, 181, 255, 0.12), rgba(30, 48, 86, 0.28));
+        box-shadow: inset 0 0 0 1px rgba(76, 118, 198, 0.22);
+        position: relative;
+      }
+
+      .touch-controls__hint-ring-inner {
+        position: absolute;
+        inset: 26%;
+        border-radius: 50%;
+        border: 1px solid rgba(186, 214, 255, 0.42);
+        opacity: 0.8;
       }
 
       .lift-controls {
@@ -746,6 +789,12 @@
           <div class="touch-controls__zone" data-touch-zone>
             <div class="thumbstick" data-thumbstick="left">
               <div class="thumbstick__handle" data-thumbstick-handle></div>
+            </div>
+            <div class="touch-controls__look-hint" data-look-hint>
+              <div class="touch-controls__hint-ring" aria-hidden="true">
+                <div class="touch-controls__hint-ring-inner"></div>
+              </div>
+              <div class="touch-controls__hint-label">Second touch: Look</div>
             </div>
           </div>
         </div>
