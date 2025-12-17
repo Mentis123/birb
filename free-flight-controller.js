@@ -2,16 +2,16 @@
 export const MOVEMENT_ACCELERATION = 2.8;
 export const LINEAR_DRAG = 1.2;
 export const SPRINT_MULTIPLIER = 1.4;
-// Controls how quickly the bird eases toward new roll velocities when strafing.
-export const BANK_RESPONSIVENESS = 2.5;
-// Maximum roll velocity (radians per second) that sustained input can achieve.
-export const BANK_ROLL_SPEED = Math.PI * 0.8;
 // Upper bound on how far the bird can bank for readability and comfort.
-export const MAX_BANK_ANGLE = Math.PI / 3;
+export const MAX_BANK_ANGLE = (35 * Math.PI) / 180;
 // How quickly a banked input should translate into a gentle yaw turn.
 export const BANK_TURN_RATE = Math.PI * 0.45;
-// How quickly the bird levels its wings when roll input stops.
-export const BANK_RETURN_RATE = 1.6;
+// How quickly the controller adapts its roll orientation when reversing direction.
+export const BANK_ORIENTATION_DAMPING = 2.5;
+// Maximum amount the bird pitches up or down when steering with the stick.
+export const MAX_PITCH_ANGLE = (20 * Math.PI) / 180;
+// How quickly the bird eases toward target pitch and bank angles.
+export const TILT_DAMPING = 14;
 // Minimum desired forward speed so the bird always keeps gliding.
 export const CRUISE_FORWARD_SPEED = 2.1;
 export const LOOK_SENSITIVITY = 0.002;
@@ -91,7 +91,7 @@ export class FreeFlightController {
     this._smoothedInput = createAxisRecord();
 
     this.bank = 0;
-    this._bankVelocity = 0;
+    this.pitch = 0;
     this.elapsed = 0;
 
     this.reset();
@@ -240,26 +240,25 @@ export class FreeFlightController {
       bankOrientation = -1;
     }
 
-    const bankStep = 1 - Math.exp(-BANK_RESPONSIVENESS * deltaTime);
-    const orientationStep = 1 - Math.exp(-BANK_RESPONSIVENESS * 0.6 * deltaTime);
+    const orientationStep = 1 - Math.exp(-BANK_ORIENTATION_DAMPING * deltaTime);
     this._bankOrientation += (bankOrientation - this._bankOrientation) * orientationStep;
 
     const rollInput = smoothed.roll * this._bankOrientation;
-    const hasRollInput = Math.abs(rollInput) > 1e-4;
-    const targetAngularVelocity = hasRollInput
-      ? rollInput * BANK_ROLL_SPEED
-      : -this.bank * BANK_RETURN_RATE - this._bankVelocity;
+    const targetPitch = clamp(smoothed.forward * MAX_PITCH_ANGLE, -MAX_PITCH_ANGLE, MAX_PITCH_ANGLE, this.pitch);
+    const targetBank = clamp(rollInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+    const tiltStep = 1 - Math.exp(-TILT_DAMPING * deltaTime);
 
-    this._bankVelocity += targetAngularVelocity * bankStep;
+    this.pitch += (targetPitch - this.pitch) * tiltStep;
+    this.bank += (targetBank - this.bank) * tiltStep;
 
-    this.bank += this._bankVelocity * deltaTime;
+    this.pitch = clamp(this.pitch, -MAX_PITCH_ANGLE, MAX_PITCH_ANGLE, this.pitch);
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
-    // Prevent the clamp from fighting the easing by clearing residual velocity at the limits.
-    if (Math.abs(this.bank) >= MAX_BANK_ANGLE && Math.sign(this.bank) === Math.sign(this._bankVelocity)) {
-      this._bankVelocity = 0;
-    }
 
-    this._bankQuaternion.setFromAxisAngle(forward, this.bank);
+    this._pitchQuaternion.setFromAxisAngle(right, this.pitch);
+    this.quaternion.multiply(this._pitchQuaternion);
+
+    const bankAxis = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    this._bankQuaternion.setFromAxisAngle(bankAxis, this.bank);
     this.quaternion.multiply(this._bankQuaternion);
 
     return {
@@ -290,7 +289,7 @@ export class FreeFlightController {
     this.quaternion.copy(this._initialQuaternion);
     const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
     this.bank = 0;
-    this._bankVelocity = 0;
+    this.pitch = 0;
     this._bankOrientation = forward.z >= 0 ? 1 : -1;
     this.elapsed = 0;
     Object.assign(this.input, createAxisRecord());
