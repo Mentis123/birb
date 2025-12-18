@@ -21,11 +21,11 @@ The birb model does not consistently face the direction of travel. Users expect 
 | #184 | f935afc | Rotated 90° clockwise: `Euler(0, -Math.PI / 2, 0)` | Still facing wrong direction |
 | #185 | 1ed3e77 | Reversed to 90° anticlockwise: `Euler(0, Math.PI / 2, 0)` | Still facing wrong direction |
 
-### Current State (as of commit 1ed3e77)
+### Current State (after latest rotation attempt)
 ```javascript
 // index.html:1158-1160
 const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0, Math.PI / 2, 0)  // 90° anticlockwise around Y
+  new THREE.Euler(0, Math.PI, 0)  // 180° yaw to face away from camera
 );
 ```
 
