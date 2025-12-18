@@ -15,11 +15,11 @@ export const TILT_DAMPING = 14;
 // Minimum desired forward speed so the bird always keeps gliding.
 export const CRUISE_FORWARD_SPEED = 2.1;
 export const LOOK_SENSITIVITY = 0.002;
-export const AMBIENT_BOB_AMPLITUDE = 0.12;
+export const AMBIENT_BOB_AMPLITUDE = 0.06;
 export const AMBIENT_BOB_SPEED = 0.8;
-export const AMBIENT_ROLL_AMPLITUDE = 0.05;
+export const AMBIENT_ROLL_AMPLITUDE = 0.025;
 export const AMBIENT_ROLL_SPEED = 0.6;
-export const AMBIENT_YAW_AMPLITUDE = 0.03;
+export const AMBIENT_YAW_AMPLITUDE = 0.015;
 export const AMBIENT_YAW_SPEED = 0.5;
 
 export const INPUT_SMOOTHING = 8;
