@@ -20,6 +20,7 @@ The birb model does not consistently face the direction of travel. Users expect 
 |----|--------|--------|--------|
 | #184 | f935afc | Rotated 90° clockwise: `Euler(0, -Math.PI / 2, 0)` | Still facing wrong direction |
 | #185 | 1ed3e77 | Reversed to 90° anticlockwise: `Euler(0, Math.PI / 2, 0)` | Still facing wrong direction |
+| This PR | _pending_ | Removed the yaw offset (identity quaternion) so the model follows the controller forward vector | Aims to flip the bird away from the camera; verify on device |
 
 ### Current State (after latest rotation attempt)
 ```javascript
