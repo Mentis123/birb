@@ -26,6 +26,7 @@ export const INPUT_SMOOTHING = 8;
 export const STRAFE_DAMPING = 0.5;
 export const IDLE_LINEAR_DRAG = 2.5;
 export const LIFT_ACCELERATION_MULTIPLIER = 1.8;
+export const THROTTLE_POWER_MULTIPLIER = 2;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -119,7 +120,7 @@ export class FreeFlightController {
   }
 
   getEffectiveThrottle() {
-    const baseThrottle = this.throttle;
+    const baseThrottle = this.throttle * THROTTLE_POWER_MULTIPLIER;
     const multiplier = this.isSprinting ? this.sprintMultiplier : 1;
     return baseThrottle * multiplier;
   }
