@@ -670,11 +670,11 @@
                     min="0"
                     max="1"
                     step="0.01"
-                    value="0.6"
+                    value="0.4"
                     aria-describedby="glide-speed-display"
                   />
                   <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-                    60%
+                    40%
                   </output>
                 </div>
                 <button type="button" class="control-button" data-control="environment">
@@ -690,7 +690,7 @@
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">Throttle</span>
-                    <span class="control-metrics__value" data-metric="throttle">60%</span>
+                    <span class="control-metrics__value" data-metric="throttle">40%</span>
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">FPS</span>
@@ -1650,7 +1650,10 @@
       }
 
       function updateControlMetrics(speed = flightController.getSpeed()) {
-        const throttlePercent = Math.round(flightController.getEffectiveThrottle() * 100);
+        const throttleSetting = Number.isFinite(flightController?.throttle)
+          ? flightController.throttle
+          : 0;
+        const throttlePercent = Math.round(throttleSetting * 100);
         const safeSpeed = Number.isFinite(speed) ? speed : 0;
         if (speedMetric) {
           speedMetric.textContent = `${safeSpeed.toFixed(2)}u/s`;
@@ -1947,7 +1950,7 @@
 
       syncFullscreenUi();
 
-      function clampThrottle(value, fallback = 0.6) {
+      function clampThrottle(value, fallback = 0.4) {
         if (!Number.isFinite(value)) {
           return fallback;
         }
