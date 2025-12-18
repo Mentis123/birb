@@ -251,7 +251,7 @@ export function createFlightControls({
     axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
     axisSources.leftStick.lift = 0;
 
-    // Track pitch input: pushing up pitches nose up (negative Y in look delta)
+    // Track pitch input: pushing up should pitch nose up
     leftStickPitchState.pitch = forward;
     leftStickPitchState.isActive = Boolean(context.isActive);
 
@@ -277,7 +277,7 @@ export function createFlightControls({
     const isFollowMode = followMode != null && currentMode === followMode;
 
     analogLookState.x = clamp(-shaped.x, -1, 1);
-    analogLookState.y = clamp(shaped.y, -1, 1);
+    analogLookState.y = clamp(-shaped.y, -1, 1);
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
     analogLookState.isFollowMode = isFollowMode;
@@ -646,8 +646,8 @@ export function createFlightControls({
       return;
     }
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
-    // Negative pitch delta = nose up (pushing joystick up should climb)
-    flightController.addLookDelta(0, -pitch * DEFAULT_LEFT_STICK_PITCH_SPEED * limitedDelta);
+    // Positive pitch delta = nose up (pushing joystick up should climb)
+    flightController.addLookDelta(0, pitch * DEFAULT_LEFT_STICK_PITCH_SPEED * limitedDelta);
   };
 
   const dispose = () => {
