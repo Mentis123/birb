@@ -398,6 +398,16 @@ export function createFlightControls({
     removeActiveTouchId(event.pointerId);
   };
 
+  const handleTouchZoneTouchStart = (event) => {
+    if (!event?.changedTouches) return;
+    Array.from(event.changedTouches).forEach((touch) => addActiveTouchId(touch.identifier));
+  };
+
+  const handleTouchZoneTouchEnd = (event) => {
+    if (!event?.changedTouches) return;
+    Array.from(event.changedTouches).forEach((touch) => removeActiveTouchId(touch.identifier));
+  };
+
   const setupTouchJoysticks = () => {
     const prefersCoarsePointer =
       typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -423,12 +433,14 @@ export function createFlightControls({
       touchZoneElement.addEventListener('pointerdown', handleTouchZonePointerDown, pointerListenerOptions);
       touchZoneElement.addEventListener('pointerup', handleTouchZonePointerUp, pointerListenerOptions);
       touchZoneElement.addEventListener('pointercancel', handleTouchZonePointerUp, pointerListenerOptions);
+      touchZoneElement.addEventListener('touchstart', handleTouchZoneTouchStart, { passive: true });
+      touchZoneElement.addEventListener('touchend', handleTouchZoneTouchEnd, { passive: true });
+      touchZoneElement.addEventListener('touchcancel', handleTouchZoneTouchEnd, { passive: true });
 
       touchJoystickState.manager.on('added', (event, nipple) => {
         const pointerId = getTouchJoystickId(nipple, event);
         const role = getTouchJoystickRole(pointerId);
-        const orderIndex = pointerId != null ? touchJoystickState.activeTouchOrder.indexOf(pointerId) : -1;
-        if (!role || (role === 'right' && orderIndex !== 1)) {
+        if (!role) {
           nipple?.destroy?.();
           return;
         }
@@ -674,6 +686,9 @@ export function createFlightControls({
       touchZoneElement.removeEventListener('pointerdown', handleTouchZonePointerDown, pointerListenerOptions);
       touchZoneElement.removeEventListener('pointerup', handleTouchZonePointerUp, pointerListenerOptions);
       touchZoneElement.removeEventListener('pointercancel', handleTouchZonePointerUp, pointerListenerOptions);
+      touchZoneElement.removeEventListener('touchstart', handleTouchZoneTouchStart, { passive: true });
+      touchZoneElement.removeEventListener('touchend', handleTouchZoneTouchEnd, { passive: true });
+      touchZoneElement.removeEventListener('touchcancel', handleTouchZoneTouchEnd, { passive: true });
     }
     if (touchZoneElement?.classList) {
       touchZoneElement.classList.remove('has-dynamic-joystick');
