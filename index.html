@@ -1234,10 +1234,11 @@
       const birbAnchor = new THREE.Group();
       scene.add(birbAnchor);
 
-      // Align the sculpted bird (modeled along the +X axis) with the
-      // controller's forward vector (-Z).
+      // Apply a 180° yaw offset so the sculpted bird (modeled along the +X axis)
+      // faces away from the camera when combined with the controller's forward
+      // vector (-Z).
       const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(0, Math.PI / 2, 0)
+        new THREE.Euler(0, Math.PI, 0)
       );
 
       const positionBirbModel = (model) => {
