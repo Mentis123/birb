@@ -9,7 +9,7 @@ export const BANK_TURN_RATE = Math.PI * 0.45;
 // How quickly the controller adapts its roll orientation when reversing direction.
 export const BANK_ORIENTATION_DAMPING = 2.5;
 // Maximum amount the bird pitches up or down when steering with the stick.
-export const MAX_PITCH_ANGLE = (20 * Math.PI) / 180;
+export const MAX_PITCH_ANGLE = (45 * Math.PI) / 180;
 // How quickly the bird eases toward target pitch and bank angles.
 export const TILT_DAMPING = 14;
 // Minimum desired forward speed so the bird always keeps gliding.
@@ -27,6 +27,11 @@ export const STRAFE_DAMPING = 0.5;
 export const IDLE_LINEAR_DRAG = 2.5;
 export const LIFT_ACCELERATION_MULTIPLIER = 1.8;
 export const THROTTLE_POWER_MULTIPLIER = 2;
+// Rotation rates for pitch and yaw (radians per second at full stick deflection)
+export const PITCH_RATE = Math.PI * 0.5;
+export const YAW_RATE = Math.PI * 0.6;
+// How quickly the visual bank angle responds to yaw input
+export const BANK_RESPONSE = 6;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -177,95 +182,88 @@ export class FreeFlightController {
       smoothed.roll += (this.input.roll - smoothed.roll) * smoothingStrength;
     }
 
-    const bankedYaw = smoothed.roll * BANK_TURN_RATE;
-    if (bankedYaw !== 0) {
-      this._yawQuaternion.setFromAxisAngle(up, bankedYaw * deltaTime);
+    // --- ROTATION-BASED FLIGHT CONTROLS ---
+    // Pitch: joystick UP (positive forward) → nose UP (negative rotation on local X-axis)
+    // The forward input is inverted so pushing up pitches nose up
+    const pitchInput = -smoothed.forward;
+    const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
+
+    // Yaw: joystick LEFT (negative roll/strafe) → nose LEFT (negative rotation on Y-axis)
+    // The roll input directly controls yaw (inverted so left = turn left)
+    const yawInput = -smoothed.roll;
+    const yawDelta = yawInput * YAW_RATE * deltaTime;
+
+    // Apply yaw rotation around global up axis
+    if (yawDelta !== 0) {
+      this._yawQuaternion.setFromAxisAngle(up, yawDelta);
       this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
     }
 
+    // Apply pitch rotation around the bird's local right axis
+    if (pitchDelta !== 0) {
+      const right = this._right.set(1, 0, 0).applyQuaternion(this.lookQuaternion).normalize();
+      this._pitchQuaternion.setFromAxisAngle(right, pitchDelta);
+      this.lookQuaternion.multiply(this._pitchQuaternion).normalize();
+    }
+
+    // Start with the look quaternion as the base orientation
     this.quaternion.copy(this.lookQuaternion);
 
+    // Get the forward direction AFTER rotation is applied
     const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
 
-    const acceleration = this._acceleration.set(0, 0, 0);
-    acceleration.addScaledVector(forward, smoothed.forward);
-    acceleration.addScaledVector(right, smoothed.strafe * this.strafeDamping);
-    acceleration.addScaledVector(up, smoothed.lift * LIFT_ACCELERATION_MULTIPLIER);
+    // --- ROTATION-BASED MOVEMENT ---
+    // The bird always moves in its forward direction based on current rotation
+    // Cruise speed maintains constant forward velocity
+    const cruiseTargetSpeed = CRUISE_FORWARD_SPEED * effectiveThrottle;
+    const forwardSpeed = this.velocity.dot(forward);
 
-    if (acceleration.lengthSq() > 1) {
-      acceleration.normalize();
+    // Always apply gentle forward glide to maintain cruise speed
+    if (cruiseTargetSpeed > 0) {
+      const cruiseAcceleration = (cruiseTargetSpeed - forwardSpeed) * MOVEMENT_ACCELERATION * 0.5;
+      this.velocity.addScaledVector(forward, cruiseAcceleration * deltaTime);
     }
 
-    const hasTranslationInput =
-      Math.abs(smoothed.forward) > 1e-3 ||
-      Math.abs(smoothed.strafe) > 1e-3 ||
-      Math.abs(smoothed.lift) > 1e-3;
+    // Apply lift input for direct vertical control (can still ascend/descend beyond pitch)
+    if (Math.abs(smoothed.lift) > 1e-3) {
+      const liftAcceleration = smoothed.lift * MOVEMENT_ACCELERATION * LIFT_ACCELERATION_MULTIPLIER;
+      this.velocity.addScaledVector(up, liftAcceleration * deltaTime);
+    }
 
-    acceleration.multiplyScalar(MOVEMENT_ACCELERATION * effectiveThrottle);
-
-    this.velocity.addScaledVector(acceleration, deltaTime);
-
+    // Apply drag
     const dragMultiplier = Math.exp(-LINEAR_DRAG * deltaTime);
     this.velocity.multiplyScalar(dragMultiplier);
 
-    if (!hasTranslationInput) {
-      const idleDragMultiplier = Math.exp(-this.idleLinearDrag * deltaTime);
-      this.velocity.multiplyScalar(idleDragMultiplier);
+    // Correct sideways drift - bird should move where it's pointing, not slide
+    const sidewaysSpeed = this.velocity.dot(right);
+    if (Math.abs(sidewaysSpeed) > 1e-3) {
+      const correctionRate = MOVEMENT_ACCELERATION * 0.8;
+      const maxCorrection = correctionRate * deltaTime;
+      const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
+      this.velocity.addScaledVector(right, -correction);
     }
 
-    const forwardSpeed = this.velocity.dot(forward);
-    const cruiseTargetSpeed = CRUISE_FORWARD_SPEED * effectiveThrottle;
-    const wantsForwardGlide = smoothed.forward >= -0.1;
-    if (wantsForwardGlide && cruiseTargetSpeed > 0) {
-      const cruiseAcceleration = (cruiseTargetSpeed - forwardSpeed) * MOVEMENT_ACCELERATION * 0.35;
-      this.velocity.addScaledVector(forward, cruiseAcceleration * deltaTime);
-    } else if (wantsForwardGlide && forwardSpeed > cruiseTargetSpeed) {
-      const brakingAcceleration = (cruiseTargetSpeed - forwardSpeed) * MOVEMENT_ACCELERATION * 0.18;
-      this.velocity.addScaledVector(forward, brakingAcceleration * deltaTime);
-    }
-
-    if (Math.abs(smoothed.strafe) < 0.05) {
-      const sidewaysSpeed = this.velocity.dot(right);
-      if (Math.abs(sidewaysSpeed) > 1e-3) {
-        const correctionRate = MOVEMENT_ACCELERATION * 0.45;
-        const maxCorrection = correctionRate * deltaTime;
-        const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
-        this.velocity.addScaledVector(right, -correction);
-      }
-    }
-
+    // Update position based on velocity
     this.position.addScaledVector(this.velocity, deltaTime);
 
-    const forwardZ = forward.z;
-    let bankOrientation = this._bankOrientation;
-    // Flip the roll direction based on facing direction so strafing left always lowers the left wing.
-    if (forwardZ > 1e-4) {
-      bankOrientation = 1;
-    } else if (forwardZ < -1e-4) {
-      bankOrientation = -1;
-    }
+    // --- PROCEDURAL BANKING (ROLL) ---
+    // Bank into turns: turning left (negative yaw) → left wing down (negative roll)
+    // The bank angle is proportional to the yaw input for visual feedback
+    const targetBank = clamp(-yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
-    const orientationStep = 1 - Math.exp(-BANK_ORIENTATION_DAMPING * deltaTime);
-    this._bankOrientation += (bankOrientation - this._bankOrientation) * orientationStep;
-
-    const rollInput = smoothed.roll * this._bankOrientation;
-    const targetPitch = clamp(smoothed.forward * MAX_PITCH_ANGLE, -MAX_PITCH_ANGLE, MAX_PITCH_ANGLE, this.pitch);
-    const targetBank = clamp(rollInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
-    const tiltStep = 1 - Math.exp(-TILT_DAMPING * deltaTime);
-
-    this.pitch += (targetPitch - this.pitch) * tiltStep;
-    this.bank += (targetBank - this.bank) * tiltStep;
-
-    this.pitch = clamp(this.pitch, -MAX_PITCH_ANGLE, MAX_PITCH_ANGLE, this.pitch);
+    // Smooth interpolation (lerp) for banking
+    const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
+    this.bank += (targetBank - this.bank) * bankStep;
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
-    this._pitchQuaternion.setFromAxisAngle(right, this.pitch);
-    this.quaternion.multiply(this._pitchQuaternion);
-
+    // Apply visual bank rotation around the forward axis
     const bankAxis = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     this._bankQuaternion.setFromAxisAngle(bankAxis, this.bank);
     this.quaternion.multiply(this._bankQuaternion);
+
+    // Reset pitch tracking (no longer used for visual tilt, rotation is in lookQuaternion)
+    this.pitch = 0;
 
     return {
       position: this.position,
