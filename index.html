@@ -1293,8 +1293,12 @@
       scene.add(birbAnchor);
 
       // Keep the model aligned with the controller's forward vector (-Z) so the
-      // beak points away from the camera.
-      const modelOrientationOffset = new THREE.Quaternion();
+      // beak points away from the camera. The procedural bird model has its beak
+      // pointing in +X, so we rotate -90° around Y to align +X with -Z.
+      const modelOrientationOffset = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        -Math.PI / 2
+      );
 
       const positionBirbModel = (model) => {
         if (!model) return;
