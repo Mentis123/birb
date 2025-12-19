@@ -203,8 +203,7 @@ export class FreeFlightController {
     // Pitch control: by default (unchecked), point up = fly up, point down = fly down (bird-style)
     // When invertPitch is true (checked), controls are airplane-style: push up = dive
     // Note: positive rotation around right axis = nose down
-    // With forward input negated in flight-controls.js (line 247), joystick UP gives negative forward
-    // So for bird-style: pitchInput = forward (negative = nose up = climb)
+    // Joystick UP produces negative forward input, so bird-style uses that negative value to climb
     const pitchInput = this.invertPitch ? -smoothed.forward : smoothed.forward;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
