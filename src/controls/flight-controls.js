@@ -552,16 +552,8 @@ export function createFlightControls({
   };
 
   const applyLeftStickPitch = (deltaTime = 0) => {
-    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
-      return;
-    }
-    const pitch = leftStickPitchState.pitch;
-    if (pitch === 0) {
-      return;
-    }
-    const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
-    // Positive pitch delta = nose up (pushing joystick up should climb)
-    flightController.addLookDelta(0, pitch * DEFAULT_LEFT_STICK_PITCH_SPEED * limitedDelta);
+    // Pitch is now handled directly in the flight controller via the forward input
+    // This function is kept for API compatibility but is a no-op
   };
 
   const dispose = () => {
