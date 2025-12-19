@@ -894,6 +894,9 @@
         createWorldShell = worldModule.createWorldShell;
         ENVIRONMENT_VARIANTS = worldModule.ENVIRONMENT_VARIANTS;
         getEnvironmentDefinition = worldModule.getEnvironmentDefinition;
+        const sphericalWorldModule = await import("./src/environment/spherical-world.js");
+        var createSphericalWorld = sphericalWorldModule.createSphericalWorld;
+        var SPHERE_RADIUS = sphericalWorldModule.SPHERE_RADIUS;
         const gltfLoaderModule = await import(
           "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
         );
@@ -1075,8 +1078,9 @@
       renderer.toneMappingExposure = 1.22;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x0a1426);
-      scene.fog = new THREE.Fog(0x0a1426, 10.5, 30);
+      scene.background = new THREE.Color(0x050a14);
+      // Extended fog for spherical world visibility (sphere radius is 30)
+      scene.fog = new THREE.Fog(0x050a14, 40, 200);
 
       const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
       ambient.groundColor.set(0x1a2f32);
@@ -1118,6 +1122,7 @@
         label: defaultEnvironment.label,
       };
       let environmentShell = null;
+      let sphericalWorld = null;
       let glideTrail = null;
       let flightControllerInitialized = false;
 
@@ -1220,23 +1225,26 @@
         const definition = getEnvironmentDefinition(variantId);
         if (!definition) return;
 
-        if (environmentShell) {
+        // Dispose old world
+        if (sphericalWorld) {
           try {
-            environmentShell.dispose();
+            sphericalWorld.dispose();
           } catch (disposeError) {
-            console.warn("Environment dispose error:", disposeError);
+            console.warn("Spherical world dispose error:", disposeError);
           }
         }
 
         try {
-          environmentShell = createWorldShell(scene, {
+          // Create spherical world
+          sphericalWorld = createSphericalWorld(scene, {
             three: THREE,
             variant: definition.id,
+            definition: definition,
           });
-          glideTrail = environmentShell.glideTrail;
+          glideTrail = null; // No glide trail on spherical world
         } catch (envError) {
-          console.warn("Environment creation failed:", envError);
-          environmentShell = null;
+          console.warn("Spherical world creation failed:", envError);
+          sphericalWorld = null;
           glideTrail = null;
         }
         environmentState.id = definition.id;
@@ -2018,8 +2026,10 @@
         { passive: true }
       );
 
+      // Start bird on top of spherical world (sphere radius + some height)
+      const birdStartHeight = SPHERE_RADIUS + 3;
       const flightController = new FreeFlightController(THREE, {
-        position: new THREE.Vector3(1.1, 0.9, 0),
+        position: new THREE.Vector3(0, birdStartHeight, 0),
         throttle: initialThrottle,
         invertPitch: savedInvertPitch,
       });
@@ -2156,6 +2166,21 @@
         flightControls.applyLeftStickPitch(lookDeltaTime);
 
         const pose = flightController.update(delta);
+
+        // Apply collision detection with spherical world
+        if (sphericalWorld && sphericalWorld.collisionSystem) {
+          const collisionResult = sphericalWorld.collisionSystem.checkAllCollisions(
+            THREE,
+            flightController.position,
+            flightController.velocity,
+            0.5 // bird collision radius
+          );
+          if (collisionResult.hadCollision) {
+            flightController.position.copy(collisionResult.position);
+            flightController.velocity.copy(collisionResult.velocity);
+          }
+        }
+
         const ambientOffsets = flightController.getAmbientOffsets();
 
         birbAnchor.position.copy(pose.position).add(ambientOffsets.position);
@@ -2234,9 +2259,9 @@
           cameraState.dispose();
         }
         renderer.dispose();
-        if (environmentShell) {
-          environmentShell.dispose();
-          environmentShell = null;
+        if (sphericalWorld) {
+          sphericalWorld.dispose();
+          sphericalWorld = null;
         }
         flightControls.dispose();
       });
