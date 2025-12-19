@@ -244,7 +244,7 @@ export function createFlightControls({
 
   const handleLeftStickChange = (value, context = {}) => {
     const shaped = shapeStickWithContext(value, context, thrustInputShaping);
-    const forward = clamp(-shaped.y, -1, 1);
+    const forward = clamp(shaped.y, -1, 1);
     const strafe = clamp(shaped.x, -1, 1);
     axisSources.leftStick.forward = forward;
     axisSources.leftStick.strafe = strafe;
