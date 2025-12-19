@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Birb Flight Lab</title>
     <meta
       name="description"
@@ -500,32 +500,52 @@
       }
 
 
-      body.is-fullscreen-fallback {
-        align-items: stretch;
+      /* Fullscreen mode - simplified fixed positioning approach */
+      body.is-fullscreen {
+        overflow: hidden;
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
       }
 
-      body.is-fullscreen-fallback main {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
+      .canvas-wrapper.is-fullscreen {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
         max-width: none;
-        width: 100vw;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        background: #0a1324;
         padding: 0;
       }
 
-      body.is-fullscreen-fallback header {
-        display: none;
+      .canvas-wrapper.is-fullscreen canvas {
+        width: 100%;
+        height: 100%;
       }
 
+      .canvas-wrapper.is-fullscreen .canvas-actions {
+        top: max(env(safe-area-inset-top, 0), clamp(0.75rem, 3vw, 1.4rem));
+        right: max(env(safe-area-inset-right, 0), clamp(0.75rem, 3vw, 1.4rem));
+        bottom: auto;
+        left: auto;
+      }
+
+      .canvas-wrapper.is-fullscreen .touch-controls {
+        bottom: max(env(safe-area-inset-bottom, 0), var(--space-2));
+        left: env(safe-area-inset-left, 0);
+        right: env(safe-area-inset-right, 0);
+      }
+
+      /* Native fullscreen (desktop) */
       .canvas-wrapper:fullscreen,
-      .canvas-wrapper:-webkit-full-screen,
-      .canvas-wrapper.is-fullscreen-fallback {
+      .canvas-wrapper:-webkit-full-screen {
         max-width: none;
-        width: 100vw;
-        height: 100vh;
-        height: 100dvh;
-        min-height: 100vh;
-        min-height: 100dvh;
         border-radius: 0;
         border: none;
         box-shadow: none;
@@ -533,8 +553,7 @@
       }
 
       .canvas-wrapper:fullscreen .canvas-actions,
-      .canvas-wrapper:-webkit-full-screen .canvas-actions,
-      .canvas-wrapper.is-fullscreen-fallback .canvas-actions {
+      .canvas-wrapper:-webkit-full-screen .canvas-actions {
         inset: clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem) auto auto;
       }
 
@@ -1571,7 +1590,8 @@
       };
 
       const fullscreenState = {
-        fallbackActive: false,
+        active: false,
+        useNative: false,
       };
 
       function updateFpsReadout(time) {
@@ -1730,197 +1750,113 @@
         });
       }
 
+      /* Simplified fullscreen - uses CSS fixed positioning on mobile, native API on desktop */
+      const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+
       function getFullscreenElement() {
-        return (
-          document.fullscreenElement ||
-          document.webkitFullscreenElement ||
-          document.mozFullScreenElement ||
-          document.msFullscreenElement ||
-          null
-        );
-      }
-
-      function callFullscreenMethod(target, methodNames) {
-        if (!target) return null;
-        for (const methodName of methodNames) {
-          const method = target[methodName];
-          if (typeof method === "function") {
-            return method.call(target);
-          }
-        }
-        return null;
-      }
-
-      function ensurePromise(result) {
-        if (result && typeof result.then === "function") {
-          return result;
-        }
-        return Promise.resolve();
-      }
-
-      function requestFullscreen(element) {
-        const targets = [element, document.documentElement, document.body].filter(Boolean);
-        let lastError = null;
-
-        const attemptAtIndex = (index = 0) => {
-          if (index >= targets.length) {
-            return Promise.reject(lastError ?? new Error("Fullscreen not supported"));
-          }
-
-          const target = targets[index];
-          const result = callFullscreenMethod(target, [
-            "requestFullscreen",
-            "webkitRequestFullscreen",
-            "mozRequestFullScreen",
-            "msRequestFullscreen",
-          ]);
-
-          if (result === null) {
-            return attemptAtIndex(index + 1);
-          }
-
-          return ensurePromise(result)
-            .then(() => target)
-            .catch((error) => {
-              lastError = error;
-              return attemptAtIndex(index + 1);
-            });
-        };
-
-        return attemptAtIndex();
-      }
-
-      function exitFullscreen() {
-        const result = callFullscreenMethod(document, [
-          "exitFullscreen",
-          "webkitExitFullscreen",
-          "mozCancelFullScreen",
-          "msExitFullscreen",
-        ]);
-
-        if (!result) {
-          return Promise.resolve();
-        }
-
-        return ensurePromise(result);
+        return document.fullscreenElement || document.webkitFullscreenElement || null;
       }
 
       function isFullscreenActive() {
-        if (fullscreenState.fallbackActive) {
-          return true;
+        return fullscreenState.active || getFullscreenElement() != null;
+      }
+
+      function applyFullscreen(active) {
+        fullscreenState.active = active;
+        if (canvasWrapper) {
+          canvasWrapper.classList.toggle("is-fullscreen", active);
         }
-        const fullscreenElement = getFullscreenElement();
-        if (!fullscreenElement) {
-          return false;
+        if (document.body) {
+          document.body.classList.toggle("is-fullscreen", active);
         }
-        return (
-          fullscreenElement === canvasWrapper ||
-          fullscreenElement === document.documentElement ||
-          fullscreenElement === document.body
-        );
+        syncFullscreenUi();
+        // Trigger resize to update renderer
+        invalidateRendererSize();
+        updateRendererSize(true);
       }
 
       function syncFullscreenUi() {
         if (!fullscreenToggleButton) return;
-        const fullscreenElement = getFullscreenElement();
-        const isDocumentFullscreen =
-          fullscreenElement === document.documentElement || fullscreenElement === document.body;
-        const isFallbackFullscreen = fullscreenState.fallbackActive && !fullscreenElement;
-        const isFullscreen =
-          fullscreenElement === canvasWrapper || isDocumentFullscreen || isFallbackFullscreen;
-        const labelText = isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen";
-        fullscreenToggleButton.setAttribute("aria-pressed", isFullscreen ? "true" : "false");
+        const active = isFullscreenActive();
+        const labelText = active ? "Exit Fullscreen" : "Enter Fullscreen";
+        fullscreenToggleButton.setAttribute("aria-pressed", String(active));
         fullscreenToggleButton.setAttribute("aria-label", labelText);
         if (fullscreenToggleLabel) {
           fullscreenToggleLabel.textContent = labelText;
         }
         if (fullscreenEnterIcon && fullscreenExitIcon) {
-          fullscreenEnterIcon.toggleAttribute("hidden", isFullscreen);
-          fullscreenExitIcon.toggleAttribute("hidden", !isFullscreen);
-        }
-        if (canvasWrapper) {
-          const shouldApplyFallback = isDocumentFullscreen || isFallbackFullscreen;
-          canvasWrapper.classList.toggle("is-fullscreen-fallback", shouldApplyFallback);
-        }
-        if (document.body) {
-          const shouldApplyFallback = isDocumentFullscreen || isFallbackFullscreen;
-          document.body.classList.toggle("is-fullscreen-fallback", shouldApplyFallback);
+          fullscreenEnterIcon.toggleAttribute("hidden", active);
+          fullscreenExitIcon.toggleAttribute("hidden", !active);
         }
       }
 
-      function enterFullscreenFallback() {
-        if (fullscreenState.fallbackActive) return;
-        fullscreenState.fallbackActive = true;
-        syncFullscreenUi();
-      }
+      function enterFullscreen() {
+        if (isFullscreenActive()) return;
 
-      function exitFullscreenFallback() {
-        if (!fullscreenState.fallbackActive) {
-          syncFullscreenUi();
+        // On touch devices, use CSS-based fullscreen (more reliable)
+        if (isTouchDevice) {
+          applyFullscreen(true);
           return;
         }
-        fullscreenState.fallbackActive = false;
-        syncFullscreenUi();
+
+        // On desktop, try native fullscreen first
+        const el = canvasWrapper || document.documentElement;
+        const request = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (request) {
+          Promise.resolve(request.call(el))
+            .then(() => {
+              fullscreenState.useNative = true;
+              syncFullscreenUi();
+            })
+            .catch(() => {
+              // Fallback to CSS fullscreen
+              applyFullscreen(true);
+            });
+        } else {
+          applyFullscreen(true);
+        }
+      }
+
+      function exitFullscreen() {
+        // Exit native fullscreen if active
+        const fsEl = getFullscreenElement();
+        if (fsEl) {
+          const exit = document.exitFullscreen || document.webkitExitFullscreen;
+          if (exit) {
+            Promise.resolve(exit.call(document)).catch(() => {});
+          }
+          fullscreenState.useNative = false;
+        }
+        // Always clear CSS fullscreen state
+        applyFullscreen(false);
       }
 
       function toggleFullscreen() {
-        if (!canvasWrapper) return;
-
         if (isFullscreenActive()) {
-          const exitResult = exitFullscreen();
-          if (exitResult && typeof exitResult.then === "function") {
-            exitResult
-              .catch(() => {})
-              .finally(() => {
-                exitFullscreenFallback();
-              });
-          } else {
-            exitFullscreenFallback();
-          }
-          return;
+          exitFullscreen();
+        } else {
+          enterFullscreen();
         }
-
-        requestFullscreen(canvasWrapper)
-          .then(() => {
-            fullscreenState.fallbackActive = false;
-            syncFullscreenUi();
-          })
-          .catch(() => {
-            enterFullscreenFallback();
-          });
       }
 
-      const fullscreenChangeEvents = [
-        "fullscreenchange",
-        "webkitfullscreenchange",
-        "mozfullscreenchange",
-        "MSFullscreenChange",
-      ];
-      fullscreenChangeEvents.forEach((eventName) => {
-        document.addEventListener(eventName, () => {
-          fullscreenState.fallbackActive = false;
-          syncFullscreenUi();
-        });
+      // Listen for native fullscreen changes (e.g., user presses Escape)
+      document.addEventListener("fullscreenchange", () => {
+        if (!getFullscreenElement() && fullscreenState.useNative) {
+          fullscreenState.useNative = false;
+          applyFullscreen(false);
+        }
+        syncFullscreenUi();
       });
-
-      const fullscreenErrorEvents = [
-        "fullscreenerror",
-        "webkitfullscreenerror",
-        "mozfullscreenerror",
-        "MSFullscreenError",
-      ];
-      fullscreenErrorEvents.forEach((eventName) => {
-        document.addEventListener(eventName, () => {
-          if (!isFullscreenActive()) {
-            enterFullscreenFallback();
-          }
-        });
+      document.addEventListener("webkitfullscreenchange", () => {
+        if (!getFullscreenElement() && fullscreenState.useNative) {
+          fullscreenState.useNative = false;
+          applyFullscreen(false);
+        }
+        syncFullscreenUi();
       });
 
       if (fullscreenToggleButton) {
-        fullscreenToggleButton.addEventListener("click", () => {
-          toggleFullscreen();
-        });
+        fullscreenToggleButton.addEventListener("click", toggleFullscreen);
       }
 
       syncFullscreenUi();
