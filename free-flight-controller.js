@@ -202,7 +202,8 @@ export class FreeFlightController {
     // --- ROTATION-BASED FLIGHT CONTROLS ---
     // Pitch control: by default, push up = climb (nose up), push down = dive (nose down)
     // When invertPitch is true, controls are inverted (airplane-style: push up = dive)
-    const pitchInput = this.invertPitch ? -smoothed.forward : smoothed.forward;
+    // Note: positive rotation around right axis = nose down, so we negate for default behavior
+    const pitchInput = this.invertPitch ? smoothed.forward : -smoothed.forward;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
     // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (negative rotation on Y-axis)
@@ -271,9 +272,9 @@ export class FreeFlightController {
     this.position.addScaledVector(this.velocity, deltaTime);
 
     // --- PROCEDURAL BANKING (ROLL) ---
-    // Bank into turns: turning right (positive yaw) → right wing down (positive roll)
-    // The bank angle is proportional to the yaw input for visual feedback
-    const targetBank = clamp(yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+    // Bank into turns: pushing right → bank right (right wing down, left wing up)
+    // Negate yawInput so positive input gives negative bank (right wing down in THREE.js)
+    const targetBank = clamp(-yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Smooth interpolation (lerp) for banking
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
