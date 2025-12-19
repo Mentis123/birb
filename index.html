@@ -201,6 +201,51 @@
         opacity: 0.85;
       }
 
+      .control-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+
+      .control-checkbox input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 1.1rem;
+        height: 1.1rem;
+        border: 1px solid rgba(176, 209, 255, 0.5);
+        border-radius: 3px;
+        background: rgba(20, 35, 60, 0.6);
+        cursor: pointer;
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .control-checkbox input[type="checkbox"]:checked {
+        background: rgba(100, 150, 220, 0.5);
+        border-color: rgba(180, 210, 255, 0.7);
+      }
+
+      .control-checkbox input[type="checkbox"]:checked::after {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 1px;
+        width: 4px;
+        height: 8px;
+        border: solid rgba(255, 255, 255, 0.9);
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+
+      .control-checkbox input[type="checkbox"]:focus-visible {
+        outline: 2px solid rgba(124, 170, 255, 0.75);
+        outline-offset: 2px;
+      }
+
       .touch-controls {
         position: absolute;
         inset: auto 0 var(--space-2) 0;
@@ -660,6 +705,14 @@
                     40%
                   </output>
                 </div>
+                <label class="control-checkbox">
+                  <input
+                    type="checkbox"
+                    id="invert-pitch"
+                    data-control="invert-pitch"
+                  />
+                  Invert Climb/Dive
+                </label>
                 <button type="button" class="control-button" data-control="environment">
                   Environment: Forest
                 </button>
@@ -1546,6 +1599,7 @@
         : null;
       const glideSpeedInput = document.querySelector("#glide-speed");
       const glideSpeedDisplay = document.querySelector('[data-display="glide-speed"]');
+      const invertPitchCheckbox = document.querySelector('[data-control="invert-pitch"]');
       const speedMetric = document.querySelector('[data-metric="speed"]');
       const throttleMetric = document.querySelector('[data-metric="throttle"]');
       const fpsMetric = document.querySelector('[data-metric="fps"]');
@@ -1563,6 +1617,13 @@
         : null;
 
       const initialThrottle = clampThrottle(Number.parseFloat(glideSpeedInput?.value ?? ""));
+
+      // Load invert pitch preference from localStorage
+      const INVERT_PITCH_STORAGE_KEY = 'birbFlightInvertPitch';
+      const savedInvertPitch = localStorage.getItem(INVERT_PITCH_STORAGE_KEY) === 'true';
+      if (invertPitchCheckbox) {
+        invertPitchCheckbox.checked = savedInvertPitch;
+      }
 
       const controlState = {
         manuallyPaused: false,
@@ -2023,6 +2084,7 @@
       const flightController = new FreeFlightController(THREE, {
         position: new THREE.Vector3(1.1, 0.9, 0),
         throttle: initialThrottle,
+        invertPitch: savedInvertPitch,
       });
       flightController.setThrottle(initialThrottle);
       flightControllerInitialized = true;
@@ -2089,6 +2151,14 @@
         glideSpeedInput.addEventListener("change", applyThrottleFromInput);
       } else {
         updateGlideSpeedDisplay(initialThrottle);
+      }
+
+      if (invertPitchCheckbox) {
+        invertPitchCheckbox.addEventListener("change", () => {
+          const isInverted = invertPitchCheckbox.checked;
+          flightController.setInvertPitch(isInverted);
+          localStorage.setItem(INVERT_PITCH_STORAGE_KEY, isInverted ? 'true' : 'false');
+        });
       }
 
       if (resetButton) {
