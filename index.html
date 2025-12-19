@@ -2078,6 +2078,14 @@
         horizontalDir: new THREE.Vector3(),
         rotationQuat: new THREE.Quaternion(),
       };
+      const sphericalCollisionFrame = {
+        worldRotation: new THREE.Quaternion(),
+        inverseRotation: new THREE.Quaternion(),
+        localPosition: new THREE.Vector3(),
+        localVelocity: new THREE.Vector3(),
+        resolvedPosition: new THREE.Vector3(),
+        resolvedVelocity: new THREE.Vector3(),
+      };
 
       const flightControls = createFlightControls({
         canvas,
@@ -2179,15 +2187,48 @@
 
         // Apply collision detection with spherical world
         if (sphericalWorld && sphericalWorld.collisionSystem) {
-          const collisionResult = sphericalWorld.collisionSystem.checkAllCollisions(
-            THREE,
-            flightController.position,
-            flightController.velocity,
-            0.5 // bird collision radius
-          );
-          if (collisionResult.hadCollision) {
-            flightController.position.copy(collisionResult.position);
-            flightController.velocity.copy(collisionResult.velocity);
+          const collisionRadius = 0.5; // bird collision radius
+          if (sphericalWorld.root?.quaternion) {
+            sphericalCollisionFrame.worldRotation.copy(sphericalWorld.root.quaternion);
+            sphericalCollisionFrame.inverseRotation
+              .copy(sphericalCollisionFrame.worldRotation)
+              .invert();
+            sphericalCollisionFrame.localPosition
+              .copy(flightController.position)
+              .applyQuaternion(sphericalCollisionFrame.inverseRotation);
+            sphericalCollisionFrame.localVelocity
+              .copy(flightController.velocity)
+              .applyQuaternion(sphericalCollisionFrame.inverseRotation);
+
+            const collisionResult = sphericalWorld.collisionSystem.checkAllCollisions(
+              THREE,
+              sphericalCollisionFrame.localPosition,
+              sphericalCollisionFrame.localVelocity,
+              collisionRadius
+            );
+
+            if (collisionResult.hadCollision) {
+              sphericalCollisionFrame.resolvedPosition
+                .copy(collisionResult.position)
+                .applyQuaternion(sphericalCollisionFrame.worldRotation);
+              sphericalCollisionFrame.resolvedVelocity
+                .copy(collisionResult.velocity)
+                .applyQuaternion(sphericalCollisionFrame.worldRotation);
+
+              flightController.position.copy(sphericalCollisionFrame.resolvedPosition);
+              flightController.velocity.copy(sphericalCollisionFrame.resolvedVelocity);
+            }
+          } else {
+            const collisionResult = sphericalWorld.collisionSystem.checkAllCollisions(
+              THREE,
+              flightController.position,
+              flightController.velocity,
+              collisionRadius
+            );
+            if (collisionResult.hadCollision) {
+              flightController.position.copy(collisionResult.position);
+              flightController.velocity.copy(collisionResult.velocity);
+            }
           }
 
           if (sphericalWorld.root) {
