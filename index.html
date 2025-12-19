@@ -2179,6 +2179,18 @@
             flightController.position.copy(collisionResult.position);
             flightController.velocity.copy(collisionResult.velocity);
           }
+
+          // Rotate the world so the bird is always "on top"
+          // This keeps gravity/up direction consistent as bird flies around sphere
+          if (sphericalWorld.root) {
+            const birdPos = flightController.position;
+            const birdDir = birdPos.clone().normalize();
+            const worldUp = new THREE.Vector3(0, 1, 0);
+
+            // Calculate rotation to bring bird's radial direction to world up
+            const rotationQuat = new THREE.Quaternion().setFromUnitVectors(birdDir, worldUp);
+            sphericalWorld.root.quaternion.copy(rotationQuat);
+          }
         }
 
         const ambientOffsets = flightController.getAmbientOffsets();
