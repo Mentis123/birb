@@ -276,8 +276,10 @@ export function createFlightControls({
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
     const isFollowMode = followMode != null && currentMode === followMode;
 
-    analogLookState.x = clamp(-shaped.x, -1, 1);
-    analogLookState.y = clamp(-shaped.y, -1, 1);
+    // Match mouse behavior: positive X = look/turn right
+    // addLookDelta already negates, so we DON'T negate here
+    analogLookState.x = clamp(shaped.x, -1, 1);
+    analogLookState.y = clamp(shaped.y, -1, 1);
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
     analogLookState.isFollowMode = isFollowMode;
