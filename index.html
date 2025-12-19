@@ -264,7 +264,25 @@
 
       .touch-controls__zone.has-dynamic-joystick .thumbstick {
         pointer-events: none;
-        opacity: 0.9;
+        opacity: 0.3;
+        transition: opacity 180ms ease;
+      }
+
+      .touch-controls__zone.has-dynamic-joystick .thumbstick::after {
+        content: '';
+        position: absolute;
+        inset: -4px;
+        border-radius: 50%;
+        border: 2px dashed rgba(170, 200, 255, 0.35);
+        pointer-events: none;
+      }
+
+      .touch-controls__zone.has-dynamic-joystick .thumbstick .thumbstick__handle {
+        opacity: 0.6;
+      }
+
+      .touch-controls__zone.has-dynamic-joystick .thumbstick.is-hidden {
+        opacity: 0;
       }
 
       .thumbstick.is-active .thumbstick__handle {

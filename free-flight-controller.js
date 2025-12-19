@@ -188,10 +188,10 @@ export class FreeFlightController {
     const pitchInput = -smoothed.forward;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
-    // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (positive rotation on Y-axis)
-    // Positive roll = turn right, negative roll = turn left
+    // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (negative rotation on Y-axis)
+    // In Three.js, positive Y rotation is counterclockwise (left), so we negate for intuitive controls
     const yawInput = smoothed.roll;
-    const yawDelta = yawInput * YAW_RATE * deltaTime;
+    const yawDelta = -yawInput * YAW_RATE * deltaTime;
 
     // Apply yaw rotation around global up axis
     if (yawDelta !== 0) {
