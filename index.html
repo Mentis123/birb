@@ -215,16 +215,15 @@
       .touch-controls__zone {
         position: relative;
         width: 100%;
-        min-height: clamp(6.5rem, 28vw, 8.5rem);
-        border-radius: 1.1rem;
-        background: radial-gradient(circle at 35% 35%, rgba(93, 146, 238, 0.14), rgba(14, 23, 41, 0.6));
-        border: 1px solid rgba(132, 174, 255, 0.22);
-        box-shadow: inset 0 0 0 1px rgba(68, 107, 182, 0.22), 0 8px 24px rgba(6, 12, 28, 0.55);
+        min-height: clamp(5.5rem, 28vw, 7.25rem);
+        border-radius: 0;
+        background: transparent;
+        border: none;
+        box-shadow: none;
         display: flex;
-        align-items: flex-end;
+        align-items: center;
         justify-content: center;
-        gap: clamp(0.75rem, 3vw, 1.25rem);
-        padding: 0.85rem 1rem;
+        padding: 0;
         pointer-events: auto;
         touch-action: none;
       }
@@ -238,22 +237,15 @@
         width: clamp(5.5rem, 28vw, 7.25rem);
         aspect-ratio: 1;
         border-radius: 50%;
-        background: rgba(18, 27, 46, 0.6);
-        border: 1px solid rgba(168, 204, 255, 0.32);
-        box-shadow: 0 12px 32px rgba(7, 13, 28, 0.55);
-        backdrop-filter: blur(18px);
+        background: transparent;
+        border: none;
+        box-shadow: none;
         touch-action: none;
         user-select: none;
       }
 
       .thumbstick::before {
-        content: "";
-        position: absolute;
-        inset: 18%;
-        border-radius: 50%;
-        border: 1px solid rgba(182, 214, 255, 0.38);
-        background: radial-gradient(circle at 35% 35%, rgba(192, 220, 255, 0.52), rgba(104, 148, 226, 0.4) 60%, rgba(46, 74, 132, 0.24) 100%);
-        opacity: 0.55;
+        display: none;
       }
 
       .thumbstick__handle {
@@ -280,26 +272,12 @@
       }
 
       .thumbstick {
-        opacity: 0;
+        opacity: 1;
         pointer-events: auto;
-        transition: opacity 120ms ease;
       }
 
       .thumbstick.is-active {
         opacity: 1;
-      }
-
-      .touch-controls__look-hint {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex: 1;
-        pointer-events: none;
-        text-align: center;
-        color: rgba(217, 230, 255, 0.82);
-        font-size: 0.68rem;
-        letter-spacing: 0.04em;
-        line-height: 1.35;
       }
 
       .lift-controls {
@@ -776,9 +754,6 @@
           <div class="touch-controls__zone" data-touch-zone>
             <div class="thumbstick" data-thumbstick="left">
               <div class="thumbstick__handle" data-thumbstick-handle></div>
-            </div>
-            <div class="touch-controls__look-hint" data-look-hint>
-              <div class="touch-controls__hint-label">Touch anywhere to steer</div>
             </div>
           </div>
         </div>
