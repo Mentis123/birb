@@ -183,14 +183,14 @@ export class FreeFlightController {
     }
 
     // --- ROTATION-BASED FLIGHT CONTROLS ---
-    // Pitch: joystick UP (positive forward) → nose UP (negative rotation on local X-axis)
+    // Pitch: joystick UP (positive forward) → nose UP (negative rotation on X-axis)
     // The forward input is inverted so pushing up pitches nose up
     const pitchInput = -smoothed.forward;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
-    // Yaw: joystick LEFT (negative roll/strafe) → nose LEFT (negative rotation on Y-axis)
-    // The roll input directly controls yaw (inverted so left = turn left)
-    const yawInput = -smoothed.roll;
+    // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (positive rotation on Y-axis)
+    // Positive roll = turn right, negative roll = turn left
+    const yawInput = smoothed.roll;
     const yawDelta = yawInput * YAW_RATE * deltaTime;
 
     // Apply yaw rotation around global up axis
@@ -199,11 +199,17 @@ export class FreeFlightController {
       this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
     }
 
-    // Apply pitch rotation around the bird's local right axis
+    // Apply pitch rotation around the WORLD horizontal right axis
+    // This ensures up/down stays pure vertical regardless of yaw orientation
     if (pitchDelta !== 0) {
-      const right = this._right.set(1, 0, 0).applyQuaternion(this.lookQuaternion).normalize();
+      // Get current forward direction
+      const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+      // Project forward onto horizontal plane and get perpendicular right vector
+      const horizontalForward = this._acceleration.set(forward.x, 0, forward.z).normalize();
+      // Right axis is perpendicular to forward in horizontal plane (cross with up)
+      const right = this._right.crossVectors(up, horizontalForward).normalize();
       this._pitchQuaternion.setFromAxisAngle(right, pitchDelta);
-      this.lookQuaternion.multiply(this._pitchQuaternion).normalize();
+      this.lookQuaternion.premultiply(this._pitchQuaternion).normalize();
     }
 
     // Start with the look quaternion as the base orientation
@@ -248,9 +254,9 @@ export class FreeFlightController {
     this.position.addScaledVector(this.velocity, deltaTime);
 
     // --- PROCEDURAL BANKING (ROLL) ---
-    // Bank into turns: turning left (negative yaw) → left wing down (negative roll)
+    // Bank into turns: turning right (positive yaw) → right wing down (positive roll)
     // The bank angle is proportional to the yaw input for visual feedback
-    const targetBank = clamp(-yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+    const targetBank = clamp(yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Smooth interpolation (lerp) for banking
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
