@@ -2072,6 +2072,12 @@
       setCameraMode(CAMERA_MODE_SEQUENCE[cameraModeIndex]);
 
       const blendedQuaternion = new THREE.Quaternion();
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const sphericalWorldAlignment = {
+        birdDir: new THREE.Vector3(),
+        horizontalDir: new THREE.Vector3(),
+        rotationQuat: new THREE.Quaternion(),
+      };
 
       const flightControls = createFlightControls({
         canvas,
@@ -2184,16 +2190,30 @@
             flightController.velocity.copy(collisionResult.velocity);
           }
 
-          // Rotate the world so the bird is always "on top"
-          // This keeps gravity/up direction consistent as bird flies around sphere
           if (sphericalWorld.root) {
-            const birdPos = flightController.position;
-            const birdDir = birdPos.clone().normalize();
-            const worldUp = new THREE.Vector3(0, 1, 0);
+            const birdDir = sphericalWorldAlignment.birdDir
+              .copy(flightController.position)
+              .normalize();
 
-            // Calculate rotation to bring bird's radial direction to world up
-            const rotationQuat = new THREE.Quaternion().setFromUnitVectors(birdDir, worldUp);
-            sphericalWorld.root.quaternion.copy(rotationQuat);
+            const horizontalDir = sphericalWorldAlignment.horizontalDir.set(
+              birdDir.x,
+              0,
+              birdDir.z,
+            );
+
+            const horizontalLengthSq = horizontalDir.lengthSq();
+            // Avoid flipping the entire scene when approaching the sphere's underside by
+            // only yawing the world around the global up axis. This keeps "down" stable
+            // for the camera while still letting the world rotate underneath the player.
+            if (horizontalLengthSq > 1e-6) {
+              horizontalDir.multiplyScalar(1 / Math.sqrt(horizontalLengthSq));
+              const yaw = Math.atan2(horizontalDir.x, horizontalDir.z);
+              sphericalWorldAlignment.rotationQuat.setFromAxisAngle(
+                worldUp,
+                -yaw,
+              );
+              sphericalWorld.root.quaternion.copy(sphericalWorldAlignment.rotationQuat);
+            }
           }
         }
 
