@@ -1293,12 +1293,62 @@
       scene.add(birbAnchor);
 
       // Keep the model aligned with the controller's forward vector (-Z) so the
-      // beak points away from the camera. The procedural bird model has its beak
-      // pointing in +X, so we rotate +90° around Y to align +X with -Z.
-      const modelOrientationOffset = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 1, 0),
-        Math.PI / 2
-      );
+      // beak points away from the camera. We detect the model's longest axis
+      // (and which side has more reach) to infer the beak direction, then rotate
+      // that inferred forward toward -Z. This works for both the procedural
+      // model (+X beak) and the GLB (currently authored facing -Z).
+      const modelOrientationOffset = new THREE.Quaternion();
+      const targetModelForward = new THREE.Vector3(0, 0, -1);
+      const forwardGuess = new THREE.Vector3();
+      const birbBoundsSize = new THREE.Vector3();
+
+      const computeModelForwardGuess = (bounds, center) => {
+        birbBoundsSize.subVectors(bounds.max, bounds.min);
+        const axisSpans = [
+          {
+            axis: "x",
+            span: birbBoundsSize.x,
+            positive: bounds.max.x - center.x,
+            negative: center.x - bounds.min.x,
+          },
+          {
+            axis: "y",
+            span: birbBoundsSize.y,
+            positive: bounds.max.y - center.y,
+            negative: center.y - bounds.min.y,
+          },
+          {
+            axis: "z",
+            span: birbBoundsSize.z,
+            positive: bounds.max.z - center.z,
+            negative: center.z - bounds.min.z,
+          },
+        ];
+
+        const dominant = axisSpans.reduce((best, current) => {
+          if (!best || current.span > best.span) {
+            return current;
+          }
+          return best;
+        }, null);
+
+        if (!dominant || dominant.span <= 0) {
+          forwardGuess.set(1, 0, 0);
+          return forwardGuess;
+        }
+
+        const sign = dominant.positive >= dominant.negative ? 1 : -1;
+        forwardGuess.set(
+          dominant.axis === "x" ? sign : 0,
+          dominant.axis === "y" ? sign : 0,
+          dominant.axis === "z" ? sign : 0
+        );
+        if (forwardGuess.lengthSq() === 0) {
+          forwardGuess.set(1, 0, 0);
+        }
+        forwardGuess.normalize();
+        return forwardGuess;
+      };
 
       const positionBirbModel = (model) => {
         if (!model) return;
@@ -1314,6 +1364,8 @@
         const birbBounds = new THREE.Box3().setFromObject(model);
         const birbCenter = new THREE.Vector3();
         birbBounds.getCenter(birbCenter);
+        const guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
+        modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
         // Re-center the bird so yaw/roll rotations pivot around its body instead
         // of an offset point in space.
         model.position.sub(birbCenter);

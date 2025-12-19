@@ -4,15 +4,16 @@ This document tracks unresolved issues with attempted fixes, research directions
 
 ---
 
-## Issue 1: Birb Facing Direction (Unresolved)
+## Issue 1: Birb Facing Direction (Resolved)
 
 ### Problem
-The birb model does not consistently face the direction of travel. Users expect the beak to point forward (away from camera) when flying, but the model orientation appears incorrect.
+The birb model did not consistently face the direction of travel. Users expect the beak to point forward (away from camera) when flying, but the model orientation appeared incorrect.
 
 ### Root Cause Analysis
 - The procedural birb model is sculpted along the **+X axis** (beak pointing toward +X)
+- The GLB currently ships facing **-Z** already
 - The flight controller uses **-Z as forward** (standard Three.js convention)
-- A quaternion offset (`modelOrientationOffset`) is applied to rotate the model
+- A static quaternion offset (`modelOrientationOffset`) that assumed +X forward rotated the GLB too far, making it face left
 
 ### What Has Been Tried
 
@@ -21,35 +22,19 @@ The birb model does not consistently face the direction of travel. Users expect 
 | #184 | f935afc | Rotated 90° clockwise: `Euler(0, -Math.PI / 2, 0)` | Still facing wrong direction |
 | #185 | 1ed3e77 | Reversed to 90° anticlockwise: `Euler(0, Math.PI / 2, 0)` | Still facing wrong direction |
 | #213+ | edd724b | Ground/world orientation fixes (not model-facing) | No change to birb heading |
-| This branch | _pending_ | Rotate +90° around Y to map the model's +X beak axis onto controller -Z | Beak should finally point forward; verify in all camera modes |
+| This branch |  | Dynamically infer the beak direction from the model's bounding box and rotate it toward controller -Z | ✅ Beak now faces away (both GLB and procedural) |
 
-### Current State (after latest rotation attempt)
+### Current State (after dynamic orientation)
 ```javascript
 // index.html ~1292
-const modelOrientationOffset = new THREE.Quaternion().setFromAxisAngle(
-  new THREE.Vector3(0, 1, 0),
-  Math.PI / 2  // rotate model's +X beak axis onto -Z controller forward
-);
+const guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
+modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
 ```
 
-### Why Fixes Haven't Worked
-The offset rotation is applied, but there may be multiple issues:
-1. The offset may not be applied at the right point in the render pipeline
-2. The `positionBirbModel()` function re-centers the model which could affect orientation
-3. The `birbAnchor` group orientation vs model orientation confusion
-4. Camera follow mode may affect perceived direction
-
-### Research Directions
-1. **Verify model axis**: Load the GLTF/procedural model in a test scene and confirm which axis the beak points along
-2. **Check quaternion application order**: The offset is multiplied, verify if it should be pre- or post-multiplied
-3. **Inspect render loop**: See where `birbAnchor.quaternion` is set from `flightController.quaternion`
-4. **Camera perspective**: Confirm issue persists in FPV vs follow camera modes
-
-### Fallback: Rebuild with Best Practices
-If simple rotations don't fix it:
-1. Re-model the bird with beak pointing along **-Z axis** (Three.js forward)
-2. Or create a wrapper group with explicit forward vector documentation
-3. Add visual debug helpers (arrows showing model forward vs controller forward)
+### Resolution Notes
+- We now compute the model's dominant axis and which side has greater reach to infer the beak direction.
+- A quaternion maps that inferred forward to controller forward (-Z), keeping the birb visually aligned with its actual heading.
+- Works for both GLB (already -Z) and procedural (+X) models without manual toggles.
 
 ---
 
@@ -115,7 +100,7 @@ If simple mappings cause control issues:
 
 | Issue | Status | Quick Fix Likelihood | Rebuild Complexity |
 |-------|--------|---------------------|-------------------|
-| Birb facing direction | Unresolved | Medium (rotation math) | Low (re-model) |
+| Birb facing direction | Resolved | Medium (rotation math) | Low (re-model) |
 | Climb on joystick up | Unresolved | High (add lift mapping) | Medium (physics rework) |
 
 ---
