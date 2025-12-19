@@ -144,9 +144,19 @@ export class FreeFlightController {
     }
 
     if (pitchAngle !== 0) {
-      const right = this._right.set(1, 0, 0).applyQuaternion(this.lookQuaternion).normalize();
-      this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
-      this.lookQuaternion.multiply(this._pitchQuaternion);
+      // Use WORLD horizontal right axis for pitch to prevent roll drift
+      // This ensures up/down stays pure vertical regardless of yaw orientation
+      const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+      const horizontalForward = this._acceleration.set(forward.x, 0, forward.z);
+      const horizontalLength = horizontalForward.length();
+      // Only apply if we have a valid horizontal direction (not looking straight up/down)
+      if (horizontalLength > 0.001) {
+        horizontalForward.divideScalar(horizontalLength);
+        const up = this._up.set(0, 1, 0);
+        const right = this._right.crossVectors(up, horizontalForward).normalize();
+        this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
+        this.lookQuaternion.premultiply(this._pitchQuaternion);
+      }
     }
 
     this.lookQuaternion.normalize();
