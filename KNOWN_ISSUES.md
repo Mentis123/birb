@@ -20,13 +20,15 @@ The birb model does not consistently face the direction of travel. Users expect 
 |----|--------|--------|--------|
 | #184 | f935afc | Rotated 90° clockwise: `Euler(0, -Math.PI / 2, 0)` | Still facing wrong direction |
 | #185 | 1ed3e77 | Reversed to 90° anticlockwise: `Euler(0, Math.PI / 2, 0)` | Still facing wrong direction |
-| This PR | _pending_ | Removed the yaw offset (identity quaternion) so the model follows the controller forward vector | Aims to flip the bird away from the camera; verify on device |
+| #213+ | edd724b | Ground/world orientation fixes (not model-facing) | No change to birb heading |
+| This branch | _pending_ | Rotate +90° around Y to map the model's +X beak axis onto controller -Z | Beak should finally point forward; verify in all camera modes |
 
 ### Current State (after latest rotation attempt)
 ```javascript
-// index.html:1158-1160
-const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0, Math.PI, 0)  // 180° yaw to face away from camera
+// index.html ~1292
+const modelOrientationOffset = new THREE.Quaternion().setFromAxisAngle(
+  new THREE.Vector3(0, 1, 0),
+  Math.PI / 2  // rotate model's +X beak axis onto -Z controller forward
 );
 ```
 
@@ -42,19 +44,6 @@ The offset rotation is applied, but there may be multiple issues:
 2. **Check quaternion application order**: The offset is multiplied, verify if it should be pre- or post-multiplied
 3. **Inspect render loop**: See where `birbAnchor.quaternion` is set from `flightController.quaternion`
 4. **Camera perspective**: Confirm issue persists in FPV vs follow camera modes
-
-### Next Fix to Try
-```javascript
-// Try rotating 180° if beak is pointing backward (toward camera):
-const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0, Math.PI, 0)  // 180° rotation
-);
-
-// Or try different axis combinations:
-const modelOrientationOffset = new THREE.Quaternion().setFromEuler(
-  new THREE.Euler(0, -Math.PI / 2, Math.PI)  // Combined Y and Z rotation
-);
-```
 
 ### Fallback: Rebuild with Best Practices
 If simple rotations don't fix it:
@@ -73,13 +62,15 @@ When pushing up on the left joystick, the birb does not climb (gain altitude) as
 The left thumbstick Y-axis is mapped to **forward thrust**, not **lift/pitch**:
 
 ```javascript
-// flight-controls.js:151-157
+// flight-controls.js ~249
 const handleLeftStickChange = (value, context = {}) => {
-  const forward = clamp(-value.y, -1, 1);  // Y-axis → forward
-  const strafe = clamp(-value.x, -1, 1);   // X-axis → strafe
+  const shaped = shapeStickWithContext(value, context, thrustInputShaping);
+  const forward = clamp(shaped.y, -1, 1);  // Y-axis → forward (pitch)
+  const strafe = clamp(shaped.x, -1, 1);   // X-axis → strafe/roll
   axisSources.leftStick.forward = forward;
   axisSources.leftStick.strafe = strafe;
-  axisSources.leftStick.lift = 0;  // Lift is ALWAYS 0 from joystick!
+  axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
+  axisSources.leftStick.lift = 0;  // No direct lift from joystick
   // ...
 };
 ```
@@ -88,41 +79,16 @@ Lift is only controlled by:
 - Keyboard: Space/E (up), Q (down)
 - Touch lift buttons (if present in UI)
 
-### What Has Been Tried
-
-| PR | Commit | Change | Result |
-|----|--------|--------|--------|
-| #186 | 1cfd753 | Added `LIFT_ACCELERATION_MULTIPLIER = 1.8` | Only affects lift buttons/keys, not joystick |
-| This branch | TBD | Pitch-up approach: joystick Y applies pitch via `addLookDelta` | Testing |
-
-### Current State (as of this branch)
-```javascript
-// free-flight-controller.js:28,192
-export const LIFT_ACCELERATION_MULTIPLIER = 1.8;
-// ...
-acceleration.addScaledVector(up, smoothed.lift * LIFT_ACCELERATION_MULTIPLIER);
-```
-
-### Why the Fix Didn't Work
-The multiplier increases lift **authority**, but the left joystick never sends lift input. The joystick Y-axis is mapped to `forward` only.
+### Current State
+- Left stick Y feeds `forward` input for **pitch**, not vertical lift.
+- Default (checkbox unchecked) is **non-inverted**: pushing up/forward pitches the nose up; down pitches down.
+- Checking "Invert pitch" flips to airplane style (push forward to dive, pull back to climb).
+- Direct lift is still only on keyboard (Space/E/Q) or touch lift buttons.
 
 ### Research Directions
 1. **Design decision**: Should joystick-up mean "pitch up" (nose up, gradual climb) or "direct lift" (helicopter-style vertical)?
 2. **Mobile flight game conventions**: Research how other mobile gliding games handle single-joystick climb input
 3. **User testing**: Determine if users expect pitch control or altitude control from joystick Y
-
-### Current Implementation (Option B: Pitch-up approach)
-
-The pitch-up approach is now implemented:
-```javascript
-// flight-controls.js - tracks pitch from left stick
-leftStickPitchState.pitch = forward;  // joystick Y → pitch state
-
-// applyLeftStickPitch called each frame applies pitch rotation
-flightController.addLookDelta(0, -pitch * DEFAULT_LEFT_STICK_PITCH_SPEED * limitedDelta);
-```
-
-This causes the bird's nose to pitch up when pushing joystick up, which combined with the cruise forward speed results in natural climbing.
 
 ### Alternative Approaches (if pitch doesn't feel right)
 
