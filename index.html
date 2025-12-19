@@ -2075,8 +2075,12 @@
       const worldUp = new THREE.Vector3(0, 1, 0);
       const sphericalWorldAlignment = {
         birdDir: new THREE.Vector3(),
-        horizontalDir: new THREE.Vector3(),
-        rotationQuat: new THREE.Quaternion(),
+        forward: new THREE.Vector3(),
+        projectedForward: new THREE.Vector3(),
+        right: new THREE.Vector3(),
+        alignedForward: new THREE.Vector3(),
+        targetQuat: new THREE.Quaternion(),
+        basisMatrix: new THREE.Matrix4(),
       };
       const sphericalCollisionFrame = {
         worldRotation: new THREE.Quaternion(),
@@ -2232,28 +2236,60 @@
           }
 
           if (sphericalWorld.root) {
-            const birdDir = sphericalWorldAlignment.birdDir
-              .copy(flightController.position)
-              .normalize();
+            const upDir = sphericalWorldAlignment.birdDir.copy(flightController.position);
+            const upLengthSq = upDir.lengthSq();
 
-            const horizontalDir = sphericalWorldAlignment.horizontalDir.set(
-              birdDir.x,
-              0,
-              birdDir.z,
-            );
+            if (upLengthSq > 1e-6) {
+              upDir.multiplyScalar(1 / Math.sqrt(upLengthSq));
 
-            const horizontalLengthSq = horizontalDir.lengthSq();
-            // Avoid flipping the entire scene when approaching the sphere's underside by
-            // only yawing the world around the global up axis. This keeps "down" stable
-            // for the camera while still letting the world rotate underneath the player.
-            if (horizontalLengthSq > 1e-6) {
-              horizontalDir.multiplyScalar(1 / Math.sqrt(horizontalLengthSq));
-              const yaw = Math.atan2(horizontalDir.x, horizontalDir.z);
-              sphericalWorldAlignment.rotationQuat.setFromAxisAngle(
-                worldUp,
-                -yaw,
-              );
-              sphericalWorld.root.quaternion.copy(sphericalWorldAlignment.rotationQuat);
+              const forwardDir = sphericalWorldAlignment.forward
+                .set(0, 0, -1)
+                .applyQuaternion(flightController.quaternion);
+
+              const projectedForward = sphericalWorldAlignment.projectedForward
+                .copy(forwardDir)
+                .projectOnPlane(upDir);
+
+              if (projectedForward.lengthSq() < 1e-6) {
+                projectedForward.set(1, 0, 0);
+                if (Math.abs(projectedForward.dot(upDir)) > 0.8) {
+                  projectedForward.set(0, 0, 1);
+                }
+                projectedForward.projectOnPlane(upDir);
+              }
+
+              if (projectedForward.lengthSq() > 1e-9) {
+                projectedForward.normalize();
+
+                const rightDir = sphericalWorldAlignment.right.crossVectors(
+                  projectedForward,
+                  upDir,
+                );
+
+                if (rightDir.lengthSq() > 1e-9) {
+                  rightDir.normalize();
+
+                  const alignedForward = sphericalWorldAlignment.alignedForward
+                    .crossVectors(upDir, rightDir)
+                    .normalize();
+
+                  sphericalWorldAlignment.basisMatrix.makeBasis(
+                    rightDir,
+                    upDir,
+                    alignedForward,
+                  );
+
+                  sphericalWorldAlignment.targetQuat.setFromRotationMatrix(
+                    sphericalWorldAlignment.basisMatrix,
+                  );
+
+                  const alignStrength = delta > 0 ? 1 - Math.exp(-6 * delta) : 1;
+                  sphericalWorld.root.quaternion.slerp(
+                    sphericalWorldAlignment.targetQuat,
+                    alignStrength,
+                  );
+                }
+              }
             }
           }
         }
