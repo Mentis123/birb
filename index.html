@@ -230,7 +230,7 @@
       }
 
       .touch-controls__zone.has-dynamic-joystick {
-        justify-content: space-between;
+        justify-content: center;
       }
 
       .thumbstick {
@@ -279,40 +279,27 @@
         transition: none;
       }
 
+      .thumbstick {
+        opacity: 0;
+        pointer-events: auto;
+        transition: opacity 120ms ease;
+      }
+
+      .thumbstick.is-active {
+        opacity: 1;
+      }
+
       .touch-controls__look-hint {
-        display: none;
-        align-self: flex-end;
-        justify-self: end;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
         pointer-events: none;
         text-align: center;
         color: rgba(217, 230, 255, 0.82);
         font-size: 0.68rem;
         letter-spacing: 0.04em;
         line-height: 1.35;
-        gap: 0.35rem;
-      }
-
-      .touch-controls__zone.has-dynamic-joystick .touch-controls__look-hint {
-        display: grid;
-        justify-items: center;
-      }
-
-      .touch-controls__hint-ring {
-        width: clamp(3.1rem, 14vw, 4.2rem);
-        aspect-ratio: 1;
-        border-radius: 50%;
-        border: 1px dashed rgba(163, 199, 255, 0.42);
-        background: radial-gradient(circle at 45% 40%, rgba(140, 181, 255, 0.12), rgba(30, 48, 86, 0.28));
-        box-shadow: inset 0 0 0 1px rgba(76, 118, 198, 0.22);
-        position: relative;
-      }
-
-      .touch-controls__hint-ring-inner {
-        position: absolute;
-        inset: 26%;
-        border-radius: 50%;
-        border: 1px solid rgba(186, 214, 255, 0.42);
-        opacity: 0.8;
       }
 
       .lift-controls {
@@ -791,9 +778,6 @@
               <div class="thumbstick__handle" data-thumbstick-handle></div>
             </div>
             <div class="touch-controls__look-hint" data-look-hint>
-              <div class="touch-controls__hint-ring" aria-hidden="true">
-                <div class="touch-controls__hint-ring-inner"></div>
-              </div>
               <div class="touch-controls__hint-label">Touch anywhere to steer</div>
             </div>
           </div>
