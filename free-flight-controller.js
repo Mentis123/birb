@@ -77,8 +77,8 @@ export class FreeFlightController {
     this.throttle = options.throttle ?? 1;
     this.sprintMultiplier = options.sprintMultiplier ?? SPRINT_MULTIPLIER;
     this.isSprinting = false;
-    // When false (default), push up = climb, push down = dive
-    // When true, push up = dive, push down = climb (inverted/airplane style)
+    // When false (default), pushing up/forward pitches the nose UP (push forward to fly up)
+    // When true, controls are airplane-style: push forward to dive, pull back to climb
     this.invertPitch = options.invertPitch ?? false;
 
     const providedSmoothing = options.inputSmoothing;
@@ -200,11 +200,10 @@ export class FreeFlightController {
     }
 
     // --- ROTATION-BASED FLIGHT CONTROLS ---
-    // Pitch control: by default (unchecked), point up = fly up, point down = fly down (bird-style)
-    // When invertPitch is true (checked), controls are airplane-style: push up = dive
-    // Note: positive rotation around right axis = nose down
-    // Joystick UP produces negative forward input, so bird-style uses that negative value to climb
-    const pitchInput = this.invertPitch ? -smoothed.forward : smoothed.forward;
+    // Pitch control: by default (unchecked), pushing forward/up tilts the nose up (non-inverted)
+    // When invertPitch is true (checked), controls become airplane-style: push forward to dive
+    // Joystick UP produces negative forward input, so non-inverted uses the negative to pitch up
+    const pitchInput = this.invertPitch ? smoothed.forward : -smoothed.forward;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
     // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (negative rotation on Y-axis)
