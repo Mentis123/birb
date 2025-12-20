@@ -3,7 +3,7 @@ export const MOVEMENT_ACCELERATION = 2.8;
 export const LINEAR_DRAG = 1.2;
 export const SPRINT_MULTIPLIER = 1.4;
 // Upper bound on how far the bird can bank for readability and comfort.
-export const MAX_BANK_ANGLE = (55 * Math.PI) / 180;
+export const MAX_BANK_ANGLE = (70 * Math.PI) / 180;
 // Maximum visual pitch tilt when climbing/diving (nose up/down effect)
 export const MAX_VISUAL_PITCH_ANGLE = (25 * Math.PI) / 180;
 // How quickly the visual pitch responds to vertical velocity
