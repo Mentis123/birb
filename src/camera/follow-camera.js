@@ -40,7 +40,7 @@ export function createFollowCameraRig(three, options = {}) {
   const state = {
     camera: null,
     initialized: false,
-    offset: options.offset ? options.offset.clone() : new Vector3(0, 1.2, -2.5),
+    offset: options.offset ? options.offset.clone() : new Vector3(0, 1.2, 2.5),
     position: new Vector3(),
     lookAt: new Vector3(),
     desiredPosition: new Vector3(),

@@ -46,15 +46,18 @@ Fixed by:
 2. Preferring Z-axis when biases are similar (standard 3D convention for most models)
 3. Only falling back to X-axis for models with clear +X asymmetry (like the procedural model)
 
-**Regression fix (commit 42751c5 was incorrect):**
-A subsequent "fix" incorrectly assumed the GLB model faces +X (like the procedural model) and hard-coded that assumption. This was wrong—the GLB model DOES face -Z as originally documented.
+**Final fix - GLB model faces -X:**
+After extensive testing, the GLB model is actually authored facing **-X** (left), not +X or -Z.
 
-The result was that `setFromUnitVectors(+X, -Z)` applied an unnecessary -90° rotation, causing the bird to face LEFT (-X) instead of the flight direction (-Z). The bird appeared to "fly down its right wing."
+The correct rotation is:
+- `guessedForward = (-1, 0, 0)` for GLB
+- `setFromUnitVectors((-1,0,0), (0,0,-1))` rotates -X to -Z
+- This is 90° clockwise when viewed from above
 
 **Correct behavior:**
-- GLB model forward: -Z (no rotation needed)
-- Procedural model forward: +X (needs rotation to -Z)
-- The code now explicitly sets `guessedForward = (0, 0, -1)` for GLB models
+- GLB model forward: -X (needs 90° clockwise rotation to face -Z)
+- Procedural model forward: +X (needs 90° counter-clockwise rotation to face -Z)
+- The code now explicitly sets `guessedForward = (-1, 0, 0)` for GLB models
 
 ---
 
@@ -110,15 +113,13 @@ This maps `offset.z` to the bird's **forward** direction, not backward. With Z=+
 - Camera ends up IN FRONT of the bird at world -Z
 
 ### Resolution
-Changed the offset Z component to negative:
+The offset Z should be positive to position camera behind the bird:
 ```javascript
 // camera-state.js, CAMERA_MODES.FOLLOW
-offset: new Vector3(0, 0.6, -2.1)  // was (0, 0.6, 2.1)
+offset: new Vector3(0, 0.6, 2.1)
 ```
 
-Now:
-- `-2.1 * forward = -2.1 * (0, 0, -1) = (0, 0, 2.1)`
-- Camera correctly positioned BEHIND the bird at world +Z
+The follow camera transformation correctly maps positive Z offset to the position behind the bird's flight direction.
 
 ---
 
