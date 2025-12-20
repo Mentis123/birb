@@ -57,6 +57,8 @@ export function createFollowCameraRig(three, options = {}) {
     orientation: new Quaternion(),
     targetOrientation: new Quaternion(),
     up: new Vector3(0, 1, 0),
+    // Spherical world support: when set, "up" becomes radial from sphere center
+    sphereCenter: options.sphereCenter ? options.sphereCenter.clone() : null,
   };
 
   function assertCamera(camera) {
@@ -93,6 +95,14 @@ export function createFollowCameraRig(three, options = {}) {
       state.steeringLookAhead.lift =
         config.steeringLookAhead.lift ?? state.steeringLookAhead.lift;
     }
+    // Handle sphereCenter configuration
+    if (config.sphereCenter !== undefined) {
+      if (config.sphereCenter === null) {
+        state.sphereCenter = null;
+      } else if (config.sphereCenter && typeof config.sphereCenter.clone === 'function') {
+        state.sphereCenter = config.sphereCenter.clone();
+      }
+    }
   }
 
   function attach(camera, config) {
@@ -125,6 +135,20 @@ export function createFollowCameraRig(three, options = {}) {
       scratch.forward.set(0, 0, -1);
     }
 
+    // Compute local "up" direction
+    // For spherical worlds: up is radial from sphere center
+    // For flat worlds: up is world Y axis (0, 1, 0)
+    if (state.sphereCenter) {
+      state.up.copy(pose.position).sub(state.sphereCenter);
+      if (state.up.lengthSq() < 1e-6) {
+        state.up.set(0, 1, 0);
+      } else {
+        state.up.normalize();
+      }
+    } else {
+      state.up.set(0, 1, 0);
+    }
+
     // Camera positioning using the user's reference formula:
     // Camera.Position = Bird.Position - (Bird.Forward * Distance) + (Up * Height)
     // offset.z = distance behind, offset.y = height above
@@ -139,8 +163,8 @@ export function createFollowCameraRig(three, options = {}) {
 
     // Place camera BEHIND the bird (subtract forward direction)
     state.desiredPosition.addScaledVector(scratch.forward, -distanceBehind);
-    // Place camera ABOVE the bird
-    state.desiredPosition.y += heightAbove;
+    // Place camera ABOVE the bird (in local up direction for spherical worlds)
+    state.desiredPosition.addScaledVector(state.up, heightAbove);
 
     // Camera look-at target: bird position (with ambient offset)
     state.desiredLookAt.copy(pose.position);
