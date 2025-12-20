@@ -1242,10 +1242,18 @@
             definition: definition,
           });
           glideTrail = null; // No glide trail on spherical world
+          // Set sphere center for camera to handle spherical up vector
+          if (cameraState && typeof cameraState.setSphereCenter === 'function') {
+            cameraState.setSphereCenter(new THREE.Vector3(0, 0, 0));
+          }
         } catch (envError) {
           console.warn("Spherical world creation failed:", envError);
           sphericalWorld = null;
           glideTrail = null;
+          // Clear sphere center if world creation fails
+          if (cameraState && typeof cameraState.setSphereCenter === 'function') {
+            cameraState.setSphereCenter(null);
+          }
         }
         environmentState.id = definition.id;
         environmentState.label = definition.label;
@@ -2159,6 +2167,11 @@
         scene,
         flightController,
       });
+
+      // Set sphere center if spherical world is already active
+      if (sphericalWorld && typeof cameraState.setSphereCenter === 'function') {
+        cameraState.setSphereCenter(new THREE.Vector3(0, 0, 0));
+      }
 
       const syncAvatarVisibility = (mode) => {
         if (!birbAnchor) return;
