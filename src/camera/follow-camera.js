@@ -40,7 +40,7 @@ export function createFollowCameraRig(three, options = {}) {
   const state = {
     camera: null,
     initialized: false,
-    offset: options.offset ? options.offset.clone() : new Vector3(0, 1.2, 2.5),
+    offset: options.offset ? options.offset.clone() : new Vector3(0, 1.0, 3.0),
     position: new Vector3(),
     lookAt: new Vector3(),
     desiredPosition: new Vector3(),
@@ -112,12 +112,8 @@ export function createFollowCameraRig(three, options = {}) {
       return false;
     }
 
-    state.desiredLookAt.copy(pose.position);
-    if (ambientOffsets?.position) {
-      state.desiredLookAt.add(ambientOffsets.position);
-    }
-
-    scratch.offset.copy(state.offset);
+    // Get bird's forward direction from its quaternion
+    // In THREE.js, default forward is -Z
     if (pose.quaternion) {
       scratch.forward.set(0, 0, -1).applyQuaternion(pose.quaternion);
       if (scratch.forward.lengthSq() < 1e-6) {
@@ -125,27 +121,38 @@ export function createFollowCameraRig(three, options = {}) {
       } else {
         scratch.forward.normalize();
       }
-      scratch.right.crossVectors(scratch.forward, state.up);
-      if (scratch.right.lengthSq() < 1e-6) {
-        scratch.right.set(1, 0, 0);
-      } else {
-        scratch.right.normalize();
-      }
-      scratch.up.crossVectors(scratch.right, scratch.forward);
-      if (scratch.up.lengthSq() < 1e-6) {
-        scratch.up.copy(state.up);
-      } else {
-        scratch.up.normalize();
-      }
-      scratch.lookMatrix.makeBasis(scratch.right, scratch.up, scratch.forward);
-      scratch.noRollQuaternion.setFromRotationMatrix(scratch.lookMatrix);
-      scratch.offset.applyQuaternion(scratch.noRollQuaternion);
+    } else {
+      scratch.forward.set(0, 0, -1);
     }
 
-    state.desiredPosition.copy(state.desiredLookAt).add(scratch.offset);
+    // Camera positioning using the user's reference formula:
+    // Camera.Position = Bird.Position - (Bird.Forward * Distance) + (Up * Height)
+    // offset.z = distance behind, offset.y = height above
+    const distanceBehind = Math.abs(state.offset.z);
+    const heightAbove = state.offset.y;
 
+    // Start with bird position (plus ambient bob if any)
+    state.desiredPosition.copy(pose.position);
+    if (ambientOffsets?.position) {
+      state.desiredPosition.add(ambientOffsets.position);
+    }
+
+    // Place camera BEHIND the bird (subtract forward direction)
+    state.desiredPosition.addScaledVector(scratch.forward, -distanceBehind);
+    // Place camera ABOVE the bird
+    state.desiredPosition.y += heightAbove;
+
+    // Camera look-at target: bird position (with ambient offset)
+    state.desiredLookAt.copy(pose.position);
+    if (ambientOffsets?.position) {
+      state.desiredLookAt.add(ambientOffsets.position);
+    }
+
+    // Add look-ahead anticipation so camera looks where bird is going
+    // Reference: Camera.LookAt = Bird.Position + (Bird.Forward * LeadDistance)
     scratch.anticipation.set(0, 0, 0);
 
+    // Velocity-based look-ahead: look further ahead when moving faster
     if (velocity) {
       scratch.velocity.copy(velocity);
       const velocityLength = scratch.velocity.length();
@@ -158,12 +165,18 @@ export function createFollowCameraRig(three, options = {}) {
       }
     }
 
+    // Steering-based anticipation: look toward where user is steering
     if (steering) {
-      if (pose.quaternion) {
-        scratch.forward.set(0, 0, -1).applyQuaternion(scratch.noRollQuaternion);
-        scratch.right.set(1, 0, 0).applyQuaternion(scratch.noRollQuaternion);
-        scratch.up.set(0, 1, 0).applyQuaternion(scratch.noRollQuaternion);
+      // Compute right vector from forward and world up
+      scratch.right.crossVectors(scratch.forward, state.up);
+      if (scratch.right.lengthSq() < 1e-6) {
+        scratch.right.set(1, 0, 0);
+      } else {
+        scratch.right.normalize();
       }
+      // Compute local up from right and forward
+      scratch.up.crossVectors(scratch.right, scratch.forward).normalize();
+
       if (Number.isFinite(steering.forward) && steering.forward !== 0) {
         scratch.anticipation.addScaledVector(
           scratch.forward,
@@ -183,6 +196,10 @@ export function createFollowCameraRig(three, options = {}) {
         );
       }
     }
+
+    // Add base forward look-ahead so camera always looks ahead of the bird
+    const baseLookAhead = distanceBehind * 0.5;
+    scratch.anticipation.addScaledVector(scratch.forward, baseLookAhead);
 
     if (scratch.anticipation.lengthSq() > 0) {
       state.desiredLookAt.add(scratch.anticipation);
