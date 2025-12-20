@@ -777,15 +777,27 @@
         border-radius: 2rem;
         color: rgba(255, 180, 150, 0.95);
         font-size: clamp(0.65rem, 2vw, 0.75rem);
+        font-family: inherit;
         text-transform: uppercase;
         letter-spacing: 0.1em;
         opacity: 0;
-        transition: opacity 300ms ease;
+        transition: opacity 300ms ease, transform 150ms ease, background 150ms ease;
         pointer-events: none;
+        z-index: 11;
+        cursor: pointer;
+        touch-action: none;
+        -webkit-touch-callout: none;
+        user-select: none;
       }
 
       .nest-indicator.is-visible {
         opacity: 1;
+        pointer-events: auto;
+      }
+
+      .nest-indicator:active {
+        transform: translateX(-50%) scale(0.95);
+        background: rgba(255, 80, 50, 0.3);
       }
 
       @media (min-width: 48rem) {
@@ -1057,9 +1069,9 @@
         </div>
 
         <!-- Nest proximity indicator (shows when approaching) -->
-        <div class="nest-indicator" data-nest-indicator>
+        <button type="button" class="nest-indicator" data-nest-indicator aria-label="Land on nest">
           Nest nearby - Tap to land
-        </div>
+        </button>
       </div>
     </main>
     <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
@@ -2610,6 +2622,21 @@
         nestLaunchButton.addEventListener('touchend', (e) => {
           e.preventDefault();
           handleLaunch();
+        });
+      }
+
+      // Nest indicator button handler (for landing when approaching)
+      if (nestIndicator) {
+        const handleLand = () => {
+          if (nestingSystem && nestingSystem.getState() === NESTING_STATES.APPROACHING) {
+            nestingSystem.tryLandOnNest(flightController.position);
+          }
+        };
+
+        nestIndicator.addEventListener('click', handleLand);
+        nestIndicator.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          handleLand();
         });
       }
 
