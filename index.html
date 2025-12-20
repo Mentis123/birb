@@ -1411,10 +1411,10 @@
 
         let guessedForward;
         if (isGLB) {
-          // GLB model is authored facing -Z (beak points toward -Z)
-          // Since the flight controller also uses -Z as forward, no rotation is needed
-          // Previous fix incorrectly assumed +X and over-rotated by 90°
-          guessedForward = new THREE.Vector3(0, 0, -1);
+          // GLB model is authored facing -X (beak points toward -X / left)
+          // Rotate -X to -Z to align with flight controller forward
+          // This is 90° clockwise rotation when viewed from above
+          guessedForward = new THREE.Vector3(-1, 0, 0);
         } else {
           // Procedural model faces +X (beak is at positive X)
           guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
