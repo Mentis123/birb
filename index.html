@@ -619,6 +619,175 @@
         color: #eff2fc;
       }
 
+      /* Nest Mode UI */
+      .nest-ui {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 10;
+        opacity: 0;
+        transition: opacity 300ms ease;
+      }
+
+      .nest-ui.is-visible {
+        opacity: 1;
+      }
+
+      .nest-ui.is-visible .nest-button {
+        pointer-events: auto;
+      }
+
+      .nest-crosshair {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 40px;
+      }
+
+      .nest-crosshair::before,
+      .nest-crosshair::after {
+        content: '';
+        position: absolute;
+        background: rgba(255, 100, 80, 0.9);
+        box-shadow: 0 0 8px rgba(255, 80, 60, 0.6);
+      }
+
+      .nest-crosshair::before {
+        width: 2px;
+        height: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+
+      .nest-crosshair::after {
+        width: 100%;
+        height: 2px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+
+      .nest-crosshair-dot {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: rgba(255, 120, 100, 0.95);
+        box-shadow: 0 0 10px rgba(255, 80, 60, 0.8);
+      }
+
+      .nest-button {
+        position: absolute;
+        appearance: none;
+        border: 2px solid rgba(255, 140, 100, 0.6);
+        border-radius: 50%;
+        width: clamp(3.5rem, 14vw, 4.5rem);
+        height: clamp(3.5rem, 14vw, 4.5rem);
+        background: linear-gradient(145deg, rgba(180, 80, 50, 0.85), rgba(120, 40, 30, 0.9));
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 180, 150, 0.2);
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+        touch-action: none;
+        -webkit-touch-callout: none;
+        user-select: none;
+      }
+
+      .nest-button:active {
+        transform: scale(0.95);
+      }
+
+      .nest-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .nest-button svg {
+        width: 55%;
+        height: 55%;
+        fill: currentColor;
+      }
+
+      .nest-takeoff-button {
+        bottom: clamp(1rem, 4vw, 2rem);
+        right: clamp(1rem, 4vw, 2rem);
+      }
+
+      .nest-launch-button {
+        bottom: clamp(1rem, 4vw, 2rem);
+        left: clamp(1rem, 4vw, 2rem);
+      }
+
+      .nest-launch-button .cooldown-ring {
+        position: absolute;
+        inset: -4px;
+        border-radius: 50%;
+        border: 3px solid transparent;
+        border-top-color: rgba(255, 200, 150, 0.9);
+        transform: rotate(0deg);
+        transition: transform 0.1s linear;
+      }
+
+      .nest-launch-button.is-cooling .cooldown-ring {
+        animation: cooldown-spin 5s linear;
+      }
+
+      @keyframes cooldown-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      .nest-toast {
+        position: absolute;
+        top: 15%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.75rem 1.5rem;
+        background: rgba(20, 30, 50, 0.9);
+        border: 1px solid rgba(255, 140, 100, 0.4);
+        border-radius: 1rem;
+        color: rgba(255, 230, 210, 0.95);
+        font-size: clamp(0.75rem, 2.5vw, 0.9rem);
+        text-align: center;
+        max-width: 90%;
+        opacity: 0;
+        transition: opacity 400ms ease;
+        pointer-events: none;
+      }
+
+      .nest-toast.is-visible {
+        opacity: 1;
+      }
+
+      .nest-indicator {
+        position: absolute;
+        bottom: clamp(1rem, 4vw, 2rem);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.5rem 1rem;
+        background: rgba(255, 80, 50, 0.15);
+        border: 1px solid rgba(255, 100, 70, 0.4);
+        border-radius: 2rem;
+        color: rgba(255, 180, 150, 0.95);
+        font-size: clamp(0.65rem, 2vw, 0.75rem);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        opacity: 0;
+        transition: opacity 300ms ease;
+        pointer-events: none;
+      }
+
+      .nest-indicator.is-visible {
+        opacity: 1;
+      }
+
       @media (min-width: 48rem) {
         main {
           padding-bottom: calc(var(--space-4) + 5.5rem);
@@ -848,6 +1017,49 @@
             </div>
           </div>
         </div>
+
+        <!-- Nest Mode UI -->
+        <div class="nest-ui" data-nest-ui aria-hidden="true">
+          <!-- Crosshair -->
+          <div class="nest-crosshair">
+            <div class="nest-crosshair-dot"></div>
+          </div>
+
+          <!-- Take Off Button (bottom right) - Wing icon -->
+          <button
+            type="button"
+            class="nest-button nest-takeoff-button"
+            data-nest-takeoff
+            aria-label="Take off from nest"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5Z"/>
+            </svg>
+          </button>
+
+          <!-- Launch Button (bottom left) - Rocket icon -->
+          <button
+            type="button"
+            class="nest-button nest-launch-button"
+            data-nest-launch
+            aria-label="Launch rocket"
+          >
+            <div class="cooldown-ring"></div>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2.5c1.5 0 5.5 3 5.5 10S13.5 21.5 12 21.5 6.5 15.5 6.5 12.5s4-10 5.5-10Zm0 4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm-3 12h6l-1 3h-4l-1-3Z"/>
+            </svg>
+          </button>
+
+          <!-- Toast message -->
+          <div class="nest-toast" data-nest-toast>
+            You've landed at a nest! Look around and launch rockets.
+          </div>
+        </div>
+
+        <!-- Nest proximity indicator (shows when approaching) -->
+        <div class="nest-indicator" data-nest-indicator>
+          Nest nearby - Tap to land
+        </div>
       </div>
     </main>
     <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
@@ -897,6 +1109,16 @@
         const sphericalWorldModule = await import("./src/environment/spherical-world.js");
         var createSphericalWorld = sphericalWorldModule.createSphericalWorld;
         var SPHERE_RADIUS = sphericalWorldModule.SPHERE_RADIUS;
+
+        // Nesting system imports
+        const nestPointsModule = await import("./src/nesting/nest-points.js");
+        var createNestPointsSystem = nestPointsModule.createNestPointsSystem;
+        var NEST_PROXIMITY_RANGE = nestPointsModule.NEST_PROXIMITY_RANGE;
+        const nestingSystemModule = await import("./src/nesting/nesting-system.js");
+        var createNestingSystem = nestingSystemModule.createNestingSystem;
+        var NESTING_STATES = nestingSystemModule.NESTING_STATES;
+        const rocketModule = await import("./src/nesting/rocket.js");
+        var createRocketSystem = rocketModule.createRocketSystem;
         const gltfLoaderModule = await import(
           "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
         );
@@ -1126,6 +1348,51 @@
       let glideTrail = null;
       let flightControllerInitialized = false;
 
+      // Nesting system state
+      let nestPointsSystem = null;
+      let nestingSystem = null;
+      let rocketSystem = null;
+      let nestToastTimeout = null;
+
+      // Nest UI elements
+      const nestUI = document.querySelector('[data-nest-ui]');
+      const nestTakeoffButton = document.querySelector('[data-nest-takeoff]');
+      const nestLaunchButton = document.querySelector('[data-nest-launch]');
+      const nestToast = document.querySelector('[data-nest-toast]');
+      const nestIndicator = document.querySelector('[data-nest-indicator]');
+
+      function showNestUI(visible) {
+        if (nestUI) {
+          nestUI.classList.toggle('is-visible', visible);
+          nestUI.setAttribute('aria-hidden', !visible);
+        }
+      }
+
+      function showNestIndicator(visible) {
+        if (nestIndicator) {
+          nestIndicator.classList.toggle('is-visible', visible);
+        }
+      }
+
+      function showNestToast() {
+        if (nestToast) {
+          nestToast.classList.add('is-visible');
+          if (nestToastTimeout) {
+            clearTimeout(nestToastTimeout);
+          }
+          nestToastTimeout = setTimeout(() => {
+            nestToast.classList.remove('is-visible');
+          }, 4000);
+        }
+      }
+
+      function updateLaunchButtonCooldown(isOnCooldown) {
+        if (nestLaunchButton) {
+          nestLaunchButton.classList.toggle('is-cooling', isOnCooldown);
+          nestLaunchButton.disabled = isOnCooldown;
+        }
+      }
+
       function updateEnvironmentControls(config) {
         if (!config) return;
         const label = config.label ?? config.id;
@@ -1225,7 +1492,29 @@
         const definition = getEnvironmentDefinition(variantId);
         if (!definition) return;
 
-        // Dispose old world
+        // Dispose old world and nesting systems
+        if (nestingSystem) {
+          try {
+            nestingSystem.reset();
+            nestingSystem = null;
+          } catch (e) {
+            console.warn("Nesting system reset error:", e);
+          }
+        }
+
+        if (nestPointsSystem) {
+          try {
+            nestPointsSystem.dispose();
+          } catch (e) {
+            console.warn("Nest points dispose error:", e);
+          }
+          nestPointsSystem = null;
+        }
+
+        // Hide nest UI when changing environments
+        showNestUI(false);
+        showNestIndicator(false);
+
         if (sphericalWorld) {
           try {
             sphericalWorld.dispose();
@@ -1242,10 +1531,19 @@
             definition: definition,
           });
           glideTrail = null; // No glide trail on spherical world
+
+          // Create nest points for this environment
+          nestPointsSystem = createNestPointsSystem(
+            THREE,
+            scene,
+            definition.id,
+            SPHERE_RADIUS
+          );
         } catch (envError) {
           console.warn("Spherical world creation failed:", envError);
           sphericalWorld = null;
           glideTrail = null;
+          nestPointsSystem = null;
         }
         environmentState.id = definition.id;
         environmentState.label = definition.label;
@@ -2218,6 +2516,85 @@
         onThrustChange: () => updateControlMetrics(),
       });
 
+      // Initialize rocket system
+      rocketSystem = createRocketSystem(THREE, scene);
+
+      // Initialize nesting system with state change callback
+      const handleNestingStateChange = (newState, previousState, currentNest) => {
+        const isNested = newState === NESTING_STATES.NESTED;
+        const isApproaching = newState === NESTING_STATES.APPROACHING;
+
+        // Show/hide nest mode UI
+        showNestUI(isNested);
+
+        // Show/hide proximity indicator
+        showNestIndicator(isApproaching && !isNested);
+
+        // Show welcome toast on first landing
+        if (isNested && previousState === NESTING_STATES.LANDING) {
+          showNestToast();
+        }
+
+        // Update status message
+        if (statusMetric) {
+          if (isNested) {
+            statusMetric.textContent = "Nested! Look around with the joystick. Launch rockets or take off.";
+          } else if (isApproaching) {
+            statusMetric.textContent = "Nest nearby! Tap the screen or click to land.";
+          }
+        }
+      };
+
+      // Create nesting system (will be updated when nestPointsSystem exists)
+      const initNestingSystem = () => {
+        if (nestPointsSystem && !nestingSystem) {
+          nestingSystem = createNestingSystem(THREE, {
+            flightController,
+            nestPointsSystem,
+            onStateChange: handleNestingStateChange,
+          });
+        }
+      };
+
+      // Nest UI button handlers
+      if (nestTakeoffButton) {
+        nestTakeoffButton.addEventListener('click', () => {
+          if (nestingSystem) {
+            nestingSystem.takeOff();
+          }
+        });
+        nestTakeoffButton.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          if (nestingSystem) {
+            nestingSystem.takeOff();
+          }
+        });
+      }
+
+      if (nestLaunchButton) {
+        const handleLaunch = () => {
+          if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
+            const launchPosition = flightController.position.clone();
+            const launchDirection = nestingSystem.getLookDirection();
+            rocketSystem.fire(launchPosition, launchDirection);
+            updateLaunchButtonCooldown(true);
+          }
+        };
+
+        nestLaunchButton.addEventListener('click', handleLaunch);
+        nestLaunchButton.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          handleLaunch();
+        });
+      }
+
+      // Handle canvas click/tap for landing on nests
+      canvas.addEventListener('click', (event) => {
+        if (nestingSystem && nestingSystem.getState() === NESTING_STATES.APPROACHING) {
+          nestingSystem.tryLandOnNest(flightController.position);
+        }
+      });
+
       const applyThrottleFromInput = () => {
         if (!glideSpeedInput) return;
         const value = clampThrottle(Number.parseFloat(glideSpeedInput.value));
@@ -2252,6 +2629,15 @@
           cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
           updateViewToggleUi(currentMode);
           flightControls.reset({ releasePointerLock: true });
+          // Reset nesting state
+          if (nestingSystem) {
+            nestingSystem.reset();
+          }
+          if (rocketSystem) {
+            rocketSystem.reset();
+          }
+          showNestUI(false);
+          showNestIndicator(false);
           updateControlMetrics();
         });
       }
@@ -2297,10 +2683,37 @@
         }
 
         const lookDeltaTime = Math.min(delta > 0 ? delta : 1 / 60, 0.05);
-        flightControls.applyAnalogLook(lookDeltaTime);
-        flightControls.applyLeftStickPitch(lookDeltaTime);
 
-        const pose = flightController.update(delta);
+        // Initialize nesting system if needed (after environment change)
+        if (nestPointsSystem && !nestingSystem) {
+          initNestingSystem();
+        }
+
+        // Update nesting system and check if we should apply flight controls
+        let isNested = false;
+        if (nestingSystem) {
+          nestingSystem.update(delta, flightController.position);
+          isNested = nestingSystem.isNested();
+        }
+
+        // Only apply flight controls when not nested
+        if (!isNested) {
+          flightControls.applyAnalogLook(lookDeltaTime);
+          flightControls.applyLeftStickPitch(lookDeltaTime);
+        }
+
+        // Update rockets
+        if (rocketSystem) {
+          rocketSystem.update(delta);
+          // Update cooldown button state
+          if (!rocketSystem.canFire()) {
+            updateLaunchButtonCooldown(true);
+          } else {
+            updateLaunchButtonCooldown(false);
+          }
+        }
+
+        const pose = flightController.update(isNested ? 0 : delta);
 
         // Apply collision detection with spherical world
         if (sphericalWorld && sphericalWorld.collisionSystem) {
@@ -2483,6 +2896,15 @@
         }
         if (cameraState) {
           cameraState.dispose();
+        }
+        if (nestingSystem) {
+          nestingSystem.dispose();
+        }
+        if (nestPointsSystem) {
+          nestPointsSystem.dispose();
+        }
+        if (rocketSystem) {
+          rocketSystem.dispose();
         }
         renderer.dispose();
         if (sphericalWorld) {
