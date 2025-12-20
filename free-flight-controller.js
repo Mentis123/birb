@@ -3,7 +3,11 @@ export const MOVEMENT_ACCELERATION = 2.8;
 export const LINEAR_DRAG = 1.2;
 export const SPRINT_MULTIPLIER = 1.4;
 // Upper bound on how far the bird can bank for readability and comfort.
-export const MAX_BANK_ANGLE = (35 * Math.PI) / 180;
+export const MAX_BANK_ANGLE = (55 * Math.PI) / 180;
+// Maximum visual pitch tilt when climbing/diving (nose up/down effect)
+export const MAX_VISUAL_PITCH_ANGLE = (25 * Math.PI) / 180;
+// How quickly the visual pitch responds to vertical velocity
+export const VISUAL_PITCH_RESPONSE = 5;
 // How quickly a banked input should translate into a gentle yaw turn.
 export const BANK_TURN_RATE = Math.PI * 0.45;
 // How quickly the controller adapts its roll orientation when reversing direction.
@@ -105,6 +109,7 @@ export class FreeFlightController {
 
     this.bank = 0;
     this.pitch = 0;
+    this.visualPitch = 0;
     this.elapsed = 0;
 
     this.reset();
@@ -326,6 +331,25 @@ export class FreeFlightController {
     this._bankQuaternion.setFromAxisAngle(bankAxis, this.bank);
     this.quaternion.multiply(this._bankQuaternion);
 
+    // --- PROCEDURAL VISUAL PITCH ---
+    // Tilt nose up when climbing, nose down when diving based on vertical velocity
+    const verticalSpeed = this.velocity.y;
+    const speed = this.velocity.length();
+    // Normalize vertical velocity relative to total speed for proportional tilt
+    const verticalRatio = speed > 0.1 ? verticalSpeed / speed : 0;
+    // Target pitch: positive vertical ratio (climbing) → nose up (negative pitch in local space)
+    const targetVisualPitch = clamp(-verticalRatio * MAX_VISUAL_PITCH_ANGLE, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
+
+    // Smooth interpolation for visual pitch
+    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
+    this.visualPitch += (targetVisualPitch - this.visualPitch) * pitchStep;
+    this.visualPitch = clamp(this.visualPitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
+
+    // Apply visual pitch rotation around the local right axis
+    const visualPitchAxis = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+    this._pitchQuaternion.setFromAxisAngle(visualPitchAxis, this.visualPitch);
+    this.quaternion.multiply(this._pitchQuaternion);
+
     // Reset pitch tracking (no longer used for visual tilt, rotation is in lookQuaternion)
     this.pitch = 0;
 
@@ -358,6 +382,7 @@ export class FreeFlightController {
     const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
     this.bank = 0;
     this.pitch = 0;
+    this.visualPitch = 0;
     this._bankOrientation = forward.z >= 0 ? 1 : -1;
     this.elapsed = 0;
     Object.assign(this.input, createAxisRecord());
