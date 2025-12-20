@@ -36,13 +36,25 @@ modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
 - A quaternion maps that inferred forward to controller forward (-Z), keeping the birb visually aligned with its actual heading.
 - Works for both GLB (already -Z) and procedural (+X) models without manual toggles.
 
-### Additional Fix (Dec 2024)
+### Additional Fixes (Dec 2024)
+
+**Auto-detection algorithm fix:**
 The original algorithm had a bug where symmetric models (like the GLB with spread wings) would fall back to "longest span" detection, incorrectly selecting the X-axis (wingspan) as forward instead of Z-axis (body).
 
 Fixed by:
 1. Filtering out Y-axis from forward candidates (birds face horizontally)
 2. Preferring Z-axis when biases are similar (standard 3D convention for most models)
 3. Only falling back to X-axis for models with clear +X asymmetry (like the procedural model)
+
+**Regression fix (commit 42751c5 was incorrect):**
+A subsequent "fix" incorrectly assumed the GLB model faces +X (like the procedural model) and hard-coded that assumption. This was wrong—the GLB model DOES face -Z as originally documented.
+
+The result was that `setFromUnitVectors(+X, -Z)` applied an unnecessary -90° rotation, causing the bird to face LEFT (-X) instead of the flight direction (-Z). The bird appeared to "fly down its right wing."
+
+**Correct behavior:**
+- GLB model forward: -Z (no rotation needed)
+- Procedural model forward: +X (needs rotation to -Z)
+- The code now explicitly sets `guessedForward = (0, 0, -1)` for GLB models
 
 ---
 
@@ -78,12 +90,45 @@ Now:
 
 ---
 
+## Issue 3: Follow Camera Not Behind Bird (Resolved)
+
+### Problem
+The follow camera appeared in front of or to the side of the bird instead of trailing behind it at a nice perspective.
+
+### Root Cause Analysis
+The follow camera offset was defined as `(0, 0.6, 2.1)`, intending Z=+2.1 to mean "behind the bird." However, the camera transformation logic works as follows:
+
+```javascript
+// follow-camera.js ~140
+scratch.lookMatrix.makeBasis(scratch.right, scratch.up, scratch.forward);
+scratch.noRollQuaternion.setFromRotationMatrix(scratch.lookMatrix);
+scratch.offset.applyQuaternion(scratch.noRollQuaternion);
+```
+
+This maps `offset.z` to the bird's **forward** direction, not backward. With Z=+2.1:
+- `2.1 * forward = 2.1 * (0, 0, -1) = (0, 0, -2.1)`
+- Camera ends up IN FRONT of the bird at world -Z
+
+### Resolution
+Changed the offset Z component to negative:
+```javascript
+// camera-state.js, CAMERA_MODES.FOLLOW
+offset: new Vector3(0, 0.6, -2.1)  // was (0, 0.6, 2.1)
+```
+
+Now:
+- `-2.1 * forward = -2.1 * (0, 0, -1) = (0, 0, 2.1)`
+- Camera correctly positioned BEHIND the bird at world +Z
+
+---
+
 ## Summary Table
 
 | Issue | Status | Quick Fix Likelihood | Rebuild Complexity |
 |-------|--------|---------------------|-------------------|
 | Birb facing direction | Resolved | Medium (rotation math) | Low (re-model) |
 | Climb on joystick up | Resolved | Fixed (cross product order) | N/A |
+| Follow camera position | Resolved | Fixed (offset sign) | N/A |
 
 ---
 

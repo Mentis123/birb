@@ -151,7 +151,9 @@ export function createCameraState({ three, scene, flightController }) {
       rotationDamping: 0.18,
     },
     [CAMERA_MODES.FOLLOW]: {
-      offset: new Vector3(0, 0.6, 2.1),
+      // offset.z is negative because the transformation uses +Z → forward direction
+      // A negative Z puts the camera BEHIND the bird (opposite of forward)
+      offset: new Vector3(0, 0.6, -2.1),
       positionDamping: 0.16,
       lookAtDamping: 0.24,
       rotationDamping: 0.2,
