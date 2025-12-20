@@ -184,10 +184,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     const tree = new THREE.Group();
 
-    // Trunk
-    const trunkHeight = randomInRange(0.6, 1.0);
+    // Trunk - doubled size for bigger world feel
+    const trunkHeight = randomInRange(1.2, 2.0);
     const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.14, trunkHeight, 7),
+      new THREE.CylinderGeometry(0.16, 0.28, trunkHeight, 7),
       new THREE.MeshStandardMaterial({
         color: 0x324b38,
         roughness: 0.78,
@@ -199,10 +199,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     trunk.position.y = trunkHeight / 2;
     tree.add(trunk);
 
-    // Canopy
-    const canopyHeight = randomInRange(0.8, 1.2);
+    // Canopy - doubled size for bigger world feel
+    const canopyHeight = randomInRange(1.6, 2.4);
     const canopy = new THREE.Mesh(
-      new THREE.ConeGeometry(0.42, canopyHeight, 9),
+      new THREE.ConeGeometry(0.84, canopyHeight, 9),
       new THREE.MeshStandardMaterial({
         color: 0x2f7a4d,
         emissive: 0x163e26,
@@ -224,14 +224,14 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     tree.quaternion.copy(quaternion);
 
-    // Random scale
-    const scale = randomInRange(0.8, 1.4);
+    // Random scale - doubled base for bigger world feel
+    const scale = randomInRange(1.6, 2.8);
     tree.scale.setScalar(scale);
 
     treeGroup.add(tree);
 
-    // Add collision for tree
-    const treeCollisionRadius = 0.3 * scale;
+    // Add collision for tree - doubled radius
+    const treeCollisionRadius = 0.6 * scale;
     collisionSystem.addCollider(pos, treeCollisionRadius, 'tree');
   });
 
@@ -251,7 +251,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
 
     const shrub = new THREE.Mesh(
-      new THREE.SphereGeometry(0.24, 10, 8),
+      new THREE.SphereGeometry(0.48, 10, 8),
       new THREE.MeshStandardMaterial({
         color: 0x3e8a58,
         roughness: 0.55,
@@ -270,13 +270,13 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     shrub.quaternion.copy(quaternion);
 
-    const scale = randomInRange(0.6, 1.2);
+    const scale = randomInRange(1.2, 2.4);
     shrub.scale.multiplyScalar(scale);
 
     shrubGroup.add(shrub);
 
-    // Add small collision for shrubs
-    collisionSystem.addCollider(pos, 0.15 * scale, 'shrub');
+    // Add small collision for shrubs - doubled
+    collisionSystem.addCollider(pos, 0.3 * scale, 'shrub');
   });
 
   root.add(shrubGroup);
@@ -295,7 +295,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, -0.05);
 
     const rock = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(0.24, 0),
+      new THREE.DodecahedronGeometry(0.48, 0),
       new THREE.MeshStandardMaterial({
         color: 0x24343f,
         roughness: 0.9,
@@ -315,13 +315,13 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
       Math.random() * Math.PI
     );
 
-    const scale = randomInRange(0.5, 1.2);
+    const scale = randomInRange(1.0, 2.4);
     rock.scale.setScalar(scale);
 
     rockGroup.add(rock);
 
-    // Add collision for rocks
-    collisionSystem.addCollider(pos, 0.2 * scale, 'rock');
+    // Add collision for rocks - doubled
+    collisionSystem.addCollider(pos, 0.4 * scale, 'rock');
   });
 
   root.add(rockGroup);
@@ -334,7 +334,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   for (let i = 0; i < cloudCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
-    const cloudHeight = randomInRange(4, 10);
+    const cloudHeight = randomInRange(8, 20);
 
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, cloudHeight);
 
@@ -349,16 +349,16 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
       opacity: 0.78,
     });
 
-    // Create cloud puffs
+    // Create cloud puffs - doubled size
     for (let j = 0; j < 4; j++) {
       const puff = new THREE.Mesh(
-        new THREE.SphereGeometry(0.44 + Math.random() * 0.28, 14, 12),
+        new THREE.SphereGeometry(0.88 + Math.random() * 0.56, 14, 12),
         cloudMaterial
       );
       puff.position.set(
-        randomInRange(-0.48, 0.48),
-        randomInRange(-0.12, 0.24),
-        j * 0.48 * (Math.random() > 0.5 ? 1 : -1)
+        randomInRange(-0.96, 0.96),
+        randomInRange(-0.24, 0.48),
+        j * 0.96 * (Math.random() > 0.5 ? 1 : -1)
       );
       cloud.add(puff);
     }
@@ -371,7 +371,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     cloud.quaternion.copy(quaternion);
 
-    const scale = randomInRange(0.6, 1.3);
+    const scale = randomInRange(1.2, 2.6);
     cloud.scale.setScalar(scale);
 
     cloudGroup.add(cloud);
@@ -395,9 +395,9 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
 
-    const height = randomInRange(2, 5);
+    const height = randomInRange(4, 10);
     const spire = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.22, 0.6, height, 10, 1, false),
+      new THREE.CylinderGeometry(0.44, 1.2, height, 10, 1, false),
       new THREE.MeshStandardMaterial({
         color: 0x8b4728,
         roughness: 0.65,
@@ -423,13 +423,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     spire.rotateX(randomInRange(-0.1, 0.1));
     spire.rotateZ(randomInRange(-0.1, 0.1));
 
-    const scale = randomInRange(0.8, 1.4);
+    const scale = randomInRange(1.6, 2.8);
     spire.scale.setScalar(scale);
 
     spireGroup.add(spire);
 
-    // Add collision for spire
-    collisionSystem.addCollider(pos, 0.5 * scale, 'spire');
+    // Add collision for spire - doubled
+    collisionSystem.addCollider(pos, 1.0 * scale, 'spire');
   });
 
   root.add(spireGroup);
@@ -443,10 +443,10 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
 
-    const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 1.5);
+    const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 3.0);
 
     const arch = new THREE.Mesh(
-      new THREE.TorusGeometry(1.4, 0.22, 12, 48),
+      new THREE.TorusGeometry(2.8, 0.44, 12, 48),
       new THREE.MeshStandardMaterial({
         color: 0xb25e34,
         roughness: 0.6,
@@ -468,13 +468,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     arch.rotateX(Math.PI / 2);
     arch.rotateZ(Math.random() * Math.PI);
 
-    const scale = randomInRange(0.8, 1.6);
+    const scale = randomInRange(1.6, 3.2);
     arch.scale.setScalar(scale);
 
     archGroup.add(arch);
 
-    // Add collision for arch (simplified as a point)
-    collisionSystem.addCollider(pos, 1.0 * scale, 'arch');
+    // Add collision for arch (simplified as a point) - doubled
+    collisionSystem.addCollider(pos, 2.0 * scale, 'arch');
   }
 
   root.add(archGroup);
@@ -493,7 +493,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, -0.1);
 
     const boulder = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(randomInRange(0.3, 0.8), 0),
+      new THREE.IcosahedronGeometry(randomInRange(0.6, 1.6), 0),
       new THREE.MeshStandardMaterial({
         color: 0x7a3c23,
         roughness: 0.8,
@@ -511,12 +511,12 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
       Math.random() * Math.PI
     );
 
-    const scale = randomInRange(0.6, 1.4);
+    const scale = randomInRange(1.2, 2.8);
     boulder.scale.setScalar(scale);
 
     boulderGroup.add(boulder);
 
-    collisionSystem.addCollider(pos, 0.3 * scale, 'boulder');
+    collisionSystem.addCollider(pos, 0.6 * scale, 'boulder');
   });
 
   root.add(boulderGroup);
@@ -553,8 +553,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
 
     const tower = new THREE.Group();
-    const height = randomInRange(2.5, 4.5);
-    const width = randomInRange(0.4, 0.7);
+    const height = randomInRange(5.0, 9.0);
+    const width = randomInRange(0.8, 1.4);
 
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(width, height, width),
@@ -578,16 +578,16 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     tower.quaternion.copy(quaternion);
 
-    const scale = randomInRange(0.8, 1.2);
+    const scale = randomInRange(1.6, 2.4);
     tower.scale.setScalar(scale);
 
     towerGroup.add(tower);
 
-    // Add collision for tower
-    collisionSystem.addCollider(pos, width * scale, 'tower');
+    // Add collision for tower - doubled
+    collisionSystem.addCollider(pos, width * scale * 2, 'tower');
   });
 
-  // Medium towers
+  // Medium towers - also doubled
   const mediumTowerCount = 100;
   const mediumTowerPoints = fibonacciSpherePoints(mediumTowerCount, sphereRadius);
 
@@ -598,8 +598,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
 
     const tower = new THREE.Group();
-    const height = randomInRange(1.5, 2.8);
-    const width = randomInRange(0.35, 0.55);
+    const height = randomInRange(3.0, 5.6);
+    const width = randomInRange(0.7, 1.1);
 
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(width, height, width),
@@ -615,12 +615,12 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     tower.quaternion.copy(quaternion);
 
-    const scale = randomInRange(0.7, 1.1);
+    const scale = randomInRange(1.4, 2.2);
     tower.scale.setScalar(scale);
 
     towerGroup.add(tower);
 
-    collisionSystem.addCollider(pos, width * scale * 0.8, 'tower');
+    collisionSystem.addCollider(pos, width * scale * 1.6, 'tower');
   });
 
   root.add(towerGroup);
@@ -641,12 +641,12 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   for (let i = 0; i < antennaCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
-    const antennaHeight = randomInRange(1.5, 3.5);
+    const antennaHeight = randomInRange(3.0, 7.0);
 
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, antennaHeight);
 
     const antenna = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.05, 0.05, 0.9, 12),
+      new THREE.CylinderGeometry(0.1, 0.1, 1.8, 12),
       antennaMaterial
     );
 
@@ -657,7 +657,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     antenna.quaternion.copy(quaternion);
 
-    const scale = randomInRange(0.8, 1.4);
+    const scale = randomInRange(1.6, 2.8);
     antenna.scale.setScalar(scale);
 
     antennaGroup.add(antenna);
@@ -683,12 +683,12 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   for (let i = 0; i < hoverCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
-    const hoverHeight = randomInRange(3, 8);
+    const hoverHeight = randomInRange(6, 16);
 
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, hoverHeight);
 
     const hover = new THREE.Mesh(
-      new THREE.TorusGeometry(0.18, 0.05, 12, 32),
+      new THREE.TorusGeometry(0.36, 0.1, 12, 32),
       hoverMaterial
     );
 
@@ -702,7 +702,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     // Make hover craft horizontal relative to surface
     hover.rotateX(Math.PI / 2);
 
-    const scale = randomInRange(0.8, 1.4);
+    const scale = randomInRange(1.6, 2.8);
     hover.scale.setScalar(scale);
 
     hoverGroup.add(hover);
