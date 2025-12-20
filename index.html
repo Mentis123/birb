@@ -1394,7 +1394,7 @@
         return forwardGuess;
       };
 
-      const positionBirbModel = (model) => {
+      const positionBirbModel = (model, isGLB = false) => {
         if (!model) return;
 
         model.traverse((child) => {
@@ -1408,7 +1408,17 @@
         const birbBounds = new THREE.Box3().setFromObject(model);
         const birbCenter = new THREE.Vector3();
         birbBounds.getCenter(birbCenter);
-        const guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
+
+        let guessedForward;
+        if (isGLB) {
+          // GLB model appears to be authored with beak at +X (like procedural model)
+          // The KNOWN_ISSUES.md claim of "-Z forward" appears incorrect based on user reports
+          // With beak at +X, we rotate +X to -Z to face forward
+          guessedForward = new THREE.Vector3(1, 0, 0);
+        } else {
+          // Procedural model faces +X (beak is at positive X)
+          guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
+        }
         modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
         // Re-center the bird so yaw/roll rotations pivot around its body instead
         // of an offset point in space.
@@ -1693,7 +1703,7 @@
           (gltf) => {
             const model = gltf.scene || gltf.scenes?.[0];
             if (!model) return;
-            positionBirbModel(model);
+            positionBirbModel(model, true);  // GLB model faces -Z
           },
           undefined,
           (error) => {

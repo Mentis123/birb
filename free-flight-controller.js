@@ -160,7 +160,8 @@ export class FreeFlightController {
       if (horizontalLength > 0.001) {
         horizontalForward.divideScalar(horizontalLength);
         const up = this._up.set(0, 1, 0);
-        const right = this._right.crossVectors(up, horizontalForward).normalize();
+        // horizontalForward × up gives proper right-hand side
+        const right = this._right.crossVectors(horizontalForward, up).normalize();
         this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
         this.lookQuaternion.premultiply(this._pitchQuaternion);
       }
