@@ -1337,7 +1337,11 @@
           }
         });
 
-        const biasDominant = axisSpans.reduce((best, current) => {
+        // Filter out Y-axis - birds face horizontally, not up/down
+        const horizontalAxes = axisSpans.filter((a) => a.axis !== "y");
+
+        // Find axis with strongest bias among horizontal axes
+        const biasDominant = horizontalAxes.reduce((best, current) => {
           if (!best || current.absBias > best.absBias) {
             return current;
           }
@@ -1347,18 +1351,28 @@
           return best;
         }, null);
 
-        const chosenAxis =
-          biasDominant && biasDominant.absBias > 0.05
-            ? biasDominant
-            : axisSpans.reduce((best, current) => {
-                if (!best || current.span > best.span) {
-                  return current;
-                }
-                return best;
-              }, null);
+        // Prefer bias-based detection, but when biases are too low (symmetric model),
+        // default to Z-axis which is the standard forward direction in most 3D models.
+        // Only use X-axis fallback for procedural models that explicitly face +X.
+        let chosenAxis;
+        if (biasDominant && biasDominant.absBias > 0.05) {
+          // Clear asymmetry detected - use that axis
+          chosenAxis = biasDominant;
+        } else {
+          // No clear asymmetry - prefer Z-axis (standard 3D convention) over X (wingspan)
+          const zAxis = horizontalAxes.find((a) => a.axis === "z");
+          const xAxis = horizontalAxes.find((a) => a.axis === "x");
+          // Use Z if it has any bias at all, or if it's reasonably long compared to X
+          if (zAxis && (zAxis.absBias > 0.01 || zAxis.span > xAxis.span * 0.5)) {
+            chosenAxis = zAxis;
+          } else {
+            chosenAxis = biasDominant;
+          }
+        }
 
         if (!chosenAxis || chosenAxis.span <= 0) {
-          forwardGuess.set(1, 0, 0);
+          // Default fallback to -Z (standard Three.js forward)
+          forwardGuess.set(0, 0, -1);
           return forwardGuess;
         }
 

@@ -36,63 +36,45 @@ modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
 - A quaternion maps that inferred forward to controller forward (-Z), keeping the birb visually aligned with its actual heading.
 - Works for both GLB (already -Z) and procedural (+X) models without manual toggles.
 
+### Additional Fix (Dec 2024)
+The original algorithm had a bug where symmetric models (like the GLB with spread wings) would fall back to "longest span" detection, incorrectly selecting the X-axis (wingspan) as forward instead of Z-axis (body).
+
+Fixed by:
+1. Filtering out Y-axis from forward candidates (birds face horizontally)
+2. Preferring Z-axis when biases are similar (standard 3D convention for most models)
+3. Only falling back to X-axis for models with clear +X asymmetry (like the procedural model)
+
 ---
 
-## Issue 2: Climbing Behavior on Joystick Push-Up (Unresolved)
+## Issue 2: Climbing Behavior on Joystick Push-Up (Resolved)
 
 ### Problem
-When pushing up on the left joystick, the birb does not climb (gain altitude) as users expect. The birb moves forward but doesn't ascend.
+When pushing up on the left joystick, the birb dove instead of climbing. The pitch direction was inverted.
 
 ### Root Cause Analysis
-The left thumbstick Y-axis is mapped to **forward thrust**, not **lift/pitch**:
+The cross product used to calculate the "right" axis for pitch rotation was in the wrong order:
 
 ```javascript
-// flight-controls.js ~249
-const handleLeftStickChange = (value, context = {}) => {
-  const shaped = shapeStickWithContext(value, context, thrustInputShaping);
-  const forward = clamp(shaped.y, -1, 1);  // Y-axis → forward (pitch)
-  const strafe = clamp(shaped.x, -1, 1);   // X-axis → strafe/roll
-  axisSources.leftStick.forward = forward;
-  axisSources.leftStick.strafe = strafe;
-  axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-  axisSources.leftStick.lift = 0;  // No direct lift from joystick
-  // ...
-};
+// free-flight-controller.js ~228 (OLD - WRONG)
+const right = this._right.crossVectors(up, horizontalForward).normalize();
 ```
 
-Lift is only controlled by:
-- Keyboard: Space/E (up), Q (down)
-- Touch lift buttons (if present in UI)
+When facing -Z with Y up:
+- `up × horizontalForward = (0,1,0) × (0,0,-1) = (-1,0,0)` which is LEFT, not right
+- Rotating by positive pitch around the LEFT axis tilts the nose DOWN
 
-### Current State
-- Left stick Y feeds `forward` input for **pitch**, not vertical lift.
-- Default (checkbox unchecked) is **non-inverted**: pushing up/forward pitches the nose up; down pitches down.
-- Checking "Invert pitch" flips to airplane style (push forward to dive, pull back to climb).
-- Direct lift is still only on keyboard (Space/E/Q) or touch lift buttons.
+### Resolution
+Fixed the cross product order to get the correct right vector:
 
-### Research Directions
-1. **Design decision**: Should joystick-up mean "pitch up" (nose up, gradual climb) or "direct lift" (helicopter-style vertical)?
-2. **Mobile flight game conventions**: Research how other mobile gliding games handle single-joystick climb input
-3. **User testing**: Determine if users expect pitch control or altitude control from joystick Y
-
-### Alternative Approaches (if pitch doesn't feel right)
-
-**Option A: Map joystick Y to lift (helicopter-style)**
 ```javascript
-axisSources.leftStick.lift = forward * 0.5;  // Direct vertical lift
+// free-flight-controller.js ~228 (NEW - CORRECT)
+const right = this._right.crossVectors(horizontalForward, up).normalize();
 ```
 
-**Option C: Split joystick axes**
-- Y-axis upper half → lift (climbing)
-- Y-axis lower half → brake/dive
-- Separate forward thrust to always-on cruise mode
-
-### Fallback: Rebuild with Best Practices
-If simple mappings cause control issues:
-1. Research mobile flight games (e.g., Alto's Adventure, Tiny Wings) for control schemes
-2. Implement "pitch-to-climb" physics where joystick Y tilts the bird nose up/down
-3. Forward velocity + pitch angle = climb rate (realistic gliding physics)
-4. Consider two-joystick layout: left = thrust/strafe, right = pitch/yaw
+Now:
+- `horizontalForward × up = (0,0,-1) × (0,1,0) = (+1,0,0)` which is RIGHT
+- Rotating by positive pitch around RIGHT axis tilts the nose UP
+- Joystick up → nose up → bird climbs (with forward velocity)
 
 ---
 
@@ -101,7 +83,7 @@ If simple mappings cause control issues:
 | Issue | Status | Quick Fix Likelihood | Rebuild Complexity |
 |-------|--------|---------------------|-------------------|
 | Birb facing direction | Resolved | Medium (rotation math) | Low (re-model) |
-| Climb on joystick up | Unresolved | High (add lift mapping) | Medium (physics rework) |
+| Climb on joystick up | Resolved | Fixed (cross product order) | N/A |
 
 ---
 
