@@ -155,7 +155,7 @@ export function createCameraState({ three, scene, flightController, sphereCenter
     },
     [CAMERA_MODES.FOLLOW]: {
       // offset.y = height above bird, offset.z = distance behind bird (use negative or positive, abs is taken)
-      offset: new Vector3(0, 1.0, 3.0),
+      offset: new Vector3(0, 0.8, 2.2),
       positionDamping: 0.14,
       lookAtDamping: 0.20,
       rotationDamping: 0.16,
