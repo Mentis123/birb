@@ -224,8 +224,9 @@ export class FreeFlightController {
       const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
       // Project forward onto horizontal plane and get perpendicular right vector
       const horizontalForward = this._acceleration.set(forward.x, 0, forward.z).normalize();
-      // Right axis is perpendicular to forward in horizontal plane (cross with up)
-      const right = this._right.crossVectors(up, horizontalForward).normalize();
+      // Right axis: horizontalForward × up gives proper right-hand side
+      // (up × horizontalForward incorrectly gave LEFT, causing inverted pitch)
+      const right = this._right.crossVectors(horizontalForward, up).normalize();
       this._pitchQuaternion.setFromAxisAngle(right, pitchDelta);
       this.lookQuaternion.premultiply(this._pitchQuaternion).normalize();
     }
