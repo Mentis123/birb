@@ -1359,6 +1359,8 @@
       let sphericalWorld = null;
       let glideTrail = null;
       let flightControllerInitialized = false;
+      let preferredCameraMode = null;
+      let nestCameraReturnMode = null;
 
       // Nesting system state
       let nestPointsSystem = null;
@@ -1500,11 +1502,9 @@
         }
       }
 
-      function setEnvironment(variantId) {
-        const definition = getEnvironmentDefinition(variantId);
-        if (!definition) return;
+      const resetNestingSystems = () => {
+        const wasNested = nestingSystem?.isNested?.() ?? false;
 
-        // Dispose old world and nesting systems
         if (nestingSystem) {
           try {
             nestingSystem.reset();
@@ -1522,6 +1522,20 @@
           }
           nestPointsSystem = null;
         }
+
+        // Restore camera if we were locked to FPV for nesting
+        if (wasNested && nestCameraReturnMode && cameraState) {
+          setCameraMode(nestCameraReturnMode);
+        }
+        nestCameraReturnMode = preferredCameraMode ?? nestCameraReturnMode;
+      };
+
+      function setEnvironment(variantId) {
+        const definition = getEnvironmentDefinition(variantId);
+        if (!definition) return;
+
+        // Dispose old world and nesting systems
+        resetNestingSystems();
 
         // Reset rockets when changing environments
         if (rocketSystem) {
@@ -1544,32 +1558,42 @@
           }
         }
 
+        let nextWorld = null;
         try {
-          // Create spherical world
-          sphericalWorld = createSphericalWorld(scene, {
+          nextWorld = createSphericalWorld(scene, {
             three: THREE,
             variant: definition.id,
             definition: definition,
           });
-          glideTrail = null; // No glide trail on spherical world
-          // Set sphere center for camera and flight controller to handle spherical up vector
-          const sphereCenter = new THREE.Vector3(0, 0, 0);
-          if (cameraState && typeof cameraState.setSphereCenter === 'function') {
-            cameraState.setSphereCenter(sphereCenter);
-          }
-          if (flightController && typeof flightController.setSphereCenter === 'function') {
-            flightController.setSphereCenter(sphereCenter);
-          }
-
-          // Create nest points for this environment
-          nestPointsSystem = createNestPointsSystem(
-            THREE,
-            scene,
-            definition.id,
-            SPHERE_RADIUS
-          );
         } catch (envError) {
           console.warn("Spherical world creation failed:", envError);
+        }
+
+        sphericalWorld = nextWorld;
+        glideTrail = null; // No glide trail on spherical world
+
+        // Set sphere center for camera and flight controller to handle spherical up vector
+        const sphereCenter = sphericalWorld ? new THREE.Vector3(0, 0, 0) : null;
+        if (cameraState && typeof cameraState.setSphereCenter === 'function') {
+          cameraState.setSphereCenter(sphereCenter);
+        }
+        if (flightController && typeof flightController.setSphereCenter === 'function') {
+          flightController.setSphereCenter(sphereCenter);
+        }
+
+        if (sphericalWorld) {
+          try {
+            nestPointsSystem = createNestPointsSystem(
+              THREE,
+              scene,
+              definition.id,
+              SPHERE_RADIUS
+            );
+          } catch (nestError) {
+            console.warn("Nest points creation failed:", nestError);
+            nestPointsSystem = null;
+          }
+        } else {
           sphericalWorld = null;
           glideTrail = null;
           // Clear sphere center if world creation fails
@@ -1580,6 +1604,9 @@
             flightController.setSphereCenter(null);
           }
           nestPointsSystem = null;
+          if (statusMetric) {
+            statusMetric.textContent = "World failed to load. Try switching environments.";
+          }
         }
         environmentState.id = definition.id;
         environmentState.label = definition.label;
@@ -2405,6 +2432,8 @@
         CAMERA_MODES.FPV,
       ];
       let cameraModeIndex = 0;
+      preferredCameraMode = CAMERA_MODE_SEQUENCE[cameraModeIndex];
+      nestCameraReturnMode = preferredCameraMode;
 
       function invalidateRendererSize() {
         resizeState.dirty = true;
@@ -2509,12 +2538,16 @@
         birbAnchor.visible = mode !== CAMERA_MODES.FPV;
       };
 
-      const setCameraMode = (mode) => {
+      const setCameraMode = (mode, { forced = false } = {}) => {
         if (!cameraState) return;
         cameraState.setMode(mode);
         const index = CAMERA_MODE_SEQUENCE.indexOf(mode);
         if (index !== -1) {
           cameraModeIndex = index;
+          if (!forced) {
+            preferredCameraMode = CAMERA_MODE_SEQUENCE[index];
+            nestCameraReturnMode = preferredCameraMode;
+          }
         }
         syncAvatarVisibility(mode);
         updateControlMetrics();
@@ -2522,6 +2555,9 @@
       };
 
       const cycleCameraMode = () => {
+        if (nestingSystem?.isNested?.()) {
+          return;
+        }
         const nextIndex = (cameraModeIndex + 1) % CAMERA_MODE_SEQUENCE.length;
         setCameraMode(CAMERA_MODE_SEQUENCE[nextIndex]);
       };
@@ -2569,6 +2605,7 @@
       const handleNestingStateChange = (newState, previousState, currentNest) => {
         const isNested = newState === NESTING_STATES.NESTED;
         const isApproaching = newState === NESTING_STATES.APPROACHING;
+        const isLeavingNest = previousState === NESTING_STATES.NESTED && newState !== NESTING_STATES.NESTED;
 
         // Show/hide nest mode UI
         showNestUI(isNested);
@@ -2579,6 +2616,14 @@
         // Show welcome toast on first landing
         if (isNested && previousState === NESTING_STATES.LANDING) {
           showNestToast();
+        }
+
+        // Lock camera to FPV while nested for aiming
+        if (isNested) {
+          nestCameraReturnMode = cameraState?.getMode?.() ?? preferredCameraMode;
+          setCameraMode(CAMERA_MODES.FPV, { forced: true });
+        } else if (isLeavingNest && nestCameraReturnMode) {
+          setCameraMode(nestCameraReturnMode);
         }
 
         // Update status message
@@ -2685,10 +2730,8 @@
         resetButton.addEventListener("click", () => {
           flightController.reset();
           cameraState.reset();
-          const currentMode = cameraState.getMode();
-          const currentIndex = CAMERA_MODE_SEQUENCE.indexOf(currentMode);
-          cameraModeIndex = currentIndex === -1 ? 0 : currentIndex;
-          updateViewToggleUi(currentMode);
+          const restoredMode = preferredCameraMode ?? CAMERA_MODE_SEQUENCE[0];
+          setCameraMode(restoredMode);
           flightControls.reset({ releasePointerLock: true });
           // Reset nesting state
           if (nestingSystem) {
