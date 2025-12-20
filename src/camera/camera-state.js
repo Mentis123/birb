@@ -151,9 +151,8 @@ export function createCameraState({ three, scene, flightController }) {
       rotationDamping: 0.18,
     },
     [CAMERA_MODES.FOLLOW]: {
-      // Camera positioned behind and above the bird
-      // Positive Z places camera behind the bird's flight direction
-      offset: new Vector3(0, 0.6, 2.1),
+      // The rig rotates +Z to align with the bird's forward (-Z), so a NEGATIVE Z offset stays behind
+      offset: new Vector3(0, 0.6, -2.1),
       positionDamping: 0.16,
       lookAtDamping: 0.24,
       rotationDamping: 0.2,

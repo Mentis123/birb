@@ -1295,14 +1295,15 @@
       // Keep the model aligned with the controller's forward vector (-Z) so the
       // beak points away from the camera. We detect the model's longest axis
       // (and which side has more reach) to infer the beak direction, then rotate
-      // that inferred forward toward -Z. This works for both the procedural
-      // model (+X beak) and the GLB (currently authored facing -Z).
+      // that inferred forward toward -Z. If the guess is ambiguous, use model
+      // hints (procedural = +X, GLB = controller forward) to resolve direction.
       const modelOrientationOffset = new THREE.Quaternion();
       const targetModelForward = new THREE.Vector3(0, 0, -1);
+      const proceduralForwardHint = new THREE.Vector3(1, 0, 0);
       const forwardGuess = new THREE.Vector3();
       const birbBoundsSize = new THREE.Vector3();
 
-      const computeModelForwardGuess = (bounds, center) => {
+      const computeModelForwardGuess = (bounds, center, fallbackForward = targetModelForward) => {
         birbBoundsSize.subVectors(bounds.max, bounds.min);
         const axisSpans = [
           {
@@ -1371,24 +1372,30 @@
         }
 
         if (!chosenAxis || chosenAxis.span <= 0) {
-          // Default fallback to -Z (standard Three.js forward)
-          forwardGuess.set(0, 0, -1);
+          forwardGuess.copy(fallbackForward);
           return forwardGuess;
         }
 
-        const sign =
-          chosenAxis.bias !== 0
-            ? Math.sign(chosenAxis.bias)
-            : chosenAxis.positive >= chosenAxis.negative
-              ? 1
-              : -1;
+        const fallbackComponent =
+          chosenAxis.axis === "x"
+            ? fallbackForward.x
+            : chosenAxis.axis === "y"
+              ? fallbackForward.y
+              : fallbackForward.z;
+        const fallbackSign = fallbackComponent !== 0 ? Math.sign(fallbackComponent) : 1;
+        const hasDirectionalBias = Math.abs(chosenAxis.bias) > 0.01;
+        const sign = hasDirectionalBias
+          ? Math.sign(chosenAxis.bias)
+          : chosenAxis.positive !== chosenAxis.negative
+            ? (chosenAxis.positive >= chosenAxis.negative ? 1 : -1)
+            : fallbackSign;
         forwardGuess.set(
           chosenAxis.axis === "x" ? sign : 0,
           chosenAxis.axis === "y" ? sign : 0,
           chosenAxis.axis === "z" ? sign : 0
         );
         if (forwardGuess.lengthSq() === 0) {
-          forwardGuess.set(1, 0, 0);
+          forwardGuess.copy(fallbackForward);
         }
         forwardGuess.normalize();
         return forwardGuess;
