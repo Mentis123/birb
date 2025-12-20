@@ -1750,16 +1750,11 @@
         const birbCenter = new THREE.Vector3();
         birbBounds.getCenter(birbCenter);
 
-        let guessedForward;
-        if (isGLB) {
-          // GLB model is authored facing +Z (beak points toward +Z / forward in Blender)
-          // Rotate +Z to -Z to align with flight controller forward (THREE.js convention)
-          // This is a 180° rotation around Y axis
-          guessedForward = new THREE.Vector3(0, 0, 1);
-        } else {
-          // Procedural model faces +X (beak is at positive X)
-          guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
-        }
+        // The shipped GLB already faces -Z (Three.js forward), so leave it untouched.
+        // The procedural birb needs its forward inferred to align with controller -Z.
+        const guessedForward = isGLB
+          ? new THREE.Vector3(0, 0, -1)
+          : computeModelForwardGuess(birbBounds, birbCenter);
         modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
         // Re-center the bird so yaw/roll rotations pivot around its body instead
         // of an offset point in space.
