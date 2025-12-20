@@ -2458,6 +2458,11 @@
         flightController,
       });
 
+      // Set sphere center if spherical world is already active
+      if (sphericalWorld && typeof cameraState.setSphereCenter === 'function') {
+        cameraState.setSphereCenter(new THREE.Vector3(0, 0, 0));
+      }
+
       const syncAvatarVisibility = (mode) => {
         if (!birbAnchor) return;
         birbAnchor.visible = mode !== CAMERA_MODES.FPV;

@@ -110,7 +110,7 @@ function createDebugOverlay({ getSnapshot }) {
   };
 }
 
-export function createCameraState({ three, scene, flightController }) {
+export function createCameraState({ three, scene, flightController, sphereCenter = null }) {
   if (!three) {
     throw new Error("createCameraState requires the THREE namespace");
   }
@@ -121,6 +121,9 @@ export function createCameraState({ three, scene, flightController }) {
     Quaternion,
     Matrix4,
   } = three;
+
+  // Track the sphere center for spherical world support
+  let activeSphereCenter = sphereCenter ? sphereCenter.clone() : null;
 
   const camera = new PerspectiveCamera(60, 1, 0.1, 500);
   // Default camera position for spherical world (bird starts at y = 33)
@@ -326,7 +329,11 @@ export function createCameraState({ three, scene, flightController }) {
   const updateFollow = ({ pose, ambientOffsets, delta }) => {
     if (!pose) return;
 
-    followState.rig.configure(modeConfigurations[CAMERA_MODES.FOLLOW]);
+    // Include sphereCenter in the configuration for spherical world support
+    followState.rig.configure({
+      ...modeConfigurations[CAMERA_MODES.FOLLOW],
+      sphereCenter: activeSphereCenter,
+    });
 
     const velocity = flightController?.velocity?.clone?.() ?? null;
     const steering = flightController
@@ -606,6 +613,14 @@ export function createCameraState({ three, scene, flightController }) {
     }
   }
 
+  function setSphereCenter(center) {
+    if (center === null || center === undefined) {
+      activeSphereCenter = null;
+    } else if (center && typeof center.clone === 'function') {
+      activeSphereCenter = center.clone();
+    }
+  }
+
   reset();
 
   return {
@@ -616,6 +631,7 @@ export function createCameraState({ three, scene, flightController }) {
     updateActiveCamera,
     update: updateActiveCamera,
     dispose,
+    setSphereCenter,
     getConfig(mode) {
       return modeConfigurations[mode];
     },
