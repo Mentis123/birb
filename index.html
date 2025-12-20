@@ -1325,23 +1325,53 @@
           },
         ];
 
-        const dominant = axisSpans.reduce((best, current) => {
-          if (!best || current.span > best.span) {
+        // Prefer axes with the strongest forward/backward imbalance so wing span
+        // doesn't override the actual beak direction.
+        axisSpans.forEach((axis) => {
+          if (axis.span > 0) {
+            axis.bias = (axis.positive - axis.negative) / axis.span;
+            axis.absBias = Math.abs(axis.bias);
+          } else {
+            axis.bias = 0;
+            axis.absBias = 0;
+          }
+        });
+
+        const biasDominant = axisSpans.reduce((best, current) => {
+          if (!best || current.absBias > best.absBias) {
+            return current;
+          }
+          if (current.absBias === best.absBias && current.span > best.span) {
             return current;
           }
           return best;
         }, null);
 
-        if (!dominant || dominant.span <= 0) {
+        const chosenAxis =
+          biasDominant && biasDominant.absBias > 0.05
+            ? biasDominant
+            : axisSpans.reduce((best, current) => {
+                if (!best || current.span > best.span) {
+                  return current;
+                }
+                return best;
+              }, null);
+
+        if (!chosenAxis || chosenAxis.span <= 0) {
           forwardGuess.set(1, 0, 0);
           return forwardGuess;
         }
 
-        const sign = dominant.positive >= dominant.negative ? 1 : -1;
+        const sign =
+          chosenAxis.bias !== 0
+            ? Math.sign(chosenAxis.bias)
+            : chosenAxis.positive >= chosenAxis.negative
+              ? 1
+              : -1;
         forwardGuess.set(
-          dominant.axis === "x" ? sign : 0,
-          dominant.axis === "y" ? sign : 0,
-          dominant.axis === "z" ? sign : 0
+          chosenAxis.axis === "x" ? sign : 0,
+          chosenAxis.axis === "y" ? sign : 0,
+          chosenAxis.axis === "z" ? sign : 0
         );
         if (forwardGuess.lengthSq() === 0) {
           forwardGuess.set(1, 0, 0);
