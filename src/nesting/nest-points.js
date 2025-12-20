@@ -5,6 +5,10 @@
  */
 
 // Nest configuration per environment
+// heightOffset values are tuned to place nests above the tallest environment objects:
+// - Forest trees: trunk(2) + canopy(2.4) * scale(2.8) = ~12.3 max height
+// - Canyon spires: height(10) * scale(2.8) = ~28 max height
+// - City towers: height(9) * scale(2.4) = ~21.6 max height
 const NEST_CONFIGS = {
   forest: {
     color: 0xff4422,
@@ -12,7 +16,7 @@ const NEST_CONFIGS = {
     emissiveIntensity: 1.2,
     glowColor: 0xff6644,
     count: 12,
-    heightOffset: 3.5, // Above tree canopy (doubled tree size)
+    heightOffset: 15.0, // Above tree canopy tops (~12.3 max)
   },
   canyons: {
     color: 0xff5533,
@@ -20,7 +24,7 @@ const NEST_CONFIGS = {
     emissiveIntensity: 1.0,
     glowColor: 0xff7755,
     count: 10,
-    heightOffset: 8.0, // Top of spires (doubled)
+    heightOffset: 30.0, // Above spire tops (~28 max)
   },
   city: {
     color: 0xff3344,
@@ -28,7 +32,7 @@ const NEST_CONFIGS = {
     emissiveIntensity: 1.4,
     glowColor: 0xff5566,
     count: 14,
-    heightOffset: 12.0, // Top of towers (doubled)
+    heightOffset: 24.0, // Above tower tops (~21.6 max)
   },
   mountain: {
     color: 0xff4422,
@@ -36,7 +40,7 @@ const NEST_CONFIGS = {
     emissiveIntensity: 1.1,
     glowColor: 0xff6644,
     count: 10,
-    heightOffset: 4.0,
+    heightOffset: 15.0, // Above peaks
   },
 };
 
@@ -324,13 +328,20 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
      * Dispose of resources
      */
     dispose() {
-      nests.forEach((nestGroup) => {
-        nestGroup.traverse((child) => {
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) child.material.dispose();
-        });
-      });
+      // Remove from scene first to prevent visual artifacts
       scene.remove(container);
+
+      // Then dispose geometries and materials
+      try {
+        nests.forEach((nestGroup) => {
+          nestGroup.traverse((child) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        });
+      } catch (e) {
+        console.warn('Error disposing nest points resources:', e);
+      }
     },
   };
 }
