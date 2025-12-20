@@ -1242,9 +1242,13 @@
             definition: definition,
           });
           glideTrail = null; // No glide trail on spherical world
-          // Set sphere center for camera to handle spherical up vector
+          // Set sphere center for camera and flight controller to handle spherical up vector
+          const sphereCenter = new THREE.Vector3(0, 0, 0);
           if (cameraState && typeof cameraState.setSphereCenter === 'function') {
-            cameraState.setSphereCenter(new THREE.Vector3(0, 0, 0));
+            cameraState.setSphereCenter(sphereCenter);
+          }
+          if (flightController && typeof flightController.setSphereCenter === 'function') {
+            flightController.setSphereCenter(sphereCenter);
           }
         } catch (envError) {
           console.warn("Spherical world creation failed:", envError);
@@ -1253,6 +1257,9 @@
           // Clear sphere center if world creation fails
           if (cameraState && typeof cameraState.setSphereCenter === 'function') {
             cameraState.setSphereCenter(null);
+          }
+          if (flightController && typeof flightController.setSphereCenter === 'function') {
+            flightController.setSphereCenter(null);
           }
         }
         environmentState.id = definition.id;
@@ -2161,6 +2168,11 @@
       flightController.setThrottle(initialThrottle);
       flightControllerInitialized = true;
       refreshAnimationState();
+
+      // Set sphere center on flight controller for spherical world support
+      if (sphericalWorld && typeof flightController.setSphereCenter === 'function') {
+        flightController.setSphereCenter(new THREE.Vector3(0, 0, 0));
+      }
 
       cameraState = createCameraState({
         three: THREE,
