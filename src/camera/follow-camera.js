@@ -35,7 +35,45 @@ export function createFollowCameraRig(three, options = {}) {
     lookDirection: new Vector3(),
     lookTarget: new Vector3(),
     noRollQuaternion: new Quaternion(),
+    viewDir: new Vector3(),
+    stableUp: new Vector3(),
+    stableRight: new Vector3(),
   };
+
+  // Compute a stable up vector that avoids gimbal lock when looking near poles.
+  // When the view direction is nearly parallel to the up vector, the lookAt
+  // matrix becomes degenerate. We fix this by deriving a stable up from the
+  // camera's current right vector.
+  function computeStableUp(position, lookAt, preferredUp, currentOrientation) {
+    scratch.viewDir.subVectors(lookAt, position);
+    const viewLength = scratch.viewDir.length();
+    if (viewLength < 1e-6) {
+      return preferredUp;
+    }
+    scratch.viewDir.divideScalar(viewLength);
+
+    // Check if view direction is nearly parallel to preferred up (gimbal lock zone)
+    const parallelism = Math.abs(scratch.viewDir.dot(preferredUp));
+    if (parallelism < 0.99) {
+      // Safe zone - use preferred up
+      return preferredUp;
+    }
+
+    // Near gimbal lock - compute stable up from current camera orientation
+    // Get the current right vector from the camera's orientation
+    scratch.stableRight.set(1, 0, 0).applyQuaternion(currentOrientation);
+
+    // Compute a new up that's perpendicular to both view direction and right
+    scratch.stableUp.crossVectors(scratch.stableRight, scratch.viewDir);
+    if (scratch.stableUp.lengthSq() < 1e-6) {
+      // Fallback: right was also parallel, use world Z to derive up
+      scratch.stableRight.set(0, 0, 1);
+      scratch.stableUp.crossVectors(scratch.stableRight, scratch.viewDir);
+    }
+    scratch.stableUp.normalize();
+
+    return scratch.stableUp;
+  }
 
   const state = {
     camera: null,
@@ -245,7 +283,9 @@ export function createFollowCameraRig(three, options = {}) {
 
     state.position.copy(state.desiredPosition);
     state.lookAt.copy(state.desiredLookAt);
-    scratch.lookMatrix.lookAt(state.position, state.lookAt, state.up);
+    // Use stable up to avoid gimbal lock at poles
+    const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);
+    scratch.lookMatrix.lookAt(state.position, state.lookAt, upForLookAt);
     state.orientation.setFromRotationMatrix(scratch.lookMatrix);
 
     perspective.position.copy(state.position);
@@ -287,7 +327,9 @@ export function createFollowCameraRig(three, options = {}) {
 
     perspective.position.copy(state.position);
 
-    scratch.lookMatrix.lookAt(state.position, state.lookAt, state.up);
+    // Use stable up to avoid gimbal lock at poles
+    const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);
+    scratch.lookMatrix.lookAt(state.position, state.lookAt, upForLookAt);
     state.targetOrientation.setFromRotationMatrix(scratch.lookMatrix);
     state.orientation.slerp(state.targetOrientation, rotationAlpha);
     perspective.quaternion.copy(state.orientation);

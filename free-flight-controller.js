@@ -333,7 +333,8 @@ export class FreeFlightController {
 
     // --- PROCEDURAL VISUAL PITCH ---
     // Tilt nose up when climbing, nose down when diving based on vertical velocity
-    const verticalSpeed = this.velocity.y;
+    // Use velocity component along local up direction (radial for spherical worlds)
+    const verticalSpeed = this.velocity.dot(up);
     const speed = this.velocity.length();
     // Normalize vertical velocity relative to total speed for proportional tilt
     const verticalRatio = speed > 0.1 ? verticalSpeed / speed : 0;
