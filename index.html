@@ -1418,10 +1418,10 @@
 
         let guessedForward;
         if (isGLB) {
-          // GLB model is authored facing -X (beak points toward -X / left)
-          // Rotate -X to -Z to align with flight controller forward
-          // This is 90° clockwise rotation when viewed from above
-          guessedForward = new THREE.Vector3(-1, 0, 0);
+          // GLB model is authored facing +Z (beak points toward +Z / forward in Blender)
+          // Rotate +Z to -Z to align with flight controller forward (THREE.js convention)
+          // This is a 180° rotation around Y axis
+          guessedForward = new THREE.Vector3(0, 0, 1);
         } else {
           // Procedural model faces +X (beak is at positive X)
           guessedForward = computeModelForwardGuess(birbBounds, birbCenter);
