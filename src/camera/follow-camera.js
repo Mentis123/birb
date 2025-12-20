@@ -34,6 +34,7 @@ export function createFollowCameraRig(three, options = {}) {
     lookMatrix: new Matrix4(),
     lookDirection: new Vector3(),
     lookTarget: new Vector3(),
+    noRollQuaternion: new Quaternion(),
   };
 
   const state = {
@@ -118,7 +119,27 @@ export function createFollowCameraRig(three, options = {}) {
 
     scratch.offset.copy(state.offset);
     if (pose.quaternion) {
-      scratch.offset.applyQuaternion(pose.quaternion);
+      scratch.forward.set(0, 0, -1).applyQuaternion(pose.quaternion);
+      if (scratch.forward.lengthSq() < 1e-6) {
+        scratch.forward.set(0, 0, -1);
+      } else {
+        scratch.forward.normalize();
+      }
+      scratch.right.crossVectors(scratch.forward, state.up);
+      if (scratch.right.lengthSq() < 1e-6) {
+        scratch.right.set(1, 0, 0);
+      } else {
+        scratch.right.normalize();
+      }
+      scratch.up.crossVectors(scratch.right, scratch.forward);
+      if (scratch.up.lengthSq() < 1e-6) {
+        scratch.up.copy(state.up);
+      } else {
+        scratch.up.normalize();
+      }
+      scratch.lookMatrix.makeBasis(scratch.right, scratch.up, scratch.forward);
+      scratch.noRollQuaternion.setFromRotationMatrix(scratch.lookMatrix);
+      scratch.offset.applyQuaternion(scratch.noRollQuaternion);
     }
 
     state.desiredPosition.copy(state.desiredLookAt).add(scratch.offset);
@@ -139,9 +160,9 @@ export function createFollowCameraRig(three, options = {}) {
 
     if (steering) {
       if (pose.quaternion) {
-        scratch.forward.set(0, 0, -1).applyQuaternion(pose.quaternion);
-        scratch.right.set(1, 0, 0).applyQuaternion(pose.quaternion);
-        scratch.up.set(0, 1, 0).applyQuaternion(pose.quaternion);
+        scratch.forward.set(0, 0, -1).applyQuaternion(scratch.noRollQuaternion);
+        scratch.right.set(1, 0, 0).applyQuaternion(scratch.noRollQuaternion);
+        scratch.up.set(0, 1, 0).applyQuaternion(scratch.noRollQuaternion);
       }
       if (Number.isFinite(steering.forward) && steering.forward !== 0) {
         scratch.anticipation.addScaledVector(
