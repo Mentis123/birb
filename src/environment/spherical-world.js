@@ -86,12 +86,15 @@ export class SphericalCollisionSystem {
       finalPosition.copy(groundResult.correctedPosition);
       hadCollision = true;
 
-      // Reflect velocity off the ground (bounce slightly)
+      // Reflect velocity off the ground with damping
+      // Standard reflection: v' = v - 2(v·n)n
+      // With restitution (0.3 = 30% bounce): v' = v - (1 + restitution)(v·n)n
       const normal = groundResult.normal;
       const dot = finalVelocity.dot(normal);
       if (dot < 0) {
-        // Moving into ground - reflect with damping
-        finalVelocity.sub(normal.multiplyScalar(dot * 1.5));
+        // Moving into ground - reflect with damping (0.3 restitution = soft bounce)
+        const restitution = 0.3;
+        finalVelocity.addScaledVector(normal, -(1 + restitution) * dot);
       }
     }
 
@@ -101,11 +104,13 @@ export class SphericalCollisionSystem {
       finalPosition.copy(objectResult.correctedPosition);
       hadCollision = true;
 
-      // Reflect velocity off the object
+      // Reflect velocity off the object with damping
       const normal = objectResult.normal;
       const dot = finalVelocity.dot(normal);
       if (dot < 0) {
-        finalVelocity.sub(normal.multiplyScalar(dot * 1.5));
+        // Moving into object - reflect with damping (0.2 restitution = softer bounce)
+        const restitution = 0.2;
+        finalVelocity.addScaledVector(normal, -(1 + restitution) * dot);
       }
     }
 

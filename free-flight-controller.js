@@ -61,6 +61,7 @@ export class FreeFlightController {
     this._forward = new Vector3(0, 0, -1);
     this._right = new Vector3(1, 0, 0);
     this._up = new Vector3(0, 1, 0);
+    this._localUp = new Vector3(0, 1, 0);
     this._acceleration = new Vector3();
     this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
@@ -69,6 +70,9 @@ export class FreeFlightController {
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
     this._bankOrientation = 1;
+
+    // Spherical world support: when set, "up" is computed radially from this center
+    this._sphereCenter = null;
 
     this._initialPosition = options.position ? options.position.clone() : new Vector3(0, 0.65, 0);
     this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
@@ -131,6 +135,31 @@ export class FreeFlightController {
     this.invertPitch = Boolean(invert);
   }
 
+  setSphereCenter(center) {
+    if (center === null || center === undefined) {
+      this._sphereCenter = null;
+    } else if (center && typeof center.clone === 'function') {
+      this._sphereCenter = center.clone();
+    }
+  }
+
+  // Compute the local "up" direction based on current position
+  // For spherical worlds: radial from sphere center
+  // For flat worlds: world Y axis
+  _computeLocalUp() {
+    if (this._sphereCenter) {
+      this._localUp.copy(this.position).sub(this._sphereCenter);
+      if (this._localUp.lengthSq() < 1e-6) {
+        this._localUp.set(0, 1, 0);
+      } else {
+        this._localUp.normalize();
+      }
+    } else {
+      this._localUp.set(0, 1, 0);
+    }
+    return this._localUp;
+  }
+
   getEffectiveThrottle() {
     const baseThrottle = this.throttle * THROTTLE_POWER_MULTIPLIER;
     const multiplier = this.isSprinting ? this.sprintMultiplier : 1;
@@ -145,21 +174,25 @@ export class FreeFlightController {
     const yawAngle = -deltaX * this.lookSensitivity;
     const pitchAngle = deltaY * this.lookSensitivity;
 
+    // Use local up (radial for spherical world, world Y for flat)
+    const up = this._computeLocalUp();
+
     if (yawAngle !== 0) {
-      this._yawQuaternion.setFromAxisAngle(this._up, yawAngle);
+      this._yawQuaternion.setFromAxisAngle(up, yawAngle);
       this.lookQuaternion.premultiply(this._yawQuaternion);
     }
 
     if (pitchAngle !== 0) {
-      // Use WORLD horizontal right axis for pitch to prevent roll drift
-      // This ensures up/down stays pure vertical regardless of yaw orientation
+      // Project forward onto the local horizontal plane (perpendicular to local up)
       const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
-      const horizontalForward = this._acceleration.set(forward.x, 0, forward.z);
+      // Remove the component along the local up to get horizontal forward
+      const upComponent = forward.dot(up);
+      const horizontalForward = this._acceleration.copy(forward).addScaledVector(up, -upComponent);
       const horizontalLength = horizontalForward.length();
+
       // Only apply if we have a valid horizontal direction (not looking straight up/down)
       if (horizontalLength > 0.001) {
         horizontalForward.divideScalar(horizontalLength);
-        const up = this._up.set(0, 1, 0);
         // horizontalForward × up gives proper right-hand side
         const right = this._right.crossVectors(horizontalForward, up).normalize();
         this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
@@ -182,7 +215,8 @@ export class FreeFlightController {
     this.elapsed += deltaTime;
     const effectiveThrottle = this.getEffectiveThrottle();
 
-    const up = this._up.set(0, 1, 0);
+    // Use local up (radial for spherical world, world Y for flat)
+    const up = this._computeLocalUp();
 
     // Ease input changes over time so gamepad and keyboard controls feel less twitchy.
     const smoothingStrength = this.inputSmoothing > 0 ? 1 - Math.exp(-this.inputSmoothing * deltaTime) : 1;
@@ -207,29 +241,33 @@ export class FreeFlightController {
     const pitchInput = this.invertPitch ? smoothed.forward : -smoothed.forward;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
-    // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (negative rotation on Y-axis)
-    // In Three.js, positive Y rotation is counterclockwise (left), so we negate for intuitive controls
+    // Yaw: joystick RIGHT (positive roll/strafe) → nose RIGHT (negative rotation on local up axis)
     const yawInput = smoothed.roll;
     const yawDelta = -yawInput * YAW_RATE * deltaTime;
 
-    // Apply yaw rotation around global up axis
+    // Apply yaw rotation around LOCAL up axis (radial for spherical world)
     if (yawDelta !== 0) {
       this._yawQuaternion.setFromAxisAngle(up, yawDelta);
       this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
     }
 
-    // Apply pitch rotation around the WORLD horizontal right axis
-    // This ensures up/down stays pure vertical regardless of yaw orientation
+    // Apply pitch rotation around the LOCAL horizontal right axis
+    // This ensures up/down stays aligned with the local vertical
     if (pitchDelta !== 0) {
       // Get current forward direction
       const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
-      // Project forward onto horizontal plane and get perpendicular right vector
-      const horizontalForward = this._acceleration.set(forward.x, 0, forward.z).normalize();
-      // Right axis: horizontalForward × up gives proper right-hand side
-      // (up × horizontalForward incorrectly gave LEFT, causing inverted pitch)
-      const right = this._right.crossVectors(horizontalForward, up).normalize();
-      this._pitchQuaternion.setFromAxisAngle(right, pitchDelta);
-      this.lookQuaternion.premultiply(this._pitchQuaternion).normalize();
+      // Project forward onto local horizontal plane (perpendicular to local up)
+      const upComponent = forward.dot(up);
+      const horizontalForward = this._acceleration.copy(forward).addScaledVector(up, -upComponent);
+      const horizontalLength = horizontalForward.length();
+
+      if (horizontalLength > 0.001) {
+        horizontalForward.divideScalar(horizontalLength);
+        // Right axis: horizontalForward × up gives proper right-hand side
+        const right = this._right.crossVectors(horizontalForward, up).normalize();
+        this._pitchQuaternion.setFromAxisAngle(right, pitchDelta);
+        this.lookQuaternion.premultiply(this._pitchQuaternion).normalize();
+      }
     }
 
     // Start with the look quaternion as the base orientation
