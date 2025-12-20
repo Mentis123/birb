@@ -1523,6 +1523,15 @@
           nestPointsSystem = null;
         }
 
+        // Reset rockets when changing environments
+        if (rocketSystem) {
+          try {
+            rocketSystem.reset();
+          } catch (e) {
+            console.warn("Rocket system reset error:", e);
+          }
+        }
+
         // Hide nest UI when changing environments
         showNestUI(false);
         showNestIndicator(false);
@@ -2748,9 +2757,10 @@
           isNested = nestingSystem.isNested();
         }
 
-        // Only apply flight controls when not nested
+        // Apply look controls - even when nested (for look-around)
+        // Movement is controlled separately via flightController.update(delta)
+        flightControls.applyAnalogLook(lookDeltaTime);
         if (!isNested) {
-          flightControls.applyAnalogLook(lookDeltaTime);
           flightControls.applyLeftStickPitch(lookDeltaTime);
         }
 

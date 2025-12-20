@@ -864,18 +864,24 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     sphereRadius,
     collisionSystem,
     dispose() {
-      // Dispose geometries and materials
-      root.traverse((child) => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(m => m && m.dispose());
-          } else {
-            child.material.dispose();
-          }
-        }
-      });
+      // Remove from scene first to prevent visual artifacts during environment switch
       scene.remove(root);
+
+      // Then dispose geometries and materials
+      try {
+        root.traverse((child) => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m && m.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('Error disposing spherical world resources:', e);
+      }
     }
   };
 }
