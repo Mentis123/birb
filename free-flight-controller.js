@@ -31,6 +31,9 @@ export const STRAFE_DAMPING = 0.5;
 export const IDLE_LINEAR_DRAG = 2.5;
 export const LIFT_ACCELERATION_MULTIPLIER = 1.8;
 export const THROTTLE_POWER_MULTIPLIER = 2;
+export const SPHERICAL_ALTITUDE_STIFFNESS = 12;
+export const SPHERICAL_ALTITUDE_DAMPING = 7;
+export const SPHERICAL_ALTITUDE_RATE = 6;
 // Rotation rates for pitch and yaw (radians per second at full stick deflection)
 export const PITCH_RATE = Math.PI * 0.5;
 export const YAW_RATE = Math.PI * 0.6;
@@ -77,6 +80,7 @@ export class FreeFlightController {
 
     // Spherical world support: when set, "up" is computed radially from this center
     this._sphereCenter = null;
+    this._targetRadius = null;
 
     this._initialPosition = options.position ? options.position.clone() : new Vector3(0, 0.65, 0);
     this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
@@ -143,8 +147,10 @@ export class FreeFlightController {
   setSphereCenter(center) {
     if (center === null || center === undefined) {
       this._sphereCenter = null;
+      this._targetRadius = null;
     } else if (center && typeof center.clone === 'function') {
       this._sphereCenter = center.clone();
+      this._targetRadius = this.position.clone().sub(this._sphereCenter).length();
     }
   }
 
@@ -380,6 +386,39 @@ export class FreeFlightController {
     // Reset pitch tracking (no longer used for visual tilt, rotation is in lookQuaternion)
     this.pitch = 0;
 
+    // --- SPHERICAL ALTITUDE STABILIZATION ---
+    if (this._sphereCenter) {
+      const radialVector = this._acceleration.copy(this.position).sub(this._sphereCenter);
+      const radius = radialVector.length();
+
+      // Establish a target radius so the bird hugs the world instead of drifting into space
+      if (!Number.isFinite(this._targetRadius)) {
+        this._targetRadius = radius > 0 ? radius : 0;
+      }
+
+      if (radius > 1e-6) {
+        radialVector.multiplyScalar(1 / radius);
+
+        // Allow the lift input to intentionally change cruising altitude around the sphere
+        if (Math.abs(smoothed.lift) > 1e-3) {
+          this._targetRadius += smoothed.lift * SPHERICAL_ALTITUDE_RATE * deltaTime;
+          this._targetRadius = Math.max(1, this._targetRadius);
+        }
+
+        // Damped spring to pull the bird back toward the target altitude and cancel radial drift
+        const altitudeError = radius - this._targetRadius;
+        const radialSpeed = this.velocity.dot(radialVector);
+        const altitudeAcceleration =
+          -altitudeError * SPHERICAL_ALTITUDE_STIFFNESS - radialSpeed * SPHERICAL_ALTITUDE_DAMPING;
+        this.velocity.addScaledVector(radialVector, altitudeAcceleration * deltaTime);
+
+        // Nudge position toward the target radius to eliminate slow creep
+        const positionCorrection = -altitudeError *
+          Math.min(1, SPHERICAL_ALTITUDE_STIFFNESS * deltaTime * 0.25);
+        this.position.addScaledVector(radialVector, positionCorrection);
+      }
+    }
+
     return {
       position: this.position,
       quaternion: this.quaternion,
@@ -416,5 +455,10 @@ export class FreeFlightController {
     Object.assign(this._smoothedInput, createAxisRecord());
     this.setThrustInput({ forward: 0, strafe: 0, lift: 0, roll: 0 });
     this.setSprintActive(false);
+    if (this._sphereCenter) {
+      this._targetRadius = this.position.clone().sub(this._sphereCenter).length();
+    } else {
+      this._targetRadius = null;
+    }
   }
 }
