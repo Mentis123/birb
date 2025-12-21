@@ -360,10 +360,10 @@ export class FreeFlightController {
     // --- PROCEDURAL VISUAL PITCH ---
     // Tilt nose up when climbing, nose down when diving based on vertical velocity
     // Use velocity component along local up direction (radial for spherical worlds)
-    const verticalSpeed = this.velocity.dot(up);
+    const visualVerticalSpeed = this.velocity.dot(up);
     const currentSpeed = this.velocity.length();
     // Normalize vertical velocity relative to total speed for proportional tilt
-    const verticalRatio = currentSpeed > 0.1 ? verticalSpeed / currentSpeed : 0;
+    const verticalRatio = currentSpeed > 0.1 ? visualVerticalSpeed / currentSpeed : 0;
     // Target pitch: positive vertical ratio (climbing) → nose up (negative pitch in local space)
     const targetVisualPitch = clamp(-verticalRatio * MAX_VISUAL_PITCH_ANGLE, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
 
