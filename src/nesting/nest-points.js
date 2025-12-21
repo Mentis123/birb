@@ -1,46 +1,36 @@
 /**
  * Nest Points System
  * Creates glowing red/orange nest markers at the tops of environment objects
- * where the birb can land and enter nest mode.
+ * (trees, buildings, rock spires) where the birb can land and enter nest mode.
+ *
+ * Nests are now placed ON actual environment objects, not floating in the air.
  */
 
 // Nest configuration per environment
-// heightOffset values are tuned to place nests above the tallest environment objects:
-// - Forest trees: trunk(2) + canopy(2.4) * scale(2.8) = ~12.3 max height
-// - Canyon spires: height(10) * scale(2.8) = ~28 max height
-// - City towers: height(9) * scale(2.4) = ~21.6 max height
 const NEST_CONFIGS = {
   forest: {
     color: 0xff4422,
     emissive: 0xff2200,
     emissiveIntensity: 1.2,
     glowColor: 0xff6644,
-    count: 12,
-    heightOffset: 15.0, // Above tree canopy tops (~12.3 max)
   },
   canyons: {
     color: 0xff5533,
     emissive: 0xff3311,
     emissiveIntensity: 1.0,
     glowColor: 0xff7755,
-    count: 10,
-    heightOffset: 30.0, // Above spire tops (~28 max)
   },
   city: {
     color: 0xff3344,
     emissive: 0xff1122,
     emissiveIntensity: 1.4,
     glowColor: 0xff5566,
-    count: 14,
-    heightOffset: 24.0, // Above tower tops (~21.6 max)
   },
   mountain: {
     color: 0xff4422,
     emissive: 0xff2200,
     emissiveIntensity: 1.1,
     glowColor: 0xff6644,
-    count: 10,
-    heightOffset: 15.0, // Above peaks
   },
 };
 
@@ -128,48 +118,11 @@ function createNestMarker(THREE, config) {
 }
 
 /**
- * Generate nest placements based on environment type
- */
-function generateNestPlacements(environmentId, sphereRadius, count) {
-  const placements = [];
-  const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
-
-  // Use golden angle distribution for even spacing
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-
-  for (let i = 0; i < count; i++) {
-    // Fibonacci sphere-like distribution
-    const y = 1 - (i / (count - 1)) * 1.6; // Concentrate more toward upper hemisphere
-    const adjustedY = Math.max(-0.3, Math.min(0.9, y)); // Keep mostly above equator
-    const radiusAtY = Math.sqrt(1 - adjustedY * adjustedY);
-    const theta = goldenAngle * i;
-
-    const x = Math.cos(theta) * radiusAtY;
-    const z = Math.sin(theta) * radiusAtY;
-
-    // Position on sphere surface plus height offset
-    const surfaceRadius = sphereRadius + config.heightOffset;
-    const position = {
-      x: x * surfaceRadius,
-      y: adjustedY * surfaceRadius,
-      z: z * surfaceRadius,
-    };
-
-    placements.push({
-      position,
-      surfaceNormal: { x, y: adjustedY, z },
-    });
-  }
-
-  return placements;
-}
-
-/**
  * Main nest points system
+ * Now accepts nestable positions from the environment builder
  */
-export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius) {
+export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius, nestablePositions = []) {
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
-  const placements = generateNestPlacements(environmentId, sphereRadius, config.count);
 
   const container = new THREE.Group();
   container.name = 'nest-points';
@@ -177,25 +130,17 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
 
   const nests = [];
   let animationTime = 0;
+  let currentlyOccupiedNest = null;
 
-  // Create nest markers
-  placements.forEach((placement, index) => {
+  // Create nest markers at the positions provided by the environment
+  nestablePositions.forEach((placement, index) => {
     const nestGroup = createNestMarker(THREE, config);
 
-    // Position nest
-    nestGroup.position.set(
-      placement.position.x,
-      placement.position.y,
-      placement.position.z
-    );
+    // Position nest at the environment object's top
+    nestGroup.position.copy(placement.position);
 
     // Orient nest to face outward from sphere center (surface normal)
-    const up = new THREE.Vector3(
-      placement.surfaceNormal.x,
-      placement.surfaceNormal.y,
-      placement.surfaceNormal.z
-    ).normalize();
-
+    const up = placement.surfaceNormal.clone().normalize();
     const defaultUp = new THREE.Vector3(0, 1, 0);
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     nestGroup.quaternion.copy(quaternion);
@@ -205,6 +150,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
     nestGroup.userData.landingPosition = nestGroup.position.clone();
     nestGroup.userData.landingQuaternion = nestGroup.quaternion.clone();
     nestGroup.userData.surfaceNormal = up.clone();
+    nestGroup.userData.hostObject = placement.hostObject;
 
     container.add(nestGroup);
     nests.push(nestGroup);
@@ -305,12 +251,28 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
     },
 
     /**
-     * Mark a nest as occupied
+     * Mark a nest as occupied and hide it for FPV view
      */
     setNestOccupied(nestGroup, occupied) {
       if (nestGroup && nestGroup.userData.isNest) {
         nestGroup.userData.isOccupied = occupied;
+
+        // Hide/show the nest when occupied (for clear FPV view)
+        if (occupied) {
+          currentlyOccupiedNest = nestGroup;
+          nestGroup.visible = false;
+        } else {
+          nestGroup.visible = true;
+          currentlyOccupiedNest = null;
+        }
       }
+    },
+
+    /**
+     * Get the currently occupied nest
+     */
+    getCurrentlyOccupiedNest() {
+      return currentlyOccupiedNest;
     },
 
     /**
@@ -322,6 +284,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
         nestGroup.userData.isActive = false;
         nestGroup.userData.isOccupied = false;
       });
+      currentlyOccupiedNest = null;
     },
 
     /**
