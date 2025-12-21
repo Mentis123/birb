@@ -1583,11 +1583,14 @@
 
         if (sphericalWorld) {
           try {
+            // Pass nestable positions from the environment to the nest system
+            const nestablePositions = sphericalWorld.nestablePositions || [];
             nestPointsSystem = createNestPointsSystem(
               THREE,
               scene,
               definition.id,
-              SPHERE_RADIUS
+              SPHERE_RADIUS,
+              nestablePositions
             );
           } catch (nestError) {
             console.warn("Nest points creation failed:", nestError);
