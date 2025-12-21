@@ -304,10 +304,26 @@ export class FreeFlightController {
     const dragMultiplier = Math.exp(-LINEAR_DRAG * deltaTime);
     this.velocity.multiplyScalar(dragMultiplier);
 
-    // Correct sideways drift - bird should move where it's pointing, not slide
+    // Align velocity direction with facing direction while preserving speed
+    // This ensures the bird moves where it's pointing, not sliding or drifting
+    const speed = this.velocity.length();
+    if (speed > 0.1) {
+      // Strong alignment: redirect velocity toward forward direction
+      // Higher rate = more responsive turning, lower = more glidy/drifty
+      const alignmentRate = 8; // How quickly velocity aligns with facing
+      const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
+
+      // Target velocity is forward at current speed
+      const targetVelocity = this._acceleration.copy(forward).multiplyScalar(speed);
+
+      // Lerp current velocity toward target
+      this.velocity.lerp(targetVelocity, alignmentStrength);
+    }
+
+    // Also correct any remaining sideways drift
     const sidewaysSpeed = this.velocity.dot(right);
     if (Math.abs(sidewaysSpeed) > 1e-3) {
-      const correctionRate = MOVEMENT_ACCELERATION * 0.8;
+      const correctionRate = MOVEMENT_ACCELERATION * 1.5;
       const maxCorrection = correctionRate * deltaTime;
       const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
       this.velocity.addScaledVector(right, -correction);
@@ -318,8 +334,9 @@ export class FreeFlightController {
 
     // --- PROCEDURAL BANKING (ROLL) ---
     // Bank into turns: pushing right → bank right (right wing down, left wing up)
-    // Negate yawInput so positive input gives negative bank (right wing down in THREE.js)
-    const targetBank = clamp(-yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+    // In THREE.js, rotating around forward axis (-Z): positive angle = right side goes down
+    // So positive yawInput (turning right) needs positive bank for right wing down
+    const targetBank = clamp(yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Smooth interpolation (lerp) for banking
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
@@ -335,9 +352,9 @@ export class FreeFlightController {
     // Tilt nose up when climbing, nose down when diving based on vertical velocity
     // Use velocity component along local up direction (radial for spherical worlds)
     const verticalSpeed = this.velocity.dot(up);
-    const speed = this.velocity.length();
+    const currentSpeed = this.velocity.length();
     // Normalize vertical velocity relative to total speed for proportional tilt
-    const verticalRatio = speed > 0.1 ? verticalSpeed / speed : 0;
+    const verticalRatio = currentSpeed > 0.1 ? verticalSpeed / currentSpeed : 0;
     // Target pitch: positive vertical ratio (climbing) → nose up (negative pitch in local space)
     const targetVisualPitch = clamp(-verticalRatio * MAX_VISUAL_PITCH_ANGLE, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
 
