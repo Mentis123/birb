@@ -283,14 +283,23 @@ export class FreeFlightController {
     const right = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
 
     // --- ROTATION-BASED MOVEMENT ---
+    // Re-express velocity in the bird's local frame so heading changes steer motion.
+    // This prevents a rotated bird from continuing to travel along a stale world-axis vector.
+    const forwardSpeed = this.velocity.dot(forward);
+    const verticalSpeed = this.velocity.dot(up);
+    this.velocity
+      .copy(forward)
+      .multiplyScalar(forwardSpeed)
+      .addScaledVector(up, verticalSpeed);
+
     // The bird always moves in its forward direction based on current rotation
     // Cruise speed maintains constant forward velocity
     const cruiseTargetSpeed = CRUISE_FORWARD_SPEED * effectiveThrottle;
-    const forwardSpeed = this.velocity.dot(forward);
+    const alignedForwardSpeed = this.velocity.dot(forward);
 
     // Always apply gentle forward glide to maintain cruise speed
     if (cruiseTargetSpeed > 0) {
-      const cruiseAcceleration = (cruiseTargetSpeed - forwardSpeed) * MOVEMENT_ACCELERATION * 0.5;
+      const cruiseAcceleration = (cruiseTargetSpeed - alignedForwardSpeed) * MOVEMENT_ACCELERATION * 0.5;
       this.velocity.addScaledVector(forward, cruiseAcceleration * deltaTime);
     }
 
