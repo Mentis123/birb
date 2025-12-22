@@ -322,6 +322,26 @@ export class FreeFlightController {
     this.velocity.multiplyScalar(dragMultiplier);
 
     // Align velocity direction with facing direction while preserving speed
+    // This ensures the bird moves where it's pointing, creating natural 3D flight
+    const speed = this.velocity.length();
+    if (speed > 0.1) {
+      // Redirect velocity toward forward direction for responsive turning
+      const alignmentRate = 8;
+      const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
+
+      // Target velocity is forward at current speed
+      const targetVelocity = this._acceleration.copy(forward).multiplyScalar(speed);
+
+      // Lerp current velocity toward target
+      this.velocity.lerp(targetVelocity, alignmentStrength);
+    }
+
+    // Cap vertical speed to prevent runaway climbing/diving
+    const currentVerticalSpeed = this.velocity.dot(up);
+    if (Math.abs(currentVerticalSpeed) > MAX_VERTICAL_SPEED) {
+      const excessVertical = currentVerticalSpeed - Math.sign(currentVerticalSpeed) * MAX_VERTICAL_SPEED;
+      this.velocity.addScaledVector(up, -excessVertical);
+    }
     // This ensures the bird moves where it's pointing, not sliding or drifting
     // IMPORTANT: Only align the HORIZONTAL component - don't convert horizontal speed to vertical!
     // This prevents runaway climbing when the bird pitches up.
