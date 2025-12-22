@@ -342,50 +342,14 @@ export class FreeFlightController {
       const excessVertical = currentVerticalSpeed - Math.sign(currentVerticalSpeed) * MAX_VERTICAL_SPEED;
       this.velocity.addScaledVector(up, -excessVertical);
     }
-    // This ensures the bird moves where it's pointing, not sliding or drifting
-    // IMPORTANT: Only align the HORIZONTAL component - don't convert horizontal speed to vertical!
-    // This prevents runaway climbing when the bird pitches up.
-
-    // Extract vertical component (along local up) - this is preserved separately
-    const currentVerticalSpeed = this.velocity.dot(up);
-
-    // Get horizontal velocity by removing vertical component
-    const horizontalVelocity = this._acceleration.copy(this.velocity).addScaledVector(up, -currentVerticalSpeed);
-    const horizontalSpeed = horizontalVelocity.length();
-
-    if (horizontalSpeed > 0.1) {
-      // Get the horizontal component of forward direction
-      const forwardHorizontal = this._right.copy(forward).addScaledVector(up, -forward.dot(up));
-      const forwardHorizontalLength = forwardHorizontal.length();
-
-      if (forwardHorizontalLength > 0.01) {
-        forwardHorizontal.divideScalar(forwardHorizontalLength);
-
-        // Align horizontal velocity toward horizontal forward
-        const alignmentRate = 8;
-        const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
-
-        // Target horizontal velocity preserves horizontal speed
-        const targetHorizontal = forwardHorizontal.multiplyScalar(horizontalSpeed);
-        horizontalVelocity.lerp(targetHorizontal, alignmentStrength);
-      }
-    }
-
-    // Cap vertical speed to prevent runaway climbing/diving
-    const cappedVerticalSpeed = Math.max(-MAX_VERTICAL_SPEED, Math.min(MAX_VERTICAL_SPEED, currentVerticalSpeed));
-
-    // Recombine: horizontal velocity + capped vertical velocity
-    this.velocity.copy(horizontalVelocity).addScaledVector(up, cappedVerticalSpeed);
 
     // Also correct any remaining sideways drift
-    // Recalculate right axis since we reused _right for temp calculations above
-    const rightAxis = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
-    const sidewaysSpeed = this.velocity.dot(rightAxis);
+    const sidewaysSpeed = this.velocity.dot(right);
     if (Math.abs(sidewaysSpeed) > 1e-3) {
       const correctionRate = MOVEMENT_ACCELERATION * 1.5;
       const maxCorrection = correctionRate * deltaTime;
       const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
-      this.velocity.addScaledVector(rightAxis, -correction);
+      this.velocity.addScaledVector(right, -correction);
     }
 
     // Update position based on velocity
