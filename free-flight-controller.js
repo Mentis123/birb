@@ -34,6 +34,8 @@ export const THROTTLE_POWER_MULTIPLIER = 2;
 export const SPHERICAL_ALTITUDE_STIFFNESS = 12;
 export const SPHERICAL_ALTITUDE_DAMPING = 7;
 export const SPHERICAL_ALTITUDE_RATE = 6;
+// Maximum vertical speed to prevent runaway climbing/diving
+export const MAX_VERTICAL_SPEED = 4.0;
 // Rotation rates for pitch and yaw (radians per second at full stick deflection)
 export const PITCH_RATE = Math.PI * 0.5;
 export const YAW_RATE = Math.PI * 0.6;
@@ -320,12 +322,11 @@ export class FreeFlightController {
     this.velocity.multiplyScalar(dragMultiplier);
 
     // Align velocity direction with facing direction while preserving speed
-    // This ensures the bird moves where it's pointing, not sliding or drifting
+    // This ensures the bird moves where it's pointing, creating natural 3D flight
     const speed = this.velocity.length();
     if (speed > 0.1) {
-      // Strong alignment: redirect velocity toward forward direction
-      // Higher rate = more responsive turning, lower = more glidy/drifty
-      const alignmentRate = 8; // How quickly velocity aligns with facing
+      // Redirect velocity toward forward direction for responsive turning
+      const alignmentRate = 8;
       const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
 
       // Target velocity is forward at current speed
@@ -333,6 +334,13 @@ export class FreeFlightController {
 
       // Lerp current velocity toward target
       this.velocity.lerp(targetVelocity, alignmentStrength);
+    }
+
+    // Cap vertical speed to prevent runaway climbing/diving
+    const currentVerticalSpeed = this.velocity.dot(up);
+    if (Math.abs(currentVerticalSpeed) > MAX_VERTICAL_SPEED) {
+      const excessVertical = currentVerticalSpeed - Math.sign(currentVerticalSpeed) * MAX_VERTICAL_SPEED;
+      this.velocity.addScaledVector(up, -excessVertical);
     }
 
     // Also correct any remaining sideways drift
