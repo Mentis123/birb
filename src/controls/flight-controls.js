@@ -98,6 +98,7 @@ export function createFlightControls({
   touchZoneElement,
   nipplejs,
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
+  invertPitch = false,
   thrustShaping = DEFAULT_THRUST_SHAPING,
   lookShaping = DEFAULT_LOOK_SHAPING,
   getCameraMode,
@@ -121,6 +122,7 @@ export function createFlightControls({
   const thrustInputShaping = normalizeShapingConfig(thrustShaping, DEFAULT_THRUST_SHAPING);
   const lookInputShaping = normalizeShapingConfig(lookShaping, DEFAULT_LOOK_SHAPING);
   const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
+  let isPitchInverted = Boolean(invertPitch);
 
   const axisSources = {
     keyboard: createAxisRecord(),
@@ -348,7 +350,8 @@ export function createFlightControls({
 
   const handlePointerMove = (event) => {
     if (document.pointerLockElement === canvas) {
-      flightController.addLookDelta(event.movementX, event.movementY);
+      const pitchSign = isPitchInverted ? -1 : 1;
+      flightController.addLookDelta(event.movementX, event.movementY * pitchSign);
     }
   };
 
@@ -392,7 +395,7 @@ export function createFlightControls({
     }
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
     const lookX = analogLookState.x;
-    const lookY = analogLookState.y;
+    const lookY = analogLookState.y * (isPitchInverted ? -1 : 1);
     if (lookX === 0 && lookY === 0) {
       return;
     }
@@ -431,6 +434,9 @@ export function createFlightControls({
 
   return {
     applyAnalogLook,
+    setInvertPitch: (invert) => {
+      isPitchInverted = Boolean(invert);
+    },
     reset: resetInputs,
     dispose,
   };
