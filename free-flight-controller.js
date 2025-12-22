@@ -258,10 +258,25 @@ export class FreeFlightController {
     this.verticalVelocity += pitchInput * LIFT_ACCELERATION * deltaTime;
     this.verticalVelocity = clamp(this.verticalVelocity, -MAX_VERTICAL_SPEED, MAX_VERTICAL_SPEED, this.verticalVelocity);
 
-    this.velocity
-      .copy(forward)
-      .multiplyScalar(this.forwardSpeed)
-      .addScaledVector(up, this.verticalVelocity);
+    // Calculate horizontal forward direction from the look quaternion for movement
+    // This ensures the bird moves in the direction it's facing on the horizontal plane
+    const movementForward = this._acceleration.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+    // Project onto horizontal plane (remove vertical component)
+    const horizontalX = movementForward.x;
+    const horizontalZ = movementForward.z;
+    const horizontalLength = Math.sqrt(horizontalX * horizontalX + horizontalZ * horizontalZ);
+
+    if (horizontalLength > 0.001) {
+      // Normalize the horizontal direction and apply forward speed
+      this.velocity.set(
+        (horizontalX / horizontalLength) * this.forwardSpeed,
+        this.verticalVelocity,
+        (horizontalZ / horizontalLength) * this.forwardSpeed
+      );
+    } else {
+      // Fallback when looking straight up/down
+      this.velocity.set(0, this.verticalVelocity, 0);
+    }
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
