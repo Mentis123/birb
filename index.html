@@ -2592,7 +2592,22 @@
         getCameraMode: () => cameraState?.getMode?.(),
         followMode: CAMERA_MODES.FOLLOW,
         onThrustChange: () => updateControlMetrics(),
+        invertPitch: savedInvertPitch,
       });
+
+      const applyInvertPitchPreference = (isInverted, { persist = true, updateUi = false } = {}) => {
+        const inverted = Boolean(isInverted);
+        flightController.setInvertPitch(inverted);
+        flightControls?.setInvertPitch?.(inverted);
+        if (persist) {
+          localStorage.setItem(INVERT_PITCH_STORAGE_KEY, inverted ? 'true' : 'false');
+        }
+        if (updateUi && invertPitchCheckbox) {
+          invertPitchCheckbox.checked = inverted;
+        }
+      };
+
+      applyInvertPitchPreference(savedInvertPitch, { persist: false });
 
       // Initialize rocket system
       rocketSystem = createRocketSystem(THREE, scene);
@@ -2717,8 +2732,7 @@
       if (invertPitchCheckbox) {
         invertPitchCheckbox.addEventListener("change", () => {
           const isInverted = invertPitchCheckbox.checked;
-          flightController.setInvertPitch(isInverted);
-          localStorage.setItem(INVERT_PITCH_STORAGE_KEY, isInverted ? 'true' : 'false');
+          applyInvertPitchPreference(isInverted);
         });
       }
 
@@ -2729,6 +2743,10 @@
           const restoredMode = preferredCameraMode ?? CAMERA_MODE_SEQUENCE[0];
           setCameraMode(restoredMode);
           flightControls.reset({ releasePointerLock: true });
+          applyInvertPitchPreference(invertPitchCheckbox?.checked ?? savedInvertPitch, {
+            persist: false,
+            updateUi: true,
+          });
           // Reset nesting state
           if (nestingSystem) {
             nestingSystem.reset();

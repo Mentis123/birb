@@ -25,6 +25,8 @@ export class SimpleFlightController {
     this.smoothedPitch = 0;
     this.rollAngle = 0;
 
+    this.invertPitch = false;
+
     // Control inputs
     this.input = {
       yaw: 0,   // -1 (left) to 1 (right)
@@ -49,9 +51,11 @@ export class SimpleFlightController {
       deltaTime,
     );
 
+    const pitchInput = this.invertPitch ? -this.smoothedPitch : this.smoothedPitch;
+
     // 1. Apply rotation from inputs
     const yawDelta = this.smoothedYaw * this.turnSpeed * deltaTime;
-    const pitchDelta = this.smoothedPitch * this.pitchSpeed * deltaTime;
+    const pitchDelta = pitchInput * this.pitchSpeed * deltaTime;
 
     const yawQuat = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 1, 0), // Y-axis (world up)
@@ -70,7 +74,7 @@ export class SimpleFlightController {
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
 
     // 3. Calculate vertical velocity (lift vs gravity)
-    const lift = this.smoothedPitch * this.liftForce + this.neutralLift;
+    const lift = pitchInput * this.liftForce + this.neutralLift;
     const verticalTarget = lift - this.gravity;
 
     // 4. Update velocity
@@ -113,5 +117,9 @@ export class SimpleFlightController {
   setInputs(yaw, pitch) {
     this.input.yaw = THREE.MathUtils.clamp(yaw, -1, 1);
     this.input.pitch = THREE.MathUtils.clamp(pitch, -1, 1);
+  }
+
+  setInvertPitch(invert) {
+    this.invertPitch = Boolean(invert);
   }
 }
