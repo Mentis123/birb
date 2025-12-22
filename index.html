@@ -2587,12 +2587,10 @@
         flightController,
         leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
         rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
-        liftButtonElements: Array.from(document.querySelectorAll('[data-lift-button]')),
         touchZoneElement: document.querySelector('[data-touch-zone]'),
         nipplejs,
         getCameraMode: () => cameraState?.getMode?.(),
         followMode: CAMERA_MODES.FOLLOW,
-        onSprintChange: () => updateControlMetrics(),
         onThrustChange: () => updateControlMetrics(),
       });
 
@@ -2801,9 +2799,6 @@
         // Apply look controls - even when nested (for look-around)
         // Movement is controlled separately via flightController.update(delta)
         flightControls.applyAnalogLook(lookDeltaTime);
-        if (!isNested) {
-          flightControls.applyLeftStickPitch(lookDeltaTime);
-        }
 
         // Update rockets
         if (rocketSystem) {

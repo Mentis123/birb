@@ -2,33 +2,21 @@ import { createThumbstick } from './thumbstick.js';
 import { inputShaping } from './virtual-thumbstick.js';
 
 const DEFAULT_ANALOG_LOOK_SPEED = 480;
-const DEFAULT_LEFT_STICK_PITCH_SPEED = 320;
-const DEFAULT_ROLL_SENSITIVITY = 0.65;
-const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.15;
 const DEFAULT_TOUCH_LOOK_DEADZONE = 0.08;
 const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.32;
 const DEFAULT_TOUCH_LOOK_EXPO = 0.18;
 const TOUCH_JOYSTICK_SIZE = 120;
 
-const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
-
-const THRUST_AXIS_KEYS = {
-  forward: {
-    positive: ['KeyW', 'ArrowUp'],
-    negative: ['KeyS', 'ArrowDown'],
-  },
-  strafe: {
-    positive: ['KeyD', 'ArrowRight'],
-    negative: ['KeyA', 'ArrowLeft'],
-  },
-  lift: {
-    positive: ['Space', 'KeyE'],
-    negative: ['KeyQ'],
-  },
+const PITCH_AXIS_KEYS = {
+  positive: ['KeyW', 'ArrowUp'],
+  negative: ['KeyS', 'ArrowDown'],
 };
 
-const THRUST_AXIS_LIST = Object.values(THRUST_AXIS_KEYS);
+const YAW_AXIS_KEYS = {
+  positive: ['KeyD', 'ArrowRight'],
+  negative: ['KeyA', 'ArrowLeft'],
+};
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -42,7 +30,7 @@ const DEFAULT_LOOK_SHAPING = {
   expo: DEFAULT_TOUCH_LOOK_EXPO,
 };
 
-const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
+const createAxisRecord = () => ({ yaw: 0, pitch: 0 });
 
 const normalizeShapingConfig = (config = {}, fallback = DEFAULT_THRUST_SHAPING) => ({
   deadzone: clamp(
@@ -107,17 +95,13 @@ export function createFlightControls({
   flightController,
   leftThumbstickElement,
   rightThumbstickElement,
-  liftButtonElements = [],
   touchZoneElement,
   nipplejs,
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
-  rollSensitivity = DEFAULT_ROLL_SENSITIVITY,
-  touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
   thrustShaping = DEFAULT_THRUST_SHAPING,
   lookShaping = DEFAULT_LOOK_SHAPING,
   getCameraMode,
   followMode,
-  onSprintChange,
   onThrustChange,
 } = {}) {
   if (!flightController) {
@@ -134,24 +118,13 @@ export function createFlightControls({
     touchZoneElement.style.touchAction = 'none';
   }
 
-  const effectiveRollSensitivity = Number.isFinite(rollSensitivity)
-    ? clamp(rollSensitivity, 0, 1)
-    : DEFAULT_ROLL_SENSITIVITY;
-  const effectiveTouchSprintThreshold = Number.isFinite(touchSprintThreshold)
-    ? clamp(touchSprintThreshold, 0, 1)
-    : DEFAULT_TOUCH_SPRINT_THRESHOLD;
   const thrustInputShaping = normalizeShapingConfig(thrustShaping, DEFAULT_THRUST_SHAPING);
   const lookInputShaping = normalizeShapingConfig(lookShaping, DEFAULT_LOOK_SHAPING);
+  const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
 
   const axisSources = {
     keyboard: createAxisRecord(),
     leftStick: createAxisRecord(),
-    liftButtons: createAxisRecord(),
-  };
-
-  const sprintSources = {
-    keyboard: false,
-    leftStick: false,
   };
 
   const analogLookState = {
@@ -161,15 +134,6 @@ export function createFlightControls({
     pointerType: null,
   };
 
-  const leftStickPitchState = {
-    pitch: 0,
-    isActive: false,
-  };
-
-  const touchLiftPresses = new Map();
-  const liftButtons = Array.isArray(liftButtonElements)
-    ? liftButtonElements.filter(Boolean)
-    : [];
   const thrustKeys = new Set();
 
   const touchJoystickState = {
@@ -178,50 +142,30 @@ export function createFlightControls({
     handlers: null,
   };
 
-  let sprintActive = false;
-
   const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
-
-  const pointerListenerOptions = { passive: false };
 
   const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
     return clamp(total, -1, 1);
   };
 
-  const applyThrustInput = () => {
-    flightController.setThrustInput({
-      forward: combineAxis('forward'),
-      strafe: combineAxis('strafe'),
-      lift: combineAxis('lift'),
-      roll: combineAxis('roll'),
-    });
+  const applyInputs = () => {
+    const yaw = combineAxis('yaw');
+    const pitch = combineAxis('pitch');
+    if (typeof flightController.setInputs === 'function') {
+      flightController.setInputs({ yaw, pitch });
+    } else {
+      flightController.setThrustInput?.({ yaw, pitch });
+    }
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
     }
   };
 
-  const setSprintActive = (isActive) => {
-    if (sprintActive === isActive) {
-      return;
-    }
-    sprintActive = isActive;
-    flightController.setSprintActive(isActive);
-    if (typeof onSprintChange === 'function') {
-      onSprintChange(isActive);
-    }
-  };
-
-  const updateSprintState = () => {
-    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick));
-  };
-
   const updateKeyboardAxes = () => {
-    axisSources.keyboard.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
-    axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
-    axisSources.keyboard.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
-    axisSources.keyboard.roll = clamp(axisSources.keyboard.strafe * effectiveRollSensitivity, -1, 1);
-    applyThrustInput();
+    axisSources.keyboard.pitch = computeAxisValue(PITCH_AXIS_KEYS);
+    axisSources.keyboard.yaw = computeAxisValue(YAW_AXIS_KEYS);
+    applyInputs();
   };
 
   const computeAxisValue = (axisKeys) => {
@@ -233,41 +177,13 @@ export function createFlightControls({
     return 0;
   };
 
-  const updateLiftFromButtons = () => {
-    let lift = 0;
-    touchLiftPresses.forEach((value) => {
-      lift += value;
-    });
-    axisSources.liftButtons.lift = clamp(lift, -1, 1);
-    applyThrustInput();
-  };
-
   const handleLeftStickChange = (value, context = {}) => {
-    const shaped = shapeStickWithContext(value, context, thrustInputShaping);
-    const forward = clamp(shaped.y, -1, 1);
-    const strafe = clamp(shaped.x, -1, 1);
-    axisSources.leftStick.forward = forward;
-    axisSources.leftStick.strafe = strafe;
-    axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-    axisSources.leftStick.lift = 0;
-
-    // Track pitch input: pushing up should pitch nose up
-    leftStickPitchState.pitch = forward;
-    leftStickPitchState.isActive = Boolean(context.isActive);
-
-    const pointerType = context.pointerType ?? null;
-    const magnitudeForSprint = clamp(
-      pointerType === 'touch'
-        ? context.rawMagnitude ?? shaped.rawMagnitude
-        : context.magnitude ?? shaped.magnitude,
-      0,
-      1
-    );
-    sprintSources.leftStick = Boolean(
-      context.isActive && pointerType === 'touch' && magnitudeForSprint >= effectiveTouchSprintThreshold
-    );
-    updateSprintState();
-    applyThrustInput();
+    const shaped = shapeStickWithContext(value, context, yawPitchShaping);
+    const pitch = clamp(shaped.y, -1, 1);
+    const yaw = clamp(shaped.x, -1, 1);
+    axisSources.leftStick.pitch = pitch;
+    axisSources.leftStick.yaw = yaw;
+    applyInputs();
   };
 
   const handleRightStickChange = (value, context = {}) => {
@@ -390,77 +306,19 @@ export function createFlightControls({
 
   setupTouchJoysticks();
 
-  const handleLiftButtonDown = (event) => {
-    event.preventDefault();
-    const { currentTarget } = event;
-    const direction = Number.parseFloat(currentTarget?.dataset?.lift ?? '0');
-    if (!Number.isFinite(direction) || direction === 0) {
-      return;
-    }
-    if (typeof currentTarget?.setPointerCapture === 'function') {
-      try {
-        currentTarget.setPointerCapture(event.pointerId);
-      } catch (error) {
-        // Ignore capture failures.
-      }
-    }
-    touchLiftPresses.set(event.pointerId, direction);
-    currentTarget?.classList.add('is-active');
-    updateLiftFromButtons();
-  };
-
-  const handleLiftButtonEnd = (event) => {
-    const { currentTarget } = event;
-    if (
-      typeof currentTarget?.hasPointerCapture === 'function' &&
-      currentTarget.hasPointerCapture(event.pointerId) &&
-      typeof currentTarget.releasePointerCapture === 'function'
-    ) {
-      try {
-        currentTarget.releasePointerCapture(event.pointerId);
-      } catch (error) {
-        // Ignore release failures.
-      }
-    }
-    event.preventDefault();
-    touchLiftPresses.delete(event.pointerId);
-    currentTarget?.classList.remove('is-active');
-    updateLiftFromButtons();
-  };
-
-  const handleLiftContextMenu = (event) => {
-    event.preventDefault();
-  };
-
-  liftButtons.forEach((button) => {
-    button.addEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
-    button.addEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
-    button.addEventListener('pointercancel', handleLiftButtonEnd, pointerListenerOptions);
-    button.addEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
-    button.addEventListener('contextmenu', handleLiftContextMenu);
-  });
-
   const handleKeyDown = (event) => {
     const { code } = event;
     if (!code || isEditableTarget(event.target)) {
       return;
     }
-    const isShift = SHIFT_CODES.has(code);
-    const isThrustKey = THRUST_AXIS_LIST.some(
-      (axis) => axis.positive.includes(code) || axis.negative.includes(code)
-    );
-    if (!isThrustKey && !isShift) {
+    const isPitchKey = PITCH_AXIS_KEYS.positive.includes(code) || PITCH_AXIS_KEYS.negative.includes(code);
+    const isYawKey = YAW_AXIS_KEYS.positive.includes(code) || YAW_AXIS_KEYS.negative.includes(code);
+    if (!isPitchKey && !isYawKey) {
       return;
     }
     event.preventDefault();
-    if (isThrustKey) {
-      thrustKeys.add(code);
-      updateKeyboardAxes();
-    }
-    if (isShift) {
-      sprintSources.keyboard = true;
-      updateSprintState();
-    }
+    thrustKeys.add(code);
+    updateKeyboardAxes();
   };
 
   const handleKeyUp = (event) => {
@@ -468,22 +326,14 @@ export function createFlightControls({
     if (!code || isEditableTarget(event.target)) {
       return;
     }
-    const isShift = SHIFT_CODES.has(code);
-    const isThrustKey = THRUST_AXIS_LIST.some(
-      (axis) => axis.positive.includes(code) || axis.negative.includes(code)
-    );
-    if (!isThrustKey && !isShift) {
+    const isPitchKey = PITCH_AXIS_KEYS.positive.includes(code) || PITCH_AXIS_KEYS.negative.includes(code);
+    const isYawKey = YAW_AXIS_KEYS.positive.includes(code) || YAW_AXIS_KEYS.negative.includes(code);
+    if (!isPitchKey && !isYawKey) {
       return;
     }
     event.preventDefault();
-    if (isThrustKey) {
-      thrustKeys.delete(code);
-      updateKeyboardAxes();
-    }
-    if (isShift) {
-      sprintSources.keyboard = false;
-      updateSprintState();
-    }
+    thrustKeys.delete(code);
+    updateKeyboardAxes();
   };
 
   const handleCanvasClick = () => {
@@ -503,31 +353,19 @@ export function createFlightControls({
   };
 
   const resetAxisRecord = (record) => {
-    record.forward = 0;
-    record.strafe = 0;
-    record.lift = 0;
-    record.roll = 0;
+    record.yaw = 0;
+    record.pitch = 0;
   };
 
   const resetInputs = ({ releasePointerLock = false } = {}) => {
     thrustKeys.clear();
     Object.values(axisSources).forEach(resetAxisRecord);
-    applyThrustInput();
-
-    sprintSources.keyboard = false;
-    sprintSources.leftStick = false;
-    updateSprintState();
+    applyInputs();
 
     analogLookState.x = 0;
     analogLookState.y = 0;
     analogLookState.isActive = false;
     analogLookState.pointerType = null;
-
-    leftStickPitchState.pitch = 0;
-    leftStickPitchState.isActive = false;
-
-    touchLiftPresses.clear();
-    liftButtons.forEach((button) => button.classList.remove('is-active'));
 
     detachLookJoystick();
 
@@ -564,11 +402,6 @@ export function createFlightControls({
     );
   };
 
-  const applyLeftStickPitch = (deltaTime = 0) => {
-    // Pitch is now handled directly in the flight controller via the forward input
-    // This function is kept for API compatibility but is a no-op
-  };
-
   const dispose = () => {
     resetInputs({ releasePointerLock: true });
     if (typeof document !== 'undefined') {
@@ -577,13 +410,6 @@ export function createFlightControls({
       document.removeEventListener('mousemove', handlePointerMove);
     }
     canvas.removeEventListener('click', handleCanvasClick);
-    liftButtons.forEach((button) => {
-      button.removeEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
-      button.removeEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
-      button.removeEventListener('pointercancel', handleLiftButtonEnd, pointerListenerOptions);
-      button.removeEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
-      button.removeEventListener('contextmenu', handleLiftContextMenu);
-    });
     if (touchJoystickState.manager) {
       if (touchJoystickState.handlers) {
         const { handleAdded, handleRemoved } = touchJoystickState.handlers;
@@ -601,12 +427,10 @@ export function createFlightControls({
     rightThumbstick?.destroy?.();
   };
 
-  applyThrustInput();
-  updateSprintState();
+  applyInputs();
 
   return {
     applyAnalogLook,
-    applyLeftStickPitch,
     reset: resetInputs,
     dispose,
   };

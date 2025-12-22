@@ -81,7 +81,7 @@ function createDebugOverlay({ getSnapshot }) {
         `Follow LookAt: ${formatVector(followMetrics.lookAt)}`,
         `Follow Damping (pos/look/rot): ${followMetrics.positionDamping.toFixed(3)} / ${followMetrics.lookAtDamping.toFixed(3)} / ${followMetrics.rotationDamping.toFixed(3)}`,
         `Velocity LookAhead: ${followMetrics.velocityLookAhead.toFixed(2)}`,
-        `Steering LookAhead: f:${followMetrics.steeringLookAhead.forward.toFixed(2)} s:${followMetrics.steeringLookAhead.strafe.toFixed(2)} l:${followMetrics.steeringLookAhead.lift.toFixed(2)}`,
+        `Steering LookAhead: yaw:${followMetrics.steeringLookAhead.yaw.toFixed(2)} pitch:${followMetrics.steeringLookAhead.pitch.toFixed(2)}`,
       );
     }
 
@@ -161,9 +161,8 @@ export function createCameraState({ three, scene, flightController, sphereCenter
       rotationDamping: 0.16,
       velocityLookAhead: 0.45,
       steeringLookAhead: {
-        forward: 0.65,
-        strafe: 0.45,
-        lift: 0.30,
+        yaw: 0.65,
+        pitch: 0.45,
       },
     },
     [CAMERA_MODES.SEQUENCE]: {
@@ -338,9 +337,8 @@ export function createCameraState({ three, scene, flightController, sphereCenter
     const velocity = flightController?.velocity?.clone?.() ?? null;
     const steering = flightController
       ? {
-          forward: flightController.input?.forward ?? 0,
-          strafe: flightController.input?.strafe ?? 0,
-          lift: flightController.input?.lift ?? 0,
+          yaw: flightController.input?.yaw ?? 0,
+          pitch: flightController.input?.pitch ?? 0,
         }
       : null;
 
@@ -493,9 +491,8 @@ export function createCameraState({ three, scene, flightController, sphereCenter
       : null;
     const steering = flightController
       ? {
-          forward: flightController.input?.forward ?? 0,
-          strafe: flightController.input?.strafe ?? 0,
-          lift: flightController.input?.lift ?? 0,
+          yaw: flightController.input?.yaw ?? 0,
+          pitch: flightController.input?.pitch ?? 0,
         }
       : null;
 
@@ -576,9 +573,8 @@ export function createCameraState({ three, scene, flightController, sphereCenter
       : null;
     const steering = flightController
       ? {
-          forward: flightController.input?.forward ?? 0,
-          strafe: flightController.input?.strafe ?? 0,
-          lift: flightController.input?.lift ?? 0,
+          yaw: flightController.input?.yaw ?? 0,
+          pitch: flightController.input?.pitch ?? 0,
         }
       : null;
 

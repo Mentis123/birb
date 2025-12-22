@@ -35,7 +35,7 @@ const clamp = (value, min, max, fallback) => {
   return value;
 };
 
-const createAxisRecord = () => ({ forward: 0, roll: 0 });
+const createAxisRecord = () => ({ yaw: 0, pitch: 0 });
 
 export class FreeFlightController {
   constructor(three, options = {}) {
@@ -86,15 +86,23 @@ export class FreeFlightController {
     this.reset();
   }
 
-  setThrustInput({
-    forward = this.input.forward,
-    roll = this.input.roll,
+  setInputs({
+    yaw = this.input.yaw,
+    pitch = this.input.pitch,
     // Legacy parameters retained for API compatibility
+    forward,
+    roll,
     strafe: _strafe,
     lift: _lift,
   } = {}) {
-    this.input.forward = clamp(forward, -1, 1, this.input.forward);
-    this.input.roll = clamp(roll, -1, 1, this.input.roll);
+    const resolvedYaw = Number.isFinite(yaw) ? yaw : roll;
+    const resolvedPitch = Number.isFinite(pitch) ? pitch : forward;
+    this.input.yaw = clamp(resolvedYaw, -1, 1, this.input.yaw);
+    this.input.pitch = clamp(resolvedPitch, -1, 1, this.input.pitch);
+  }
+
+  setThrustInput(inputs = {}) {
+    this.setInputs(inputs);
   }
 
   setThrottle(value) {
@@ -178,12 +186,12 @@ export class FreeFlightController {
     // --- ROTATION-BASED FLIGHT CONTROLS ---
     // Pitch control: by default (unchecked), pushing forward/up tilts the nose up (non-inverted)
     // When invertPitch is true (checked), controls become airplane-style: push forward to dive
-    // Joystick UP produces negative forward input, so non-inverted uses the negative to pitch up
-    const pitchInput = this.invertPitch ? this.input.forward : -this.input.forward;
+    // Joystick UP produces negative pitch input, so non-inverted uses the negative to pitch up
+    const pitchInput = this.invertPitch ? this.input.pitch : -this.input.pitch;
     const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
-    // Yaw: joystick X (roll) drives yaw for responsive turns
-    const yawInput = this.input.roll;
+    // Yaw: joystick X drives yaw for responsive turns
+    const yawInput = this.input.yaw;
     const yawDelta = -yawInput * YAW_RATE * deltaTime;
 
     // Apply yaw rotation around LOCAL up axis
@@ -311,7 +319,7 @@ export class FreeFlightController {
     this.verticalVelocity = 0;
     this.elapsed = 0;
     Object.assign(this.input, createAxisRecord());
-    this.setThrustInput({ forward: 0, roll: 0 });
+    this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);
   }
 }
