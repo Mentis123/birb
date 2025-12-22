@@ -62,6 +62,7 @@ export class FreeFlightController {
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
+    this._sphereCenter = options.sphereCenter ? options.sphereCenter.clone() : null;
 
     this._initialPosition = options.position ? options.position.clone() : new Vector3(0, 0.65, 0);
     this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
@@ -118,9 +119,26 @@ export class FreeFlightController {
     this.invertPitch = Boolean(invert);
   }
 
+  setSphereCenter(center) {
+    if (center === null || center === undefined) {
+      this._sphereCenter = null;
+      return;
+    }
+    if (typeof center.clone === 'function') {
+      this._sphereCenter = center.clone();
+    }
+  }
+
   // Compute the local "up" direction based on current position
   // For flat worlds: world Y axis
   _computeLocalUp() {
+    if (this._sphereCenter) {
+      this._localUp.copy(this.position).sub(this._sphereCenter);
+      if (this._localUp.lengthSq() > 1e-9) {
+        this._localUp.normalize();
+        return this._localUp;
+      }
+    }
     this._localUp.set(0, 1, 0);
     return this._localUp;
   }
