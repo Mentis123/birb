@@ -489,6 +489,130 @@ function buildCityEnvironment({ THREE, root, propOrigin, terrainScale }) {
   root.add(skyline);
 }
 
+function buildMountainEnvironment({ THREE, root, propOrigin, terrainScale, spaceScale }) {
+  const ridgeMaterial = new THREE.MeshStandardMaterial({
+    color: 0x4d5662,
+    roughness: 0.86,
+    metalness: 0.08,
+    flatShading: true,
+  });
+  const snowMaterial = new THREE.MeshStandardMaterial({
+    color: 0xe6f1ff,
+    emissive: 0x93b8ff,
+    emissiveIntensity: 0.18,
+    roughness: 0.35,
+    metalness: 0.08,
+  });
+
+  const peakPrototype = new THREE.Group();
+  const ridge = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.32, 0.92, 1.8, 8, 2, false),
+    ridgeMaterial,
+  );
+  ridge.position.y = 0.9;
+  peakPrototype.add(ridge);
+  const snow = new THREE.Mesh(new THREE.ConeGeometry(0.52, 0.68, 8), snowMaterial);
+  snow.position.y = 1.68;
+  peakPrototype.add(snow);
+
+  const peakGroup = createScatterGroup(THREE, {
+    count: 18,
+    baseObject: peakPrototype,
+    radiusRange: [propOrigin * 0.55, propOrigin * 1.2],
+    heightRange: [-0.35, 0.65],
+    scaleRange: [2.1, 3.4],
+    tiltRange: [-5, 5],
+    yawJitter: Math.PI * 0.4,
+  });
+  peakGroup.position.y = -0.6;
+  root.add(peakGroup);
+
+  const pinePrototype = new THREE.Group();
+  const pineTrunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.12, 0.48, 7),
+    new THREE.MeshStandardMaterial({
+      color: 0x2e3b2b,
+      roughness: 0.78,
+      metalness: 0.06,
+      emissive: 0x0c120e,
+      emissiveIntensity: 0.14,
+    }),
+  );
+  pineTrunk.position.y = 0.24;
+  pinePrototype.add(pineTrunk);
+  const pineCanopy = new THREE.Mesh(
+    new THREE.ConeGeometry(0.32, 0.72, 9),
+    new THREE.MeshStandardMaterial({
+      color: 0x3b6b45,
+      emissive: 0x1d3322,
+      emissiveIntensity: 0.18,
+      roughness: 0.62,
+      metalness: 0.08,
+    }),
+  );
+  pineCanopy.position.y = 0.72;
+  pinePrototype.add(pineCanopy);
+
+  const pineGroup = createScatterGroup(THREE, {
+    count: 36,
+    baseObject: pinePrototype,
+    radiusRange: [propOrigin * 0.6, propOrigin * 1.2],
+    heightRange: [-0.48, 0.12],
+    scaleRange: [1.2, 1.9],
+    tiltRange: [-6, 6],
+  });
+  pineGroup.position.y = -0.5;
+  root.add(pineGroup);
+
+  const boulderMaterial = new THREE.MeshStandardMaterial({
+    color: 0x404853,
+    roughness: 0.88,
+    metalness: 0.05,
+    flatShading: true,
+  });
+  const boulderPrototype = new THREE.Mesh(new THREE.DodecahedronGeometry(0.3, 0), boulderMaterial);
+  const boulderGroup = createScatterGroup(THREE, {
+    count: 24,
+    baseObject: boulderPrototype,
+    radiusRange: [propOrigin * 0.5, propOrigin * 1.05],
+    heightRange: [-0.5, -0.25],
+    scaleRange: [0.9, 1.6],
+    tiltRange: [-8, 8],
+    yawJitter: Math.PI * 0.5,
+  });
+  boulderGroup.children.forEach((child) => {
+    child.rotation.y += randomInRange(-Math.PI, Math.PI);
+  });
+  root.add(boulderGroup);
+
+  const mistMaterial = new THREE.MeshBasicMaterial({
+    color: 0xdce9f9,
+    transparent: true,
+    opacity: 0.14,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const mistRing = new THREE.Mesh(
+    new THREE.RingGeometry(propOrigin * 0.55, propOrigin * 1.3, 72, 1),
+    mistMaterial,
+  );
+  mistRing.rotation.x = -Math.PI / 2;
+  mistRing.position.y = 0.18;
+  root.add(mistRing);
+
+  const floatingIce = new THREE.Mesh(
+    new THREE.CircleGeometry(propOrigin * 0.42, 18),
+    new THREE.MeshBasicMaterial({
+      color: 0xbfd4e8,
+      transparent: true,
+      opacity: 0.32,
+    }),
+  );
+  floatingIce.rotation.x = -Math.PI / 2;
+  floatingIce.position.y = -0.4;
+  root.add(floatingIce);
+}
+
 const ENVIRONMENT_VARIANTS = [
   {
     id: "forest",
@@ -549,6 +673,36 @@ const ENVIRONMENT_VARIANTS = [
       glow: { color: 0xffa05e, intensity: 1.5, distance: 14, decay: 2.6, position: [1, 2.1, 0.4] },
     },
     builder: buildCanyonEnvironment,
+  },
+  {
+    id: "mountain",
+    label: "Mountains",
+    spaceScale: 3.3,
+    propSpread: 7.4,
+    terrainScale: 132,
+    backgroundColor: 0x0b1521,
+    fogColor: 0x0f1f2f,
+    fogNear: 24,
+    fogFar: 182,
+    sky: { top: 0x6da0df, bottom: 0x08121f, glow: 0.32 },
+    hazeColor: 0x1a2f42,
+    hazeLayers: [
+      { radius: 46, height: 26, opacity: 0.19 },
+      { radius: 60, height: 30, opacity: 0.15 },
+      { radius: 74, height: 34, opacity: 0.12 },
+    ],
+    groundColor: 0x1d2e2f,
+    floor: { color: 0x24424b, opacity: 0.84 },
+    trail: { color: 0x7fd5ff, opacity: 0.5 },
+    anchor: { color: 0x315a6b, opacity: 0.92 },
+    lighting: {
+      ambient: { sky: 0xc6e3ff, ground: 0x112028, intensity: 1.02 },
+      key: { color: 0xeaf4ff, intensity: 1.32, position: [7.6, 8.5, 5.4] },
+      rim: { color: 0x81c5ff, intensity: 0.52, position: [-6.4, 5, -5.2] },
+      fill: { color: 0x99c9ff, intensity: 0.4, position: [1.6, 3.4, -6.6] },
+      glow: { color: 0x88d1ff, intensity: 1.55, distance: 13, decay: 2.2, position: [0.4, 2, 0.6] },
+    },
+    builder: buildMountainEnvironment,
   },
   {
     id: "city",
