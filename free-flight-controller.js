@@ -34,6 +34,8 @@ export const THROTTLE_POWER_MULTIPLIER = 2;
 export const SPHERICAL_ALTITUDE_STIFFNESS = 12;
 export const SPHERICAL_ALTITUDE_DAMPING = 7;
 export const SPHERICAL_ALTITUDE_RATE = 6;
+// Maximum vertical speed to prevent runaway climbing/diving
+export const MAX_VERTICAL_SPEED = 4.0;
 // Rotation rates for pitch and yaw (radians per second at full stick deflection)
 export const PITCH_RATE = Math.PI * 0.5;
 export const YAW_RATE = Math.PI * 0.6;
@@ -321,27 +323,49 @@ export class FreeFlightController {
 
     // Align velocity direction with facing direction while preserving speed
     // This ensures the bird moves where it's pointing, not sliding or drifting
-    const speed = this.velocity.length();
-    if (speed > 0.1) {
-      // Strong alignment: redirect velocity toward forward direction
-      // Higher rate = more responsive turning, lower = more glidy/drifty
-      const alignmentRate = 8; // How quickly velocity aligns with facing
-      const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
+    // IMPORTANT: Only align the HORIZONTAL component - don't convert horizontal speed to vertical!
+    // This prevents runaway climbing when the bird pitches up.
 
-      // Target velocity is forward at current speed
-      const targetVelocity = this._acceleration.copy(forward).multiplyScalar(speed);
+    // Extract vertical component (along local up) - this is preserved separately
+    const currentVerticalSpeed = this.velocity.dot(up);
 
-      // Lerp current velocity toward target
-      this.velocity.lerp(targetVelocity, alignmentStrength);
+    // Get horizontal velocity by removing vertical component
+    const horizontalVelocity = this._acceleration.copy(this.velocity).addScaledVector(up, -currentVerticalSpeed);
+    const horizontalSpeed = horizontalVelocity.length();
+
+    if (horizontalSpeed > 0.1) {
+      // Get the horizontal component of forward direction
+      const forwardHorizontal = this._right.copy(forward).addScaledVector(up, -forward.dot(up));
+      const forwardHorizontalLength = forwardHorizontal.length();
+
+      if (forwardHorizontalLength > 0.01) {
+        forwardHorizontal.divideScalar(forwardHorizontalLength);
+
+        // Align horizontal velocity toward horizontal forward
+        const alignmentRate = 8;
+        const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
+
+        // Target horizontal velocity preserves horizontal speed
+        const targetHorizontal = forwardHorizontal.multiplyScalar(horizontalSpeed);
+        horizontalVelocity.lerp(targetHorizontal, alignmentStrength);
+      }
     }
 
+    // Cap vertical speed to prevent runaway climbing/diving
+    const cappedVerticalSpeed = Math.max(-MAX_VERTICAL_SPEED, Math.min(MAX_VERTICAL_SPEED, currentVerticalSpeed));
+
+    // Recombine: horizontal velocity + capped vertical velocity
+    this.velocity.copy(horizontalVelocity).addScaledVector(up, cappedVerticalSpeed);
+
     // Also correct any remaining sideways drift
-    const sidewaysSpeed = this.velocity.dot(right);
+    // Recalculate right axis since we reused _right for temp calculations above
+    const rightAxis = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+    const sidewaysSpeed = this.velocity.dot(rightAxis);
     if (Math.abs(sidewaysSpeed) > 1e-3) {
       const correctionRate = MOVEMENT_ACCELERATION * 1.5;
       const maxCorrection = correctionRate * deltaTime;
       const correction = Math.sign(sidewaysSpeed) * Math.min(Math.abs(sidewaysSpeed), maxCorrection);
-      this.velocity.addScaledVector(right, -correction);
+      this.velocity.addScaledVector(rightAxis, -correction);
     }
 
     // Update position based on velocity
