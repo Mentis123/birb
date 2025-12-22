@@ -258,10 +258,17 @@ export class FreeFlightController {
     this.verticalVelocity += pitchInput * LIFT_ACCELERATION * deltaTime;
     this.verticalVelocity = clamp(this.verticalVelocity, -MAX_VERTICAL_SPEED, MAX_VERTICAL_SPEED, this.verticalVelocity);
 
-    this.velocity
+    // Compute the target velocity based on facing direction
+    const targetVelocity = this._acceleration
       .copy(forward)
       .multiplyScalar(this.forwardSpeed)
       .addScaledVector(up, this.verticalVelocity);
+
+    // Align velocity with facing direction - ensures bird moves where it's pointing
+    // This fixes the issue where turning would cause strafing instead of changing direction
+    const alignmentRate = 8;
+    const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
+    this.velocity.lerp(targetVelocity, alignmentStrength);
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
