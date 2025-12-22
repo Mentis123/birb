@@ -88,9 +88,8 @@ export function createFollowCameraRig(three, options = {}) {
     rotationDamping: options.rotationDamping ?? 0.12,
     velocityLookAhead: options.velocityLookAhead ?? 0.25,
     steeringLookAhead: {
-      forward: options.steeringLookAhead?.forward ?? 0.45,
-      strafe: options.steeringLookAhead?.strafe ?? 0.35,
-      lift: options.steeringLookAhead?.lift ?? 0.25,
+      yaw: options.steeringLookAhead?.yaw ?? 0.45,
+      pitch: options.steeringLookAhead?.pitch ?? 0.35,
     },
     orientation: new Quaternion(),
     targetOrientation: new Quaternion(),
@@ -126,12 +125,10 @@ export function createFollowCameraRig(three, options = {}) {
       state.velocityLookAhead = config.velocityLookAhead;
     }
     if (config.steeringLookAhead) {
-      state.steeringLookAhead.forward =
-        config.steeringLookAhead.forward ?? state.steeringLookAhead.forward;
-      state.steeringLookAhead.strafe =
-        config.steeringLookAhead.strafe ?? state.steeringLookAhead.strafe;
-      state.steeringLookAhead.lift =
-        config.steeringLookAhead.lift ?? state.steeringLookAhead.lift;
+      state.steeringLookAhead.yaw =
+        config.steeringLookAhead.yaw ?? config.steeringLookAhead.strafe ?? state.steeringLookAhead.yaw;
+      state.steeringLookAhead.pitch =
+        config.steeringLookAhead.pitch ?? config.steeringLookAhead.lift ?? state.steeringLookAhead.pitch;
     }
     // Handle sphereCenter configuration
     if (config.sphereCenter !== undefined) {
@@ -239,22 +236,23 @@ export function createFollowCameraRig(three, options = {}) {
       // Compute local up from right and forward
       scratch.up.crossVectors(scratch.right, scratch.forward).normalize();
 
-      if (Number.isFinite(steering.forward) && steering.forward !== 0) {
-        scratch.anticipation.addScaledVector(
-          scratch.forward,
-          state.steeringLookAhead.forward * steering.forward,
-        );
-      }
-      if (Number.isFinite(steering.strafe) && steering.strafe !== 0) {
+      const steeringYaw = Number.isFinite(steering.yaw)
+        ? steering.yaw
+        : steering.strafe;
+      const steeringPitch = Number.isFinite(steering.pitch)
+        ? steering.pitch
+        : steering.lift;
+
+      if (Number.isFinite(steeringYaw) && steeringYaw !== 0) {
         scratch.anticipation.addScaledVector(
           scratch.right,
-          state.steeringLookAhead.strafe * steering.strafe,
+          state.steeringLookAhead.yaw * steeringYaw,
         );
       }
-      if (Number.isFinite(steering.lift) && steering.lift !== 0) {
+      if (Number.isFinite(steeringPitch) && steeringPitch !== 0) {
         scratch.anticipation.addScaledVector(
           scratch.up,
-          state.steeringLookAhead.lift * steering.lift,
+          state.steeringLookAhead.pitch * steeringPitch,
         );
       }
     }
