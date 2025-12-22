@@ -123,6 +123,48 @@ function createNestMarker(THREE, config) {
  */
 export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius, nestablePositions = []) {
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
+  const _hostBounds = new THREE.Box3();
+  const _hostSize = new THREE.Vector3();
+  const _normalAbs = new THREE.Vector3();
+
+  const computeHostClearance = (hostObject, surfaceNormal) => {
+    if (!hostObject || !surfaceNormal) return 0;
+
+    hostObject.updateWorldMatrix(true, true);
+    _hostBounds.setFromObject(hostObject);
+
+    if (_hostBounds.isEmpty()) return 0;
+
+    _hostBounds.getSize(_hostSize);
+    _normalAbs.set(
+      Math.abs(surfaceNormal.x),
+      Math.abs(surfaceNormal.y),
+      Math.abs(surfaceNormal.z)
+    );
+
+    // Project the bounds along the surface normal to approximate clearance
+    return _hostSize.dot(_normalAbs);
+  };
+
+  const hideHostObject = (nestGroup) => {
+    const hostObject = nestGroup?.userData?.hostObject;
+    if (!hostObject) return;
+
+    if (hostObject.userData.__nestOriginalVisibility === undefined) {
+      hostObject.userData.__nestOriginalVisibility = hostObject.visible;
+    }
+    hostObject.visible = false;
+  };
+
+  const restoreHostObjectVisibility = (nestGroup) => {
+    const hostObject = nestGroup?.userData?.hostObject;
+    if (!hostObject) return;
+
+    if (hostObject.userData.__nestOriginalVisibility !== undefined) {
+      hostObject.visible = hostObject.userData.__nestOriginalVisibility;
+      delete hostObject.userData.__nestOriginalVisibility;
+    }
+  };
 
   const container = new THREE.Group();
   container.name = 'nest-points';
@@ -151,6 +193,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
     nestGroup.userData.landingQuaternion = nestGroup.quaternion.clone();
     nestGroup.userData.surfaceNormal = up.clone();
     nestGroup.userData.hostObject = placement.hostObject;
+    nestGroup.userData.hostClearance = computeHostClearance(placement.hostObject, up);
 
     container.add(nestGroup);
     nests.push(nestGroup);
@@ -261,9 +304,11 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
         if (occupied) {
           currentlyOccupiedNest = nestGroup;
           nestGroup.visible = false;
+          hideHostObject(nestGroup);
         } else {
           nestGroup.visible = true;
           currentlyOccupiedNest = null;
+          restoreHostObjectVisibility(nestGroup);
         }
       }
     },
@@ -283,6 +328,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
         nestGroup.visible = true;
         nestGroup.userData.isActive = false;
         nestGroup.userData.isOccupied = false;
+        restoreHostObjectVisibility(nestGroup);
       });
       currentlyOccupiedNest = null;
     },

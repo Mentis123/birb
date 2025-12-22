@@ -110,7 +110,9 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
       // Offset landing position slightly above the nest
       const surfaceNormal = nearestNest.userData.surfaceNormal;
-      targetPosition.addScaledVector(surfaceNormal, 0.5);
+      const hostClearance = nearestNest.userData.hostClearance || 0;
+      const clearanceOffset = Math.max(0.6, Math.min(hostClearance * 0.2, 3.0));
+      targetPosition.addScaledVector(surfaceNormal, clearanceOffset);
 
       setState(NESTING_STATES.LANDING);
       nestPointsSystem.setNestOccupied(currentNest, true);
