@@ -59,6 +59,8 @@ export class FreeFlightController {
     this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
     this._pitchQuaternion = new Quaternion();
+    this._alignQuaternion = new Quaternion();
+    this._previousUp = new Vector3(0, 1, 0);
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
@@ -200,6 +202,20 @@ export class FreeFlightController {
 
     // Use local up (world Y axis)
     const up = this._computeLocalUp();
+
+    // On spherical worlds, re-align lookQuaternion when local up changes.
+    // This keeps the forward direction tangent to the sphere surface as the bird moves.
+    if (this._sphereCenter) {
+      const upDot = this._previousUp.dot(up);
+      // Only re-align if the up direction has changed significantly
+      if (upDot < 0.99999) {
+        // Compute rotation from previous up to current up
+        this._alignQuaternion.setFromUnitVectors(this._previousUp, up);
+        // Apply this rotation to lookQuaternion to maintain relative heading
+        this.lookQuaternion.premultiply(this._alignQuaternion).normalize();
+      }
+      this._previousUp.copy(up);
+    }
 
     // --- ROTATION-BASED FLIGHT CONTROLS ---
     // Pitch control: by default (unchecked), pushing forward/up tilts the nose up (non-inverted)
@@ -344,5 +360,8 @@ export class FreeFlightController {
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);
+    // Reset previous up to match initial position's local up
+    this._computeLocalUp();
+    this._previousUp.copy(this._localUp);
   }
 }
