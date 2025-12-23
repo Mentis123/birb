@@ -1,0 +1,12 @@
+{
+  "name": "birb",
+  "version": "1.0.0",
+  "description": "Flight controller controls and harness tests",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
