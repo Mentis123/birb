@@ -48,15 +48,17 @@ export class FreeFlightController {
 
     this.position = new Vector3();
     this.velocity = new Vector3();
+    // Single quaternion for flight direction (like SimpleFlightController)
     this.quaternion = new Quaternion();
-    this.lookQuaternion = new Quaternion();
+    // Separate quaternion for visual output (includes banking)
+    this._visualQuaternion = new Quaternion();
+    // Keep lookQuaternion as alias for compatibility with nesting system
+    this.lookQuaternion = this.quaternion;
 
     this._forward = new Vector3(0, 0, -1);
     this._right = new Vector3(1, 0, 0);
     this._up = new Vector3(0, 1, 0);
     this._localUp = new Vector3(0, 1, 0);
-    this._acceleration = new Vector3();
-    this._velocityForward = new Vector3(0, 0, -1); // Dedicated vector for velocity direction
     this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
     this._pitchQuaternion = new Quaternion();
@@ -79,6 +81,9 @@ export class FreeFlightController {
     this.invertPitch = options.invertPitch ?? false;
 
     this.input = createAxisRecord();
+    // Accumulated look deltas (from mouse/touch) - applied once per frame
+    this._pendingYaw = 0;
+    this._pendingPitch = 0;
 
     this.bank = 0;
     this.pitch = 0;
@@ -152,41 +157,14 @@ export class FreeFlightController {
     return baseThrottle * multiplier;
   }
 
+  // Queue look delta for processing in update() - ensures single rotation path
   addLookDelta(deltaX, deltaY) {
     if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
       return;
     }
-
-    const yawAngle = -deltaX * this.lookSensitivity;
-    const pitchAngle = deltaY * this.lookSensitivity;
-
-    // Use local up (world Y for flat)
-    const up = this._computeLocalUp();
-
-    if (yawAngle !== 0) {
-      this._yawQuaternion.setFromAxisAngle(up, yawAngle);
-      this.lookQuaternion.premultiply(this._yawQuaternion);
-    }
-
-    if (pitchAngle !== 0) {
-      // Project forward onto the local horizontal plane (perpendicular to local up)
-      const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
-      // Remove the component along the local up to get horizontal forward
-      const upComponent = forward.dot(up);
-      const horizontalForward = this._acceleration.copy(forward).addScaledVector(up, -upComponent);
-      const horizontalLength = horizontalForward.length();
-
-      // Only apply if we have a valid horizontal direction (not looking straight up/down)
-      if (horizontalLength > 0.001) {
-        horizontalForward.divideScalar(horizontalLength);
-        // horizontalForward × up gives proper right-hand side
-        const right = this._right.crossVectors(horizontalForward, up).normalize();
-        this._pitchQuaternion.setFromAxisAngle(right, pitchAngle);
-        this.lookQuaternion.premultiply(this._pitchQuaternion);
-      }
-    }
-
-    this.lookQuaternion.normalize();
+    // Accumulate pending rotation - will be applied in update()
+    this._pendingYaw += -deltaX * this.lookSensitivity;
+    this._pendingPitch += deltaY * this.lookSensitivity;
   }
 
   getSpeed() {
@@ -201,10 +179,10 @@ export class FreeFlightController {
     this.elapsed += deltaTime;
     const effectiveThrottle = this.getEffectiveThrottle();
 
-    // Use local up (world Y axis)
+    // Use local up (world Y for flat, radial for spherical)
     const up = this._computeLocalUp();
 
-    // On spherical worlds, re-align lookQuaternion when local up changes.
+    // On spherical worlds, re-align quaternion when local up changes.
     // This keeps the forward direction tangent to the sphere surface as the bird moves.
     if (this._sphereCenter) {
       const upDot = this._previousUp.dot(up);
@@ -212,62 +190,64 @@ export class FreeFlightController {
       if (upDot < 0.99999) {
         // Compute rotation from previous up to current up
         this._alignQuaternion.setFromUnitVectors(this._previousUp, up);
-        // Apply this rotation to lookQuaternion to maintain relative heading
-        this.lookQuaternion.premultiply(this._alignQuaternion).normalize();
+        // Apply this rotation to quaternion to maintain relative heading
+        this.quaternion.premultiply(this._alignQuaternion).normalize();
       }
       this._previousUp.copy(up);
     }
 
-    // --- ROTATION-BASED FLIGHT CONTROLS ---
-    // Pitch control: by default (unchecked), pushing forward/up tilts the nose up (non-inverted)
-    // When invertPitch is true (checked), controls become airplane-style: push forward to dive
-    // Joystick UP produces negative pitch input, so non-inverted uses the negative to pitch up
+    // --- COMBINED ROTATION FROM ALL SOURCES ---
+    // Combine input.yaw with pending look delta (from mouse/touch)
     const pitchInput = this.invertPitch ? this.input.pitch : -this.input.pitch;
-    const pitchDelta = pitchInput * PITCH_RATE * deltaTime;
 
-    // Yaw: joystick X drives yaw for responsive turns
-    const yawInput = this.input.yaw;
-    const yawDelta = -yawInput * YAW_RATE * deltaTime;
+    // Total yaw = input-based yaw + accumulated look delta
+    const totalYawDelta = (-this.input.yaw * YAW_RATE * deltaTime) + this._pendingYaw;
+    const totalPitchDelta = (pitchInput * PITCH_RATE * deltaTime) + this._pendingPitch;
+
+    // Clear pending deltas after consuming
+    this._pendingYaw = 0;
+    this._pendingPitch = 0;
 
     // Apply yaw rotation around LOCAL up axis
-    if (yawDelta !== 0) {
-      this._yawQuaternion.setFromAxisAngle(up, yawDelta);
-      this.lookQuaternion.premultiply(this._yawQuaternion).normalize();
+    if (totalYawDelta !== 0) {
+      this._yawQuaternion.setFromAxisAngle(up, totalYawDelta);
+      this.quaternion.premultiply(this._yawQuaternion);
     }
 
     // Apply pitch rotation around the LOCAL horizontal right axis
-    // This ensures up/down stays aligned with the local vertical
-    if (pitchDelta !== 0) {
+    if (totalPitchDelta !== 0) {
       // Get current forward direction
-      const forward = this._forward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+      const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
       // Project forward onto local horizontal plane (perpendicular to local up)
       const upComponent = forward.dot(up);
-      const horizontalForward = this._acceleration.copy(forward).addScaledVector(up, -upComponent);
+      const horizontalForward = this._up.copy(forward).addScaledVector(up, -upComponent);
       const horizontalLength = horizontalForward.length();
 
       if (horizontalLength > 0.001) {
         horizontalForward.divideScalar(horizontalLength);
         // Right axis: horizontalForward × up gives proper right-hand side
         const right = this._right.crossVectors(horizontalForward, up).normalize();
-        this._pitchQuaternion.setFromAxisAngle(right, pitchDelta);
-        this.lookQuaternion.premultiply(this._pitchQuaternion).normalize();
+        this._pitchQuaternion.setFromAxisAngle(right, totalPitchDelta);
+        this.quaternion.premultiply(this._pitchQuaternion);
       }
     }
 
-    // Start with the look quaternion as the base orientation
-    this.quaternion.copy(this.lookQuaternion);
+    this.quaternion.normalize();
 
-    // Calculate the velocity forward direction using a DEDICATED vector
-    // This prevents any accidental modification from other calculations
-    const velocityForward = this._velocityForward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+    // --- CALCULATE VELOCITY FROM FACING DIRECTION ---
+    // This is the key fix: velocity directly follows quaternion (like SimpleFlightController)
+    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
 
     // For spherical worlds, ensure forward is tangent to the sphere (perpendicular to up)
-    // This prevents any drift in the vertical component of the forward direction
     if (this._sphereCenter) {
-      const upComponent = velocityForward.dot(up);
-      velocityForward.addScaledVector(up, -upComponent);
+      const upComponent = forward.dot(up);
+      forward.addScaledVector(up, -upComponent);
+      if (forward.lengthSq() > 1e-9) {
+        forward.normalize();
+      } else {
+        forward.set(0, 0, -1).applyQuaternion(this.quaternion);
+      }
     }
-    velocityForward.normalize();
 
     // --- STREAMLINED KINEMATICS ---
     const targetSpeed = Math.min(
@@ -284,22 +264,18 @@ export class FreeFlightController {
     this.verticalVelocity += pitchInput * LIFT_ACCELERATION * deltaTime;
     this.verticalVelocity = clamp(this.verticalVelocity, -MAX_VERTICAL_SPEED, MAX_VERTICAL_SPEED, this.verticalVelocity);
 
-    // Compute the target velocity based on facing direction
-    const targetVelocity = this._acceleration
-      .copy(velocityForward)
-      .multiplyScalar(this.forwardSpeed)
-      .addScaledVector(up, this.verticalVelocity);
-
-    // Directly set velocity to match facing direction - bird always moves where it's pointing
-    // This ensures immediate response to heading changes with no lag or drift
-    this.velocity.copy(targetVelocity);
+    // Set velocity directly from facing direction (the key fix!)
+    this.velocity.copy(forward).multiplyScalar(this.forwardSpeed);
+    this.velocity.addScaledVector(up, this.verticalVelocity);
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
-    // --- PROCEDURAL BANKING (ROLL) ---
-    // Bank into turns: pushing right → bank right (right wing down, left wing up)
-    // In THREE.js, rotating around forward axis (-Z): positive angle = right side goes down
-    // So positive yawInput (turning right) needs positive bank for right wing down
+    // --- VISUAL OUTPUT (banking, visual pitch) ---
+    // Copy base quaternion for visual, then apply banking
+    this._visualQuaternion.copy(this.quaternion);
+
+    // Bank into turns based on input (not rotation delta, for smoother visuals)
+    const yawInput = this.input.yaw;
     const targetBank = clamp(yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Smooth interpolation (lerp) for banking
@@ -308,36 +284,29 @@ export class FreeFlightController {
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Apply visual bank rotation around the forward axis
-    const bankAxis = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    const bankAxis = this._forward.set(0, 0, -1).applyQuaternion(this._visualQuaternion).normalize();
     this._bankQuaternion.setFromAxisAngle(bankAxis, this.bank);
-    this.quaternion.multiply(this._bankQuaternion);
+    this._visualQuaternion.multiply(this._bankQuaternion);
 
     // --- PROCEDURAL VISUAL PITCH ---
-    // Tilt nose up when climbing, nose down when diving based on vertical velocity
-    // Use velocity component along local up direction
     const visualVerticalSpeed = this.velocity.dot(up);
     const currentSpeed = this.velocity.length();
-    // Normalize vertical velocity relative to total speed for proportional tilt
     const verticalRatio = currentSpeed > 0.1 ? visualVerticalSpeed / currentSpeed : 0;
-    // Target pitch: positive vertical ratio (climbing) → nose up (negative pitch in local space)
     const targetVisualPitch = clamp(-verticalRatio * MAX_VISUAL_PITCH_ANGLE, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
 
-    // Smooth interpolation for visual pitch
     const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
     this.visualPitch += (targetVisualPitch - this.visualPitch) * pitchStep;
     this.visualPitch = clamp(this.visualPitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
 
-    // Apply visual pitch rotation around the local right axis
-    const visualPitchAxis = this._right.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+    const visualPitchAxis = this._right.set(1, 0, 0).applyQuaternion(this._visualQuaternion).normalize();
     this._pitchQuaternion.setFromAxisAngle(visualPitchAxis, this.visualPitch);
-    this.quaternion.multiply(this._pitchQuaternion);
+    this._visualQuaternion.multiply(this._pitchQuaternion);
 
-    // Reset pitch tracking (no longer used for visual tilt, rotation is in lookQuaternion)
     this.pitch = 0;
 
     return {
       position: this.position,
-      quaternion: this.quaternion,
+      quaternion: this._visualQuaternion,
     };
   }
 
@@ -359,14 +328,16 @@ export class FreeFlightController {
   reset() {
     this.position.copy(this._initialPosition);
     this.velocity.set(0, 0, 0);
-    this.lookQuaternion.copy(this._initialQuaternion);
     this.quaternion.copy(this._initialQuaternion);
+    this._visualQuaternion.copy(this._initialQuaternion);
     this.bank = 0;
     this.pitch = 0;
     this.visualPitch = 0;
     this.forwardSpeed = BASE_FORWARD_SPEED;
     this.verticalVelocity = 0;
     this.elapsed = 0;
+    this._pendingYaw = 0;
+    this._pendingPitch = 0;
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);
