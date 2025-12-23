@@ -264,11 +264,9 @@ export class FreeFlightController {
       .multiplyScalar(this.forwardSpeed)
       .addScaledVector(up, this.verticalVelocity);
 
-    // Align velocity with facing direction - ensures bird moves where it's pointing
-    // This fixes the issue where turning would cause strafing instead of changing direction
-    const alignmentRate = 8;
-    const alignmentStrength = 1 - Math.exp(-alignmentRate * deltaTime);
-    this.velocity.lerp(targetVelocity, alignmentStrength);
+    // Directly set velocity to match facing direction - bird always moves where it's pointing
+    // This ensures immediate response to heading changes with no lag or drift
+    this.velocity.copy(targetVelocity);
 
     this.position.addScaledVector(this.velocity, deltaTime);
 
