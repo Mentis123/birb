@@ -28,6 +28,7 @@ export function createFollowCameraRig(three, options = {}) {
     offset: new Vector3(),
     anticipation: new Vector3(),
     velocity: new Vector3(),
+    travelDirection: new Vector3(0, 0, -1),
     forward: new Vector3(0, 0, -1),
     right: new Vector3(1, 0, 0),
     up: new Vector3(0, 1, 0),
@@ -94,6 +95,7 @@ export function createFollowCameraRig(three, options = {}) {
     orientation: new Quaternion(),
     targetOrientation: new Quaternion(),
     up: new Vector3(0, 1, 0),
+    travelDirection: new Vector3(0, 0, -1),
     // Spherical world support: when set, "up" becomes radial from sphere center
     sphereCenter: options.sphereCenter ? options.sphereCenter.clone() : null,
   };
@@ -184,8 +186,31 @@ export function createFollowCameraRig(three, options = {}) {
       state.up.set(0, 1, 0);
     }
 
+    // Compute a smoothed travel direction. Prefer actual velocity to align the
+    // camera with the bird's path, but fall back to facing when hovering. This
+    // avoids camera jumps when the bird yaws quickly without moving forward.
+    scratch.travelDirection.copy(scratch.forward);
+    if (velocity && velocity.lengthSq() > 1e-6) {
+      scratch.travelDirection.copy(velocity);
+      const velocityLength = scratch.travelDirection.length();
+      if (velocityLength > 1e-6) {
+        scratch.travelDirection.divideScalar(velocityLength);
+      }
+    }
+
+    if (state.travelDirection.lengthSq() < 1e-6) {
+      state.travelDirection.copy(scratch.travelDirection);
+    } else {
+      // Blend toward the latest travel direction for stability during rapid yaw
+      state.travelDirection.lerp(scratch.travelDirection, 0.25).normalize();
+    }
+
+    const offsetDirection = state.travelDirection.lengthSq() > 1e-6
+      ? state.travelDirection
+      : scratch.forward;
+
     // Camera positioning using the user's reference formula:
-    // Camera.Position = Bird.Position - (Bird.Forward * Distance) + (Up * Height)
+    // Camera.Position = Bird.Position - (Direction * Distance) + (Up * Height)
     // offset.z = distance behind, offset.y = height above
     const distanceBehind = Math.abs(state.offset.z);
     const heightAbove = state.offset.y;
@@ -196,8 +221,8 @@ export function createFollowCameraRig(three, options = {}) {
       state.desiredPosition.add(ambientOffsets.position);
     }
 
-    // Place camera BEHIND the bird (subtract forward direction)
-    state.desiredPosition.addScaledVector(scratch.forward, -distanceBehind);
+    // Place camera BEHIND the bird's travel direction
+    state.desiredPosition.addScaledVector(offsetDirection, -distanceBehind);
     // Place camera ABOVE the bird (in local up direction for spherical worlds)
     state.desiredPosition.addScaledVector(state.up, heightAbove);
 
@@ -259,7 +284,7 @@ export function createFollowCameraRig(three, options = {}) {
 
     // Add base forward look-ahead so camera always looks ahead of the bird
     const baseLookAhead = distanceBehind * 0.5;
-    scratch.anticipation.addScaledVector(scratch.forward, baseLookAhead);
+    scratch.anticipation.addScaledVector(offsetDirection, baseLookAhead);
 
     if (scratch.anticipation.lengthSq() > 0) {
       state.desiredLookAt.add(scratch.anticipation);
@@ -352,6 +377,7 @@ export function createFollowCameraRig(three, options = {}) {
       rotationDamping: state.rotationDamping,
       velocityLookAhead: state.velocityLookAhead,
       steeringLookAhead: { ...state.steeringLookAhead },
+      travelDirection: state.travelDirection.clone(),
     };
   }
 

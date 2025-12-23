@@ -1338,6 +1338,92 @@
 
       const lightingRig = { ambient, keyLight, rimLight, fillLight, glowLight };
 
+      const debugVectorState = (() => {
+        const hasDebugVectors = new URLSearchParams(window.location.search).has("debugVectors");
+        if (!hasDebugVectors) return null;
+
+        const modelForwardHelper = new THREE.ArrowHelper(
+          new THREE.Vector3(0, 0, -1),
+          new THREE.Vector3(),
+          1,
+          0x4ad8ff,
+          0.32,
+          0.14
+        );
+        const cameraForwardHelper = new THREE.ArrowHelper(
+          new THREE.Vector3(0, 0, -1),
+          new THREE.Vector3(),
+          1,
+          0xffd166,
+          0.32,
+          0.14
+        );
+        const velocityHelper = new THREE.ArrowHelper(
+          new THREE.Vector3(0, 0, -1),
+          new THREE.Vector3(),
+          1,
+          0xff61d8,
+          0.32,
+          0.14
+        );
+
+        scene.add(modelForwardHelper, cameraForwardHelper, velocityHelper);
+
+        const scratch = {
+          direction: new THREE.Vector3(),
+          origin: new THREE.Vector3(),
+        };
+
+        const setArrow = (helper, direction, origin, length) => {
+          const fallbackLength = 0.35;
+          if (direction.lengthSq() < 1e-8) {
+            scratch.direction.set(0, 0, -1);
+          } else {
+            scratch.direction.copy(direction).normalize();
+          }
+          helper.setDirection(scratch.direction);
+          const resolvedLength = Math.max(length ?? direction.length(), fallbackLength);
+          const head = Math.max(resolvedLength * 0.32, 0.16);
+          const headWidth = Math.max(resolvedLength * 0.18, 0.08);
+          helper.setLength(resolvedLength, head, headWidth);
+          helper.position.copy(origin);
+        };
+
+        const update = ({ pose, ambientOffsets, camera }) => {
+          if (!pose || !pose.position) return;
+
+          scratch.origin.copy(pose.position);
+          if (ambientOffsets?.position) {
+            scratch.origin.add(ambientOffsets.position);
+          }
+
+          if (birbAnchor) {
+            scratch.direction.set(0, 0, -1).applyQuaternion(birbAnchor.quaternion);
+            setArrow(modelForwardHelper, scratch.direction, scratch.origin, 1.35);
+          }
+
+          const cameraDirection = scratch.direction.set(0, 0, -1).applyQuaternion(camera.quaternion);
+          setArrow(cameraForwardHelper, cameraDirection, camera.position, 1.15);
+
+          if (flightController?.velocity) {
+            const velocityLength = flightController.velocity.length();
+            if (velocityLength > 1e-9) {
+              scratch.direction.copy(flightController.velocity);
+            } else {
+              scratch.direction.set(0, 0, -1).applyQuaternion(flightController.quaternion);
+            }
+            setArrow(velocityHelper, scratch.direction, scratch.origin, Math.max(velocityLength, 0.6));
+          }
+        };
+
+        return {
+          update,
+          dispose() {
+            scene.remove(modelForwardHelper, cameraForwardHelper, velocityHelper);
+          },
+        };
+      })();
+
       const environmentButton = document.querySelector('[data-control="environment"]');
       const environmentToggleButton = document.querySelector(
         '[data-control="environment-toggle"]'
@@ -2956,6 +3042,13 @@
 
         updateFpsReadout(time);
         cameraState.updateActiveCamera({ pose, ambientOffsets, delta });
+        if (debugVectorState) {
+          debugVectorState.update({
+            pose,
+            ambientOffsets,
+            camera: cameraState.camera,
+          });
+        }
         renderer.render(scene, cameraState.camera);
       };
 
@@ -3027,6 +3120,9 @@
         if (sphericalWorld) {
           sphericalWorld.dispose();
           sphericalWorld = null;
+        }
+        if (debugVectorState) {
+          debugVectorState.dispose();
         }
         flightControls.dispose();
       });
