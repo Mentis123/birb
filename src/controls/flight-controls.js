@@ -204,7 +204,8 @@ export function createFlightControls({
   };
 
   const resetLookTouchJoystick = () => {
-    handleRightStickChange(
+    // Reset flight control inputs when touch joystick is released
+    handleLeftStickChange(
       { x: 0, y: 0 },
       { isActive: false, pointerType: 'touch', magnitude: 0, rawMagnitude: 0 }
     );
@@ -219,7 +220,9 @@ export function createFlightControls({
       raw: normalized.raw,
       rawMagnitude: normalized.rawMagnitude,
     };
-    handleRightStickChange(payload, context);
+    // Use flight control path (left stick) for touch input - this ensures
+    // velocity follows facing direction via the yaw/pitch rotation in update()
+    handleLeftStickChange(payload, context);
   };
 
   const detachLookJoystick = () => {
