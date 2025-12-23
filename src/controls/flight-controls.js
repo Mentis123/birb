@@ -19,6 +19,7 @@ const YAW_AXIS_KEYS = {
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const noop = () => {};
 
 const DEFAULT_THRUST_SHAPING = {
   deadzone: DEFAULT_TOUCH_JOYSTICK_DEADZONE,
@@ -40,6 +41,20 @@ const normalizeShapingConfig = (config = {}, fallback = DEFAULT_THRUST_SHAPING) 
   ),
   expo: clamp(Number.isFinite(config.expo) ? config.expo : fallback.expo, 0, 1),
 });
+
+const createTelemetryLogger = (logger) => {
+  if (logger === null || logger === false) return noop;
+  if (typeof logger === 'function') return logger;
+  if (logger && typeof logger.log === 'function') return (...args) => logger.log(...args);
+  if (typeof console !== 'undefined') {
+    return typeof console.debug === 'function'
+      ? (...args) => console.debug(...args)
+      : typeof console.log === 'function'
+        ? (...args) => console.log(...args)
+        : noop;
+  }
+  return noop;
+};
 
 const { shapeAxis } = inputShaping;
 
@@ -104,6 +119,7 @@ export function createFlightControls({
   getCameraMode,
   followMode,
   onThrustChange,
+  telemetryLogger = null,
 } = {}) {
   if (!flightController) {
     throw new Error('createFlightControls requires a FreeFlightController instance');
@@ -123,6 +139,17 @@ export function createFlightControls({
   const lookInputShaping = normalizeShapingConfig(lookShaping, DEFAULT_LOOK_SHAPING);
   const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
   let isPitchInverted = Boolean(invertPitch);
+  const logTelemetry = createTelemetryLogger(telemetryLogger);
+  const telemetryState = {
+    lastAxes: { yaw: null, pitch: null },
+    lastLook: { x: null, y: null, pointerType: null, isActive: null },
+  };
+
+  logTelemetry('[flight-controls] normalized shaping', {
+    thrust: thrustInputShaping,
+    look: lookInputShaping,
+    yawPitch: yawPitchShaping,
+  });
 
   const axisSources = {
     keyboard: createAxisRecord(),
@@ -162,11 +189,23 @@ export function createFlightControls({
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
     }
+    if (yaw !== telemetryState.lastAxes.yaw || pitch !== telemetryState.lastAxes.pitch) {
+      telemetryState.lastAxes = { yaw, pitch };
+      logTelemetry('[flight-controls] applyInputs', {
+        aggregated: { yaw, pitch },
+        sources: { ...axisSources },
+      });
+    }
   };
 
   const updateKeyboardAxes = () => {
     axisSources.keyboard.pitch = computeAxisValue(PITCH_AXIS_KEYS);
     axisSources.keyboard.yaw = computeAxisValue(YAW_AXIS_KEYS);
+    logTelemetry('[flight-controls] keyboard axes', {
+      yaw: axisSources.keyboard.yaw,
+      pitch: axisSources.keyboard.pitch,
+      activeKeys: Array.from(thrustKeys),
+    });
     applyInputs();
   };
 
@@ -185,6 +224,15 @@ export function createFlightControls({
     const yaw = clamp(shaped.x, -1, 1);
     axisSources.leftStick.pitch = pitch;
     axisSources.leftStick.yaw = yaw;
+    logTelemetry('[flight-controls] left stick', {
+      yaw,
+      pitch,
+      raw: shaped.raw,
+      rawMagnitude: shaped.rawMagnitude,
+      magnitude: shaped.magnitude,
+      pointerType: context.pointerType ?? null,
+      isActive: Boolean(context.isActive),
+    });
     applyInputs();
   };
 
@@ -201,6 +249,15 @@ export function createFlightControls({
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
     analogLookState.isFollowMode = isFollowMode;
+    logTelemetry('[flight-controls] right stick look', {
+      look: { x: analogLookState.x, y: analogLookState.y },
+      pointerType,
+      isActive: analogLookState.isActive,
+      isFollowMode,
+      raw: shaped.raw,
+      rawMagnitude: shaped.rawMagnitude,
+      magnitude: shaped.magnitude,
+    });
   };
 
   const resetLookTouchJoystick = () => {
@@ -354,6 +411,12 @@ export function createFlightControls({
   const handlePointerMove = (event) => {
     if (document.pointerLockElement === canvas) {
       const pitchSign = isPitchInverted ? -1 : 1;
+      logTelemetry('[flight-controls] pointer-lock look', {
+        pointerType: event.pointerType || 'mouse',
+        movementX: event.movementX,
+        movementY: event.movementY,
+        pitchSign,
+      });
       flightController.addLookDelta(event.movementX, event.movementY * pitchSign);
     }
   };
@@ -401,6 +464,25 @@ export function createFlightControls({
     const lookY = analogLookState.y * (isPitchInverted ? -1 : 1);
     if (lookX === 0 && lookY === 0) {
       return;
+    }
+    if (
+      lookX !== telemetryState.lastLook.x ||
+      lookY !== telemetryState.lastLook.y ||
+      analogLookState.pointerType !== telemetryState.lastLook.pointerType ||
+      analogLookState.isActive !== telemetryState.lastLook.isActive
+    ) {
+      telemetryState.lastLook = {
+        x: lookX,
+        y: lookY,
+        pointerType: analogLookState.pointerType,
+        isActive: analogLookState.isActive,
+      };
+      logTelemetry('[flight-controls] analog look apply', {
+        look: { x: lookX, y: lookY },
+        pointerType: analogLookState.pointerType,
+        isActive: analogLookState.isActive,
+        limitedDelta,
+      });
     }
     flightController.addLookDelta(
       lookX * analogLookSpeed * limitedDelta,
