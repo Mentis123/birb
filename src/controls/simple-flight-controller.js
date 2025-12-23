@@ -65,7 +65,7 @@ export class SimpleFlightController {
     const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion);
     const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
       rightAxis,
-      -pitchDelta // Negative for intuitive up/down
+      pitchDelta
     );
 
     this.quaternion.premultiply(yawQuat).multiply(pitchQuat).normalize();

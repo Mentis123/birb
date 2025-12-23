@@ -1,0 +1,4 @@
+node_modules/*
+!node_modules/three/
+!node_modules/three/index.js
+npm-debug.log*
