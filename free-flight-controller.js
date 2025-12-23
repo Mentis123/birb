@@ -56,6 +56,7 @@ export class FreeFlightController {
     this._up = new Vector3(0, 1, 0);
     this._localUp = new Vector3(0, 1, 0);
     this._acceleration = new Vector3();
+    this._velocityForward = new Vector3(0, 0, -1); // Dedicated vector for velocity direction
     this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
     this._pitchQuaternion = new Quaternion();
@@ -256,8 +257,17 @@ export class FreeFlightController {
     // Start with the look quaternion as the base orientation
     this.quaternion.copy(this.lookQuaternion);
 
-    // Get the forward direction AFTER rotation is applied
-    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    // Calculate the velocity forward direction using a DEDICATED vector
+    // This prevents any accidental modification from other calculations
+    const velocityForward = this._velocityForward.set(0, 0, -1).applyQuaternion(this.lookQuaternion);
+
+    // For spherical worlds, ensure forward is tangent to the sphere (perpendicular to up)
+    // This prevents any drift in the vertical component of the forward direction
+    if (this._sphereCenter) {
+      const upComponent = velocityForward.dot(up);
+      velocityForward.addScaledVector(up, -upComponent);
+    }
+    velocityForward.normalize();
 
     // --- STREAMLINED KINEMATICS ---
     const targetSpeed = Math.min(
@@ -276,7 +286,7 @@ export class FreeFlightController {
 
     // Compute the target velocity based on facing direction
     const targetVelocity = this._acceleration
-      .copy(forward)
+      .copy(velocityForward)
       .multiplyScalar(this.forwardSpeed)
       .addScaledVector(up, this.verticalVelocity);
 
