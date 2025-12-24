@@ -107,3 +107,86 @@ test('FreeFlightController pitch changes altitude', () => {
   assert.ok(controller.position.y > startY, `altitude should increase when pitching up, got ${controller.position.y}`);
   assert.ok(controller.verticalVelocity > 0, `vertical velocity should be positive, got ${controller.verticalVelocity}`);
 });
+
+// Test spherical world mode
+test('FreeFlightController works correctly with sphere center set', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 100, 0),  // Start high above sphere center
+  });
+
+  // Set sphere center at origin
+  controller.setSphereCenter(new THREE.Vector3(0, 0, 0));
+
+  // Fly straight for a bit
+  for (let i = 0; i < 10; i++) {
+    controller.update(0.05);
+  }
+  const startPos = controller.position.clone();
+
+  // Turn right
+  controller.setInputs({ yaw: -1, pitch: 0 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  // Fly straight
+  controller.setInputs({ yaw: 0, pitch: 0 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  // Velocity should follow facing direction
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+  const velocityDir = controller.velocity.clone().normalize();
+
+  // In spherical mode, forward is projected to be tangent to sphere
+  // So we compare the horizontal components
+  forward.y = 0;
+  velocityDir.y = 0;
+  if (forward.lengthSq() > 0.01 && velocityDir.lengthSq() > 0.01) {
+    forward.normalize();
+    velocityDir.normalize();
+    const alignment = forward.dot(velocityDir);
+    assert.ok(alignment > 0.85, `spherical mode: velocity should follow facing, alignment = ${alignment}`);
+  }
+
+  // Position should have moved (not stuck in one direction)
+  const diff = controller.position.clone().sub(startPos);
+  const moved = diff.length();
+  assert.ok(moved > 5, `bird should have moved significantly, moved = ${moved}`);
+});
+
+// Critical test: position displacement matches facing direction
+test('FreeFlightController position moves in facing direction after turn', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+  });
+
+  // First turn 90 degrees right (yaw = -1 turns right in this system)
+  controller.setInputs({ yaw: -1, pitch: 0 });
+  for (let i = 0; i < 30; i++) {  // 1.5 seconds of turning
+    controller.update(0.05);
+  }
+
+  // Stop turning and record position
+  controller.setInputs({ yaw: 0, pitch: 0 });
+  const posAfterTurn = controller.position.clone();
+
+  // Now fly straight for 1 second
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  const posAfterFlight = controller.position.clone();
+  const displacement = posAfterFlight.clone().sub(posAfterTurn);
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+
+  // Displacement should be roughly in the forward direction
+  displacement.y = 0;  // Ignore vertical component
+  forward.y = 0;
+  displacement.normalize();
+  forward.normalize();
+
+  const alignment = displacement.dot(forward);
+  assert.ok(alignment > 0.9, `position should move in facing direction, alignment = ${alignment}`);
+});
