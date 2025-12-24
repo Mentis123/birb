@@ -230,31 +230,16 @@ export class FreeFlightController {
     this._pendingYaw = 0;
     this._pendingPitch = 0;
 
-    // Apply yaw rotation around LOCAL up axis
-    if (totalYawDelta !== 0) {
-      this._yawQuaternion.setFromAxisAngle(up, totalYawDelta);
-      this.quaternion.premultiply(this._yawQuaternion);
-    }
+    // Apply yaw around local up (premultiply = world space rotation)
+    this._yawQuaternion.setFromAxisAngle(up, totalYawDelta);
 
-    // Apply pitch rotation around the LOCAL horizontal right axis
-    if (totalPitchDelta !== 0) {
-      // Get current forward direction
-      const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
-      // Project forward onto local horizontal plane (perpendicular to local up)
-      const upComponent = forward.dot(up);
-      const horizontalForward = this._up.copy(forward).addScaledVector(up, -upComponent);
-      const horizontalLength = horizontalForward.length();
+    // Apply pitch around local right axis (multiply = local space rotation)
+    // This matches SimpleFlightController's working pattern
+    const rightAxis = this._right.set(1, 0, 0).applyQuaternion(this.quaternion);
+    this._pitchQuaternion.setFromAxisAngle(rightAxis, totalPitchDelta);
 
-      if (horizontalLength > 0.001) {
-        horizontalForward.divideScalar(horizontalLength);
-        // Right axis: horizontalForward × up gives proper right-hand side
-        const right = this._right.crossVectors(horizontalForward, up).normalize();
-        this._pitchQuaternion.setFromAxisAngle(right, totalPitchDelta);
-        this.quaternion.premultiply(this._pitchQuaternion);
-      }
-    }
-
-    this.quaternion.normalize();
+    // Combine: yaw in world space, pitch in local space
+    this.quaternion.premultiply(this._yawQuaternion).multiply(this._pitchQuaternion).normalize();
 
     // --- CALCULATE VELOCITY FROM FACING DIRECTION ---
     // This is the key fix: velocity directly follows quaternion (like SimpleFlightController)
