@@ -59,6 +59,11 @@ The correct rotation is:
 - Procedural model forward: +X (needs 90° counter-clockwise rotation to face -Z)
 - The code now explicitly sets `guessedForward = (-1, 0, 0)` for GLB models
 
+**Dec 2025 Fix:**
+The GLB orientation fix was inadvertently reverted. The code was incorrectly assuming GLB faces -Z
+(identity transform), but it actually faces -X. Fixed in index.html `positionBirbModel()` by
+setting `guessedForward = new THREE.Vector3(-1, 0, 0)` for GLB models.
+
 ---
 
 ## Issue 2: Climbing Behavior on Joystick Push-Up (Resolved)
