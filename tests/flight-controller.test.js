@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as THREE from 'three';
 import { runFlightHarness, forwardFromQuaternion } from './helpers/flight-harness.js';
 import { SimpleFlightController } from '../src/controls/simple-flight-controller.js';
+import { FreeFlightController } from '../free-flight-controller.js';
 
 const round = (value, places = 6) => Number(value.toFixed(places));
 
@@ -60,4 +62,48 @@ test('combined yaw and pitch apply in the correct order', () => {
   assert.ok(Math.abs(round(forward.x, 3) + 0.33) < 0.02, 'yaw should push left');
   assert.ok(Math.abs(round(forward.y, 3) - 0.217) < 0.01, 'pitch should lift relative to yawed axis');
   assert.ok(Math.abs(round(forward.z, 3) + 0.919) < 0.01, 'forward should retain forward weight');
+});
+
+// Test FreeFlightController specifically (used in main game)
+test('FreeFlightController velocity follows facing direction during turns', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+  });
+
+  // Fly straight for a bit
+  for (let i = 0; i < 10; i++) {
+    controller.update(0.05);
+  }
+
+  // Turn right (yaw = 1) for 1 second
+  controller.setInputs({ yaw: 1, pitch: 0 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  // Check velocity follows facing direction
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion).normalize();
+  const velocityDir = controller.velocity.clone().normalize();
+  const alignment = forward.dot(velocityDir);
+
+  assert.ok(alignment > 0.95, `velocity should follow facing direction, got alignment ${alignment}`);
+  // Position should have moved to the right (positive X) since we turned right
+  assert.ok(controller.position.x > 0, `position.x should be positive after turning right, got ${controller.position.x}`);
+});
+
+test('FreeFlightController pitch changes altitude', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+  });
+
+  const startY = controller.position.y;
+
+  // Pitch up for 1 second
+  controller.setInputs({ yaw: 0, pitch: 1 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  assert.ok(controller.position.y > startY, `altitude should increase when pitching up, got ${controller.position.y}`);
+  assert.ok(controller.verticalVelocity > 0, `vertical velocity should be positive, got ${controller.verticalVelocity}`);
 });
