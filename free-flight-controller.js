@@ -103,6 +103,8 @@ export class FreeFlightController {
     this._pendingYaw = 0;
     this._pendingPitch = 0;
 
+    this._yawOnlyMode = false;
+
     this.bank = 0;
     this.pitch = 0;
     this.visualPitch = 0;
@@ -145,6 +147,10 @@ export class FreeFlightController {
     if (!this.frozen) {
       this._frozenInitialized = false;
     }
+  }
+
+  setYawOnlyMode(isActive) {
+    this._yawOnlyMode = Boolean(isActive);
   }
 
   setSprintActive(isActive) {
@@ -209,7 +215,9 @@ export class FreeFlightController {
       deltaTime = 0;
     }
 
-    if (this.frozen) {
+    const isYawOnlyFrozen = this.frozen && this._yawOnlyMode;
+
+    if (this.frozen && !isYawOnlyFrozen) {
       if (!this._frozenInitialized) {
         this.position.copy(this._initialPosition);
         this.quaternion.copy(this._initialQuaternion);
@@ -253,11 +261,13 @@ export class FreeFlightController {
 
     // --- COMBINED ROTATION FROM ALL SOURCES ---
     // Combine input.yaw with pending look delta (from mouse/touch)
-    const pitchInput = this.invertPitch ? -this.input.pitch : this.input.pitch;
+    const pitchInput = isYawOnlyFrozen ? 0 : (this.invertPitch ? -this.input.pitch : this.input.pitch);
 
     // Total yaw = input-based yaw + accumulated look delta
     const totalYawDelta = (-this.input.yaw * YAW_RATE * deltaTime) + this._pendingYaw;
-    const totalPitchDelta = (pitchInput * PITCH_RATE * deltaTime) + this._pendingPitch;
+    const totalPitchDelta = isYawOnlyFrozen
+      ? 0
+      : (pitchInput * PITCH_RATE * deltaTime) + this._pendingPitch;
 
     // Clear pending deltas after consuming
     this._pendingYaw = 0;
@@ -302,56 +312,62 @@ export class FreeFlightController {
     }
 
     // --- STREAMLINED KINEMATICS ---
-    const previousForwardSpeed = this.forwardSpeed;
-    const targetSpeed = Math.min(
-      MAX_FORWARD_SPEED,
-      BASE_FORWARD_SPEED * effectiveThrottle,
-    );
+    if (isYawOnlyFrozen) {
+      this.forwardSpeed = 0;
+      this.verticalVelocity = 0;
+      this.velocity.set(0, 0, 0);
+    } else {
+      const previousForwardSpeed = this.forwardSpeed;
+      const targetSpeed = Math.min(
+        MAX_FORWARD_SPEED,
+        BASE_FORWARD_SPEED * effectiveThrottle,
+      );
 
-    if (this.forwardSpeed < targetSpeed) {
-      this.forwardSpeed = Math.min(targetSpeed, this.forwardSpeed + SPEED_RAMP * deltaTime);
-    } else if (this.forwardSpeed > targetSpeed) {
-      this.forwardSpeed = Math.max(targetSpeed, this.forwardSpeed - SPEED_RAMP * deltaTime * 0.6);
+      if (this.forwardSpeed < targetSpeed) {
+        this.forwardSpeed = Math.min(targetSpeed, this.forwardSpeed + SPEED_RAMP * deltaTime);
+      } else if (this.forwardSpeed > targetSpeed) {
+        this.forwardSpeed = Math.max(targetSpeed, this.forwardSpeed - SPEED_RAMP * deltaTime * 0.6);
+      }
+
+      const previousVerticalVelocity = this.verticalVelocity;
+      const verticalVelocityUnclamped = this.verticalVelocity + (pitchInput * LIFT_ACCELERATION * deltaTime);
+      this.verticalVelocity = clamp(
+        verticalVelocityUnclamped,
+        -MAX_VERTICAL_SPEED,
+        MAX_VERTICAL_SPEED,
+        verticalVelocityUnclamped,
+      );
+
+      this._logFlightState('velocity-prep', {
+        forward: forward.toArray(),
+        targetSpeed,
+        forwardSpeed: {
+          previous: previousForwardSpeed,
+          next: this.forwardSpeed,
+        },
+        verticalVelocity: {
+          previous: previousVerticalVelocity,
+          unclamped: verticalVelocityUnclamped,
+          clamped: this.verticalVelocity,
+        },
+        throttle: this.throttle,
+        effectiveThrottle,
+      });
+
+      // Set velocity directly from facing direction (the key fix!)
+      this.velocity.copy(forward).multiplyScalar(this.forwardSpeed);
+      this.velocity.addScaledVector(up, this.verticalVelocity);
+
+      this._logFlightState('velocity-assigned', {
+        velocity: this.velocity.toArray(),
+        forward: forward.toArray(),
+        forwardSpeed: this.forwardSpeed,
+        verticalVelocity: this.verticalVelocity,
+        localUp: up.toArray(),
+      });
+
+      this.position.addScaledVector(this.velocity, deltaTime);
     }
-
-    const previousVerticalVelocity = this.verticalVelocity;
-    const verticalVelocityUnclamped = this.verticalVelocity + (pitchInput * LIFT_ACCELERATION * deltaTime);
-    this.verticalVelocity = clamp(
-      verticalVelocityUnclamped,
-      -MAX_VERTICAL_SPEED,
-      MAX_VERTICAL_SPEED,
-      verticalVelocityUnclamped,
-    );
-
-    this._logFlightState('velocity-prep', {
-      forward: forward.toArray(),
-      targetSpeed,
-      forwardSpeed: {
-        previous: previousForwardSpeed,
-        next: this.forwardSpeed,
-      },
-      verticalVelocity: {
-        previous: previousVerticalVelocity,
-        unclamped: verticalVelocityUnclamped,
-        clamped: this.verticalVelocity,
-      },
-      throttle: this.throttle,
-      effectiveThrottle,
-    });
-
-    // Set velocity directly from facing direction (the key fix!)
-    this.velocity.copy(forward).multiplyScalar(this.forwardSpeed);
-    this.velocity.addScaledVector(up, this.verticalVelocity);
-
-    this._logFlightState('velocity-assigned', {
-      velocity: this.velocity.toArray(),
-      forward: forward.toArray(),
-      forwardSpeed: this.forwardSpeed,
-      verticalVelocity: this.verticalVelocity,
-      localUp: up.toArray(),
-    });
-
-    this.position.addScaledVector(this.velocity, deltaTime);
 
     // --- VISUAL OUTPUT (banking, visual pitch) ---
     // Copy base quaternion for visual, then apply banking
@@ -429,6 +445,7 @@ export class FreeFlightController {
     this.elapsed = 0;
     this._pendingYaw = 0;
     this._pendingPitch = 0;
+    this._yawOnlyMode = false;
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);

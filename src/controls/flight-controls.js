@@ -141,6 +141,7 @@ export function createFlightControls({
   const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
   let isPitchInverted = Boolean(invertPitch);
   let isFrozen = Boolean(frozen);
+  const yawOnlyState = { yaw: 0, isActive: false };
   const logTelemetry = createTelemetryLogger(telemetryLogger);
   const telemetryState = {
     lastAxes: { yaw: null, pitch: null },
@@ -175,6 +176,7 @@ export function createFlightControls({
 
   const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
   const isControlsFrozen = () => Boolean(isFrozen);
+  const isYawOnlyRotation = () => Boolean(yawOnlyState.isActive);
 
   const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
@@ -182,9 +184,10 @@ export function createFlightControls({
   };
 
   const applyInputs = () => {
-    if (isControlsFrozen()) {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
       return;
     }
+    flightController.setYawOnlyMode?.(false);
     const yaw = combineAxis('yaw');
     const pitch = combineAxis('pitch');
     if (typeof flightController.setInputs === 'function') {
@@ -225,7 +228,7 @@ export function createFlightControls({
   };
 
   const handleLeftStickChange = (value, context = {}) => {
-    if (isControlsFrozen()) {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
       return;
     }
     const shaped = shapeStickWithContext(value, context, yawPitchShaping);
@@ -245,8 +248,42 @@ export function createFlightControls({
     applyInputs();
   };
 
+  const handleYawOnlyAxis = (x, context = {}) => {
+    const shaped = shapeStickWithContext({ x, y: 0 }, context, yawPitchShaping);
+    const yaw = clamp(shaped.x, -1, 1);
+    const isActive = Boolean(context.isActive ?? shaped.rawMagnitude > 0);
+    yawOnlyState.yaw = yaw;
+    yawOnlyState.isActive = isActive;
+    flightController.setYawOnlyMode?.(isActive);
+
+    if (
+      isActive &&
+      typeof document !== 'undefined' &&
+      document.pointerLockElement === canvas &&
+      typeof document.exitPointerLock === 'function'
+    ) {
+      document.exitPointerLock();
+    }
+
+    if (!isActive) {
+      applyInputs();
+      return;
+    }
+
+    flightController.setInputs({ yaw, pitch: 0 });
+    onThrustChange?.({ yaw, pitch: 0 });
+
+    logTelemetry('[flight-controls] yaw-only axis', {
+      yaw,
+      raw: shaped.raw,
+      rawMagnitude: shaped.rawMagnitude,
+      pointerType: context.pointerType ?? null,
+      isActive,
+    });
+  };
+
   const handleRightStickChange = (value, context = {}) => {
-    if (isControlsFrozen()) {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
       return;
     }
     const shaped = shapeStickWithContext(value, context, lookInputShaping);
@@ -281,7 +318,7 @@ export function createFlightControls({
   };
 
   const handleTouchJoystickMove = (data) => {
-    if (isControlsFrozen()) {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
       return;
     }
     const normalized = normalizeNippleData(data);
@@ -403,7 +440,7 @@ export function createFlightControls({
   setupTouchJoysticks();
 
   const handleKeyDown = (event) => {
-    if (isControlsFrozen()) {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
       return;
     }
     const { code } = event;
@@ -481,6 +518,10 @@ export function createFlightControls({
     analogLookState.y = 0;
     analogLookState.isActive = false;
     analogLookState.pointerType = null;
+
+    yawOnlyState.yaw = 0;
+    yawOnlyState.isActive = false;
+    flightController.setYawOnlyMode?.(false);
 
     detachLookJoystick();
 
@@ -562,6 +603,9 @@ export function createFlightControls({
       teardownTouchJoysticks();
       resetInputs({ releasePointerLock: false });
     } else {
+      yawOnlyState.yaw = 0;
+      yawOnlyState.isActive = false;
+      flightController.setYawOnlyMode?.(false);
       setupTouchJoysticks();
     }
   };
@@ -575,6 +619,17 @@ export function createFlightControls({
     },
     setFrozen,
     reset: resetInputs,
+    setYawOnlyAxis: (x, context) => handleYawOnlyAxis(x, context),
+    setYawOnlyMode: (isActive) => {
+      yawOnlyState.isActive = Boolean(isActive);
+      if (!yawOnlyState.isActive) {
+        yawOnlyState.yaw = 0;
+      }
+      flightController.setYawOnlyMode?.(yawOnlyState.isActive);
+      if (!yawOnlyState.isActive) {
+        applyInputs();
+      }
+    },
     dispose,
   };
 }
