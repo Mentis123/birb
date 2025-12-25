@@ -169,10 +169,16 @@ export class FreeFlightController {
   setSphereCenter(center) {
     if (center === null || center === undefined) {
       this._sphereCenter = null;
+      // Reset to world up for flat world
+      this._previousUp.set(0, 1, 0);
       return;
     }
     if (typeof center.clone === 'function') {
       this._sphereCenter = center.clone();
+      // Update _previousUp to match new local up direction
+      // This prevents unwanted quaternion realignment on the next frame
+      this._computeLocalUp();
+      this._previousUp.copy(this._localUp);
     }
   }
 
@@ -455,7 +461,7 @@ export class FreeFlightController {
     this.bank = 0;
     this.pitch = 0;
     this.visualPitch = 0;
-    this.forwardSpeed = BASE_FORWARD_SPEED;
+    this.forwardSpeed = 0;
     this.verticalVelocity = 0;
     this.elapsed = 0;
     this._pendingYaw = 0;

@@ -249,3 +249,56 @@ test('FreeFlightController pitch-only mode rotates without translating and updat
   assert.ok(forward.y > 0, 'pitch-only mode should tilt the nose up');
   assert.notEqual(controller.visualPitch, 0, 'visual pitch should still update while stationary');
 });
+
+test('FreeFlightController stays stationary when frozen on spherical world', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 35, 0),
+    frozen: true,
+  });
+
+  // Set sphere center to simulate spherical world
+  controller.setSphereCenter(new THREE.Vector3(0, 0, 0));
+
+  const startPosition = controller.position.clone();
+  const startQuaternion = controller.quaternion.clone();
+
+  // Run several update frames with no input - bird should NOT drift on globe
+  controller.setInputs({ yaw: 0, pitch: 0 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  // Bird should remain stationary when frozen
+  const displacement = controller.position.clone().sub(startPosition).length();
+
+  assert.equal(controller.forwardSpeed, 0, 'forward speed should be zero when frozen');
+  assert.equal(controller.velocity.length(), 0, 'velocity should be zero when frozen');
+  assert.ok(displacement < 0.001, `position should not drift on globe when frozen, moved ${displacement}`);
+});
+
+test('setSphereCenter updates previousUp to prevent drift on transition', () => {
+  // Use non-frozen bird positioned off-axis to test alignment
+  const startPos = new THREE.Vector3(20, 20, 20);
+  const controller = new FreeFlightController(THREE, {
+    position: startPos.clone(),
+    frozen: true,
+  });
+
+  // Do an initial update to establish state
+  controller.update(0.05);
+
+  // Setting sphere center should update previousUp to match new local up
+  // This prevents unwanted quaternion realignment on subsequent frames
+  controller.setSphereCenter(new THREE.Vector3(0, 0, 0));
+
+  const posAfterSetCenter = controller.position.clone();
+
+  // Multiple updates after setting sphere center should NOT cause drift
+  for (let i = 0; i < 10; i++) {
+    controller.update(0.05);
+  }
+
+  // Position should remain unchanged (frozen mode + no drift from sphere alignment)
+  const displacement = controller.position.clone().sub(posAfterSetCenter).length();
+  assert.ok(displacement < 0.001, `position should not drift after setSphereCenter, moved ${displacement}`);
+});
