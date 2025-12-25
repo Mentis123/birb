@@ -190,3 +190,26 @@ test('FreeFlightController position moves in facing direction after turn', () =>
   const alignment = displacement.dot(forward);
   assert.ok(alignment > 0.9, `position should move in facing direction, alignment = ${alignment}`);
 });
+
+test('FreeFlightController yaw-only mode rotates and banks while frozen', () => {
+  const controller = new FreeFlightController(THREE, {
+    frozen: true,
+  });
+
+  const startPosition = controller.position.clone();
+  controller.setYawOnlyMode(true);
+  controller.setInputs({ yaw: 1, pitch: 0.5 });
+
+  controller.update(0.1);
+  const afterFirstUpdate = controller.quaternion.clone();
+  controller.update(0.1);
+
+  assert.ok(controller.velocity.length() === 0, 'velocity should stay zero while frozen yaw-only');
+  assert.ok(controller.forwardSpeed === 0, 'forward speed should remain zero while frozen');
+  const displacement = controller.position.clone().sub(startPosition).length();
+  assert.ok(displacement < 1e-6, 'position should not change while frozen yaw-only');
+
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(afterFirstUpdate);
+  assert.ok(Math.abs(forward.x) > 1e-6, 'yaw-only mode should rotate orientation');
+  assert.ok(controller.bank !== 0, 'bank should animate during yaw-only rotation');
+});
