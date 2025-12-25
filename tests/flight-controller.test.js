@@ -68,6 +68,7 @@ test('combined yaw and pitch apply in the correct order', () => {
 test('FreeFlightController velocity follows facing direction during turns', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,  // Enable flight
   });
 
   // Fly straight for a bit
@@ -94,6 +95,7 @@ test('FreeFlightController velocity follows facing direction during turns', () =
 test('FreeFlightController pitch changes altitude', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,  // Enable flight
   });
 
   const startY = controller.position.y;
@@ -112,6 +114,7 @@ test('FreeFlightController pitch changes altitude', () => {
 test('FreeFlightController works correctly with sphere center set', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 100, 0),  // Start high above sphere center
+    throttle: 1,  // Enable flight
   });
 
   // Set sphere center at origin
@@ -160,6 +163,7 @@ test('FreeFlightController works correctly with sphere center set', () => {
 test('FreeFlightController position moves in facing direction after turn', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,  // Enable flight
   });
 
   // First turn 90 degrees right (yaw = -1 turns right in this system)

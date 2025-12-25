@@ -91,7 +91,9 @@ export class FreeFlightController {
     this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
 
     this.lookSensitivity = options.lookSensitivity ?? LOOK_SENSITIVITY;
-    this.throttle = options.throttle ?? 1;
+    // Default throttle to 0 (stationary) - game code sets throttle > 0 to start flight
+    this._initialThrottle = options.throttle ?? 0;
+    this.throttle = this._initialThrottle;
     this.sprintMultiplier = options.sprintMultiplier ?? 1.4;
     this.isSprinting = false;
     // When false (default), pushing up/forward pitches the nose UP (push forward to fly up)
@@ -471,6 +473,7 @@ export class FreeFlightController {
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);
+    this.throttle = this._initialThrottle;
     this.frozen = this._initialFrozen;
     this._frozenInitialized = false;
     // Reset previous up to match initial position's local up
