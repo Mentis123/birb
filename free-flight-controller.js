@@ -318,9 +318,15 @@ export class FreeFlightController {
     }
 
     // --- STREAMLINED KINEMATICS ---
+    const isStationaryDelta = deltaTime === 0;
+
     if (isYawOnlyFrozen || isPitchOnlyMode) {
       this.forwardSpeed = 0;
       this.verticalVelocity = 0;
+      this.velocity.set(0, 0, 0);
+    } else if (isStationaryDelta) {
+      // When no time has elapsed (paused, nested, or frame clamped),
+      // keep rotational updates but avoid reintroducing forward drift.
       this.velocity.set(0, 0, 0);
     } else {
       const previousForwardSpeed = this.forwardSpeed;
