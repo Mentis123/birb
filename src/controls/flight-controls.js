@@ -119,6 +119,7 @@ export function createFlightControls({
   getCameraMode,
   followMode,
   onThrustChange,
+  frozen = false,
   telemetryLogger = null,
 } = {}) {
   if (!flightController) {
@@ -139,6 +140,7 @@ export function createFlightControls({
   const lookInputShaping = normalizeShapingConfig(lookShaping, DEFAULT_LOOK_SHAPING);
   const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
   let isPitchInverted = Boolean(invertPitch);
+  let isFrozen = Boolean(frozen);
   const logTelemetry = createTelemetryLogger(telemetryLogger);
   const telemetryState = {
     lastAxes: { yaw: null, pitch: null },
@@ -172,6 +174,7 @@ export function createFlightControls({
   };
 
   const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
+  const isControlsFrozen = () => Boolean(isFrozen);
 
   const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
@@ -179,6 +182,9 @@ export function createFlightControls({
   };
 
   const applyInputs = () => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const yaw = combineAxis('yaw');
     const pitch = combineAxis('pitch');
     if (typeof flightController.setInputs === 'function') {
@@ -219,6 +225,9 @@ export function createFlightControls({
   };
 
   const handleLeftStickChange = (value, context = {}) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const shaped = shapeStickWithContext(value, context, yawPitchShaping);
     const pitch = clamp(shaped.y, -1, 1);
     const yaw = clamp(shaped.x, -1, 1);
@@ -237,6 +246,9 @@ export function createFlightControls({
   };
 
   const handleRightStickChange = (value, context = {}) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const shaped = shapeStickWithContext(value, context, lookInputShaping);
     const pointerType = context.pointerType ?? null;
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
@@ -269,6 +281,9 @@ export function createFlightControls({
   };
 
   const handleTouchJoystickMove = (data) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const normalized = normalizeNippleData(data);
     const payload = { x: normalized.raw.x, y: normalized.raw.y };
     const context = {
@@ -301,7 +316,26 @@ export function createFlightControls({
     touchJoystickState.nipple = { nipple, move, end };
   };
 
+  const teardownTouchJoysticks = () => {
+    detachLookJoystick();
+    if (touchJoystickState.manager) {
+      if (touchJoystickState.handlers) {
+        const { handleAdded, handleRemoved } = touchJoystickState.handlers;
+        touchJoystickState.manager.off('added', handleAdded);
+        touchJoystickState.manager.off('removed', handleRemoved);
+      }
+      touchJoystickState.manager.destroy();
+      touchJoystickState.manager = null;
+      touchJoystickState.handlers = null;
+    }
+    if (touchZoneElement?.classList) {
+      touchZoneElement.classList.remove('has-dynamic-joystick');
+    }
+  };
+
   const setupTouchJoysticks = () => {
+    if (isControlsFrozen()) return;
+    if (touchJoystickState.manager) return;
     const prefersCoarsePointer =
       typeof window !== 'undefined' && typeof window.matchMedia === 'function'
         ? window.matchMedia('(pointer: coarse)').matches
@@ -369,6 +403,9 @@ export function createFlightControls({
   setupTouchJoysticks();
 
   const handleKeyDown = (event) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const { code } = event;
     if (!code || isEditableTarget(event.target)) {
       return;
@@ -384,6 +421,9 @@ export function createFlightControls({
   };
 
   const handleKeyUp = (event) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const { code } = event;
     if (!code || isEditableTarget(event.target)) {
       return;
@@ -399,6 +439,9 @@ export function createFlightControls({
   };
 
   const handleCanvasClick = () => {
+    if (isControlsFrozen()) {
+      return;
+    }
     if (typeof window === 'undefined') return;
     if (!window.matchMedia('(pointer: fine)').matches) {
       return;
@@ -409,6 +452,9 @@ export function createFlightControls({
   };
 
   const handlePointerMove = (event) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     if (document.pointerLockElement === canvas) {
       const pitchSign = isPitchInverted ? -1 : 1;
       logTelemetry('[flight-controls] pointer-lock look', {
@@ -456,6 +502,9 @@ export function createFlightControls({
   canvas.addEventListener('click', handleCanvasClick);
 
   const applyAnalogLook = (deltaTime = 0) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
       return;
     }
@@ -491,6 +540,7 @@ export function createFlightControls({
   };
 
   const dispose = () => {
+    teardownTouchJoysticks();
     resetInputs({ releasePointerLock: true });
     if (typeof document !== 'undefined') {
       document.removeEventListener('keydown', handleKeyDown);
@@ -498,21 +548,22 @@ export function createFlightControls({
       document.removeEventListener('mousemove', handlePointerMove);
     }
     canvas.removeEventListener('click', handleCanvasClick);
-    if (touchJoystickState.manager) {
-      if (touchJoystickState.handlers) {
-        const { handleAdded, handleRemoved } = touchJoystickState.handlers;
-        touchJoystickState.manager.off('added', handleAdded);
-        touchJoystickState.manager.off('removed', handleRemoved);
-      }
-      touchJoystickState.manager.destroy();
-      touchJoystickState.manager = null;
-      touchJoystickState.nipple = null;
-    }
-    if (touchZoneElement?.classList) {
-      touchZoneElement.classList.remove('has-dynamic-joystick');
-    }
     leftThumbstick?.destroy?.();
     rightThumbstick?.destroy?.();
+  };
+
+  const setFrozen = (nextFrozen) => {
+    const shouldFreeze = Boolean(nextFrozen);
+    if (shouldFreeze === isControlsFrozen()) {
+      return;
+    }
+    isFrozen = shouldFreeze;
+    if (isControlsFrozen()) {
+      teardownTouchJoysticks();
+      resetInputs({ releasePointerLock: false });
+    } else {
+      setupTouchJoysticks();
+    }
   };
 
   applyInputs();
@@ -522,6 +573,7 @@ export function createFlightControls({
     setInvertPitch: (invert) => {
       isPitchInverted = Boolean(invert);
     },
+    setFrozen,
     reset: resetInputs,
     dispose,
   };
