@@ -104,6 +104,7 @@ export class FreeFlightController {
     this._pendingPitch = 0;
 
     this._yawOnlyMode = false;
+    this._pitchOnlyMode = false;
 
     this.bank = 0;
     this.pitch = 0;
@@ -151,6 +152,10 @@ export class FreeFlightController {
 
   setYawOnlyMode(isActive) {
     this._yawOnlyMode = Boolean(isActive);
+  }
+
+  setPitchOnlyMode(isActive) {
+    this._pitchOnlyMode = Boolean(isActive);
   }
 
   setSprintActive(isActive) {
@@ -216,8 +221,9 @@ export class FreeFlightController {
     }
 
     const isYawOnlyFrozen = this.frozen && this._yawOnlyMode;
+    const isPitchOnlyMode = this._pitchOnlyMode;
 
-    if (this.frozen && !isYawOnlyFrozen) {
+    if (this.frozen && !isYawOnlyFrozen && !isPitchOnlyMode) {
       if (!this._frozenInitialized) {
         this.position.copy(this._initialPosition);
         this.quaternion.copy(this._initialQuaternion);
@@ -264,7 +270,7 @@ export class FreeFlightController {
     const pitchInput = isYawOnlyFrozen ? 0 : (this.invertPitch ? -this.input.pitch : this.input.pitch);
 
     // Total yaw = input-based yaw + accumulated look delta
-    const totalYawDelta = (-this.input.yaw * YAW_RATE * deltaTime) + this._pendingYaw;
+    const totalYawDelta = isPitchOnlyMode ? 0 : ((-this.input.yaw * YAW_RATE * deltaTime) + this._pendingYaw);
     const totalPitchDelta = isYawOnlyFrozen
       ? 0
       : (pitchInput * PITCH_RATE * deltaTime) + this._pendingPitch;
@@ -312,7 +318,7 @@ export class FreeFlightController {
     }
 
     // --- STREAMLINED KINEMATICS ---
-    if (isYawOnlyFrozen) {
+    if (isYawOnlyFrozen || isPitchOnlyMode) {
       this.forwardSpeed = 0;
       this.verticalVelocity = 0;
       this.velocity.set(0, 0, 0);
@@ -398,7 +404,10 @@ export class FreeFlightController {
     // --- PROCEDURAL VISUAL PITCH ---
     const visualVerticalSpeed = this.velocity.dot(up);
     const currentSpeed = this.velocity.length();
-    const verticalRatio = currentSpeed > 0.1 ? visualVerticalSpeed / currentSpeed : 0;
+    const forwardVerticalRatio = forward.dot(up);
+    const verticalRatio = currentSpeed > 0.1
+      ? visualVerticalSpeed / currentSpeed
+      : forwardVerticalRatio;
     const targetVisualPitch = clamp(-verticalRatio * MAX_VISUAL_PITCH_ANGLE, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
 
     const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
@@ -446,6 +455,7 @@ export class FreeFlightController {
     this._pendingYaw = 0;
     this._pendingPitch = 0;
     this._yawOnlyMode = false;
+    this._pitchOnlyMode = false;
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);

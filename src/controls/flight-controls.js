@@ -141,6 +141,7 @@ export function createFlightControls({
   const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
   let isPitchInverted = Boolean(invertPitch);
   let isFrozen = Boolean(frozen);
+  let isStagedMode = false;
   const yawOnlyState = { yaw: 0, isActive: false };
   const logTelemetry = createTelemetryLogger(telemetryLogger);
   const telemetryState = {
@@ -177,6 +178,7 @@ export function createFlightControls({
   const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
   const isControlsFrozen = () => Boolean(isFrozen);
   const isYawOnlyRotation = () => Boolean(yawOnlyState.isActive);
+  const isStagedRotation = () => Boolean(isStagedMode);
 
   const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
@@ -229,6 +231,23 @@ export function createFlightControls({
 
   const handleLeftStickChange = (value, context = {}) => {
     if (isControlsFrozen() || isYawOnlyRotation()) {
+      return;
+    }
+    if (isStagedRotation()) {
+      const shaped = shapeStickWithContext(value, context, yawPitchShaping);
+      const pitch = clamp(shaped.y, -1, 1);
+      flightController.setPitchOnlyMode?.(true);
+      flightController.setInputs({ yaw: 0, pitch });
+      onThrustChange?.({ yaw: 0, pitch });
+
+      logTelemetry('[flight-controls] pitch-only axis', {
+        pitch,
+        raw: shaped.raw,
+        rawMagnitude: shaped.rawMagnitude,
+        magnitude: shaped.magnitude,
+        pointerType: context.pointerType ?? null,
+        isActive: Boolean(context.isActive ?? shaped.rawMagnitude > 0),
+      });
       return;
     }
     const shaped = shapeStickWithContext(value, context, yawPitchShaping);
@@ -509,7 +528,7 @@ export function createFlightControls({
     record.pitch = 0;
   };
 
-  const resetInputs = ({ releasePointerLock = false } = {}) => {
+  const resetInputs = ({ releasePointerLock = false, preserveStagedMode = false } = {}) => {
     thrustKeys.clear();
     Object.values(axisSources).forEach(resetAxisRecord);
     applyInputs();
@@ -522,6 +541,12 @@ export function createFlightControls({
     yawOnlyState.yaw = 0;
     yawOnlyState.isActive = false;
     flightController.setYawOnlyMode?.(false);
+    if (!preserveStagedMode) {
+      isStagedMode = false;
+      flightController.setPitchOnlyMode?.(false);
+    } else {
+      flightController.setPitchOnlyMode?.(isStagedMode);
+    }
 
     detachLookJoystick();
 
@@ -606,6 +631,8 @@ export function createFlightControls({
       yawOnlyState.yaw = 0;
       yawOnlyState.isActive = false;
       flightController.setYawOnlyMode?.(false);
+      isStagedMode = false;
+      flightController.setPitchOnlyMode?.(false);
       setupTouchJoysticks();
     }
   };
@@ -629,6 +656,20 @@ export function createFlightControls({
       if (!yawOnlyState.isActive) {
         applyInputs();
       }
+    },
+    setStagedMode: (isActive) => {
+      const nextValue = Boolean(isActive);
+      if (nextValue === isStagedMode) return;
+      isStagedMode = nextValue;
+      flightController.setPitchOnlyMode?.(isStagedMode);
+      if (!isStagedMode) {
+        applyInputs();
+        return;
+      }
+      resetInputs({ releasePointerLock: false, preserveStagedMode: true });
+      flightController.setPitchOnlyMode?.(true);
+      flightController.setInputs({ yaw: 0, pitch: 0 });
+      onThrustChange?.({ yaw: 0, pitch: 0 });
     },
     dispose,
   };
