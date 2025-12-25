@@ -191,6 +191,23 @@ test('FreeFlightController position moves in facing direction after turn', () =>
   assert.ok(alignment > 0.9, `position should move in facing direction, alignment = ${alignment}`);
 });
 
+test('FreeFlightController stays velocity-zero when delta time is zero', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+    throttle: 0.4,
+  });
+
+  // Establish a moving state
+  controller.update(0.1);
+  const movingSpeed = controller.velocity.length();
+  assert.ok(movingSpeed > 0.1, `expected non-zero velocity before pause, got ${movingSpeed}`);
+
+  // Zero-delta update should not resurrect forward drift
+  controller.update(0);
+
+  assert.equal(controller.velocity.length(), 0, 'velocity should be zero when no time has elapsed');
+});
+
 test('FreeFlightController yaw-only mode rotates and banks while frozen', () => {
   const controller = new FreeFlightController(THREE, {
     frozen: true,
