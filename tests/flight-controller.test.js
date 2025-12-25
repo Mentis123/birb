@@ -213,3 +213,22 @@ test('FreeFlightController yaw-only mode rotates and banks while frozen', () => 
   assert.ok(Math.abs(forward.x) > 1e-6, 'yaw-only mode should rotate orientation');
   assert.ok(controller.bank !== 0, 'bank should animate during yaw-only rotation');
 });
+
+test('FreeFlightController pitch-only mode rotates without translating and updates visual pitch', () => {
+  const controller = new FreeFlightController(THREE, {
+    frozen: false,
+  });
+
+  controller.setPitchOnlyMode(true);
+  controller.setInputs({ yaw: 0, pitch: 1 });
+
+  controller.update(0.1);
+
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+
+  assert.equal(controller.forwardSpeed, 0, 'forward speed should stay zero in pitch-only mode');
+  assert.equal(controller.verticalVelocity, 0, 'vertical velocity should stay zero in pitch-only mode');
+  assert.equal(controller.velocity.length(), 0, 'velocity vector should stay zero in pitch-only mode');
+  assert.ok(forward.y > 0, 'pitch-only mode should tilt the nose up');
+  assert.notEqual(controller.visualPitch, 0, 'visual pitch should still update while stationary');
+});
