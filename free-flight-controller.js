@@ -224,230 +224,27 @@ export class FreeFlightController {
   }
 
   update(deltaTime = 0) {
-    if (!Number.isFinite(deltaTime) || deltaTime < 0) {
-      deltaTime = 0;
-    }
-
-    const isYawOnlyFrozen = this.frozen && this._yawOnlyMode;
-    const isPitchOnlyMode = this._pitchOnlyMode;
-
-    if (this.frozen && !isYawOnlyFrozen && !isPitchOnlyMode) {
-      if (!this._frozenInitialized) {
-        this.position.copy(this._initialPosition);
-        this.quaternion.copy(this._initialQuaternion);
-        this._visualQuaternion.copy(this._initialQuaternion);
-        this._frozenInitialized = true;
-      }
-
-      this.velocity.set(0, 0, 0);
-      this.forwardSpeed = 0;
-      this.verticalVelocity = 0;
-      this._pendingYaw = 0;
-      this._pendingPitch = 0;
-
-      return {
-        position: this.position,
-        quaternion: this._visualQuaternion,
-      };
-    }
-
-    this._frozenInitialized = false;
-
-    this.elapsed += deltaTime;
-    const effectiveThrottle = this.getEffectiveThrottle();
-
-    // Use local up (world Y for flat, radial for spherical)
-    const up = this._computeLocalUp();
-
-    // On spherical worlds, re-align quaternion when local up changes.
-    // This keeps the forward direction tangent to the sphere surface as the bird moves.
-    if (this._sphereCenter) {
-      const upDot = this._previousUp.dot(up);
-      // Only re-align if the up direction has changed significantly
-      if (upDot < 0.99999) {
-        // Compute rotation from previous up to current up
-        this._alignQuaternion.setFromUnitVectors(this._previousUp, up);
-        // Apply this rotation to quaternion to maintain relative heading
-        this.quaternion.premultiply(this._alignQuaternion).normalize();
-      }
-      this._previousUp.copy(up);
-    }
-
-    // --- COMBINED ROTATION FROM ALL SOURCES ---
-    // Combine input.yaw with pending look delta (from mouse/touch)
-    const pitchInput = isYawOnlyFrozen ? 0 : (this.invertPitch ? -this.input.pitch : this.input.pitch);
-
-    // Total yaw = input-based yaw + accumulated look delta
-    const totalYawDelta = isPitchOnlyMode ? 0 : ((-this.input.yaw * YAW_RATE * deltaTime) + this._pendingYaw);
-    const totalPitchDelta = isYawOnlyFrozen
-      ? 0
-      : (pitchInput * PITCH_RATE * deltaTime) + this._pendingPitch;
-
-    // Clear pending deltas after consuming
+    // DEBUGGING: Completely disabled all movement and rotation
+    // Bird should be 100% stationary - if it still moves, the problem is elsewhere
+    this.velocity.set(0, 0, 0);
+    this.forwardSpeed = 0;
+    this.verticalVelocity = 0;
+    this.bank = 0;
+    this.visualPitch = 0;
     this._pendingYaw = 0;
     this._pendingPitch = 0;
 
-    // Apply yaw around local up (premultiply = world space rotation)
-    this._yawQuaternion.setFromAxisAngle(up, totalYawDelta);
-
-    // Apply pitch around local right axis (multiply = local space rotation)
-    // This matches SimpleFlightController's working pattern
-    const rightAxis = this._right.set(1, 0, 0).applyQuaternion(this.quaternion);
-    this._pitchQuaternion.setFromAxisAngle(rightAxis, totalPitchDelta);
-
-    // Combine: yaw in world space, pitch in local space
-    this.quaternion.premultiply(this._yawQuaternion).multiply(this._pitchQuaternion).normalize();
-
-    // --- CALCULATE VELOCITY FROM FACING DIRECTION ---
-    // This is the key fix: velocity directly follows quaternion (like SimpleFlightController)
-    const forward = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
-
-    this._logFlightState('rotation-applied', {
-      yawInput: this.input.yaw,
-      pitchInput,
-      invertPitch: this.invertPitch,
-      localUp: up.toArray(),
-      quaternion: this.quaternion.toArray(),
-      forwardRaw: forward.toArray(),
-      totalYawDelta,
-      totalPitchDelta,
-      isSpherical: Boolean(this._sphereCenter),
-    });
-
-    // For spherical worlds, ensure forward is tangent to the sphere (perpendicular to up)
-    if (this._sphereCenter) {
-      const upComponent = forward.dot(up);
-      forward.addScaledVector(up, -upComponent);
-      if (forward.lengthSq() > 1e-9) {
-        forward.normalize();
-      } else {
-        forward.set(0, 0, -1).applyQuaternion(this.quaternion);
-      }
-    }
-
-    // --- STREAMLINED KINEMATICS ---
-    const isStationaryDelta = deltaTime === 0;
-
-    if (isYawOnlyFrozen || isPitchOnlyMode) {
-      this.forwardSpeed = 0;
-      this.verticalVelocity = 0;
-      this.velocity.set(0, 0, 0);
-    } else if (isStationaryDelta) {
-      // When no time has elapsed (paused, nested, or frame clamped),
-      // keep rotational updates but avoid reintroducing forward drift.
-      this.velocity.set(0, 0, 0);
-    } else {
-      const previousForwardSpeed = this.forwardSpeed;
-      const targetSpeed = Math.min(
-        MAX_FORWARD_SPEED,
-        BASE_FORWARD_SPEED * effectiveThrottle,
-      );
-
-      if (this.forwardSpeed < targetSpeed) {
-        this.forwardSpeed = Math.min(targetSpeed, this.forwardSpeed + SPEED_RAMP * deltaTime);
-      } else if (this.forwardSpeed > targetSpeed) {
-        this.forwardSpeed = Math.max(targetSpeed, this.forwardSpeed - SPEED_RAMP * deltaTime * 0.6);
-      }
-
-      const previousVerticalVelocity = this.verticalVelocity;
-      const verticalVelocityUnclamped = this.verticalVelocity + (pitchInput * LIFT_ACCELERATION * deltaTime);
-      this.verticalVelocity = clamp(
-        verticalVelocityUnclamped,
-        -MAX_VERTICAL_SPEED,
-        MAX_VERTICAL_SPEED,
-        verticalVelocityUnclamped,
-      );
-
-      this._logFlightState('velocity-prep', {
-        forward: forward.toArray(),
-        targetSpeed,
-        forwardSpeed: {
-          previous: previousForwardSpeed,
-          next: this.forwardSpeed,
-        },
-        verticalVelocity: {
-          previous: previousVerticalVelocity,
-          unclamped: verticalVelocityUnclamped,
-          clamped: this.verticalVelocity,
-        },
-        throttle: this.throttle,
-        effectiveThrottle,
-      });
-
-      // Set velocity directly from facing direction (the key fix!)
-      this.velocity.copy(forward).multiplyScalar(this.forwardSpeed);
-      this.velocity.addScaledVector(up, this.verticalVelocity);
-
-      this._logFlightState('velocity-assigned', {
-        velocity: this.velocity.toArray(),
-        forward: forward.toArray(),
-        forwardSpeed: this.forwardSpeed,
-        verticalVelocity: this.verticalVelocity,
-        localUp: up.toArray(),
-      });
-
-      this.position.addScaledVector(this.velocity, deltaTime);
-    }
-
-    // --- VISUAL OUTPUT (banking, visual pitch) ---
-    // Copy base quaternion for visual, then apply banking
-    this._visualQuaternion.copy(this.quaternion);
-
-    // Bank into turns based on input (not rotation delta, for smoother visuals)
-    const yawInput = this.input.yaw;
-    const targetBank = clamp(yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
-
-    // Smooth interpolation (lerp) for banking
-    const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
-    this.bank += (targetBank - this.bank) * bankStep;
-    this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
-
-    // Apply visual bank rotation around the forward axis
-    const bankAxis = this._forward.set(0, 0, -1).applyQuaternion(this._visualQuaternion).normalize();
-    this._bankQuaternion.setFromAxisAngle(bankAxis, this.bank);
-    this._visualQuaternion.multiply(this._bankQuaternion);
-
-    this._logFlightState('visual-bank', {
-      yawInput,
-      targetBank,
-      bank: this.bank,
-      forwardPhysics: forward.toArray(),
-      visualQuaternion: this._visualQuaternion.toArray(),
-    });
-
-    // --- PROCEDURAL VISUAL PITCH ---
-    const visualVerticalSpeed = this.velocity.dot(up);
-    const currentSpeed = this.velocity.length();
-    const forwardVerticalRatio = forward.dot(up);
-    const verticalRatio = currentSpeed > 0.1
-      ? visualVerticalSpeed / currentSpeed
-      : forwardVerticalRatio;
-    const targetVisualPitch = clamp(-verticalRatio * MAX_VISUAL_PITCH_ANGLE, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
-
-    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
-    this.visualPitch += (targetVisualPitch - this.visualPitch) * pitchStep;
-    this.visualPitch = clamp(this.visualPitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.visualPitch);
-
-    const visualPitchAxis = this._right.set(1, 0, 0).applyQuaternion(this._visualQuaternion).normalize();
-    this._pitchQuaternion.setFromAxisAngle(visualPitchAxis, this.visualPitch);
-    this._visualQuaternion.multiply(this._pitchQuaternion);
-
-    this.pitch = 0;
-
+    // Return unchanged position and quaternion
     return {
       position: this.position,
-      quaternion: this._visualQuaternion,
+      quaternion: this.quaternion,
     };
   }
 
   getAmbientOffsets() {
-    const bob = Math.sin(this.elapsed * AMBIENT_BOB_SPEED) * AMBIENT_BOB_AMPLITUDE;
-    const roll = Math.sin(this.elapsed * AMBIENT_ROLL_SPEED) * AMBIENT_ROLL_AMPLITUDE;
-    const yaw = Math.cos(this.elapsed * AMBIENT_YAW_SPEED) * AMBIENT_YAW_AMPLITUDE;
-
-    this._ambientPosition.set(0, bob, 0);
-    this._ambientEuler.set(0, yaw, roll);
-    this._ambientQuaternion.setFromEuler(this._ambientEuler);
+    // DEBUGGING: Disabled all ambient motion (bobbing, rolling, yaw)
+    this._ambientPosition.set(0, 0, 0);
+    this._ambientQuaternion.set(0, 0, 0, 1); // Identity quaternion
 
     return {
       position: this._ambientPosition,
