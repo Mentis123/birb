@@ -83,6 +83,10 @@ export class FreeFlightController {
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
     this._sphereCenter = options.sphereCenter ? options.sphereCenter.clone() : null;
 
+    this._initialFrozen = Boolean(options.frozen ?? false);
+    this.frozen = this._initialFrozen;
+    this._frozenInitialized = false;
+
     this._initialPosition = options.position ? options.position.clone() : new Vector3(0, 0.65, 0);
     this._initialQuaternion = options.orientation ? options.orientation.clone() : new Quaternion();
 
@@ -134,6 +138,13 @@ export class FreeFlightController {
   setThrottle(value) {
     const nextValue = clamp(value, 0, 1, this.throttle);
     this.throttle = nextValue;
+  }
+
+  setFrozen(isFrozen) {
+    this.frozen = Boolean(isFrozen);
+    if (!this.frozen) {
+      this._frozenInitialized = false;
+    }
   }
 
   setSprintActive(isActive) {
@@ -197,6 +208,28 @@ export class FreeFlightController {
     if (!Number.isFinite(deltaTime) || deltaTime < 0) {
       deltaTime = 0;
     }
+
+    if (this.frozen) {
+      if (!this._frozenInitialized) {
+        this.position.copy(this._initialPosition);
+        this.quaternion.copy(this._initialQuaternion);
+        this._visualQuaternion.copy(this._initialQuaternion);
+        this._frozenInitialized = true;
+      }
+
+      this.velocity.set(0, 0, 0);
+      this.forwardSpeed = 0;
+      this.verticalVelocity = 0;
+      this._pendingYaw = 0;
+      this._pendingPitch = 0;
+
+      return {
+        position: this.position,
+        quaternion: this._visualQuaternion,
+      };
+    }
+
+    this._frozenInitialized = false;
 
     this.elapsed += deltaTime;
     const effectiveThrottle = this.getEffectiveThrottle();
@@ -399,6 +432,8 @@ export class FreeFlightController {
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);
+    this.frozen = this._initialFrozen;
+    this._frozenInitialized = false;
     // Reset previous up to match initial position's local up
     this._computeLocalUp();
     this._previousUp.copy(this._localUp);
