@@ -235,8 +235,9 @@ export class FreeFlightController {
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
 
-    // Get yaw input - positive = left stick = turn left
+    // Get inputs
     const yawInput = this.input.yaw;
+    const pitchInput = this.input.pitch;
 
     // Update heading as a scalar angle
     // Negative yawDelta so left stick (positive input) = turn left (decreasing heading in THREE.js)
@@ -255,12 +256,20 @@ export class FreeFlightController {
     this.bank += (targetBank - this.bank) * bankStep;
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
+    // Visual pitch - nose up when pushing up, nose down when pushing down
+    // Positive pitch input (up stick) = negative pitch angle = nose up in THREE.js
+    const targetPitch = -pitchInput * MAX_VISUAL_PITCH_ANGLE;
+
+    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
+    this.pitch += (targetPitch - this.pitch) * pitchStep;
+    this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.pitch);
+
     // Use YXZ Euler order to prevent axis contamination (Yaw-Pitch-Roll)
-    // Y = heading (yaw), X = pitch (0 for now), Z = bank (roll)
-    this._ambientEuler.set(0, this.heading, this.bank, 'YXZ');
+    // Y = heading (yaw), X = pitch, Z = bank (roll)
+    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
     this._visualQuaternion.setFromEuler(this._ambientEuler);
 
-    // Also update the physics quaternion (heading only, no bank)
+    // Also update the physics quaternion (heading only, no bank/pitch)
     this._ambientEuler.set(0, this.heading, 0, 'YXZ');
     this.quaternion.setFromEuler(this._ambientEuler);
 
