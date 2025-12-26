@@ -235,11 +235,12 @@ export class FreeFlightController {
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
 
-    // Get local up for yaw axis (world Y for flat, radial for spherical)
-    const up = this._computeLocalUp();
+    // Get yaw input - positive = left stick = turn left
+    const yawInput = this.input.yaw;
 
-    // Update heading as a scalar angle (avoids quaternion accumulation issues)
-    const yawDelta = -this.input.yaw * YAW_RATE * deltaTime;
+    // Update heading as a scalar angle
+    // Positive yaw input = positive heading change = counterclockwise = turn LEFT (correct in THREE.js)
+    const yawDelta = yawInput * YAW_RATE * deltaTime;
     this.heading += yawDelta;
 
     // Clear any pending look deltas
@@ -247,29 +248,21 @@ export class FreeFlightController {
     this._pendingPitch = 0;
 
     // Visual banking - wing dips on the side we're turning toward
-    // Negative bank for positive yaw input = left stick -> left wing down
-    const yawInput = this.input.yaw;
-    const targetBank = clamp(-yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+    // Left stick (positive yaw) = left wing down = negative roll in THREE.js
+    const targetBank = -yawInput * MAX_BANK_ANGLE;
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
-    // Build quaternion from scratch each frame to avoid accumulation errors
-    // Step 1: Apply heading rotation around local up axis
-    this._yawQuaternion.setFromAxisAngle(up, this.heading);
+    // Use YXZ Euler order to prevent axis contamination (Yaw-Pitch-Roll)
+    // Y = heading (yaw), X = pitch (0 for now), Z = bank (roll)
+    this._ambientEuler.set(0, this.heading, this.bank, 'YXZ');
+    this._visualQuaternion.setFromEuler(this._ambientEuler);
 
-    // Step 2: Get forward direction after heading is applied
-    this._forward.set(0, 0, -1).applyQuaternion(this._yawQuaternion);
-
-    // Step 3: Apply bank rotation around the forward axis
-    this._bankQuaternion.setFromAxisAngle(this._forward, this.bank);
-
-    // Step 4: Combine: first heading, then bank (order matters!)
-    this._visualQuaternion.copy(this._yawQuaternion).multiply(this._bankQuaternion);
-
-    // Also update the physics quaternion (without bank for consistency)
-    this.quaternion.copy(this._yawQuaternion);
+    // Also update the physics quaternion (heading only, no bank)
+    this._ambientEuler.set(0, this.heading, 0, 'YXZ');
+    this.quaternion.setFromEuler(this._ambientEuler);
 
     return {
       position: this.position,
