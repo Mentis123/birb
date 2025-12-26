@@ -257,8 +257,8 @@ export class FreeFlightController {
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Visual pitch - nose up when pushing up, nose down when pushing down
-    // Positive pitch input (up stick) = negative pitch angle = nose up in THREE.js
-    const targetPitch = -pitchInput * MAX_VISUAL_PITCH_ANGLE;
+    // Positive pitch input (up stick) = positive pitch angle = nose up
+    const targetPitch = pitchInput * MAX_VISUAL_PITCH_ANGLE;
 
     const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
     this.pitch += (targetPitch - this.pitch) * pitchStep;
