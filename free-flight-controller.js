@@ -239,8 +239,8 @@ export class FreeFlightController {
     const yawInput = this.input.yaw;
 
     // Update heading as a scalar angle
-    // Positive yaw input = positive heading change = counterclockwise = turn LEFT (correct in THREE.js)
-    const yawDelta = yawInput * YAW_RATE * deltaTime;
+    // Negative yawDelta so left stick (positive input) = turn left (decreasing heading in THREE.js)
+    const yawDelta = -yawInput * YAW_RATE * deltaTime;
     this.heading += yawDelta;
 
     // Clear any pending look deltas
