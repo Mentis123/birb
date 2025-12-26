@@ -224,20 +224,46 @@ export class FreeFlightController {
   }
 
   update(deltaTime = 0) {
-    // DEBUGGING: Completely disabled all movement and rotation
-    // Bird should be 100% stationary - if it still moves, the problem is elsewhere
+    if (!Number.isFinite(deltaTime) || deltaTime < 0) {
+      deltaTime = 0;
+    }
+
+    // Keep velocity at zero - no forward movement
     this.velocity.set(0, 0, 0);
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
-    this.bank = 0;
-    this.visualPitch = 0;
+
+    // Get local up for yaw axis
+    const up = this._computeLocalUp();
+
+    // Apply yaw rotation from input (turning left/right)
+    const yawDelta = -this.input.yaw * YAW_RATE * deltaTime;
+    if (yawDelta !== 0) {
+      this._yawQuaternion.setFromAxisAngle(up, yawDelta);
+      this.quaternion.premultiply(this._yawQuaternion).normalize();
+    }
+
+    // Clear any pending look deltas
     this._pendingYaw = 0;
     this._pendingPitch = 0;
 
-    // Return unchanged position and quaternion
+    // Visual banking - wing dips on the side we're turning toward
+    const yawInput = this.input.yaw;
+    const targetBank = clamp(yawInput * MAX_BANK_ANGLE, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+
+    const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
+    this.bank += (targetBank - this.bank) * bankStep;
+    this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
+
+    // Build visual quaternion with banking applied
+    this._visualQuaternion.copy(this.quaternion);
+    const bankAxis = this._forward.set(0, 0, -1).applyQuaternion(this._visualQuaternion).normalize();
+    this._bankQuaternion.setFromAxisAngle(bankAxis, this.bank);
+    this._visualQuaternion.multiply(this._bankQuaternion);
+
     return {
       position: this.position,
-      quaternion: this.quaternion,
+      quaternion: this._visualQuaternion,
     };
   }
 
