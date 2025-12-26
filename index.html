@@ -1670,10 +1670,11 @@
         if (sphericalWorld) {
           try {
             // Pass nestable positions from the environment to the nest system
+            // Use sphericalWorld.root instead of scene so nests rotate with the world
             const nestablePositions = sphericalWorld.nestablePositions || [];
             nestPointsSystem = createNestPointsSystem(
               THREE,
-              scene,
+              sphericalWorld.root,
               definition.id,
               SPHERE_RADIUS,
               nestablePositions
