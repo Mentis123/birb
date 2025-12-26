@@ -37,10 +37,33 @@ export class SimpleFlightController {
   }
 
   update(deltaTime) {
-    // DEBUGGING: Completely disabled all movement
-    // Bird should be 100% stationary
+    // No forward movement - position stays fixed
     this.velocity.set(0, 0, 0);
-    this.rollAngle = 0;
+
+    // Smooth the yaw input
+    this.smoothedYaw = THREE.MathUtils.damp(
+      this.smoothedYaw,
+      this.input.yaw,
+      this.yawResponse,
+      deltaTime,
+    );
+
+    // Apply yaw rotation (turning left/right)
+    const yawDelta = this.smoothedYaw * this.turnSpeed * deltaTime;
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      yawDelta
+    );
+    this.quaternion.premultiply(yawQuat).normalize();
+
+    // Visual banking - wing dips on the side we're turning toward
+    const targetRoll = -this.smoothedYaw * this.maxRoll;
+    this.rollAngle = THREE.MathUtils.damp(
+      this.rollAngle,
+      targetRoll,
+      this.rollResponse,
+      deltaTime,
+    );
 
     return {
       position: this.position.clone(),
