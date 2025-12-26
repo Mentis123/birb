@@ -120,8 +120,9 @@ function createNestMarker(THREE, config) {
 /**
  * Main nest points system
  * Now accepts nestable positions from the environment builder
+ * @param parentContainer - The parent to add nests to (typically sphericalWorld.root so nests rotate with the world)
  */
-export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius, nestablePositions = []) {
+export function createNestPointsSystem(THREE, parentContainer, environmentId, sphereRadius, nestablePositions = []) {
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
   const _hostBounds = new THREE.Box3();
   const _hostSize = new THREE.Vector3();
@@ -168,7 +169,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
 
   const container = new THREE.Group();
   container.name = 'nest-points';
-  scene.add(container);
+  parentContainer.add(container);
 
   const nests = [];
   let animationTime = 0;
@@ -337,8 +338,8 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
      * Dispose of resources
      */
     dispose() {
-      // Remove from scene first to prevent visual artifacts
-      scene.remove(container);
+      // Remove from parent first to prevent visual artifacts
+      parentContainer.remove(container);
 
       // Then dispose geometries and materials
       try {
