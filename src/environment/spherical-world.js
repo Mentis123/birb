@@ -247,7 +247,8 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     // If this is a nestable tree, calculate the nest position at the TOP of the canopy
     if (nestableTreeIndices.has(i)) {
       // Calculate the world position of the tree top
-      const treeTopLocalY = trunkHeight + canopyHeight - 0.2; // Top of canopy
+      // Cone tip is at: trunkHeight + canopyHeight - 0.1, add small offset to place nest ON TOP
+      const treeTopLocalY = trunkHeight + canopyHeight;
       const nestOffset = treeTopLocalY * scale; // Scale the local position
       const nestPos = pos.clone().add(up.clone().multiplyScalar(nestOffset));
 
@@ -470,8 +471,9 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     // If this is a nestable spire, calculate the nest position at the TOP
     if (nestableSpireIndices.has(i)) {
-      // Calculate the world position of the spire top
-      const spireTopOffset = height * scale; // Full height scaled
+      // Spire center is at pos + up*height/2, top extends up by height/2*scale
+      // So spire top = pos + up*height/2 + up*height/2*scale = pos + up*height/2*(1+scale)
+      const spireTopOffset = (height / 2) * (1 + scale);
       const nestPos = pos.clone().add(up.clone().multiplyScalar(spireTopOffset));
 
       nestablePositions.push({
@@ -656,7 +658,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     collisionSystem.addCollider(pos, baseRadius * scale * 1.2, 'mountain');
 
     if (nestablePeakIndices.has(i)) {
-      const nestHeight = (height + snowHeight * 0.6) * scale;
+      // Snow cap tip is at local Y = height + snowHeight - 0.15
+      // Place nest slightly above the peak
+      const nestHeight = (height + snowHeight) * scale;
       const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
 
       nestablePositions.push({

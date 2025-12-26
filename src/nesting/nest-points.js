@@ -86,18 +86,6 @@ function createNestMarker(THREE, config) {
   core.position.y = 0.15;
   group.add(core);
 
-  // Vertical beam effect (visible from afar)
-  const beamGeometry = new THREE.CylinderGeometry(0.08, 0.15, 3.0, 8);
-  const beamMaterial = new THREE.MeshBasicMaterial({
-    color: config.glowColor,
-    transparent: true,
-    opacity: 0.25,
-    depthWrite: false,
-  });
-  const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-  beam.position.y = 1.6;
-  group.add(beam);
-
   // Store references for animation and interaction
   group.userData.nest = nest;
   group.userData.nestMaterial = nestMaterial;
@@ -105,8 +93,6 @@ function createNestMarker(THREE, config) {
   group.userData.glowMaterial = glowMaterial;
   group.userData.core = core;
   group.userData.coreMaterial = coreMaterial;
-  group.userData.beam = beam;
-  group.userData.beamMaterial = beamMaterial;
   group.userData.baseEmissiveIntensity = config.emissiveIntensity;
   group.userData.baseGlowOpacity = 0.5;
   group.userData.baseCoreOpacity = 0.7;
@@ -234,7 +220,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
         const activePulse = isInRange ? (Math.sin(animationTime * 6) * 0.3 + 0.7) : 1.0;
 
         // Update materials
-        const { nestMaterial, glowMaterial, coreMaterial, beamMaterial } = nestGroup.userData;
+        const { nestMaterial, glowMaterial, coreMaterial } = nestGroup.userData;
         const baseEmissive = nestGroup.userData.baseEmissiveIntensity;
 
         // Emissive intensity with pulse and proximity boost
@@ -245,9 +231,6 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
 
         // Core glow
         coreMaterial.opacity = nestGroup.userData.baseCoreOpacity * (0.5 + pulse * 0.5) * intensityMultiplier * activePulse;
-
-        // Beam visibility increases when close
-        beamMaterial.opacity = 0.15 + (isGlowing ? 0.25 * intensityMultiplier : 0) + pulse * 0.1;
 
         // Slight bobbing animation for the core
         const core = nestGroup.userData.core;
