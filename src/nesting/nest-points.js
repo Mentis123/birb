@@ -134,6 +134,8 @@ function createNestMarker(THREE, config) {
  */
 export function createNestPointsSystem(THREE, parentContainer, environmentId, sphereRadius, nestablePositions = []) {
   console.log(`[NestSystem] Creating nests for ${environmentId}: ${nestablePositions.length} positions provided`);
+  console.log(`[NestSystem] Parent container: ${parentContainer ? parentContainer.name || 'unnamed' : 'NULL'}`);
+  console.log(`[NestSystem] Parent in scene: ${parentContainer?.parent ? 'yes' : 'no'}`);
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
   const _hostBounds = new THREE.Box3();
   const _hostSize = new THREE.Vector3();
