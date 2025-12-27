@@ -244,9 +244,15 @@ export class FreeFlightController {
     }
 
     // Update heading as a scalar angle
-    // Negative yawDelta so left stick (positive input) = turn left (decreasing heading in THREE.js)
+    // yawDelta sign: negative yawInput (stick left) -> positive delta -> heading increases -> turn left
+    //                positive yawInput (stick right) -> negative delta -> heading decreases -> turn right
     const yawDelta = -yawInput * YAW_RATE * deltaTime;
     this.heading += yawDelta;
+
+    // Normalize heading to [-PI, PI] to prevent floating-point precision issues over time
+    const TWO_PI = Math.PI * 2;
+    while (this.heading > Math.PI) this.heading -= TWO_PI;
+    while (this.heading < -Math.PI) this.heading += TWO_PI;
 
     // Clear any pending look deltas
     this._pendingYaw = 0;
@@ -287,8 +293,18 @@ export class FreeFlightController {
 
     if (canTranslate) {
       const throttle = this.getEffectiveThrottle();
-      const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
       this._computeLocalUp();
+
+      // Get forward direction from quaternion
+      const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
+
+      // On spherical worlds, project forward onto the tangent plane (perpendicular to local up)
+      // This ensures velocity follows the sphere surface, not a fixed world direction
+      if (this._sphereCenter) {
+        const dot = forwardDirection.dot(this._localUp);
+        forwardDirection.addScaledVector(this._localUp, -dot);
+      }
+      forwardDirection.normalize();
 
       const targetForwardSpeed = clamp(
         throttle * (BASE_FORWARD_SPEED + SPEED_RAMP),
