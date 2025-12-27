@@ -46,45 +46,65 @@ function createNestMarker(THREE, config) {
   const group = new THREE.Group();
   group.name = 'nest-marker';
 
-  // Main nest platform - a soft glowing disc/bowl shape
-  const nestGeometry = new THREE.CylinderGeometry(0.6, 0.4, 0.2, 16);
-  const nestMaterial = new THREE.MeshStandardMaterial({
+  // Main nest platform - a soft glowing disc/bowl shape (increased size for visibility)
+  const nestGeometry = new THREE.CylinderGeometry(1.2, 0.8, 0.4, 16);
+  // Use MeshBasicMaterial for guaranteed visibility (not affected by lighting)
+  const nestMaterial = new THREE.MeshBasicMaterial({
     color: config.color,
-    emissive: config.emissive,
-    emissiveIntensity: config.emissiveIntensity,
-    metalness: 0.2,
-    roughness: 0.4,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.95,
   });
   const nest = new THREE.Mesh(nestGeometry, nestMaterial);
   group.add(nest);
 
-  // Outer glow ring
-  const glowGeometry = new THREE.TorusGeometry(0.7, 0.12, 12, 32);
+  // Outer glow ring (increased size)
+  const glowGeometry = new THREE.TorusGeometry(1.4, 0.2, 12, 32);
   const glowMaterial = new THREE.MeshBasicMaterial({
     color: config.glowColor,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.7,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
   const glow = new THREE.Mesh(glowGeometry, glowMaterial);
   glow.rotation.x = Math.PI / 2;
-  glow.position.y = 0.1;
+  glow.position.y = 0.2;
   group.add(glow);
 
-  // Inner bright core
-  const coreGeometry = new THREE.SphereGeometry(0.25, 16, 12);
+  // Inner bright core (increased size)
+  const coreGeometry = new THREE.SphereGeometry(0.5, 16, 12);
   const coreMaterial = new THREE.MeshBasicMaterial({
     color: 0xffaa88,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.9,
     depthWrite: false,
   });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
-  core.position.y = 0.15;
+  core.position.y = 0.3;
   group.add(core);
+
+  // Tall beacon for visibility - a glowing column above the nest (made thicker)
+  const beaconHeight = 12.0;
+  const beaconGeometry = new THREE.CylinderGeometry(0.2, 0.4, beaconHeight, 8);
+  const beaconMaterial = new THREE.MeshBasicMaterial({
+    color: config.glowColor,
+    transparent: true,
+    opacity: 0.8,
+  });
+  const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+  beacon.position.y = beaconHeight / 2 + 0.5;
+  group.add(beacon);
+
+  // Beacon tip sphere for extra visibility (made larger)
+  const tipGeometry = new THREE.SphereGeometry(0.8, 12, 8);
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: config.color,
+    transparent: true,
+    opacity: 0.95,
+  });
+  const tip = new THREE.Mesh(tipGeometry, tipMaterial);
+  tip.position.y = beaconHeight + 1.0;
+  group.add(tip);
 
   // Store references for animation and interaction
   group.userData.nest = nest;
@@ -109,6 +129,9 @@ function createNestMarker(THREE, config) {
  * @param parentContainer - The parent to add nests to (typically sphericalWorld.root so nests rotate with the world)
  */
 export function createNestPointsSystem(THREE, parentContainer, environmentId, sphereRadius, nestablePositions = []) {
+  console.log(`[NestSystem] Creating nests for ${environmentId}: ${nestablePositions.length} positions provided`);
+  console.log(`[NestSystem] Parent container: ${parentContainer ? parentContainer.name || 'unnamed' : 'NULL'}`);
+  console.log(`[NestSystem] Parent in scene: ${parentContainer?.parent ? 'yes' : 'no'}`);
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
   const _hostBounds = new THREE.Box3();
   const _hostSize = new THREE.Vector3();
@@ -157,6 +180,19 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
   container.name = 'nest-points';
   parentContainer.add(container);
 
+  // Add a debug test beacon at a known position (should be visible from start)
+  // Bird starts at (0, 33, 0), this beacon is directly in front
+  const testBeaconGeometry = new THREE.SphereGeometry(2, 16, 12);
+  const testBeaconMaterial = new THREE.MeshBasicMaterial({
+    color: 0x00ff00, // Bright green
+    transparent: true,
+    opacity: 0.9,
+  });
+  const testBeacon = new THREE.Mesh(testBeaconGeometry, testBeaconMaterial);
+  testBeacon.position.set(0, 35, -10); // In front of starting position
+  container.add(testBeacon);
+  console.log('[NestSystem] Added test beacon at (0, 35, -10)');
+
   const nests = [];
   let animationTime = 0;
   let currentlyOccupiedNest = null;
@@ -167,6 +203,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
 
     // Position nest at the environment object's top
     nestGroup.position.copy(placement.position);
+    console.log(`[NestSystem] Nest ${index}: pos (${placement.position.x.toFixed(1)}, ${placement.position.y.toFixed(1)}, ${placement.position.z.toFixed(1)}), distance from origin: ${placement.position.length().toFixed(1)}`);
 
     // Orient nest to face outward from sphere center (surface normal)
     const up = placement.surfaceNormal.clone().normalize();
