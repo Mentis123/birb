@@ -8,7 +8,7 @@ export class SimpleFlightController {
     this.velocity = new THREE.Vector3();
 
     // Physics constants
-    this.speed = 2.5;              // Forward speed (constant)
+    this.speed = 2.7;              // Forward speed (constant)
     this.turnSpeed = Math.PI / 2;  // Radians per second
     this.pitchSpeed = Math.PI / 4; // Half of turn speed
     this.liftForce = 2.0;          // Upward lift from pitch
@@ -24,6 +24,8 @@ export class SimpleFlightController {
     this.smoothedYaw = 0;
     this.smoothedPitch = 0;
     this.rollAngle = 0;
+    this.yawAngle = 0;
+    this.pitchAngle = 0;
 
     this.invertPitch = false;
 
@@ -37,8 +39,15 @@ export class SimpleFlightController {
   }
 
   update(deltaTime) {
-    // No forward movement - position stays fixed
-    this.velocity.set(0, 0, 0);
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      this.velocity.set(0, 0, 0);
+      return {
+        position: this.position.clone(),
+        quaternion: this.quaternion.clone(),
+        velocity: this.velocity.clone(),
+        roll: this.rollAngle,
+      };
+    }
 
     // Smooth the yaw input
     this.smoothedYaw = THREE.MathUtils.damp(
@@ -48,13 +57,31 @@ export class SimpleFlightController {
       deltaTime,
     );
 
+    // Smooth the pitch input (with optional inversion)
+    const targetPitchInput = this.invertPitch ? -this.input.pitch : this.input.pitch;
+    this.smoothedPitch = THREE.MathUtils.damp(
+      this.smoothedPitch,
+      targetPitchInput,
+      this.pitchResponse,
+      deltaTime,
+    );
+
     // Apply yaw rotation (turning left/right)
     const yawDelta = this.smoothedYaw * this.turnSpeed * deltaTime;
-    const yawQuat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      yawDelta
-    );
-    this.quaternion.premultiply(yawQuat).normalize();
+    const pitchDelta = this.smoothedPitch * this.pitchSpeed * deltaTime;
+
+    this.yawAngle += yawDelta;
+    this.pitchAngle += pitchDelta;
+
+    // Update orientation from accumulated yaw/pitch (no roll baked into physics)
+    const tilt = new THREE.Euler(this.pitchAngle, this.yawAngle, 0, 'YXZ');
+    this.quaternion.setFromEuler(tilt);
+
+    // Compute forward velocity aligned with facing direction
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+    this.velocity.copy(forward).multiplyScalar(this.speed);
+
+    this.position.addScaledVector(this.velocity, deltaTime);
 
     // Visual banking - wing dips on the side we're turning toward
     const targetRoll = -this.smoothedYaw * this.maxRoll;
