@@ -1679,6 +1679,14 @@
               SPHERE_RADIUS,
               nestablePositions
             );
+
+            // DEBUG: Add test sphere directly to scene (not via sphericalWorld.root)
+            const testSphereGeom = new THREE.SphereGeometry(3, 16, 12);
+            const testSphereMat = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // Magenta
+            const testSphere = new THREE.Mesh(testSphereGeom, testSphereMat);
+            testSphere.position.set(5, 35, 5); // Near starting position
+            scene.add(testSphere);
+            console.log('[DEBUG] Added magenta test sphere to scene at (5, 35, 5)');
           } catch (nestError) {
             console.warn("Nest points creation failed:", nestError);
             nestPointsSystem = null;
