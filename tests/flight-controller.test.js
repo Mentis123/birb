@@ -281,6 +281,77 @@ test('FreeFlightController stays stationary when frozen on spherical world', () 
   assert.ok(displacement < 0.001, `position should not drift on globe when frozen, moved ${displacement}`);
 });
 
+test('FreeFlightController caps total velocity when climbing or diving', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,  // Full throttle
+  });
+
+  // Fly level first to establish baseline
+  controller.setInputs({ yaw: 0, pitch: 0 });
+  controller.update(0.05);
+  const levelSpeed = controller.velocity.length();
+
+  // Now pitch fully up (climb)
+  controller.setInputs({ yaw: 0, pitch: 1 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+  const climbSpeed = controller.velocity.length();
+
+  // Total speed when climbing should be capped (not exceed level flight speed)
+  assert.ok(
+    climbSpeed <= levelSpeed * 1.01,
+    `climbing speed (${climbSpeed}) should not exceed level speed (${levelSpeed})`
+  );
+
+  // Forward speed should be reduced when climbing
+  assert.ok(
+    controller.forwardSpeed < levelSpeed,
+    `forward speed (${controller.forwardSpeed}) should be less than level speed (${levelSpeed}) when climbing`
+  );
+
+  // Vertical velocity should be positive (climbing)
+  assert.ok(
+    controller.verticalVelocity > 0,
+    `vertical velocity (${controller.verticalVelocity}) should be positive when pitching up`
+  );
+});
+
+test('FreeFlightController allows steep dives with velocity capping', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 50, 0),
+    throttle: 1,  // Full throttle
+  });
+
+  // Pitch fully down (dive)
+  controller.setInputs({ yaw: 0, pitch: -1 });
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  // Calculate dive angle: arctan(verticalVelocity / forwardSpeed)
+  const diveAngleRad = Math.atan2(
+    Math.abs(controller.verticalVelocity),
+    controller.forwardSpeed
+  );
+  const diveAngleDeg = (diveAngleRad * 180) / Math.PI;
+
+  // With velocity capping, dive angle should be steeper than before
+  // Previously limited to ~27°, now should be ~45° or more
+  assert.ok(
+    diveAngleDeg > 35,
+    `dive angle (${diveAngleDeg}°) should be steep (> 35°) with velocity capping`
+  );
+
+  // Altitude should decrease (diving)
+  const startY = 50;
+  assert.ok(
+    controller.position.y < startY,
+    `position.y (${controller.position.y}) should be less than start (${startY}) when diving`
+  );
+});
+
 test('setSphereCenter updates previousUp to prevent drift on transition', () => {
   // Use non-frozen bird positioned off-axis to test alignment
   const startPos = new THREE.Vector3(20, 20, 20);
