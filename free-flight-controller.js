@@ -292,8 +292,18 @@ export class FreeFlightController {
 
     if (canTranslate) {
       const throttle = this.getEffectiveThrottle();
-      const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
       this._computeLocalUp();
+
+      // Get forward direction from quaternion
+      const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
+
+      // On spherical worlds, project forward onto the tangent plane (perpendicular to local up)
+      // This ensures velocity follows the sphere surface, not a fixed world direction
+      if (this._sphereCenter) {
+        const dot = forwardDirection.dot(this._localUp);
+        forwardDirection.addScaledVector(this._localUp, -dot);
+      }
+      forwardDirection.normalize();
 
       const targetForwardSpeed = clamp(
         throttle * (BASE_FORWARD_SPEED + SPEED_RAMP),
