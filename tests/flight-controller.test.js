@@ -115,19 +115,17 @@ test('FreeFlightController applies look deltas to heading and travel direction',
   assert.ok(controller.position.x > startPos.x, 'travel should follow the new heading after look input');
 });
 
-test('FreeFlightController retains look deltas when no time elapses', () => {
+test('FreeFlightController applies look deltas even when time is paused', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 5, 0),
     throttle: 1,
   });
 
   controller.addLookDelta(-80, 0);
-  controller.update(0); // Zero delta should not consume queued look
+  controller.update(0); // Rotation should still be processed for free-look
 
-  const headingBefore = controller.heading;
-  controller.update(0.05);
-
-  assert.ok(controller.heading < headingBefore, 'look delta should apply once time advances');
+  assert.ok(controller.heading < 0, 'look delta should rotate heading during idle updates');
+  assert.strictEqual(controller.velocity.length(), 0, 'free-look should not introduce movement');
 });
 
 test('FreeFlightController velocity follows pitched orientation', () => {

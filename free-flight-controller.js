@@ -248,16 +248,38 @@ export class FreeFlightController {
     }
 
     const hasElapsedTime = deltaTime > 0;
+    const hasRotationInput =
+      this._pendingYaw !== 0 ||
+      this._pendingPitch !== 0 ||
+      yawInput !== 0 ||
+      pitchInput !== 0;
+    // Allow rotation-only updates (for stationary nest free-look) even when
+    // simulation time isn't advancing by falling back to a small timestep.
+    const rotationDeltaTime = hasElapsedTime
+      ? deltaTime
+      : hasRotationInput
+        ? 1 / 60
+        : 0;
 
     let combinedYaw = yawInput;
     let combinedPitch = pitchInput;
 
-    if (hasElapsedTime) {
+    if (rotationDeltaTime > 0) {
       // Apply accumulated look deltas to the current frame's inputs
       // Convert the queued deltas into normalized axis contributions so that
       // right-stick/mouse look influences the same rotation path as thrust yaw/pitch.
-      const lookYawInput = clamp(this._pendingYaw / (YAW_RATE * deltaTime), -1, 1, 0);
-      const lookPitchInput = clamp(this._pendingPitch / (PITCH_RATE * deltaTime), -1, 1, 0);
+      const lookYawInput = clamp(
+        this._pendingYaw / (YAW_RATE * rotationDeltaTime),
+        -1,
+        1,
+        0,
+      );
+      const lookPitchInput = clamp(
+        this._pendingPitch / (PITCH_RATE * rotationDeltaTime),
+        -1,
+        1,
+        0,
+      );
 
       combinedYaw = clamp(yawInput + lookYawInput, -1, 1, yawInput);
       combinedPitch = clamp(pitchInput + lookPitchInput, -1, 1, pitchInput);
@@ -270,7 +292,7 @@ export class FreeFlightController {
     // Update heading as a scalar angle
     // yawDelta sign: negative yawInput (stick left) -> positive delta -> heading increases -> turn left
     //                positive yawInput (stick right) -> negative delta -> heading decreases -> turn right
-    const yawDelta = -combinedYaw * YAW_RATE * deltaTime;
+    const yawDelta = -combinedYaw * YAW_RATE * rotationDeltaTime;
     this.heading += yawDelta;
 
     // Normalize heading to [-PI, PI] to prevent floating-point precision issues over time
@@ -282,7 +304,7 @@ export class FreeFlightController {
     // Left stick (positive yaw) = left wing down = negative roll in THREE.js
     const targetBank = -combinedYaw * MAX_BANK_ANGLE;
 
-    const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
+    const bankStep = 1 - Math.exp(-BANK_RESPONSE * rotationDeltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
@@ -290,7 +312,7 @@ export class FreeFlightController {
     // Positive pitch input (up stick) = positive pitch angle = nose up
     const targetPitch = combinedPitch * MAX_VISUAL_PITCH_ANGLE;
 
-    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
+    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * rotationDeltaTime);
     this.pitch += (targetPitch - this.pitch) * pitchStep;
     this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.pitch);
     this.visualPitch = this.pitch;
