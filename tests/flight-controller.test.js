@@ -92,6 +92,29 @@ test('FreeFlightController velocity follows facing direction during turns', () =
   assert.ok(controller.position.x > 0, `position.x should be positive after turning right, got ${controller.position.x}`);
 });
 
+test('FreeFlightController applies look deltas to heading and travel direction', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,  // Enable flight
+  });
+
+  // Prime the controller with a frame to avoid zero-delta short-circuiting
+  controller.update(0.05);
+
+  // Look to the right using pointer/analog look (negative X movement)
+  controller.addLookDelta(-120, 0);
+  controller.update(0.05);
+
+  assert.ok(controller.heading < 0, `heading should decrease when looking right, got ${controller.heading}`);
+
+  const startPos = controller.position.clone();
+  for (let i = 0; i < 20; i++) {
+    controller.update(0.05);
+  }
+
+  assert.ok(controller.position.x > startPos.x, 'travel should follow the new heading after look input');
+});
+
 test('FreeFlightController pitch changes altitude', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 5, 0),

@@ -247,10 +247,25 @@ export class FreeFlightController {
       pitchInput = -pitchInput;
     }
 
+    // Apply accumulated look deltas to the current frame's inputs
+    // Convert the queued deltas into normalized axis contributions so that
+    // right-stick/mouse look influences the same rotation path as thrust yaw/pitch.
+    const lookYawInput =
+      deltaTime > 0 ? clamp(this._pendingYaw / (YAW_RATE * deltaTime), -1, 1, 0) : 0;
+    const lookPitchInput =
+      deltaTime > 0 ? clamp(this._pendingPitch / (PITCH_RATE * deltaTime), -1, 1, 0) : 0;
+
+    const combinedYaw = clamp(yawInput + lookYawInput, -1, 1, yawInput);
+    const combinedPitch = clamp(pitchInput + lookPitchInput, -1, 1, pitchInput);
+
+    // Clear queued deltas now that they've been consumed
+    this._pendingYaw = 0;
+    this._pendingPitch = 0;
+
     // Update heading as a scalar angle
     // yawDelta sign: negative yawInput (stick left) -> positive delta -> heading increases -> turn left
     //                positive yawInput (stick right) -> negative delta -> heading decreases -> turn right
-    const yawDelta = -yawInput * YAW_RATE * deltaTime;
+    const yawDelta = -combinedYaw * YAW_RATE * deltaTime;
     this.heading += yawDelta;
 
     // Normalize heading to [-PI, PI] to prevent floating-point precision issues over time
@@ -258,13 +273,9 @@ export class FreeFlightController {
     while (this.heading > Math.PI) this.heading -= TWO_PI;
     while (this.heading < -Math.PI) this.heading += TWO_PI;
 
-    // Clear any pending look deltas
-    this._pendingYaw = 0;
-    this._pendingPitch = 0;
-
     // Visual banking - wing dips on the side we're turning toward
     // Left stick (positive yaw) = left wing down = negative roll in THREE.js
-    const targetBank = -yawInput * MAX_BANK_ANGLE;
+    const targetBank = -combinedYaw * MAX_BANK_ANGLE;
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * deltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
@@ -272,7 +283,7 @@ export class FreeFlightController {
 
     // Visual pitch - nose up when pushing up, nose down when pushing down
     // Positive pitch input (up stick) = positive pitch angle = nose up
-    const targetPitch = pitchInput * MAX_VISUAL_PITCH_ANGLE;
+    const targetPitch = combinedPitch * MAX_VISUAL_PITCH_ANGLE;
 
     const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
     this.pitch += (targetPitch - this.pitch) * pitchStep;
@@ -319,7 +330,7 @@ export class FreeFlightController {
       );
 
       const rawVerticalVelocity = clamp(
-        pitchInput * LIFT_ACCELERATION * throttle,
+        combinedPitch * LIFT_ACCELERATION * throttle,
         -MAX_VERTICAL_SPEED,
         MAX_VERTICAL_SPEED,
         this.verticalVelocity,
