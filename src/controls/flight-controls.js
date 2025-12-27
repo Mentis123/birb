@@ -236,12 +236,13 @@ export function createFlightControls({
     if (isStagedRotation()) {
       const shaped = shapeStickWithContext(value, context, yawPitchShaping);
       const pitch = clamp(shaped.y, -1, 1);
+      const pitchInput = isPitchInverted ? -pitch : pitch;
       flightController.setPitchOnlyMode?.(true);
-      flightController.setInputs({ yaw: 0, pitch });
-      onThrustChange?.({ yaw: 0, pitch });
+      flightController.setInputs({ yaw: 0, pitch: pitchInput });
+      onThrustChange?.({ yaw: 0, pitch: pitchInput });
 
       logTelemetry('[flight-controls] pitch-only axis', {
-        pitch,
+        pitch: pitchInput,
         raw: shaped.raw,
         rawMagnitude: shaped.rawMagnitude,
         magnitude: shaped.magnitude,
@@ -252,12 +253,13 @@ export function createFlightControls({
     }
     const shaped = shapeStickWithContext(value, context, yawPitchShaping);
     const pitch = clamp(shaped.y, -1, 1);
+    const pitchInput = isPitchInverted ? -pitch : pitch;
     const yaw = clamp(shaped.x, -1, 1);
-    axisSources.leftStick.pitch = pitch;
+    axisSources.leftStick.pitch = pitchInput;
     axisSources.leftStick.yaw = yaw;
     logTelemetry('[flight-controls] left stick', {
       yaw,
-      pitch,
+      pitch: pitchInput,
       raw: shaped.raw,
       rawMagnitude: shaped.rawMagnitude,
       magnitude: shaped.magnitude,
