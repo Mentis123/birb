@@ -261,6 +261,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   });
 
   root.add(treeGroup);
+  console.log(`[Forest] Created ${nestablePositions.length} nest positions on trees`);
 
   // Shrubs - reduced for cleaner environment
   const shrubCount = 120;
@@ -1183,6 +1184,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // Build environment-specific objects and get nestable positions
   let nestablePositions = [];
   const builder = SPHERE_BUILDERS[variant];
+  console.log(`[SphericalWorld] Creating ${variant} environment, builder exists: ${typeof builder === 'function'}`);
   if (typeof builder === 'function') {
     nestablePositions = builder({
       THREE,
@@ -1191,6 +1193,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       collisionSystem,
     }) || [];
   }
+  console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions`);
 
   return {
     root,

@@ -86,6 +86,30 @@ function createNestMarker(THREE, config) {
   core.position.y = 0.15;
   group.add(core);
 
+  // Tall beacon for visibility - a glowing column above the nest
+  const beaconHeight = 8.0;
+  const beaconGeometry = new THREE.CylinderGeometry(0.08, 0.15, beaconHeight, 8);
+  const beaconMaterial = new THREE.MeshBasicMaterial({
+    color: config.glowColor,
+    transparent: true,
+    opacity: 0.6,
+    depthWrite: false,
+  });
+  const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+  beacon.position.y = beaconHeight / 2 + 0.3;
+  group.add(beacon);
+
+  // Beacon tip sphere for extra visibility
+  const tipGeometry = new THREE.SphereGeometry(0.3, 12, 8);
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: config.color,
+    transparent: true,
+    opacity: 0.8,
+  });
+  const tip = new THREE.Mesh(tipGeometry, tipMaterial);
+  tip.position.y = beaconHeight + 0.5;
+  group.add(tip);
+
   // Store references for animation and interaction
   group.userData.nest = nest;
   group.userData.nestMaterial = nestMaterial;
@@ -109,6 +133,7 @@ function createNestMarker(THREE, config) {
  * @param parentContainer - The parent to add nests to (typically sphericalWorld.root so nests rotate with the world)
  */
 export function createNestPointsSystem(THREE, parentContainer, environmentId, sphereRadius, nestablePositions = []) {
+  console.log(`[NestSystem] Creating nests for ${environmentId}: ${nestablePositions.length} positions provided`);
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
   const _hostBounds = new THREE.Box3();
   const _hostSize = new THREE.Vector3();
@@ -167,6 +192,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
 
     // Position nest at the environment object's top
     nestGroup.position.copy(placement.position);
+    console.log(`[NestSystem] Nest ${index}: pos (${placement.position.x.toFixed(1)}, ${placement.position.y.toFixed(1)}, ${placement.position.z.toFixed(1)}), distance from origin: ${placement.position.length().toFixed(1)}`);
 
     // Orient nest to face outward from sphere center (surface normal)
     const up = placement.surfaceNormal.clone().normalize();
