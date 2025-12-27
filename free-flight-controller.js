@@ -230,14 +230,18 @@ export class FreeFlightController {
       deltaTime = 0;
     }
 
-    // Keep velocity at zero - no forward movement
-    this.velocity.set(0, 0, 0);
-    this.forwardSpeed = 0;
-    this.verticalVelocity = 0;
+    if (deltaTime === 0) {
+      this.velocity.set(0, 0, 0);
+      this.forwardSpeed = 0;
+      this.verticalVelocity = 0;
+    }
 
     // Get inputs
-    const yawInput = this.input.yaw;
-    const pitchInput = this.input.pitch;
+    const yawInput = this._pitchOnlyMode ? 0 : this.input.yaw;
+    let pitchInput = this._yawOnlyMode ? 0 : this.input.pitch;
+    if (this.invertPitch) {
+      pitchInput = -pitchInput;
+    }
 
     // Update heading as a scalar angle
     // Negative yawDelta so left stick (positive input) = turn left (decreasing heading in THREE.js)
@@ -263,15 +267,55 @@ export class FreeFlightController {
     const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * deltaTime);
     this.pitch += (targetPitch - this.pitch) * pitchStep;
     this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.pitch);
+    this.visualPitch = this.pitch;
 
     // Use YXZ Euler order to prevent axis contamination (Yaw-Pitch-Roll)
     // Y = heading (yaw), X = pitch, Z = bank (roll)
     this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
     this._visualQuaternion.setFromEuler(this._ambientEuler);
 
-    // Also update the physics quaternion (heading only, no bank/pitch)
-    this._ambientEuler.set(0, this.heading, 0, 'YXZ');
+    // Also update the physics quaternion (heading + pitch, no bank)
+    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
     this.quaternion.setFromEuler(this._ambientEuler);
+
+    const canTranslate =
+      !this.frozen &&
+      !this._yawOnlyMode &&
+      !this._pitchOnlyMode &&
+      deltaTime > 0;
+
+    if (canTranslate) {
+      const throttle = this.getEffectiveThrottle();
+      const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+      this._computeLocalUp();
+
+      const targetForwardSpeed = clamp(
+        throttle * (BASE_FORWARD_SPEED + SPEED_RAMP),
+        0,
+        MAX_FORWARD_SPEED,
+        this.forwardSpeed,
+      );
+      this.forwardSpeed = targetForwardSpeed;
+
+      const targetVerticalVelocity = clamp(
+        pitchInput * LIFT_ACCELERATION * throttle,
+        -MAX_VERTICAL_SPEED,
+        MAX_VERTICAL_SPEED,
+        this.verticalVelocity,
+      );
+      this.verticalVelocity = targetVerticalVelocity;
+
+      this.velocity
+        .copy(forwardDirection)
+        .multiplyScalar(this.forwardSpeed)
+        .addScaledVector(this._localUp, this.verticalVelocity);
+
+      this.position.addScaledVector(this.velocity, deltaTime);
+    } else {
+      this.velocity.set(0, 0, 0);
+      this.forwardSpeed = 0;
+      this.verticalVelocity = 0;
+    }
 
     return {
       position: this.position,
