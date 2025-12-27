@@ -12,8 +12,12 @@ export const AMBIENT_YAW_SPEED = 0.5;
 
 export const LIFT_ACCELERATION = 4;
 export const THROTTLE_POWER_MULTIPLIER = 1.5;
-// Maximum vertical speed to prevent runaway climbing/diving
-export const MAX_VERTICAL_SPEED = 3.5;
+// Maximum vertical speed when pitching fully up/down
+// Set equal to MAX_FORWARD_SPEED to allow steep dives/climbs
+export const MAX_VERTICAL_SPEED = 7;
+// Total velocity magnitude cap - ensures forward + vertical share a budget
+// When climbing/diving, forward speed is reduced to maintain this cap
+export const MAX_TOTAL_SPEED = 7;
 // Rotation rates for pitch and yaw (radians per second at full stick deflection)
 export const PITCH_RATE = Math.PI * 0.6;
 export const YAW_RATE = Math.PI * 0.75;
@@ -306,21 +310,36 @@ export class FreeFlightController {
       }
       forwardDirection.normalize();
 
-      const targetForwardSpeed = clamp(
+      // Calculate uncapped target speeds
+      const rawForwardSpeed = clamp(
         throttle * (BASE_FORWARD_SPEED + SPEED_RAMP),
         0,
         MAX_FORWARD_SPEED,
         this.forwardSpeed,
       );
-      this.forwardSpeed = targetForwardSpeed;
 
-      const targetVerticalVelocity = clamp(
+      const rawVerticalVelocity = clamp(
         pitchInput * LIFT_ACCELERATION * throttle,
         -MAX_VERTICAL_SPEED,
         MAX_VERTICAL_SPEED,
         this.verticalVelocity,
       );
-      this.verticalVelocity = targetVerticalVelocity;
+
+      // Apply total velocity cap - forward and vertical share a budget
+      // This ensures diving/climbing reduces forward speed, allowing steeper angles
+      const uncappedTotal = Math.sqrt(
+        rawForwardSpeed * rawForwardSpeed + rawVerticalVelocity * rawVerticalVelocity
+      );
+
+      if (uncappedTotal > MAX_TOTAL_SPEED && uncappedTotal > 0) {
+        // Scale both components proportionally to fit within the cap
+        const scale = MAX_TOTAL_SPEED / uncappedTotal;
+        this.forwardSpeed = rawForwardSpeed * scale;
+        this.verticalVelocity = rawVerticalVelocity * scale;
+      } else {
+        this.forwardSpeed = rawForwardSpeed;
+        this.verticalVelocity = rawVerticalVelocity;
+      }
 
       this.velocity
         .copy(forwardDirection)
