@@ -899,11 +899,11 @@
                     min="0"
                     max="1"
                     step="0.01"
-                    value="0.4"
+                    value="0"
                     aria-describedby="glide-speed-display"
                   />
                   <output id="glide-speed-display" data-display="glide-speed" for="glide-speed">
-                    40%
+                    0%
                   </output>
                 </div>
                 <label class="control-checkbox">
@@ -927,7 +927,7 @@
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">Throttle</span>
-                    <span class="control-metrics__value" data-metric="throttle">40%</span>
+                    <span class="control-metrics__value" data-metric="throttle">0%</span>
                   </div>
                   <div class="control-metrics__row">
                     <span class="control-metrics__label">FPS</span>
@@ -2216,7 +2216,7 @@
         ? fullscreenToggleButton.querySelector('[data-icon="exit"]')
         : null;
 
-      const initialThrottle = clampThrottle(Number.parseFloat(glideSpeedInput?.value ?? ""));
+      const initialThrottle = clampThrottle(Number.parseFloat(glideSpeedInput?.value ?? ""), 0);
 
       // Load invert pitch preference from localStorage
       const INVERT_PITCH_STORAGE_KEY = 'birbFlightInvertPitch';
@@ -2502,16 +2502,17 @@
 
       syncFullscreenUi();
 
-      function clampThrottle(value, fallback = 0.4) {
+      function clampThrottle(value, fallback = 0) {
         if (!Number.isFinite(value)) {
           return fallback;
         }
         return Math.min(Math.max(value, 0), 1);
       }
 
-      function updateGlideSpeedDisplay(value) {
+      function updateGlideSpeedDisplay(value = flightController?.throttle) {
         if (!glideSpeedDisplay) return;
-        const throttlePercent = Math.round(value * 100);
+        const throttleSetting = Number.isFinite(value) ? value : flightController?.throttle;
+        const throttlePercent = Math.round(clampThrottle(throttleSetting ?? 0) * 100);
         glideSpeedDisplay.textContent = `${throttlePercent}%`;
       }
 
@@ -2812,17 +2813,17 @@
         if (!glideSpeedInput) return;
         const value = clampThrottle(Number.parseFloat(glideSpeedInput.value));
         flightController.setThrottle(value);
-        updateGlideSpeedDisplay(value);
+        updateGlideSpeedDisplay(flightController.throttle);
         updateControlMetrics();
       };
 
       if (glideSpeedInput) {
-        updateGlideSpeedDisplay(initialThrottle);
-        glideSpeedInput.value = `${initialThrottle}`;
+        updateGlideSpeedDisplay();
+        glideSpeedInput.value = `${flightController.throttle}`;
         glideSpeedInput.addEventListener("input", applyThrottleFromInput);
         glideSpeedInput.addEventListener("change", applyThrottleFromInput);
       } else {
-        updateGlideSpeedDisplay(initialThrottle);
+        updateGlideSpeedDisplay();
       }
 
       if (invertPitchCheckbox) {
