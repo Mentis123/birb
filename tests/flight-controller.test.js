@@ -245,12 +245,13 @@ test('FreeFlightController pitch-only mode rotates without translating and updat
 
   controller.update(0.1);
 
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+  // Physics quaternion is heading-only, visual quaternion has pitch for display
+  const visualForward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller._visualQuaternion);
 
   assert.equal(controller.forwardSpeed, 0, 'forward speed should stay zero in pitch-only mode');
   assert.equal(controller.verticalVelocity, 0, 'vertical velocity should stay zero in pitch-only mode');
   assert.equal(controller.velocity.length(), 0, 'velocity vector should stay zero in pitch-only mode');
-  assert.ok(forward.y > 0, 'pitch-only mode should tilt the nose up');
+  assert.ok(visualForward.y > 0, 'pitch-only mode should tilt the nose up visually');
   assert.notEqual(controller.visualPitch, 0, 'visual pitch should still update while stationary');
 });
 

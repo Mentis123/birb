@@ -11,7 +11,7 @@ export const AMBIENT_YAW_AMPLITUDE = 0.015;
 export const AMBIENT_YAW_SPEED = 0.5;
 
 export const LIFT_ACCELERATION = 4;
-export const THROTTLE_POWER_MULTIPLIER = 2;
+export const THROTTLE_POWER_MULTIPLIER = 1.5;
 // Maximum vertical speed to prevent runaway climbing/diving
 export const MAX_VERTICAL_SPEED = 3.5;
 // Rotation rates for pitch and yaw (radians per second at full stick deflection)
@@ -274,8 +274,9 @@ export class FreeFlightController {
     this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
     this._visualQuaternion.setFromEuler(this._ambientEuler);
 
-    // Also update the physics quaternion (heading + pitch, no bank)
-    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
+    // Physics quaternion uses heading only - pitch is visual only
+    // Vertical movement comes from verticalVelocity, not from tilted forward direction
+    this._ambientEuler.set(0, this.heading, 0, 'YXZ');
     this.quaternion.setFromEuler(this._ambientEuler);
 
     const canTranslate =
