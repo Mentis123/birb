@@ -180,19 +180,6 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
   container.name = 'nest-points';
   parentContainer.add(container);
 
-  // Add a debug test beacon at a known position (should be visible from start)
-  // Bird starts at (0, 33, 0), this beacon is directly in front
-  const testBeaconGeometry = new THREE.SphereGeometry(2, 16, 12);
-  const testBeaconMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00ff00, // Bright green
-    transparent: true,
-    opacity: 0.9,
-  });
-  const testBeacon = new THREE.Mesh(testBeaconGeometry, testBeaconMaterial);
-  testBeacon.position.set(0, 35, -10); // In front of starting position
-  container.add(testBeacon);
-  console.log('[NestSystem] Added test beacon at (0, 35, -10)');
-
   const nests = [];
   let animationTime = 0;
   let currentlyOccupiedNest = null;
@@ -222,6 +209,9 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
     container.add(nestGroup);
     nests.push(nestGroup);
   });
+
+  // Force initial matrix update to ensure nests are visible on first render
+  container.updateMatrixWorld(true);
 
   return {
     nests,
