@@ -247,20 +247,25 @@ export class FreeFlightController {
       pitchInput = -pitchInput;
     }
 
-    // Apply accumulated look deltas to the current frame's inputs
-    // Convert the queued deltas into normalized axis contributions so that
-    // right-stick/mouse look influences the same rotation path as thrust yaw/pitch.
-    const lookYawInput =
-      deltaTime > 0 ? clamp(this._pendingYaw / (YAW_RATE * deltaTime), -1, 1, 0) : 0;
-    const lookPitchInput =
-      deltaTime > 0 ? clamp(this._pendingPitch / (PITCH_RATE * deltaTime), -1, 1, 0) : 0;
+    const hasElapsedTime = deltaTime > 0;
 
-    const combinedYaw = clamp(yawInput + lookYawInput, -1, 1, yawInput);
-    const combinedPitch = clamp(pitchInput + lookPitchInput, -1, 1, pitchInput);
+    let combinedYaw = yawInput;
+    let combinedPitch = pitchInput;
 
-    // Clear queued deltas now that they've been consumed
-    this._pendingYaw = 0;
-    this._pendingPitch = 0;
+    if (hasElapsedTime) {
+      // Apply accumulated look deltas to the current frame's inputs
+      // Convert the queued deltas into normalized axis contributions so that
+      // right-stick/mouse look influences the same rotation path as thrust yaw/pitch.
+      const lookYawInput = clamp(this._pendingYaw / (YAW_RATE * deltaTime), -1, 1, 0);
+      const lookPitchInput = clamp(this._pendingPitch / (PITCH_RATE * deltaTime), -1, 1, 0);
+
+      combinedYaw = clamp(yawInput + lookYawInput, -1, 1, yawInput);
+      combinedPitch = clamp(pitchInput + lookPitchInput, -1, 1, pitchInput);
+
+      // Clear queued deltas now that they've been consumed
+      this._pendingYaw = 0;
+      this._pendingPitch = 0;
+    }
 
     // Update heading as a scalar angle
     // yawDelta sign: negative yawInput (stick left) -> positive delta -> heading increases -> turn left
@@ -295,16 +300,16 @@ export class FreeFlightController {
     this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
     this._visualQuaternion.setFromEuler(this._ambientEuler);
 
-    // Physics quaternion uses heading only - pitch is visual only
-    // Vertical movement comes from verticalVelocity, not from tilted forward direction
-    this._ambientEuler.set(0, this.heading, 0, 'YXZ');
+    // Physics quaternion mirrors heading and pitch (bank is visual-only)
+    // so that travel direction follows the visible nose direction.
+    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
     this.quaternion.setFromEuler(this._ambientEuler);
 
     const canTranslate =
       !this.frozen &&
       !this._yawOnlyMode &&
       !this._pitchOnlyMode &&
-      deltaTime > 0;
+      hasElapsedTime;
 
     if (canTranslate) {
       const throttle = this.getEffectiveThrottle();
@@ -312,6 +317,7 @@ export class FreeFlightController {
 
       // Get forward direction from quaternion
       const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
+      forwardDirection.normalize();
 
       // On spherical worlds, project forward onto the tangent plane (perpendicular to local up)
       // This ensures velocity follows the sphere surface, not a fixed world direction
@@ -336,26 +342,18 @@ export class FreeFlightController {
         this.verticalVelocity,
       );
 
-      // Apply total velocity cap - forward and vertical share a budget
-      // This ensures diving/climbing reduces forward speed, allowing steeper angles
-      const uncappedTotal = Math.sqrt(
-        rawForwardSpeed * rawForwardSpeed + rawVerticalVelocity * rawVerticalVelocity
-      );
-
-      if (uncappedTotal > MAX_TOTAL_SPEED && uncappedTotal > 0) {
-        // Scale both components proportionally to fit within the cap
-        const scale = MAX_TOTAL_SPEED / uncappedTotal;
-        this.forwardSpeed = rawForwardSpeed * scale;
-        this.verticalVelocity = rawVerticalVelocity * scale;
-      } else {
-        this.forwardSpeed = rawForwardSpeed;
-        this.verticalVelocity = rawVerticalVelocity;
-      }
-
       this.velocity
         .copy(forwardDirection)
-        .multiplyScalar(this.forwardSpeed)
-        .addScaledVector(this._localUp, this.verticalVelocity);
+        .multiplyScalar(rawForwardSpeed)
+        .addScaledVector(this._localUp, rawVerticalVelocity);
+
+      const uncappedSpeed = this.velocity.length();
+      if (uncappedSpeed > MAX_TOTAL_SPEED && uncappedSpeed > 0) {
+        this.velocity.multiplyScalar(MAX_TOTAL_SPEED / uncappedSpeed);
+      }
+
+      this.forwardSpeed = this.velocity.dot(forwardDirection);
+      this.verticalVelocity = this.velocity.dot(this._localUp);
 
       this.position.addScaledVector(this.velocity, deltaTime);
     } else {

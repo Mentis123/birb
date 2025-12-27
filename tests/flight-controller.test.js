@@ -115,6 +115,40 @@ test('FreeFlightController applies look deltas to heading and travel direction',
   assert.ok(controller.position.x > startPos.x, 'travel should follow the new heading after look input');
 });
 
+test('FreeFlightController retains look deltas when no time elapses', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,
+  });
+
+  controller.addLookDelta(-80, 0);
+  controller.update(0); // Zero delta should not consume queued look
+
+  const headingBefore = controller.heading;
+  controller.update(0.05);
+
+  assert.ok(controller.heading < headingBefore, 'look delta should apply once time advances');
+});
+
+test('FreeFlightController velocity follows pitched orientation', () => {
+  const controller = new FreeFlightController(THREE, {
+    position: new THREE.Vector3(0, 5, 0),
+    throttle: 1,
+  });
+
+  controller.setInputs({ yaw: 0, pitch: 1 });
+  for (let i = 0; i < 10; i++) {
+    controller.update(0.05);
+  }
+
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion).normalize();
+  const velocityDir = controller.velocity.clone().normalize();
+  const alignment = forward.dot(velocityDir);
+
+  assert.ok(alignment > 0.84, `velocity should align with pitched forward vector, alignment = ${alignment}`);
+  assert.ok(velocityDir.y > 0, 'pitched nose up should tilt travel upward');
+});
+
 test('FreeFlightController pitch changes altitude', () => {
   const controller = new FreeFlightController(THREE, {
     position: new THREE.Vector3(0, 5, 0),
