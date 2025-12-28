@@ -7,6 +7,9 @@ const DEFAULT_TOUCH_LOOK_DEADZONE = 0.08;
 const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.32;
 const DEFAULT_TOUCH_LOOK_EXPO = 0.18;
 const TOUCH_JOYSTICK_SIZE = 120;
+// Smoothing factor for touch input (0 = instant, 1 = very slow)
+// This creates a more responsive feel on mobile by reducing jitter
+const TOUCH_INPUT_SMOOTHING = 0.3;
 
 const PITCH_AXIS_KEYS = {
   positive: ['KeyW', 'ArrowUp'],
@@ -75,16 +78,55 @@ const shapeStickInput = (x, y, config = DEFAULT_THRUST_SHAPING) => {
   };
 };
 
+/**
+ * Normalize nipplejs input data to a consistent format.
+ * Handles edge cases like NaN, undefined values, and coordinate system differences.
+ *
+ * nipplejs coordinate system:
+ * - vector.x: -1 (left) to +1 (right)
+ * - vector.y: -1 (down) to +1 (up) - standard Cartesian, matches our expectation
+ * - angle.radian: 0 = right, π/2 = up, π = left, 3π/2 = down
+ * - force: 0 to 1 (distance from center, normalized)
+ *
+ * @param {Object} data - nipplejs event data
+ * @returns {Object} Normalized input { raw: {x, y}, rawMagnitude }
+ */
 const normalizeNippleData = (data = {}) => {
+  // Prefer direct vector values if available (most accurate)
   const vectorX = Number.isFinite(data?.vector?.x) ? data.vector.x : null;
   const vectorY = Number.isFinite(data?.vector?.y) ? data.vector.y : null;
+
+  // Fallback to angle + force if vector is missing
   const angle = Number.isFinite(data?.angle?.radian) ? data.angle.radian : null;
   const force = clamp(Number.isFinite(data?.force) ? data.force : 0, 0, 1);
-  const rawX = clamp(vectorX ?? (angle !== null ? Math.cos(angle) * force : 0), -1, 1);
-  const rawY = clamp(vectorY ?? (angle !== null ? Math.sin(angle) * force : 0), -1, 1);
+
+  // Calculate raw values, preferring vector over angle-based calculation
+  let rawX, rawY;
+
+  if (vectorX !== null && vectorY !== null) {
+    // Use direct vector values
+    rawX = vectorX;
+    rawY = vectorY;
+  } else if (angle !== null && force > 0) {
+    // Calculate from angle and force (nipplejs angle: 0 = right, increases CCW)
+    rawX = Math.cos(angle) * force;
+    rawY = Math.sin(angle) * force;
+  } else {
+    // No valid input, return neutral
+    rawX = 0;
+    rawY = 0;
+  }
+
+  // Clamp to valid range and handle any remaining NaN
+  rawX = clamp(Number.isFinite(rawX) ? rawX : 0, -1, 1);
+  rawY = clamp(Number.isFinite(rawY) ? rawY : 0, -1, 1);
+
+  // Calculate magnitude, ensuring it doesn't exceed 1
+  const rawMagnitude = Math.min(Math.hypot(rawX, rawY), 1);
+
   return {
     raw: { x: rawX, y: rawY },
-    rawMagnitude: clamp(Math.hypot(rawX, rawY), 0, 1),
+    rawMagnitude,
   };
 };
 
@@ -173,6 +215,40 @@ export function createFlightControls({
     manager: null,
     nipple: null,
     handlers: null,
+  };
+
+  // Smoothed touch input state for reducing jitter on mobile
+  const smoothedTouchInput = {
+    x: 0,
+    y: 0,
+    targetX: 0,
+    targetY: 0,
+    isActive: false,
+  };
+
+  // Apply smoothing to touch input values
+  const smoothTouchInput = (targetX, targetY, isActive) => {
+    smoothedTouchInput.targetX = targetX;
+    smoothedTouchInput.targetY = targetY;
+    smoothedTouchInput.isActive = isActive;
+
+    if (!isActive) {
+      // When released, quickly decay to zero
+      smoothedTouchInput.x *= 0.5;
+      smoothedTouchInput.y *= 0.5;
+      if (Math.abs(smoothedTouchInput.x) < 0.01) smoothedTouchInput.x = 0;
+      if (Math.abs(smoothedTouchInput.y) < 0.01) smoothedTouchInput.y = 0;
+    } else {
+      // Smooth interpolation toward target
+      const smoothing = TOUCH_INPUT_SMOOTHING;
+      smoothedTouchInput.x += (targetX - smoothedTouchInput.x) * (1 - smoothing);
+      smoothedTouchInput.y += (targetY - smoothedTouchInput.y) * (1 - smoothing);
+    }
+
+    return {
+      x: smoothedTouchInput.x,
+      y: smoothedTouchInput.y,
+    };
   };
 
   const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
@@ -331,9 +407,11 @@ export function createFlightControls({
   };
 
   const resetLookTouchJoystick = () => {
+    // Reset smoothed input state
+    const smoothed = smoothTouchInput(0, 0, false);
     // Reset flight control inputs when touch joystick is released
     handleLeftStickChange(
-      { x: 0, y: 0 },
+      { x: smoothed.x, y: smoothed.y },
       { isActive: false, pointerType: 'touch', magnitude: 0, rawMagnitude: 0 }
     );
   };
@@ -343,12 +421,15 @@ export function createFlightControls({
       return;
     }
     const normalized = normalizeNippleData(data);
-    const payload = { x: normalized.raw.x, y: normalized.raw.y };
+    // Apply smoothing to reduce jitter on mobile touch input
+    const smoothed = smoothTouchInput(normalized.raw.x, normalized.raw.y, true);
+    const payload = { x: smoothed.x, y: smoothed.y };
+    const smoothedMagnitude = Math.hypot(smoothed.x, smoothed.y);
     const context = {
       isActive: true,
       pointerType: 'touch',
-      raw: normalized.raw,
-      rawMagnitude: normalized.rawMagnitude,
+      raw: { x: smoothed.x, y: smoothed.y },
+      rawMagnitude: smoothedMagnitude,
     };
     // Use flight control path (left stick) for touch input - this ensures
     // velocity follows facing direction via the yaw/pitch rotation in update()
