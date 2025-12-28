@@ -1272,19 +1272,25 @@
       // Ensure audio context is running - call this before every sound
       const ensureAudioReady = async () => {
         const ctx = initAudioContext();
-        if (!ctx) return null;
+        if (!ctx) {
+          console.warn('[Audio] No AudioContext available');
+          return null;
+        }
 
         // Always try to resume if suspended (can happen after tab switch, phone lock, etc.)
         if (ctx.state === 'suspended') {
           try {
             await ctx.resume();
+            console.log('[Audio] Context resumed from suspended state');
           } catch (e) {
+            console.warn('[Audio] Failed to resume context:', e);
             return null;
           }
         }
 
         // Double-check it's actually running now
         if (ctx.state !== 'running') {
+          console.warn('[Audio] Context not running after resume, state:', ctx.state);
           return null;
         }
 
@@ -1331,66 +1337,81 @@
 
       const playRocketFireSound = async () => {
         const ctx = await ensureAudioReady();
-        if (!ctx) return;
+        if (!ctx) {
+          console.warn('[Audio] Cannot play rocket fire sound - audio context not ready');
+          return;
+        }
 
-        const now = ctx.currentTime;
-        const duration = 0.35;
-        const oscillator = ctx.createOscillator();
-        const gain = ctx.createGain();
+        try {
+          const now = ctx.currentTime;
+          const duration = 0.35;
+          const oscillator = ctx.createOscillator();
+          const gain = ctx.createGain();
 
-        oscillator.type = 'sawtooth';
-        oscillator.frequency.setValueAtTime(280, now);
-        oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.18);
+          oscillator.type = 'sawtooth';
+          oscillator.frequency.setValueAtTime(280, now);
+          oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.18);
 
-        gain.gain.setValueAtTime(0.18, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+          // Increased volume for better audibility
+          gain.gain.setValueAtTime(0.35, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
-        oscillator.connect(gain).connect(ctx.destination);
-        oscillator.start(now);
-        oscillator.stop(now + duration);
+          oscillator.connect(gain).connect(ctx.destination);
+          oscillator.start(now);
+          oscillator.stop(now + duration);
+        } catch (e) {
+          console.warn('[Audio] Error playing rocket fire sound:', e);
+        }
       };
 
       const playExplosionSound = async () => {
         const ctx = await ensureAudioReady();
-        if (!ctx) return;
+        if (!ctx) {
+          console.warn('[Audio] Cannot play explosion sound - audio context not ready');
+          return;
+        }
 
-        const now = ctx.currentTime;
+        try {
+          const now = ctx.currentTime;
 
-        // Low rumble/boom component
-        const boom = ctx.createOscillator();
-        const boomGain = ctx.createGain();
-        boom.type = 'sine';
-        boom.frequency.setValueAtTime(80, now);
-        boom.frequency.exponentialRampToValueAtTime(30, now + 0.3);
-        boomGain.gain.setValueAtTime(0.3, now);
-        boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-        boom.connect(boomGain).connect(ctx.destination);
-        boom.start(now);
-        boom.stop(now + 0.4);
+          // Low rumble/boom component - increased volume
+          const boom = ctx.createOscillator();
+          const boomGain = ctx.createGain();
+          boom.type = 'sine';
+          boom.frequency.setValueAtTime(80, now);
+          boom.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+          boomGain.gain.setValueAtTime(0.5, now);
+          boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+          boom.connect(boomGain).connect(ctx.destination);
+          boom.start(now);
+          boom.stop(now + 0.4);
 
-        // Crackle/noise component using multiple oscillators
-        const crackle = ctx.createOscillator();
-        const crackleGain = ctx.createGain();
-        crackle.type = 'sawtooth';
-        crackle.frequency.setValueAtTime(400, now);
-        crackle.frequency.exponentialRampToValueAtTime(100, now + 0.15);
-        crackleGain.gain.setValueAtTime(0.15, now);
-        crackleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-        crackle.connect(crackleGain).connect(ctx.destination);
-        crackle.start(now);
-        crackle.stop(now + 0.2);
+          // Crackle/noise component - increased volume
+          const crackle = ctx.createOscillator();
+          const crackleGain = ctx.createGain();
+          crackle.type = 'sawtooth';
+          crackle.frequency.setValueAtTime(400, now);
+          crackle.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+          crackleGain.gain.setValueAtTime(0.3, now);
+          crackleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+          crackle.connect(crackleGain).connect(ctx.destination);
+          crackle.start(now);
+          crackle.stop(now + 0.2);
 
-        // High frequency pop
-        const pop = ctx.createOscillator();
-        const popGain = ctx.createGain();
-        pop.type = 'square';
-        pop.frequency.setValueAtTime(600, now);
-        pop.frequency.exponentialRampToValueAtTime(200, now + 0.08);
-        popGain.gain.setValueAtTime(0.1, now);
-        popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-        pop.connect(popGain).connect(ctx.destination);
-        pop.start(now);
-        pop.stop(now + 0.1);
+          // High frequency pop - increased volume
+          const pop = ctx.createOscillator();
+          const popGain = ctx.createGain();
+          pop.type = 'square';
+          pop.frequency.setValueAtTime(600, now);
+          pop.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+          popGain.gain.setValueAtTime(0.2, now);
+          popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+          pop.connect(popGain).connect(ctx.destination);
+          pop.start(now);
+          pop.stop(now + 0.1);
+        } catch (e) {
+          console.warn('[Audio] Error playing explosion sound:', e);
+        }
       };
 
       function clamp(value, min, max) {
@@ -3048,6 +3069,10 @@
 
       if (nestLaunchButton) {
         const handleLaunch = async () => {
+          // Ensure audio context is ready immediately during user gesture
+          // This must happen synchronously in the event handler for mobile browsers
+          await initAudioOnInteraction();
+
           if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
             const launchPosition = flightController.position.clone();
             const launchDirection = nestingSystem.getLookDirection();
@@ -3059,7 +3084,7 @@
           }
         };
 
-        nestLaunchButton.addEventListener('click', () => handleLaunch());
+        nestLaunchButton.addEventListener('click', handleLaunch);
         nestLaunchButton.addEventListener('touchend', (e) => {
           e.preventDefault();
           handleLaunch();
