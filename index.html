@@ -1269,9 +1269,12 @@
         return audioContext;
       };
 
+      // Ensure audio context is running - call this before every sound
       const ensureAudioReady = async () => {
         const ctx = initAudioContext();
         if (!ctx) return null;
+
+        // Always try to resume if suspended (can happen after tab switch, phone lock, etc.)
         if (ctx.state === 'suspended') {
           try {
             await ctx.resume();
@@ -1279,36 +1282,50 @@
             return null;
           }
         }
+
+        // Double-check it's actually running now
+        if (ctx.state !== 'running') {
+          return null;
+        }
+
         return ctx;
       };
 
-      // Pre-initialize and fully unlock audio context on first user interaction (for future sounds)
-      const initAudioOnInteraction = async () => {
-        const ctx = await ensureAudioReady();
-        if (!ctx || hasUnlockedAudio) return;
+      // Play silent buffer to unlock iOS/Safari audio - must be called from user gesture
+      const unlockAudioWithSilentBuffer = async (ctx) => {
+        if (!ctx || hasUnlockedAudio) return true;
 
         try {
-          // Play an inaudible buffer to unlock iOS/Safari mobile audio
+          // Create and play a short silent buffer - this unlocks iOS audio
           const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
           const source = ctx.createBufferSource();
           source.buffer = buffer;
           source.connect(ctx.destination);
           source.start(0);
+
+          // Wait a tick to ensure it played
+          await new Promise(resolve => setTimeout(resolve, 10));
           hasUnlockedAudio = true;
+          return true;
         } catch (error) {
-          // If unlocking fails, try again on the next interaction
           hasUnlockedAudio = false;
+          return false;
         }
       };
 
+      // Pre-initialize and unlock audio on first user interaction
+      const initAudioOnInteraction = async () => {
+        const ctx = await ensureAudioReady();
+        if (!ctx) return;
+        await unlockAudioWithSilentBuffer(ctx);
+      };
+
+      // Keep listeners active to handle re-suspend after tab switches etc.
       const audioInteractionEvents = ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'];
       audioInteractionEvents.forEach(eventType => {
         document.addEventListener(eventType, async function handleAudioInteraction(event) {
+          // Always try to init/resume on interaction - audio can get suspended again
           await initAudioOnInteraction();
-
-          if (hasUnlockedAudio) {
-            document.removeEventListener(eventType, handleAudioInteraction);
-          }
         }, { passive: true });
       });
 

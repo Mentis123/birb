@@ -33,6 +33,12 @@ export const MAX_NEST_PITCH_ANGLE = (85 * Math.PI) / 180;
 export const VISUAL_PITCH_RESPONSE = 6;
 // How quickly pitch responds when in nest look-around mode (more responsive)
 export const NEST_PITCH_RESPONSE = 12;
+// Smoothing factor for nest look input (0 = instant, higher = smoother/slower)
+// This dampens jittery input while preserving responsiveness
+export const NEST_LOOK_SMOOTHING = 8;
+// Reduced rotation rates for nest look mode (feels more controlled)
+export const NEST_YAW_RATE = Math.PI * 0.5;
+export const NEST_PITCH_RATE = Math.PI * 0.4;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -124,6 +130,9 @@ export class FreeFlightController {
     this._pitchOnlyMode = false;
     // Nest look-around mode: allows larger pitch range and more responsive controls
     this._nestLookMode = false;
+    // Smoothed input for nest look mode to reduce jitter
+    this._smoothedNestYaw = 0;
+    this._smoothedNestPitch = 0;
 
     // Track heading as a scalar angle to avoid quaternion accumulation issues
     this.heading = 0;
@@ -182,8 +191,11 @@ export class FreeFlightController {
   // Enable/disable nest look-around mode (larger pitch range, more responsive)
   setNestLookMode(isActive) {
     this._nestLookMode = Boolean(isActive);
-    // Reset pitch when exiting nest mode to avoid stuck at extreme angles
+    // Reset smoothed input and pitch when transitioning modes
+    this._smoothedNestYaw = 0;
+    this._smoothedNestPitch = 0;
     if (!this._nestLookMode) {
+      // Reset pitch when exiting nest mode to avoid stuck at extreme angles
       this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, 0);
     }
   }
@@ -363,10 +375,27 @@ export class FreeFlightController {
       this._pendingPitch = 0;
     }
 
+    // In nest mode, apply input smoothing to reduce jitter and make controls feel fluid
+    let effectiveYaw = combinedYaw;
+    let effectivePitch = combinedPitch;
+
+    if (this._nestLookMode && rotationDeltaTime > 0) {
+      // Smooth interpolation toward target input values
+      const smoothStep = 1 - Math.exp(-NEST_LOOK_SMOOTHING * rotationDeltaTime);
+      this._smoothedNestYaw += (combinedYaw - this._smoothedNestYaw) * smoothStep;
+      this._smoothedNestPitch += (combinedPitch - this._smoothedNestPitch) * smoothStep;
+
+      // Use smoothed values for nest look
+      effectiveYaw = this._smoothedNestYaw;
+      effectivePitch = this._smoothedNestPitch;
+    }
+
     // Update heading as a scalar angle
     // yawDelta sign: negative yawInput (stick left) -> positive delta -> heading increases -> turn left
     //                positive yawInput (stick right) -> negative delta -> heading decreases -> turn right
-    const yawDelta = -combinedYaw * YAW_RATE * rotationDeltaTime;
+    // Use reduced rotation rate in nest mode for more controlled look-around
+    const activeYawRate = this._nestLookMode ? NEST_YAW_RATE : YAW_RATE;
+    const yawDelta = -effectiveYaw * activeYawRate * rotationDeltaTime;
     this.heading += yawDelta;
 
     // Normalize heading to [-PI, PI] to prevent floating-point precision issues over time
@@ -376,7 +405,8 @@ export class FreeFlightController {
 
     // Visual banking - wing dips on the side we're turning toward
     // Left stick (positive yaw) = left wing down = negative roll in THREE.js
-    const targetBank = -combinedYaw * MAX_BANK_ANGLE;
+    // No banking in nest mode (bird is stationary)
+    const targetBank = this._nestLookMode ? 0 : -combinedYaw * MAX_BANK_ANGLE;
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * rotationDeltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
@@ -388,11 +418,11 @@ export class FreeFlightController {
     const maxPitchAngle = this._nestLookMode ? MAX_NEST_PITCH_ANGLE : MAX_VISUAL_PITCH_ANGLE;
     const pitchResponse = this._nestLookMode ? NEST_PITCH_RESPONSE : VISUAL_PITCH_RESPONSE;
 
-    // In nest mode, accumulate pitch directly from input for free look
+    // In nest mode, accumulate pitch from smoothed input for fluid free look
     // In flight mode, pitch is proportional to input (returns to level when released)
     if (this._nestLookMode) {
-      // Accumulate pitch from input - free look style
-      const pitchDelta = combinedPitch * PITCH_RATE * rotationDeltaTime;
+      // Accumulate pitch from smoothed input - free look style with reduced rate
+      const pitchDelta = effectivePitch * NEST_PITCH_RATE * rotationDeltaTime;
       this.pitch += pitchDelta;
       this.pitch = clamp(this.pitch, -maxPitchAngle, maxPitchAngle, this.pitch);
     } else {
