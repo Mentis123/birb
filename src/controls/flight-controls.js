@@ -11,6 +11,9 @@ const TOUCH_JOYSTICK_SIZE = 120;
 // This creates a more responsive feel on mobile by reducing jitter
 const TOUCH_INPUT_SMOOTHING = 0.3;
 
+// Debug mode for mobile input diagnostics - set to true to log all touch input
+const DEBUG_MOBILE_INPUT = false;
+
 const PITCH_AXIS_KEYS = {
   positive: ['KeyW', 'ArrowUp'],
   negative: ['KeyS', 'ArrowDown'],
@@ -123,6 +126,13 @@ const normalizeNippleData = (data = {}) => {
 
   // Calculate magnitude, ensuring it doesn't exceed 1
   const rawMagnitude = Math.min(Math.hypot(rawX, rawY), 1);
+
+  if (DEBUG_MOBILE_INPUT && (rawX !== 0 || rawY !== 0)) {
+    console.log('[mobile-input] nipple data:', {
+      vectorX, vectorY, angle, force, rawX, rawY,
+      source: vectorX !== null ? 'vector' : 'angle',
+    });
+  }
 
   return {
     raw: { x: rawX, y: rawY },
@@ -268,6 +278,19 @@ export function createFlightControls({
     flightController.setYawOnlyMode?.(false);
     const yaw = combineAxis('yaw');
     const pitch = combineAxis('pitch');
+
+    // Debug: Log when non-zero input is being sent to the flight controller
+    if (DEBUG_MOBILE_INPUT && (yaw !== 0 || pitch !== 0)) {
+      console.log('[mobile-input] applyInputs:', {
+        yaw: yaw.toFixed(3),
+        pitch: pitch.toFixed(3),
+        sources: {
+          keyboard: { ...axisSources.keyboard },
+          leftStick: { ...axisSources.leftStick },
+        },
+      });
+    }
+
     if (typeof flightController.setInputs === 'function') {
       flightController.setInputs({ yaw, pitch });
     } else {
@@ -417,9 +440,19 @@ export function createFlightControls({
   };
 
   const handleTouchJoystickMove = (data) => {
-    if (isControlsFrozen() || isYawOnlyRotation()) {
+    if (isControlsFrozen()) {
+      if (DEBUG_MOBILE_INPUT) {
+        console.log('[mobile-input] blocked: controls frozen');
+      }
       return;
     }
+    if (isYawOnlyRotation()) {
+      if (DEBUG_MOBILE_INPUT) {
+        console.log('[mobile-input] blocked: yaw-only mode active');
+      }
+      return;
+    }
+
     const normalized = normalizeNippleData(data);
     // Apply smoothing to reduce jitter on mobile touch input
     const smoothed = smoothTouchInput(normalized.raw.x, normalized.raw.y, true);
@@ -431,6 +464,15 @@ export function createFlightControls({
       raw: { x: smoothed.x, y: smoothed.y },
       rawMagnitude: smoothedMagnitude,
     };
+
+    if (DEBUG_MOBILE_INPUT && normalized.rawMagnitude > 0.01) {
+      console.log('[mobile-input] joystick move:', {
+        x: normalized.raw.x.toFixed(3),
+        y: normalized.raw.y.toFixed(3),
+        magnitude: normalized.rawMagnitude.toFixed(3),
+      });
+    }
+
     // Use flight control path (left stick) for touch input - this ensures
     // velocity follows facing direction via the yaw/pitch rotation in update()
     handleLeftStickChange(payload, context);

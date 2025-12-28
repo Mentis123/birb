@@ -83,9 +83,9 @@ export class FreeFlightController {
 
     this.position = new Vector3();
     this.velocity = new Vector3();
-    // Single quaternion for flight direction (like SimpleFlightController)
+    // Single quaternion for flight direction (combines heading + pitch)
     this.quaternion = new Quaternion();
-    // Separate quaternion for visual output (includes banking)
+    // Separate quaternion for visual output (includes banking for aesthetics)
     this._visualQuaternion = new Quaternion();
     // Keep lookQuaternion as alias for compatibility with nesting system
     this.lookQuaternion = this.quaternion;
@@ -559,5 +559,37 @@ export class FreeFlightController {
     // Reset previous up to match initial position's local up
     this._computeLocalUp();
     this._previousUp.copy(this._localUp);
+  }
+
+  /**
+   * Set the initial orientation for the controller. This can be called after
+   * construction to change the spawn orientation. The heading and pitch will
+   * be extracted from the quaternion on the next reset() call.
+   */
+  setInitialOrientation(quaternion) {
+    if (quaternion && typeof quaternion.clone === 'function') {
+      this._initialQuaternion.copy(quaternion);
+    }
+  }
+
+  /**
+   * Get the current heading angle in radians.
+   */
+  getHeading() {
+    return this.heading;
+  }
+
+  /**
+   * Set the heading angle directly (in radians). Useful for teleportation
+   * or spawning at a specific orientation.
+   */
+  setHeading(radians) {
+    if (Number.isFinite(radians)) {
+      this.heading = radians;
+      // Normalize to [-PI, PI]
+      const TWO_PI = Math.PI * 2;
+      while (this.heading > Math.PI) this.heading -= TWO_PI;
+      while (this.heading < -Math.PI) this.heading += TWO_PI;
+    }
   }
 }

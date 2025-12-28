@@ -133,6 +133,66 @@ The follow camera transformation correctly maps positive Z offset to the positio
 
 ---
 
+## Issue 4: Mobile Flight Direction Mismatch (Resolved)
+
+### Problem
+On mobile devices, the bird would fly in one absolute direction regardless of which way the model was visually pointed. Users could rotate the visual model, but movement always went toward the same world direction.
+
+### Root Cause Analysis
+Two interconnected issues were identified:
+
+1. **Heading never initialized from spawn orientation**: In `FreeFlightController.reset()`, the heading was always set to 0, ignoring any initial orientation quaternion passed to the constructor. This meant the bird always started flying toward -Z regardless of spawn orientation.
+
+2. **GLB model orientation mismatch**: The code assumed the GLB model faced -Z and set `guessedForward = (0, 0, -1)`, resulting in identity offset. But the documentation correctly noted the GLB faces -X. This mismatch was never applied to the code.
+
+### Resolution
+
+**Fix 1: Extract heading from initial quaternion** (`free-flight-controller.js`)
+```javascript
+// Before (WRONG - always started at heading 0)
+this.heading = 0;
+
+// After (CORRECT - extract from initial orientation)
+this.heading = extractHeadingFromQuaternion(this._initialQuaternion, this._ambientEuler);
+this.pitch = extractPitchFromQuaternion(this._initialQuaternion, this._ambientEuler);
+```
+
+Added helper functions to extract Euler angles from quaternions using YXZ order.
+
+**Fix 2: Correct GLB model forward direction** (`index.html`)
+```javascript
+// Before (WRONG - assumed GLB faces -Z)
+const guessedForward = isGLB
+  ? new THREE.Vector3(0, 0, -1)
+  : computeModelForwardGuess(birbBounds, birbCenter);
+
+// After (CORRECT - GLB faces -X as documented)
+const guessedForward = isGLB
+  ? new THREE.Vector3(-1, 0, 0)
+  : computeModelForwardGuess(birbBounds, birbCenter);
+```
+
+**Fix 3: Mobile input diagnostics** (`flight-controls.js`)
+Added `DEBUG_MOBILE_INPUT` flag for debugging touch input issues on mobile devices.
+
+### New APIs Added
+- `setInitialOrientation(quaternion)` - Set spawn orientation after construction
+- `getHeading()` - Get current heading in radians
+- `setHeading(radians)` - Set heading directly for teleportation
+
+---
+
+## Summary Table
+
+| Issue | Status | Quick Fix Likelihood | Rebuild Complexity |
+|-------|--------|---------------------|-------------------|
+| Birb facing direction | Resolved | Medium (rotation math) | Low (re-model) |
+| Climb on joystick up | Resolved | Fixed (cross product order) | N/A |
+| Follow camera position | Resolved | Fixed (offset sign) | N/A |
+| Mobile flight direction | Resolved | Fixed (heading init + GLB offset) | N/A |
+
+---
+
 ## For Future Agents
 
 When working on these issues:
@@ -141,3 +201,4 @@ When working on these issues:
 3. **Use debug overlays** - Add visual arrows for forward vectors
 4. **Small incremental changes** - Each PR should test one hypothesis
 5. **Document results** - Update this file with what you tried and observed
+6. **Enable DEBUG_MOBILE_INPUT** - Set to `true` in `flight-controls.js` to trace mobile input
