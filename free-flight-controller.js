@@ -39,6 +39,13 @@ const clamp = (value, min, max, fallback) => {
   return value;
 };
 
+// Extract all rotation components from a quaternion using YXZ Euler decomposition
+// Uses an existing Euler instance to avoid constructor lookup issues
+const extractRotationsFromQuaternion = (quaternion, eulerInstance) => {
+  eulerInstance.setFromQuaternion(quaternion, 'YXZ');
+  return { heading: eulerInstance.y, pitch: eulerInstance.x, bank: eulerInstance.z };
+};
+
 const noop = () => {};
 
 const resolveLogger = (logger) => {
@@ -172,6 +179,54 @@ export class FreeFlightController {
 
   setInvertPitch(invert) {
     this.invertPitch = Boolean(invert);
+  }
+
+  /**
+   * Set the controller's orientation from a quaternion.
+   * This method properly extracts heading/pitch/bank values from the quaternion,
+   * ensuring that subsequent update() calls don't overwrite the orientation.
+   * Use this instead of directly modifying controller.quaternion.
+   *
+   * @param {Quaternion} quaternion - The target orientation quaternion
+   * @param {Object} options - Optional configuration
+   * @param {boolean} options.preserveBank - If true, keeps current bank value (default: false)
+   */
+  setOrientation(quaternion, { preserveBank = false } = {}) {
+    if (!quaternion || typeof quaternion.clone !== 'function') {
+      return;
+    }
+    const rotations = extractRotationsFromQuaternion(quaternion, this._ambientEuler);
+    this.heading = rotations.heading;
+    this.pitch = rotations.pitch;
+    if (!preserveBank) {
+      this.bank = rotations.bank;
+    }
+    this.visualPitch = this.pitch;
+    // Rebuild quaternions from extracted values to ensure consistency
+    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
+    this._visualQuaternion.setFromEuler(this._ambientEuler);
+    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
+    this.quaternion.setFromEuler(this._ambientEuler);
+  }
+
+  /**
+   * Set heading directly (useful for aligning with a specific compass direction)
+   * @param {number} headingRadians - The heading in radians
+   */
+  setHeading(headingRadians) {
+    if (!Number.isFinite(headingRadians)) {
+      return;
+    }
+    this.heading = headingRadians;
+    // Normalize heading to [-PI, PI]
+    const TWO_PI = Math.PI * 2;
+    while (this.heading > Math.PI) this.heading -= TWO_PI;
+    while (this.heading < -Math.PI) this.heading += TWO_PI;
+    // Rebuild quaternions
+    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
+    this._visualQuaternion.setFromEuler(this._ambientEuler);
+    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
+    this.quaternion.setFromEuler(this._ambientEuler);
   }
 
   setSphereCenter(center) {
@@ -415,10 +470,16 @@ export class FreeFlightController {
     this.velocity.set(0, 0, 0);
     this.quaternion.copy(this._initialQuaternion);
     this._visualQuaternion.copy(this._initialQuaternion);
-    this.heading = 0;
-    this.bank = 0;
-    this.pitch = 0;
-    this.visualPitch = 0;
+
+    // CRITICAL FIX: Extract heading/pitch/bank from initial quaternion instead of
+    // resetting to 0. This ensures the bird's direction matches its initial orientation
+    // and prevents the first update() from overwriting the initial quaternion.
+    const rotations = extractRotationsFromQuaternion(this._initialQuaternion, this._ambientEuler);
+    this.heading = rotations.heading;
+    this.pitch = rotations.pitch;
+    this.bank = rotations.bank;
+    this.visualPitch = this.pitch;
+
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
     this.elapsed = 0;
