@@ -307,54 +307,86 @@
 
     // ============================================================================
     // BASIC FLIGHT CONTROLLER CLASS
+    // Fixed: Velocity now follows facing direction (no separate Y override)
     // ============================================================================
     class BasicFlightController {
       constructor() {
+        // State
         this.position = new THREE.Vector3(0, 5, 0);
         this.quaternion = new THREE.Quaternion();
         this.velocity = new THREE.Vector3();
 
-        this.speed = 4.0;
-        this.turnSpeed = Math.PI / 2;
-        this.pitchSpeed = Math.PI / 4;
-        this.liftForce = 2.0;
-        this.gravity = 0.6;
+        // Settings
+        this.speed = 4.0;              // Constant forward speed
+        this.turnSpeed = 2.0;          // How fast we turn left/right (rad/s)
+        this.pitchSpeed = 1.5;         // How fast we climb/dive (rad/s)
+        this.pitchLimit = 1.2;         // Maximum pitch angle (radians, ~70 degrees)
 
-        this.yawInput = 0;
-        this.pitchInput = 0;
+        // Inputs
+        this.input = { x: 0, y: 0 };   // x = yaw (left/right), y = pitch (up/down)
       }
 
       update(deltaTime) {
-        const yawDelta = this.yawInput * this.turnSpeed * deltaTime;
-        const pitchDelta = this.pitchInput * this.pitchSpeed * deltaTime;
+        // 1. INPUTS: Calculate rotation amounts
+        // Note: input.x is Yaw (Left/Right), input.y is Pitch (Up/Down)
+        const yawChange = -this.input.x * this.turnSpeed * deltaTime;
+        const pitchChange = this.input.y * this.pitchSpeed * deltaTime;
 
+        // 2. ROTATION: Apply changes directly to the quaternion
+
+        // A. Apply Yaw (Rotation around World Y - keeps horizon level)
         const yawQuat = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(0, 1, 0),
-          yawDelta
+          yawChange
         );
+        this.quaternion.premultiply(yawQuat);
 
-        const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion);
+        // B. Apply Pitch (Rotation around Local X - nose up/down)
         const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
-          rightAxis,
-          -pitchDelta
+          new THREE.Vector3(1, 0, 0),
+          pitchChange
         );
+        this.quaternion.multiply(pitchQuat);
 
-        this.quaternion.premultiply(yawQuat).multiply(pitchQuat).normalize();
+        // Normalize to prevent quaternion drift
+        this.quaternion.normalize();
 
+        // C. Limit pitch to prevent flying straight up/down or flipping
+        // Extract current pitch from quaternion using Euler angles
+        const euler = new THREE.Euler().setFromQuaternion(this.quaternion, 'YXZ');
+        if (Math.abs(euler.x) > this.pitchLimit) {
+          euler.x = Math.sign(euler.x) * this.pitchLimit;
+          this.quaternion.setFromEuler(euler);
+        }
+
+        // 3. VELOCITY: Force velocity to align with facing direction
+        // Get the "Forward" vector (0, 0, -1) relative to our rotation
         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
 
-        const lift = this.pitchInput * this.liftForce;
-        const verticalVelocity = lift - this.gravity;
-
+        // Set velocity to exactly that direction * speed
+        // This is the KEY FIX: velocity follows where we're looking
         this.velocity.copy(forward).multiplyScalar(this.speed);
-        this.velocity.y = verticalVelocity;
 
+        // 4. POSITION: Update based on velocity
         this.position.addScaledVector(this.velocity, deltaTime);
 
-        if (this.position.y < 0.5) {
-          this.position.y = 0.5;
+        // 5. CONSTRAINT: Floor check (Bounce/Slide)
+        if (this.position.y < 1.0) {
+          this.position.y = 1.0;
+
+          // If pointing down, level out automatically
           if (this.velocity.y < 0) {
-            this.velocity.y = 0;
+            // Create a level quaternion to recover
+            const levelForward = new THREE.Vector3(forward.x, 0, forward.z).normalize();
+            // Prevent error if flying straight down
+            if (levelForward.lengthSq() > 0.001) {
+              const m = new THREE.Matrix4().lookAt(
+                new THREE.Vector3(0, 0, 0),
+                levelForward,
+                new THREE.Vector3(0, 1, 0)
+              );
+              this.quaternion.setFromRotationMatrix(m);
+            }
           }
         }
 
@@ -366,8 +398,9 @@
       }
 
       setInputs(yaw, pitch) {
-        this.yawInput = THREE.MathUtils.clamp(yaw, -1, 1);
-        this.pitchInput = THREE.MathUtils.clamp(pitch, -1, 1);
+        // x = left/right (-1 to 1), y = down/up (-1 to 1)
+        this.input.x = THREE.MathUtils.clamp(yaw, -1, 1);
+        this.input.y = THREE.MathUtils.clamp(pitch, -1, 1);
       }
     }
 
