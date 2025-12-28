@@ -8,6 +8,9 @@ const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.32;
 const DEFAULT_TOUCH_LOOK_EXPO = 0.18;
 const TOUCH_JOYSTICK_SIZE = 120;
 
+// Debug mode for mobile input diagnostics - set to true to log all touch input
+const DEBUG_MOBILE_INPUT = false;
+
 const PITCH_AXIS_KEYS = {
   positive: ['KeyW', 'ArrowUp'],
   negative: ['KeyS', 'ArrowDown'],
@@ -75,13 +78,31 @@ const shapeStickInput = (x, y, config = DEFAULT_THRUST_SHAPING) => {
   };
 };
 
+/**
+ * Normalize nipplejs event data to consistent X/Y values.
+ * Nipplejs provides vector.x (right = positive) and vector.y (up = positive).
+ * The values are already normalized to roughly -1 to 1 range.
+ */
 const normalizeNippleData = (data = {}) => {
+  // Prefer vector data when available (most accurate)
   const vectorX = Number.isFinite(data?.vector?.x) ? data.vector.x : null;
   const vectorY = Number.isFinite(data?.vector?.y) ? data.vector.y : null;
+
+  // Fallback to angle/force calculation if vector is not available
   const angle = Number.isFinite(data?.angle?.radian) ? data.angle.radian : null;
   const force = clamp(Number.isFinite(data?.force) ? data.force : 0, 0, 1);
+
+  // Calculate raw values - use vector if available, otherwise compute from angle
   const rawX = clamp(vectorX ?? (angle !== null ? Math.cos(angle) * force : 0), -1, 1);
   const rawY = clamp(vectorY ?? (angle !== null ? Math.sin(angle) * force : 0), -1, 1);
+
+  if (DEBUG_MOBILE_INPUT && (rawX !== 0 || rawY !== 0)) {
+    console.log('[mobile-input] nipple data:', {
+      vectorX, vectorY, angle, force, rawX, rawY,
+      source: vectorX !== null ? 'vector' : 'angle',
+    });
+  }
+
   return {
     raw: { x: rawX, y: rawY },
     rawMagnitude: clamp(Math.hypot(rawX, rawY), 0, 1),
@@ -192,6 +213,19 @@ export function createFlightControls({
     flightController.setYawOnlyMode?.(false);
     const yaw = combineAxis('yaw');
     const pitch = combineAxis('pitch');
+
+    // Debug: Log when non-zero input is being sent to the flight controller
+    if (DEBUG_MOBILE_INPUT && (yaw !== 0 || pitch !== 0)) {
+      console.log('[mobile-input] applyInputs:', {
+        yaw: yaw.toFixed(3),
+        pitch: pitch.toFixed(3),
+        sources: {
+          keyboard: { ...axisSources.keyboard },
+          leftStick: { ...axisSources.leftStick },
+        },
+      });
+    }
+
     if (typeof flightController.setInputs === 'function') {
       flightController.setInputs({ yaw, pitch });
     } else {
@@ -339,9 +373,19 @@ export function createFlightControls({
   };
 
   const handleTouchJoystickMove = (data) => {
-    if (isControlsFrozen() || isYawOnlyRotation()) {
+    if (isControlsFrozen()) {
+      if (DEBUG_MOBILE_INPUT) {
+        console.log('[mobile-input] blocked: controls frozen');
+      }
       return;
     }
+    if (isYawOnlyRotation()) {
+      if (DEBUG_MOBILE_INPUT) {
+        console.log('[mobile-input] blocked: yaw-only mode active');
+      }
+      return;
+    }
+
     const normalized = normalizeNippleData(data);
     const payload = { x: normalized.raw.x, y: normalized.raw.y };
     const context = {
@@ -350,6 +394,15 @@ export function createFlightControls({
       raw: normalized.raw,
       rawMagnitude: normalized.rawMagnitude,
     };
+
+    if (DEBUG_MOBILE_INPUT && normalized.rawMagnitude > 0.01) {
+      console.log('[mobile-input] joystick move:', {
+        x: normalized.raw.x.toFixed(3),
+        y: normalized.raw.y.toFixed(3),
+        magnitude: normalized.rawMagnitude.toFixed(3),
+      });
+    }
+
     // Use flight control path (left stick) for touch input - this ensures
     // velocity follows facing direction via the yaw/pitch rotation in update()
     handleLeftStickChange(payload, context);

@@ -55,6 +55,26 @@ const resolveLogger = (logger) => {
 
 const createAxisRecord = () => ({ yaw: 0, pitch: 0 });
 
+/**
+ * Extract the heading (yaw) angle from a quaternion using YXZ Euler order.
+ * Returns heading in radians, normalized to [-PI, PI].
+ */
+const extractHeadingFromQuaternion = (quaternion, euler) => {
+  if (!quaternion || quaternion.w === undefined) return 0;
+  euler.setFromQuaternion(quaternion, 'YXZ');
+  return euler.y;
+};
+
+/**
+ * Extract the pitch angle from a quaternion using YXZ Euler order.
+ * Returns pitch in radians.
+ */
+const extractPitchFromQuaternion = (quaternion, euler) => {
+  if (!quaternion || quaternion.w === undefined) return 0;
+  euler.setFromQuaternion(quaternion, 'YXZ');
+  return euler.x;
+};
+
 export class FreeFlightController {
   constructor(three, options = {}) {
     if (!three) {
@@ -66,9 +86,9 @@ export class FreeFlightController {
 
     this.position = new Vector3();
     this.velocity = new Vector3();
-    // Single quaternion for flight direction (like SimpleFlightController)
+    // Single quaternion for flight direction (combines heading + pitch)
     this.quaternion = new Quaternion();
-    // Separate quaternion for visual output (includes banking)
+    // Separate quaternion for visual output (includes banking for aesthetics)
     this._visualQuaternion = new Quaternion();
     // Keep lookQuaternion as alias for compatibility with nesting system
     this.lookQuaternion = this.quaternion;
@@ -406,10 +426,15 @@ export class FreeFlightController {
     this.velocity.set(0, 0, 0);
     this.quaternion.copy(this._initialQuaternion);
     this._visualQuaternion.copy(this._initialQuaternion);
-    this.heading = 0;
+
+    // Extract heading and pitch from the initial quaternion so that movement
+    // direction matches the initial orientation. This fixes the bug where the
+    // bird would always fly toward -Z regardless of spawn orientation.
+    this.heading = extractHeadingFromQuaternion(this._initialQuaternion, this._ambientEuler);
+    this.pitch = extractPitchFromQuaternion(this._initialQuaternion, this._ambientEuler);
     this.bank = 0;
-    this.pitch = 0;
-    this.visualPitch = 0;
+    this.visualPitch = this.pitch;
+
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
     this.elapsed = 0;
@@ -426,5 +451,37 @@ export class FreeFlightController {
     // Reset previous up to match initial position's local up
     this._computeLocalUp();
     this._previousUp.copy(this._localUp);
+  }
+
+  /**
+   * Set the initial orientation for the controller. This can be called after
+   * construction to change the spawn orientation. The heading and pitch will
+   * be extracted from the quaternion on the next reset() call.
+   */
+  setInitialOrientation(quaternion) {
+    if (quaternion && typeof quaternion.clone === 'function') {
+      this._initialQuaternion.copy(quaternion);
+    }
+  }
+
+  /**
+   * Get the current heading angle in radians.
+   */
+  getHeading() {
+    return this.heading;
+  }
+
+  /**
+   * Set the heading angle directly (in radians). Useful for teleportation
+   * or spawning at a specific orientation.
+   */
+  setHeading(radians) {
+    if (Number.isFinite(radians)) {
+      this.heading = radians;
+      // Normalize to [-PI, PI]
+      const TWO_PI = Math.PI * 2;
+      while (this.heading > Math.PI) this.heading -= TWO_PI;
+      while (this.heading < -Math.PI) this.heading += TWO_PI;
+    }
   }
 }
