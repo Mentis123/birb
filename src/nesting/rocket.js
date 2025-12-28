@@ -99,8 +99,14 @@ function createRocketTrail(THREE, count = 30) {
 
 /**
  * Main rocket system
+ * @param {Object} THREE - Three.js library
+ * @param {Object} scene - Three.js scene
+ * @param {Object} [options] - Configuration options
+ * @param {Function} [options.onExplosion] - Callback when a rocket explodes on impact
  */
-export function createRocketSystem(THREE, scene) {
+export function createRocketSystem(THREE, scene, options = {}) {
+  const { onExplosion } = options;
+
   const container = new THREE.Group();
   container.name = 'rockets';
   scene.add(container);
@@ -119,6 +125,11 @@ export function createRocketSystem(THREE, scene) {
   const _raycaster = new THREE.Raycaster();
 
   const createExplosion = (position) => {
+    // Notify listener about explosion
+    if (typeof onExplosion === 'function') {
+      onExplosion(position);
+    }
+
     const explosionMaterial = new THREE.MeshBasicMaterial({
       color: 0xffaa44,
       transparent: true,
