@@ -327,6 +327,15 @@ export class FreeFlightController {
     this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
     this.quaternion.setFromEuler(this._ambientEuler);
 
+    // Align orientation with the local "up" direction so the horizon stays
+    // level relative to the surface (useful when perched on spherical worlds).
+    if (this._sphereCenter) {
+      this._computeLocalUp();
+      this._alignQuaternion.setFromUnitVectors(this._up, this._localUp);
+      this._visualQuaternion.premultiply(this._alignQuaternion);
+      this.quaternion.premultiply(this._alignQuaternion);
+    }
+
     const canTranslate =
       !this.frozen &&
       !this._yawOnlyMode &&
