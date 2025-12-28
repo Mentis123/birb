@@ -149,6 +149,48 @@
         transform: translateY(0);
       }
 
+      .heading-telemetry {
+        position: fixed;
+        inset: 0.85rem auto auto 0.85rem;
+        z-index: 20;
+        min-width: 15rem;
+        padding: 0.75rem 0.9rem;
+        border-radius: 0.9rem;
+        border: 1px solid rgba(144, 188, 255, 0.35);
+        background: rgba(10, 17, 34, 0.9);
+        box-shadow: 0 12px 28px rgba(3, 8, 20, 0.5);
+        font-size: 0.8rem;
+        line-height: 1.35;
+        letter-spacing: 0.04em;
+        color: #eaf2ff;
+        backdrop-filter: blur(14px);
+      }
+
+      .heading-telemetry h3 {
+        margin: 0 0 0.35rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        opacity: 0.8;
+      }
+
+      .heading-telemetry dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.25rem 0.6rem;
+      }
+
+      .heading-telemetry dt {
+        opacity: 0.72;
+      }
+
+      .heading-telemetry dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+
       .control-slider {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
@@ -1213,6 +1255,144 @@
         relativeY: 0,
       };
 
+      let audioContext = null;
+      let hasUnlockedAudio = false;
+
+      const initAudioContext = () => {
+        if (audioContext) return audioContext;
+        const AudioContextCtor =
+          typeof window !== 'undefined'
+            ? window.AudioContext || window.webkitAudioContext
+            : null;
+        if (!AudioContextCtor) return null;
+        audioContext = new AudioContextCtor();
+        return audioContext;
+      };
+
+      // Ensure audio context is running - call this before every sound
+      const ensureAudioReady = async () => {
+        const ctx = initAudioContext();
+        if (!ctx) return null;
+
+        // Always try to resume if suspended (can happen after tab switch, phone lock, etc.)
+        if (ctx.state === 'suspended') {
+          try {
+            await ctx.resume();
+          } catch (e) {
+            return null;
+          }
+        }
+
+        // Double-check it's actually running now
+        if (ctx.state !== 'running') {
+          return null;
+        }
+
+        return ctx;
+      };
+
+      // Play silent buffer to unlock iOS/Safari audio - must be called from user gesture
+      const unlockAudioWithSilentBuffer = async (ctx) => {
+        if (!ctx || hasUnlockedAudio) return true;
+
+        try {
+          // Create and play a short silent buffer - this unlocks iOS audio
+          const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          source.start(0);
+
+          // Wait a tick to ensure it played
+          await new Promise(resolve => setTimeout(resolve, 10));
+          hasUnlockedAudio = true;
+          return true;
+        } catch (error) {
+          hasUnlockedAudio = false;
+          return false;
+        }
+      };
+
+      // Pre-initialize and unlock audio on first user interaction
+      const initAudioOnInteraction = async () => {
+        const ctx = await ensureAudioReady();
+        if (!ctx) return;
+        await unlockAudioWithSilentBuffer(ctx);
+      };
+
+      // Keep listeners active to handle re-suspend after tab switches etc.
+      const audioInteractionEvents = ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'];
+      audioInteractionEvents.forEach(eventType => {
+        document.addEventListener(eventType, async function handleAudioInteraction(event) {
+          // Always try to init/resume on interaction - audio can get suspended again
+          await initAudioOnInteraction();
+        }, { passive: true });
+      });
+
+      const playRocketFireSound = async () => {
+        const ctx = await ensureAudioReady();
+        if (!ctx) return;
+
+        const now = ctx.currentTime;
+        const duration = 0.35;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(280, now);
+        oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.18);
+
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+        oscillator.connect(gain).connect(ctx.destination);
+        oscillator.start(now);
+        oscillator.stop(now + duration);
+      };
+
+      const playExplosionSound = async () => {
+        const ctx = await ensureAudioReady();
+        if (!ctx) return;
+
+        const now = ctx.currentTime;
+
+        // Low rumble/boom component
+        const boom = ctx.createOscillator();
+        const boomGain = ctx.createGain();
+        boom.type = 'sine';
+        boom.frequency.setValueAtTime(80, now);
+        boom.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+        boomGain.gain.setValueAtTime(0.3, now);
+        boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        boom.connect(boomGain).connect(ctx.destination);
+        boom.start(now);
+        boom.stop(now + 0.4);
+
+        // Crackle/noise component using multiple oscillators
+        const crackle = ctx.createOscillator();
+        const crackleGain = ctx.createGain();
+        crackle.type = 'sawtooth';
+        crackle.frequency.setValueAtTime(400, now);
+        crackle.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+        crackleGain.gain.setValueAtTime(0.15, now);
+        crackleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        crackle.connect(crackleGain).connect(ctx.destination);
+        crackle.start(now);
+        crackle.stop(now + 0.2);
+
+        // High frequency pop
+        const pop = ctx.createOscillator();
+        const popGain = ctx.createGain();
+        pop.type = 'square';
+        pop.frequency.setValueAtTime(600, now);
+        pop.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+        popGain.gain.setValueAtTime(0.1, now);
+        popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        pop.connect(popGain).connect(ctx.destination);
+        pop.start(now);
+        pop.stop(now + 0.1);
+      };
+
       function clamp(value, min, max) {
         if (!Number.isFinite(value)) {
           return 0;
@@ -1421,6 +1601,86 @@
           dispose() {
             scene.remove(modelForwardHelper, cameraForwardHelper, velocityHelper);
           },
+        };
+      })();
+
+      const headingTelemetry = (() => {
+        const hasTelemetry = new URLSearchParams(window.location.search).has("headingDebug");
+        if (!hasTelemetry) return null;
+
+        const container = document.createElement("section");
+        container.className = "heading-telemetry";
+        container.innerHTML = `
+          <h3>Heading / Velocity</h3>
+          <dl>
+            <dt>Heading</dt>
+            <dd data-heading-value>0°</dd>
+            <dt>Forward</dt>
+            <dd data-forward-value>0.00, 0.00, -1.00</dd>
+            <dt>Velocity</dt>
+            <dd data-velocity-value>0.00, 0.00, 0.00</dd>
+            <dt>Dot (fwd·vel)</dt>
+            <dd data-dot-value>—</dd>
+          </dl>
+        `;
+
+        document.body.appendChild(container);
+
+        const headingValue = container.querySelector('[data-heading-value]');
+        const forwardValue = container.querySelector('[data-forward-value]');
+        const velocityValue = container.querySelector('[data-velocity-value]');
+        const dotValue = container.querySelector('[data-dot-value]');
+
+        const scratch = {
+          forward: new THREE.Vector3(),
+          velocity: new THREE.Vector3(),
+        };
+
+        let lastDot = null;
+        let lastWarningTime = 0;
+
+        const formatVec = (vec) =>
+          `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`;
+
+        const update = (controller) => {
+          if (!controller) return;
+
+          const heading = Number.isFinite(controller.heading) ? controller.heading : 0;
+          const headingDeg = ((heading * 180) / Math.PI).toFixed(1);
+          headingValue.textContent = `${headingDeg}°`;
+
+          const forward = scratch.forward.set(0, 0, -1).applyQuaternion(controller.quaternion);
+          if (forward.lengthSq() > 1e-9) {
+            forward.normalize();
+          }
+          forwardValue.textContent = formatVec(forward);
+
+          const velocity = scratch.velocity.copy(controller.velocity);
+          const speed = velocity.length();
+          let dot = null;
+          if (speed > 1e-6) {
+            velocity.multiplyScalar(1 / speed);
+            dot = forward.dot(velocity);
+          }
+          velocityValue.textContent = formatVec(controller.velocity);
+          dotValue.textContent = Number.isFinite(dot) ? dot.toFixed(3) : "—";
+
+          lastDot = dot;
+
+          const now = typeof performance !== "undefined" ? performance.now() : 0;
+          if (Number.isFinite(dot) && dot < 0.6 && now - lastWarningTime > 1200) {
+            console.warn(
+              "[headingDebug] Velocity diverged from forward direction",
+              { headingDeg, forward: forward.toArray(), velocity: controller.velocity.toArray(), dot },
+            );
+            lastWarningTime = now;
+          }
+        };
+
+        return {
+          update,
+          getDotProduct: () => lastDot,
+          dispose: () => container.remove(),
         };
       })();
 
@@ -1686,6 +1946,10 @@
             }
             sphericalWorld.root.updateMatrixWorld(true);
 
+            if (rocketSystem && typeof rocketSystem.setCollisionTargets === 'function') {
+              rocketSystem.setCollisionTargets([sphericalWorld.root]);
+            }
+
           } catch (nestError) {
             console.warn("Nest points creation failed:", nestError);
             nestPointsSystem = null;
@@ -1699,6 +1963,9 @@
           }
           if (flightController && typeof flightController.setSphereCenter === 'function') {
             flightController.setSphereCenter(null);
+          }
+          if (rocketSystem && typeof rocketSystem.setCollisionTargets === 'function') {
+            rocketSystem.setCollisionTargets([]);
           }
           nestPointsSystem = null;
           if (statusMetric) {
@@ -2706,8 +2973,12 @@
 
       applyInvertPitchPreference(savedInvertPitch, { persist: false });
 
-      // Initialize rocket system
-      rocketSystem = createRocketSystem(THREE, scene);
+      // Initialize rocket system with explosion sound callback
+      rocketSystem = createRocketSystem(THREE, scene, {
+        onExplosion: () => {
+          playExplosionSound();
+        },
+      });
 
       // Initialize nesting system with state change callback
       const handleNestingStateChange = (newState, previousState, currentNest) => {
@@ -2732,6 +3003,11 @@
           setCameraMode(CAMERA_MODES.FPV, { forced: true });
         } else if (isLeavingNest && nestCameraReturnMode) {
           setCameraMode(nestCameraReturnMode);
+        }
+
+        // Enable/disable nest look mode for free camera look-around
+        if (typeof flightController.setNestLookMode === 'function') {
+          flightController.setNestLookMode(isNested);
         }
 
         // Update status message
@@ -2775,8 +3051,11 @@
           if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
             const launchPosition = flightController.position.clone();
             const launchDirection = nestingSystem.getLookDirection();
-            rocketSystem.fire(launchPosition, launchDirection);
-            updateLaunchButtonCooldown(true);
+            const fired = rocketSystem.fire(launchPosition, launchDirection);
+            if (fired) {
+              playRocketFireSound();
+              updateLaunchButtonCooldown(true);
+            }
           }
         };
 
@@ -3059,6 +3338,8 @@
             camera: cameraState.camera,
           });
         }
+
+        headingTelemetry?.update(flightController);
         renderer.render(scene, cameraState.camera);
       };
 

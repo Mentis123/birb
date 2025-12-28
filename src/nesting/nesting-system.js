@@ -184,8 +184,15 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
             // Arrived at nest
             flightController.position.copy(targetPosition);
             flightController.velocity.set(0, 0, 0);
-            flightController.lookQuaternion.copy(targetQuaternion);
-            flightController.quaternion.copy(targetQuaternion);
+            // Use setOrientation to properly sync heading/pitch/bank with quaternion
+            // This prevents the next update() from overwriting the orientation
+            if (typeof flightController.setOrientation === 'function') {
+              flightController.setOrientation(targetQuaternion);
+            } else {
+              // Fallback for older controller versions
+              flightController.lookQuaternion.copy(targetQuaternion);
+              flightController.quaternion.copy(targetQuaternion);
+            }
             setState(NESTING_STATES.NESTED);
           } else {
             // Move toward nest
@@ -198,6 +205,10 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
             // Smoothly rotate to face landing orientation
             flightController.lookQuaternion.slerp(targetQuaternion, delta * 3);
             flightController.quaternion.slerp(targetQuaternion, delta * 3);
+            // Sync heading/pitch/bank with the slerped quaternion
+            if (typeof flightController.setOrientation === 'function') {
+              flightController.setOrientation(flightController.quaternion, { preserveBank: true });
+            }
           }
           break;
         }

@@ -27,8 +27,18 @@ export const BANK_RESPONSE = 8;
 export const MAX_BANK_ANGLE = (65 * Math.PI) / 180;
 // Maximum visual pitch tilt when climbing/diving (nose up/down effect)
 export const MAX_VISUAL_PITCH_ANGLE = (22 * Math.PI) / 180;
+// Maximum pitch angle when in nest look-around mode (allows looking up/down freely)
+export const MAX_NEST_PITCH_ANGLE = (85 * Math.PI) / 180;
 // How quickly the visual pitch responds to vertical velocity
 export const VISUAL_PITCH_RESPONSE = 6;
+// How quickly pitch responds when in nest look-around mode (more responsive)
+export const NEST_PITCH_RESPONSE = 12;
+// Smoothing factor for nest look input (0 = instant, higher = smoother/slower)
+// This dampens jittery input while preserving responsiveness
+export const NEST_LOOK_SMOOTHING = 8;
+// Reduced rotation rates for nest look mode (feels more controlled)
+export const NEST_YAW_RATE = Math.PI * 0.5;
+export const NEST_PITCH_RATE = Math.PI * 0.4;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -37,6 +47,13 @@ const clamp = (value, min, max, fallback) => {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+};
+
+// Extract all rotation components from a quaternion using YXZ Euler decomposition
+// Uses an existing Euler instance to avoid constructor lookup issues
+const extractRotationsFromQuaternion = (quaternion, eulerInstance) => {
+  eulerInstance.setFromQuaternion(quaternion, 'YXZ');
+  return { heading: eulerInstance.y, pitch: eulerInstance.x, bank: eulerInstance.z };
 };
 
 const noop = () => {};
@@ -54,26 +71,6 @@ const resolveLogger = (logger) => {
 };
 
 const createAxisRecord = () => ({ yaw: 0, pitch: 0 });
-
-/**
- * Extract the heading (yaw) angle from a quaternion using YXZ Euler order.
- * Returns heading in radians, normalized to [-PI, PI].
- */
-const extractHeadingFromQuaternion = (quaternion, euler) => {
-  if (!quaternion || quaternion.w === undefined) return 0;
-  euler.setFromQuaternion(quaternion, 'YXZ');
-  return euler.y;
-};
-
-/**
- * Extract the pitch angle from a quaternion using YXZ Euler order.
- * Returns pitch in radians.
- */
-const extractPitchFromQuaternion = (quaternion, euler) => {
-  if (!quaternion || quaternion.w === undefined) return 0;
-  euler.setFromQuaternion(quaternion, 'YXZ');
-  return euler.x;
-};
 
 export class FreeFlightController {
   constructor(three, options = {}) {
@@ -131,6 +128,11 @@ export class FreeFlightController {
 
     this._yawOnlyMode = false;
     this._pitchOnlyMode = false;
+    // Nest look-around mode: allows larger pitch range and more responsive controls
+    this._nestLookMode = false;
+    // Smoothed input for nest look mode to reduce jitter
+    this._smoothedNestYaw = 0;
+    this._smoothedNestPitch = 0;
 
     // Track heading as a scalar angle to avoid quaternion accumulation issues
     this.heading = 0;
@@ -186,12 +188,76 @@ export class FreeFlightController {
     this._pitchOnlyMode = Boolean(isActive);
   }
 
+  // Enable/disable nest look-around mode (larger pitch range, more responsive)
+  setNestLookMode(isActive) {
+    this._nestLookMode = Boolean(isActive);
+    // Reset smoothed input and pitch when transitioning modes
+    this._smoothedNestYaw = 0;
+    this._smoothedNestPitch = 0;
+    if (!this._nestLookMode) {
+      // Reset pitch when exiting nest mode to avoid stuck at extreme angles
+      this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, 0);
+    }
+  }
+
+  isNestLookMode() {
+    return this._nestLookMode;
+  }
+
   setSprintActive(isActive) {
     this.isSprinting = Boolean(isActive);
   }
 
   setInvertPitch(invert) {
     this.invertPitch = Boolean(invert);
+  }
+
+  /**
+   * Set the controller's orientation from a quaternion.
+   * This method properly extracts heading/pitch/bank values from the quaternion,
+   * ensuring that subsequent update() calls don't overwrite the orientation.
+   * Use this instead of directly modifying controller.quaternion.
+   *
+   * @param {Quaternion} quaternion - The target orientation quaternion
+   * @param {Object} options - Optional configuration
+   * @param {boolean} options.preserveBank - If true, keeps current bank value (default: false)
+   */
+  setOrientation(quaternion, { preserveBank = false } = {}) {
+    if (!quaternion || typeof quaternion.clone !== 'function') {
+      return;
+    }
+    const rotations = extractRotationsFromQuaternion(quaternion, this._ambientEuler);
+    this.heading = rotations.heading;
+    this.pitch = rotations.pitch;
+    if (!preserveBank) {
+      this.bank = rotations.bank;
+    }
+    this.visualPitch = this.pitch;
+    // Rebuild quaternions from extracted values to ensure consistency
+    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
+    this._visualQuaternion.setFromEuler(this._ambientEuler);
+    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
+    this.quaternion.setFromEuler(this._ambientEuler);
+  }
+
+  /**
+   * Set heading directly (useful for aligning with a specific compass direction)
+   * @param {number} headingRadians - The heading in radians
+   */
+  setHeading(headingRadians) {
+    if (!Number.isFinite(headingRadians)) {
+      return;
+    }
+    this.heading = headingRadians;
+    // Normalize heading to [-PI, PI]
+    const TWO_PI = Math.PI * 2;
+    while (this.heading > Math.PI) this.heading -= TWO_PI;
+    while (this.heading < -Math.PI) this.heading += TWO_PI;
+    // Rebuild quaternions
+    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
+    this._visualQuaternion.setFromEuler(this._ambientEuler);
+    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
+    this.quaternion.setFromEuler(this._ambientEuler);
   }
 
   setSphereCenter(center) {
@@ -309,10 +375,27 @@ export class FreeFlightController {
       this._pendingPitch = 0;
     }
 
+    // In nest mode, apply input smoothing to reduce jitter and make controls feel fluid
+    let effectiveYaw = combinedYaw;
+    let effectivePitch = combinedPitch;
+
+    if (this._nestLookMode && rotationDeltaTime > 0) {
+      // Smooth interpolation toward target input values
+      const smoothStep = 1 - Math.exp(-NEST_LOOK_SMOOTHING * rotationDeltaTime);
+      this._smoothedNestYaw += (combinedYaw - this._smoothedNestYaw) * smoothStep;
+      this._smoothedNestPitch += (combinedPitch - this._smoothedNestPitch) * smoothStep;
+
+      // Use smoothed values for nest look
+      effectiveYaw = this._smoothedNestYaw;
+      effectivePitch = this._smoothedNestPitch;
+    }
+
     // Update heading as a scalar angle
     // yawDelta sign: negative yawInput (stick left) -> positive delta -> heading increases -> turn left
     //                positive yawInput (stick right) -> negative delta -> heading decreases -> turn right
-    const yawDelta = -combinedYaw * YAW_RATE * rotationDeltaTime;
+    // Use reduced rotation rate in nest mode for more controlled look-around
+    const activeYawRate = this._nestLookMode ? NEST_YAW_RATE : YAW_RATE;
+    const yawDelta = -effectiveYaw * activeYawRate * rotationDeltaTime;
     this.heading += yawDelta;
 
     // Normalize heading to [-PI, PI] to prevent floating-point precision issues over time
@@ -322,7 +405,8 @@ export class FreeFlightController {
 
     // Visual banking - wing dips on the side we're turning toward
     // Left stick (positive yaw) = left wing down = negative roll in THREE.js
-    const targetBank = -combinedYaw * MAX_BANK_ANGLE;
+    // No banking in nest mode (bird is stationary)
+    const targetBank = this._nestLookMode ? 0 : -combinedYaw * MAX_BANK_ANGLE;
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * rotationDeltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
@@ -330,11 +414,24 @@ export class FreeFlightController {
 
     // Visual pitch - nose up when pushing up, nose down when pushing down
     // Positive pitch input (up stick) = positive pitch angle = nose up
-    const targetPitch = combinedPitch * MAX_VISUAL_PITCH_ANGLE;
+    // Use larger pitch range and faster response when in nest look-around mode
+    const maxPitchAngle = this._nestLookMode ? MAX_NEST_PITCH_ANGLE : MAX_VISUAL_PITCH_ANGLE;
+    const pitchResponse = this._nestLookMode ? NEST_PITCH_RESPONSE : VISUAL_PITCH_RESPONSE;
 
-    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * rotationDeltaTime);
-    this.pitch += (targetPitch - this.pitch) * pitchStep;
-    this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.pitch);
+    // In nest mode, accumulate pitch from smoothed input for fluid free look
+    // In flight mode, pitch is proportional to input (returns to level when released)
+    if (this._nestLookMode) {
+      // Accumulate pitch from smoothed input - free look style with reduced rate
+      const pitchDelta = effectivePitch * NEST_PITCH_RATE * rotationDeltaTime;
+      this.pitch += pitchDelta;
+      this.pitch = clamp(this.pitch, -maxPitchAngle, maxPitchAngle, this.pitch);
+    } else {
+      // Flight mode: pitch proportional to input
+      const targetPitch = combinedPitch * maxPitchAngle;
+      const pitchStep = 1 - Math.exp(-pitchResponse * rotationDeltaTime);
+      this.pitch += (targetPitch - this.pitch) * pitchStep;
+      this.pitch = clamp(this.pitch, -maxPitchAngle, maxPitchAngle, this.pitch);
+    }
     this.visualPitch = this.pitch;
 
     // Use YXZ Euler order to prevent axis contamination (Yaw-Pitch-Roll)
@@ -346,6 +443,15 @@ export class FreeFlightController {
     // so that travel direction follows the visible nose direction.
     this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
     this.quaternion.setFromEuler(this._ambientEuler);
+
+    // Align orientation with the local "up" direction so the horizon stays
+    // level relative to the surface (useful when perched on spherical worlds).
+    if (this._sphereCenter) {
+      this._computeLocalUp();
+      this._alignQuaternion.setFromUnitVectors(this._up, this._localUp);
+      this._visualQuaternion.premultiply(this._alignQuaternion);
+      this.quaternion.premultiply(this._alignQuaternion);
+    }
 
     const canTranslate =
       !this.frozen &&
@@ -427,12 +533,13 @@ export class FreeFlightController {
     this.quaternion.copy(this._initialQuaternion);
     this._visualQuaternion.copy(this._initialQuaternion);
 
-    // Extract heading and pitch from the initial quaternion so that movement
-    // direction matches the initial orientation. This fixes the bug where the
-    // bird would always fly toward -Z regardless of spawn orientation.
-    this.heading = extractHeadingFromQuaternion(this._initialQuaternion, this._ambientEuler);
-    this.pitch = extractPitchFromQuaternion(this._initialQuaternion, this._ambientEuler);
-    this.bank = 0;
+    // CRITICAL FIX: Extract heading/pitch/bank from initial quaternion instead of
+    // resetting to 0. This ensures the bird's direction matches its initial orientation
+    // and prevents the first update() from overwriting the initial quaternion.
+    const rotations = extractRotationsFromQuaternion(this._initialQuaternion, this._ambientEuler);
+    this.heading = rotations.heading;
+    this.pitch = rotations.pitch;
+    this.bank = rotations.bank;
     this.visualPitch = this.pitch;
 
     this.forwardSpeed = 0;
@@ -442,6 +549,7 @@ export class FreeFlightController {
     this._pendingPitch = 0;
     this._yawOnlyMode = false;
     this._pitchOnlyMode = false;
+    this._nestLookMode = false;
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);
