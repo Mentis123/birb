@@ -149,6 +149,48 @@
         transform: translateY(0);
       }
 
+      .heading-telemetry {
+        position: fixed;
+        inset: 0.85rem auto auto 0.85rem;
+        z-index: 20;
+        min-width: 15rem;
+        padding: 0.75rem 0.9rem;
+        border-radius: 0.9rem;
+        border: 1px solid rgba(144, 188, 255, 0.35);
+        background: rgba(10, 17, 34, 0.9);
+        box-shadow: 0 12px 28px rgba(3, 8, 20, 0.5);
+        font-size: 0.8rem;
+        line-height: 1.35;
+        letter-spacing: 0.04em;
+        color: #eaf2ff;
+        backdrop-filter: blur(14px);
+      }
+
+      .heading-telemetry h3 {
+        margin: 0 0 0.35rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        opacity: 0.8;
+      }
+
+      .heading-telemetry dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.25rem 0.6rem;
+      }
+
+      .heading-telemetry dt {
+        opacity: 0.72;
+      }
+
+      .heading-telemetry dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+
       .control-slider {
         display: grid;
         grid-template-columns: auto minmax(0, 1fr);
@@ -1421,6 +1463,86 @@
           dispose() {
             scene.remove(modelForwardHelper, cameraForwardHelper, velocityHelper);
           },
+        };
+      })();
+
+      const headingTelemetry = (() => {
+        const hasTelemetry = new URLSearchParams(window.location.search).has("headingDebug");
+        if (!hasTelemetry) return null;
+
+        const container = document.createElement("section");
+        container.className = "heading-telemetry";
+        container.innerHTML = `
+          <h3>Heading / Velocity</h3>
+          <dl>
+            <dt>Heading</dt>
+            <dd data-heading-value>0°</dd>
+            <dt>Forward</dt>
+            <dd data-forward-value>0.00, 0.00, -1.00</dd>
+            <dt>Velocity</dt>
+            <dd data-velocity-value>0.00, 0.00, 0.00</dd>
+            <dt>Dot (fwd·vel)</dt>
+            <dd data-dot-value>—</dd>
+          </dl>
+        `;
+
+        document.body.appendChild(container);
+
+        const headingValue = container.querySelector('[data-heading-value]');
+        const forwardValue = container.querySelector('[data-forward-value]');
+        const velocityValue = container.querySelector('[data-velocity-value]');
+        const dotValue = container.querySelector('[data-dot-value]');
+
+        const scratch = {
+          forward: new THREE.Vector3(),
+          velocity: new THREE.Vector3(),
+        };
+
+        let lastDot = null;
+        let lastWarningTime = 0;
+
+        const formatVec = (vec) =>
+          `${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)}`;
+
+        const update = (controller) => {
+          if (!controller) return;
+
+          const heading = Number.isFinite(controller.heading) ? controller.heading : 0;
+          const headingDeg = ((heading * 180) / Math.PI).toFixed(1);
+          headingValue.textContent = `${headingDeg}°`;
+
+          const forward = scratch.forward.set(0, 0, -1).applyQuaternion(controller.quaternion);
+          if (forward.lengthSq() > 1e-9) {
+            forward.normalize();
+          }
+          forwardValue.textContent = formatVec(forward);
+
+          const velocity = scratch.velocity.copy(controller.velocity);
+          const speed = velocity.length();
+          let dot = null;
+          if (speed > 1e-6) {
+            velocity.multiplyScalar(1 / speed);
+            dot = forward.dot(velocity);
+          }
+          velocityValue.textContent = formatVec(controller.velocity);
+          dotValue.textContent = Number.isFinite(dot) ? dot.toFixed(3) : "—";
+
+          lastDot = dot;
+
+          const now = typeof performance !== "undefined" ? performance.now() : 0;
+          if (Number.isFinite(dot) && dot < 0.6 && now - lastWarningTime > 1200) {
+            console.warn(
+              "[headingDebug] Velocity diverged from forward direction",
+              { headingDeg, forward: forward.toArray(), velocity: controller.velocity.toArray(), dot },
+            );
+            lastWarningTime = now;
+          }
+        };
+
+        return {
+          update,
+          getDotProduct: () => lastDot,
+          dispose: () => container.remove(),
         };
       })();
 
@@ -3058,6 +3180,8 @@
             camera: cameraState.camera,
           });
         }
+
+        headingTelemetry?.update(flightController);
         renderer.render(scene, cameraState.camera);
       };
 
