@@ -7,7 +7,7 @@
 const ROCKET_SPEED = 25.0;
 const ROCKET_GRAVITY = 5.0;
 const ROCKET_LIFETIME = 8.0; // seconds
-const ROCKET_COOLDOWN = 5.0; // seconds between shots
+const ROCKET_COOLDOWN = 2.0; // seconds between shots
 
 /**
  * Create a single rocket mesh
@@ -106,12 +106,40 @@ export function createRocketSystem(THREE, scene) {
   scene.add(container);
 
   const rockets = [];
+  const explosions = [];
   let cooldownTimer = 0;
   let animationTime = 0;
+  let collisionTargets = [];
 
   // Temporary vectors
   const _tempVec = new THREE.Vector3();
   const _tempQuat = new THREE.Quaternion();
+  const _movementVec = new THREE.Vector3();
+  const _rayDirection = new THREE.Vector3();
+  const _raycaster = new THREE.Raycaster();
+
+  const createExplosion = (position) => {
+    const explosionMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffaa44,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const explosion = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 12, 10),
+      explosionMaterial,
+    );
+
+    explosion.position.copy(position);
+    explosion.userData.lifetime = 0.6;
+    explosion.userData.age = 0;
+    explosion.userData.material = explosionMaterial;
+
+    container.add(explosion);
+    explosions.push(explosion);
+  };
 
   return {
     /**
@@ -161,6 +189,7 @@ export function createRocketSystem(THREE, scene) {
       rocket.userData.lifetime = ROCKET_LIFETIME;
       rocket.userData.trail = trail;
       rocket.userData.trailIndex = 0;
+      rocket.userData.previousPosition = position.clone();
 
       container.add(rocket);
       container.add(trail);
@@ -194,11 +223,32 @@ export function createRocketSystem(THREE, scene) {
           continue;
         }
 
+        const previousPosition = rocket.userData.previousPosition || rocket.position.clone();
+
         // Apply gravity
         rocket.userData.velocity.y -= ROCKET_GRAVITY * delta;
 
         // Update position
         rocket.position.addScaledVector(rocket.userData.velocity, delta);
+
+        // Collision detection along travel path
+        _movementVec.copy(rocket.position).sub(previousPosition);
+        const distanceTraveled = _movementVec.length();
+        if (distanceTraveled > 0 && collisionTargets.length > 0) {
+          _rayDirection.copy(_movementVec).normalize();
+          _raycaster.set(previousPosition, _rayDirection);
+          _raycaster.far = distanceTraveled;
+
+          const intersections = _raycaster.intersectObjects(collisionTargets, true);
+          if (intersections.length > 0) {
+            const hitPoint = intersections[0].point;
+            createExplosion(hitPoint);
+            this.removeRocket(i);
+            continue;
+          }
+        }
+
+        rocket.userData.previousPosition = rocket.position.clone();
 
         // Orient rocket to velocity direction
         const velocity = rocket.userData.velocity;
@@ -241,6 +291,26 @@ export function createRocketSystem(THREE, scene) {
           trail.material.opacity = 0.7 * (1 - fadeProgress * 0.5);
         }
       }
+
+      // Update explosions
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const explosion = explosions[i];
+        explosion.userData.age += delta;
+        const progress = explosion.userData.age / explosion.userData.lifetime;
+        const material = explosion.userData.material;
+        const scale = 1 + progress * 1.6;
+        explosion.scale.setScalar(scale);
+        if (material) {
+          material.opacity = Math.max(0, 0.8 * (1 - progress));
+        }
+
+        if (explosion.userData.age >= explosion.userData.lifetime) {
+          explosion.geometry.dispose();
+          if (material) material.dispose();
+          container.remove(explosion);
+          explosions.splice(i, 1);
+        }
+      }
     },
 
     /**
@@ -268,6 +338,16 @@ export function createRocketSystem(THREE, scene) {
       rockets.splice(index, 1);
     },
 
+    removeExplosion(index) {
+      const explosion = explosions[index];
+      if (!explosion) return;
+
+      if (explosion.geometry) explosion.geometry.dispose();
+      if (explosion.userData.material) explosion.userData.material.dispose();
+      container.remove(explosion);
+      explosions.splice(index, 1);
+    },
+
     /**
      * Get active rocket count
      */
@@ -276,11 +356,21 @@ export function createRocketSystem(THREE, scene) {
     },
 
     /**
+     * Provide objects to test for collisions against
+     */
+    setCollisionTargets(targets = []) {
+      collisionTargets = (targets || []).filter(Boolean);
+    },
+
+    /**
      * Reset system (clear all rockets, reset cooldown)
      */
     reset() {
       while (rockets.length > 0) {
         this.removeRocket(0);
+      }
+      while (explosions.length > 0) {
+        this.removeExplosion(0);
       }
       cooldownTimer = 0;
     },

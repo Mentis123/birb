@@ -1255,6 +1255,44 @@
         relativeY: 0,
       };
 
+      let audioContext = null;
+
+      const getAudioContext = () => {
+        const AudioContextCtor =
+          typeof window !== 'undefined'
+            ? window.AudioContext || window.webkitAudioContext
+            : null;
+        if (!AudioContextCtor) return null;
+        if (!audioContext) {
+          audioContext = new AudioContextCtor();
+        }
+        if (audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {});
+        }
+        return audioContext;
+      };
+
+      const playRocketFireSound = () => {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+
+        const now = ctx.currentTime;
+        const duration = 0.35;
+        const oscillator = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(280, now);
+        oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.18);
+
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+        oscillator.connect(gain).connect(ctx.destination);
+        oscillator.start(now);
+        oscillator.stop(now + duration);
+      };
+
       function clamp(value, min, max) {
         if (!Number.isFinite(value)) {
           return 0;
@@ -1808,6 +1846,10 @@
             }
             sphericalWorld.root.updateMatrixWorld(true);
 
+            if (rocketSystem && typeof rocketSystem.setCollisionTargets === 'function') {
+              rocketSystem.setCollisionTargets([sphericalWorld.root]);
+            }
+
           } catch (nestError) {
             console.warn("Nest points creation failed:", nestError);
             nestPointsSystem = null;
@@ -1821,6 +1863,9 @@
           }
           if (flightController && typeof flightController.setSphereCenter === 'function') {
             flightController.setSphereCenter(null);
+          }
+          if (rocketSystem && typeof rocketSystem.setCollisionTargets === 'function') {
+            rocketSystem.setCollisionTargets([]);
           }
           nestPointsSystem = null;
           if (statusMetric) {
@@ -2896,8 +2941,11 @@
           if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
             const launchPosition = flightController.position.clone();
             const launchDirection = nestingSystem.getLookDirection();
-            rocketSystem.fire(launchPosition, launchDirection);
-            updateLaunchButtonCooldown(true);
+            const fired = rocketSystem.fire(launchPosition, launchDirection);
+            if (fired) {
+              playRocketFireSound();
+              updateLaunchButtonCooldown(true);
+            }
           }
         };
 
