@@ -2975,8 +2975,8 @@
 
       // Initialize rocket system with explosion sound callback
       rocketSystem = createRocketSystem(THREE, scene, {
-        onExplosion: () => {
-          playExplosionSound();
+        onExplosion: async () => {
+          await playExplosionSound();
         },
       });
 
@@ -3047,19 +3047,19 @@
       }
 
       if (nestLaunchButton) {
-        const handleLaunch = () => {
+        const handleLaunch = async () => {
           if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
             const launchPosition = flightController.position.clone();
             const launchDirection = nestingSystem.getLookDirection();
             const fired = rocketSystem.fire(launchPosition, launchDirection);
             if (fired) {
-              playRocketFireSound();
+              await playRocketFireSound();
               updateLaunchButtonCooldown(true);
             }
           }
         };
 
-        nestLaunchButton.addEventListener('click', handleLaunch);
+        nestLaunchButton.addEventListener('click', () => handleLaunch());
         nestLaunchButton.addEventListener('touchend', (e) => {
           e.preventDefault();
           handleLaunch();
