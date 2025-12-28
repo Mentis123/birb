@@ -1256,6 +1256,7 @@
       };
 
       let audioContext = null;
+      let hasUnlockedAudio = false;
 
       const initAudioContext = () => {
         if (audioContext) return audioContext;
@@ -1281,13 +1282,34 @@
         return ctx;
       };
 
-      // Pre-initialize audio context on first user interaction (for future sounds)
-      const initAudioOnInteraction = () => {
-        ensureAudioReady();
+      // Pre-initialize and fully unlock audio context on first user interaction (for future sounds)
+      const initAudioOnInteraction = async () => {
+        const ctx = await ensureAudioReady();
+        if (!ctx || hasUnlockedAudio) return;
+
+        try {
+          // Play an inaudible buffer to unlock iOS/Safari mobile audio
+          const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          source.start(0);
+          hasUnlockedAudio = true;
+        } catch (error) {
+          // If unlocking fails, try again on the next interaction
+          hasUnlockedAudio = false;
+        }
       };
 
-      ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'].forEach(eventType => {
-        document.addEventListener(eventType, initAudioOnInteraction, { once: true, passive: true });
+      const audioInteractionEvents = ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'];
+      audioInteractionEvents.forEach(eventType => {
+        document.addEventListener(eventType, async function handleAudioInteraction(event) {
+          await initAudioOnInteraction();
+
+          if (hasUnlockedAudio) {
+            document.removeEventListener(eventType, handleAudioInteraction);
+          }
+        }, { passive: true });
       });
 
       const playRocketFireSound = async () => {
