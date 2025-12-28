@@ -1256,17 +1256,47 @@
       };
 
       let audioContext = null;
+      let audioContextReady = false;
 
-      const getAudioContext = () => {
+      const initAudioContext = () => {
+        if (audioContext) return;
         const AudioContextCtor =
           typeof window !== 'undefined'
             ? window.AudioContext || window.webkitAudioContext
             : null;
-        if (!AudioContextCtor) return null;
-        if (!audioContext) {
-          audioContext = new AudioContextCtor();
-        }
+        if (!AudioContextCtor) return;
+        audioContext = new AudioContextCtor();
         if (audioContext.state === 'suspended') {
+          audioContext.resume().then(() => {
+            audioContextReady = true;
+          }).catch(() => {});
+        } else {
+          audioContextReady = true;
+        }
+      };
+
+      // Initialize audio context on first user interaction (required for mobile)
+      const initAudioOnInteraction = () => {
+        initAudioContext();
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().then(() => {
+            audioContextReady = true;
+          }).catch(() => {});
+        } else if (audioContext) {
+          audioContextReady = true;
+        }
+      };
+
+      // Listen for first user interaction to unlock audio on mobile
+      ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'].forEach(eventType => {
+        document.addEventListener(eventType, initAudioOnInteraction, { once: true, passive: true });
+      });
+
+      const getAudioContext = () => {
+        if (!audioContext) {
+          initAudioContext();
+        }
+        if (audioContext && audioContext.state === 'suspended') {
           audioContext.resume().catch(() => {});
         }
         return audioContext;
@@ -1274,7 +1304,7 @@
 
       const playRocketFireSound = () => {
         const ctx = getAudioContext();
-        if (!ctx) return;
+        if (!ctx || ctx.state === 'suspended') return;
 
         const now = ctx.currentTime;
         const duration = 0.35;
@@ -1291,6 +1321,49 @@
         oscillator.connect(gain).connect(ctx.destination);
         oscillator.start(now);
         oscillator.stop(now + duration);
+      };
+
+      const playExplosionSound = () => {
+        const ctx = getAudioContext();
+        if (!ctx || ctx.state === 'suspended') return;
+
+        const now = ctx.currentTime;
+
+        // Low rumble/boom component
+        const boom = ctx.createOscillator();
+        const boomGain = ctx.createGain();
+        boom.type = 'sine';
+        boom.frequency.setValueAtTime(80, now);
+        boom.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+        boomGain.gain.setValueAtTime(0.3, now);
+        boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        boom.connect(boomGain).connect(ctx.destination);
+        boom.start(now);
+        boom.stop(now + 0.4);
+
+        // Crackle/noise component using multiple oscillators
+        const crackle = ctx.createOscillator();
+        const crackleGain = ctx.createGain();
+        crackle.type = 'sawtooth';
+        crackle.frequency.setValueAtTime(400, now);
+        crackle.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+        crackleGain.gain.setValueAtTime(0.15, now);
+        crackleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        crackle.connect(crackleGain).connect(ctx.destination);
+        crackle.start(now);
+        crackle.stop(now + 0.2);
+
+        // High frequency pop
+        const pop = ctx.createOscillator();
+        const popGain = ctx.createGain();
+        pop.type = 'square';
+        pop.frequency.setValueAtTime(600, now);
+        pop.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+        popGain.gain.setValueAtTime(0.1, now);
+        popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        pop.connect(popGain).connect(ctx.destination);
+        pop.start(now);
+        pop.stop(now + 0.1);
       };
 
       function clamp(value, min, max) {
@@ -2872,8 +2945,12 @@
 
       applyInvertPitchPreference(savedInvertPitch, { persist: false });
 
-      // Initialize rocket system
-      rocketSystem = createRocketSystem(THREE, scene);
+      // Initialize rocket system with explosion sound callback
+      rocketSystem = createRocketSystem(THREE, scene, {
+        onExplosion: () => {
+          playExplosionSound();
+        },
+      });
 
       // Initialize nesting system with state change callback
       const handleNestingStateChange = (newState, previousState, currentNest) => {
