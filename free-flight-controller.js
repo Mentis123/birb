@@ -27,8 +27,12 @@ export const BANK_RESPONSE = 8;
 export const MAX_BANK_ANGLE = (65 * Math.PI) / 180;
 // Maximum visual pitch tilt when climbing/diving (nose up/down effect)
 export const MAX_VISUAL_PITCH_ANGLE = (22 * Math.PI) / 180;
+// Maximum pitch angle when in nest look-around mode (allows looking up/down freely)
+export const MAX_NEST_PITCH_ANGLE = (85 * Math.PI) / 180;
 // How quickly the visual pitch responds to vertical velocity
 export const VISUAL_PITCH_RESPONSE = 6;
+// How quickly pitch responds when in nest look-around mode (more responsive)
+export const NEST_PITCH_RESPONSE = 12;
 
 const clamp = (value, min, max, fallback) => {
   if (!Number.isFinite(value)) {
@@ -111,6 +115,8 @@ export class FreeFlightController {
 
     this._yawOnlyMode = false;
     this._pitchOnlyMode = false;
+    // Nest look-around mode: allows larger pitch range and more responsive controls
+    this._nestLookMode = false;
 
     // Track heading as a scalar angle to avoid quaternion accumulation issues
     this.heading = 0;
@@ -164,6 +170,19 @@ export class FreeFlightController {
 
   setPitchOnlyMode(isActive) {
     this._pitchOnlyMode = Boolean(isActive);
+  }
+
+  // Enable/disable nest look-around mode (larger pitch range, more responsive)
+  setNestLookMode(isActive) {
+    this._nestLookMode = Boolean(isActive);
+    // Reset pitch when exiting nest mode to avoid stuck at extreme angles
+    if (!this._nestLookMode) {
+      this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, 0);
+    }
+  }
+
+  isNestLookMode() {
+    return this._nestLookMode;
   }
 
   setSprintActive(isActive) {
@@ -310,11 +329,24 @@ export class FreeFlightController {
 
     // Visual pitch - nose up when pushing up, nose down when pushing down
     // Positive pitch input (up stick) = positive pitch angle = nose up
-    const targetPitch = combinedPitch * MAX_VISUAL_PITCH_ANGLE;
+    // Use larger pitch range and faster response when in nest look-around mode
+    const maxPitchAngle = this._nestLookMode ? MAX_NEST_PITCH_ANGLE : MAX_VISUAL_PITCH_ANGLE;
+    const pitchResponse = this._nestLookMode ? NEST_PITCH_RESPONSE : VISUAL_PITCH_RESPONSE;
 
-    const pitchStep = 1 - Math.exp(-VISUAL_PITCH_RESPONSE * rotationDeltaTime);
-    this.pitch += (targetPitch - this.pitch) * pitchStep;
-    this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, this.pitch);
+    // In nest mode, accumulate pitch directly from input for free look
+    // In flight mode, pitch is proportional to input (returns to level when released)
+    if (this._nestLookMode) {
+      // Accumulate pitch from input - free look style
+      const pitchDelta = combinedPitch * PITCH_RATE * rotationDeltaTime;
+      this.pitch += pitchDelta;
+      this.pitch = clamp(this.pitch, -maxPitchAngle, maxPitchAngle, this.pitch);
+    } else {
+      // Flight mode: pitch proportional to input
+      const targetPitch = combinedPitch * maxPitchAngle;
+      const pitchStep = 1 - Math.exp(-pitchResponse * rotationDeltaTime);
+      this.pitch += (targetPitch - this.pitch) * pitchStep;
+      this.pitch = clamp(this.pitch, -maxPitchAngle, maxPitchAngle, this.pitch);
+    }
     this.visualPitch = this.pitch;
 
     // Use YXZ Euler order to prevent axis contamination (Yaw-Pitch-Roll)
@@ -426,6 +458,7 @@ export class FreeFlightController {
     this._pendingPitch = 0;
     this._yawOnlyMode = false;
     this._pitchOnlyMode = false;
+    this._nestLookMode = false;
     Object.assign(this.input, createAxisRecord());
     this.setInputs({ yaw: 0, pitch: 0 });
     this.setSprintActive(false);

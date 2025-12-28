@@ -2977,6 +2977,11 @@
           setCameraMode(nestCameraReturnMode);
         }
 
+        // Enable/disable nest look mode for free camera look-around
+        if (typeof flightController.setNestLookMode === 'function') {
+          flightController.setNestLookMode(isNested);
+        }
+
         // Update status message
         if (statusMetric) {
           if (isNested) {
