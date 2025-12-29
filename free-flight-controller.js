@@ -434,23 +434,59 @@ export class FreeFlightController {
     }
     this.visualPitch = this.pitch;
 
-    // Use YXZ Euler order to prevent axis contamination (Yaw-Pitch-Roll)
-    // Y = heading (yaw), X = pitch, Z = bank (roll)
-    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
-    this._visualQuaternion.setFromEuler(this._ambientEuler);
-
-    // Physics quaternion mirrors heading and pitch (bank is visual-only)
-    // so that travel direction follows the visible nose direction.
-    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
-    this.quaternion.setFromEuler(this._ambientEuler);
-
-    // Align orientation with the local "up" direction so the horizon stays
-    // level relative to the surface (useful when perched on spherical worlds).
+    // Build orientation quaternions
     if (this._sphereCenter) {
       this._computeLocalUp();
-      this._alignQuaternion.setFromUnitVectors(this._up, this._localUp);
-      this._visualQuaternion.premultiply(this._alignQuaternion);
-      this.quaternion.premultiply(this._alignQuaternion);
+
+      // DEBUG: Log heading changes
+      if (Math.abs(effectiveYaw) > 0.01) {
+        console.log('YAW INPUT:', effectiveYaw.toFixed(3), 'HEADING:', this.heading.toFixed(3));
+      }
+
+      // SPHERICAL WORLD: Build quaternion using LOCAL up as yaw axis
+      // This ensures heading rotation happens in the local tangent plane,
+      // not around world Y.
+
+      // Step 1: Create yaw rotation around LOCAL up
+      this._yawQuaternion.setFromAxisAngle(this._localUp, this.heading);
+
+      // Step 2: Compute local right (perpendicular to local up and world forward reference)
+      // Use world -Z projected onto tangent plane as reference forward
+      const refForward = this._forward.set(0, 0, -1);
+      const upDot = refForward.dot(this._localUp);
+      refForward.addScaledVector(this._localUp, -upDot);
+      if (refForward.lengthSq() < 1e-6) {
+        refForward.set(1, 0, 0);
+        const fallbackDot = refForward.dot(this._localUp);
+        refForward.addScaledVector(this._localUp, -fallbackDot);
+      }
+      refForward.normalize();
+
+      // Local right is perpendicular to both local up and reference forward
+      const localRight = this._right.crossVectors(this._localUp, refForward).normalize();
+
+      // Step 3: Create pitch rotation around local right
+      this._pitchQuaternion.setFromAxisAngle(localRight, this.pitch);
+
+      // Step 4: Create bank rotation around local forward (after yaw)
+      const localForward = refForward.clone().applyQuaternion(this._yawQuaternion);
+      this._bankQuaternion.setFromAxisAngle(localForward, this.bank);
+
+      // Combine: yaw, then pitch, then bank
+      this._visualQuaternion.copy(this._yawQuaternion)
+        .multiply(this._pitchQuaternion)
+        .multiply(this._bankQuaternion);
+
+      // Physics quaternion: yaw and pitch only (no bank)
+      this.quaternion.copy(this._yawQuaternion).multiply(this._pitchQuaternion);
+
+    } else {
+      // FLAT WORLD: Use original Euler-based approach
+      this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
+      this._visualQuaternion.setFromEuler(this._ambientEuler);
+
+      this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
+      this.quaternion.setFromEuler(this._ambientEuler);
     }
 
     const canTranslate =
@@ -459,21 +495,43 @@ export class FreeFlightController {
       !this._pitchOnlyMode &&
       hasElapsedTime;
 
+    // DEBUG: Why can't we translate?
+    if (!canTranslate && this.elapsed % 0.5 < 0.02) {
+      console.log('CANT TRANSLATE: frozen=', this.frozen, 'yawOnly=', this._yawOnlyMode, 'pitchOnly=', this._pitchOnlyMode, 'hasTime=', hasElapsedTime);
+    }
+
     if (canTranslate) {
       const throttle = this.getEffectiveThrottle();
       this._computeLocalUp();
 
-      // Get forward direction from quaternion
-      const forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
-      forwardDirection.normalize();
+      let forwardDirection;
 
-      // On spherical worlds, project forward onto the tangent plane (perpendicular to local up)
-      // This ensures velocity follows the sphere surface, not a fixed world direction
       if (this._sphereCenter) {
-        const dot = forwardDirection.dot(this._localUp);
-        forwardDirection.addScaledVector(this._localUp, -dot);
+        // SPHERICAL: Compute forward same way as quaternion is built
+        // Start with world -Z projected onto tangent plane
+        forwardDirection = this._forward.set(0, 0, -1);
+        const refDot = forwardDirection.dot(this._localUp);
+        forwardDirection.addScaledVector(this._localUp, -refDot);
+        if (forwardDirection.lengthSq() < 1e-6) {
+          forwardDirection.set(1, 0, 0);
+          const fallbackDot = forwardDirection.dot(this._localUp);
+          forwardDirection.addScaledVector(this._localUp, -fallbackDot);
+        }
+        forwardDirection.normalize();
+
+        // Apply yaw rotation around local up (same as quaternion building)
+        forwardDirection.applyQuaternion(this._yawQuaternion);
+        forwardDirection.normalize();
+
+        // DEBUG: Log heading and forward
+        if (this.elapsed % 0.5 < 0.02) {
+          console.log('HEADING:', this.heading.toFixed(2), 'FWD:', forwardDirection.x.toFixed(2), forwardDirection.y.toFixed(2), forwardDirection.z.toFixed(2));
+        }
+      } else {
+        // FLAT: Use quaternion-based forward
+        forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
+        forwardDirection.normalize();
       }
-      forwardDirection.normalize();
 
       // Calculate uncapped target speeds
       const rawForwardSpeed = clamp(

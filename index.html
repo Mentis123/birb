@@ -2162,12 +2162,10 @@
         const birbCenter = new THREE.Vector3();
         birbBounds.getCenter(birbCenter);
 
-        // The shipped GLB model faces -X (left), not -Z. This was determined through
-        // extensive testing documented in KNOWN_ISSUES.md. We need to rotate -X to -Z
-        // (90° clockwise when viewed from above).
+        // The shipped GLB model already faces -Z (forward). No rotation needed.
         // The procedural birb faces +X and needs its forward inferred to align with -Z.
         const guessedForward = isGLB
-          ? new THREE.Vector3(-1, 0, 0)
+          ? new THREE.Vector3(0, 0, -1)
           : computeModelForwardGuess(birbBounds, birbCenter);
         modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
         // Re-center the bird so yaw/roll rotations pivot around its body instead

@@ -1,3 +1,78 @@
+# CLAUDE.md - Birb Mobile Project Context
+
+## Project Overview
+Mobile-first 3D bird flight game built with Three.js. Bird flies on a spherical world.
+Target: iOS Safari on Vercel deployment.
+
+## Quick Start
+```bash
+cd C:\Users\user\Documents\birb
+python -m http.server 8000
+# Open http://localhost:8000 in browser
+# For mobile testing: Edge F12 → Device Emulation → iPhone
+```
+
+## Key Files
+| File | Purpose |
+|------|---------|
+| `index.html` | Main game, Three.js scene setup, model loading |
+| `free-flight-controller.js` | **Core flight physics** - heading, pitch, velocity |
+| `src/controls/flight-controls.js` | Touch input handling (nipplejs joystick) |
+| `KNOWN_ISSUES.md` | Bug documentation with fix attempts |
+
+## Architecture
+```
+Touch Input → flight-controls.js → free-flight-controller.js → Three.js Render
+                  ↓                         ↓
+            setInputs({yaw,pitch})    quaternion + velocity
+```
+
+## CRITICAL OPEN BUG: Flight Direction on Spherical World
+**Status**: UNSOLVED after extensive debugging session
+
+**Problem**: Bird always flies in absolute world direction, not the direction it's facing. When you turn/bank, the bird keeps going the original direction.
+
+**Root Cause Analysis**:
+- Current system: `heading (angle) → quaternion → forward direction`
+- On flat world: works fine (Y-axis is always "up")
+- On sphere: local "up" changes with position, breaking Euler-based heading
+
+**What's Been Tried** (see KNOWN_ISSUES.md Issue 5):
+1. Model orientation fixes (`guessedForward` vector changes)
+2. Parallel transport compensation for heading drift
+3. Building quaternion from local-up axis instead of world Y
+4. Direct velocity calculation from `_yawQuaternion`
+
+**Proposed Solution** (not yet implemented):
+Rebuild flight system to track `forward` as a persistent Vector3, derive quaternion for rendering:
+```javascript
+turn(deltaRadians) {
+  const localUp = this.getLocalUp();
+  const q = new Quaternion().setFromAxisAngle(localUp, deltaRadians);
+  this.forward.applyQuaternion(q).normalize();
+  this._projectToTangent(); // Keep forward tangent to sphere
+}
+```
+
+## Debug Tools
+- URL param `?debugVectors` - Shows colored arrow helpers
+- `DEBUG_MOBILE_INPUT = true` in flight-controls.js (line 15)
+- Console logs: YAW INPUT, HEADING, FORWARD DIR, VELOCITY
+
+## Code Conventions
+- Three.js quaternion multiplication: `premultiply` = apply first, `multiply` = apply after
+- Euler order: 'YXZ' (yaw around Y, then pitch around X)
+- Reuse objects with `_` prefix to avoid GC
+
+## Testing Checklist
+- [ ] Bird faces direction of travel
+- [ ] Turning changes actual flight direction
+- [ ] Works on both poles of sphere
+- [ ] Touch input responsive at 60fps
+- [ ] No jitter on input release
+
+---
+
 # Flight Quality & Regression Guidance
 
 ## Priorities
