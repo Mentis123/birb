@@ -415,9 +415,10 @@ export class FreeFlightController {
     while (this.heading < -Math.PI) this.heading += TWO_PI;
 
     // Visual banking - wing dips on the side we're turning toward
-    // Left stick (positive yaw) = left wing down = negative roll in THREE.js
+    // Turn right (positive yaw) = bank right = right wing down = positive roll in Three.js
+    // Turn left (negative yaw) = bank left = left wing down = negative roll in Three.js
     // No banking in nest mode (bird is stationary)
-    const targetBank = this._nestLookMode ? 0 : -combinedYaw * MAX_BANK_ANGLE;
+    const targetBank = this._nestLookMode ? 0 : combinedYaw * MAX_BANK_ANGLE;
 
     const bankStep = 1 - Math.exp(-BANK_RESPONSE * rotationDeltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
@@ -521,9 +522,10 @@ export class FreeFlightController {
       let forwardDirection;
 
       if (this._sphereCenter) {
-        // SPHERICAL: Use the persistent forward vector directly (Cesium approach)
-        // This is the key fix - velocity uses the same vector as visual orientation
-        forwardDirection = this._persistentForward;
+        // SPHERICAL: Extract forward from the physics quaternion we just built
+        // This ensures velocity exactly matches the visual orientation
+        forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
+        forwardDirection.normalize();
       } else {
         // FLAT: Use quaternion-based forward
         forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
