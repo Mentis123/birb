@@ -79,7 +79,7 @@ export class FreeFlightController {
     }
 
     this.THREE = three;
-    const { Vector3, Quaternion, Euler } = three;
+    const { Vector3, Quaternion, Euler, Matrix4 } = three;
 
     this.position = new Vector3();
     this.velocity = new Vector3();
@@ -94,10 +94,15 @@ export class FreeFlightController {
     this._right = new Vector3(1, 0, 0);
     this._up = new Vector3(0, 1, 0);
     this._localUp = new Vector3(0, 1, 0);
+    // Persistent forward direction vector (key insight from Cesium flight simulator)
+    // This vector is updated directly by yaw input rather than derived from heading
+    this._persistentForward = new Vector3(0, 0, -1);
     this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
     this._pitchQuaternion = new Quaternion();
     this._alignQuaternion = new Quaternion();
+    this._turnQuaternion = new Quaternion(); // For yaw rotation around local up
+    this._basisMatrix = new Matrix4(); // For building quaternion from basis vectors
     this._previousUp = new Vector3(0, 1, 0);
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
@@ -233,6 +238,12 @@ export class FreeFlightController {
       this.bank = rotations.bank;
     }
     this.visualPitch = this.pitch;
+    // Sync persistent forward vector for spherical world consistency
+    this._persistentForward.set(
+      -Math.sin(this.heading),
+      0,
+      -Math.cos(this.heading)
+    ).normalize();
     // Rebuild quaternions from extracted values to ensure consistency
     this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
     this._visualQuaternion.setFromEuler(this._ambientEuler);
@@ -438,47 +449,55 @@ export class FreeFlightController {
     if (this._sphereCenter) {
       this._computeLocalUp();
 
-      // DEBUG: Log heading changes
-      if (Math.abs(effectiveYaw) > 0.01) {
-        console.log('YAW INPUT:', effectiveYaw.toFixed(3), 'HEADING:', this.heading.toFixed(3));
+      // SPHERICAL WORLD: Vector-based approach (learned from Cesium flight simulator)
+      // Key insight: Track forward direction as a persistent vector, not a scalar heading.
+      // This ensures velocity follows the visual direction on a curved surface.
+
+      // Step 1: Rotate _persistentForward around local up for yaw input
+      // This directly updates the flight direction vector
+      const yawRotation = -effectiveYaw * (this._nestLookMode ? NEST_YAW_RATE : YAW_RATE) * rotationDeltaTime;
+      if (Math.abs(yawRotation) > 1e-8) {
+        this._turnQuaternion.setFromAxisAngle(this._localUp, yawRotation);
+        this._persistentForward.applyQuaternion(this._turnQuaternion);
       }
 
-      // SPHERICAL WORLD: Build quaternion using LOCAL up as yaw axis
-      // This ensures heading rotation happens in the local tangent plane,
-      // not around world Y.
-
-      // Step 1: Create yaw rotation around LOCAL up
-      this._yawQuaternion.setFromAxisAngle(this._localUp, this.heading);
-
-      // Step 2: Compute local right (perpendicular to local up and world forward reference)
-      // Use world -Z projected onto tangent plane as reference forward
-      const refForward = this._forward.set(0, 0, -1);
-      const upDot = refForward.dot(this._localUp);
-      refForward.addScaledVector(this._localUp, -upDot);
-      if (refForward.lengthSq() < 1e-6) {
-        refForward.set(1, 0, 0);
-        const fallbackDot = refForward.dot(this._localUp);
-        refForward.addScaledVector(this._localUp, -fallbackDot);
+      // Step 2: Ensure forward stays in tangent plane (parallel transport)
+      // When moving on sphere, local up changes, so we must re-project forward
+      const upDot = this._persistentForward.dot(this._localUp);
+      this._persistentForward.addScaledVector(this._localUp, -upDot);
+      if (this._persistentForward.lengthSq() < 1e-6) {
+        // Fallback if forward collapsed (at poles)
+        this._persistentForward.set(0, 0, -1);
+        const fallbackDot = this._persistentForward.dot(this._localUp);
+        this._persistentForward.addScaledVector(this._localUp, -fallbackDot);
       }
-      refForward.normalize();
+      this._persistentForward.normalize();
 
-      // Local right is perpendicular to both local up and reference forward
-      const localRight = this._right.crossVectors(this._localUp, refForward).normalize();
+      // Step 3: Build quaternion FROM the forward vector (Cesium's key insight)
+      // localRight = forward × up (for right-handed coordinate system)
+      const localRight = this._right.crossVectors(this._persistentForward, this._localUp).normalize();
+      // Recompute forward to ensure orthogonality (forward = up × right)
+      const localForward = this._forward.crossVectors(this._localUp, localRight).normalize();
 
-      // Step 3: Create pitch rotation around local right
+      // Step 4: Create pitch rotation around local right
       this._pitchQuaternion.setFromAxisAngle(localRight, this.pitch);
 
-      // Step 4: Create bank rotation around local forward (after yaw)
-      const localForward = refForward.clone().applyQuaternion(this._yawQuaternion);
+      // Step 5: Create bank rotation around local forward
       this._bankQuaternion.setFromAxisAngle(localForward, this.bank);
 
-      // Combine: yaw, then pitch, then bank
-      this._visualQuaternion.copy(this._yawQuaternion)
-        .multiply(this._pitchQuaternion)
-        .multiply(this._bankQuaternion);
+      // Step 6: Build orientation from basis vectors (like Cesium's makeBasis)
+      // Base orientation aligns model -Z with localForward, Y with localUp
+      this._basisMatrix.makeBasis(localRight, this._localUp, localForward.clone().negate());
+      this.quaternion.setFromRotationMatrix(this._basisMatrix);
 
-      // Physics quaternion: yaw and pitch only (no bank)
-      this.quaternion.copy(this._yawQuaternion).multiply(this._pitchQuaternion);
+      // Apply pitch to physics quaternion
+      this.quaternion.multiply(this._pitchQuaternion);
+
+      // Visual quaternion includes bank
+      this._visualQuaternion.copy(this.quaternion).multiply(this._bankQuaternion);
+
+      // Update scalar heading for compatibility (derive from forward vector)
+      this.heading = Math.atan2(-this._persistentForward.x, -this._persistentForward.z);
 
     } else {
       // FLAT WORLD: Use original Euler-based approach
@@ -495,11 +514,6 @@ export class FreeFlightController {
       !this._pitchOnlyMode &&
       hasElapsedTime;
 
-    // DEBUG: Why can't we translate?
-    if (!canTranslate && this.elapsed % 0.5 < 0.02) {
-      console.log('CANT TRANSLATE: frozen=', this.frozen, 'yawOnly=', this._yawOnlyMode, 'pitchOnly=', this._pitchOnlyMode, 'hasTime=', hasElapsedTime);
-    }
-
     if (canTranslate) {
       const throttle = this.getEffectiveThrottle();
       this._computeLocalUp();
@@ -507,26 +521,9 @@ export class FreeFlightController {
       let forwardDirection;
 
       if (this._sphereCenter) {
-        // SPHERICAL: Compute forward same way as quaternion is built
-        // Start with world -Z projected onto tangent plane
-        forwardDirection = this._forward.set(0, 0, -1);
-        const refDot = forwardDirection.dot(this._localUp);
-        forwardDirection.addScaledVector(this._localUp, -refDot);
-        if (forwardDirection.lengthSq() < 1e-6) {
-          forwardDirection.set(1, 0, 0);
-          const fallbackDot = forwardDirection.dot(this._localUp);
-          forwardDirection.addScaledVector(this._localUp, -fallbackDot);
-        }
-        forwardDirection.normalize();
-
-        // Apply yaw rotation around local up (same as quaternion building)
-        forwardDirection.applyQuaternion(this._yawQuaternion);
-        forwardDirection.normalize();
-
-        // DEBUG: Log heading and forward
-        if (this.elapsed % 0.5 < 0.02) {
-          console.log('HEADING:', this.heading.toFixed(2), 'FWD:', forwardDirection.x.toFixed(2), forwardDirection.y.toFixed(2), forwardDirection.z.toFixed(2));
-        }
+        // SPHERICAL: Use the persistent forward vector directly (Cesium approach)
+        // This is the key fix - velocity uses the same vector as visual orientation
+        forwardDirection = this._persistentForward;
       } else {
         // FLAT: Use quaternion-based forward
         forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
@@ -600,6 +597,14 @@ export class FreeFlightController {
     this.bank = rotations.bank;
     this.visualPitch = this.pitch;
 
+    // Initialize persistent forward from heading (for spherical world support)
+    // This vector will be rotated directly by yaw input and used for velocity
+    this._persistentForward.set(
+      -Math.sin(this.heading),
+      0,
+      -Math.cos(this.heading)
+    ).normalize();
+
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
     this.elapsed = 0;
@@ -648,6 +653,12 @@ export class FreeFlightController {
       const TWO_PI = Math.PI * 2;
       while (this.heading > Math.PI) this.heading -= TWO_PI;
       while (this.heading < -Math.PI) this.heading += TWO_PI;
+      // Sync persistent forward vector for spherical world consistency
+      this._persistentForward.set(
+        -Math.sin(this.heading),
+        0,
+        -Math.cos(this.heading)
+      ).normalize();
     }
   }
 }

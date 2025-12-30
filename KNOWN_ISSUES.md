@@ -190,11 +190,11 @@ Added `DEBUG_MOBILE_INPUT` flag for debugging touch input issues on mobile devic
 | Climb on joystick up | Resolved | Fixed (cross product order) | N/A |
 | Follow camera position | Resolved | Fixed (offset sign) | N/A |
 | Mobile flight direction | Resolved | Fixed (heading init + GLB offset) | N/A |
-| Spherical world velocity mismatch | **OPEN** | Complex - see Issue 5 | High |
+| Spherical world velocity mismatch | **RESOLVED** | Fixed (vector-based forward) | N/A |
 
 ---
 
-## Issue 5: Spherical World Velocity Direction Mismatch (OPEN - Dec 2025)
+## Issue 5: Spherical World Velocity Direction Mismatch (RESOLVED - Dec 2025)
 
 ### Problem
 On the spherical world, the bird flies in a fixed world direction regardless of which way the model is visually facing. When the user turns (yaw input), the visual model rotates but the velocity/movement direction doesn't follow. The bird appears to "strafe" - flying sideways relative to its visual orientation.
@@ -236,32 +236,49 @@ On a spherical world, the local "up" direction changes based on position. The cu
 - `free-flight-controller.js:527` - Logs HEADING and FWD direction
 - `flight-controls.js:15` - `DEBUG_MOBILE_INPUT` flag
 
-### Hypotheses Not Yet Tested
+### Resolution (Dec 30, 2025)
 
-1. **Visual quaternion includes modelOrientationOffset** but velocity doesn't - might need to apply same offset
-2. **The reference forward (world -Z projected onto tangent plane) isn't stable** - changes as bird moves, causing drift
-3. **Need to track forward direction as a persistent vector** rather than recomputing from world reference each frame
-4. **Multiplication order issue** in quaternion combining (multiply vs premultiply)
+After studying the [Cesium Flight Simulator](https://github.com/WilliamAvHolmberg/cesium-flight-simulator), the key insight was:
 
-### Files Modified (may need cleanup)
-- `free-flight-controller.js` - Multiple changes to quaternion building and velocity calculation, debug logging added
-- `index.html:2168-2170` - Changed `guessedForward` to `(0, 0, -1)`
+**Track forward direction as a persistent vector, not a scalar heading.**
 
-### Recommended Next Steps (Incremental Fix)
+The Cesium approach:
+1. Store `forwardDirection` as a `Vector3` that persists between frames
+2. Update it directly by rotating around `localUp` for yaw input
+3. Use this vector directly for velocity calculation: `velocity = forwardDirection * speed`
+4. Derive quaternion FROM the forward vector (not the other way around)
 
-1. **Verify visual model IS rotating**: Take video/screenshots while turning to confirm visual model turns
-2. **Log both visual quaternion and physics quaternion** forward directions side-by-side
-3. **Try using visual quaternion for velocity** (extract forward from `_visualQuaternion` instead of `this.quaternion`)
-4. **Consider tracking forward as a vector** that persists between frames, updated by:
-   - Yaw input: rotate around local up
-   - Parallel transport: adjust when local up changes
-5. **Check if issue exists in flat world mode** - if not, problem is sphere-specific
+**Implementation Changes:**
+
+1. Added `_persistentForward` vector to `FreeFlightController` constructor
+2. In spherical world mode, yaw input rotates `_persistentForward` around `_localUp`:
+   ```javascript
+   this._turnQuaternion.setFromAxisAngle(this._localUp, yawRotation);
+   this._persistentForward.applyQuaternion(this._turnQuaternion);
+   ```
+3. Parallel transport: Re-project forward to tangent plane when localUp changes
+4. Build quaternion using `Matrix4.makeBasis()` from orthonormal basis vectors
+5. Velocity uses `_persistentForward` directly (not extracted from quaternion)
+
+**Files Modified:**
+- `free-flight-controller.js` - Vector-based spherical flight direction
+- `node_modules/three/index.js` - Added Matrix4 mock for tests
+
+**Key Cross Product Fix:**
+The cross product order matters for right-handed coordinates:
+- `localRight = persistentForward × localUp` (NOT `localUp × persistentForward`)
+- `localForward = localUp × localRight`
 
 ---
 
-## Alternative: Ground-Up Flight System Rebuild
+## Historical Notes: Previous Hypotheses
 
-If incremental fixes continue to fail, consider ripping out the entire flight/direction/movement system and rebuilding from scratch. Below is a research plan.
+The following were explored before finding the vector-based solution:
+
+1. ~~Visual quaternion includes modelOrientationOffset but velocity doesn't~~
+2. ~~The reference forward (world -Z projected onto tangent plane) isn't stable~~
+3. **Need to track forward direction as a persistent vector** ✓ THIS WAS THE FIX
+4. ~~Multiplication order issue in quaternion combining~~
 
 ### Phase 1: Research & Framework Selection
 
