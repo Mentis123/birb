@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m http.server:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nDocument spherical flight direction bug investigation\n\n- Add Issue 5 to KNOWN_ISSUES.md with comprehensive debugging attempts\n- Add research plan for ground-up flight system rebuild\n- Update CLAUDE.md with project context and critical bug documentation\n- Include debug logging in free-flight-controller.js\n- Adjust model orientation in index.html\n\nBug Status: UNSOLVED - bird flies absolute direction instead of facing direction on spherical world. Multiple quaternion/heading approaches attempted. Proposed solution: track forward as persistent Vector3, derive quaternion for rendering.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git config:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
