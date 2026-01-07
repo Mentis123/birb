@@ -90,12 +90,19 @@ export class FreeFlightController {
     // Keep lookQuaternion as alias for compatibility with nesting system
     this.lookQuaternion = this.quaternion;
 
+    // === VECTOR-BASED FLIGHT SYSTEM ===
+    // Core insight: Track direction as persistent Vector3, not scalar angles.
+    // This is the primary flight direction - everything derives from this.
+    this._flightForward = new Vector3(0, 0, -1);  // Primary direction vector
+    this._flightUp = new Vector3(0, 1, 0);        // Local up (from sphere surface)
+    this._flightRight = new Vector3(1, 0, 0);    // Derived: forward × up
+
+    // Scratch vectors for calculations (avoid allocations)
     this._forward = new Vector3(0, 0, -1);
     this._right = new Vector3(1, 0, 0);
     this._up = new Vector3(0, 1, 0);
     this._localUp = new Vector3(0, 1, 0);
-    // Persistent forward direction vector (key insight from Cesium flight simulator)
-    // This vector is updated directly by yaw input rather than derived from heading
+    // Legacy: kept for compatibility but _flightForward is now authoritative
     this._persistentForward = new Vector3(0, 0, -1);
     this._bankQuaternion = new Quaternion();
     this._yawQuaternion = new Quaternion();
@@ -238,12 +245,33 @@ export class FreeFlightController {
       this.bank = rotations.bank;
     }
     this.visualPitch = this.pitch;
-    // Sync persistent forward vector for spherical world consistency
-    this._persistentForward.set(
-      -Math.sin(this.heading),
-      0,
-      -Math.cos(this.heading)
-    ).normalize();
+
+    // === Update vector-based flight system ===
+    // Extract forward from quaternion
+    this._flightForward.set(0, 0, -1).applyQuaternion(quaternion);
+
+    // Get current up direction
+    if (this._sphereCenter) {
+      this._computeLocalUp();
+      this._flightUp.copy(this._localUp);
+    } else {
+      this._flightUp.set(0, 1, 0);
+    }
+
+    // Project forward onto tangent plane
+    const upDot = this._flightForward.dot(this._flightUp);
+    this._flightForward.addScaledVector(this._flightUp, -upDot);
+    if (this._flightForward.lengthSq() < 1e-8) {
+      this._flightForward.set(0, 0, -1);
+      const fallback = this._flightForward.dot(this._flightUp);
+      this._flightForward.addScaledVector(this._flightUp, -fallback);
+    }
+    this._flightForward.normalize();
+    this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+
+    // Sync legacy vector
+    this._persistentForward.copy(this._flightForward);
+
     // Rebuild quaternions from extracted values to ensure consistency
     this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
     this._visualQuaternion.setFromEuler(this._ambientEuler);
@@ -276,6 +304,14 @@ export class FreeFlightController {
       this._sphereCenter = null;
       // Reset to world up for flat world
       this._previousUp.set(0, 1, 0);
+      this._flightUp.set(0, 1, 0);
+      // Keep current forward direction, just ensure it's horizontal
+      this._flightForward.y = 0;
+      if (this._flightForward.lengthSq() < 1e-8) {
+        this._flightForward.set(0, 0, -1);
+      }
+      this._flightForward.normalize();
+      this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
       return;
     }
     if (typeof center.clone === 'function') {
@@ -284,6 +320,24 @@ export class FreeFlightController {
       // This prevents unwanted quaternion realignment on the next frame
       this._computeLocalUp();
       this._previousUp.copy(this._localUp);
+
+      // Initialize vector-based flight system for spherical world
+      this._flightUp.copy(this._localUp);
+
+      // Project current forward onto new tangent plane
+      const upDot = this._flightForward.dot(this._flightUp);
+      this._flightForward.addScaledVector(this._flightUp, -upDot);
+      if (this._flightForward.lengthSq() < 1e-8) {
+        // If forward collapsed (looking straight up/down), pick arbitrary tangent
+        this._flightForward.set(0, 0, -1);
+        const fallback = this._flightForward.dot(this._flightUp);
+        this._flightForward.addScaledVector(this._flightUp, -fallback);
+      }
+      this._flightForward.normalize();
+      this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+
+      // Sync legacy vector
+      this._persistentForward.copy(this._flightForward);
     }
   }
 
@@ -448,57 +502,77 @@ export class FreeFlightController {
 
     // Build orientation quaternions
     if (this._sphereCenter) {
+      // === VECTOR-BASED SPHERICAL FLIGHT ===
+      // Core principle: Track direction as Vector3, derive everything else from it.
+      // This ensures velocity ALWAYS matches facing direction on curved surfaces.
+
+      // Step 1: Get current local up from position on sphere
       this._computeLocalUp();
+      this._flightUp.copy(this._localUp);
 
-      // SPHERICAL WORLD: Vector-based approach (learned from Cesium flight simulator)
-      // Key insight: Track forward direction as a persistent vector, not a scalar heading.
-      // This ensures velocity follows the visual direction on a curved surface.
+      // Step 2: Parallel transport - preserve forward direction when up changes
+      // Project _flightForward onto tangent plane (perpendicular to new up)
+      const upComponent = this._flightForward.dot(this._flightUp);
+      this._flightForward.addScaledVector(this._flightUp, -upComponent);
 
-      // Step 1: Rotate _persistentForward around local up for yaw input
-      // This directly updates the flight direction vector
+      // Handle pole singularity - if forward collapsed, pick a sensible direction
+      if (this._flightForward.lengthSq() < 1e-8) {
+        // At poles, pick arbitrary tangent direction
+        this._flightForward.set(1, 0, 0);
+        const fallbackDot = this._flightForward.dot(this._flightUp);
+        this._flightForward.addScaledVector(this._flightUp, -fallbackDot);
+      }
+      this._flightForward.normalize();
+
+      // Step 3: Compute right vector (for pitch rotation axis)
+      // right = forward × up (right-handed system)
+      this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+
+      // Step 4: Apply YAW - rotate forward around up
       const yawRotation = -effectiveYaw * (this._nestLookMode ? NEST_YAW_RATE : YAW_RATE) * rotationDeltaTime;
       if (Math.abs(yawRotation) > 1e-8) {
-        this._turnQuaternion.setFromAxisAngle(this._localUp, yawRotation);
-        this._persistentForward.applyQuaternion(this._turnQuaternion);
+        this._turnQuaternion.setFromAxisAngle(this._flightUp, yawRotation);
+        this._flightForward.applyQuaternion(this._turnQuaternion);
+        this._flightForward.normalize();
+        // Recompute right after yaw
+        this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
       }
 
-      // Step 2: Ensure forward stays in tangent plane (parallel transport)
-      // When moving on sphere, local up changes, so we must re-project forward
-      const upDot = this._persistentForward.dot(this._localUp);
-      this._persistentForward.addScaledVector(this._localUp, -upDot);
-      if (this._persistentForward.lengthSq() < 1e-6) {
-        // Fallback if forward collapsed (at poles)
-        this._persistentForward.set(0, 0, -1);
-        const fallbackDot = this._persistentForward.dot(this._localUp);
-        this._persistentForward.addScaledVector(this._localUp, -fallbackDot);
-      }
-      this._persistentForward.normalize();
+      // Step 5: Apply PITCH - rotate forward around right (visual only, affects climb)
+      // This tilts the nose up/down for visual feedback
+      const pitchRotation = this.pitch;
+      this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchRotation);
 
-      // Step 3: Build quaternion FROM the forward vector (Cesium's key insight)
-      // localRight = forward × up (for right-handed coordinate system)
-      const localRight = this._right.crossVectors(this._persistentForward, this._localUp).normalize();
-      // Recompute forward to ensure orthogonality (forward = up × right)
-      const localForward = this._forward.crossVectors(this._localUp, localRight).normalize();
-
-      // Step 4: Create pitch rotation around local right
-      this._pitchQuaternion.setFromAxisAngle(localRight, this.pitch);
-
-      // Step 5: Create bank rotation around local forward
-      this._bankQuaternion.setFromAxisAngle(localForward, this.bank);
-
-      // Step 6: Build orientation from basis vectors (like Cesium's makeBasis)
-      // Base orientation aligns model -Z with localForward, Y with localUp
-      this._basisMatrix.makeBasis(localRight, this._localUp, localForward.clone().negate());
+      // Step 6: Build base quaternion from orthonormal basis
+      // Base orientation: model -Z aligns with forward, Y aligns with up
+      this._basisMatrix.makeBasis(
+        this._flightRight,
+        this._flightUp,
+        this._forward.copy(this._flightForward).negate()
+      );
       this.quaternion.setFromRotationMatrix(this._basisMatrix);
 
-      // Apply pitch to physics quaternion
+      // Apply pitch rotation to quaternion
       this.quaternion.multiply(this._pitchQuaternion);
 
-      // Visual quaternion includes bank
+      // Step 7: Add bank for visual appeal
+      this._bankQuaternion.setFromAxisAngle(this._flightForward, this.bank);
       this._visualQuaternion.copy(this.quaternion).multiply(this._bankQuaternion);
 
-      // Update scalar heading for compatibility (derive from forward vector)
-      this.heading = Math.atan2(-this._persistentForward.x, -this._persistentForward.z);
+      // Sync legacy vectors for compatibility
+      this._persistentForward.copy(this._flightForward);
+
+      // Update scalar heading for compatibility/debug (derive from forward)
+      // Project forward onto XZ plane for heading calculation
+      const horizForward = this._forward.set(
+        this._flightForward.x,
+        0,
+        this._flightForward.z
+      );
+      if (horizForward.lengthSq() > 1e-8) {
+        horizForward.normalize();
+        this.heading = Math.atan2(-horizForward.x, -horizForward.z);
+      }
 
     } else {
       // FLAT WORLD: Use original Euler-based approach
@@ -522,12 +596,12 @@ export class FreeFlightController {
       let forwardDirection;
 
       if (this._sphereCenter) {
-        // SPHERICAL: Extract forward from the physics quaternion we just built
-        // This ensures velocity exactly matches the visual orientation
-        forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
-        forwardDirection.normalize();
+        // SPHERICAL: Use _flightForward directly - THIS IS THE KEY FIX!
+        // The forward vector is already in the tangent plane and matches facing direction.
+        // Do NOT extract from quaternion (which includes pitch tilt).
+        forwardDirection = this._forward.copy(this._flightForward);
       } else {
-        // FLAT: Use quaternion-based forward
+        // FLAT: Use quaternion-based forward (works fine for flat worlds)
         forwardDirection = this._forward.set(0, 0, -1).applyQuaternion(this.quaternion);
         forwardDirection.normalize();
       }
@@ -599,13 +673,39 @@ export class FreeFlightController {
     this.bank = rotations.bank;
     this.visualPitch = this.pitch;
 
-    // Initialize persistent forward from heading (for spherical world support)
-    // This vector will be rotated directly by yaw input and used for velocity
-    this._persistentForward.set(
-      -Math.sin(this.heading),
-      0,
-      -Math.cos(this.heading)
-    ).normalize();
+    // === INITIALIZE VECTOR-BASED FLIGHT SYSTEM ===
+    // Compute initial up direction based on position
+    if (this._sphereCenter) {
+      this._flightUp.copy(this.position).sub(this._sphereCenter);
+      if (this._flightUp.lengthSq() > 1e-9) {
+        this._flightUp.normalize();
+      } else {
+        this._flightUp.set(0, 1, 0);
+      }
+    } else {
+      this._flightUp.set(0, 1, 0);
+    }
+
+    // Extract forward direction from initial quaternion
+    // This ensures the bird starts facing the correct direction
+    this._flightForward.set(0, 0, -1).applyQuaternion(this._initialQuaternion);
+
+    // Project forward onto tangent plane (perpendicular to up)
+    const upDot = this._flightForward.dot(this._flightUp);
+    this._flightForward.addScaledVector(this._flightUp, -upDot);
+    if (this._flightForward.lengthSq() < 1e-8) {
+      // Fallback if forward is parallel to up
+      this._flightForward.set(0, 0, -1);
+      const fallback = this._flightForward.dot(this._flightUp);
+      this._flightForward.addScaledVector(this._flightUp, -fallback);
+    }
+    this._flightForward.normalize();
+
+    // Compute right vector
+    this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+
+    // Legacy: sync persistent forward for compatibility
+    this._persistentForward.copy(this._flightForward);
 
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
@@ -655,12 +755,40 @@ export class FreeFlightController {
       const TWO_PI = Math.PI * 2;
       while (this.heading > Math.PI) this.heading -= TWO_PI;
       while (this.heading < -Math.PI) this.heading += TWO_PI;
-      // Sync persistent forward vector for spherical world consistency
-      this._persistentForward.set(
-        -Math.sin(this.heading),
-        0,
-        -Math.cos(this.heading)
-      ).normalize();
+
+      // Update vector-based forward direction
+      if (this._sphereCenter) {
+        // Spherical: compute forward in tangent plane from heading
+        this._computeLocalUp();
+        this._flightUp.copy(this._localUp);
+        // Create forward vector from heading, then project to tangent plane
+        this._flightForward.set(
+          -Math.sin(this.heading),
+          0,
+          -Math.cos(this.heading)
+        );
+        const upDot = this._flightForward.dot(this._flightUp);
+        this._flightForward.addScaledVector(this._flightUp, -upDot);
+        if (this._flightForward.lengthSq() < 1e-8) {
+          this._flightForward.set(1, 0, 0);
+          const fallback = this._flightForward.dot(this._flightUp);
+          this._flightForward.addScaledVector(this._flightUp, -fallback);
+        }
+        this._flightForward.normalize();
+        this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+      } else {
+        // Flat world: simple heading-based forward
+        this._flightForward.set(
+          -Math.sin(this.heading),
+          0,
+          -Math.cos(this.heading)
+        ).normalize();
+        this._flightUp.set(0, 1, 0);
+        this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+      }
+
+      // Sync legacy vector
+      this._persistentForward.copy(this._flightForward);
     }
   }
 }
