@@ -190,11 +190,11 @@ Added `DEBUG_MOBILE_INPUT` flag for debugging touch input issues on mobile devic
 | Climb on joystick up | Resolved | Fixed (cross product order) | N/A |
 | Follow camera position | Resolved | Fixed (offset sign) | N/A |
 | Mobile flight direction | Resolved | Fixed (heading init + GLB offset) | N/A |
-| Spherical world velocity mismatch | **RESOLVED** | Fixed (vector-based forward) | N/A |
+| Spherical world velocity mismatch | **UNRESOLVED** | Multiple attempts failed | HIGH |
 
 ---
 
-## Issue 5: Spherical World Velocity Direction Mismatch (RESOLVED - Dec 2025)
+## Issue 5: Spherical World Velocity Direction Mismatch (UNRESOLVED)
 
 ### Problem
 On the spherical world, the bird flies in a fixed world direction regardless of which way the model is visually facing. When the user turns (yaw input), the visual model rotates but the velocity/movement direction doesn't follow. The bird appears to "strafe" - flying sideways relative to its visual orientation.
@@ -236,9 +236,9 @@ On a spherical world, the local "up" direction changes based on position. The cu
 - `free-flight-controller.js:527` - Logs HEADING and FWD direction
 - `flight-controls.js:15` - `DEBUG_MOBILE_INPUT` flag
 
-### Resolution (Dec 30, 2025)
+### Attempted Resolution (Dec 30, 2025) - DID NOT WORK
 
-After studying the [Cesium Flight Simulator](https://github.com/WilliamAvHolmberg/cesium-flight-simulator), the key insight was:
+After studying the [Cesium Flight Simulator](https://github.com/WilliamAvHolmberg/cesium-flight-simulator), the key insight was identified:
 
 **Track forward direction as a persistent vector, not a scalar heading.**
 
@@ -248,7 +248,7 @@ The Cesium approach:
 3. Use this vector directly for velocity calculation: `velocity = forwardDirection * speed`
 4. Derive quaternion FROM the forward vector (not the other way around)
 
-**Implementation Changes:**
+**Implementation Attempted:**
 
 1. Added `_persistentForward` vector to `FreeFlightController` constructor
 2. In spherical world mode, yaw input rotates `_persistentForward` around `_localUp`:
@@ -268,6 +268,17 @@ The Cesium approach:
 The cross product order matters for right-handed coordinates:
 - `localRight = persistentForward × localUp` (NOT `localUp × persistentForward`)
 - `localForward = localUp × localRight`
+
+### Why It Still Doesn't Work (Jan 2026)
+
+**The bug persists despite the above changes.** Possible reasons:
+1. `_persistentForward` may not actually be used for velocity calculation
+2. Parallel transport may not be re-projecting correctly
+3. There may still be code paths using the old scalar heading
+4. The quaternion may still be overriding the vector-based direction
+5. Integration with visual rendering may be conflicting with physics
+
+**Recommended approach: Clean rewrite in isolated module (see FLIGHT_CONTROLS_PLAN.md)**
 
 ---
 
