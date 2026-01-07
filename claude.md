@@ -28,9 +28,9 @@ Touch Input → flight-controls.js → free-flight-controller.js → Three.js Re
 ```
 
 ## CRITICAL OPEN BUG: Flight Direction on Spherical World
-**Status**: UNSOLVED after extensive debugging session
+**Status**: UNRESOLVED - Multiple fix attempts have failed (Jan 2026)
 
-**Problem**: Bird always flies in absolute world direction, not the direction it's facing. When you turn/bank, the bird keeps going the original direction.
+**Problem**: Bird always flies in absolute world direction, not the direction it's facing. When you turn/bank, the bird keeps going the original direction. **This breaks gameplay entirely.**
 
 **Root Cause Analysis**:
 - Current system: `heading (angle) → quaternion → forward direction`
@@ -38,13 +38,14 @@ Touch Input → flight-controls.js → free-flight-controller.js → Three.js Re
 - On sphere: local "up" changes with position, breaking Euler-based heading
 
 **What's Been Tried** (see KNOWN_ISSUES.md Issue 5):
-1. Model orientation fixes (`guessedForward` vector changes)
-2. Parallel transport compensation for heading drift
-3. Building quaternion from local-up axis instead of world Y
-4. Direct velocity calculation from `_yawQuaternion`
+1. Model orientation fixes (`guessedForward` vector changes) - didn't fix
+2. Parallel transport compensation for heading drift - didn't fix
+3. Building quaternion from local-up axis instead of world Y - didn't fix
+4. Direct velocity calculation from `_yawQuaternion` - didn't fix
+5. Vector-based `_persistentForward` (Dec 2025) - **implemented but still broken**
 
-**Proposed Solution** (not yet implemented):
-Rebuild flight system to track `forward` as a persistent Vector3, derive quaternion for rendering:
+**Required Solution** (see FLIGHT_CONTROLS_PLAN.md):
+Clean rewrite of spherical flight in isolated module. Track `forward` as persistent Vector3, derive quaternion for rendering only:
 ```javascript
 turn(deltaRadians) {
   const localUp = this.getLocalUp();
@@ -52,6 +53,8 @@ turn(deltaRadians) {
   this.forward.applyQuaternion(q).normalize();
   this._projectToTangent(); // Keep forward tangent to sphere
 }
+// Velocity = forward * speed (directly, not via quaternion)
+// Quaternion = derived from forward + up (for rendering only)
 ```
 
 ## Debug Tools
