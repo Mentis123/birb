@@ -183,7 +183,13 @@ export class BirdFlight {
      * @param {number} deltaTime - frame time in seconds
      */
     update(deltaTime) {
-        if (!Number.isFinite(deltaTime) || deltaTime <= 0) return;
+        if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+            return {
+                position: this.getPosition(),
+                quaternion: this.quaternion,
+                velocity: this.getVelocity(),
+            };
+        }
 
         if (this.sphereCenter) {
             // Spherical: moving forward = pitching forward on the sphere

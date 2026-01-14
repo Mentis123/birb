@@ -1651,6 +1651,7 @@
     let flightControllerInitialized = false;
     let preferredCameraMode = null;
     let nestCameraReturnMode = null;
+    let cameraState = null;
     let newFlightSystem = null; // New flight system state
 
     // Nesting system state
@@ -2731,18 +2732,7 @@
       refreshAnimationState();
     });
 
-    let cameraState = null;
-    const CAMERA_MODE_SEQUENCE = [
-      CAMERA_MODES.FOLLOW,
-      CAMERA_MODES.FPV,
-    ];
-    let cameraModeIndex = 0;
-    preferredCameraMode = CAMERA_MODE_SEQUENCE[cameraModeIndex];
-    nestCameraReturnMode = preferredCameraMode;
-
-    function invalidateRendererSize() {
-      resizeState.dirty = true;
-    }
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     function updateRendererSize(force = false) {
       if (!resizeState.dirty && !force) {
