@@ -1654,6 +1654,12 @@
 
     // Hoisted variables to prevent ReferenceErrors
     let flightController = null;
+    const CAMERA_MODE_SEQUENCE = ['follow', 'fpv'];
+    let cameraModeIndex = 0;
+    let preferredCameraMode = 'follow';
+    let nestCameraReturnMode = 'follow';
+
+    // motionQuery declaration
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     // Stub for invalidateRendererSize to prevent crash if called early
