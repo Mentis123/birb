@@ -1050,7 +1050,6 @@
       GLTFLoader,
       FreeFlightController,
       createCameraState,
-      CAMERA_MODES,
       createFlightControls,
       createWorldShell,
       ENVIRONMENT_VARIANTS,
@@ -1649,10 +1648,17 @@
     let sphericalWorld = null;
     let glideTrail = null;
     let flightControllerInitialized = false;
-    let preferredCameraMode = null;
-    let nestCameraReturnMode = null;
+    let flightControllerInitialized = false;
     let cameraState = null;
     let newFlightSystem = null; // New flight system state
+
+    // Hoisted variables to prevent ReferenceErrors
+    let flightController = null;
+    const CAMERA_MODES = { FOLLOW: 'follow', FPV: 'fpv' };
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+    // Stub for invalidateRendererSize to prevent crash if called early
+    let invalidateRendererSize = () => { resizeState.dirty = true; };
 
     // Nesting system state
     let nestPointsSystem = null;
@@ -2385,7 +2391,6 @@
       );
     }
 
-    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const motionState = {
       animate: !motionQuery.matches,
       elapsed: 0,
@@ -2805,7 +2810,7 @@
     // Check for new flight system flag
     const useNewFlight = new URLSearchParams(window.location.search).has('newFlight');
 
-    let flightController;
+    // flightController declaration hoisted
 
     if (useNewFlight) {
       console.log('🚀 Initializing NEW Clean Flight System');
