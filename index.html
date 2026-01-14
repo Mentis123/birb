@@ -1050,6 +1050,7 @@
       GLTFLoader,
       FreeFlightController,
       createCameraState,
+      CAMERA_MODES = { FOLLOW: 'follow', FPV: 'fpv' },
       createFlightControls,
       createWorldShell,
       ENVIRONMENT_VARIANTS,
@@ -1653,7 +1654,6 @@
 
     // Hoisted variables to prevent ReferenceErrors
     let flightController = null;
-    const CAMERA_MODES = { FOLLOW: 'follow', FPV: 'fpv' };
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     // Stub for invalidateRendererSize to prevent crash if called early
