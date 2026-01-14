@@ -3278,6 +3278,8 @@
 
       } else {
         // === LEGACY FLIGHT UPDATE ===
+        let pose;
+
         if (newFlightSystem) {
           // === NEW FLIGHT UPDATE LOOP ===
           const { input, flight, camera: bCam, visual } = newFlightSystem;
@@ -3286,7 +3288,7 @@
           const inputState = input.get();
 
           // 2. Physics Update
-          const pose = flight.tick(inputState, isNested ? 0 : delta);
+          pose = flight.tick(inputState, isNested ? 0 : delta);
 
           // 3. Camera Update
           bCam.update(pose.position, pose.quaternion, delta);
@@ -3298,7 +3300,7 @@
           birbAnchor.position.copy(pose.position);
           birbAnchor.quaternion.copy(visualQuat);
 
-          // Sync legacy controller for compatibility
+          // Sync legacy controller
           if (flightController) {
             flightController.position.copy(pose.position);
             flightController.quaternion.copy(pose.quaternion);
@@ -3310,12 +3312,9 @@
             sphericalWorld.root.quaternion.identity();
           }
 
-          // Dummy pose for rest of loop (collision etc)
-          pose.position = flightController.position;
-
         } else {
           // === LEGACY FLIGHT UPDATE ===
-          const pose = flightController.update(isNested ? 0 : delta);
+          pose = flightController.update(isNested ? 0 : delta);
         }
       }
 
