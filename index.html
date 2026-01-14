@@ -2732,8 +2732,6 @@
       refreshAnimationState();
     });
 
-    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-
     function updateRendererSize(force = false) {
       if (!resizeState.dirty && !force) {
         return;
