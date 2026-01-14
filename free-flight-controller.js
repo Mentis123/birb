@@ -538,8 +538,20 @@ export class FreeFlightController {
         this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
       }
 
-      // Step 5: Apply PITCH - rotate forward around right (visual only, affects climb)
-      // This tilts the nose up/down for visual feedback
+      // Step 4b: Apply PITCH to physics forward (FIX: pitch now affects flight direction)
+      // This makes pitching actually steer the bird, not just tilt visuals.
+      // The parallel transport at the start of each frame will re-project to tangent plane,
+      // so the bird stays near the sphere surface while still responding to pitch input.
+      const pitchForwardRotation = effectivePitch * (this._nestLookMode ? NEST_YAW_RATE : PITCH_RATE) * rotationDeltaTime;
+      if (Math.abs(pitchForwardRotation) > 1e-8) {
+        this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchForwardRotation);
+        this._flightForward.applyQuaternion(this._pitchQuaternion);
+        this._flightForward.normalize();
+        // Recompute right after pitch
+        this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+      }
+
+      // Step 5: Apply PITCH to visual quaternion - tilts nose for visual feedback
       const pitchRotation = this.pitch;
       this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchRotation);
 
@@ -742,6 +754,20 @@ export class FreeFlightController {
    */
   getHeading() {
     return this.heading;
+  }
+
+  /**
+   * Get the physics forward direction vector (used for velocity calculation).
+   * This is the actual direction the bird flies, without visual pitch/bank.
+   * Use this for world alignment instead of extracting from quaternion.
+   * @param {Vector3} [target] - Optional vector to copy into (avoids allocation)
+   * @returns {Vector3} The physics forward direction (normalized)
+   */
+  getPhysicsForward(target) {
+    if (target) {
+      return target.copy(this._flightForward);
+    }
+    return this._flightForward.clone();
   }
 
   /**

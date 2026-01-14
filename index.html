@@ -3283,9 +3283,10 @@
             if (upLengthSq > 1e-6) {
               upDir.multiplyScalar(1 / Math.sqrt(upLengthSq));
 
-              const forwardDir = sphericalWorldAlignment.forward
-                .set(0, 0, -1)
-                .applyQuaternion(flightController.quaternion);
+              // FIX: Use physics forward vector directly, not quaternion
+              // The quaternion includes visual pitch/bank which doesn't match
+              // the actual velocity direction (_flightForward is yaw-only)
+              const forwardDir = flightController.getPhysicsForward(sphericalWorldAlignment.forward);
 
               const projectedForward = sphericalWorldAlignment.projectedForward
                 .copy(forwardDir)
