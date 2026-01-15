@@ -2512,12 +2512,17 @@
       viewToggleButton.setAttribute("title", `Cycle camera view • ${modeLabel}`);
     }
 
-    function updateControlMetrics(speed = flightController.getSpeed()) {
+    function updateControlMetrics(speed) {
       const throttleSetting = Number.isFinite(flightController?.throttle)
         ? flightController.throttle
         : 0;
       const throttlePercent = Math.round(throttleSetting * 100);
-      const safeSpeed = Number.isFinite(speed) ? speed : 0;
+      const resolvedSpeed = Number.isFinite(speed)
+        ? speed
+        : typeof flightController?.getSpeed === "function"
+          ? flightController.getSpeed()
+          : flightController?.speed;
+      const safeSpeed = Number.isFinite(resolvedSpeed) ? resolvedSpeed : 0;
       if (speedMetric) {
         speedMetric.textContent = `${safeSpeed.toFixed(2)}u/s`;
       }
