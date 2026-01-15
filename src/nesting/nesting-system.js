@@ -36,6 +36,12 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
   const _tempVec = new THREE.Vector3();
   const _tempQuat = new THREE.Quaternion();
 
+  function applyVelocity(direction, speed) {
+    if (flightController.velocity) {
+      flightController.velocity.copy(direction).multiplyScalar(speed);
+    }
+  }
+
   function setState(newState) {
     if (currentState !== newState) {
       const previousState = currentState;
@@ -196,7 +202,9 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
           if (distance < AUTO_FLY_ARRIVAL_THRESHOLD) {
             // Arrived at nest
             flightController.position.copy(targetPosition);
-            flightController.velocity.set(0, 0, 0);
+            if (flightController.velocity) {
+              flightController.velocity.set(0, 0, 0);
+            }
             // Use setOrientation to properly sync heading/pitch/bank with quaternion
             // This prevents the next update() from overwriting the orientation
             if (typeof flightController.setOrientation === 'function') {
@@ -216,7 +224,7 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
             const direction = toTarget.normalize();
             const speed = Math.min(AUTO_FLY_SPEED, distance / delta);
 
-            flightController.velocity.copy(direction).multiplyScalar(speed);
+            applyVelocity(direction, speed);
             flightController.position.addScaledVector(direction, speed * delta);
 
             // Smoothly rotate to face landing orientation
@@ -239,7 +247,7 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
           // Use setSpeed(0) for BirdFlight support
           if (typeof flightController.setSpeed === 'function') {
             flightController.setSpeed(0);
-          } else {
+          } else if (flightController.velocity) {
             flightController.velocity.set(0, 0, 0);
           }
           // Position is maintained, controls are for look-around only
@@ -256,7 +264,7 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
           } else {
             // Apply take-off boost
             const boostFactor = takeOffTimer / TAKE_OFF_DURATION;
-            flightController.velocity.copy(takeOffDirection).multiplyScalar(TAKE_OFF_BOOST * boostFactor);
+            applyVelocity(takeOffDirection, TAKE_OFF_BOOST * boostFactor);
             flightController.position.addScaledVector(
               takeOffDirection,
               TAKE_OFF_BOOST * boostFactor * delta,
