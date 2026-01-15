@@ -3241,6 +3241,8 @@
         }
       }
 
+      let pose;
+
       if (useNewFlight && newFlightSystem) {
         // === NEW FLIGHT UPDATE LOOP ===
         const { input, flight, camera: bCam, visual } = newFlightSystem;
@@ -3249,7 +3251,7 @@
         const inputState = input.get();
 
         // 2. Physics Update
-        const pose = flight.tick(inputState, delta);
+        pose = flight.tick(inputState, delta);
 
         // 3. Camera Update
         // We pass the bird's position/quat to the camera system
@@ -3278,8 +3280,6 @@
 
       } else {
         // === LEGACY FLIGHT UPDATE ===
-        let pose;
-
         if (newFlightSystem) {
           // === NEW FLIGHT UPDATE LOOP ===
           const { input, flight, camera: bCam, visual } = newFlightSystem;
