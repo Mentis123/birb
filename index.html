@@ -1249,6 +1249,34 @@
       }
     };
 
+    // Synchronous audio initialization - MUST be called synchronously from user gesture
+    // This is critical for mobile browsers which require audio unlock from gesture context
+    const initAudioSynchronously = () => {
+      const ctx = initAudioContext();
+      if (!ctx) return null;
+
+      // Start resume without awaiting - this MUST happen synchronously in gesture
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      // Unlock with silent buffer synchronously
+      if (!hasUnlockedAudio) {
+        try {
+          const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(ctx.destination);
+          source.start(0);
+          hasUnlockedAudio = true;
+        } catch (e) {
+          // Ignore errors - audio will be retried
+        }
+      }
+
+      return ctx;
+    };
+
     // Pre-initialize and unlock audio on first user interaction
     const initAudioOnInteraction = async () => {
       const ctx = await ensureAudioReady();
@@ -1259,9 +1287,11 @@
     // Keep listeners active to handle re-suspend after tab switches etc.
     const audioInteractionEvents = ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'];
     audioInteractionEvents.forEach(eventType => {
-      document.addEventListener(eventType, async function handleAudioInteraction(event) {
-        // Always try to init/resume on interaction - audio can get suspended again
-        await initAudioOnInteraction();
+      document.addEventListener(eventType, function handleAudioInteraction(event) {
+        // Call synchronous init FIRST (within gesture context)
+        initAudioSynchronously();
+        // Then also do async init for full setup
+        initAudioOnInteraction();
       }, { passive: true });
     });
 
@@ -1295,9 +1325,21 @@
     };
 
     const playExplosionSound = async () => {
-      const ctx = await ensureAudioReady();
+      // For explosion sounds (called from animation loop, not user gesture),
+      // we can't resume the audio context on mobile. Just check if it's already running.
+      const ctx = initAudioContext();
       if (!ctx) {
-        console.warn('[Audio] Cannot play explosion sound - audio context not ready');
+        return; // No audio context available
+      }
+
+      // If context is suspended, try a non-blocking resume (works on desktop).
+      // On mobile, the firing action should have already unlocked/resumed the audio.
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      // Only play if context is running - don't block waiting for it
+      if (ctx.state !== 'running') {
         return;
       }
 
@@ -3061,8 +3103,11 @@
 
     if (nestLaunchButton) {
       const handleLaunch = async () => {
-        // Ensure audio context is ready immediately during user gesture
-        // This must happen synchronously in the event handler for mobile browsers
+        // CRITICAL: Call synchronous audio init FIRST, before any awaits
+        // This must happen within the user gesture's synchronous call stack
+        initAudioSynchronously();
+
+        // Now safe to use async operations
         await initAudioOnInteraction();
 
         if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {

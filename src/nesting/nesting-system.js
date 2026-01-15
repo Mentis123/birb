@@ -111,14 +111,18 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
       // Start landing sequence
       currentNest = nearestNest;
-      targetPosition.copy(nearestNest.userData.landingPosition);
-      targetQuaternion.copy(nearestNest.userData.landingQuaternion);
 
-      // Offset landing position slightly above the nest
-      const surfaceNormal = nearestNest.userData.surfaceNormal;
+      // Use WORLD coordinates for landing position (accounts for sphere rotation)
+      nestPointsSystem.getNestWorldPosition(nearestNest, targetPosition);
+      nestPointsSystem.getNestWorldQuaternion(nearestNest, targetQuaternion);
+
+      // Get world-space surface normal for clearance offset
+      const worldSurfaceNormal = nestPointsSystem.getNestWorldSurfaceNormal(nearestNest, _tempVec);
       const hostClearance = nearestNest.userData.hostClearance || 0;
       const clearanceOffset = Math.max(0.6, Math.min(hostClearance * 0.2, 3.0));
-      targetPosition.addScaledVector(surfaceNormal, clearanceOffset);
+      if (worldSurfaceNormal) {
+        targetPosition.addScaledVector(worldSurfaceNormal, clearanceOffset);
+      }
 
       setState(NESTING_STATES.LANDING);
       nestPointsSystem.setNestOccupied(currentNest, true);
@@ -136,7 +140,12 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
       // Calculate take-off direction (outward from sphere + slight forward)
       if (currentNest) {
-        takeOffDirection.copy(currentNest.userData.surfaceNormal);
+        // Use world-space surface normal for take-off direction
+        const worldNormal = nestPointsSystem.getNestWorldSurfaceNormal(currentNest, takeOffDirection);
+        if (!worldNormal) {
+          // Fallback to local normal if world normal unavailable
+          takeOffDirection.copy(currentNest.userData.surfaceNormal);
+        }
 
         // Add some forward momentum based on current look direction
         // Check for lookQuaternion (legacy) or just quaternion (BirdFlight)

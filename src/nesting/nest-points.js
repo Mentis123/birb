@@ -136,6 +136,9 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
   const _hostBounds = new THREE.Box3();
   const _hostSize = new THREE.Vector3();
   const _normalAbs = new THREE.Vector3();
+  // Temporary vectors for world position/quaternion calculations
+  const _worldPos = new THREE.Vector3();
+  const _worldQuat = new THREE.Quaternion();
 
   const computeHostClearance = (hostObject, surfaceNormal) => {
     if (!hostObject || !surfaceNormal) return 0;
@@ -227,7 +230,9 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
       nests.forEach((nestGroup, index) => {
         if (!nestGroup.visible) return;
 
-        const distance = birbPosition.distanceTo(nestGroup.position);
+        // Use world position for proper distance calculation when sphere rotates
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
         const isInRange = distance < NEST_PROXIMITY_RANGE;
         const isGlowing = distance < NEST_GLOW_RANGE;
 
@@ -275,6 +280,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
 
     /**
      * Find the nearest active (in-range) nest
+     * Uses world coordinates for proper detection when sphere rotates
      */
     getNearestActiveNest(birbPosition) {
       let nearest = null;
@@ -283,7 +289,9 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
       nests.forEach((nestGroup) => {
         if (!nestGroup.visible) return;
 
-        const distance = birbPosition.distanceTo(nestGroup.position);
+        // Get nest's world position (accounts for sphere rotation)
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
         if (distance < NEST_PROXIMITY_RANGE && distance < nearestDistance) {
           nearest = nestGroup;
           nearestDistance = distance;
@@ -294,12 +302,45 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
     },
 
     /**
+     * Get the world position of a nest (for landing target)
+     */
+    getNestWorldPosition(nestGroup, target) {
+      if (!nestGroup) return null;
+      nestGroup.getWorldPosition(target || _worldPos);
+      return target || _worldPos.clone();
+    },
+
+    /**
+     * Get the world quaternion of a nest (for landing orientation)
+     */
+    getNestWorldQuaternion(nestGroup, target) {
+      if (!nestGroup) return null;
+      nestGroup.getWorldQuaternion(target || _worldQuat);
+      return target || _worldQuat.clone();
+    },
+
+    /**
+     * Get the world-space surface normal of a nest
+     */
+    getNestWorldSurfaceNormal(nestGroup, target) {
+      if (!nestGroup || !nestGroup.userData.surfaceNormal) return null;
+      // The surface normal in local space needs to be transformed to world space
+      // We can do this by applying the nest's world quaternion to the local normal
+      nestGroup.getWorldQuaternion(_worldQuat);
+      const normal = target || new THREE.Vector3();
+      normal.copy(nestGroup.userData.surfaceNormal).applyQuaternion(_worldQuat);
+      return normal;
+    },
+
+    /**
      * Get all nests in glow range (for UI indicator)
      */
     getNestsInRange(birbPosition) {
       return nests.filter((nestGroup) => {
         if (!nestGroup.visible) return false;
-        const distance = birbPosition.distanceTo(nestGroup.position);
+        // Use world position for proper distance calculation
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
         return distance < NEST_GLOW_RANGE;
       });
     },
