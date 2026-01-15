@@ -47,7 +47,11 @@ export class BirdVisual {
      */
     update(flightQuaternion, input, deltaTime) {
         // Target bank based on yaw input (turn right = bank right)
-        const targetBank = (input?.x ?? 0) * this.maxBankAngle;
+        // User Polished: Turn LEFT (Input -1) -> Left Wing Down (+Z Bank).
+        // Since Bank +Z is Left Wing Down (Counter-Clockwise Roll), 
+        // Input -1 should equal Positive Bank.
+        // Input +1 (Right) should equal Negative Bank (Right Wing Down).
+        const targetBank = -(input?.x ?? 0) * this.maxBankAngle;
 
         // Target pitch tilt based on pitch input (pitch up = nose up)
         const targetPitch = (input?.y ?? 0) * this.maxPitchTilt;

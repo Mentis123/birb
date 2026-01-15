@@ -118,8 +118,41 @@ export class BirdFlight {
         const transportQ = new Quaternion().setFromUnitVectors(oldNormal, newNormal);
 
         // Apply this rotation GLOBALLY to the bird (Pre-multiply)
-        // This effectively "drags" the bird's orientation along with the earth's curve
+        // This effectively "drags" the bird's orientation to follow the curve
         this.quaternion.premultiply(transportQ);
+
+        // 4. Auto-Leveling (Pitch)
+        // If no pitch input, slowly rotate back to level flight (tangent to sphere)
+        // Level flight means Local Forward has 0 vertical component relative to Sphere Normal.
+        // We already have 'newNormal' (World Up).
+        // Forward is (0,0,-1) applied by Quat.
+        // We want Forward dot Normal = 0.
+        // Current Pitch Angle = Asin(Forward dot Normal).
+        // We want to rotate around Local X (Pitch) to reduce this angle.
+
+        // Only auto-level if speed is sufficient (aerodynamic stability)
+        if (this.speed > 0.5) {
+            const currentForward = this._scratch.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+            const sphereNormal = this.position.clone().sub(this.sphereCenter).normalize();
+
+            // Pitch Angle: Angle between Forward vector and the Tangent Plane.
+            // Sin(Pitch) = Forward dot Normal.
+            const sinPitch = currentForward.dot(sphereNormal);
+
+            // If pointing UP (positive dot), we want to Pitch DOWN (Negative X Rot).
+            // If pointing DOWN (negative dot), we want to Pitch UP (Positive X Rot).
+            // So correction is proportional to -sinPitch.
+
+            const autoLevelStrength = 1.0; // Adjustment strength
+            const correction = -sinPitch * autoLevelStrength * deltaTime;
+
+            // Apply if significant
+            if (Math.abs(correction) > 0.0001) {
+                this._scratch.axis.set(1, 0, 0); // Local X
+                this._scratch.quat.setFromAxisAngle(this._scratch.axis, correction);
+                this.quaternion.multiply(this._scratch.quat);
+            }
+        }
 
         return this._getPose();
     }
@@ -151,4 +184,8 @@ export class BirdFlight {
 
     // Getters for external checking
     getPosition() { return this.position.clone(); }
+
+    setSpeed(speed) {
+        this.speed = speed;
+    }
 }

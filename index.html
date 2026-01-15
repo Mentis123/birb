@@ -2815,123 +2815,172 @@
       { passive: true }
     );
 
+    // === AUDIO SYSTEM ===
+    const audioCtxSource = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    let audioEnabled = false;
+
+    async function initAudioOnInteraction() {
+      if (audioEnabled && audioCtx) {
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+        return;
+      }
+
+      if (!audioCtxSource) return;
+
+      try {
+        audioCtx = new audioCtxSource();
+        audioEnabled = true;
+
+        // Unlock audio on iOS/Chrome
+        const buffer = audioCtx.createBuffer(1, 1, 22050);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+        console.log("Audio System Initialized");
+      } catch (e) {
+        console.warn("Audio init failed:", e);
+      }
+    }
+
+    async function playRocketFireSound() {
+      if (!audioEnabled || !audioCtx) return;
+
+      try {
+        const t = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        // Rocket Launch "Pew-Woosh"
+        // Start high, drop fast
+        osc.frequency.setValueAtTime(880, t);
+        osc.frequency.exponentialRampToValueAtTime(110, t + 0.3);
+
+        osc.type = 'sawtooth';
+
+        // Filter for "woosh" effect
+        // (Simple implementation just uses volume envelope)
+        gain.gain.setValueAtTime(0.5, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+
+        osc.start(t);
+        osc.stop(t + 0.3);
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+
+    async function playExplosionSound() {
+      if (!audioEnabled || !audioCtx) return;
+
+      try {
+        const t = audioCtx.currentTime;
+
+        // Simple Noise Burst for Explosion
+        const bufferSize = audioCtx.sampleRate * 0.5; // 0.5 seconds
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+
+        const gain = audioCtx.createGain();
+        // Lowpass filter for "Thud"
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 800;
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        gain.gain.setValueAtTime(0.8, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+
+        noise.start(t);
+      } catch (e) {
+        // Ignore
+      }
+    }
+
     // Start bird on top of spherical world (sphere radius + some height)
     const birdStartHeight = SPHERE_RADIUS + 3;
 
-    // Check for new flight system flag
-    const useNewFlight = new URLSearchParams(window.location.search).has('newFlight');
+    // FLIGHT PORT: Always use New Flight System (BirdFlight + BirdVisual + BirdCamera)
+    console.log('🚀 Initializing Flight System');
 
-    // flightController declaration hoisted
+    // 1. Input
+    const zoneParams = document.querySelector('[data-touch-zone]');
+    // Simplified joystick selector
+    const touchInput = createTouchInput(zoneParams, nipplejs);
+    const keyboardInput = createKeyboardInput();
+    const flightInput = combineInputs(touchInput, keyboardInput);
 
-    if (useNewFlight) {
-      console.log('🚀 Initializing NEW Clean Flight System');
+    // 2. Flight Physics (BirdFlight)
+    const flight = new BirdFlight(THREE, {
+      sphereCenter: new THREE.Vector3(0, 0, 0),
+      sphereRadius: SPHERE_RADIUS,
+      speed: 4,
+      position: new THREE.Vector3(0, birdStartHeight, 0)
+    });
 
-      // 1. Input
-      const joystickZone = document.getElementById('joystick-zone'); // Using ID we just saw in HTML
-      // Note: joystick-zone might be class .touch-controls__zone data-touch-zone
-      // The HTML showed: <div class="touch-controls__zone" data-touch-zone>
-      // It does NOT have an ID 'joystick-zone'. We need to fix that or select by class.
-      // Let's select by attribute to be safe.
-      const zoneParams = document.querySelector('[data-touch-zone]');
+    // 3. Visuals
+    const visual = new BirdVisual(THREE, {
+      maxBankAngle: Math.PI * 0.35,
+      maxPitchTilt: Math.PI * 0.2,
+    });
 
-      const touchInput = createTouchInput(zoneParams, nipplejs);
-      const keyboardInput = createKeyboardInput();
-      const flightInput = combineInputs(touchInput, keyboardInput);
-
-      // 2. Flight Physics
-      const flight = new BirdFlight(THREE, {
-        sphereCenter: new THREE.Vector3(0, 0, 0),
-        sphereRadius: SPHERE_RADIUS,
-        speed: 4,
-        position: new THREE.Vector3(0, birdStartHeight, 0)
-      });
-
-      // 3. Camera
-      // We need 'camera' which is created inside createCameraState usually? 
-      // No, 'camera' is passed to FreeFlightController usually?
-      // Wait, legacy init: new FreeFlightController(THREE, { camera })
-      // Where is 'camera' created?
-      // It seems 'createCameraState' creates the camera?
-      // line 2816: cameraState = createCameraState(...)
-      // So camera isn't ready here?
-      // Actually FreeFlightController uses camera for look direction but here we are BEFORE cameraState creation.
-      // Let's create a temporary camera or defer camera init.
-      // Actually, FreeFlightController is created BEFORE cameraState.
-      // Let's look at how FreeFlightController gets camera.
-      // It seems it might NOT need camera in constructor?
-      // Arg... previous view_file of FreeFlightController constructor would confirm.
-      // Let's assume we can init BirdCamera LATER or pass camera object later.
-
-      // For now, let's just init the physics. Visuals/Camera we can hook up after cameraState creation?
-      // Or just create a dummy object for now.
-
-      // Wait, I need 'flightController' to exist for the rest of index.html to not crash.
-      // I will create a DUMMY flight controller that mimics the interface for legacy code compatibility
-      // OR better, I rely on 'newFlightSystem' variable and 'flightController' being the physics engine?
-      // BirdFlight doesn't have same API as FreeFlightController.
-
-      // Let's keep flightController as NULL or a dummy if useNewFlight is true,
-      // BUT 'cameraState' usually EXPECTS 'flightController'.
-
-      // Strategy:
-      // Initialize legacy controller ANYWAY to keep other systems happy (cameraState, etc)
-      // BUT we will override its update method or ignore it in the loop.
-      flightController = new FreeFlightController(THREE, {
-        position: new THREE.Vector3(0, birdStartHeight, 0),
-        throttle: initialThrottle,
-        invertPitch: savedInvertPitch,
-      });
-
-      // Initialize New System
-      const visual = new BirdVisual(THREE, {
-        maxBankAngle: Math.PI * 0.35,
-        maxPitchTilt: Math.PI * 0.2,
-      });
-
-      newFlightSystem = {
-        input: flightInput,
-        flight: flight,
-        visual: visual,
-        camera: null // Will set after camera creation
-      };
-
-    } else {
-      flightController = new FreeFlightController(THREE, {
-        position: new THREE.Vector3(0, birdStartHeight, 0),
-        throttle: initialThrottle,
-        invertPitch: savedInvertPitch,
-      });
-    }
-
-    flightController.setThrottle(initialThrottle);
+    // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
+    flightController = flight;
     flightControllerInitialized = true;
-    refreshAnimationState();
 
     // Set sphere center on flight controller for spherical world support
     if (sphericalWorld && typeof flightController.setSphereCenter === 'function') {
       flightController.setSphereCenter(new THREE.Vector3(0, 0, 0));
     }
 
+    // Initialize Camera State (Legacy camera rig system)
     cameraState = createCameraState({
       three: THREE,
       scene,
       flightController,
     });
 
-    if (newFlightSystem) {
-      newFlightSystem.camera = new BirdCamera(THREE, cameraState.camera, {
-        distance: 12,
-        height: 5,
-        lookAhead: 4,
-        smoothing: 0.1,
-        sphereCenter: new THREE.Vector3(0, 0, 0),
-      });
-    }
-
-    // Set sphere center if spherical world is already active
     if (sphericalWorld && typeof cameraState.setSphereCenter === 'function') {
       cameraState.setSphereCenter(new THREE.Vector3(0, 0, 0));
     }
+
+    // 4. Camera (BirdCamera - simpler, tighter follow)
+    // Use the camera created by cameraState
+    const bCam = new BirdCamera(THREE, cameraState.camera, {
+      distance: 12,
+      height: 5,
+      lookAhead: 4,
+      smoothing: 0.1,
+      sphereCenter: new THREE.Vector3(0, 0, 0),
+    });
+
+    // 5. System Container
+    newFlightSystem = {
+      input: flightInput,
+      flight: flight,
+      visual: visual,
+      camera: bCam
+    };
 
     const syncAvatarVisibility = (mode) => {
       if (!birbAnchor) return;
@@ -3249,198 +3298,59 @@
 
       let pose;
 
-      if (useNewFlight && newFlightSystem) {
-        // === NEW FLIGHT UPDATE LOOP ===
+      // Update New Flight System
+      if (newFlightSystem) {
         const { input, flight, camera: bCam, visual } = newFlightSystem;
 
         // 1. Get Input
         const inputState = input.get();
 
         // 2. Physics Update
+        // IMPORTANT: We pass delta even when nested!
+        // BirdFlight.speed will be 0 when nested, preventing position change,
+        // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
         pose = flight.tick(inputState, delta);
 
         // 3. Camera Update
-        // We pass the bird's position/quat to the camera system
-        bCam.update(pose.position, pose.quaternion, delta);
+        // Decide which camera to use:
+        // If nested, we might want FPV from 'cameraState' (if it supports spherical)
+        // OR we just use bCam but place it at 0 distance?
+        // 'nestingSystem' sets cameraMode to FPV.
+        // If cameraMode is FPV, 'cameraState' usually handles it.
+        // If cameraMode is FOLLOW, 'bCam' handles it.
+        const currentMode = cameraState.getMode();
+
+        if (currentMode === CAMERA_MODES.FOLLOW) {
+          // Use New Flight Camera
+          bCam.update(pose.position, pose.quaternion, delta);
+        } else {
+          // Use Legacy Camera State (supports FPV, Sequence, Fixed)
+          cameraState.updateActiveCamera({ pose, ambientOffsets: null, delta });
+        }
 
         // 4. Visual Update
         const visualQuat = visual.update(pose.quaternion, inputState, delta);
 
         // 5. Apply to Mesh
-        // Note: changing position/quaternion of birdAnchor directly
-        // This bypasses the old 'sphericalWorldAlignment' logic
         birbAnchor.position.copy(pose.position);
         birbAnchor.quaternion.copy(visualQuat);
 
-        // Sync for legacy systems (collectibles need position)
-        if (flightController) {
-          flightController.position.copy(pose.position);
-          flightController.quaternion.copy(pose.quaternion);
-          flightController.velocity.copy(pose.velocity);
-        }
-
-        // IMPORTANT: Disable the old world rotation logic entirely
-        // We do NOT update sphericalWorldAlignment.targetQuat
-        // We leave sphericalWorld.root stationary (or identity)
+        // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
-
-      } else {
-        // === LEGACY FLIGHT UPDATE ===
-        if (newFlightSystem) {
-          // === NEW FLIGHT UPDATE LOOP ===
-          const { input, flight, camera: bCam, visual } = newFlightSystem;
-
-          // 1. Get Input
-          const inputState = input.get();
-
-          // 2. Physics Update
-          pose = flight.tick(inputState, isNested ? 0 : delta);
-
-          // 3. Camera Update
-          bCam.update(pose.position, pose.quaternion, delta);
-
-          // 4. Visual Update
-          const visualQuat = visual.update(pose.quaternion, inputState, delta);
-
-          // 5. Apply to Mesh
-          birbAnchor.position.copy(pose.position);
-          birbAnchor.quaternion.copy(visualQuat);
-
-          // Sync legacy controller
-          if (flightController) {
-            flightController.position.copy(pose.position);
-            flightController.quaternion.copy(pose.quaternion);
-            flightController.velocity.copy(pose.velocity);
-          }
-
-          // Disable legacy world rotation
-          if (sphericalWorld && sphericalWorld.root) {
-            sphericalWorld.root.quaternion.identity();
-          }
-
-        } else {
-          // === LEGACY FLIGHT UPDATE ===
-          pose = flightController.update(isNested ? 0 : delta);
-        }
       }
 
-      // Apply collision detection with spherical world
-      if (sphericalWorld && sphericalWorld.collisionSystem) {
-        const collisionRadius = 0.5; // bird collision radius
-        if (sphericalWorld.root?.quaternion) {
-          sphericalCollisionFrame.worldRotation.copy(sphericalWorld.root.quaternion);
-          sphericalCollisionFrame.inverseRotation
-            .copy(sphericalCollisionFrame.worldRotation)
-            .invert();
-          sphericalCollisionFrame.localPosition
-            .copy(flightController.position)
-            .applyQuaternion(sphericalCollisionFrame.inverseRotation);
-          sphericalCollisionFrame.localVelocity
-            .copy(flightController.velocity)
-            .applyQuaternion(sphericalCollisionFrame.inverseRotation);
 
-          const collisionResult = sphericalWorld.collisionSystem.checkAllCollisions(
-            THREE,
-            sphericalCollisionFrame.localPosition,
-            sphericalCollisionFrame.localVelocity,
-            collisionRadius
-          );
+      const ambientOffsets = flightController.getAmbientOffsets ? flightController.getAmbientOffsets() : { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
 
-          if (collisionResult.hadCollision) {
-            sphericalCollisionFrame.resolvedPosition
-              .copy(collisionResult.position)
-              .applyQuaternion(sphericalCollisionFrame.worldRotation);
-            sphericalCollisionFrame.resolvedVelocity
-              .copy(collisionResult.velocity)
-              .applyQuaternion(sphericalCollisionFrame.worldRotation);
+      birbAnchor.position.copy(pose.position);
+      if (ambientOffsets.position) birbAnchor.position.add(ambientOffsets.position);
 
-            flightController.position.copy(sphericalCollisionFrame.resolvedPosition);
-            flightController.velocity.copy(sphericalCollisionFrame.resolvedVelocity);
-          }
-        } else {
-          const collisionResult = sphericalWorld.collisionSystem.checkAllCollisions(
-            THREE,
-            flightController.position,
-            flightController.velocity,
-            collisionRadius
-          );
-          if (collisionResult.hadCollision) {
-            flightController.position.copy(collisionResult.position);
-            flightController.velocity.copy(collisionResult.velocity);
-          }
-        }
-
-        if (sphericalWorld.root) {
-          const upDir = sphericalWorldAlignment.birdDir.copy(flightController.position);
-          const upLengthSq = upDir.lengthSq();
-
-          if (upLengthSq > 1e-6) {
-            upDir.multiplyScalar(1 / Math.sqrt(upLengthSq));
-
-            // FIX: Use physics forward vector directly, not quaternion
-            // The quaternion includes visual pitch/bank which doesn't match
-            // the actual velocity direction (_flightForward is yaw-only)
-            const forwardDir = flightController.getPhysicsForward(sphericalWorldAlignment.forward);
-
-            const projectedForward = sphericalWorldAlignment.projectedForward
-              .copy(forwardDir)
-              .projectOnPlane(upDir);
-
-            if (projectedForward.lengthSq() < 1e-6) {
-              projectedForward.set(1, 0, 0);
-              if (Math.abs(projectedForward.dot(upDir)) > 0.8) {
-                projectedForward.set(0, 0, 1);
-              }
-              projectedForward.projectOnPlane(upDir);
-            }
-
-            if (projectedForward.lengthSq() > 1e-9) {
-              projectedForward.normalize();
-
-              const rightDir = sphericalWorldAlignment.right.crossVectors(
-                projectedForward,
-                upDir,
-              );
-
-              if (rightDir.lengthSq() > 1e-9) {
-                rightDir.normalize();
-
-                const alignedForward = sphericalWorldAlignment.alignedForward
-                  .crossVectors(upDir, rightDir)
-                  .normalize();
-
-                sphericalWorldAlignment.basisMatrix.makeBasis(
-                  rightDir,
-                  upDir,
-                  alignedForward,
-                );
-
-                sphericalWorldAlignment.targetQuat.setFromRotationMatrix(
-                  sphericalWorldAlignment.basisMatrix,
-                );
-
-                const alignStrength = delta > 0 ? 1 - Math.exp(-6 * delta) : 1;
-
-                // DISABLE WORLD ROTATION FOR NEW FLIGHT SYSTEM
-                if (!useNewFlight) {
-                  sphericalWorld.root.quaternion.slerp(
-                    sphericalWorldAlignment.targetQuat,
-                    alignStrength,
-                  );
-                }
-              }
-            }
-          }
-        }
-      }
-
-      const ambientOffsets = flightController.getAmbientOffsets();
-
-      birbAnchor.position.copy(pose.position).add(ambientOffsets.position);
       birbAnchor.quaternion.copy(pose.quaternion);
       birbAnchor.quaternion.multiply(modelOrientationOffset);
-      blendedQuaternion.copy(ambientOffsets.quaternion);
-      birbAnchor.quaternion.multiply(blendedQuaternion);
+      if (ambientOffsets.quaternion) {
+        blendedQuaternion.copy(ambientOffsets.quaternion);
+        birbAnchor.quaternion.multiply(blendedQuaternion);
+      }
       birbAnchor.quaternion.normalize();
 
       if (glideTrail && glideTrail.rotation) {
@@ -3448,11 +3358,14 @@
       }
 
       if (motionState.animate && !controlState.systemPaused) {
-        updateControlMetrics(flightController.getSpeed());
+        // Safe check for getSpeed
+        const speed = typeof flightController.getSpeed === 'function' ? flightController.getSpeed() : flightController.speed;
+        updateControlMetrics(speed);
       }
 
       updateFpsReadout(time);
-      cameraState.updateActiveCamera({ pose, ambientOffsets, delta });
+
+      // Update camera debug if active
       if (debugVectorState) {
         debugVectorState.update({
           pose,
