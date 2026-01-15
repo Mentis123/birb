@@ -145,7 +145,6 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
       }
 
       takeOffTimer = TAKE_OFF_DURATION;
-      takeOffTimer = TAKE_OFF_DURATION;
       setState(NESTING_STATES.TAKING_OFF);
 
       // Restore flight speed if using BirdFlight
@@ -203,91 +202,100 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
             if (typeof flightController.setOrientation === 'function') {
               flightController.setOrientation(targetQuaternion);
             } else {
-            } else {
-            // Fallback for older controller versions
-            if (flightController.lookQuaternion) flightController.lookQuaternion.copy(targetQuaternion);
-            if (flightController.quaternion) flightController.quaternion.copy(targetQuaternion);
+              // Fallback for older controller versions
+              if (flightController.lookQuaternion) {
+                flightController.lookQuaternion.copy(targetQuaternion);
+              }
+              if (flightController.quaternion) {
+                flightController.quaternion.copy(targetQuaternion);
+              }
+            }
+            setState(NESTING_STATES.NESTED);
+          } else {
+            // Move toward nest
+            const direction = toTarget.normalize();
+            const speed = Math.min(AUTO_FLY_SPEED, distance / delta);
+
+            flightController.velocity.copy(direction).multiplyScalar(speed);
+            flightController.position.addScaledVector(direction, speed * delta);
+
+            // Smoothly rotate to face landing orientation
+            if (flightController.lookQuaternion) {
+              flightController.lookQuaternion.slerp(targetQuaternion, delta * 3);
+            }
+            if (flightController.quaternion) {
+              flightController.quaternion.slerp(targetQuaternion, delta * 3);
+            }
+            // Sync heading/pitch/bank with the slerped quaternion
+            if (typeof flightController.setOrientation === 'function' && flightController.quaternion) {
+              flightController.setOrientation(flightController.quaternion, { preserveBank: true });
+            }
           }
-          setState(NESTING_STATES.NESTED);
-        } else {
-          // Move toward nest
-          const direction = toTarget.normalize();
-          const speed = Math.min(AUTO_FLY_SPEED, distance / delta);
-
-          flightController.velocity.copy(direction).multiplyScalar(speed);
-          flightController.position.addScaledVector(direction, speed * delta);
-
-          // Smoothly rotate to face landing orientation
-          flightController.lookQuaternion.slerp(targetQuaternion, delta * 3);
-          flightController.quaternion.slerp(targetQuaternion, delta * 3);
-          flightController.quaternion.slerp(targetQuaternion, delta * 3);
-          // Sync heading/pitch/bank with the slerped quaternion
-          if(typeof flightController.setOrientation === 'function') {
-    flightController.setOrientation(flightController.quaternion, { preserveBank: true });
-  }
-}
-break;
+          break;
         }
 
         case NESTING_STATES.NESTED: {
-  // Keep birb stationary
-  // Use setSpeed(0) for BirdFlight support
-  if (typeof flightController.setSpeed === 'function') {
-    flightController.setSpeed(0);
-  } else {
-    flightController.velocity.set(0, 0, 0);
-  }
-  // Position is maintained, controls are for look-around only
-  break;
-}
+          // Keep birb stationary
+          // Use setSpeed(0) for BirdFlight support
+          if (typeof flightController.setSpeed === 'function') {
+            flightController.setSpeed(0);
+          } else {
+            flightController.velocity.set(0, 0, 0);
+          }
+          // Position is maintained, controls are for look-around only
+          break;
+        }
 
         case NESTING_STATES.TAKING_OFF: {
-  takeOffTimer -= delta;
+          takeOffTimer -= delta;
 
-  if (takeOffTimer <= 0) {
-    // Take-off complete, return to flying
-    currentNest = null;
-    setState(NESTING_STATES.FLYING);
-  } else {
-    // Apply take-off boost
-    const boostFactor = takeOffTimer / TAKE_OFF_DURATION;
-    flightController.velocity.copy(takeOffDirection).multiplyScalar(TAKE_OFF_BOOST * boostFactor);
-    flightController.position.addScaledVector(takeOffDirection, TAKE_OFF_BOOST * boostFactor * delta);
-  }
-  break;
-}
+          if (takeOffTimer <= 0) {
+            // Take-off complete, return to flying
+            currentNest = null;
+            setState(NESTING_STATES.FLYING);
+          } else {
+            // Apply take-off boost
+            const boostFactor = takeOffTimer / TAKE_OFF_DURATION;
+            flightController.velocity.copy(takeOffDirection).multiplyScalar(TAKE_OFF_BOOST * boostFactor);
+            flightController.position.addScaledVector(
+              takeOffDirection,
+              TAKE_OFF_BOOST * boostFactor * delta,
+            );
+          }
+          break;
+        }
       }
 
-return currentState;
+      return currentState;
     },
 
-/**
- * Get look direction for crosshair aiming (when nested)
- */
-getLookDirection() {
-  const quat = flightController.lookQuaternion || flightController.quaternion;
-  return _tempVec.set(0, 0, -1).applyQuaternion(quat);
-},
+    /**
+     * Get look direction for crosshair aiming (when nested)
+     */
+    getLookDirection() {
+      const quat = flightController.lookQuaternion || flightController.quaternion;
+      return _tempVec.set(0, 0, -1).applyQuaternion(quat);
+    },
 
-/**
- * Reset nesting system
- */
-reset() {
-  if (currentNest) {
-    nestPointsSystem.setNestOccupied(currentNest, false);
-  }
-  currentNest = null;
-  currentState = NESTING_STATES.FLYING;
-  takeOffTimer = 0;
-  hasShownWelcomeMessage = false;
-  nestPointsSystem.reset();
-},
+    /**
+     * Reset nesting system
+     */
+    reset() {
+      if (currentNest) {
+        nestPointsSystem.setNestOccupied(currentNest, false);
+      }
+      currentNest = null;
+      currentState = NESTING_STATES.FLYING;
+      takeOffTimer = 0;
+      hasShownWelcomeMessage = false;
+      nestPointsSystem.reset();
+    },
 
-/**
- * Dispose resources
- */
-dispose() {
-  this.reset();
-},
+    /**
+     * Dispose resources
+     */
+    dispose() {
+      this.reset();
+    },
   };
 }
