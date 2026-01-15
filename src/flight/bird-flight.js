@@ -101,8 +101,13 @@ export class BirdFlight {
         // Apply movement
         this.position.add(displacement);
 
-        // 2. Constrain to Sphere
-        this.position.sub(this.sphereCenter).normalize().multiplyScalar(this.sphereRadius).add(this.sphereCenter);
+        // 2. Constrain to Sphere (keep minimum altitude, allow climbing)
+        const radialOffset = this.position.clone().sub(this.sphereCenter);
+        const radialDistance = radialOffset.length();
+        if (radialDistance < this.sphereRadius) {
+            radialOffset.normalize().multiplyScalar(this.sphereRadius);
+            this.position.copy(radialOffset.add(this.sphereCenter));
+        }
 
         // 3. Transport Rotation (Spherical Adjustment)
         // We moved along the sphere, so our "Up" vector (Gravity) changed.
@@ -127,7 +132,12 @@ export class BirdFlight {
 
     _constrainToSphere() {
         if (this.sphereCenter) {
-            this.position.sub(this.sphereCenter).normalize().multiplyScalar(this.sphereRadius).add(this.sphereCenter);
+            const radialOffset = this.position.clone().sub(this.sphereCenter);
+            const radialDistance = radialOffset.length();
+            if (radialDistance < this.sphereRadius) {
+                radialOffset.normalize().multiplyScalar(this.sphereRadius);
+                this.position.copy(radialOffset.add(this.sphereCenter));
+            }
         }
     }
 
