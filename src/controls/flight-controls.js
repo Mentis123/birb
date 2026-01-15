@@ -530,33 +530,21 @@ export function createFlightControls({
         maxNumberOfNipples: 1,
         size: TOUCH_JOYSTICK_SIZE,
         color: '#aac8ff',
-        fadeTime: 120,
-        restOpacity: 0.2,
+        fadeTime: 100,
+        restOpacity: 0,
         threshold: 0.05,
       });
 
       touchZoneElement.classList.add('has-dynamic-joystick');
       touchZoneElement.style.touchAction = 'none';
 
-      // Find the ghost thumbstick placeholder to hide/show based on touch state
-      const ghostThumbstick = touchZoneElement.querySelector('.thumbstick');
-
       const handleAdded = (event, nipple) => {
         attachLookJoystick(nipple);
-        // Hide the ghost when user touches elsewhere
-        if (ghostThumbstick) {
-          ghostThumbstick.classList.add('is-hidden');
-        }
       };
 
       const handleRemoved = (event, nipple) => {
-        if (touchJoystickState.nipple?.nipple === nipple) {
-          detachLookJoystick();
-        }
-        // Show the ghost again when touch ends
-        if (ghostThumbstick) {
-          ghostThumbstick.classList.remove('is-hidden');
-        }
+        // Always detach on removal to prevent stuck joysticks
+        detachLookJoystick();
       };
 
       touchJoystickState.manager.on('added', handleAdded);

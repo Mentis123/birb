@@ -28,6 +28,12 @@
       box-sizing: border-box;
     }
 
+    html {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
@@ -37,6 +43,9 @@
       justify-content: center;
       background: radial-gradient(circle at 30% 20%, #273d68, #0a1324 68%);
       color: #f6f8ff;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     main {
@@ -358,8 +367,9 @@
 
     .touch-controls__zone.has-dynamic-joystick .thumbstick {
       pointer-events: none;
-      opacity: 0.3;
-      transition: opacity 180ms ease;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 180ms ease, visibility 180ms ease;
     }
 
     .touch-controls__zone.has-dynamic-joystick .thumbstick::after {
@@ -3149,6 +3159,43 @@
         nestingSystem.tryLandOnNest(flightController.position);
       }
     });
+
+    // Tap detection on touch zone for mobile landing
+    // (touch zone captures all touches, so canvas click doesn't fire on mobile)
+    const touchZone = document.querySelector('[data-touch-zone]');
+    if (touchZone) {
+      let tapStartTime = 0;
+      let tapStartX = 0;
+      let tapStartY = 0;
+      const TAP_MAX_DURATION = 250; // ms
+      const TAP_MAX_DISTANCE = 15; // px
+
+      touchZone.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          tapStartTime = Date.now();
+          tapStartX = e.touches[0].clientX;
+          tapStartY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      touchZone.addEventListener('touchend', (e) => {
+        const tapDuration = Date.now() - tapStartTime;
+        if (tapDuration > TAP_MAX_DURATION) return;
+
+        // Check distance moved
+        const touch = e.changedTouches[0];
+        if (!touch) return;
+        const dx = touch.clientX - tapStartX;
+        const dy = touch.clientY - tapStartY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance > TAP_MAX_DISTANCE) return;
+
+        // This was a tap - try to land if approaching a nest
+        if (nestingSystem && nestingSystem.getState() === NESTING_STATES.APPROACHING) {
+          nestingSystem.tryLandOnNest(flightController.position);
+        }
+      }, { passive: true });
+    }
 
     const applyThrottleFromInput = () => {
       if (!glideSpeedInput) return;
