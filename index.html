@@ -3112,6 +3112,12 @@
     }
 
     if (nestLaunchButton) {
+      // CRITICAL: Unlock audio on touchstart - mobile browsers require this
+      // touchend is too late for iOS Safari and other mobile browsers
+      nestLaunchButton.addEventListener('touchstart', () => {
+        initAudioSynchronously();
+      }, { passive: true });
+
       const handleLaunch = async () => {
         // CRITICAL: Call synchronous audio init FIRST, before any awaits
         // This must happen within the user gesture's synchronous call stack
