@@ -2245,15 +2245,19 @@
       wingGeometry.translate(0, 0, 0);
 
       const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+      leftWing.name = 'leftWing';
       leftWing.position.set(-0.18, 0.1, 0.64);
       leftWing.rotation.set(Math.PI / 2.2, -Math.PI / 4, Math.PI / 2.6);
       leftWing.scale.set(1.06, 1.06, 1.1);
+      leftWing.userData.baseRotation = leftWing.rotation.clone();
       birbModel.add(leftWing);
 
       const rightWing = new THREE.Mesh(wingGeometry, wingMaterial.clone());
+      rightWing.name = 'rightWing';
       rightWing.position.set(-0.18, 0.1, -0.64);
       rightWing.rotation.set(Math.PI / 2.2, Math.PI / 4, Math.PI / 2.6);
       rightWing.scale.set(1.06, 1.06, 1.1);
+      rightWing.userData.baseRotation = rightWing.rotation.clone();
       birbModel.add(rightWing);
 
       const tailMaterial = plumageMaterial.clone();
@@ -2889,9 +2893,9 @@
     // 4. Camera (BirdCamera - simpler, tighter follow)
     // Use the camera created by cameraState
     const bCam = new BirdCamera(THREE, cameraState.camera, {
-      distance: 12,
-      height: 5,
-      lookAhead: 4,
+      distance: 5,
+      height: 2,
+      lookAhead: 2,
       smoothing: 0.1,
       sphereCenter: new THREE.Vector3(0, 0, 0),
     });
@@ -3274,6 +3278,23 @@
         birbAnchor.quaternion.multiply(blendedQuaternion);
       }
       birbAnchor.quaternion.normalize();
+
+      // Wing banking animation - dip wing on turn direction
+      const leftWing = birbAnchor.getObjectByName('leftWing');
+      const rightWing = birbAnchor.getObjectByName('rightWing');
+      if (leftWing && rightWing && leftWing.userData.baseRotation && rightWing.userData.baseRotation) {
+        // Get yaw input from flight controller (-1 = left, +1 = right)
+        const yawInput = flightController?.smoothedYaw ?? flightController?.input?.yaw ?? 0;
+        const wingDipAmount = 0.4; // Max wing dip angle in radians
+
+        // Left turn (negative yaw): left wing dips down, right wing rises
+        // Right turn (positive yaw): right wing dips down, left wing rises
+        const leftDip = yawInput * wingDipAmount;  // Positive yaw = left rises
+        const rightDip = -yawInput * wingDipAmount; // Positive yaw = right dips
+
+        leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip;
+        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip;
+      }
 
       if (glideTrail && glideTrail.rotation) {
         glideTrail.rotation.z = motionState.elapsed * 0.32;
