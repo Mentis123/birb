@@ -197,7 +197,7 @@ export class BirdFlight {
             const moveAngle = (this.speed * deltaTime) / this.sphereRadius;
             this._scratch.axis.set(1, 0, 0);
             this._scratch.tempQ.setFromAxisAngle(this._scratch.axis, -moveAngle);
-            this.quaternion.premultiply(this._scratch.tempQ);
+            this.quaternion.multiply(this._scratch.tempQ);
             this.quaternion.normalize();
         } else {
             // Flat: simple position += forward * speed * dt
