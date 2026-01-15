@@ -8,6 +8,7 @@
   <title>Birb Flight Lab</title>
   <meta name="description" content="Mobile-first Three.js playground for experimenting with gliding birbs." />
   <meta name="theme-color" content="#0b0d17" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <style>
     :root {
       color-scheme: dark;
@@ -2644,8 +2645,7 @@
       }
       syncFullscreenUi();
       // Trigger resize to update renderer
-      invalidateRendererSize();
-      updateRendererSize(true);
+      scheduleRendererResize(true);
     }
 
     function syncFullscreenUi() {
@@ -2791,11 +2791,32 @@
       }
     }
 
+    let resizeRafId = null;
+    let resizeForce = false;
+    const scheduleRendererResize = (force = false) => {
+      invalidateRendererSize();
+      resizeForce = resizeForce || force;
+      if (typeof requestAnimationFrame !== "function") {
+        const shouldForce = resizeForce;
+        resizeForce = false;
+        updateRendererSize(shouldForce);
+        return;
+      }
+      if (resizeRafId !== null) {
+        return;
+      }
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        const shouldForce = resizeForce;
+        resizeForce = false;
+        updateRendererSize(shouldForce);
+      });
+    };
+
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => {
-          invalidateRendererSize();
-          updateRendererSize();
+          scheduleRendererResize();
         })
         : null;
     if (resizeObserver) {
@@ -2804,8 +2825,7 @@
     window.addEventListener(
       "orientationchange",
       () => {
-        invalidateRendererSize();
-        updateRendererSize(true);
+        scheduleRendererResize(true);
       },
       {
         passive: true,
@@ -2814,8 +2834,7 @@
     window.addEventListener(
       "resize",
       () => {
-        invalidateRendererSize();
-        updateRendererSize();
+        scheduleRendererResize();
       },
       { passive: true }
     );
@@ -2951,7 +2970,7 @@
 
     const applyInvertPitchPreference = (isInverted, { persist = true, updateUi = false } = {}) => {
       const inverted = Boolean(isInverted);
-      flightController.setInvertPitch(inverted);
+      flightController?.setInvertPitch?.(inverted);
       flightControls?.setInvertPitch?.(inverted);
       if (persist) {
         localStorage.setItem(INVERT_PITCH_STORAGE_KEY, inverted ? 'true' : 'false');
@@ -3295,8 +3314,7 @@
     function handleContextRestored() {
       contextState.lost = false;
       renderer.state?.reset?.();
-      invalidateRendererSize();
-      updateRendererSize(true);
+      scheduleRendererResize(true);
       renderer.setAnimationLoop(document.hidden ? null : renderFrame);
       renderFrame(0);
       if (statusMetric) {
@@ -3356,8 +3374,7 @@
       flightControls.dispose();
     });
 
-    invalidateRendererSize();
-    updateRendererSize(true);
+    scheduleRendererResize(true);
     renderFrame(0);
   </script>
 </body>
