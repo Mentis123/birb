@@ -111,6 +111,11 @@ export class FreeFlightController {
     this._turnQuaternion = new Quaternion(); // For yaw rotation around local up
     this._basisMatrix = new Matrix4(); // For building quaternion from basis vectors
     this._previousUp = new Vector3(0, 1, 0);
+    // Nest reference frame - locked when entering nest mode to prevent drift
+    this._nestUp = new Vector3(0, 1, 0);
+    this._nestForward = new Vector3(0, 0, -1);
+    this._nestRight = new Vector3(1, 0, 0);
+    this._nestFrameLocked = false;
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
@@ -202,13 +207,30 @@ export class FreeFlightController {
 
   // Enable/disable nest look-around mode (larger pitch range, more responsive)
   setNestLookMode(isActive) {
+    const wasNestMode = this._nestLookMode;
     this._nestLookMode = Boolean(isActive);
-    // Reset smoothed input and pitch when transitioning modes
+    // Reset smoothed input when transitioning modes
     this._smoothedNestYaw = 0;
     this._smoothedNestPitch = 0;
-    if (!this._nestLookMode) {
-      // Reset pitch when exiting nest mode to avoid stuck at extreme angles
+
+    if (this._nestLookMode && !wasNestMode) {
+      // Entering nest mode: lock the current reference frame to prevent drift
+      // This captures the nest's orientation as our stable basis for look-around
+      this._nestUp.copy(this._flightUp);
+      this._nestForward.copy(this._flightForward);
+      this._nestRight.copy(this._flightRight);
+      this._nestFrameLocked = true;
+      // Reset pitch to 0 when entering nest mode for a clean start
+      this.pitch = 0;
+    } else if (!this._nestLookMode && wasNestMode) {
+      // Exiting nest mode: unlock frame and restore normal flight behavior
+      this._nestFrameLocked = false;
+      // Reset pitch to avoid stuck at extreme angles
       this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, 0);
+      // Sync flight vectors with nest frame (so takeoff direction is correct)
+      this._flightUp.copy(this._nestUp);
+      this._flightForward.copy(this._nestForward);
+      this._flightRight.copy(this._nestRight);
     }
   }
 
@@ -247,18 +269,13 @@ export class FreeFlightController {
     this.visualPitch = this.pitch;
 
     // === Update vector-based flight system ===
-    // Extract forward from quaternion
+    // Extract forward and up DIRECTLY from the quaternion
+    // This is crucial for nest landing - the nest quaternion encodes the correct
+    // up direction (surface normal), which may differ from position-derived local up
     this._flightForward.set(0, 0, -1).applyQuaternion(quaternion);
+    this._flightUp.set(0, 1, 0).applyQuaternion(quaternion);
 
-    // Get current up direction
-    if (this._sphereCenter) {
-      this._computeLocalUp();
-      this._flightUp.copy(this._localUp);
-    } else {
-      this._flightUp.set(0, 1, 0);
-    }
-
-    // Project forward onto tangent plane
+    // Project forward onto tangent plane (perpendicular to up)
     const upDot = this._flightForward.dot(this._flightUp);
     this._flightForward.addScaledVector(this._flightUp, -upDot);
     if (this._flightForward.lengthSq() < 1e-8) {
@@ -269,14 +286,18 @@ export class FreeFlightController {
     this._flightForward.normalize();
     this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
 
+    // Also sync nest frame vectors - this is called before setNestLookMode
+    // so the nest frame will be ready when nest mode is activated
+    this._nestUp.copy(this._flightUp);
+    this._nestForward.copy(this._flightForward);
+    this._nestRight.copy(this._flightRight);
+
     // Sync legacy vector
     this._persistentForward.copy(this._flightForward);
 
-    // Rebuild quaternions from extracted values to ensure consistency
-    this._ambientEuler.set(this.pitch, this.heading, this.bank, 'YXZ');
-    this._visualQuaternion.setFromEuler(this._ambientEuler);
-    this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
-    this.quaternion.setFromEuler(this._ambientEuler);
+    // Copy quaternions directly from input for consistency
+    this.quaternion.copy(quaternion);
+    this._visualQuaternion.copy(quaternion);
   }
 
   /**
@@ -506,73 +527,116 @@ export class FreeFlightController {
       // Core principle: Track direction as Vector3, derive everything else from it.
       // This ensures velocity ALWAYS matches facing direction on curved surfaces.
 
-      // Step 1: Get current local up from position on sphere
-      this._computeLocalUp();
-      this._flightUp.copy(this._localUp);
+      if (this._nestLookMode && this._nestFrameLocked) {
+        // === NEST LOOK MODE: Use locked reference frame ===
+        // When nested, we use a stable frame based on the nest's orientation.
+        // This prevents drift caused by parallel transport or local up recalculation.
+        // Yaw rotates the look direction around the nest's up axis.
+        // Pitch tilts the view up/down relative to the nest's horizon.
 
-      // Step 2: Parallel transport - preserve forward direction when up changes
-      // Project _flightForward onto tangent plane (perpendicular to new up)
-      const upComponent = this._flightForward.dot(this._flightUp);
-      this._flightForward.addScaledVector(this._flightUp, -upComponent);
+        // Start with the locked nest frame
+        this._flightUp.copy(this._nestUp);
 
-      // Handle pole singularity - if forward collapsed, pick a sensible direction
-      if (this._flightForward.lengthSq() < 1e-8) {
-        // At poles, pick arbitrary tangent direction
-        this._flightForward.set(1, 0, 0);
-        const fallbackDot = this._flightForward.dot(this._flightUp);
-        this._flightForward.addScaledVector(this._flightUp, -fallbackDot);
-      }
-      this._flightForward.normalize();
+        // Apply yaw to forward direction (rotate around nest up)
+        const yawRotation = -effectiveYaw * NEST_YAW_RATE * rotationDeltaTime;
+        if (Math.abs(yawRotation) > 1e-8) {
+          this._turnQuaternion.setFromAxisAngle(this._nestUp, yawRotation);
+          this._nestForward.applyQuaternion(this._turnQuaternion);
+          this._nestForward.normalize();
+          // Update nest right after yaw
+          this._nestRight.crossVectors(this._nestForward, this._nestUp).normalize();
+        }
 
-      // Step 3: Compute right vector (for pitch rotation axis)
-      // right = forward × up (right-handed system)
-      this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+        // Copy current nest frame to flight vectors for quaternion building
+        this._flightForward.copy(this._nestForward);
+        this._flightRight.copy(this._nestRight);
 
-      // Step 4: Apply YAW - rotate forward around up
-      const yawRotation = -effectiveYaw * (this._nestLookMode ? NEST_YAW_RATE : YAW_RATE) * rotationDeltaTime;
-      if (Math.abs(yawRotation) > 1e-8) {
-        this._turnQuaternion.setFromAxisAngle(this._flightUp, yawRotation);
-        this._flightForward.applyQuaternion(this._turnQuaternion);
+        // Build base quaternion from the stable nest frame
+        this._basisMatrix.makeBasis(
+          this._flightRight,
+          this._flightUp,
+          this._forward.copy(this._flightForward).negate()
+        );
+        this.quaternion.setFromRotationMatrix(this._basisMatrix);
+
+        // Apply pitch rotation for visual tilt (looking up/down)
+        this._pitchQuaternion.setFromAxisAngle(this._flightRight, this.pitch);
+        this.quaternion.multiply(this._pitchQuaternion);
+
+        // No bank in nest mode - keep view stable
+        this._visualQuaternion.copy(this.quaternion);
+
+        // Sync legacy vectors
+        this._persistentForward.copy(this._flightForward);
+
+      } else {
+        // === NORMAL FLIGHT MODE ===
+        // Step 1: Get current local up from position on sphere
+        this._computeLocalUp();
+        this._flightUp.copy(this._localUp);
+
+        // Step 2: Parallel transport - preserve forward direction when up changes
+        // Project _flightForward onto tangent plane (perpendicular to new up)
+        const upComponent = this._flightForward.dot(this._flightUp);
+        this._flightForward.addScaledVector(this._flightUp, -upComponent);
+
+        // Handle pole singularity - if forward collapsed, pick a sensible direction
+        if (this._flightForward.lengthSq() < 1e-8) {
+          // At poles, pick arbitrary tangent direction
+          this._flightForward.set(1, 0, 0);
+          const fallbackDot = this._flightForward.dot(this._flightUp);
+          this._flightForward.addScaledVector(this._flightUp, -fallbackDot);
+        }
         this._flightForward.normalize();
-        // Recompute right after yaw
+
+        // Step 3: Compute right vector (for pitch rotation axis)
+        // right = forward × up (right-handed system)
         this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+
+        // Step 4: Apply YAW - rotate forward around up
+        const yawRotation = -effectiveYaw * YAW_RATE * rotationDeltaTime;
+        if (Math.abs(yawRotation) > 1e-8) {
+          this._turnQuaternion.setFromAxisAngle(this._flightUp, yawRotation);
+          this._flightForward.applyQuaternion(this._turnQuaternion);
+          this._flightForward.normalize();
+          // Recompute right after yaw
+          this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+        }
+
+        // Step 4b: Apply PITCH to physics forward (pitch affects flight direction)
+        // This makes pitching actually steer the bird, not just tilt visuals.
+        const pitchForwardRotation = effectivePitch * PITCH_RATE * rotationDeltaTime;
+        if (Math.abs(pitchForwardRotation) > 1e-8) {
+          this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchForwardRotation);
+          this._flightForward.applyQuaternion(this._pitchQuaternion);
+          this._flightForward.normalize();
+          // Recompute right after pitch
+          this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
+        }
+
+        // Step 5: Apply PITCH to visual quaternion - tilts nose for visual feedback
+        const pitchRotation = this.pitch;
+        this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchRotation);
+
+        // Step 6: Build base quaternion from orthonormal basis
+        // Base orientation: model -Z aligns with forward, Y aligns with up
+        this._basisMatrix.makeBasis(
+          this._flightRight,
+          this._flightUp,
+          this._forward.copy(this._flightForward).negate()
+        );
+        this.quaternion.setFromRotationMatrix(this._basisMatrix);
+
+        // Apply pitch rotation to quaternion
+        this.quaternion.multiply(this._pitchQuaternion);
+
+        // Step 7: Add bank for visual appeal
+        this._bankQuaternion.setFromAxisAngle(this._flightForward, this.bank);
+        this._visualQuaternion.copy(this.quaternion).multiply(this._bankQuaternion);
+
+        // Sync legacy vectors for compatibility
+        this._persistentForward.copy(this._flightForward);
       }
-
-      // Step 4b: Apply PITCH to physics forward (FIX: pitch now affects flight direction)
-      // This makes pitching actually steer the bird, not just tilt visuals.
-      // The parallel transport at the start of each frame will re-project to tangent plane,
-      // so the bird stays near the sphere surface while still responding to pitch input.
-      const pitchForwardRotation = effectivePitch * (this._nestLookMode ? NEST_YAW_RATE : PITCH_RATE) * rotationDeltaTime;
-      if (Math.abs(pitchForwardRotation) > 1e-8) {
-        this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchForwardRotation);
-        this._flightForward.applyQuaternion(this._pitchQuaternion);
-        this._flightForward.normalize();
-        // Recompute right after pitch
-        this._flightRight.crossVectors(this._flightForward, this._flightUp).normalize();
-      }
-
-      // Step 5: Apply PITCH to visual quaternion - tilts nose for visual feedback
-      const pitchRotation = this.pitch;
-      this._pitchQuaternion.setFromAxisAngle(this._flightRight, pitchRotation);
-
-      // Step 6: Build base quaternion from orthonormal basis
-      // Base orientation: model -Z aligns with forward, Y aligns with up
-      this._basisMatrix.makeBasis(
-        this._flightRight,
-        this._flightUp,
-        this._forward.copy(this._flightForward).negate()
-      );
-      this.quaternion.setFromRotationMatrix(this._basisMatrix);
-
-      // Apply pitch rotation to quaternion
-      this.quaternion.multiply(this._pitchQuaternion);
-
-      // Step 7: Add bank for visual appeal
-      this._bankQuaternion.setFromAxisAngle(this._flightForward, this.bank);
-      this._visualQuaternion.copy(this.quaternion).multiply(this._bankQuaternion);
-
-      // Sync legacy vectors for compatibility
-      this._persistentForward.copy(this._flightForward);
 
       // Update scalar heading for compatibility/debug (derive from forward)
       // Project forward onto XZ plane for heading calculation
@@ -718,6 +782,12 @@ export class FreeFlightController {
 
     // Legacy: sync persistent forward for compatibility
     this._persistentForward.copy(this._flightForward);
+
+    // Reset nest frame vectors to match initial flight vectors
+    this._nestUp.copy(this._flightUp);
+    this._nestForward.copy(this._flightForward);
+    this._nestRight.copy(this._flightRight);
+    this._nestFrameLocked = false;
 
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;
