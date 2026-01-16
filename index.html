@@ -1201,6 +1201,7 @@
     // Pre-generated audio buffers for instant playback (data3-cisco-live pattern)
     let rocketFireBuffer = null;
     let explosionBuffer = null;
+    let nestJoinBuffer = null;
     let buffersGenerated = false;
 
     const initAudioContext = () => {
@@ -1272,6 +1273,41 @@
           }
 
           explosionData[i] = sample;
+        }
+
+        // Generate nest join buffer (0.5s pleasant welcoming chime)
+        // A warm, inviting sound to indicate successful nest landing
+        const nestJoinDuration = 0.5;
+        const nestJoinSamples = Math.floor(sampleRate * nestJoinDuration);
+        nestJoinBuffer = ctx.createBuffer(1, nestJoinSamples, sampleRate);
+        const nestJoinData = nestJoinBuffer.getChannelData(0);
+        for (let i = 0; i < nestJoinSamples; i++) {
+          const t = i / sampleRate;
+          let sample = 0;
+
+          // Primary tone - rising major chord arpeggio feel (C5 -> E5 -> G5)
+          // Starts at 523Hz (C5), sweeps to 784Hz (G5)
+          const primaryFreq = 523 * Math.pow(784 / 523, Math.min(t / 0.15, 1));
+          const primaryAmp = 0.25 * Math.exp(-t / 0.35);
+          sample += Math.sin(2 * Math.PI * primaryFreq * t) * primaryAmp;
+
+          // Harmony tone - fifth above, slightly delayed attack
+          const harmonyDelay = 0.03;
+          if (t > harmonyDelay) {
+            const ht = t - harmonyDelay;
+            const harmonyFreq = 659 * Math.pow(988 / 659, Math.min(ht / 0.12, 1)); // E5 -> B5
+            const harmonyAmp = 0.15 * Math.exp(-ht / 0.3);
+            sample += Math.sin(2 * Math.PI * harmonyFreq * ht) * harmonyAmp;
+          }
+
+          // Shimmer/sparkle component - high frequency triangle wave
+          const shimmerFreq = 1200 + 400 * Math.sin(2 * Math.PI * 8 * t); // Vibrato
+          const shimmerPhase = (t * shimmerFreq) % 1;
+          const shimmerTri = Math.abs(4 * shimmerPhase - 2) - 1; // Triangle wave
+          const shimmerAmp = 0.08 * Math.exp(-t / 0.2);
+          sample += shimmerTri * shimmerAmp;
+
+          nestJoinData[i] = sample;
         }
 
         buffersGenerated = true;
@@ -1516,6 +1552,74 @@
         pop.stop(now + 0.1);
       } catch (e) {
         console.warn('[Audio] Error playing explosion sound:', e);
+      }
+    };
+
+    // Play nest join sound using pre-generated buffer (data3-cisco-live pattern)
+    // Pleasant welcoming chime when player lands in a nest
+    const playNestJoinSound = () => {
+      const ctx = initAudioContext();
+      if (!ctx) {
+        console.warn('[Audio] Cannot play nest join sound - no audio context');
+        return;
+      }
+
+      // Resume if suspended (non-blocking for mobile)
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      // Use pre-generated buffer for instant playback (like data3 pattern)
+      if (nestJoinBuffer) {
+        try {
+          const source = ctx.createBufferSource();
+          source.buffer = nestJoinBuffer;
+          const gainNode = ctx.createGain();
+          gainNode.gain.value = 0.8; // Slightly lower volume for ambient feel
+          source.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          source.start(0);
+          console.log('[Audio] Playing nest join sound');
+          return;
+        } catch (e) {
+          console.warn('[Audio] Nest join buffer playback failed, falling back to oscillator:', e);
+        }
+      }
+
+      // Fallback to oscillator if buffer not ready (only works if context is running)
+      if (ctx.state !== 'running') {
+        return;
+      }
+
+      try {
+        const now = ctx.currentTime;
+
+        // Primary rising tone
+        const primary = ctx.createOscillator();
+        const primaryGain = ctx.createGain();
+        primary.type = 'sine';
+        primary.frequency.setValueAtTime(523, now); // C5
+        primary.frequency.exponentialRampToValueAtTime(784, now + 0.15); // G5
+        primaryGain.gain.setValueAtTime(0.25, now);
+        primaryGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+        primary.connect(primaryGain).connect(ctx.destination);
+        primary.start(now);
+        primary.stop(now + 0.5);
+
+        // Harmony tone with slight delay
+        const harmony = ctx.createOscillator();
+        const harmonyGain = ctx.createGain();
+        harmony.type = 'sine';
+        harmony.frequency.setValueAtTime(659, now + 0.03); // E5
+        harmony.frequency.exponentialRampToValueAtTime(988, now + 0.15); // B5
+        harmonyGain.gain.setValueAtTime(0, now);
+        harmonyGain.gain.setValueAtTime(0.15, now + 0.03);
+        harmonyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+        harmony.connect(harmonyGain).connect(ctx.destination);
+        harmony.start(now);
+        harmony.stop(now + 0.5);
+      } catch (e) {
+        console.warn('[Audio] Error playing nest join sound:', e);
       }
     };
 
@@ -3180,9 +3284,10 @@
       // Show/hide proximity indicator
       showNestIndicator(isApproaching && !isNested);
 
-      // Show welcome toast on first landing
+      // Show welcome toast and play sound on landing
       if (isNested && previousState === NESTING_STATES.LANDING) {
         showNestToast();
+        playNestJoinSound();
       }
 
       // Lock camera to FPV while nested for aiming
