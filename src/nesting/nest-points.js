@@ -1,7 +1,9 @@
 /**
  * Nest Points System
  * Creates glowing red/orange nest markers at the tops of environment objects
- * where the birb can land and enter nest mode.
+ * (trees, buildings, rock spires) where the birb can land and enter nest mode.
+ *
+ * Nests are now placed ON actual environment objects, not floating in the air.
  */
 
 // Nest configuration per environment
@@ -11,32 +13,24 @@ const NEST_CONFIGS = {
     emissive: 0xff2200,
     emissiveIntensity: 1.2,
     glowColor: 0xff6644,
-    count: 12,
-    heightOffset: 3.5, // Above tree canopy (doubled tree size)
   },
   canyons: {
     color: 0xff5533,
     emissive: 0xff3311,
     emissiveIntensity: 1.0,
     glowColor: 0xff7755,
-    count: 10,
-    heightOffset: 8.0, // Top of spires (doubled)
   },
   city: {
     color: 0xff3344,
     emissive: 0xff1122,
     emissiveIntensity: 1.4,
     glowColor: 0xff5566,
-    count: 14,
-    heightOffset: 12.0, // Top of towers (doubled)
   },
   mountain: {
     color: 0xff4422,
     emissive: 0xff2200,
     emissiveIntensity: 1.1,
     glowColor: 0xff6644,
-    count: 10,
-    heightOffset: 4.0,
   },
 };
 
@@ -52,57 +46,65 @@ function createNestMarker(THREE, config) {
   const group = new THREE.Group();
   group.name = 'nest-marker';
 
-  // Main nest platform - a soft glowing disc/bowl shape
-  const nestGeometry = new THREE.CylinderGeometry(0.6, 0.4, 0.2, 16);
-  const nestMaterial = new THREE.MeshStandardMaterial({
+  // Main nest platform - a soft glowing disc/bowl shape (increased size for visibility)
+  const nestGeometry = new THREE.CylinderGeometry(1.2, 0.8, 0.4, 16);
+  // Use MeshBasicMaterial for guaranteed visibility (not affected by lighting)
+  const nestMaterial = new THREE.MeshBasicMaterial({
     color: config.color,
-    emissive: config.emissive,
-    emissiveIntensity: config.emissiveIntensity,
-    metalness: 0.2,
-    roughness: 0.4,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.95,
   });
   const nest = new THREE.Mesh(nestGeometry, nestMaterial);
   group.add(nest);
 
-  // Outer glow ring
-  const glowGeometry = new THREE.TorusGeometry(0.7, 0.12, 12, 32);
+  // Outer glow ring (increased size)
+  const glowGeometry = new THREE.TorusGeometry(1.4, 0.2, 12, 32);
   const glowMaterial = new THREE.MeshBasicMaterial({
     color: config.glowColor,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.7,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
   const glow = new THREE.Mesh(glowGeometry, glowMaterial);
   glow.rotation.x = Math.PI / 2;
-  glow.position.y = 0.1;
+  glow.position.y = 0.2;
   group.add(glow);
 
-  // Inner bright core
-  const coreGeometry = new THREE.SphereGeometry(0.25, 16, 12);
+  // Inner bright core (increased size)
+  const coreGeometry = new THREE.SphereGeometry(0.5, 16, 12);
   const coreMaterial = new THREE.MeshBasicMaterial({
     color: 0xffaa88,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.9,
     depthWrite: false,
   });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
-  core.position.y = 0.15;
+  core.position.y = 0.3;
   group.add(core);
 
-  // Vertical beam effect (visible from afar)
-  const beamGeometry = new THREE.CylinderGeometry(0.08, 0.15, 3.0, 8);
-  const beamMaterial = new THREE.MeshBasicMaterial({
+  // Tall beacon for visibility - a glowing column above the nest (made thicker)
+  const beaconHeight = 12.0;
+  const beaconGeometry = new THREE.CylinderGeometry(0.2, 0.4, beaconHeight, 8);
+  const beaconMaterial = new THREE.MeshBasicMaterial({
     color: config.glowColor,
     transparent: true,
-    opacity: 0.25,
-    depthWrite: false,
+    opacity: 0.8,
   });
-  const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-  beam.position.y = 1.6;
-  group.add(beam);
+  const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
+  beacon.position.y = beaconHeight / 2 + 0.5;
+  group.add(beacon);
+
+  // Beacon tip sphere for extra visibility (made larger)
+  const tipGeometry = new THREE.SphereGeometry(0.8, 12, 8);
+  const tipMaterial = new THREE.MeshBasicMaterial({
+    color: config.color,
+    transparent: true,
+    opacity: 0.95,
+  });
+  const tip = new THREE.Mesh(tipGeometry, tipMaterial);
+  tip.position.y = beaconHeight + 1.0;
+  group.add(tip);
 
   // Store references for animation and interaction
   group.userData.nest = nest;
@@ -111,8 +113,6 @@ function createNestMarker(THREE, config) {
   group.userData.glowMaterial = glowMaterial;
   group.userData.core = core;
   group.userData.coreMaterial = coreMaterial;
-  group.userData.beam = beam;
-  group.userData.beamMaterial = beamMaterial;
   group.userData.baseEmissiveIntensity = config.emissiveIntensity;
   group.userData.baseGlowOpacity = 0.5;
   group.userData.baseCoreOpacity = 0.7;
@@ -124,74 +124,79 @@ function createNestMarker(THREE, config) {
 }
 
 /**
- * Generate nest placements based on environment type
- */
-function generateNestPlacements(environmentId, sphereRadius, count) {
-  const placements = [];
-  const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
-
-  // Use golden angle distribution for even spacing
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-
-  for (let i = 0; i < count; i++) {
-    // Fibonacci sphere-like distribution
-    const y = 1 - (i / (count - 1)) * 1.6; // Concentrate more toward upper hemisphere
-    const adjustedY = Math.max(-0.3, Math.min(0.9, y)); // Keep mostly above equator
-    const radiusAtY = Math.sqrt(1 - adjustedY * adjustedY);
-    const theta = goldenAngle * i;
-
-    const x = Math.cos(theta) * radiusAtY;
-    const z = Math.sin(theta) * radiusAtY;
-
-    // Position on sphere surface plus height offset
-    const surfaceRadius = sphereRadius + config.heightOffset;
-    const position = {
-      x: x * surfaceRadius,
-      y: adjustedY * surfaceRadius,
-      z: z * surfaceRadius,
-    };
-
-    placements.push({
-      position,
-      surfaceNormal: { x, y: adjustedY, z },
-    });
-  }
-
-  return placements;
-}
-
-/**
  * Main nest points system
+ * Now accepts nestable positions from the environment builder
+ * @param parentContainer - The parent to add nests to (typically sphericalWorld.root so nests rotate with the world)
  */
-export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius) {
+export function createNestPointsSystem(THREE, parentContainer, environmentId, sphereRadius, nestablePositions = []) {
+  console.log(`[NestSystem] Creating nests for ${environmentId}: ${nestablePositions.length} positions provided`);
+  console.log(`[NestSystem] Parent container: ${parentContainer ? parentContainer.name || 'unnamed' : 'NULL'}`);
+  console.log(`[NestSystem] Parent in scene: ${parentContainer?.parent ? 'yes' : 'no'}`);
   const config = NEST_CONFIGS[environmentId] || NEST_CONFIGS.forest;
-  const placements = generateNestPlacements(environmentId, sphereRadius, config.count);
+  const _hostBounds = new THREE.Box3();
+  const _hostSize = new THREE.Vector3();
+  const _normalAbs = new THREE.Vector3();
+  // Temporary vectors for world position/quaternion calculations
+  const _worldPos = new THREE.Vector3();
+  const _worldQuat = new THREE.Quaternion();
+
+  const computeHostClearance = (hostObject, surfaceNormal) => {
+    if (!hostObject || !surfaceNormal) return 0;
+
+    hostObject.updateWorldMatrix(true, true);
+    _hostBounds.setFromObject(hostObject);
+
+    if (_hostBounds.isEmpty()) return 0;
+
+    _hostBounds.getSize(_hostSize);
+    _normalAbs.set(
+      Math.abs(surfaceNormal.x),
+      Math.abs(surfaceNormal.y),
+      Math.abs(surfaceNormal.z)
+    );
+
+    // Project the bounds along the surface normal to approximate clearance
+    return _hostSize.dot(_normalAbs);
+  };
+
+  const hideHostObject = (nestGroup) => {
+    const hostObject = nestGroup?.userData?.hostObject;
+    if (!hostObject) return;
+
+    if (hostObject.userData.__nestOriginalVisibility === undefined) {
+      hostObject.userData.__nestOriginalVisibility = hostObject.visible;
+    }
+    hostObject.visible = false;
+  };
+
+  const restoreHostObjectVisibility = (nestGroup) => {
+    const hostObject = nestGroup?.userData?.hostObject;
+    if (!hostObject) return;
+
+    if (hostObject.userData.__nestOriginalVisibility !== undefined) {
+      hostObject.visible = hostObject.userData.__nestOriginalVisibility;
+      delete hostObject.userData.__nestOriginalVisibility;
+    }
+  };
 
   const container = new THREE.Group();
   container.name = 'nest-points';
-  scene.add(container);
+  parentContainer.add(container);
 
   const nests = [];
   let animationTime = 0;
+  let currentlyOccupiedNest = null;
 
-  // Create nest markers
-  placements.forEach((placement, index) => {
+  // Create nest markers at the positions provided by the environment
+  nestablePositions.forEach((placement, index) => {
     const nestGroup = createNestMarker(THREE, config);
 
-    // Position nest
-    nestGroup.position.set(
-      placement.position.x,
-      placement.position.y,
-      placement.position.z
-    );
+    // Position nest at the environment object's top
+    nestGroup.position.copy(placement.position);
+    console.log(`[NestSystem] Nest ${index}: pos (${placement.position.x.toFixed(1)}, ${placement.position.y.toFixed(1)}, ${placement.position.z.toFixed(1)}), distance from origin: ${placement.position.length().toFixed(1)}`);
 
     // Orient nest to face outward from sphere center (surface normal)
-    const up = new THREE.Vector3(
-      placement.surfaceNormal.x,
-      placement.surfaceNormal.y,
-      placement.surfaceNormal.z
-    ).normalize();
-
+    const up = placement.surfaceNormal.clone().normalize();
     const defaultUp = new THREE.Vector3(0, 1, 0);
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     nestGroup.quaternion.copy(quaternion);
@@ -201,10 +206,15 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
     nestGroup.userData.landingPosition = nestGroup.position.clone();
     nestGroup.userData.landingQuaternion = nestGroup.quaternion.clone();
     nestGroup.userData.surfaceNormal = up.clone();
+    nestGroup.userData.hostObject = placement.hostObject;
+    nestGroup.userData.hostClearance = computeHostClearance(placement.hostObject, up);
 
     container.add(nestGroup);
     nests.push(nestGroup);
   });
+
+  // Force initial matrix update to ensure nests are visible on first render
+  container.updateMatrixWorld(true);
 
   return {
     nests,
@@ -220,7 +230,9 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
       nests.forEach((nestGroup, index) => {
         if (!nestGroup.visible) return;
 
-        const distance = birbPosition.distanceTo(nestGroup.position);
+        // Use world position for proper distance calculation when sphere rotates
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
         const isInRange = distance < NEST_PROXIMITY_RANGE;
         const isGlowing = distance < NEST_GLOW_RANGE;
 
@@ -240,7 +252,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
         const activePulse = isInRange ? (Math.sin(animationTime * 6) * 0.3 + 0.7) : 1.0;
 
         // Update materials
-        const { nestMaterial, glowMaterial, coreMaterial, beamMaterial } = nestGroup.userData;
+        const { nestMaterial, glowMaterial, coreMaterial } = nestGroup.userData;
         const baseEmissive = nestGroup.userData.baseEmissiveIntensity;
 
         // Emissive intensity with pulse and proximity boost
@@ -251,9 +263,6 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
 
         // Core glow
         coreMaterial.opacity = nestGroup.userData.baseCoreOpacity * (0.5 + pulse * 0.5) * intensityMultiplier * activePulse;
-
-        // Beam visibility increases when close
-        beamMaterial.opacity = 0.15 + (isGlowing ? 0.25 * intensityMultiplier : 0) + pulse * 0.1;
 
         // Slight bobbing animation for the core
         const core = nestGroup.userData.core;
@@ -271,6 +280,7 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
 
     /**
      * Find the nearest active (in-range) nest
+     * Uses world coordinates for proper detection when sphere rotates
      */
     getNearestActiveNest(birbPosition) {
       let nearest = null;
@@ -279,7 +289,9 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
       nests.forEach((nestGroup) => {
         if (!nestGroup.visible) return;
 
-        const distance = birbPosition.distanceTo(nestGroup.position);
+        // Get nest's world position (accounts for sphere rotation)
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
         if (distance < NEST_PROXIMITY_RANGE && distance < nearestDistance) {
           nearest = nestGroup;
           nearestDistance = distance;
@@ -290,23 +302,74 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
     },
 
     /**
+     * Get the world position of a nest (for landing target)
+     */
+    getNestWorldPosition(nestGroup, target) {
+      if (!nestGroup) return null;
+      nestGroup.getWorldPosition(target || _worldPos);
+      return target || _worldPos.clone();
+    },
+
+    /**
+     * Get the world quaternion of a nest (for landing orientation)
+     */
+    getNestWorldQuaternion(nestGroup, target) {
+      if (!nestGroup) return null;
+      nestGroup.getWorldQuaternion(target || _worldQuat);
+      return target || _worldQuat.clone();
+    },
+
+    /**
+     * Get the world-space surface normal of a nest
+     */
+    getNestWorldSurfaceNormal(nestGroup, target) {
+      if (!nestGroup || !nestGroup.userData.surfaceNormal) return null;
+      // The surface normal in local space needs to be transformed to world space
+      // We can do this by applying the nest's world quaternion to the local normal
+      nestGroup.getWorldQuaternion(_worldQuat);
+      const normal = target || new THREE.Vector3();
+      normal.copy(nestGroup.userData.surfaceNormal).applyQuaternion(_worldQuat);
+      return normal;
+    },
+
+    /**
      * Get all nests in glow range (for UI indicator)
      */
     getNestsInRange(birbPosition) {
       return nests.filter((nestGroup) => {
         if (!nestGroup.visible) return false;
-        const distance = birbPosition.distanceTo(nestGroup.position);
+        // Use world position for proper distance calculation
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
         return distance < NEST_GLOW_RANGE;
       });
     },
 
     /**
-     * Mark a nest as occupied
+     * Mark a nest as occupied and hide it for FPV view
      */
     setNestOccupied(nestGroup, occupied) {
       if (nestGroup && nestGroup.userData.isNest) {
         nestGroup.userData.isOccupied = occupied;
+
+        // Hide/show the nest when occupied (for clear FPV view)
+        if (occupied) {
+          currentlyOccupiedNest = nestGroup;
+          nestGroup.visible = false;
+          hideHostObject(nestGroup);
+        } else {
+          nestGroup.visible = true;
+          currentlyOccupiedNest = null;
+          restoreHostObjectVisibility(nestGroup);
+        }
       }
+    },
+
+    /**
+     * Get the currently occupied nest
+     */
+    getCurrentlyOccupiedNest() {
+      return currentlyOccupiedNest;
     },
 
     /**
@@ -317,20 +380,29 @@ export function createNestPointsSystem(THREE, scene, environmentId, sphereRadius
         nestGroup.visible = true;
         nestGroup.userData.isActive = false;
         nestGroup.userData.isOccupied = false;
+        restoreHostObjectVisibility(nestGroup);
       });
+      currentlyOccupiedNest = null;
     },
 
     /**
      * Dispose of resources
      */
     dispose() {
-      nests.forEach((nestGroup) => {
-        nestGroup.traverse((child) => {
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) child.material.dispose();
+      // Remove from parent first to prevent visual artifacts
+      parentContainer.remove(container);
+
+      // Then dispose geometries and materials
+      try {
+        nests.forEach((nestGroup) => {
+          nestGroup.traverse((child) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
         });
-      });
-      scene.remove(container);
+      } catch (e) {
+        console.warn('Error disposing nest points resources:', e);
+      }
     },
   };
 }

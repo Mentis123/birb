@@ -86,12 +86,15 @@ export class SphericalCollisionSystem {
       finalPosition.copy(groundResult.correctedPosition);
       hadCollision = true;
 
-      // Reflect velocity off the ground (bounce slightly)
+      // Reflect velocity off the ground with damping
+      // Standard reflection: v' = v - 2(v·n)n
+      // With restitution (0.3 = 30% bounce): v' = v - (1 + restitution)(v·n)n
       const normal = groundResult.normal;
       const dot = finalVelocity.dot(normal);
       if (dot < 0) {
-        // Moving into ground - reflect with damping
-        finalVelocity.sub(normal.multiplyScalar(dot * 1.5));
+        // Moving into ground - reflect with damping (0.3 restitution = soft bounce)
+        const restitution = 0.3;
+        finalVelocity.addScaledVector(normal, -(1 + restitution) * dot);
       }
     }
 
@@ -101,11 +104,13 @@ export class SphericalCollisionSystem {
       finalPosition.copy(objectResult.correctedPosition);
       hadCollision = true;
 
-      // Reflect velocity off the object
+      // Reflect velocity off the object with damping
       const normal = objectResult.normal;
       const dot = finalVelocity.dot(normal);
       if (dot < 0) {
-        finalVelocity.sub(normal.multiplyScalar(dot * 1.5));
+        // Moving into object - reflect with damping (0.2 restitution = softer bounce)
+        const restitution = 0.2;
+        finalVelocity.addScaledVector(normal, -(1 + restitution) * dot);
       }
     }
 
@@ -162,13 +167,24 @@ function randomInRange(min, max) {
 }
 
 // Build forest environment objects on sphere
+// Returns array of nestable positions (tree tops)
 function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
-  // Trees - distributed across sphere
-  const treeCount = 180;
+  const nestablePositions = [];
+
+  // Trees - distributed across sphere (reduced from 180 for cleaner look)
+  const treeCount = 100;
   const treePoints = fibonacciSpherePoints(treeCount, sphereRadius);
 
   const treeGroup = new THREE.Group();
   treeGroup.name = 'forest-trees';
+
+  // Select which trees will have nests (every ~8th tree, spread evenly)
+  const nestableTreeIndices = new Set();
+  const nestCount = 12;
+  for (let i = 0; i < nestCount; i++) {
+    const idx = Math.floor((i / nestCount) * treeCount);
+    nestableTreeIndices.add(idx);
+  }
 
   treePoints.forEach((point, i) => {
     // Add some random offset to position
@@ -214,7 +230,6 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     // Orient to surface normal
     const up = pos.clone().normalize();
-    const rotMatrix = new THREE.Matrix4();
     const defaultUp = new THREE.Vector3(0, 1, 0);
     const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
     tree.quaternion.copy(quaternion);
@@ -228,12 +243,28 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     // Add collision for tree - doubled radius
     const treeCollisionRadius = 0.6 * scale;
     collisionSystem.addCollider(pos, treeCollisionRadius, 'tree');
+
+    // If this is a nestable tree, calculate the nest position at the TOP of the canopy
+    if (nestableTreeIndices.has(i)) {
+      // Calculate the world position of the tree top
+      // Cone tip is at: trunkHeight + canopyHeight - 0.1, add small offset to place nest ON TOP
+      const treeTopLocalY = trunkHeight + canopyHeight;
+      const nestOffset = treeTopLocalY * scale; // Scale the local position
+      const nestPos = pos.clone().add(up.clone().multiplyScalar(nestOffset));
+
+      nestablePositions.push({
+        position: nestPos,
+        surfaceNormal: up.clone(),
+        hostObject: tree,
+      });
+    }
   });
 
   root.add(treeGroup);
+  console.log(`[Forest] Created ${nestablePositions.length} nest positions on trees`);
 
-  // Shrubs - more distributed
-  const shrubCount = 220;
+  // Shrubs - reduced for cleaner environment
+  const shrubCount = 120;
   const shrubPoints = fibonacciSpherePoints(shrubCount, sphereRadius);
 
   const shrubGroup = new THREE.Group();
@@ -276,8 +307,8 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
   root.add(shrubGroup);
 
-  // Rocks
-  const rockCount = 140;
+  // Rocks - reduced
+  const rockCount = 80;
   const rockPoints = fibonacciSpherePoints(rockCount, sphereRadius);
 
   const rockGroup = new THREE.Group();
@@ -321,15 +352,15 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
   root.add(rockGroup);
 
-  // Clouds - floating above surface
-  const cloudCount = 50;
+  // Clouds - floating above surface (reduced)
+  const cloudCount = 30;
   const cloudGroup = new THREE.Group();
   cloudGroup.name = 'forest-clouds';
 
   for (let i = 0; i < cloudCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
-    const cloudHeight = randomInRange(8, 20);
+    const cloudHeight = randomInRange(10, 25);
 
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, cloudHeight);
 
@@ -373,16 +404,29 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   }
 
   root.add(cloudGroup);
+
+  return nestablePositions;
 }
 
 // Build canyon environment objects on sphere
+// Returns array of nestable positions (spire tops)
 function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
-  // Spires - tall rock formations
-  const spireCount = 120;
+  const nestablePositions = [];
+
+  // Spires - tall rock formations (reduced significantly from 120)
+  const spireCount = 45;
   const spirePoints = fibonacciSpherePoints(spireCount, sphereRadius);
 
   const spireGroup = new THREE.Group();
   spireGroup.name = 'canyon-spires';
+
+  // Select which spires will have nests (every ~4th spire, spread evenly)
+  const nestableSpireIndices = new Set();
+  const nestCount = 10;
+  for (let i = 0; i < nestCount; i++) {
+    const idx = Math.floor((i / nestCount) * spireCount);
+    nestableSpireIndices.add(idx);
+  }
 
   spirePoints.forEach((point, i) => {
     const jitterTheta = point.theta + randomInRange(-0.1, 0.1);
@@ -390,7 +434,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
 
-    const height = randomInRange(4, 10);
+    const height = randomInRange(4, 8);
     const spire = new THREE.Mesh(
       new THREE.CylinderGeometry(0.44, 1.2, height, 10, 1, false),
       new THREE.MeshStandardMaterial({
@@ -418,19 +462,33 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     spire.rotateX(randomInRange(-0.1, 0.1));
     spire.rotateZ(randomInRange(-0.1, 0.1));
 
-    const scale = randomInRange(1.6, 2.8);
+    const scale = randomInRange(1.6, 2.4);
     spire.scale.setScalar(scale);
 
     spireGroup.add(spire);
 
-    // Add collision for spire - doubled
+    // Add collision for spire
     collisionSystem.addCollider(pos, 1.0 * scale, 'spire');
+
+    // If this is a nestable spire, calculate the nest position at the TOP
+    if (nestableSpireIndices.has(i)) {
+      // Spire center is at pos + up*height/2, top extends up by height/2*scale
+      // So spire top = pos + up*height/2 + up*height/2*scale = pos + up*height/2*(1+scale)
+      const spireTopOffset = (height / 2) * (1 + scale);
+      const nestPos = pos.clone().add(up.clone().multiplyScalar(spireTopOffset));
+
+      nestablePositions.push({
+        position: nestPos,
+        surfaceNormal: up.clone(),
+        hostObject: spire,
+      });
+    }
   });
 
   root.add(spireGroup);
 
-  // Arches
-  const archCount = 30;
+  // Arches - reduced
+  const archCount = 12;
   const archGroup = new THREE.Group();
   archGroup.name = 'canyon-arches';
 
@@ -468,14 +526,14 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     archGroup.add(arch);
 
-    // Add collision for arch (simplified as a point) - doubled
+    // Add collision for arch (simplified as a point)
     collisionSystem.addCollider(pos, 2.0 * scale, 'arch');
   }
 
   root.add(archGroup);
 
-  // Boulders
-  const boulderCount = 160;
+  // Boulders - significantly reduced
+  const boulderCount = 60;
   const boulderPoints = fibonacciSpherePoints(boulderCount, sphereRadius);
 
   const boulderGroup = new THREE.Group();
@@ -515,10 +573,266 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   });
 
   root.add(boulderGroup);
+
+  return nestablePositions;
+}
+
+// Build mountain environment objects on sphere
+// Returns array of nestable positions (peak tops)
+function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
+  const nestablePositions = [];
+
+  // Mountain peaks
+  const peakCount = 58;
+  const peakPoints = fibonacciSpherePoints(peakCount, sphereRadius);
+
+  const peakGroup = new THREE.Group();
+  peakGroup.name = 'mountain-peaks';
+
+  // Spread nests across taller peaks
+  const nestablePeakIndices = new Set();
+  const nestCount = 14;
+  for (let i = 0; i < nestCount; i++) {
+    const idx = Math.floor((i / nestCount) * peakCount);
+    nestablePeakIndices.add(idx);
+  }
+
+  peakPoints.forEach((point, i) => {
+    const jitterTheta = point.theta + randomInRange(-0.1, 0.1);
+    const jitterPhi = point.phi + randomInRange(-0.05, 0.05);
+
+    const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
+
+    const peak = new THREE.Group();
+    const height = randomInRange(4.2, 8.2);
+    const baseRadius = randomInRange(1.3, 2.6);
+    const taper = randomInRange(0.32, 0.52);
+
+    const stoneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x5c6472,
+      roughness: 0.82,
+      metalness: 0.08,
+      emissive: 0x1f2634,
+      emissiveIntensity: 0.22,
+      flatShading: true,
+    });
+
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(baseRadius * taper, baseRadius, height, 10, 2, false),
+      stoneMaterial
+    );
+    body.position.y = height / 2;
+    peak.add(body);
+
+    const snowHeight = randomInRange(1.1, 1.9);
+    const snowCap = new THREE.Mesh(
+      new THREE.ConeGeometry(baseRadius * 0.7, snowHeight, 9, 1, false),
+      new THREE.MeshStandardMaterial({
+        color: 0xe6f1ff,
+        emissive: 0x8fb7ff,
+        emissiveIntensity: 0.28,
+        roughness: 0.35,
+        metalness: 0.08,
+      })
+    );
+    snowCap.position.y = height + snowHeight / 2 - 0.15;
+    peak.add(snowCap);
+
+    peak.position.copy(pos);
+
+    // Orient to surface normal
+    const up = pos.clone().normalize();
+    const defaultUp = new THREE.Vector3(0, 1, 0);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
+    peak.quaternion.copy(quaternion);
+
+    // Slight random lean for variation
+    peak.rotateX(randomInRange(-0.08, 0.08));
+    peak.rotateZ(randomInRange(-0.08, 0.08));
+
+    const scale = randomInRange(1.5, 2.6);
+    peak.scale.setScalar(scale);
+
+    peakGroup.add(peak);
+
+    // Add collision for peak
+    collisionSystem.addCollider(pos, baseRadius * scale * 1.2, 'mountain');
+
+    if (nestablePeakIndices.has(i)) {
+      // Snow cap tip is at local Y = height + snowHeight - 0.15
+      // Place nest slightly above the peak
+      const nestHeight = (height + snowHeight) * scale;
+      const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
+
+      nestablePositions.push({
+        position: nestPos,
+        surfaceNormal: up.clone(),
+        hostObject: peak,
+      });
+    }
+  });
+
+  root.add(peakGroup);
+
+  // Pine clusters around mountain bases
+  const pineCount = 140;
+  const pinePoints = fibonacciSpherePoints(pineCount, sphereRadius);
+
+  const pineGroup = new THREE.Group();
+  pineGroup.name = 'mountain-pines';
+
+  pinePoints.forEach((point) => {
+    const jitterTheta = point.theta + randomInRange(-0.12, 0.12);
+    const jitterPhi = point.phi + randomInRange(-0.06, 0.06);
+
+    const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, -0.05);
+
+    const pine = new THREE.Group();
+    const trunkHeight = randomInRange(0.8, 1.3);
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.18, trunkHeight, 7),
+      new THREE.MeshStandardMaterial({
+        color: 0x2e3b2b,
+        roughness: 0.8,
+        metalness: 0.06,
+        emissive: 0x0c120e,
+        emissiveIntensity: 0.2,
+      })
+    );
+    trunk.position.y = trunkHeight / 2;
+    pine.add(trunk);
+
+    const canopyHeight = randomInRange(1.2, 1.8);
+    const canopy = new THREE.Mesh(
+      new THREE.ConeGeometry(0.6, canopyHeight, 9),
+      new THREE.MeshStandardMaterial({
+        color: 0x3b6b45,
+        emissive: 0x1d3322,
+        emissiveIntensity: 0.24,
+        roughness: 0.62,
+        metalness: 0.08,
+      })
+    );
+    canopy.position.y = trunkHeight + canopyHeight / 2 - 0.08;
+    pine.add(canopy);
+
+    pine.position.copy(pos);
+
+    const up = pos.clone().normalize();
+    const defaultUp = new THREE.Vector3(0, 1, 0);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
+    pine.quaternion.copy(quaternion);
+
+    const scale = randomInRange(1.2, 2.1);
+    pine.scale.setScalar(scale);
+
+    pineGroup.add(pine);
+
+    collisionSystem.addCollider(pos, 0.5 * scale, 'pine');
+  });
+
+  root.add(pineGroup);
+
+  // Boulder fields
+  const boulderCount = 90;
+  const boulderPoints = fibonacciSpherePoints(boulderCount, sphereRadius);
+  const boulderGroup = new THREE.Group();
+  boulderGroup.name = 'mountain-boulders';
+
+  boulderPoints.forEach((point) => {
+    const jitterTheta = point.theta + randomInRange(-0.18, 0.18);
+    const jitterPhi = point.phi + randomInRange(-0.1, 0.1);
+
+    const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, -0.06);
+
+    const boulder = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(randomInRange(0.5, 1.4), 0),
+      new THREE.MeshStandardMaterial({
+        color: 0x4a505a,
+        roughness: 0.88,
+        metalness: 0.05,
+        emissive: 0x1c222b,
+        emissiveIntensity: 0.16,
+        flatShading: true,
+      })
+    );
+
+    boulder.position.copy(pos);
+    boulder.rotation.set(
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+      Math.random() * Math.PI
+    );
+
+    const scale = randomInRange(1.0, 2.4);
+    boulder.scale.setScalar(scale);
+
+    boulderGroup.add(boulder);
+
+    collisionSystem.addCollider(pos, 0.5 * scale, 'boulder');
+  });
+
+  root.add(boulderGroup);
+
+  // Misty clouds hugging peaks
+  const cloudGroup = new THREE.Group();
+  cloudGroup.name = 'mountain-clouds';
+  const cloudCount = 26;
+
+  for (let i = 0; i < cloudCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(1 - 2 * Math.random());
+    const cloudHeight = randomInRange(6, 14);
+
+    const pos = placeOnSphere(THREE, sphereRadius, theta, phi, cloudHeight);
+
+    const cloud = new THREE.Group();
+    const cloudMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe7eef9,
+      emissive: 0x6c84a1,
+      emissiveIntensity: 0.18,
+      roughness: 0.32,
+      metalness: 0.04,
+      transparent: true,
+      opacity: 0.72,
+    });
+
+    for (let j = 0; j < 3; j++) {
+      const puff = new THREE.Mesh(
+        new THREE.SphereGeometry(0.76 + Math.random() * 0.48, 12, 10),
+        cloudMaterial
+      );
+      puff.position.set(
+        randomInRange(-0.8, 0.8),
+        randomInRange(-0.24, 0.36),
+        j * 0.82 * (Math.random() > 0.5 ? 1 : -1)
+      );
+      cloud.add(puff);
+    }
+
+    cloud.position.copy(pos);
+
+    const up = pos.clone().normalize();
+    const defaultUp = new THREE.Vector3(0, 1, 0);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
+    cloud.quaternion.copy(quaternion);
+
+    const scale = randomInRange(1.0, 2.1);
+    cloud.scale.setScalar(scale);
+
+    cloudGroup.add(cloud);
+  }
+
+  root.add(cloudGroup);
+
+  return nestablePositions;
 }
 
 // Build city environment objects on sphere
+// Returns array of nestable positions (building tops)
 function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
+  const nestablePositions = [];
+
   // Towers of varying heights
   const towerGroup = new THREE.Group();
   towerGroup.name = 'city-towers';
@@ -537,9 +851,17 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     opacity: 0.22,
   });
 
-  // Tall towers
-  const tallTowerCount = 80;
+  // Tall towers (reduced from 80)
+  const tallTowerCount = 50;
   const tallTowerPoints = fibonacciSpherePoints(tallTowerCount, sphereRadius);
+
+  // Select which towers will have nests
+  const nestableTowerIndices = new Set();
+  const nestCount = 14;
+  for (let i = 0; i < nestCount; i++) {
+    const idx = Math.floor((i / nestCount) * tallTowerCount);
+    nestableTowerIndices.add(idx);
+  }
 
   tallTowerPoints.forEach((point, i) => {
     const jitterTheta = point.theta + randomInRange(-0.08, 0.08);
@@ -578,12 +900,25 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     towerGroup.add(tower);
 
-    // Add collision for tower - doubled
+    // Add collision for tower
     collisionSystem.addCollider(pos, width * scale * 2, 'tower');
+
+    // If this is a nestable tower, calculate the nest position at the TOP
+    if (nestableTowerIndices.has(i)) {
+      // Calculate the world position of the tower top
+      const towerTopOffset = height * scale; // Full height scaled
+      const nestPos = pos.clone().add(up.clone().multiplyScalar(towerTopOffset));
+
+      nestablePositions.push({
+        position: nestPos,
+        surfaceNormal: up.clone(),
+        hostObject: tower,
+      });
+    }
   });
 
-  // Medium towers - also doubled
-  const mediumTowerCount = 100;
+  // Medium towers (reduced from 100)
+  const mediumTowerCount = 60;
   const mediumTowerPoints = fibonacciSpherePoints(mediumTowerCount, sphereRadius);
 
   mediumTowerPoints.forEach((point, i) => {
@@ -620,8 +955,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
   root.add(towerGroup);
 
-  // Antennas
-  const antennaCount = 150;
+  // Antennas (reduced from 150)
+  const antennaCount = 80;
   const antennaGroup = new THREE.Group();
   antennaGroup.name = 'city-antennas';
 
@@ -660,8 +995,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
   root.add(antennaGroup);
 
-  // Hover craft / flying vehicles
-  const hoverCount = 80;
+  // Hover craft / flying vehicles (reduced from 80)
+  const hoverCount = 40;
   const hoverGroup = new THREE.Group();
   hoverGroup.name = 'city-hover';
 
@@ -678,7 +1013,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   for (let i = 0; i < hoverCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
-    const hoverHeight = randomInRange(6, 16);
+    const hoverHeight = randomInRange(8, 18);
 
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, hoverHeight);
 
@@ -704,6 +1039,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
   }
 
   root.add(hoverGroup);
+
+  return nestablePositions;
 }
 
 // Environment builder mapping
@@ -711,6 +1048,7 @@ const SPHERE_BUILDERS = {
   forest: buildForestOnSphere,
   canyons: buildCanyonOnSphere,
   city: buildCityOnSphere,
+  mountain: buildMountainOnSphere,
 };
 
 export function createSphericalWorld(scene, { three, variant = 'forest', definition } = {}) {
@@ -843,34 +1181,44 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   skydome.renderOrder = -5;
   root.add(skydome);
 
-  // Build environment-specific objects
+  // Build environment-specific objects and get nestable positions
+  let nestablePositions = [];
   const builder = SPHERE_BUILDERS[variant];
+  console.log(`[SphericalWorld] Creating ${variant} environment, builder exists: ${typeof builder === 'function'}`);
   if (typeof builder === 'function') {
-    builder({
+    nestablePositions = builder({
       THREE,
       root,
       sphereRadius,
       collisionSystem,
-    });
+    }) || [];
   }
+  console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions`);
 
   return {
     root,
     sphereRadius,
     collisionSystem,
+    nestablePositions,
     dispose() {
-      // Dispose geometries and materials
-      root.traverse((child) => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach(m => m && m.dispose());
-          } else {
-            child.material.dispose();
-          }
-        }
-      });
+      // Remove from scene first to prevent visual artifacts during environment switch
       scene.remove(root);
+
+      // Then dispose geometries and materials
+      try {
+        root.traverse((child) => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m && m.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('Error disposing spherical world resources:', e);
+      }
     }
   };
 }

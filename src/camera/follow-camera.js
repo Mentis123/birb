@@ -28,6 +28,7 @@ export function createFollowCameraRig(three, options = {}) {
     offset: new Vector3(),
     anticipation: new Vector3(),
     velocity: new Vector3(),
+    travelDirection: new Vector3(0, 0, -1),
     forward: new Vector3(0, 0, -1),
     right: new Vector3(1, 0, 0),
     up: new Vector3(0, 1, 0),
@@ -35,7 +36,45 @@ export function createFollowCameraRig(three, options = {}) {
     lookDirection: new Vector3(),
     lookTarget: new Vector3(),
     noRollQuaternion: new Quaternion(),
+    viewDir: new Vector3(),
+    stableUp: new Vector3(),
+    stableRight: new Vector3(),
   };
+
+  // Compute a stable up vector that avoids gimbal lock when looking near poles.
+  // When the view direction is nearly parallel to the up vector, the lookAt
+  // matrix becomes degenerate. We fix this by deriving a stable up from the
+  // camera's current right vector.
+  function computeStableUp(position, lookAt, preferredUp, currentOrientation) {
+    scratch.viewDir.subVectors(lookAt, position);
+    const viewLength = scratch.viewDir.length();
+    if (viewLength < 1e-6) {
+      return preferredUp;
+    }
+    scratch.viewDir.divideScalar(viewLength);
+
+    // Check if view direction is nearly parallel to preferred up (gimbal lock zone)
+    const parallelism = Math.abs(scratch.viewDir.dot(preferredUp));
+    if (parallelism < 0.99) {
+      // Safe zone - use preferred up
+      return preferredUp;
+    }
+
+    // Near gimbal lock - compute stable up from current camera orientation
+    // Get the current right vector from the camera's orientation
+    scratch.stableRight.set(1, 0, 0).applyQuaternion(currentOrientation);
+
+    // Compute a new up that's perpendicular to both view direction and right
+    scratch.stableUp.crossVectors(scratch.stableRight, scratch.viewDir);
+    if (scratch.stableUp.lengthSq() < 1e-6) {
+      // Fallback: right was also parallel, use world Z to derive up
+      scratch.stableRight.set(0, 0, 1);
+      scratch.stableUp.crossVectors(scratch.stableRight, scratch.viewDir);
+    }
+    scratch.stableUp.normalize();
+
+    return scratch.stableUp;
+  }
 
   const state = {
     camera: null,
@@ -50,13 +89,13 @@ export function createFollowCameraRig(three, options = {}) {
     rotationDamping: options.rotationDamping ?? 0.12,
     velocityLookAhead: options.velocityLookAhead ?? 0.25,
     steeringLookAhead: {
-      forward: options.steeringLookAhead?.forward ?? 0.45,
-      strafe: options.steeringLookAhead?.strafe ?? 0.35,
-      lift: options.steeringLookAhead?.lift ?? 0.25,
+      yaw: options.steeringLookAhead?.yaw ?? 0.45,
+      pitch: options.steeringLookAhead?.pitch ?? 0.35,
     },
     orientation: new Quaternion(),
     targetOrientation: new Quaternion(),
     up: new Vector3(0, 1, 0),
+    travelDirection: new Vector3(0, 0, -1),
     // Spherical world support: when set, "up" becomes radial from sphere center
     sphereCenter: options.sphereCenter ? options.sphereCenter.clone() : null,
   };
@@ -88,12 +127,10 @@ export function createFollowCameraRig(three, options = {}) {
       state.velocityLookAhead = config.velocityLookAhead;
     }
     if (config.steeringLookAhead) {
-      state.steeringLookAhead.forward =
-        config.steeringLookAhead.forward ?? state.steeringLookAhead.forward;
-      state.steeringLookAhead.strafe =
-        config.steeringLookAhead.strafe ?? state.steeringLookAhead.strafe;
-      state.steeringLookAhead.lift =
-        config.steeringLookAhead.lift ?? state.steeringLookAhead.lift;
+      state.steeringLookAhead.yaw =
+        config.steeringLookAhead.yaw ?? config.steeringLookAhead.strafe ?? state.steeringLookAhead.yaw;
+      state.steeringLookAhead.pitch =
+        config.steeringLookAhead.pitch ?? config.steeringLookAhead.lift ?? state.steeringLookAhead.pitch;
     }
     // Handle sphereCenter configuration
     if (config.sphereCenter !== undefined) {
@@ -149,8 +186,31 @@ export function createFollowCameraRig(three, options = {}) {
       state.up.set(0, 1, 0);
     }
 
+    // Compute a smoothed travel direction. Prefer actual velocity to align the
+    // camera with the bird's path, but fall back to facing when hovering. This
+    // avoids camera jumps when the bird yaws quickly without moving forward.
+    scratch.travelDirection.copy(scratch.forward);
+    if (velocity && velocity.lengthSq() > 1e-6) {
+      scratch.travelDirection.copy(velocity);
+      const velocityLength = scratch.travelDirection.length();
+      if (velocityLength > 1e-6) {
+        scratch.travelDirection.divideScalar(velocityLength);
+      }
+    }
+
+    if (state.travelDirection.lengthSq() < 1e-6) {
+      state.travelDirection.copy(scratch.travelDirection);
+    } else {
+      // Blend toward the latest travel direction for stability during rapid yaw
+      state.travelDirection.lerp(scratch.travelDirection, 0.25).normalize();
+    }
+
+    const offsetDirection = state.travelDirection.lengthSq() > 1e-6
+      ? state.travelDirection
+      : scratch.forward;
+
     // Camera positioning using the user's reference formula:
-    // Camera.Position = Bird.Position - (Bird.Forward * Distance) + (Up * Height)
+    // Camera.Position = Bird.Position - (Direction * Distance) + (Up * Height)
     // offset.z = distance behind, offset.y = height above
     const distanceBehind = Math.abs(state.offset.z);
     const heightAbove = state.offset.y;
@@ -161,8 +221,8 @@ export function createFollowCameraRig(three, options = {}) {
       state.desiredPosition.add(ambientOffsets.position);
     }
 
-    // Place camera BEHIND the bird (subtract forward direction)
-    state.desiredPosition.addScaledVector(scratch.forward, -distanceBehind);
+    // Place camera BEHIND the bird's travel direction
+    state.desiredPosition.addScaledVector(offsetDirection, -distanceBehind);
     // Place camera ABOVE the bird (in local up direction for spherical worlds)
     state.desiredPosition.addScaledVector(state.up, heightAbove);
 
@@ -201,29 +261,30 @@ export function createFollowCameraRig(three, options = {}) {
       // Compute local up from right and forward
       scratch.up.crossVectors(scratch.right, scratch.forward).normalize();
 
-      if (Number.isFinite(steering.forward) && steering.forward !== 0) {
-        scratch.anticipation.addScaledVector(
-          scratch.forward,
-          state.steeringLookAhead.forward * steering.forward,
-        );
-      }
-      if (Number.isFinite(steering.strafe) && steering.strafe !== 0) {
+      const steeringYaw = Number.isFinite(steering.yaw)
+        ? steering.yaw
+        : steering.strafe;
+      const steeringPitch = Number.isFinite(steering.pitch)
+        ? steering.pitch
+        : steering.lift;
+
+      if (Number.isFinite(steeringYaw) && steeringYaw !== 0) {
         scratch.anticipation.addScaledVector(
           scratch.right,
-          state.steeringLookAhead.strafe * steering.strafe,
+          state.steeringLookAhead.yaw * steeringYaw,
         );
       }
-      if (Number.isFinite(steering.lift) && steering.lift !== 0) {
+      if (Number.isFinite(steeringPitch) && steeringPitch !== 0) {
         scratch.anticipation.addScaledVector(
           scratch.up,
-          state.steeringLookAhead.lift * steering.lift,
+          state.steeringLookAhead.pitch * steeringPitch,
         );
       }
     }
 
     // Add base forward look-ahead so camera always looks ahead of the bird
     const baseLookAhead = distanceBehind * 0.5;
-    scratch.anticipation.addScaledVector(scratch.forward, baseLookAhead);
+    scratch.anticipation.addScaledVector(offsetDirection, baseLookAhead);
 
     if (scratch.anticipation.lengthSq() > 0) {
       state.desiredLookAt.add(scratch.anticipation);
@@ -245,7 +306,9 @@ export function createFollowCameraRig(three, options = {}) {
 
     state.position.copy(state.desiredPosition);
     state.lookAt.copy(state.desiredLookAt);
-    scratch.lookMatrix.lookAt(state.position, state.lookAt, state.up);
+    // Use stable up to avoid gimbal lock at poles
+    const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);
+    scratch.lookMatrix.lookAt(state.position, state.lookAt, upForLookAt);
     state.orientation.setFromRotationMatrix(scratch.lookMatrix);
 
     perspective.position.copy(state.position);
@@ -287,7 +350,9 @@ export function createFollowCameraRig(three, options = {}) {
 
     perspective.position.copy(state.position);
 
-    scratch.lookMatrix.lookAt(state.position, state.lookAt, state.up);
+    // Use stable up to avoid gimbal lock at poles
+    const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);
+    scratch.lookMatrix.lookAt(state.position, state.lookAt, upForLookAt);
     state.targetOrientation.setFromRotationMatrix(scratch.lookMatrix);
     state.orientation.slerp(state.targetOrientation, rotationAlpha);
     perspective.quaternion.copy(state.orientation);
@@ -312,6 +377,7 @@ export function createFollowCameraRig(three, options = {}) {
       rotationDamping: state.rotationDamping,
       velocityLookAhead: state.velocityLookAhead,
       steeringLookAhead: { ...state.steeringLookAhead },
+      travelDirection: state.travelDirection.clone(),
     };
   }
 

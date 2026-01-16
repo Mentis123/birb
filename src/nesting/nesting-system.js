@@ -36,6 +36,12 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
   const _tempVec = new THREE.Vector3();
   const _tempQuat = new THREE.Quaternion();
 
+  function applyVelocity(direction, speed) {
+    if (flightController.velocity) {
+      flightController.velocity.copy(direction).multiplyScalar(speed);
+    }
+  }
+
   function setState(newState) {
     if (currentState !== newState) {
       const previousState = currentState;
@@ -73,8 +79,8 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
      */
     isFlying() {
       return currentState === NESTING_STATES.FLYING ||
-             currentState === NESTING_STATES.APPROACHING ||
-             currentState === NESTING_STATES.TAKING_OFF;
+        currentState === NESTING_STATES.APPROACHING ||
+        currentState === NESTING_STATES.TAKING_OFF;
     },
 
     /**
@@ -94,7 +100,7 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
      */
     tryLandOnNest(birbPosition) {
       if (currentState !== NESTING_STATES.FLYING &&
-          currentState !== NESTING_STATES.APPROACHING) {
+        currentState !== NESTING_STATES.APPROACHING) {
         return false;
       }
 
@@ -105,12 +111,18 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
       // Start landing sequence
       currentNest = nearestNest;
-      targetPosition.copy(nearestNest.userData.landingPosition);
-      targetQuaternion.copy(nearestNest.userData.landingQuaternion);
 
-      // Offset landing position slightly above the nest
-      const surfaceNormal = nearestNest.userData.surfaceNormal;
-      targetPosition.addScaledVector(surfaceNormal, 0.5);
+      // Use WORLD coordinates for landing position (accounts for sphere rotation)
+      nestPointsSystem.getNestWorldPosition(nearestNest, targetPosition);
+      nestPointsSystem.getNestWorldQuaternion(nearestNest, targetQuaternion);
+
+      // Get world-space surface normal for clearance offset
+      const worldSurfaceNormal = nestPointsSystem.getNestWorldSurfaceNormal(nearestNest, _tempVec);
+      const hostClearance = nearestNest.userData.hostClearance || 0;
+      const clearanceOffset = Math.max(0.6, Math.min(hostClearance * 0.2, 3.0));
+      if (worldSurfaceNormal) {
+        targetPosition.addScaledVector(worldSurfaceNormal, clearanceOffset);
+      }
 
       setState(NESTING_STATES.LANDING);
       nestPointsSystem.setNestOccupied(currentNest, true);
@@ -128,10 +140,17 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
       // Calculate take-off direction (outward from sphere + slight forward)
       if (currentNest) {
-        takeOffDirection.copy(currentNest.userData.surfaceNormal);
+        // Use world-space surface normal for take-off direction
+        const worldNormal = nestPointsSystem.getNestWorldSurfaceNormal(currentNest, takeOffDirection);
+        if (!worldNormal) {
+          // Fallback to local normal if world normal unavailable
+          takeOffDirection.copy(currentNest.userData.surfaceNormal);
+        }
 
         // Add some forward momentum based on current look direction
-        const forward = _tempVec.set(0, 0, -1).applyQuaternion(flightController.lookQuaternion);
+        // Check for lookQuaternion (legacy) or just quaternion (BirdFlight)
+        const quat = flightController.lookQuaternion || flightController.quaternion;
+        const forward = _tempVec.set(0, 0, -1).applyQuaternion(quat);
         takeOffDirection.addScaledVector(forward, 0.5);
         takeOffDirection.normalize();
 
@@ -142,6 +161,17 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
       takeOffTimer = TAKE_OFF_DURATION;
       setState(NESTING_STATES.TAKING_OFF);
+
+      // Restore flight speed if using BirdFlight
+      if (typeof flightController.setSpeed === 'function') {
+        // We need to restore the default speed. 
+        // Since we don't have access to defaults here, we assume 4.0 or similar.
+        // Ideally we'd store the specific speed before nesting.
+        // For now, let's assume 4.0 as it matches AUTO_FLY_SPEED.
+        flightController.setSpeed(4.0);
+      }
+      flightController.speed = 4.0; // Fallback direct property set
+
       hasShownWelcomeMessage = false; // Reset for next landing
 
       return true;
@@ -174,6 +204,11 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
         }
 
         case NESTING_STATES.LANDING: {
+          // Disable BirdFlight speed-based movement during auto-fly (nesting system controls position)
+          if (typeof flightController.setSpeed === 'function') {
+            flightController.setSpeed(0);
+          }
+
           // Auto-fly toward the nest
           const toTarget = _tempVec.copy(targetPosition).sub(flightController.position);
           const distance = toTarget.length();
@@ -181,28 +216,54 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
           if (distance < AUTO_FLY_ARRIVAL_THRESHOLD) {
             // Arrived at nest
             flightController.position.copy(targetPosition);
-            flightController.velocity.set(0, 0, 0);
-            flightController.lookQuaternion.copy(targetQuaternion);
-            flightController.quaternion.copy(targetQuaternion);
+            if (flightController.velocity) {
+              flightController.velocity.set(0, 0, 0);
+            }
+            // Use setOrientation to properly sync heading/pitch/bank with quaternion
+            // This prevents the next update() from overwriting the orientation
+            if (typeof flightController.setOrientation === 'function') {
+              flightController.setOrientation(targetQuaternion);
+            } else {
+              // Fallback for older controller versions
+              if (flightController.lookQuaternion) {
+                flightController.lookQuaternion.copy(targetQuaternion);
+              }
+              if (flightController.quaternion) {
+                flightController.quaternion.copy(targetQuaternion);
+              }
+            }
             setState(NESTING_STATES.NESTED);
           } else {
             // Move toward nest
             const direction = toTarget.normalize();
             const speed = Math.min(AUTO_FLY_SPEED, distance / delta);
 
-            flightController.velocity.copy(direction).multiplyScalar(speed);
+            applyVelocity(direction, speed);
             flightController.position.addScaledVector(direction, speed * delta);
 
             // Smoothly rotate to face landing orientation
-            flightController.lookQuaternion.slerp(targetQuaternion, delta * 3);
-            flightController.quaternion.slerp(targetQuaternion, delta * 3);
+            if (flightController.lookQuaternion) {
+              flightController.lookQuaternion.slerp(targetQuaternion, delta * 3);
+            }
+            if (flightController.quaternion) {
+              flightController.quaternion.slerp(targetQuaternion, delta * 3);
+            }
+            // Sync heading/pitch/bank with the slerped quaternion
+            if (typeof flightController.setOrientation === 'function' && flightController.quaternion) {
+              flightController.setOrientation(flightController.quaternion, { preserveBank: true });
+            }
           }
           break;
         }
 
         case NESTING_STATES.NESTED: {
           // Keep birb stationary
-          flightController.velocity.set(0, 0, 0);
+          // Use setSpeed(0) for BirdFlight support
+          if (typeof flightController.setSpeed === 'function') {
+            flightController.setSpeed(0);
+          } else if (flightController.velocity) {
+            flightController.velocity.set(0, 0, 0);
+          }
           // Position is maintained, controls are for look-around only
           break;
         }
@@ -217,8 +278,11 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
           } else {
             // Apply take-off boost
             const boostFactor = takeOffTimer / TAKE_OFF_DURATION;
-            flightController.velocity.copy(takeOffDirection).multiplyScalar(TAKE_OFF_BOOST * boostFactor);
-            flightController.position.addScaledVector(takeOffDirection, TAKE_OFF_BOOST * boostFactor * delta);
+            applyVelocity(takeOffDirection, TAKE_OFF_BOOST * boostFactor);
+            flightController.position.addScaledVector(
+              takeOffDirection,
+              TAKE_OFF_BOOST * boostFactor * delta,
+            );
           }
           break;
         }
@@ -231,7 +295,8 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
      * Get look direction for crosshair aiming (when nested)
      */
     getLookDirection() {
-      return _tempVec.set(0, 0, -1).applyQuaternion(flightController.lookQuaternion);
+      const quat = flightController.lookQuaternion || flightController.quaternion;
+      return _tempVec.set(0, 0, -1).applyQuaternion(quat);
     },
 
     /**

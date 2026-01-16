@@ -2,35 +2,30 @@ import { createThumbstick } from './thumbstick.js';
 import { inputShaping } from './virtual-thumbstick.js';
 
 const DEFAULT_ANALOG_LOOK_SPEED = 480;
-const DEFAULT_LEFT_STICK_PITCH_SPEED = 320;
-const DEFAULT_ROLL_SENSITIVITY = 0.65;
-const DEFAULT_TOUCH_SPRINT_THRESHOLD = 0.75;
 const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.15;
 const DEFAULT_TOUCH_LOOK_DEADZONE = 0.08;
 const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.32;
 const DEFAULT_TOUCH_LOOK_EXPO = 0.18;
 const TOUCH_JOYSTICK_SIZE = 120;
+// Smoothing factor for touch input (0 = instant, 1 = very slow)
+// This creates a more responsive feel on mobile by reducing jitter
+const TOUCH_INPUT_SMOOTHING = 0.3;
 
-const SHIFT_CODES = new Set(['ShiftLeft', 'ShiftRight']);
+// Debug mode for mobile input diagnostics - set to true to log all touch input
+const DEBUG_MOBILE_INPUT = false;
 
-const THRUST_AXIS_KEYS = {
-  forward: {
-    positive: ['KeyW', 'ArrowUp'],
-    negative: ['KeyS', 'ArrowDown'],
-  },
-  strafe: {
-    positive: ['KeyD', 'ArrowRight'],
-    negative: ['KeyA', 'ArrowLeft'],
-  },
-  lift: {
-    positive: ['Space', 'KeyE'],
-    negative: ['KeyQ'],
-  },
+const PITCH_AXIS_KEYS = {
+  positive: ['KeyW', 'ArrowUp'],
+  negative: ['KeyS', 'ArrowDown'],
 };
 
-const THRUST_AXIS_LIST = Object.values(THRUST_AXIS_KEYS);
+const YAW_AXIS_KEYS = {
+  positive: ['KeyD', 'ArrowRight'],
+  negative: ['KeyA', 'ArrowLeft'],
+};
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const noop = () => {};
 
 const DEFAULT_THRUST_SHAPING = {
   deadzone: DEFAULT_TOUCH_JOYSTICK_DEADZONE,
@@ -42,7 +37,7 @@ const DEFAULT_LOOK_SHAPING = {
   expo: DEFAULT_TOUCH_LOOK_EXPO,
 };
 
-const createAxisRecord = () => ({ forward: 0, strafe: 0, lift: 0, roll: 0 });
+const createAxisRecord = () => ({ yaw: 0, pitch: 0 });
 
 const normalizeShapingConfig = (config = {}, fallback = DEFAULT_THRUST_SHAPING) => ({
   deadzone: clamp(
@@ -52,6 +47,20 @@ const normalizeShapingConfig = (config = {}, fallback = DEFAULT_THRUST_SHAPING) 
   ),
   expo: clamp(Number.isFinite(config.expo) ? config.expo : fallback.expo, 0, 1),
 });
+
+const createTelemetryLogger = (logger) => {
+  if (logger === null || logger === false) return noop;
+  if (typeof logger === 'function') return logger;
+  if (logger && typeof logger.log === 'function') return (...args) => logger.log(...args);
+  if (typeof console !== 'undefined') {
+    return typeof console.debug === 'function'
+      ? (...args) => console.debug(...args)
+      : typeof console.log === 'function'
+        ? (...args) => console.log(...args)
+        : noop;
+  }
+  return noop;
+};
 
 const { shapeAxis } = inputShaping;
 
@@ -72,16 +81,62 @@ const shapeStickInput = (x, y, config = DEFAULT_THRUST_SHAPING) => {
   };
 };
 
+/**
+ * Normalize nipplejs input data to a consistent format.
+ * Handles edge cases like NaN, undefined values, and coordinate system differences.
+ *
+ * nipplejs coordinate system:
+ * - vector.x: -1 (left) to +1 (right)
+ * - vector.y: -1 (down) to +1 (up) - standard Cartesian, matches our expectation
+ * - angle.radian: 0 = right, π/2 = up, π = left, 3π/2 = down
+ * - force: 0 to 1 (distance from center, normalized)
+ *
+ * @param {Object} data - nipplejs event data
+ * @returns {Object} Normalized input { raw: {x, y}, rawMagnitude }
+ */
 const normalizeNippleData = (data = {}) => {
+  // Prefer direct vector values if available (most accurate)
   const vectorX = Number.isFinite(data?.vector?.x) ? data.vector.x : null;
   const vectorY = Number.isFinite(data?.vector?.y) ? data.vector.y : null;
+
+  // Fallback to angle + force if vector is missing
   const angle = Number.isFinite(data?.angle?.radian) ? data.angle.radian : null;
   const force = clamp(Number.isFinite(data?.force) ? data.force : 0, 0, 1);
-  const rawX = clamp(vectorX ?? (angle !== null ? Math.cos(angle) * force : 0), -1, 1);
-  const rawY = clamp(vectorY ?? (angle !== null ? Math.sin(angle) * force : 0), -1, 1);
+
+  // Calculate raw values, preferring vector over angle-based calculation
+  let rawX, rawY;
+
+  if (vectorX !== null && vectorY !== null) {
+    // Use direct vector values
+    rawX = vectorX;
+    rawY = vectorY;
+  } else if (angle !== null && force > 0) {
+    // Calculate from angle and force (nipplejs angle: 0 = right, increases CCW)
+    rawX = Math.cos(angle) * force;
+    rawY = Math.sin(angle) * force;
+  } else {
+    // No valid input, return neutral
+    rawX = 0;
+    rawY = 0;
+  }
+
+  // Clamp to valid range and handle any remaining NaN
+  rawX = clamp(Number.isFinite(rawX) ? rawX : 0, -1, 1);
+  rawY = clamp(Number.isFinite(rawY) ? rawY : 0, -1, 1);
+
+  // Calculate magnitude, ensuring it doesn't exceed 1
+  const rawMagnitude = Math.min(Math.hypot(rawX, rawY), 1);
+
+  if (DEBUG_MOBILE_INPUT && (rawX !== 0 || rawY !== 0)) {
+    console.log('[mobile-input] nipple data:', {
+      vectorX, vectorY, angle, force, rawX, rawY,
+      source: vectorX !== null ? 'vector' : 'angle',
+    });
+  }
+
   return {
     raw: { x: rawX, y: rawY },
-    rawMagnitude: clamp(Math.hypot(rawX, rawY), 0, 1),
+    rawMagnitude,
   };
 };
 
@@ -107,18 +162,17 @@ export function createFlightControls({
   flightController,
   leftThumbstickElement,
   rightThumbstickElement,
-  liftButtonElements = [],
   touchZoneElement,
   nipplejs,
   analogLookSpeed = DEFAULT_ANALOG_LOOK_SPEED,
-  rollSensitivity = DEFAULT_ROLL_SENSITIVITY,
-  touchSprintThreshold = DEFAULT_TOUCH_SPRINT_THRESHOLD,
+  invertPitch = false,
   thrustShaping = DEFAULT_THRUST_SHAPING,
   lookShaping = DEFAULT_LOOK_SHAPING,
   getCameraMode,
   followMode,
-  onSprintChange,
   onThrustChange,
+  frozen = false,
+  telemetryLogger = null,
 } = {}) {
   if (!flightController) {
     throw new Error('createFlightControls requires a FreeFlightController instance');
@@ -134,24 +188,28 @@ export function createFlightControls({
     touchZoneElement.style.touchAction = 'none';
   }
 
-  const effectiveRollSensitivity = Number.isFinite(rollSensitivity)
-    ? clamp(rollSensitivity, 0, 1)
-    : DEFAULT_ROLL_SENSITIVITY;
-  const effectiveTouchSprintThreshold = Number.isFinite(touchSprintThreshold)
-    ? clamp(touchSprintThreshold, 0, 1)
-    : DEFAULT_TOUCH_SPRINT_THRESHOLD;
   const thrustInputShaping = normalizeShapingConfig(thrustShaping, DEFAULT_THRUST_SHAPING);
   const lookInputShaping = normalizeShapingConfig(lookShaping, DEFAULT_LOOK_SHAPING);
+  const yawPitchShaping = { ...thrustInputShaping, expo: 0 };
+  let isPitchInverted = Boolean(invertPitch);
+  let isFrozen = Boolean(frozen);
+  let isStagedMode = false;
+  const yawOnlyState = { yaw: 0, isActive: false };
+  const logTelemetry = createTelemetryLogger(telemetryLogger);
+  const telemetryState = {
+    lastAxes: { yaw: null, pitch: null },
+    lastLook: { x: null, y: null, pointerType: null, isActive: null },
+  };
+
+  logTelemetry('[flight-controls] normalized shaping', {
+    thrust: thrustInputShaping,
+    look: lookInputShaping,
+    yawPitch: yawPitchShaping,
+  });
 
   const axisSources = {
     keyboard: createAxisRecord(),
     leftStick: createAxisRecord(),
-    liftButtons: createAxisRecord(),
-  };
-
-  const sprintSources = {
-    keyboard: false,
-    leftStick: false,
   };
 
   const analogLookState = {
@@ -161,15 +219,6 @@ export function createFlightControls({
     pointerType: null,
   };
 
-  const leftStickPitchState = {
-    pitch: 0,
-    isActive: false,
-  };
-
-  const touchLiftPresses = new Map();
-  const liftButtons = Array.isArray(liftButtonElements)
-    ? liftButtonElements.filter(Boolean)
-    : [];
   const thrustKeys = new Set();
 
   const touchJoystickState = {
@@ -178,50 +227,96 @@ export function createFlightControls({
     handlers: null,
   };
 
-  let sprintActive = false;
+  // Smoothed touch input state for reducing jitter on mobile
+  const smoothedTouchInput = {
+    x: 0,
+    y: 0,
+    targetX: 0,
+    targetY: 0,
+    isActive: false,
+  };
+
+  // Apply smoothing to touch input values
+  const smoothTouchInput = (targetX, targetY, isActive) => {
+    smoothedTouchInput.targetX = targetX;
+    smoothedTouchInput.targetY = targetY;
+    smoothedTouchInput.isActive = isActive;
+
+    if (!isActive) {
+      // When released, quickly decay to zero
+      smoothedTouchInput.x *= 0.5;
+      smoothedTouchInput.y *= 0.5;
+      if (Math.abs(smoothedTouchInput.x) < 0.01) smoothedTouchInput.x = 0;
+      if (Math.abs(smoothedTouchInput.y) < 0.01) smoothedTouchInput.y = 0;
+    } else {
+      // Smooth interpolation toward target
+      const smoothing = TOUCH_INPUT_SMOOTHING;
+      smoothedTouchInput.x += (targetX - smoothedTouchInput.x) * (1 - smoothing);
+      smoothedTouchInput.y += (targetY - smoothedTouchInput.y) * (1 - smoothing);
+    }
+
+    return {
+      x: smoothedTouchInput.x,
+      y: smoothedTouchInput.y,
+    };
+  };
 
   const useDynamicTouchJoysticks = Boolean(touchZoneElement && nipplejs);
-
-  const pointerListenerOptions = { passive: false };
+  const isControlsFrozen = () => Boolean(isFrozen);
+  const isYawOnlyRotation = () => Boolean(yawOnlyState.isActive);
+  const isStagedRotation = () => Boolean(isStagedMode);
 
   const combineAxis = (axis) => {
     const total = Object.values(axisSources).reduce((sum, source) => sum + (source[axis] ?? 0), 0);
     return clamp(total, -1, 1);
   };
 
-  const applyThrustInput = () => {
-    flightController.setThrustInput({
-      forward: combineAxis('forward'),
-      strafe: combineAxis('strafe'),
-      lift: combineAxis('lift'),
-      roll: combineAxis('roll'),
-    });
+  const applyInputs = () => {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
+      return;
+    }
+    flightController.setYawOnlyMode?.(false);
+    const yaw = combineAxis('yaw');
+    const pitch = combineAxis('pitch');
+
+    // Debug: Log when non-zero input is being sent to the flight controller
+    if (DEBUG_MOBILE_INPUT && (yaw !== 0 || pitch !== 0)) {
+      console.log('[mobile-input] applyInputs:', {
+        yaw: yaw.toFixed(3),
+        pitch: pitch.toFixed(3),
+        sources: {
+          keyboard: { ...axisSources.keyboard },
+          leftStick: { ...axisSources.leftStick },
+        },
+      });
+    }
+
+    if (typeof flightController.setInputs === 'function') {
+      flightController.setInputs({ yaw, pitch });
+    } else {
+      flightController.setThrustInput?.({ yaw, pitch });
+    }
     if (typeof onThrustChange === 'function') {
       onThrustChange(flightController.input);
     }
-  };
-
-  const setSprintActive = (isActive) => {
-    if (sprintActive === isActive) {
-      return;
+    if (yaw !== telemetryState.lastAxes.yaw || pitch !== telemetryState.lastAxes.pitch) {
+      telemetryState.lastAxes = { yaw, pitch };
+      logTelemetry('[flight-controls] applyInputs', {
+        aggregated: { yaw, pitch },
+        sources: { ...axisSources },
+      });
     }
-    sprintActive = isActive;
-    flightController.setSprintActive(isActive);
-    if (typeof onSprintChange === 'function') {
-      onSprintChange(isActive);
-    }
-  };
-
-  const updateSprintState = () => {
-    setSprintActive(Boolean(sprintSources.keyboard || sprintSources.leftStick));
   };
 
   const updateKeyboardAxes = () => {
-    axisSources.keyboard.forward = computeAxisValue(THRUST_AXIS_KEYS.forward);
-    axisSources.keyboard.strafe = computeAxisValue(THRUST_AXIS_KEYS.strafe);
-    axisSources.keyboard.lift = computeAxisValue(THRUST_AXIS_KEYS.lift);
-    axisSources.keyboard.roll = clamp(axisSources.keyboard.strafe * effectiveRollSensitivity, -1, 1);
-    applyThrustInput();
+    axisSources.keyboard.pitch = computeAxisValue(PITCH_AXIS_KEYS);
+    axisSources.keyboard.yaw = computeAxisValue(YAW_AXIS_KEYS);
+    logTelemetry('[flight-controls] keyboard axes', {
+      yaw: axisSources.keyboard.yaw,
+      pitch: axisSources.keyboard.pitch,
+      activeKeys: Array.from(thrustKeys),
+    });
+    applyInputs();
   };
 
   const computeAxisValue = (axisKeys) => {
@@ -233,44 +328,84 @@ export function createFlightControls({
     return 0;
   };
 
-  const updateLiftFromButtons = () => {
-    let lift = 0;
-    touchLiftPresses.forEach((value) => {
-      lift += value;
+  const handleLeftStickChange = (value, context = {}) => {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
+      return;
+    }
+    if (isStagedRotation()) {
+      const shaped = shapeStickWithContext(value, context, yawPitchShaping);
+      const pitch = clamp(shaped.y, -1, 1);
+      const pitchInput = isPitchInverted ? -pitch : pitch;
+      flightController.setPitchOnlyMode?.(true);
+      flightController.setInputs({ yaw: 0, pitch: pitchInput });
+      onThrustChange?.({ yaw: 0, pitch: pitchInput });
+
+      logTelemetry('[flight-controls] pitch-only axis', {
+        pitch: pitchInput,
+        raw: shaped.raw,
+        rawMagnitude: shaped.rawMagnitude,
+        magnitude: shaped.magnitude,
+        pointerType: context.pointerType ?? null,
+        isActive: Boolean(context.isActive ?? shaped.rawMagnitude > 0),
+      });
+      return;
+    }
+    const shaped = shapeStickWithContext(value, context, yawPitchShaping);
+    const pitch = clamp(shaped.y, -1, 1);
+    const pitchInput = isPitchInverted ? -pitch : pitch;
+    const yaw = clamp(shaped.x, -1, 1);
+    axisSources.leftStick.pitch = pitchInput;
+    axisSources.leftStick.yaw = yaw;
+    logTelemetry('[flight-controls] left stick', {
+      yaw,
+      pitch: pitchInput,
+      raw: shaped.raw,
+      rawMagnitude: shaped.rawMagnitude,
+      magnitude: shaped.magnitude,
+      pointerType: context.pointerType ?? null,
+      isActive: Boolean(context.isActive),
     });
-    axisSources.liftButtons.lift = clamp(lift, -1, 1);
-    applyThrustInput();
+    applyInputs();
   };
 
-  const handleLeftStickChange = (value, context = {}) => {
-    const shaped = shapeStickWithContext(value, context, thrustInputShaping);
-    const forward = clamp(shaped.y, -1, 1);
-    const strafe = clamp(shaped.x, -1, 1);
-    axisSources.leftStick.forward = forward;
-    axisSources.leftStick.strafe = strafe;
-    axisSources.leftStick.roll = clamp(strafe * effectiveRollSensitivity, -1, 1);
-    axisSources.leftStick.lift = 0;
+  const handleYawOnlyAxis = (x, context = {}) => {
+    const shaped = shapeStickWithContext({ x, y: 0 }, context, yawPitchShaping);
+    const yaw = clamp(shaped.x, -1, 1);
+    const isActive = Boolean(context.isActive ?? shaped.rawMagnitude > 0);
+    yawOnlyState.yaw = yaw;
+    yawOnlyState.isActive = isActive;
+    flightController.setYawOnlyMode?.(isActive);
 
-    // Track pitch input: pushing up should pitch nose up
-    leftStickPitchState.pitch = forward;
-    leftStickPitchState.isActive = Boolean(context.isActive);
+    if (
+      isActive &&
+      typeof document !== 'undefined' &&
+      document.pointerLockElement === canvas &&
+      typeof document.exitPointerLock === 'function'
+    ) {
+      document.exitPointerLock();
+    }
 
-    const pointerType = context.pointerType ?? null;
-    const magnitudeForSprint = clamp(
-      pointerType === 'touch'
-        ? context.rawMagnitude ?? shaped.rawMagnitude
-        : context.magnitude ?? shaped.magnitude,
-      0,
-      1
-    );
-    sprintSources.leftStick = Boolean(
-      context.isActive && pointerType === 'touch' && magnitudeForSprint >= effectiveTouchSprintThreshold
-    );
-    updateSprintState();
-    applyThrustInput();
+    if (!isActive) {
+      applyInputs();
+      return;
+    }
+
+    flightController.setInputs({ yaw, pitch: 0 });
+    onThrustChange?.({ yaw, pitch: 0 });
+
+    logTelemetry('[flight-controls] yaw-only axis', {
+      yaw,
+      raw: shaped.raw,
+      rawMagnitude: shaped.rawMagnitude,
+      pointerType: context.pointerType ?? null,
+      isActive,
+    });
   };
 
   const handleRightStickChange = (value, context = {}) => {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
+      return;
+    }
     const shaped = shapeStickWithContext(value, context, lookInputShaping);
     const pointerType = context.pointerType ?? null;
     const currentMode = typeof getCameraMode === 'function' ? getCameraMode() : null;
@@ -283,25 +418,64 @@ export function createFlightControls({
     analogLookState.pointerType = pointerType;
     analogLookState.isActive = Boolean(context.isActive);
     analogLookState.isFollowMode = isFollowMode;
+    logTelemetry('[flight-controls] right stick look', {
+      look: { x: analogLookState.x, y: analogLookState.y },
+      pointerType,
+      isActive: analogLookState.isActive,
+      isFollowMode,
+      raw: shaped.raw,
+      rawMagnitude: shaped.rawMagnitude,
+      magnitude: shaped.magnitude,
+    });
   };
 
   const resetLookTouchJoystick = () => {
-    handleRightStickChange(
-      { x: 0, y: 0 },
+    // Reset smoothed input state
+    const smoothed = smoothTouchInput(0, 0, false);
+    // Reset flight control inputs when touch joystick is released
+    handleLeftStickChange(
+      { x: smoothed.x, y: smoothed.y },
       { isActive: false, pointerType: 'touch', magnitude: 0, rawMagnitude: 0 }
     );
   };
 
   const handleTouchJoystickMove = (data) => {
+    if (isControlsFrozen()) {
+      if (DEBUG_MOBILE_INPUT) {
+        console.log('[mobile-input] blocked: controls frozen');
+      }
+      return;
+    }
+    if (isYawOnlyRotation()) {
+      if (DEBUG_MOBILE_INPUT) {
+        console.log('[mobile-input] blocked: yaw-only mode active');
+      }
+      return;
+    }
+
     const normalized = normalizeNippleData(data);
-    const payload = { x: normalized.raw.x, y: normalized.raw.y };
+    // Apply smoothing to reduce jitter on mobile touch input
+    const smoothed = smoothTouchInput(normalized.raw.x, normalized.raw.y, true);
+    const payload = { x: smoothed.x, y: smoothed.y };
+    const smoothedMagnitude = Math.hypot(smoothed.x, smoothed.y);
     const context = {
       isActive: true,
       pointerType: 'touch',
-      raw: normalized.raw,
-      rawMagnitude: normalized.rawMagnitude,
+      raw: { x: smoothed.x, y: smoothed.y },
+      rawMagnitude: smoothedMagnitude,
     };
-    handleRightStickChange(payload, context);
+
+    if (DEBUG_MOBILE_INPUT && normalized.rawMagnitude > 0.01) {
+      console.log('[mobile-input] joystick move:', {
+        x: normalized.raw.x.toFixed(3),
+        y: normalized.raw.y.toFixed(3),
+        magnitude: normalized.rawMagnitude.toFixed(3),
+      });
+    }
+
+    // Use flight control path (left stick) for touch input - this ensures
+    // velocity follows facing direction via the yaw/pitch rotation in update()
+    handleLeftStickChange(payload, context);
   };
 
   const detachLookJoystick = () => {
@@ -323,7 +497,26 @@ export function createFlightControls({
     touchJoystickState.nipple = { nipple, move, end };
   };
 
+  const teardownTouchJoysticks = () => {
+    detachLookJoystick();
+    if (touchJoystickState.manager) {
+      if (touchJoystickState.handlers) {
+        const { handleAdded, handleRemoved } = touchJoystickState.handlers;
+        touchJoystickState.manager.off('added', handleAdded);
+        touchJoystickState.manager.off('removed', handleRemoved);
+      }
+      touchJoystickState.manager.destroy();
+      touchJoystickState.manager = null;
+      touchJoystickState.handlers = null;
+    }
+    if (touchZoneElement?.classList) {
+      touchZoneElement.classList.remove('has-dynamic-joystick');
+    }
+  };
+
   const setupTouchJoysticks = () => {
+    if (isControlsFrozen()) return;
+    if (touchJoystickState.manager) return;
     const prefersCoarsePointer =
       typeof window !== 'undefined' && typeof window.matchMedia === 'function'
         ? window.matchMedia('(pointer: coarse)').matches
@@ -337,7 +530,7 @@ export function createFlightControls({
         maxNumberOfNipples: 1,
         size: TOUCH_JOYSTICK_SIZE,
         color: '#aac8ff',
-        fadeTime: 120,
+        fadeTime: 100,
         restOpacity: 0,
         threshold: 0.05,
       });
@@ -345,25 +538,13 @@ export function createFlightControls({
       touchZoneElement.classList.add('has-dynamic-joystick');
       touchZoneElement.style.touchAction = 'none';
 
-      // Find the ghost thumbstick placeholder to hide/show based on touch state
-      const ghostThumbstick = touchZoneElement.querySelector('.thumbstick');
-
       const handleAdded = (event, nipple) => {
         attachLookJoystick(nipple);
-        // Hide the ghost when user touches elsewhere
-        if (ghostThumbstick) {
-          ghostThumbstick.classList.add('is-hidden');
-        }
       };
 
       const handleRemoved = (event, nipple) => {
-        if (touchJoystickState.nipple?.nipple === nipple) {
-          detachLookJoystick();
-        }
-        // Show the ghost again when touch ends
-        if (ghostThumbstick) {
-          ghostThumbstick.classList.remove('is-hidden');
-        }
+        // Always detach on removal to prevent stuck joysticks
+        detachLookJoystick();
       };
 
       touchJoystickState.manager.on('added', handleAdded);
@@ -390,103 +571,46 @@ export function createFlightControls({
 
   setupTouchJoysticks();
 
-  const handleLiftButtonDown = (event) => {
-    event.preventDefault();
-    const { currentTarget } = event;
-    const direction = Number.parseFloat(currentTarget?.dataset?.lift ?? '0');
-    if (!Number.isFinite(direction) || direction === 0) {
+  const handleKeyDown = (event) => {
+    if (isControlsFrozen() || isYawOnlyRotation()) {
       return;
     }
-    if (typeof currentTarget?.setPointerCapture === 'function') {
-      try {
-        currentTarget.setPointerCapture(event.pointerId);
-      } catch (error) {
-        // Ignore capture failures.
-      }
-    }
-    touchLiftPresses.set(event.pointerId, direction);
-    currentTarget?.classList.add('is-active');
-    updateLiftFromButtons();
-  };
-
-  const handleLiftButtonEnd = (event) => {
-    const { currentTarget } = event;
-    if (
-      typeof currentTarget?.hasPointerCapture === 'function' &&
-      currentTarget.hasPointerCapture(event.pointerId) &&
-      typeof currentTarget.releasePointerCapture === 'function'
-    ) {
-      try {
-        currentTarget.releasePointerCapture(event.pointerId);
-      } catch (error) {
-        // Ignore release failures.
-      }
-    }
-    event.preventDefault();
-    touchLiftPresses.delete(event.pointerId);
-    currentTarget?.classList.remove('is-active');
-    updateLiftFromButtons();
-  };
-
-  const handleLiftContextMenu = (event) => {
-    event.preventDefault();
-  };
-
-  liftButtons.forEach((button) => {
-    button.addEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
-    button.addEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
-    button.addEventListener('pointercancel', handleLiftButtonEnd, pointerListenerOptions);
-    button.addEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
-    button.addEventListener('contextmenu', handleLiftContextMenu);
-  });
-
-  const handleKeyDown = (event) => {
     const { code } = event;
     if (!code || isEditableTarget(event.target)) {
       return;
     }
-    const isShift = SHIFT_CODES.has(code);
-    const isThrustKey = THRUST_AXIS_LIST.some(
-      (axis) => axis.positive.includes(code) || axis.negative.includes(code)
-    );
-    if (!isThrustKey && !isShift) {
+    const isPitchKey = PITCH_AXIS_KEYS.positive.includes(code) || PITCH_AXIS_KEYS.negative.includes(code);
+    const isYawKey = YAW_AXIS_KEYS.positive.includes(code) || YAW_AXIS_KEYS.negative.includes(code);
+    if (!isPitchKey && !isYawKey) {
       return;
     }
     event.preventDefault();
-    if (isThrustKey) {
-      thrustKeys.add(code);
-      updateKeyboardAxes();
-    }
-    if (isShift) {
-      sprintSources.keyboard = true;
-      updateSprintState();
-    }
+    thrustKeys.add(code);
+    updateKeyboardAxes();
   };
 
   const handleKeyUp = (event) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     const { code } = event;
     if (!code || isEditableTarget(event.target)) {
       return;
     }
-    const isShift = SHIFT_CODES.has(code);
-    const isThrustKey = THRUST_AXIS_LIST.some(
-      (axis) => axis.positive.includes(code) || axis.negative.includes(code)
-    );
-    if (!isThrustKey && !isShift) {
+    const isPitchKey = PITCH_AXIS_KEYS.positive.includes(code) || PITCH_AXIS_KEYS.negative.includes(code);
+    const isYawKey = YAW_AXIS_KEYS.positive.includes(code) || YAW_AXIS_KEYS.negative.includes(code);
+    if (!isPitchKey && !isYawKey) {
       return;
     }
     event.preventDefault();
-    if (isThrustKey) {
-      thrustKeys.delete(code);
-      updateKeyboardAxes();
-    }
-    if (isShift) {
-      sprintSources.keyboard = false;
-      updateSprintState();
-    }
+    thrustKeys.delete(code);
+    updateKeyboardAxes();
   };
 
   const handleCanvasClick = () => {
+    if (isControlsFrozen()) {
+      return;
+    }
     if (typeof window === 'undefined') return;
     if (!window.matchMedia('(pointer: fine)').matches) {
       return;
@@ -497,37 +621,45 @@ export function createFlightControls({
   };
 
   const handlePointerMove = (event) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     if (document.pointerLockElement === canvas) {
-      flightController.addLookDelta(event.movementX, event.movementY);
+      const pitchSign = isPitchInverted ? -1 : 1;
+      logTelemetry('[flight-controls] pointer-lock look', {
+        pointerType: event.pointerType || 'mouse',
+        movementX: event.movementX,
+        movementY: event.movementY,
+        pitchSign,
+      });
+      flightController.addLookDelta(event.movementX, event.movementY * pitchSign);
     }
   };
 
   const resetAxisRecord = (record) => {
-    record.forward = 0;
-    record.strafe = 0;
-    record.lift = 0;
-    record.roll = 0;
+    record.yaw = 0;
+    record.pitch = 0;
   };
 
-  const resetInputs = ({ releasePointerLock = false } = {}) => {
+  const resetInputs = ({ releasePointerLock = false, preserveStagedMode = false } = {}) => {
     thrustKeys.clear();
     Object.values(axisSources).forEach(resetAxisRecord);
-    applyThrustInput();
-
-    sprintSources.keyboard = false;
-    sprintSources.leftStick = false;
-    updateSprintState();
+    applyInputs();
 
     analogLookState.x = 0;
     analogLookState.y = 0;
     analogLookState.isActive = false;
     analogLookState.pointerType = null;
 
-    leftStickPitchState.pitch = 0;
-    leftStickPitchState.isActive = false;
-
-    touchLiftPresses.clear();
-    liftButtons.forEach((button) => button.classList.remove('is-active'));
+    yawOnlyState.yaw = 0;
+    yawOnlyState.isActive = false;
+    flightController.setYawOnlyMode?.(false);
+    if (!preserveStagedMode) {
+      isStagedMode = false;
+      flightController.setPitchOnlyMode?.(false);
+    } else {
+      flightController.setPitchOnlyMode?.(isStagedMode);
+    }
 
     detachLookJoystick();
 
@@ -549,14 +681,36 @@ export function createFlightControls({
   canvas.addEventListener('click', handleCanvasClick);
 
   const applyAnalogLook = (deltaTime = 0) => {
+    if (isControlsFrozen()) {
+      return;
+    }
     if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
       return;
     }
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
     const lookX = analogLookState.x;
-    const lookY = analogLookState.y;
+    const lookY = analogLookState.y * (isPitchInverted ? -1 : 1);
     if (lookX === 0 && lookY === 0) {
       return;
+    }
+    if (
+      lookX !== telemetryState.lastLook.x ||
+      lookY !== telemetryState.lastLook.y ||
+      analogLookState.pointerType !== telemetryState.lastLook.pointerType ||
+      analogLookState.isActive !== telemetryState.lastLook.isActive
+    ) {
+      telemetryState.lastLook = {
+        x: lookX,
+        y: lookY,
+        pointerType: analogLookState.pointerType,
+        isActive: analogLookState.isActive,
+      };
+      logTelemetry('[flight-controls] analog look apply', {
+        look: { x: lookX, y: lookY },
+        pointerType: analogLookState.pointerType,
+        isActive: analogLookState.isActive,
+        limitedDelta,
+      });
     }
     flightController.addLookDelta(
       lookX * analogLookSpeed * limitedDelta,
@@ -564,12 +718,8 @@ export function createFlightControls({
     );
   };
 
-  const applyLeftStickPitch = (deltaTime = 0) => {
-    // Pitch is now handled directly in the flight controller via the forward input
-    // This function is kept for API compatibility but is a no-op
-  };
-
   const dispose = () => {
+    teardownTouchJoysticks();
     resetInputs({ releasePointerLock: true });
     if (typeof document !== 'undefined') {
       document.removeEventListener('keydown', handleKeyDown);
@@ -577,37 +727,63 @@ export function createFlightControls({
       document.removeEventListener('mousemove', handlePointerMove);
     }
     canvas.removeEventListener('click', handleCanvasClick);
-    liftButtons.forEach((button) => {
-      button.removeEventListener('pointerdown', handleLiftButtonDown, pointerListenerOptions);
-      button.removeEventListener('pointerup', handleLiftButtonEnd, pointerListenerOptions);
-      button.removeEventListener('pointercancel', handleLiftButtonEnd, pointerListenerOptions);
-      button.removeEventListener('lostpointercapture', handleLiftButtonEnd, pointerListenerOptions);
-      button.removeEventListener('contextmenu', handleLiftContextMenu);
-    });
-    if (touchJoystickState.manager) {
-      if (touchJoystickState.handlers) {
-        const { handleAdded, handleRemoved } = touchJoystickState.handlers;
-        touchJoystickState.manager.off('added', handleAdded);
-        touchJoystickState.manager.off('removed', handleRemoved);
-      }
-      touchJoystickState.manager.destroy();
-      touchJoystickState.manager = null;
-      touchJoystickState.nipple = null;
-    }
-    if (touchZoneElement?.classList) {
-      touchZoneElement.classList.remove('has-dynamic-joystick');
-    }
     leftThumbstick?.destroy?.();
     rightThumbstick?.destroy?.();
   };
 
-  applyThrustInput();
-  updateSprintState();
+  const setFrozen = (nextFrozen) => {
+    const shouldFreeze = Boolean(nextFrozen);
+    if (shouldFreeze === isControlsFrozen()) {
+      return;
+    }
+    isFrozen = shouldFreeze;
+    if (isControlsFrozen()) {
+      teardownTouchJoysticks();
+      resetInputs({ releasePointerLock: false });
+    } else {
+      yawOnlyState.yaw = 0;
+      yawOnlyState.isActive = false;
+      flightController.setYawOnlyMode?.(false);
+      isStagedMode = false;
+      flightController.setPitchOnlyMode?.(false);
+      setupTouchJoysticks();
+    }
+  };
+
+  applyInputs();
 
   return {
     applyAnalogLook,
-    applyLeftStickPitch,
+    setInvertPitch: (invert) => {
+      isPitchInverted = Boolean(invert);
+    },
+    setFrozen,
     reset: resetInputs,
+    setYawOnlyAxis: (x, context) => handleYawOnlyAxis(x, context),
+    setYawOnlyMode: (isActive) => {
+      yawOnlyState.isActive = Boolean(isActive);
+      if (!yawOnlyState.isActive) {
+        yawOnlyState.yaw = 0;
+      }
+      flightController.setYawOnlyMode?.(yawOnlyState.isActive);
+      if (!yawOnlyState.isActive) {
+        applyInputs();
+      }
+    },
+    setStagedMode: (isActive) => {
+      const nextValue = Boolean(isActive);
+      if (nextValue === isStagedMode) return;
+      isStagedMode = nextValue;
+      flightController.setPitchOnlyMode?.(isStagedMode);
+      if (!isStagedMode) {
+        applyInputs();
+        return;
+      }
+      resetInputs({ releasePointerLock: false, preserveStagedMode: true });
+      flightController.setPitchOnlyMode?.(true);
+      flightController.setInputs({ yaw: 0, pitch: 0 });
+      onThrustChange?.({ yaw: 0, pitch: 0 });
+    },
     dispose,
   };
 }

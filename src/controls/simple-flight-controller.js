@@ -8,7 +8,7 @@ export class SimpleFlightController {
     this.velocity = new THREE.Vector3();
 
     // Physics constants
-    this.speed = 2.5;              // Forward speed (constant)
+    this.speed = 2.7;              // Forward speed (constant)
     this.turnSpeed = Math.PI / 2;  // Radians per second
     this.pitchSpeed = Math.PI / 4; // Half of turn speed
     this.liftForce = 2.0;          // Upward lift from pitch
@@ -24,6 +24,10 @@ export class SimpleFlightController {
     this.smoothedYaw = 0;
     this.smoothedPitch = 0;
     this.rollAngle = 0;
+    this.yawAngle = 0;
+    this.pitchAngle = 0;
+
+    this.invertPitch = false;
 
     // Control inputs
     this.input = {
@@ -35,6 +39,17 @@ export class SimpleFlightController {
   }
 
   update(deltaTime) {
+    if (!Number.isFinite(deltaTime) || deltaTime <= 0) {
+      this.velocity.set(0, 0, 0);
+      return {
+        position: this.position.clone(),
+        quaternion: this.quaternion.clone(),
+        velocity: this.velocity.clone(),
+        roll: this.rollAngle,
+      };
+    }
+
+    // Smooth the yaw input
     this.smoothedYaw = THREE.MathUtils.damp(
       this.smoothedYaw,
       this.input.yaw,
@@ -42,47 +57,33 @@ export class SimpleFlightController {
       deltaTime,
     );
 
+    // Smooth the pitch input (with optional inversion)
+    const targetPitchInput = this.invertPitch ? -this.input.pitch : this.input.pitch;
     this.smoothedPitch = THREE.MathUtils.damp(
       this.smoothedPitch,
-      this.input.pitch,
+      targetPitchInput,
       this.pitchResponse,
       deltaTime,
     );
 
-    // 1. Apply rotation from inputs
+    // Apply yaw rotation (turning left/right)
     const yawDelta = this.smoothedYaw * this.turnSpeed * deltaTime;
     const pitchDelta = this.smoothedPitch * this.pitchSpeed * deltaTime;
 
-    const yawQuat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0), // Y-axis (world up)
-      yawDelta
-    );
+    this.yawAngle += yawDelta;
+    this.pitchAngle += pitchDelta;
 
-    const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(this.quaternion);
-    const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
-      rightAxis,
-      -pitchDelta // Negative for intuitive up/down
-    );
+    // Update orientation from accumulated yaw/pitch (no roll baked into physics)
+    const tilt = new THREE.Euler(this.pitchAngle, this.yawAngle, 0, 'YXZ');
+    this.quaternion.setFromEuler(tilt);
 
-    this.quaternion.premultiply(yawQuat).multiply(pitchQuat).normalize();
-
-    // 2. Calculate forward direction
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion);
-
-    // 3. Calculate vertical velocity (lift vs gravity)
-    const lift = this.smoothedPitch * this.liftForce + this.neutralLift;
-    const verticalTarget = lift - this.gravity;
-
-    // 4. Update velocity
+    // Compute forward velocity aligned with facing direction
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.quaternion).normalize();
     this.velocity.copy(forward).multiplyScalar(this.speed);
-    this.velocity.y = THREE.MathUtils.damp(
-      this.velocity.y,
-      verticalTarget,
-      this.verticalResponse,
-      deltaTime,
-    );
 
-    // 4b. Bank roll for visuals
+    this.position.addScaledVector(this.velocity, deltaTime);
+
+    // Visual banking - wing dips on the side we're turning toward
     const targetRoll = -this.smoothedYaw * this.maxRoll;
     this.rollAngle = THREE.MathUtils.damp(
       this.rollAngle,
@@ -90,17 +91,6 @@ export class SimpleFlightController {
       this.rollResponse,
       deltaTime,
     );
-
-    // 5. Update position
-    this.position.addScaledVector(this.velocity, deltaTime);
-
-    // 6. Prevent going underground
-    if (this.position.y < 0.5) {
-      this.position.y = 0.5;
-      if (this.velocity.y < 0) {
-        this.velocity.y = 0;
-      }
-    }
 
     return {
       position: this.position.clone(),
@@ -113,5 +103,9 @@ export class SimpleFlightController {
   setInputs(yaw, pitch) {
     this.input.yaw = THREE.MathUtils.clamp(yaw, -1, 1);
     this.input.pitch = THREE.MathUtils.clamp(pitch, -1, 1);
+  }
+
+  setInvertPitch(invert) {
+    this.invertPitch = Boolean(invert);
   }
 }
