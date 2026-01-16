@@ -61,6 +61,54 @@ turn(deltaRadians) {
 - URL param `?debugVectors` - Shows colored arrow helpers
 - `DEBUG_MOBILE_INPUT = true` in flight-controls.js (line 15)
 - Console logs: YAW INPUT, HEADING, FORWARD DIR, VELOCITY
+- **Eruda mobile console** currently enabled in index.html (remove after debugging)
+
+---
+
+## iOS Audio Fix Progress (Jan 2026)
+
+### Problem
+Rocket fire and explosion sounds were not playing on iOS mobile (Safari/Chrome).
+
+### Root Cause Found
+- **Web Audio API** (AudioContext, decodeAudioData, BufferSource) does NOT work reliably on iOS
+- **HTML Audio elements** DO work on iOS when properly unlocked
+
+### Current Solution (WORKING)
+Using HTML Audio elements with a reference pool to prevent garbage collection:
+
+```javascript
+const activeSounds = new Set(); // Prevents GC clipping
+
+const playSound = (src, volume) => {
+  const audio = new Audio(src);
+  audio.volume = volume;
+  activeSounds.add(audio);
+  audio.addEventListener('ended', () => activeSounds.delete(audio));
+  audio.play();
+};
+```
+
+### Audio Files
+- `/sound/rocket-fire.mp3` - 19KB - plays on rocket launch
+- `/sound/explosion.mp3` - 26KB - plays on rocket impact
+
+### What Works
+- ✅ Sound plays on iOS Chrome mobile
+- ✅ `unlockAudio()` called on first user gesture
+- ✅ Logging via eruda shows sounds triggering
+
+### Still Testing
+- [ ] Full sound duration (was clipping - added activeSounds Set to fix)
+- [ ] Explosion sound at any distance
+- [ ] Remove eruda debug console when confirmed working
+
+### Key Files Modified
+- `index.html` - Audio system at ~line 1198
+- `src/controls/flight-controls.js` - Fixed nipplejs forEach error
+
+### Reference
+Working iOS audio pattern from: https://github.com/Mentis123/data3-cisco-live
 
 ## Code Conventions
 - Three.js quaternion multiplication: `premultiply` = apply first, `multiply` = apply after
