@@ -2418,6 +2418,10 @@
     // createFlightControls does NOT get nipplejs to avoid duplicate managers
     const touchZone = document.querySelector('[data-touch-zone]');
     const touchInput = touchZone && nipplejs ? createTouchInput(touchZone, nipplejs) : null;
+    // Hide the static HTML thumbstick element when using dynamic nipplejs joystick
+    if (touchInput && touchZone) {
+      touchZone.classList.add('has-dynamic-joystick');
+    }
     const keyboardInput = createKeyboardInput();
     const flightInput = touchInput ? combineInputs(touchInput, keyboardInput) : keyboardInput;
 
@@ -2835,13 +2839,18 @@
       }
 
       let nestedAimQuaternion = null;
+
+      // Get input state early (needed for both flight and aim rig when nested)
+      const inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
+
       if (isNested && aimRig?.isActive?.()) {
-        const lookState = flightControls.getAnalogLookState?.() ?? { x: 0, y: 0 };
+        // When nested, use the touch/keyboard input for look-around
+        // flightControls.getAnalogLookState() doesn't work because nipplejs isn't passed to it
         const pointerDelta = flightControls.consumePointerLookDelta?.() ?? { x: 0, y: 0 };
         aimRig.update(
           {
-            axisX: lookState.x,
-            axisY: lookState.y,
+            axisX: inputState.x,
+            axisY: inputState.y,
             deltaX: pointerDelta.x,
             deltaY: pointerDelta.y,
           },
@@ -2868,10 +2877,9 @@
 
       // Update New Flight System
       if (newFlightSystem) {
-        const { input, flight, camera: bCam, visual } = newFlightSystem;
+        const { flight, camera: bCam, visual } = newFlightSystem;
 
-        // 1. Get Input
-        const inputState = input.get();
+        // inputState already obtained above for aim rig
         const resolvedInput = isNested
           ? { x: 0, y: 0, active: false }
           : inputState;
