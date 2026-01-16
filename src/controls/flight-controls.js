@@ -218,6 +218,10 @@ export function createFlightControls({
     isActive: false,
     pointerType: null,
   };
+  const pointerLookDelta = {
+    x: 0,
+    y: 0,
+  };
 
   const thrustKeys = new Set();
 
@@ -669,6 +673,8 @@ export function createFlightControls({
         pitchSign,
       });
       flightController.addLookDelta(event.movementX, event.movementY * pitchSign);
+      pointerLookDelta.x += event.movementX;
+      pointerLookDelta.y += event.movementY * pitchSign;
     }
   };
 
@@ -686,6 +692,8 @@ export function createFlightControls({
     analogLookState.y = 0;
     analogLookState.isActive = false;
     analogLookState.pointerType = null;
+    pointerLookDelta.x = 0;
+    pointerLookDelta.y = 0;
 
     yawOnlyState.yaw = 0;
     yawOnlyState.isActive = false;
@@ -790,6 +798,18 @@ export function createFlightControls({
 
   return {
     applyAnalogLook,
+    getAnalogLookState: () => ({
+      x: analogLookState.x,
+      y: analogLookState.y,
+      isActive: analogLookState.isActive,
+      pointerType: analogLookState.pointerType,
+    }),
+    consumePointerLookDelta: () => {
+      const delta = { x: pointerLookDelta.x, y: pointerLookDelta.y };
+      pointerLookDelta.x = 0;
+      pointerLookDelta.y = 0;
+      return delta;
+    },
     setInvertPitch: (invert) => {
       isPitchInverted = Boolean(invert);
     },
