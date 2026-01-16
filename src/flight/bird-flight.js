@@ -158,9 +158,10 @@ export class BirdFlight {
     }
 
     tick(input, deltaTime) {
-        this.yaw(input.x, deltaTime);
-        this.pitch(input.y, deltaTime);
-        return this.update(deltaTime);
+        const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
+        this.yaw(input.x, limitedDelta);
+        this.pitch(input.y, limitedDelta);
+        return this.update(limitedDelta);
     }
 
     _constrainToSphere() {

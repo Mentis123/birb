@@ -23,7 +23,12 @@ const TAKE_OFF_BOOST = 3.0;
 /**
  * Create the nesting system
  */
-export function createNestingSystem(THREE, { flightController, nestPointsSystem, onStateChange }) {
+export function createNestingSystem(THREE, {
+  flightController,
+  nestPointsSystem,
+  onStateChange,
+  aimRig = null,
+} = {}) {
   let currentState = NESTING_STATES.FLYING;
   let currentNest = null;
   let targetPosition = new THREE.Vector3();
@@ -149,8 +154,11 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
 
         // Add some forward momentum based on current look direction
         // Check for lookQuaternion (legacy) or just quaternion (BirdFlight)
-        const quat = flightController.lookQuaternion || flightController.quaternion;
-        const forward = _tempVec.set(0, 0, -1).applyQuaternion(quat);
+        const forward = aimRig?.isActive?.()
+          ? aimRig.getLookDirection(_tempVec)
+          : _tempVec.set(0, 0, -1).applyQuaternion(
+              flightController.lookQuaternion || flightController.quaternion
+            );
         takeOffDirection.addScaledVector(forward, 0.5);
         takeOffDirection.normalize();
 
@@ -295,6 +303,9 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
      * Get look direction for crosshair aiming (when nested)
      */
     getLookDirection() {
+      if (aimRig?.isActive?.()) {
+        return aimRig.getLookDirection(_tempVec);
+      }
       const quat = flightController.lookQuaternion || flightController.quaternion;
       return _tempVec.set(0, 0, -1).applyQuaternion(quat);
     },

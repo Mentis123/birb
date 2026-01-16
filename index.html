@@ -776,6 +776,7 @@
       createCameraState,
       CAMERA_MODES = { FOLLOW: 'follow', FPV: 'fpv' },
       createFlightControls,
+      AimRig,
       createWorldShell,
       ENVIRONMENT_VARIANTS,
       getEnvironmentDefinition,
@@ -818,6 +819,8 @@
       const nestingSystemModule = await import("./src/nesting/nesting-system.js");
       var createNestingSystem = nestingSystemModule.createNestingSystem;
       var NESTING_STATES = nestingSystemModule.NESTING_STATES;
+      const aimRigModule = await import("./src/nesting/aim-rig.js");
+      AimRig = aimRigModule.AimRig;
       const rocketModule = await import("./src/nesting/rocket.js");
       var createRocketSystem = rocketModule.createRocketSystem;
       const gltfLoaderModule = await import(
@@ -2432,6 +2435,8 @@
       maxPitchTilt: Math.PI * 0.2,
     });
 
+    const aimRig = new AimRig(THREE);
+
     // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
     flightController = flight;
     flightControllerInitialized = true;
@@ -2585,6 +2590,14 @@
       if (typeof flightController.setNestLookMode === 'function') {
         flightController.setNestLookMode(isNested);
       }
+      if (aimRig) {
+        if (isNested) {
+          aimRig.setReferenceFromQuaternion(flightController.quaternion);
+          aimRig.setActive(true);
+        } else {
+          aimRig.setActive(false);
+        }
+      }
 
       // Update status message
       if (statusMetric) {
@@ -2602,6 +2615,7 @@
         nestingSystem = createNestingSystem(THREE, {
           flightController,
           nestPointsSystem,
+          aimRig,
           onStateChange: handleNestingStateChange,
         });
       }
@@ -2763,6 +2777,9 @@
         if (rocketSystem) {
           rocketSystem.reset();
         }
+        if (aimRig) {
+          aimRig.setActive(false);
+        }
         showNestUI(false);
         showNestIndicator(false);
         updateControlMetrics();
@@ -2817,9 +2834,24 @@
         isNested = nestingSystem.isNested();
       }
 
-      // Apply look controls - even when nested (for look-around)
-      // Movement is controlled separately via flightController.update(delta)
-      flightControls.applyAnalogLook(lookDeltaTime);
+      let nestedAimQuaternion = null;
+      if (isNested && aimRig?.isActive?.()) {
+        const lookState = flightControls.getAnalogLookState?.() ?? { x: 0, y: 0 };
+        const pointerDelta = flightControls.consumePointerLookDelta?.() ?? { x: 0, y: 0 };
+        aimRig.update(
+          {
+            axisX: lookState.x,
+            axisY: lookState.y,
+            deltaX: pointerDelta.x,
+            deltaY: pointerDelta.y,
+          },
+          lookDeltaTime
+        );
+        nestedAimQuaternion = aimRig.getQuaternion();
+      } else {
+        // Apply look controls during flight
+        flightControls.applyAnalogLook(lookDeltaTime);
+      }
 
       // Update rockets
       if (rocketSystem) {
@@ -2840,12 +2872,19 @@
 
         // 1. Get Input
         const inputState = input.get();
+        const resolvedInput = isNested
+          ? { x: 0, y: 0, active: false }
+          : inputState;
 
         // 2. Physics Update
         // IMPORTANT: We pass delta even when nested!
         // BirdFlight.speed will be 0 when nested, preventing position change,
         // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
-        pose = flight.tick(inputState, delta);
+        pose = flight.tick(resolvedInput, delta);
+        if (nestedAimQuaternion) {
+          pose.quaternion.copy(nestedAimQuaternion);
+          flight.quaternion.copy(nestedAimQuaternion);
+        }
 
         // 3. Camera Update
         // Decide which camera to use:
@@ -2865,7 +2904,7 @@
         }
 
         // 4. Visual Update
-        const visualQuat = visual.update(pose.quaternion, inputState, delta);
+        const visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
 
         // 5. Apply to Mesh
         birbAnchor.position.copy(pose.position);
