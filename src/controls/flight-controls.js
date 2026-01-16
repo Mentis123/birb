@@ -502,11 +502,14 @@ export function createFlightControls({
     if (touchJoystickState.manager) {
       // Explicitly destroy all nipples before destroying manager
       const allNipples = touchJoystickState.manager.get();
-      allNipples.forEach((nipple) => {
-        if (nipple && nipple.destroy) {
-          nipple.destroy();
-        }
-      });
+      // Guard: nipplejs get() may return object or undefined on some browsers
+      if (allNipples && typeof allNipples.forEach === 'function') {
+        allNipples.forEach((nipple) => {
+          if (nipple && nipple.destroy) {
+            nipple.destroy();
+          }
+        });
+      }
       if (touchJoystickState.handlers) {
         const { handleAdded, handleRemoved } = touchJoystickState.handlers;
         touchJoystickState.manager.off('added', handleAdded);
@@ -559,11 +562,14 @@ export function createFlightControls({
         const manager = touchJoystickState.manager;
         if (manager) {
           const allNipples = manager.get();
-          allNipples.forEach((existingNipple) => {
-            if (existingNipple !== nipple && existingNipple.destroy) {
-              existingNipple.destroy();
-            }
-          });
+          // Guard: nipplejs get() may return object or undefined on some browsers
+          if (allNipples && typeof allNipples.forEach === 'function') {
+            allNipples.forEach((existingNipple) => {
+              if (existingNipple !== nipple && existingNipple.destroy) {
+                existingNipple.destroy();
+              }
+            });
+          }
         }
         attachLookJoystick(nipple);
       };
