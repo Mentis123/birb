@@ -1405,14 +1405,26 @@
       }
 
       try {
+        // TEST: Try oscillator first to see if any audio works
+        const testOsc = ctx.createOscillator();
+        const testGain = ctx.createGain();
+        testOsc.frequency.value = 440; // A4 note
+        testGain.gain.value = 0.3;
+        testOsc.connect(testGain);
+        testGain.connect(ctx.destination);
+        testOsc.start();
+        testOsc.stop(ctx.currentTime + 0.1);
+        console.log('[Audio] TEST BEEP sent!');
+
+        // Now try the buffer
         const source = ctx.createBufferSource();
         source.buffer = rocketFireBuffer;
         const gainNode = ctx.createGain();
-        gainNode.gain.value = 0.6; // Match data3 volume
+        gainNode.gain.value = 0.6;
         source.connect(gainNode);
         gainNode.connect(ctx.destination);
         source.start(0);
-        console.log('[Audio] Rocket fire sound STARTED!');
+        console.log('[Audio] Rocket fire buffer STARTED! Buffer duration:', rocketFireBuffer.duration);
       } catch (e) {
         console.warn('[Audio] Error playing rocket fire sound:', e);
       }
