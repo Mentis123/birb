@@ -338,7 +338,7 @@ export function createFlightControls({
         size: TOUCH_JOYSTICK_SIZE,
         color: '#aac8ff',
         fadeTime: 120,
-        restOpacity: 0.2,
+        restOpacity: 0,
         threshold: 0.05,
       });
 

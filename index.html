@@ -2696,13 +2696,15 @@
 
         // Update nesting system and check if we should apply flight controls
         let isNested = false;
+        let isLanding = false;
         if (nestingSystem) {
           nestingSystem.update(delta, flightController.position);
           isNested = nestingSystem.isNested();
+          isLanding = nestingSystem.getState() === NESTING_STATES.LANDING;
         }
 
-        // Only apply flight controls when not nested
-        if (!isNested) {
+        // Only apply flight controls when not nested or landing (nesting system controls position/orientation during landing)
+        if (!isNested && !isLanding) {
           flightControls.applyAnalogLook(lookDeltaTime);
           flightControls.applyLeftStickPitch(lookDeltaTime);
         }
@@ -2718,10 +2720,10 @@
           }
         }
 
-        const pose = flightController.update(isNested ? 0 : delta);
+        const pose = flightController.update((isNested || isLanding) ? 0 : delta);
 
-        // Apply collision detection with spherical world
-        if (sphericalWorld && sphericalWorld.collisionSystem) {
+        // Apply collision detection with spherical world (skip during landing/nested to prevent nest displacement)
+        if (sphericalWorld && sphericalWorld.collisionSystem && !isNested && !isLanding) {
           const collisionRadius = 0.5; // bird collision radius
           if (sphericalWorld.root?.quaternion) {
             sphericalCollisionFrame.worldRotation.copy(sphericalWorld.root.quaternion);
