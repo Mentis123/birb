@@ -1397,7 +1397,9 @@
       }
 
       // Use pre-generated buffer for instant playback (like data3 click sounds)
-      if (rocketFireBuffer && ctx.state === 'running') {
+      // Note: We try to play even if context isn't 'running' yet - Web Audio will
+      // queue the sound and play it once the async resume() completes
+      if (rocketFireBuffer) {
         try {
           const source = ctx.createBufferSource();
           source.buffer = rocketFireBuffer;
@@ -1412,7 +1414,7 @@
         }
       }
 
-      // Fallback to oscillator if buffer not ready
+      // Fallback to oscillator if buffer not ready (only works if context is running)
       if (ctx.state !== 'running') {
         return;
       }
@@ -1451,12 +1453,9 @@
         ctx.resume().catch(() => {});
       }
 
-      // Only play if context is running - don't block waiting for it
-      if (ctx.state !== 'running') {
-        return;
-      }
-
       // Use pre-generated buffer for instant playback (like data3 pattern)
+      // Note: We try to play even if context isn't 'running' yet - Web Audio will
+      // queue the sound and play it once the async resume() completes
       if (explosionBuffer) {
         try {
           const source = ctx.createBufferSource();
@@ -1472,7 +1471,11 @@
         }
       }
 
-      // Fallback to oscillator if buffer not ready
+      // Fallback to oscillator if buffer not ready (only works if context is running)
+      if (ctx.state !== 'running') {
+        return;
+      }
+
       try {
         const now = ctx.currentTime;
 
