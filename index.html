@@ -1198,16 +1198,10 @@
     let audioContext = null;
     let hasUnlockedAudio = false;
 
-    // Pre-generated audio buffers for instant playback (data3-cisco-live pattern)
+    // Audio buffers loaded from files (data3-cisco-live pattern)
     let rocketFireBuffer = null;
     let explosionBuffer = null;
-    let nestJoinBuffer = null;
-    let buffersGenerated = false;
-    // Track which AudioContext instance the buffers were generated for
-    // Buffers are ONLY valid for the context they were created with
-    let buffersContextId = null;
-    let contextIdCounter = 0;
-    let currentContextId = null;
+    let audioBuffersLoaded = false;
 
     const initAudioContext = () => {
       // Check if existing context is still valid (not closed)
@@ -1215,9 +1209,8 @@
         if (audioContext.state === 'closed') {
           console.log('[Audio] Context was closed, creating new one');
           audioContext = null;
-          currentContextId = null;
-          // Invalidate buffers since they're tied to the old context
-          invalidateAudioBuffers();
+          // Buffers may need reloading if context closed
+          audioBuffersLoaded = false;
         } else {
           return audioContext;
         }
@@ -1228,137 +1221,37 @@
           : null;
       if (!AudioContextCtor) return null;
       audioContext = new AudioContextCtor();
-      currentContextId = ++contextIdCounter;
-      console.log('[Audio] Created new AudioContext, id:', currentContextId, 'state:', audioContext.state);
+      console.log('[Audio] Created new AudioContext, state:', audioContext.state);
       return audioContext;
     };
 
-    // Invalidate buffers - call when context is recreated or becomes invalid
-    const invalidateAudioBuffers = () => {
-      rocketFireBuffer = null;
-      explosionBuffer = null;
-      nestJoinBuffer = null;
-      buffersGenerated = false;
-      buffersContextId = null;
-      console.log('[Audio] Buffers invalidated');
-    };
-
-    // Generate audio buffers once for instant playback on iOS
-    // This follows the data3-cisco-live pattern of pre-loading audio
-    const generateAudioBuffers = (ctx) => {
-      if (!ctx) return;
-
-      // CRITICAL: Buffers are tied to a specific AudioContext instance
-      // If context changed (recreated, closed and reopened), must regenerate
-      if (buffersGenerated && buffersContextId === currentContextId) {
-        return; // Buffers are valid for current context
-      }
-
-      // Buffers need regeneration - either first time or context changed
-      if (buffersGenerated && buffersContextId !== currentContextId) {
-        console.log('[Audio] Context changed (was:', buffersContextId, 'now:', currentContextId, '), regenerating buffers');
-        invalidateAudioBuffers();
-      }
+    // Preload audio buffers from files on page load (data3-cisco-live pattern)
+    // This is called BEFORE any user gestures - buffers load async in background
+    const preloadAudioBuffers = async () => {
+      const ctx = initAudioContext();
+      if (!ctx || audioBuffersLoaded) return;
 
       try {
-        const sampleRate = ctx.sampleRate;
+        console.log('[Audio] Preloading audio files...');
+        const [fireData, explodeData] = await Promise.all([
+          fetch('/sound/rocket-fire.mp3').then(r => r.arrayBuffer()),
+          fetch('/sound/explosion.mp3').then(r => r.arrayBuffer())
+        ]);
 
-        // Generate rocket fire buffer (0.35s sawtooth sweep 280Hz -> 1200Hz)
-        const rocketDuration = 0.35;
-        const rocketSamples = Math.floor(sampleRate * rocketDuration);
-        rocketFireBuffer = ctx.createBuffer(1, rocketSamples, sampleRate);
-        const rocketData = rocketFireBuffer.getChannelData(0);
-        for (let i = 0; i < rocketSamples; i++) {
-          const t = i / sampleRate;
-          // Frequency sweep from 280 to 1200 Hz (exponential)
-          const freq = 280 * Math.pow(1200 / 280, t / 0.18);
-          // Sawtooth wave
-          const phase = (t * freq) % 1;
-          const sawtooth = 2 * phase - 1;
-          // Amplitude envelope (0.35 -> 0.001 exponential decay)
-          const amp = 0.35 * Math.pow(0.001 / 0.35, t / rocketDuration);
-          rocketData[i] = sawtooth * amp;
-        }
+        rocketFireBuffer = await ctx.decodeAudioData(fireData);
+        explosionBuffer = await ctx.decodeAudioData(explodeData);
 
-        // Generate explosion buffer (0.4s multi-component sound)
-        const explosionDuration = 0.4;
-        const explosionSamples = Math.floor(sampleRate * explosionDuration);
-        explosionBuffer = ctx.createBuffer(1, explosionSamples, sampleRate);
-        const explosionData = explosionBuffer.getChannelData(0);
-        for (let i = 0; i < explosionSamples; i++) {
-          const t = i / sampleRate;
-          let sample = 0;
-
-          // Boom component (sine 80Hz -> 30Hz, 0.4s)
-          const boomFreq = 80 * Math.pow(30 / 80, t / 0.3);
-          const boomAmp = t < 0.4 ? 0.5 * Math.pow(0.001 / 0.5, t / 0.4) : 0;
-          sample += Math.sin(2 * Math.PI * boomFreq * t) * boomAmp;
-
-          // Crackle component (sawtooth 400Hz -> 100Hz, 0.2s)
-          if (t < 0.2) {
-            const crackleFreq = 400 * Math.pow(100 / 400, t / 0.15);
-            const cracklePhase = (t * crackleFreq) % 1;
-            const crackleSaw = 2 * cracklePhase - 1;
-            const crackleAmp = 0.3 * Math.pow(0.001 / 0.3, t / 0.2);
-            sample += crackleSaw * crackleAmp;
-          }
-
-          // Pop component (square 600Hz -> 200Hz, 0.1s)
-          if (t < 0.1) {
-            const popFreq = 600 * Math.pow(200 / 600, t / 0.08);
-            const popPhase = (t * popFreq) % 1;
-            const popSquare = popPhase < 0.5 ? 1 : -1;
-            const popAmp = 0.2 * Math.pow(0.001 / 0.2, t / 0.1);
-            sample += popSquare * popAmp;
-          }
-
-          explosionData[i] = sample;
-        }
-
-        // Generate nest join buffer (0.5s pleasant welcoming chime)
-        // A warm, inviting sound to indicate successful nest landing
-        const nestJoinDuration = 0.5;
-        const nestJoinSamples = Math.floor(sampleRate * nestJoinDuration);
-        nestJoinBuffer = ctx.createBuffer(1, nestJoinSamples, sampleRate);
-        const nestJoinData = nestJoinBuffer.getChannelData(0);
-        for (let i = 0; i < nestJoinSamples; i++) {
-          const t = i / sampleRate;
-          let sample = 0;
-
-          // Primary tone - rising major chord arpeggio feel (C5 -> E5 -> G5)
-          // Starts at 523Hz (C5), sweeps to 784Hz (G5)
-          const primaryFreq = 523 * Math.pow(784 / 523, Math.min(t / 0.15, 1));
-          const primaryAmp = 0.25 * Math.exp(-t / 0.35);
-          sample += Math.sin(2 * Math.PI * primaryFreq * t) * primaryAmp;
-
-          // Harmony tone - fifth above, slightly delayed attack
-          const harmonyDelay = 0.03;
-          if (t > harmonyDelay) {
-            const ht = t - harmonyDelay;
-            const harmonyFreq = 659 * Math.pow(988 / 659, Math.min(ht / 0.12, 1)); // E5 -> B5
-            const harmonyAmp = 0.15 * Math.exp(-ht / 0.3);
-            sample += Math.sin(2 * Math.PI * harmonyFreq * ht) * harmonyAmp;
-          }
-
-          // Shimmer/sparkle component - high frequency triangle wave
-          const shimmerFreq = 1200 + 400 * Math.sin(2 * Math.PI * 8 * t); // Vibrato
-          const shimmerPhase = (t * shimmerFreq) % 1;
-          const shimmerTri = Math.abs(4 * shimmerPhase - 2) - 1; // Triangle wave
-          const shimmerAmp = 0.08 * Math.exp(-t / 0.2);
-          sample += shimmerTri * shimmerAmp;
-
-          nestJoinData[i] = sample;
-        }
-
-        buffersGenerated = true;
-        buffersContextId = currentContextId;
-        console.log('[Audio] Pre-generated audio buffers ready for instant playback, contextId:', currentContextId);
+        audioBuffersLoaded = true;
+        console.log('[Audio] Buffers preloaded via decodeAudioData - ready for instant playback');
       } catch (e) {
-        console.warn('[Audio] Failed to generate audio buffers:', e);
-        // Reset state so we can retry
-        invalidateAudioBuffers();
+        console.warn('[Audio] Failed to preload audio files:', e);
+        // Will retry on next call
+        audioBuffersLoaded = false;
       }
     };
+
+    // Start preloading audio as soon as page loads (don't wait for gesture)
+    document.addEventListener('DOMContentLoaded', preloadAudioBuffers);
 
     // Ensure audio context is running - call this before every sound
     const ensureAudioReady = async () => {
@@ -1412,6 +1305,7 @@
 
     // Synchronous audio initialization - MUST be called synchronously from user gesture
     // This is critical for mobile browsers which require audio unlock from gesture context
+    // NOTE: Buffers are already preloaded on DOMContentLoaded - this just unlocks playback
     const initAudioSynchronously = () => {
       const ctx = initAudioContext();
       if (!ctx) return null;
@@ -1435,9 +1329,6 @@
         }
       }
 
-      // Pre-generate audio buffers for instant playback (data3-cisco-live pattern)
-      generateAudioBuffers(ctx);
-
       return ctx;
     };
 
@@ -1446,8 +1337,10 @@
       const ctx = await ensureAudioReady();
       if (!ctx) return;
       await unlockAudioWithSilentBuffer(ctx);
-      // Also generate buffers on async path
-      generateAudioBuffers(ctx);
+      // Ensure buffers are loaded (in case DOMContentLoaded preload failed)
+      if (!audioBuffersLoaded) {
+        preloadAudioBuffers();
+      }
     };
 
     // Keep listeners active to handle re-suspend after tab switches etc.
@@ -1461,8 +1354,7 @@
       }, { passive: true });
     });
 
-    // Play rocket fire sound using pre-generated buffer (data3-cisco-live pattern)
-    // This is MUCH faster and more reliable on iOS than creating oscillators on the fly
+    // Play rocket fire sound using preloaded buffer (data3-cisco-live pattern)
     const playRocketFireSound = () => {
       const ctx = initAudioContext();
       if (!ctx) {
@@ -1475,146 +1367,30 @@
         ctx.resume().catch(() => {});
       }
 
-      // Ensure buffers exist for current context (regenerate if context changed)
-      generateAudioBuffers(ctx);
-
-      // Use pre-generated buffer for instant playback (like data3 click sounds)
-      // Note: We try to play even if context isn't 'running' yet - Web Audio will
-      // queue the sound and play it once the async resume() completes
-      if (rocketFireBuffer && buffersContextId === currentContextId) {
-        try {
-          const source = ctx.createBufferSource();
-          source.buffer = rocketFireBuffer;
-          const gainNode = ctx.createGain();
-          gainNode.gain.value = 1.0;
-          source.connect(gainNode);
-          gainNode.connect(ctx.destination);
-          source.start(0);
-          return;
-        } catch (e) {
-          console.warn('[Audio] Buffer playback failed, falling back to oscillator:', e);
-        }
-      }
-
-      // Fallback to oscillator if buffer not ready (only works if context is running)
-      if (ctx.state !== 'running') {
-        console.warn('[Audio] Cannot play rocket fire - no buffer and context not running. State:', ctx.state, 'BufferExists:', !!rocketFireBuffer, 'ContextMatch:', buffersContextId === currentContextId);
+      // Play from preloaded buffer
+      if (!rocketFireBuffer) {
+        console.warn('[Audio] Rocket fire buffer not loaded yet');
         return;
       }
 
-      console.log('[Audio] Using oscillator fallback for rocket fire sound');
       try {
-        const now = ctx.currentTime;
-        const duration = 0.35;
-        const oscillator = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        oscillator.type = 'sawtooth';
-        oscillator.frequency.setValueAtTime(280, now);
-        oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.18);
-
-        gain.gain.setValueAtTime(0.35, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-
-        oscillator.connect(gain).connect(ctx.destination);
-        oscillator.start(now);
-        oscillator.stop(now + duration);
+        const source = ctx.createBufferSource();
+        source.buffer = rocketFireBuffer;
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = 0.6; // Match data3 volume
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        source.start(0);
       } catch (e) {
         console.warn('[Audio] Error playing rocket fire sound:', e);
       }
     };
 
-    // Play explosion sound using pre-generated buffer (data3-cisco-live pattern)
+    // Play explosion sound using preloaded buffer (data3-cisco-live pattern)
     const playExplosionSound = () => {
       const ctx = initAudioContext();
       if (!ctx) {
         console.warn('[Audio] Cannot play explosion sound - no audio context');
-        return;
-      }
-
-      // If context is suspended, try a non-blocking resume (works on desktop).
-      // On mobile, the firing action should have already unlocked/resumed the audio.
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
-
-      // Ensure buffers exist for current context (regenerate if context changed)
-      generateAudioBuffers(ctx);
-
-      // Use pre-generated buffer for instant playback (like data3 pattern)
-      // Note: We try to play even if context isn't 'running' yet - Web Audio will
-      // queue the sound and play it once the async resume() completes
-      if (explosionBuffer && buffersContextId === currentContextId) {
-        try {
-          const source = ctx.createBufferSource();
-          source.buffer = explosionBuffer;
-          const gainNode = ctx.createGain();
-          gainNode.gain.value = 1.0;
-          source.connect(gainNode);
-          gainNode.connect(ctx.destination);
-          source.start(0);
-          return;
-        } catch (e) {
-          console.warn('[Audio] Buffer playback failed, falling back to oscillator:', e);
-        }
-      }
-
-      // Fallback to oscillator if buffer not ready (only works if context is running)
-      if (ctx.state !== 'running') {
-        console.warn('[Audio] Cannot play explosion - no buffer and context not running. State:', ctx.state, 'BufferExists:', !!explosionBuffer, 'ContextMatch:', buffersContextId === currentContextId);
-        return;
-      }
-
-      console.log('[Audio] Using oscillator fallback for explosion sound');
-      try {
-        const now = ctx.currentTime;
-
-        // Low rumble/boom component - increased volume
-        const boom = ctx.createOscillator();
-        const boomGain = ctx.createGain();
-        boom.type = 'sine';
-        boom.frequency.setValueAtTime(80, now);
-        boom.frequency.exponentialRampToValueAtTime(30, now + 0.3);
-        boomGain.gain.setValueAtTime(0.5, now);
-        boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-        boom.connect(boomGain).connect(ctx.destination);
-        boom.start(now);
-        boom.stop(now + 0.4);
-
-        // Crackle/noise component - increased volume
-        const crackle = ctx.createOscillator();
-        const crackleGain = ctx.createGain();
-        crackle.type = 'sawtooth';
-        crackle.frequency.setValueAtTime(400, now);
-        crackle.frequency.exponentialRampToValueAtTime(100, now + 0.15);
-        crackleGain.gain.setValueAtTime(0.3, now);
-        crackleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-        crackle.connect(crackleGain).connect(ctx.destination);
-        crackle.start(now);
-        crackle.stop(now + 0.2);
-
-        // High frequency pop - increased volume
-        const pop = ctx.createOscillator();
-        const popGain = ctx.createGain();
-        pop.type = 'square';
-        pop.frequency.setValueAtTime(600, now);
-        pop.frequency.exponentialRampToValueAtTime(200, now + 0.08);
-        popGain.gain.setValueAtTime(0.2, now);
-        popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-        pop.connect(popGain).connect(ctx.destination);
-        pop.start(now);
-        pop.stop(now + 0.1);
-      } catch (e) {
-        console.warn('[Audio] Error playing explosion sound:', e);
-      }
-    };
-
-    // Play nest join sound using pre-generated buffer (data3-cisco-live pattern)
-    // Pleasant welcoming chime when player lands in a nest
-    const playNestJoinSound = () => {
-      const ctx = initAudioContext();
-      if (!ctx) {
-        console.warn('[Audio] Cannot play nest join sound - no audio context');
         return;
       }
 
@@ -1623,62 +1399,22 @@
         ctx.resume().catch(() => {});
       }
 
-      // Ensure buffers exist for current context (regenerate if context changed)
-      generateAudioBuffers(ctx);
-
-      // Use pre-generated buffer for instant playback (like data3 pattern)
-      if (nestJoinBuffer && buffersContextId === currentContextId) {
-        try {
-          const source = ctx.createBufferSource();
-          source.buffer = nestJoinBuffer;
-          const gainNode = ctx.createGain();
-          gainNode.gain.value = 0.8; // Slightly lower volume for ambient feel
-          source.connect(gainNode);
-          gainNode.connect(ctx.destination);
-          source.start(0);
-          console.log('[Audio] Playing nest join sound');
-          return;
-        } catch (e) {
-          console.warn('[Audio] Nest join buffer playback failed, falling back to oscillator:', e);
-        }
-      }
-
-      // Fallback to oscillator if buffer not ready (only works if context is running)
-      if (ctx.state !== 'running') {
-        console.warn('[Audio] Cannot play nest join - no buffer and context not running. State:', ctx.state, 'BufferExists:', !!nestJoinBuffer, 'ContextMatch:', buffersContextId === currentContextId);
+      // Play from preloaded buffer
+      if (!explosionBuffer) {
+        console.warn('[Audio] Explosion buffer not loaded yet');
         return;
       }
 
-      console.log('[Audio] Using oscillator fallback for nest join sound');
       try {
-        const now = ctx.currentTime;
-
-        // Primary rising tone
-        const primary = ctx.createOscillator();
-        const primaryGain = ctx.createGain();
-        primary.type = 'sine';
-        primary.frequency.setValueAtTime(523, now); // C5
-        primary.frequency.exponentialRampToValueAtTime(784, now + 0.15); // G5
-        primaryGain.gain.setValueAtTime(0.25, now);
-        primaryGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-        primary.connect(primaryGain).connect(ctx.destination);
-        primary.start(now);
-        primary.stop(now + 0.5);
-
-        // Harmony tone with slight delay
-        const harmony = ctx.createOscillator();
-        const harmonyGain = ctx.createGain();
-        harmony.type = 'sine';
-        harmony.frequency.setValueAtTime(659, now + 0.03); // E5
-        harmony.frequency.exponentialRampToValueAtTime(988, now + 0.15); // B5
-        harmonyGain.gain.setValueAtTime(0, now);
-        harmonyGain.gain.setValueAtTime(0.15, now + 0.03);
-        harmonyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-        harmony.connect(harmonyGain).connect(ctx.destination);
-        harmony.start(now);
-        harmony.stop(now + 0.5);
+        const source = ctx.createBufferSource();
+        source.buffer = explosionBuffer;
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = 0.6; // Match data3 volume
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        source.start(0);
       } catch (e) {
-        console.warn('[Audio] Error playing nest join sound:', e);
+        console.warn('[Audio] Error playing explosion sound:', e);
       }
     };
 
@@ -3343,10 +3079,9 @@
       // Show/hide proximity indicator
       showNestIndicator(isApproaching && !isNested);
 
-      // Show welcome toast and play sound on landing
+      // Show welcome toast on landing
       if (isNested && previousState === NESTING_STATES.LANDING) {
         showNestToast();
-        playNestJoinSound();
       }
 
       // Lock camera to FPV while nested for aiming
