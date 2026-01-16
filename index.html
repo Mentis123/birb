@@ -1384,15 +1384,18 @@
 
     // Play rocket fire sound using preloaded buffer (data3-cisco-live pattern)
     const playRocketFireSound = () => {
+      console.log('[Audio] playRocketFireSound called');
       const ctx = initAudioContext();
       if (!ctx) {
         console.warn('[Audio] Cannot play rocket fire sound - no audio context');
         return;
       }
+      console.log('[Audio] Context state:', ctx.state, 'Buffer exists:', !!rocketFireBuffer);
 
       // Resume if suspended (non-blocking for mobile)
       if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
+        console.log('[Audio] Resuming suspended context...');
+        ctx.resume().catch((e) => console.warn('[Audio] Resume failed:', e));
       }
 
       // Play from preloaded buffer
@@ -1409,6 +1412,7 @@
         source.connect(gainNode);
         gainNode.connect(ctx.destination);
         source.start(0);
+        console.log('[Audio] Rocket fire sound STARTED!');
       } catch (e) {
         console.warn('[Audio] Error playing rocket fire sound:', e);
       }
