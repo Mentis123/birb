@@ -500,6 +500,13 @@ export function createFlightControls({
   const teardownTouchJoysticks = () => {
     detachLookJoystick();
     if (touchJoystickState.manager) {
+      // Explicitly destroy all nipples before destroying manager
+      const allNipples = touchJoystickState.manager.get();
+      allNipples.forEach((nipple) => {
+        if (nipple && nipple.destroy) {
+          nipple.destroy();
+        }
+      });
       if (touchJoystickState.handlers) {
         const { handleAdded, handleRemoved } = touchJoystickState.handlers;
         touchJoystickState.manager.off('added', handleAdded);
@@ -508,6 +515,11 @@ export function createFlightControls({
       touchJoystickState.manager.destroy();
       touchJoystickState.manager = null;
       touchJoystickState.handlers = null;
+    }
+    // Clean up any orphaned nipple DOM elements that might have been left behind
+    if (touchZoneElement) {
+      const orphanedNipples = touchZoneElement.querySelectorAll('.back, .front');
+      orphanedNipples.forEach((el) => el.remove());
     }
     if (touchZoneElement?.classList) {
       touchZoneElement.classList.remove('has-dynamic-joystick');
@@ -522,6 +534,9 @@ export function createFlightControls({
         ? window.matchMedia('(pointer: coarse)').matches
         : true;
     if (!useDynamicTouchJoysticks || !touchZoneElement || !nipplejs || !prefersCoarsePointer) return;
+    // Clean up any orphaned nipple DOM elements before creating new manager
+    const existingNipples = touchZoneElement.querySelectorAll('.back, .front');
+    existingNipples.forEach((el) => el.remove());
     try {
       touchJoystickState.manager = nipplejs.create({
         zone: touchZoneElement,
@@ -530,7 +545,7 @@ export function createFlightControls({
         maxNumberOfNipples: 1,
         size: TOUCH_JOYSTICK_SIZE,
         color: '#aac8ff',
-        fadeTime: 100,
+        fadeTime: 0,
         restOpacity: 0,
         threshold: 0.05,
       });
@@ -539,12 +554,27 @@ export function createFlightControls({
       touchZoneElement.style.touchAction = 'none';
 
       const handleAdded = (event, nipple) => {
+        // Force destroy any other existing nipples to prevent visual duplicates
+        // This handles cases where the old nipple hasn't fully cleaned up yet
+        const manager = touchJoystickState.manager;
+        if (manager) {
+          const allNipples = manager.get();
+          allNipples.forEach((existingNipple) => {
+            if (existingNipple !== nipple && existingNipple.destroy) {
+              existingNipple.destroy();
+            }
+          });
+        }
         attachLookJoystick(nipple);
       };
 
       const handleRemoved = (event, nipple) => {
         // Always detach on removal to prevent stuck joysticks
         detachLookJoystick();
+        // Explicitly destroy the nipple to ensure DOM cleanup
+        if (nipple && nipple.destroy) {
+          nipple.destroy();
+        }
       };
 
       touchJoystickState.manager.on('added', handleAdded);
