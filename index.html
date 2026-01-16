@@ -2784,11 +2784,12 @@
     console.log('🚀 Initializing Flight System');
 
     // 1. Input
-    // NOTE: Touch input is handled by createFlightControls (via nipplejs)
-    // Only use keyboard input here to avoid duplicate nipplejs managers
-    // which would cause joystick visuals to persist on screen
+    // Touch input uses createTouchInput (nipplejs) which feeds into flight.tick()
+    // createFlightControls does NOT get nipplejs to avoid duplicate managers
+    const touchZone = document.querySelector('[data-touch-zone]');
+    const touchInput = touchZone && nipplejs ? createTouchInput(touchZone, nipplejs) : null;
     const keyboardInput = createKeyboardInput();
-    const flightInput = keyboardInput; // Touch handled by flightControls
+    const flightInput = touchInput ? combineInputs(touchInput, keyboardInput) : keyboardInput;
 
     // 2. Flight Physics (BirdFlight)
     const flight = new BirdFlight(THREE, {
@@ -2893,13 +2894,15 @@
       resolvedVelocity: new THREE.Vector3(),
     };
 
+    // NOTE: nipplejs is NOT passed here - touch input is handled by createTouchInput
+    // above, which feeds into flight.tick(). This avoids duplicate nipplejs managers.
     const flightControls = createFlightControls({
       canvas,
       flightController,
       leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
       rightThumbstickElement: document.querySelector('[data-thumbstick="right"]'),
       touchZoneElement: document.querySelector('[data-touch-zone]'),
-      nipplejs,
+      // nipplejs intentionally omitted - touch handled by createTouchInput
       getCameraMode: () => cameraState?.getMode?.(),
       followMode: CAMERA_MODES.FOLLOW,
       onThrustChange: () => updateControlMetrics(),
