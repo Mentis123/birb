@@ -1198,17 +1198,68 @@
       relativeY: 0,
     };
 
-    // ============ AUDIO SYSTEM (HTML Audio for iOS compatibility) ============
+    // ============ AUDIO SYSTEM (Preloaded for instant playback) ============
     let audioUnlocked = false;
-    const activeSounds = new Set(); // Keep references to prevent garbage collection
+
+    // Preload audio files for instant playback (no loading delay)
+    const SOUND_POOL_SIZE = 3; // Multiple instances for overlapping sounds
+    const preloadedSounds = {
+      rocketFire: [],
+      explosion: [],
+    };
+
+    // Create audio pool for a sound
+    const createSoundPool = (src, poolSize, volume) => {
+      const pool = [];
+      for (let i = 0; i < poolSize; i++) {
+        const audio = new Audio(src);
+        audio.volume = volume;
+        audio.preload = 'auto';
+        pool.push({ audio, playing: false });
+      }
+      return pool;
+    };
+
+    // Initialize sound pools (preload immediately)
+    const initSoundPools = () => {
+      preloadedSounds.rocketFire = createSoundPool('/sound/rocket-fire.mp3', SOUND_POOL_SIZE, 0.6);
+      preloadedSounds.explosion = createSoundPool('/sound/explosion.mp3', SOUND_POOL_SIZE, 0.7);
+    };
+    initSoundPools();
+
+    // Play from preloaded pool (instant, no loading delay)
+    const playFromPool = (pool) => {
+      // Find an available audio element
+      let slot = pool.find(s => !s.playing);
+      if (!slot) {
+        // All slots busy, reuse the first one
+        slot = pool[0];
+        slot.audio.currentTime = 0;
+      }
+
+      slot.playing = true;
+      slot.audio.currentTime = 0;
+      slot.audio.play().then(() => {
+        // Mark as available when done
+        slot.audio.addEventListener('ended', () => {
+          slot.playing = false;
+        }, { once: true });
+      }).catch(() => {
+        slot.playing = false;
+      });
+    };
 
     // Unlock audio on first user interaction (required for iOS)
     const unlockAudio = () => {
       if (audioUnlocked) return;
+      // Play silent audio to unlock
       const silence = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
       silence.play().then(() => {
         silence.pause();
         audioUnlocked = true;
+        // Also "warm up" the preloaded sounds by playing them silently
+        preloadedSounds.rocketFire.forEach(s => { s.audio.volume = 0; s.audio.play().then(() => { s.audio.pause(); s.audio.currentTime = 0; s.audio.volume = 0.6; }).catch(() => {}); });
+        preloadedSounds.explosion.forEach(s => { s.audio.volume = 0; s.audio.play().then(() => { s.audio.pause(); s.audio.currentTime = 0; s.audio.volume = 0.7; }).catch(() => {}); });
       }).catch(() => {});
     };
 
@@ -1217,42 +1268,14 @@
       document.addEventListener(event, unlockAudio, { passive: true, once: false });
     });
 
-    // Play a sound and keep reference until it finishes
-    const playSound = (src, volume = 0.6) => {
-      console.log('[Audio] playSound called:', src);
-      try {
-        const audio = new Audio(src);
-        audio.volume = volume;
-        activeSounds.add(audio); // Prevent garbage collection
-        audio.addEventListener('ended', () => {
-          console.log('[Audio] Sound ended:', src);
-          activeSounds.delete(audio); // Clean up when done
-        });
-        audio.addEventListener('error', (e) => {
-          console.warn('[Audio] Sound error:', src, e);
-          activeSounds.delete(audio);
-        });
-        audio.play().then(() => {
-          console.log('[Audio] Playing:', src);
-        }).catch((e) => {
-          console.warn('[Audio] Play failed:', src, e);
-          activeSounds.delete(audio);
-        });
-      } catch (e) {
-        console.error('[Audio] Exception:', e);
-      }
-    };
-
-    // Play rocket fire sound
+    // Play rocket fire sound (instant from preloaded pool)
     const playRocketFireSound = () => {
-      console.log('[Audio] playRocketFireSound called');
-      playSound('/sound/rocket-fire.mp3', 0.6);
+      playFromPool(preloadedSounds.rocketFire);
     };
 
-    // Play explosion sound (always full volume, regardless of distance)
+    // Play explosion sound (instant from preloaded pool)
     const playExplosionSound = () => {
-      console.log('[Audio] playExplosionSound called');
-      playSound('/sound/explosion.mp3', 0.7);
+      playFromPool(preloadedSounds.explosion);
     };
 
     function clamp(value, min, max) {
@@ -2761,11 +2784,11 @@
     console.log('🚀 Initializing Flight System');
 
     // 1. Input
-    const zoneParams = document.querySelector('[data-touch-zone]');
-    // Simplified joystick selector
-    const touchInput = createTouchInput(zoneParams, nipplejs);
+    // NOTE: Touch input is handled by createFlightControls (via nipplejs)
+    // Only use keyboard input here to avoid duplicate nipplejs managers
+    // which would cause joystick visuals to persist on screen
     const keyboardInput = createKeyboardInput();
-    const flightInput = combineInputs(touchInput, keyboardInput);
+    const flightInput = keyboardInput; // Touch handled by flightControls
 
     // 2. Flight Physics (BirdFlight)
     const flight = new BirdFlight(THREE, {

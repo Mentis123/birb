@@ -386,6 +386,8 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
         randomInRange(-0.24, 0.48),
         j * 0.96 * (Math.random() > 0.5 ? 1 : -1)
       );
+      // Exclude clouds from rocket raycasting
+      puff.raycast = () => {};
       cloud.add(puff);
     }
 
@@ -807,6 +809,8 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
         randomInRange(-0.24, 0.36),
         j * 0.82 * (Math.random() > 0.5 ? 1 : -1)
       );
+      // Exclude clouds from rocket raycasting
+      puff.raycast = () => {};
       cloud.add(puff);
     }
 
@@ -1079,6 +1083,8 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
 
   const sphereGround = new THREE.Mesh(sphereGeometry, sphereMaterial);
   sphereGround.name = 'sphere-ground';
+  // Exclude ground from rocket raycasting (rockets should only hit objects like trees/rocks)
+  sphereGround.raycast = () => {};
   root.add(sphereGround);
 
   // Add a subtle grid pattern on the sphere for visibility
@@ -1091,6 +1097,8 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   });
   const gridSphere = new THREE.Mesh(gridGeometry, gridMaterial);
   gridSphere.name = 'sphere-grid';
+  // Exclude grid from rocket raycasting
+  gridSphere.raycast = () => {};
   root.add(gridSphere);
 
   // Multiple light sources to eliminate dark areas
@@ -1179,6 +1187,8 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   const skydome = new THREE.Mesh(skyGeometry, skyMaterial);
   skydome.name = 'sky-sphere';
   skydome.renderOrder = -5;
+  // Exclude sky from rocket raycasting
+  skydome.raycast = () => {};
   root.add(skydome);
 
   // Build environment-specific objects and get nestable positions
