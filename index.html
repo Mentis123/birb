@@ -2976,7 +2976,7 @@
       // CRITICAL: Unlock audio on touchstart - mobile browsers require this
       // touchend is too late for iOS Safari and other mobile browsers
       nestLaunchButton.addEventListener('touchstart', () => {
-        initAudioSynchronously();
+        unlockAudio();
         handleLaunch();
         lastTouchLaunchAt = Date.now();
       }, { passive: true });
@@ -2986,7 +2986,7 @@
       const handleLaunch = () => {
         // CRITICAL: Initialize audio synchronously within gesture context
         // This unlocks audio AND pre-generates buffers for instant playback
-        initAudioSynchronously();
+        unlockAudio();
 
         if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
           const launchPosition = flightController.position.clone();
