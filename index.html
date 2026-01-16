@@ -276,7 +276,7 @@
 
     .canvas-actions {
       position: absolute;
-      inset: var(--space-2) var(--space-2) auto auto;
+      inset: auto var(--space-2) var(--space-2) auto;
       z-index: 3;
       padding: 0.55rem;
       border-radius: 1.1rem;
@@ -681,6 +681,16 @@
       <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
       <div class="canvas-actions" data-draggable-panel>
         <div class="canvas-actions__tray" role="group" aria-label="Display options">
+          <button type="button" class="canvas-action-button environment-toggle" data-control="environment-toggle"
+            aria-label="Cycle environment">
+            <svg class="environment-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
+              <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
+              <path
+                d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25" />
+            </svg>
+            <span class="visually-hidden" data-environment-label>Environment: Forest</span>
+          </button>
           <button type="button" class="canvas-action-button fullscreen-toggle" data-control="fullscreen"
             aria-pressed="false" aria-label="Enter fullscreen">
             <svg class="fullscreen-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
@@ -693,16 +703,6 @@
               <path d="M15 9h4M15 15h4M5 9h4M5 15h4" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <span class="visually-hidden" data-fullscreen-label>Enter Fullscreen</span>
-          </button>
-          <button type="button" class="canvas-action-button environment-toggle" data-control="environment-toggle"
-            aria-label="Cycle environment">
-            <svg class="environment-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
-              <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
-              <path
-                d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25" />
-            </svg>
-            <span class="visually-hidden" data-environment-label>Environment: Forest</span>
           </button>
         </div>
       </div>
