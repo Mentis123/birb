@@ -1405,18 +1405,16 @@
       }
 
       try {
-        // TEST: Try oscillator first to see if any audio works
-        const testOsc = ctx.createOscillator();
-        const testGain = ctx.createGain();
-        testOsc.frequency.value = 440; // A4 note
-        testGain.gain.value = 0.3;
-        testOsc.connect(testGain);
-        testGain.connect(ctx.destination);
-        testOsc.start();
-        testOsc.stop(ctx.currentTime + 0.1);
-        console.log('[Audio] TEST BEEP sent!');
+        // Try HTML Audio element - this is what data3 uses for most sounds
+        const audio = new Audio('/sound/rocket-fire.mp3');
+        audio.volume = 0.6;
+        audio.play().then(() => {
+          console.log('[Audio] HTML Audio PLAYING!');
+        }).catch(e => {
+          console.warn('[Audio] HTML Audio failed:', e);
+        });
 
-        // Now try the buffer
+        // Also try Web Audio buffer as backup
         const source = ctx.createBufferSource();
         source.buffer = rocketFireBuffer;
         const gainNode = ctx.createGain();
@@ -1424,7 +1422,7 @@
         source.connect(gainNode);
         gainNode.connect(ctx.destination);
         source.start(0);
-        console.log('[Audio] Rocket fire buffer STARTED! Buffer duration:', rocketFireBuffer.duration);
+        console.log('[Audio] Web Audio buffer started, duration:', rocketFireBuffer.duration);
       } catch (e) {
         console.warn('[Audio] Error playing rocket fire sound:', e);
       }
