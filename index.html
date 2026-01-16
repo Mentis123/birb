@@ -904,6 +904,9 @@
       }
     }
   </style>
+  <!-- Mobile debug console -->
+  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+  <script>eruda.init();</script>
 </head>
 
 <body>
@@ -1216,31 +1219,39 @@
 
     // Play a sound and keep reference until it finishes
     const playSound = (src, volume = 0.6) => {
+      console.log('[Audio] playSound called:', src);
       try {
         const audio = new Audio(src);
         audio.volume = volume;
         activeSounds.add(audio); // Prevent garbage collection
         audio.addEventListener('ended', () => {
+          console.log('[Audio] Sound ended:', src);
           activeSounds.delete(audio); // Clean up when done
         });
-        audio.addEventListener('error', () => {
+        audio.addEventListener('error', (e) => {
+          console.warn('[Audio] Sound error:', src, e);
           activeSounds.delete(audio);
         });
-        audio.play().catch(() => {
+        audio.play().then(() => {
+          console.log('[Audio] Playing:', src);
+        }).catch((e) => {
+          console.warn('[Audio] Play failed:', src, e);
           activeSounds.delete(audio);
         });
       } catch (e) {
-        // Silent fail
+        console.error('[Audio] Exception:', e);
       }
     };
 
     // Play rocket fire sound
     const playRocketFireSound = () => {
+      console.log('[Audio] playRocketFireSound called');
       playSound('/sound/rocket-fire.mp3', 0.6);
     };
 
     // Play explosion sound (always full volume, regardless of distance)
     const playExplosionSound = () => {
+      console.log('[Audio] playExplosionSound called');
       playSound('/sound/explosion.mp3', 0.7);
     };
 
