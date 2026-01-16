@@ -108,9 +108,10 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
       targetPosition.copy(nearestNest.userData.landingPosition);
       targetQuaternion.copy(nearestNest.userData.landingQuaternion);
 
-      // Offset landing position slightly above the nest
+      // Offset landing position slightly above the nest surface
+      // Use a small offset to account for bird collision radius
       const surfaceNormal = nearestNest.userData.surfaceNormal;
-      targetPosition.addScaledVector(surfaceNormal, 0.5);
+      targetPosition.addScaledVector(surfaceNormal, 0.1);
 
       setState(NESTING_STATES.LANDING);
       nestPointsSystem.setNestOccupied(currentNest, true);

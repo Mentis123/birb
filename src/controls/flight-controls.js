@@ -531,6 +531,28 @@ export function createFlightControls({
 
     detachLookJoystick();
 
+    // Destroy any active nipplejs joysticks and show ghost thumbstick
+    if (touchJoystickState.manager) {
+      const activeNipples = touchJoystickState.manager.get();
+      if (activeNipples && activeNipples.length > 0) {
+        activeNipples.forEach((nipple) => {
+          try {
+            touchJoystickState.manager.destroy(nipple);
+          } catch (e) {
+            // Ignore destruction errors
+          }
+        });
+      }
+    }
+
+    // Ensure ghost thumbstick is visible again
+    if (touchZoneElement) {
+      const ghostThumbstick = touchZoneElement.querySelector('.thumbstick');
+      if (ghostThumbstick) {
+        ghostThumbstick.classList.remove('is-hidden');
+      }
+    }
+
     leftThumbstick?.reset?.();
     rightThumbstick?.reset?.();
 

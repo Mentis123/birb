@@ -2527,6 +2527,7 @@
       // Initialize nesting system with state change callback
       const handleNestingStateChange = (newState, previousState, currentNest) => {
         const isNested = newState === NESTING_STATES.NESTED;
+        const isLanding = newState === NESTING_STATES.LANDING;
         const isApproaching = newState === NESTING_STATES.APPROACHING;
 
         // Show/hide nest mode UI
@@ -2534,6 +2535,11 @@
 
         // Show/hide proximity indicator
         showNestIndicator(isApproaching && !isNested);
+
+        // Reset flight controls when landing or nested to clear any active joysticks
+        if (isLanding || isNested) {
+          flightControls.reset();
+        }
 
         // Show welcome toast on first landing
         if (isNested && previousState === NESTING_STATES.LANDING) {
