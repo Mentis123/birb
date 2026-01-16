@@ -3235,10 +3235,14 @@
     }
 
     if (nestLaunchButton) {
+      let lastTouchLaunchAt = 0;
+
       // CRITICAL: Unlock audio on touchstart - mobile browsers require this
       // touchend is too late for iOS Safari and other mobile browsers
       nestLaunchButton.addEventListener('touchstart', () => {
         initAudioSynchronously();
+        handleLaunch();
+        lastTouchLaunchAt = Date.now();
       }, { passive: true });
 
       // Synchronous launch handler (data3-cisco-live pattern)
@@ -3260,10 +3264,14 @@
         }
       };
 
-      nestLaunchButton.addEventListener('click', handleLaunch);
+      nestLaunchButton.addEventListener('click', () => {
+        if (Date.now() - lastTouchLaunchAt < 600) {
+          return;
+        }
+        handleLaunch();
+      });
       nestLaunchButton.addEventListener('touchend', (e) => {
         e.preventDefault();
-        handleLaunch();
       });
     }
 
