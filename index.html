@@ -1225,33 +1225,57 @@
       return audioContext;
     };
 
-    // Preload audio buffers from files on page load (data3-cisco-live pattern)
-    // This is called BEFORE any user gestures - buffers load async in background
-    const preloadAudioBuffers = async () => {
-      const ctx = initAudioContext();
-      if (!ctx || audioBuffersLoaded) return;
+    // Prefetch audio files on page load (safe - no AudioContext needed)
+    // iOS REQUIRES AudioContext to be created within a user gesture
+    let prefetchedFireData = null;
+    let prefetchedExplodeData = null;
+    let prefetchComplete = false;
 
+    const prefetchAudioFiles = async () => {
+      if (prefetchComplete) return;
       try {
-        console.log('[Audio] Preloading audio files...');
+        console.log('[Audio] Prefetching audio files...');
         const [fireData, explodeData] = await Promise.all([
           fetch('/sound/rocket-fire.mp3').then(r => r.arrayBuffer()),
           fetch('/sound/explosion.mp3').then(r => r.arrayBuffer())
         ]);
-
-        rocketFireBuffer = await ctx.decodeAudioData(fireData);
-        explosionBuffer = await ctx.decodeAudioData(explodeData);
-
-        audioBuffersLoaded = true;
-        console.log('[Audio] Buffers preloaded via decodeAudioData - ready for instant playback');
+        prefetchedFireData = fireData;
+        prefetchedExplodeData = explodeData;
+        prefetchComplete = true;
+        console.log('[Audio] Audio files prefetched (decode pending until first gesture)');
       } catch (e) {
-        console.warn('[Audio] Failed to preload audio files:', e);
-        // Will retry on next call
-        audioBuffersLoaded = false;
+        console.warn('[Audio] Failed to prefetch audio files:', e);
       }
     };
 
-    // Start preloading audio as soon as page loads (don't wait for gesture)
-    document.addEventListener('DOMContentLoaded', preloadAudioBuffers);
+    // Start prefetch early (safe - no AudioContext created yet)
+    document.addEventListener('DOMContentLoaded', prefetchAudioFiles);
+
+    // Decode buffers - called AFTER context created in gesture
+    const decodeAudioBuffers = async (ctx) => {
+      if (!ctx || audioBuffersLoaded) return;
+
+      // Wait for prefetch if not done
+      if (!prefetchComplete) {
+        await prefetchAudioFiles();
+      }
+      if (!prefetchedFireData || !prefetchedExplodeData) {
+        console.warn('[Audio] Prefetch failed, cannot decode');
+        return;
+      }
+
+      try {
+        console.log('[Audio] Decoding audio buffers...');
+        // Clone ArrayBuffers since decodeAudioData consumes them
+        rocketFireBuffer = await ctx.decodeAudioData(prefetchedFireData.slice(0));
+        explosionBuffer = await ctx.decodeAudioData(prefetchedExplodeData.slice(0));
+        audioBuffersLoaded = true;
+        console.log('[Audio] Buffers decoded - ready for instant playback!');
+      } catch (e) {
+        console.warn('[Audio] Failed to decode audio buffers:', e);
+        audioBuffersLoaded = false;
+      }
+    };
 
     // Ensure audio context is running - call this before every sound
     const ensureAudioReady = async () => {
@@ -1304,8 +1328,8 @@
     };
 
     // Synchronous audio initialization - MUST be called synchronously from user gesture
-    // This is critical for mobile browsers which require audio unlock from gesture context
-    // NOTE: Buffers are already preloaded on DOMContentLoaded - this just unlocks playback
+    // iOS REQUIRES AudioContext creation to happen within gesture context
+    // This creates context + unlocks, then async path decodes the prefetched buffers
     const initAudioSynchronously = () => {
       const ctx = initAudioContext();
       if (!ctx) return null;
@@ -1333,13 +1357,14 @@
     };
 
     // Pre-initialize and unlock audio on first user interaction
+    // iOS: Context MUST be created in gesture, then we can decode buffers
     const initAudioOnInteraction = async () => {
       const ctx = await ensureAudioReady();
       if (!ctx) return;
       await unlockAudioWithSilentBuffer(ctx);
-      // Ensure buffers are loaded (in case DOMContentLoaded preload failed)
+      // Decode buffers now that we have a valid context from gesture
       if (!audioBuffersLoaded) {
-        preloadAudioBuffers();
+        await decodeAudioBuffers(ctx);
       }
     };
 
