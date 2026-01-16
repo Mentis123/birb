@@ -1197,11 +1197,11 @@
 
     // ============ AUDIO SYSTEM (HTML Audio for iOS compatibility) ============
     let audioUnlocked = false;
+    const activeSounds = new Set(); // Keep references to prevent garbage collection
 
     // Unlock audio on first user interaction (required for iOS)
     const unlockAudio = () => {
       if (audioUnlocked) return;
-      // Play and immediately pause a silent audio to unlock iOS audio
       const silence = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
       silence.play().then(() => {
         silence.pause();
@@ -1214,26 +1214,34 @@
       document.addEventListener(event, unlockAudio, { passive: true, once: false });
     });
 
-    // Play rocket fire sound
-    const playRocketFireSound = () => {
+    // Play a sound and keep reference until it finishes
+    const playSound = (src, volume = 0.6) => {
       try {
-        const audio = new Audio('/sound/rocket-fire.mp3');
-        audio.volume = 0.6;
-        audio.play().catch(() => {});
+        const audio = new Audio(src);
+        audio.volume = volume;
+        activeSounds.add(audio); // Prevent garbage collection
+        audio.addEventListener('ended', () => {
+          activeSounds.delete(audio); // Clean up when done
+        });
+        audio.addEventListener('error', () => {
+          activeSounds.delete(audio);
+        });
+        audio.play().catch(() => {
+          activeSounds.delete(audio);
+        });
       } catch (e) {
         // Silent fail
       }
     };
 
+    // Play rocket fire sound
+    const playRocketFireSound = () => {
+      playSound('/sound/rocket-fire.mp3', 0.6);
+    };
+
     // Play explosion sound (always full volume, regardless of distance)
     const playExplosionSound = () => {
-      try {
-        const audio = new Audio('/sound/explosion.mp3');
-        audio.volume = 0.7;
-        audio.play().catch(() => {});
-      } catch (e) {
-        // Silent fail
-      }
+      playSound('/sound/explosion.mp3', 0.7);
     };
 
     function clamp(value, min, max) {
