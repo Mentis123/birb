@@ -1198,6 +1198,11 @@
     let audioContext = null;
     let hasUnlockedAudio = false;
 
+    // Pre-generated audio buffers for instant playback (data3-cisco-live pattern)
+    let rocketFireBuffer = null;
+    let explosionBuffer = null;
+    let buffersGenerated = false;
+
     const initAudioContext = () => {
       if (audioContext) return audioContext;
       const AudioContextCtor =
@@ -1207,6 +1212,73 @@
       if (!AudioContextCtor) return null;
       audioContext = new AudioContextCtor();
       return audioContext;
+    };
+
+    // Generate audio buffers once for instant playback on iOS
+    // This follows the data3-cisco-live pattern of pre-loading audio
+    const generateAudioBuffers = (ctx) => {
+      if (buffersGenerated || !ctx) return;
+
+      try {
+        const sampleRate = ctx.sampleRate;
+
+        // Generate rocket fire buffer (0.35s sawtooth sweep 280Hz -> 1200Hz)
+        const rocketDuration = 0.35;
+        const rocketSamples = Math.floor(sampleRate * rocketDuration);
+        rocketFireBuffer = ctx.createBuffer(1, rocketSamples, sampleRate);
+        const rocketData = rocketFireBuffer.getChannelData(0);
+        for (let i = 0; i < rocketSamples; i++) {
+          const t = i / sampleRate;
+          // Frequency sweep from 280 to 1200 Hz (exponential)
+          const freq = 280 * Math.pow(1200 / 280, t / 0.18);
+          // Sawtooth wave
+          const phase = (t * freq) % 1;
+          const sawtooth = 2 * phase - 1;
+          // Amplitude envelope (0.35 -> 0.001 exponential decay)
+          const amp = 0.35 * Math.pow(0.001 / 0.35, t / rocketDuration);
+          rocketData[i] = sawtooth * amp;
+        }
+
+        // Generate explosion buffer (0.4s multi-component sound)
+        const explosionDuration = 0.4;
+        const explosionSamples = Math.floor(sampleRate * explosionDuration);
+        explosionBuffer = ctx.createBuffer(1, explosionSamples, sampleRate);
+        const explosionData = explosionBuffer.getChannelData(0);
+        for (let i = 0; i < explosionSamples; i++) {
+          const t = i / sampleRate;
+          let sample = 0;
+
+          // Boom component (sine 80Hz -> 30Hz, 0.4s)
+          const boomFreq = 80 * Math.pow(30 / 80, t / 0.3);
+          const boomAmp = t < 0.4 ? 0.5 * Math.pow(0.001 / 0.5, t / 0.4) : 0;
+          sample += Math.sin(2 * Math.PI * boomFreq * t) * boomAmp;
+
+          // Crackle component (sawtooth 400Hz -> 100Hz, 0.2s)
+          if (t < 0.2) {
+            const crackleFreq = 400 * Math.pow(100 / 400, t / 0.15);
+            const cracklePhase = (t * crackleFreq) % 1;
+            const crackleSaw = 2 * cracklePhase - 1;
+            const crackleAmp = 0.3 * Math.pow(0.001 / 0.3, t / 0.2);
+            sample += crackleSaw * crackleAmp;
+          }
+
+          // Pop component (square 600Hz -> 200Hz, 0.1s)
+          if (t < 0.1) {
+            const popFreq = 600 * Math.pow(200 / 600, t / 0.08);
+            const popPhase = (t * popFreq) % 1;
+            const popSquare = popPhase < 0.5 ? 1 : -1;
+            const popAmp = 0.2 * Math.pow(0.001 / 0.2, t / 0.1);
+            sample += popSquare * popAmp;
+          }
+
+          explosionData[i] = sample;
+        }
+
+        buffersGenerated = true;
+        console.log('[Audio] Pre-generated audio buffers ready for instant playback');
+      } catch (e) {
+        console.warn('[Audio] Failed to generate audio buffers:', e);
+      }
     };
 
     // Ensure audio context is running - call this before every sound
@@ -1284,6 +1356,9 @@
         }
       }
 
+      // Pre-generate audio buffers for instant playback (data3-cisco-live pattern)
+      generateAudioBuffers(ctx);
+
       return ctx;
     };
 
@@ -1292,6 +1367,8 @@
       const ctx = await ensureAudioReady();
       if (!ctx) return;
       await unlockAudioWithSilentBuffer(ctx);
+      // Also generate buffers on async path
+      generateAudioBuffers(ctx);
     };
 
     // Keep listeners active to handle re-suspend after tab switches etc.
@@ -1305,10 +1382,38 @@
       }, { passive: true });
     });
 
-    const playRocketFireSound = async () => {
-      const ctx = await ensureAudioReady();
+    // Play rocket fire sound using pre-generated buffer (data3-cisco-live pattern)
+    // This is MUCH faster and more reliable on iOS than creating oscillators on the fly
+    const playRocketFireSound = () => {
+      const ctx = initAudioContext();
       if (!ctx) {
-        console.warn('[Audio] Cannot play rocket fire sound - audio context not ready');
+        console.warn('[Audio] Cannot play rocket fire sound - no audio context');
+        return;
+      }
+
+      // Resume if suspended (non-blocking for mobile)
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      // Use pre-generated buffer for instant playback (like data3 click sounds)
+      if (rocketFireBuffer && ctx.state === 'running') {
+        try {
+          const source = ctx.createBufferSource();
+          source.buffer = rocketFireBuffer;
+          const gainNode = ctx.createGain();
+          gainNode.gain.value = 1.0;
+          source.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          source.start(0);
+          return;
+        } catch (e) {
+          console.warn('[Audio] Buffer playback failed, falling back to oscillator:', e);
+        }
+      }
+
+      // Fallback to oscillator if buffer not ready
+      if (ctx.state !== 'running') {
         return;
       }
 
@@ -1322,7 +1427,6 @@
         oscillator.frequency.setValueAtTime(280, now);
         oscillator.frequency.exponentialRampToValueAtTime(1200, now + 0.18);
 
-        // Increased volume for better audibility
         gain.gain.setValueAtTime(0.35, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
@@ -1334,9 +1438,8 @@
       }
     };
 
-    const playExplosionSound = async () => {
-      // For explosion sounds (called from animation loop, not user gesture),
-      // we can't resume the audio context on mobile. Just check if it's already running.
+    // Play explosion sound using pre-generated buffer (data3-cisco-live pattern)
+    const playExplosionSound = () => {
       const ctx = initAudioContext();
       if (!ctx) {
         return; // No audio context available
@@ -1353,6 +1456,23 @@
         return;
       }
 
+      // Use pre-generated buffer for instant playback (like data3 pattern)
+      if (explosionBuffer) {
+        try {
+          const source = ctx.createBufferSource();
+          source.buffer = explosionBuffer;
+          const gainNode = ctx.createGain();
+          gainNode.gain.value = 1.0;
+          source.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          source.start(0);
+          return;
+        } catch (e) {
+          console.warn('[Audio] Buffer playback failed, falling back to oscillator:', e);
+        }
+      }
+
+      // Fallback to oscillator if buffer not ready
       try {
         const now = ctx.currentTime;
 
@@ -3040,8 +3160,8 @@
 
     // Initialize rocket system with explosion sound callback
     rocketSystem = createRocketSystem(THREE, scene, {
-      onExplosion: async () => {
-        await playExplosionSound();
+      onExplosion: () => {
+        playExplosionSound();
       },
     });
 
@@ -3118,20 +3238,20 @@
         initAudioSynchronously();
       }, { passive: true });
 
-      const handleLaunch = async () => {
-        // CRITICAL: Call synchronous audio init FIRST, before any awaits
-        // This must happen within the user gesture's synchronous call stack
+      // Synchronous launch handler (data3-cisco-live pattern)
+      // Keep everything in the gesture call stack for iOS audio to work
+      const handleLaunch = () => {
+        // CRITICAL: Initialize audio synchronously within gesture context
+        // This unlocks audio AND pre-generates buffers for instant playback
         initAudioSynchronously();
-
-        // Now safe to use async operations
-        await initAudioOnInteraction();
 
         if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
           const launchPosition = flightController.position.clone();
           const launchDirection = nestingSystem.getLookDirection();
           const fired = rocketSystem.fire(launchPosition, launchDirection);
           if (fired) {
-            await playRocketFireSound();
+            // Play sound synchronously using pre-generated buffer
+            playRocketFireSound();
             updateLaunchButtonCooldown(true);
           }
         }
