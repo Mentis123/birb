@@ -1203,22 +1203,62 @@
     let explosionBuffer = null;
     let nestJoinBuffer = null;
     let buffersGenerated = false;
+    // Track which AudioContext instance the buffers were generated for
+    // Buffers are ONLY valid for the context they were created with
+    let buffersContextId = null;
+    let contextIdCounter = 0;
+    let currentContextId = null;
 
     const initAudioContext = () => {
-      if (audioContext) return audioContext;
+      // Check if existing context is still valid (not closed)
+      if (audioContext) {
+        if (audioContext.state === 'closed') {
+          console.log('[Audio] Context was closed, creating new one');
+          audioContext = null;
+          currentContextId = null;
+          // Invalidate buffers since they're tied to the old context
+          invalidateAudioBuffers();
+        } else {
+          return audioContext;
+        }
+      }
       const AudioContextCtor =
         typeof window !== 'undefined'
           ? window.AudioContext || window.webkitAudioContext
           : null;
       if (!AudioContextCtor) return null;
       audioContext = new AudioContextCtor();
+      currentContextId = ++contextIdCounter;
+      console.log('[Audio] Created new AudioContext, id:', currentContextId, 'state:', audioContext.state);
       return audioContext;
+    };
+
+    // Invalidate buffers - call when context is recreated or becomes invalid
+    const invalidateAudioBuffers = () => {
+      rocketFireBuffer = null;
+      explosionBuffer = null;
+      nestJoinBuffer = null;
+      buffersGenerated = false;
+      buffersContextId = null;
+      console.log('[Audio] Buffers invalidated');
     };
 
     // Generate audio buffers once for instant playback on iOS
     // This follows the data3-cisco-live pattern of pre-loading audio
     const generateAudioBuffers = (ctx) => {
-      if (buffersGenerated || !ctx) return;
+      if (!ctx) return;
+
+      // CRITICAL: Buffers are tied to a specific AudioContext instance
+      // If context changed (recreated, closed and reopened), must regenerate
+      if (buffersGenerated && buffersContextId === currentContextId) {
+        return; // Buffers are valid for current context
+      }
+
+      // Buffers need regeneration - either first time or context changed
+      if (buffersGenerated && buffersContextId !== currentContextId) {
+        console.log('[Audio] Context changed (was:', buffersContextId, 'now:', currentContextId, '), regenerating buffers');
+        invalidateAudioBuffers();
+      }
 
       try {
         const sampleRate = ctx.sampleRate;
@@ -1311,9 +1351,12 @@
         }
 
         buffersGenerated = true;
-        console.log('[Audio] Pre-generated audio buffers ready for instant playback');
+        buffersContextId = currentContextId;
+        console.log('[Audio] Pre-generated audio buffers ready for instant playback, contextId:', currentContextId);
       } catch (e) {
         console.warn('[Audio] Failed to generate audio buffers:', e);
+        // Reset state so we can retry
+        invalidateAudioBuffers();
       }
     };
 
@@ -1432,10 +1475,13 @@
         ctx.resume().catch(() => {});
       }
 
+      // Ensure buffers exist for current context (regenerate if context changed)
+      generateAudioBuffers(ctx);
+
       // Use pre-generated buffer for instant playback (like data3 click sounds)
       // Note: We try to play even if context isn't 'running' yet - Web Audio will
       // queue the sound and play it once the async resume() completes
-      if (rocketFireBuffer) {
+      if (rocketFireBuffer && buffersContextId === currentContextId) {
         try {
           const source = ctx.createBufferSource();
           source.buffer = rocketFireBuffer;
@@ -1452,9 +1498,11 @@
 
       // Fallback to oscillator if buffer not ready (only works if context is running)
       if (ctx.state !== 'running') {
+        console.warn('[Audio] Cannot play rocket fire - no buffer and context not running. State:', ctx.state, 'BufferExists:', !!rocketFireBuffer, 'ContextMatch:', buffersContextId === currentContextId);
         return;
       }
 
+      console.log('[Audio] Using oscillator fallback for rocket fire sound');
       try {
         const now = ctx.currentTime;
         const duration = 0.35;
@@ -1480,7 +1528,8 @@
     const playExplosionSound = () => {
       const ctx = initAudioContext();
       if (!ctx) {
-        return; // No audio context available
+        console.warn('[Audio] Cannot play explosion sound - no audio context');
+        return;
       }
 
       // If context is suspended, try a non-blocking resume (works on desktop).
@@ -1489,10 +1538,13 @@
         ctx.resume().catch(() => {});
       }
 
+      // Ensure buffers exist for current context (regenerate if context changed)
+      generateAudioBuffers(ctx);
+
       // Use pre-generated buffer for instant playback (like data3 pattern)
       // Note: We try to play even if context isn't 'running' yet - Web Audio will
       // queue the sound and play it once the async resume() completes
-      if (explosionBuffer) {
+      if (explosionBuffer && buffersContextId === currentContextId) {
         try {
           const source = ctx.createBufferSource();
           source.buffer = explosionBuffer;
@@ -1509,9 +1561,11 @@
 
       // Fallback to oscillator if buffer not ready (only works if context is running)
       if (ctx.state !== 'running') {
+        console.warn('[Audio] Cannot play explosion - no buffer and context not running. State:', ctx.state, 'BufferExists:', !!explosionBuffer, 'ContextMatch:', buffersContextId === currentContextId);
         return;
       }
 
+      console.log('[Audio] Using oscillator fallback for explosion sound');
       try {
         const now = ctx.currentTime;
 
@@ -1569,8 +1623,11 @@
         ctx.resume().catch(() => {});
       }
 
+      // Ensure buffers exist for current context (regenerate if context changed)
+      generateAudioBuffers(ctx);
+
       // Use pre-generated buffer for instant playback (like data3 pattern)
-      if (nestJoinBuffer) {
+      if (nestJoinBuffer && buffersContextId === currentContextId) {
         try {
           const source = ctx.createBufferSource();
           source.buffer = nestJoinBuffer;
@@ -1588,9 +1645,11 @@
 
       // Fallback to oscillator if buffer not ready (only works if context is running)
       if (ctx.state !== 'running') {
+        console.warn('[Audio] Cannot play nest join - no buffer and context not running. State:', ctx.state, 'BufferExists:', !!nestJoinBuffer, 'ContextMatch:', buffersContextId === currentContextId);
         return;
       }
 
+      console.log('[Audio] Using oscillator fallback for nest join sound');
       try {
         const now = ctx.currentTime;
 
