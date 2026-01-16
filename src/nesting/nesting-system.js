@@ -204,6 +204,11 @@ export function createNestingSystem(THREE, { flightController, nestPointsSystem,
         }
 
         case NESTING_STATES.LANDING: {
+          // Disable BirdFlight speed-based movement during auto-fly (nesting system controls position)
+          if (typeof flightController.setSpeed === 'function') {
+            flightController.setSpeed(0);
+          }
+
           // Auto-fly toward the nest
           const toTarget = _tempVec.copy(targetPosition).sub(flightController.position);
           const distance = toTarget.length();
