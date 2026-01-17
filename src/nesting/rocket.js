@@ -374,6 +374,20 @@ export function createRocketSystem(THREE, scene, options = {}) {
     },
 
     /**
+     * Create an explosion at a position (for external use, e.g., drone destruction)
+     */
+    createExplosionAt(position) {
+      createExplosion(position);
+    },
+
+    /**
+     * Get all active rockets (for external collision checking)
+     */
+    getRockets() {
+      return rockets;
+    },
+
+    /**
      * Reset system (clear all rockets, reset cooldown)
      */
     reset() {

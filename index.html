@@ -414,13 +414,6 @@
       height: 100%;
     }
 
-    .canvas-wrapper.is-fullscreen .canvas-actions {
-      top: max(env(safe-area-inset-top, 0), clamp(0.75rem, 3vw, 1.4rem));
-      right: max(env(safe-area-inset-right, 0), clamp(0.75rem, 3vw, 1.4rem));
-      bottom: auto;
-      left: auto;
-    }
-
     .canvas-wrapper.is-fullscreen .touch-controls {
       bottom: max(env(safe-area-inset-bottom, 0), var(--space-2));
       left: env(safe-area-inset-left, 0);
@@ -436,12 +429,6 @@
       box-shadow: none;
       padding-bottom: clamp(3rem, 14vw, 4.5rem);
     }
-
-    .canvas-wrapper:fullscreen .canvas-actions,
-    .canvas-wrapper:-webkit-full-screen .canvas-actions {
-      inset: clamp(0.75rem, 3vw, 1.4rem) clamp(0.75rem, 3vw, 1.4rem) auto auto;
-    }
-
 
     @media (pointer: coarse) {
       .touch-controls {
@@ -645,6 +632,68 @@
       background: rgba(255, 80, 50, 0.3);
     }
 
+    /* Freeze indicator - shows when birb collides with drone */
+    .freeze-indicator {
+      position: fixed;
+      bottom: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      z-index: 100;
+    }
+
+    .freeze-indicator.is-visible {
+      opacity: 1;
+    }
+
+    .freeze-indicator.is-frozen {
+      animation: freeze-pulse 0.5s ease-in-out infinite;
+    }
+
+    @keyframes freeze-pulse {
+      0%, 100% { transform: translateX(-50%) scale(1); }
+      50% { transform: translateX(-50%) scale(1.1); }
+    }
+
+    .freeze-progress-ring {
+      width: 64px;
+      height: 64px;
+    }
+
+    .freeze-progress-ring svg {
+      transform: rotate(-90deg);
+      width: 100%;
+      height: 100%;
+    }
+
+    .freeze-bg {
+      fill: none;
+      stroke: rgba(100, 200, 255, 0.3);
+      stroke-width: 3;
+    }
+
+    .freeze-progress {
+      fill: none;
+      stroke: #4dc3ff;
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-dasharray: 100, 100;
+      stroke-dashoffset: 0;
+      transition: stroke-dashoffset 0.1s linear;
+    }
+
+    .freeze-icon {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      color: #4dc3ff;
+      text-shadow: 0 0 10px rgba(77, 195, 255, 0.8);
+    }
+
     @media (min-width: 48rem) {
       main {
         padding-bottom: calc(var(--space-4) + 5.5rem);
@@ -748,6 +797,17 @@
       <button type="button" class="nest-indicator" data-nest-indicator aria-label="Land on nest">
         Nest nearby - Tap to land
       </button>
+
+      <!-- Freeze indicator (shows when birb collides with drone) -->
+      <div class="freeze-indicator" data-freeze-indicator aria-hidden="true">
+        <div class="freeze-progress-ring">
+          <svg viewBox="0 0 36 36">
+            <path class="freeze-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+            <path class="freeze-progress" data-freeze-progress d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+          </svg>
+        </div>
+        <span class="freeze-icon">&#x2744;</span>
+      </div>
     </div>
   </main>
   <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
@@ -823,6 +883,8 @@
       AimRig = aimRigModule.AimRig;
       const rocketModule = await import("./src/nesting/rocket.js");
       var createRocketSystem = rocketModule.createRocketSystem;
+      const droneModule = await import("./src/nesting/drone-system.js");
+      var createDroneSystem = droneModule.createDroneSystem;
       const gltfLoaderModule = await import(
         "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
       );
@@ -1301,6 +1363,7 @@
 
     // Hoisted variables to prevent ReferenceErrors
     let flightController = null;
+    let flightControls = null;
     const CAMERA_MODE_SEQUENCE = ['follow', 'fpv'];
     let cameraModeIndex = 0;
     let preferredCameraMode = 'follow';
@@ -1316,7 +1379,126 @@
     let nestPointsSystem = null;
     let nestingSystem = null;
     let rocketSystem = null;
+    let droneSystem = null;
     let nestToastTimeout = null;
+
+    // Freeze state (when birb collides with drone)
+    const freezeState = {
+      isFrozen: false,
+      freezeTimer: 0,
+      freezeDuration: 3.0,
+      cooldownTimer: 0,
+      cooldownDuration: 2.0,
+      flashPhase: 0,
+      savedSpeed: null,
+    };
+
+    // Freeze UI elements
+    const freezeIndicator = document.querySelector('[data-freeze-indicator]');
+    const freezeProgress = document.querySelector('[data-freeze-progress]');
+
+    function showFreezeUI(visible) {
+      if (freezeIndicator) {
+        freezeIndicator.classList.toggle('is-visible', visible);
+        freezeIndicator.classList.toggle('is-frozen', freezeState.isFrozen);
+      }
+    }
+
+    function updateFreezeUI(progress) {
+      if (freezeProgress) {
+        // SVG circle uses stroke-dashoffset for progress
+        const dashOffset = 100 * (1 - progress);
+        freezeProgress.style.strokeDashoffset = dashOffset;
+      }
+    }
+
+    // birbAnchor is defined later in the script - these functions work because
+    // they're closures that capture outer scope variables when called
+    let birbAnchor = null; // Hoisted - will be assigned later
+
+    function updateBirbFlashEffect(intensity) {
+      if (!birbAnchor) return;
+      birbAnchor.traverse((child) => {
+        if (child.isMesh && child.material) {
+          if (!child.userData.originalEmissive && child.material.emissive) {
+            child.userData.originalEmissive = child.material.emissive.clone();
+            child.userData.originalEmissiveIntensity = child.material.emissiveIntensity || 0;
+          }
+          if (child.material.emissive) {
+            child.material.emissive.setHex(0xff4444);
+            child.material.emissiveIntensity = intensity * 2.0;
+          }
+        }
+      });
+    }
+
+    function clearBirbFlashEffect() {
+      if (!birbAnchor) return;
+      birbAnchor.traverse((child) => {
+        if (child.isMesh && child.material && child.userData.originalEmissive) {
+          child.material.emissive.copy(child.userData.originalEmissive);
+          child.material.emissiveIntensity = child.userData.originalEmissiveIntensity;
+        }
+      });
+    }
+
+    // Note: triggerFreeze and updateFreezeState reference flightController and flightControls
+    // which are defined later in the script. This works because functions are closures.
+
+    function triggerFreeze() {
+      if (freezeState.isFrozen) return;
+
+      freezeState.isFrozen = true;
+      freezeState.freezeTimer = freezeState.freezeDuration;
+      freezeState.flashPhase = 0;
+
+      // Store current speed and freeze movement
+      if (flightController) {
+        freezeState.savedSpeed = flightController.getSpeed?.() ?? 8;
+        flightController.setSpeed?.(0);
+      }
+      if (flightControls) {
+        flightControls.setFrozen?.(true);
+      }
+
+      showFreezeUI(true);
+    }
+
+    function updateFreezeState(delta) {
+      // Update immunity cooldown
+      if (freezeState.cooldownTimer > 0) {
+        freezeState.cooldownTimer -= delta;
+      }
+
+      if (!freezeState.isFrozen) return;
+
+      freezeState.freezeTimer -= delta;
+      freezeState.flashPhase += delta * 10;
+
+      // Flash effect (oscillate between 0 and 1)
+      const intensity = Math.sin(freezeState.flashPhase * Math.PI) * 0.5 + 0.5;
+      updateBirbFlashEffect(intensity);
+
+      // Update UI progress
+      updateFreezeUI(freezeState.freezeTimer / freezeState.freezeDuration);
+
+      // Check if freeze is complete
+      if (freezeState.freezeTimer <= 0) {
+        freezeState.isFrozen = false;
+        freezeState.cooldownTimer = freezeState.cooldownDuration;
+
+        // Restore movement
+        if (flightController && freezeState.savedSpeed !== null) {
+          flightController.setSpeed?.(freezeState.savedSpeed);
+        }
+        if (flightControls) {
+          flightControls.setFrozen?.(false);
+        }
+
+        showFreezeUI(false);
+        clearBirbFlashEffect();
+      }
+    }
 
     // Nest UI elements
     const nestUI = document.querySelector('[data-nest-ui]');
@@ -1618,7 +1800,7 @@
     }
 
 
-    const birbAnchor = new THREE.Group();
+    birbAnchor = new THREE.Group();
     scene.add(birbAnchor);
 
     // Keep the model aligned with the controller's forward vector (-Z) so the
@@ -2531,7 +2713,7 @@
 
     // NOTE: nipplejs is NOT passed here - touch input is handled by createTouchInput
     // above, which feeds into flight.tick(). This avoids duplicate nipplejs managers.
-    const flightControls = createFlightControls({
+    flightControls = createFlightControls({
       canvas,
       flightController,
       leftThumbstickElement: document.querySelector('[data-thumbstick="left"]'),
@@ -2561,6 +2743,17 @@
     // Initialize rocket system with explosion sound callback
     rocketSystem = createRocketSystem(THREE, scene, {
       onExplosion: () => {
+        playExplosionSound();
+      },
+    });
+
+    // Initialize drone target system
+    droneSystem = createDroneSystem(THREE, scene, {
+      onDroneDestroyed: (position) => {
+        // Create explosion visual at drone position
+        if (rocketSystem && rocketSystem.createExplosionAt) {
+          rocketSystem.createExplosionAt(position);
+        }
         playExplosionSound();
       },
     });
@@ -2659,8 +2852,8 @@
         unlockAudio();
 
         if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
-          const launchPosition = flightController.position.clone();
           const launchDirection = nestingSystem.getLookDirection();
+          const launchPosition = flightController.position.clone().addScaledVector(launchDirection, 1.0);
           const fired = rocketSystem.fire(launchPosition, launchDirection);
           if (fired) {
             // Play sound synchronously using pre-generated buffer
@@ -2871,7 +3064,37 @@
         } else {
           updateLaunchButtonCooldown(false);
         }
+
+        // Check rocket-drone collisions
+        if (droneSystem) {
+          const rockets = rocketSystem.getRockets();
+          for (let i = rockets.length - 1; i >= 0; i--) {
+            const rocket = rockets[i];
+            const droneHit = droneSystem.checkRocketCollision(rocket.position);
+            if (droneHit.hit) {
+              droneSystem.destroyDrone(droneHit.index);
+              rocketSystem.removeRocket(i);
+            }
+          }
+        }
       }
+
+      // Update drones
+      if (droneSystem) {
+        droneSystem.update(delta);
+
+        // Check birb-drone collisions (only when flying, not nested, not frozen)
+        if (flightController && !isNested && !freezeState.isFrozen && freezeState.cooldownTimer <= 0) {
+          const birbHit = droneSystem.checkBirbCollision(flightController.position);
+          if (birbHit.hit) {
+            triggerFreeze();
+            droneSystem.destroyDrone(birbHit.index);
+          }
+        }
+      }
+
+      // Update freeze state
+      updateFreezeState(delta);
 
       let pose;
 
@@ -3040,6 +3263,9 @@
       }
       if (rocketSystem) {
         rocketSystem.dispose();
+      }
+      if (droneSystem) {
+        droneSystem.dispose();
       }
       renderer.dispose();
       if (sphericalWorld) {

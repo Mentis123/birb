@@ -1,12 +1,20 @@
 export const AIM_RIG_DEFAULTS = {
-  yawRate: Math.PI * 0.5,
-  pitchRate: Math.PI * 0.4,
+  yawRate: Math.PI * 0.6,     // Slightly faster horizontal rotation
+  pitchRate: Math.PI * 0.5,   // Slightly faster vertical rotation
   maxPitch: (85 * Math.PI) / 180,
-  smoothing: 10,
+  smoothing: 12,              // Slightly higher for smoother response
   lookSensitivity: 0.002,
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const TWO_PI = Math.PI * 2;
+
+// Normalize angle to [-PI, PI] range to prevent drift over long sessions
+const normalizeAngle = (angle) => {
+  while (angle > Math.PI) angle -= TWO_PI;
+  while (angle < -Math.PI) angle += TWO_PI;
+  return angle;
+};
 
 export class AimRig {
   constructor(THREE, options = {}) {
@@ -80,7 +88,12 @@ export class AimRig {
       this._pitch += deltaY * this.lookSensitivity;
     }
 
+    // Clamp pitch to prevent looking past vertical
     this._pitch = clamp(this._pitch, -this.maxPitch, this.maxPitch);
+
+    // Normalize yaw to prevent floating point drift over long sessions
+    // This allows continuous 360° rotation while keeping values bounded
+    this._yaw = normalizeAngle(this._yaw);
   }
 
   getQuaternion(target = new this.THREE.Quaternion()) {
