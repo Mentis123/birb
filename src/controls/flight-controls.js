@@ -523,12 +523,17 @@ export function createFlightControls({
       touchJoystickState.manager = null;
       touchJoystickState.handlers = null;
     }
-    // Clean up any orphaned nipple DOM elements that might have been left behind
-    if (touchZoneElement) {
+    // Clean up any orphaned nipple DOM elements that might have been left behind.
+    // Only do this if we're responsible for managing nipplejs (useDynamicTouchJoysticks is true).
+    // Otherwise we might remove elements belonging to another system (e.g., createTouchInput).
+    if (useDynamicTouchJoysticks && touchZoneElement) {
       const orphanedNipples = touchZoneElement.querySelectorAll('.back, .front');
       orphanedNipples.forEach((el) => el.remove());
     }
-    if (touchZoneElement?.classList) {
+    // Only remove the class if we're responsible for managing it (useDynamicTouchJoysticks is true).
+    // If nipplejs wasn't passed to createFlightControls, another system (e.g., createTouchInput)
+    // owns the class and we shouldn't touch it.
+    if (useDynamicTouchJoysticks && touchZoneElement?.classList) {
       touchZoneElement.classList.remove('has-dynamic-joystick');
     }
   };
