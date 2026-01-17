@@ -1604,7 +1604,14 @@
     const environmentToggleButton = document.querySelector(
       '[data-control="environment-toggle"]'
     );
-    const environmentOrder = ENVIRONMENT_VARIANTS.map((variant) => variant.id);
+    const environmentOrder = Array.from(new Set([
+      ...ENVIRONMENT_VARIANTS.map((variant) => variant.id),
+      "canyons",
+      "city",
+    ])).filter((variantId) => {
+      const definition = getEnvironmentDefinition(variantId);
+      return definition?.id === variantId;
+    });
     const defaultEnvironmentId = environmentOrder[0] ?? "forest";
     const defaultEnvironment =
       getEnvironmentDefinition(defaultEnvironmentId) ?? {
