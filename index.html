@@ -2770,12 +2770,10 @@
       // Show/hide nest mode UI
       showNestUI(isNested);
 
-      // Hide fullscreen and environment toggles while nested
-      if (fullscreenToggleButton) {
-        fullscreenToggleButton.hidden = isNested;
-      }
-      if (environmentToggleButton) {
-        environmentToggleButton.hidden = isNested;
+      // Hide the entire canvas-actions container while nested
+      // This hides the environment and fullscreen toggle buttons
+      if (canvasActions) {
+        canvasActions.hidden = isNested;
       }
 
       // Show/hide proximity indicator
