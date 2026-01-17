@@ -2810,9 +2810,8 @@
       syncFullscreenUi();
     });
 
-    if (fullscreenToggleButton) {
-      fullscreenToggleButton.addEventListener("click", toggleFullscreen);
-    }
+    // Note: fullscreen click handler is attached later in SETTINGS UI WIRE-UP section
+    // to avoid duplicate event listeners
 
     syncFullscreenUi();
 
