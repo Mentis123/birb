@@ -3102,6 +3102,7 @@
       updateFreezeState(delta);
 
       let pose;
+      let visualQuat = null;
 
       // Update New Flight System
       if (newFlightSystem) {
@@ -3158,11 +3159,7 @@
         }
 
         // 4. Visual Update
-        const visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
-
-        // 5. Apply to Mesh
-        birbAnchor.position.copy(pose.position);
-        birbAnchor.quaternion.copy(visualQuat);
+        visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
 
         // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
@@ -3174,7 +3171,8 @@
       birbAnchor.position.copy(pose.position);
       if (ambientOffsets.position) birbAnchor.position.add(ambientOffsets.position);
 
-      birbAnchor.quaternion.copy(pose.quaternion);
+      const appliedQuaternion = visualQuat ?? pose.quaternion;
+      birbAnchor.quaternion.copy(appliedQuaternion);
       birbAnchor.quaternion.multiply(modelOrientationOffset);
       if (ambientOffsets.quaternion) {
         blendedQuaternion.copy(ambientOffsets.quaternion);
