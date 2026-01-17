@@ -2764,6 +2764,14 @@
       // Show/hide nest mode UI
       showNestUI(isNested);
 
+      // Hide fullscreen and environment toggles while nested
+      if (fullscreenToggleButton) {
+        fullscreenToggleButton.hidden = isNested;
+      }
+      if (environmentToggleButton) {
+        environmentToggleButton.hidden = isNested;
+      }
+
       // Show/hide proximity indicator
       showNestIndicator(isApproaching && !isNested);
 
