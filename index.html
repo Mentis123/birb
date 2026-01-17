@@ -808,18 +808,12 @@
         opacity: 1;
       }
       33.33% {
-        transform: rotate(360deg);
+        /* Fast: 270 degrees in 1500ms (right, bottom, left) */
+        transform: rotate(270deg);
         opacity: 1;
       }
-      38% {
-        transform: rotate(360deg);
-        opacity: 0;
-      }
-      95% {
-        transform: rotate(360deg);
-        opacity: 0;
-      }
       100% {
+        /* Slow: 90 degrees in 3000ms (across the top) */
         transform: rotate(360deg);
         opacity: 1;
       }
