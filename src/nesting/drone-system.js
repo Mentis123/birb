@@ -4,6 +4,35 @@
  * Drones orbit at nest altitude and can be shot with rockets or collided with by birb.
  */
 
+// Explosion configuration
+const EXPLOSION_CONFIG = {
+  // Core flash
+  flashDuration: 0.15,
+  flashMaxScale: 4.0,
+
+  // Shockwave ring
+  ringDuration: 0.4,
+  ringMaxScale: 8.0,
+
+  // Debris shards
+  shardCount: 12,
+  shardSpeed: 15,
+  shardSpeedVariance: 0.5,
+  shardDuration: 0.8,
+  shardGravity: 25,
+
+  // Spark particles
+  sparkCount: 30,
+  sparkSpeed: 20,
+  sparkSpeedVariance: 0.6,
+  sparkDuration: 0.6,
+
+  // Ember particles (slower, lingering)
+  emberCount: 15,
+  emberSpeed: 5,
+  emberDuration: 1.2,
+};
+
 const DRONE_CONFIG = {
   count: 8,                    // Total drones maintained in world
   minAltitude: 35,             // Sphere radius (30) + 5
@@ -55,6 +84,284 @@ function createDroneMesh(THREE) {
 }
 
 /**
+ * Create explosion effect components at given position
+ * Returns an object containing all explosion elements that need to be updated
+ */
+function createDroneExplosion(THREE, container, position) {
+  const explosionGroup = new THREE.Group();
+  explosionGroup.position.copy(position);
+  container.add(explosionGroup);
+
+  const explosion = {
+    group: explosionGroup,
+    age: 0,
+    components: [],
+    finished: false,
+  };
+
+  // 1. Core flash - bright center burst
+  const flashGeometry = new THREE.SphereGeometry(0.5, 12, 10);
+  const flashMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+  explosionGroup.add(flash);
+  explosion.components.push({
+    type: 'flash',
+    mesh: flash,
+    material: flashMaterial,
+    duration: EXPLOSION_CONFIG.flashDuration,
+    maxScale: EXPLOSION_CONFIG.flashMaxScale,
+  });
+
+  // 2. Shockwave ring
+  const ringGeometry = new THREE.RingGeometry(0.8, 1.2, 32);
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff6699,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+  // Orient ring to face outward from center of sphere
+  ring.lookAt(position.clone().normalize().multiplyScalar(100));
+  explosionGroup.add(ring);
+  explosion.components.push({
+    type: 'ring',
+    mesh: ring,
+    material: ringMaterial,
+    duration: EXPLOSION_CONFIG.ringDuration,
+    maxScale: EXPLOSION_CONFIG.ringMaxScale,
+  });
+
+  // 3. Secondary ring (perpendicular)
+  const ring2 = ring.clone();
+  ring2.material = ringMaterial.clone();
+  ring2.rotation.x += Math.PI / 2;
+  explosionGroup.add(ring2);
+  explosion.components.push({
+    type: 'ring',
+    mesh: ring2,
+    material: ring2.material,
+    duration: EXPLOSION_CONFIG.ringDuration * 0.9,
+    maxScale: EXPLOSION_CONFIG.ringMaxScale * 0.8,
+  });
+
+  // 4. Debris shards - small octahedron pieces flying outward
+  const shardGeometry = new THREE.OctahedronGeometry(0.3, 0);
+  for (let i = 0; i < EXPLOSION_CONFIG.shardCount; i++) {
+    const shardMaterial = new THREE.MeshBasicMaterial({
+      color: i % 2 === 0 ? 0xff3366 : 0xff6699,
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const shard = new THREE.Mesh(shardGeometry, shardMaterial);
+
+    // Random direction (sphere distribution)
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const direction = new THREE.Vector3(
+      Math.sin(phi) * Math.cos(theta),
+      Math.sin(phi) * Math.sin(theta),
+      Math.cos(phi)
+    );
+
+    const speed = EXPLOSION_CONFIG.shardSpeed *
+      (1 - EXPLOSION_CONFIG.shardSpeedVariance / 2 + Math.random() * EXPLOSION_CONFIG.shardSpeedVariance);
+
+    // Random rotation axis and speed
+    const rotationAxis = new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() - 0.5,
+      Math.random() - 0.5
+    ).normalize();
+
+    explosionGroup.add(shard);
+    explosion.components.push({
+      type: 'shard',
+      mesh: shard,
+      material: shardMaterial,
+      velocity: direction.multiplyScalar(speed),
+      rotationAxis,
+      rotationSpeed: 10 + Math.random() * 20,
+      duration: EXPLOSION_CONFIG.shardDuration * (0.7 + Math.random() * 0.3),
+      gravity: EXPLOSION_CONFIG.shardGravity,
+    });
+  }
+
+  // 5. Spark particles - small bright dots
+  const sparkGeometry = new THREE.SphereGeometry(0.08, 6, 6);
+  for (let i = 0; i < EXPLOSION_CONFIG.sparkCount; i++) {
+    const sparkMaterial = new THREE.MeshBasicMaterial({
+      color: i % 3 === 0 ? 0xffff88 : (i % 3 === 1 ? 0xff8844 : 0xff4466),
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const spark = new THREE.Mesh(sparkGeometry, sparkMaterial);
+
+    // Random direction
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const direction = new THREE.Vector3(
+      Math.sin(phi) * Math.cos(theta),
+      Math.sin(phi) * Math.sin(theta),
+      Math.cos(phi)
+    );
+
+    const speed = EXPLOSION_CONFIG.sparkSpeed *
+      (1 - EXPLOSION_CONFIG.sparkSpeedVariance / 2 + Math.random() * EXPLOSION_CONFIG.sparkSpeedVariance);
+
+    explosionGroup.add(spark);
+    explosion.components.push({
+      type: 'spark',
+      mesh: spark,
+      material: sparkMaterial,
+      velocity: direction.multiplyScalar(speed),
+      duration: EXPLOSION_CONFIG.sparkDuration * (0.5 + Math.random() * 0.5),
+    });
+  }
+
+  // 6. Ember particles - slower glowing particles that linger
+  const emberGeometry = new THREE.SphereGeometry(0.12, 6, 6);
+  for (let i = 0; i < EXPLOSION_CONFIG.emberCount; i++) {
+    const emberMaterial = new THREE.MeshBasicMaterial({
+      color: i % 2 === 0 ? 0xff2244 : 0xff4466,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ember = new THREE.Mesh(emberGeometry, emberMaterial);
+
+    // Random direction with slight upward bias
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const direction = new THREE.Vector3(
+      Math.sin(phi) * Math.cos(theta),
+      Math.sin(phi) * Math.sin(theta) + 0.3,
+      Math.cos(phi)
+    ).normalize();
+
+    const speed = EXPLOSION_CONFIG.emberSpeed * (0.5 + Math.random());
+
+    explosionGroup.add(ember);
+    explosion.components.push({
+      type: 'ember',
+      mesh: ember,
+      material: emberMaterial,
+      velocity: direction.multiplyScalar(speed),
+      duration: EXPLOSION_CONFIG.emberDuration * (0.7 + Math.random() * 0.3),
+      pulsePhase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  return explosion;
+}
+
+/**
+ * Update a drone explosion animation
+ * Returns true if explosion is still active, false if finished
+ */
+function updateDroneExplosion(explosion, delta) {
+  explosion.age += delta;
+  let hasActiveComponents = false;
+
+  for (const comp of explosion.components) {
+    const progress = explosion.age / comp.duration;
+
+    if (progress >= 1) {
+      // Hide finished components
+      comp.mesh.visible = false;
+      continue;
+    }
+
+    hasActiveComponents = true;
+
+    switch (comp.type) {
+      case 'flash': {
+        // Quick bright flash that expands and fades
+        const scale = 1 + progress * (comp.maxScale - 1);
+        comp.mesh.scale.setScalar(scale);
+        // Fast fade out
+        comp.material.opacity = Math.max(0, 1 - progress * progress);
+        break;
+      }
+
+      case 'ring': {
+        // Expanding ring that fades
+        const scale = 1 + progress * (comp.maxScale - 1);
+        comp.mesh.scale.setScalar(scale);
+        // Fade out with easing
+        comp.material.opacity = Math.max(0, 0.9 * (1 - progress * progress));
+        break;
+      }
+
+      case 'shard': {
+        // Move shard outward with gravity
+        comp.mesh.position.addScaledVector(comp.velocity, delta);
+        // Apply gravity (toward sphere center approximated as down from explosion point)
+        comp.velocity.y -= comp.gravity * delta;
+        // Spin the shard
+        comp.mesh.rotateOnAxis(comp.rotationAxis, comp.rotationSpeed * delta);
+        // Fade out
+        comp.material.opacity = Math.max(0, 1 - progress);
+        // Shrink slightly as it fades
+        const shardScale = 1 - progress * 0.5;
+        comp.mesh.scale.setScalar(shardScale);
+        break;
+      }
+
+      case 'spark': {
+        // Fast moving bright spark
+        comp.mesh.position.addScaledVector(comp.velocity, delta);
+        // Slow down over time
+        comp.velocity.multiplyScalar(1 - delta * 2);
+        // Fade out with easing
+        comp.material.opacity = Math.max(0, 1 - progress * progress);
+        break;
+      }
+
+      case 'ember': {
+        // Slower glowing ember with pulse
+        comp.mesh.position.addScaledVector(comp.velocity, delta);
+        // Slow down
+        comp.velocity.multiplyScalar(1 - delta);
+        // Pulse glow
+        comp.pulsePhase += delta * 15;
+        const pulse = 0.5 + Math.sin(comp.pulsePhase) * 0.3;
+        // Fade out gradually
+        comp.material.opacity = Math.max(0, pulse * (1 - progress));
+        break;
+      }
+    }
+  }
+
+  explosion.finished = !hasActiveComponents;
+  return hasActiveComponents;
+}
+
+/**
+ * Dispose of explosion resources
+ */
+function disposeExplosion(explosion, container) {
+  for (const comp of explosion.components) {
+    if (comp.mesh.geometry) comp.mesh.geometry.dispose();
+    if (comp.material) comp.material.dispose();
+  }
+  container.remove(explosion.group);
+}
+
+/**
  * Create the drone system
  * @param {Object} THREE - Three.js library
  * @param {Object} scene - Three.js scene
@@ -67,6 +374,7 @@ export function createDroneSystem(THREE, scene, options = {}) {
 
   const drones = [];
   const pendingRespawns = [];
+  const activeExplosions = [];
   const container = new THREE.Group();
   container.name = 'drone-targets';
   scene.add(container);
@@ -186,6 +494,16 @@ export function createDroneSystem(THREE, scene, options = {}) {
           drone.lookAt(drone.position.x + tangent.x, drone.position.y + tangent.y, drone.position.z + tangent.z);
         }
       }
+
+      // Update active explosions
+      for (let i = activeExplosions.length - 1; i >= 0; i--) {
+        const explosion = activeExplosions[i];
+        const stillActive = updateDroneExplosion(explosion, delta);
+        if (!stillActive) {
+          disposeExplosion(explosion, container);
+          activeExplosions.splice(i, 1);
+        }
+      }
     },
 
     /**
@@ -238,6 +556,10 @@ export function createDroneSystem(THREE, scene, options = {}) {
       drone.userData.isAlive = false;
       container.remove(drone);
 
+      // Create awesome explosion effect at drone position
+      const explosion = createDroneExplosion(THREE, container, position);
+      activeExplosions.push(explosion);
+
       // Dispose geometry and materials
       drone.traverse((child) => {
         if (child.geometry) child.geometry.dispose();
@@ -286,8 +608,13 @@ export function createDroneSystem(THREE, scene, options = {}) {
           if (child.material) child.material.dispose();
         });
       }
+      // Dispose active explosions
+      for (const explosion of activeExplosions) {
+        disposeExplosion(explosion, container);
+      }
       drones.length = 0;
       pendingRespawns.length = 0;
+      activeExplosions.length = 0;
       scene.remove(container);
     },
   };
