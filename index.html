@@ -717,10 +717,59 @@
         gap: 0.55rem;
       }
     }
+
+    /* Splash Screen */
+    .splash-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #060918;
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .splash-screen.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s ease-out;
+    }
+
+    .splash-image {
+      max-width: 90%;
+      max-height: 70vh;
+      object-fit: contain;
+      border-radius: 1rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    }
+
+    .splash-prompt {
+      margin-top: 2rem;
+      font-size: clamp(1rem, 4vw, 1.5rem);
+      color: rgba(200, 220, 255, 0.9);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      animation: splash-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes splash-pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
   </style>
 </head>
 
 <body>
+  <!-- Splash Screen - tap to dismiss -->
+  <div class="splash-screen" data-splash-screen>
+    <img src="./splash.jpg" alt="Birb Flight Lab" class="splash-image">
+    <div class="splash-prompt">Tap to start</div>
+  </div>
+
   <main>
     <header>Birb Flight Lab</header>
     <div class="canvas-wrapper">
@@ -826,6 +875,23 @@
       }
       console.error("Unhandled rejection:", event);
     });
+
+    // Splash screen - dismiss on tap/click
+    const splashScreen = document.querySelector('[data-splash-screen]');
+    if (splashScreen) {
+      const dismissSplash = () => {
+        splashScreen.classList.add('is-hidden');
+        // Remove from DOM after fade animation
+        setTimeout(() => {
+          splashScreen.remove();
+        }, 500);
+      };
+      splashScreen.addEventListener('click', dismissSplash, { once: true });
+      splashScreen.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        dismissSplash();
+      }, { once: true, passive: false });
+    }
 
     let THREE,
       GLTFLoader,
