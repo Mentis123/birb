@@ -760,6 +760,217 @@
       0%, 100% { opacity: 0.6; }
       50% { opacity: 1; }
     }
+
+    /* Settings Gear Button */
+    .settings-gear-button {
+      position: absolute;
+      bottom: var(--space-2);
+      right: var(--space-2);
+      z-index: 50;
+      width: 3rem;
+      height: 3rem;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(132, 174, 255, 0.35);
+      background: rgba(14, 23, 41, 0.85);
+      color: #f1f5ff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(6, 14, 31, 0.5);
+      backdrop-filter: blur(12px);
+      transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .settings-gear-button:hover {
+      border-color: rgba(180, 210, 255, 0.6);
+      box-shadow: 0 12px 32px rgba(6, 14, 31, 0.6);
+    }
+
+    .settings-gear-button:active {
+      transform: scale(0.95);
+    }
+
+    .settings-gear-button svg {
+      width: 1.4rem;
+      height: 1.4rem;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Settings Overlay */
+    .settings-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(6, 10, 22, 0.75);
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 250ms ease;
+    }
+
+    .settings-overlay.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .settings-panel {
+      width: min(90%, 20rem);
+      padding: 1.5rem;
+      border-radius: 1.25rem;
+      background: rgba(16, 26, 48, 0.95);
+      border: 1px solid rgba(120, 160, 255, 0.25);
+      box-shadow: 0 24px 64px rgba(3, 8, 20, 0.7);
+    }
+
+    .settings-title {
+      margin: 0 0 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      text-align: center;
+      color: rgba(200, 220, 255, 0.9);
+    }
+
+    .settings-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .settings-button {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid rgba(140, 180, 255, 0.25);
+      border-radius: 0.75rem;
+      background: linear-gradient(145deg, rgba(30, 48, 88, 0.8), rgba(20, 32, 58, 0.9));
+      color: #f1f5ff;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 150ms ease, background 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .settings-button:hover {
+      border-color: rgba(180, 210, 255, 0.5);
+      background: linear-gradient(145deg, rgba(40, 62, 110, 0.9), rgba(26, 40, 72, 0.95));
+    }
+
+    .settings-button:active {
+      transform: scale(0.98);
+    }
+
+    .settings-button svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      flex-shrink: 0;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .settings-button--disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .settings-close {
+      width: 100%;
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(100, 200, 150, 0.4);
+      border-radius: 0.75rem;
+      background: linear-gradient(145deg, rgba(30, 80, 60, 0.7), rgba(20, 55, 45, 0.85));
+      color: rgba(180, 255, 200, 0.95);
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .settings-close:hover {
+      border-color: rgba(140, 230, 180, 0.6);
+    }
+
+    .settings-close:active {
+      transform: scale(0.98);
+    }
+
+    /* Info/How-to-play Overlay */
+    .info-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 150;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(4, 8, 18, 0.92);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 300ms ease;
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .info-overlay.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .info-image {
+      max-width: 92%;
+      max-height: 70vh;
+      object-fit: contain;
+      border-radius: 1rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    }
+
+    .info-close {
+      margin-top: 1.5rem;
+      padding: 0.75rem 2rem;
+      border: 1px solid rgba(140, 180, 255, 0.4);
+      border-radius: 2rem;
+      background: rgba(20, 35, 65, 0.9);
+      color: rgba(200, 220, 255, 0.95);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .info-close:hover {
+      border-color: rgba(180, 210, 255, 0.6);
+    }
+
+    .info-close:active {
+      transform: scale(0.97);
+    }
   </style>
 </head>
 
@@ -774,32 +985,62 @@
     <header>Birb Flight Lab</header>
     <div class="canvas-wrapper">
       <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
-      <div class="canvas-actions" data-draggable-panel>
-        <div class="canvas-actions__tray" role="group" aria-label="Display options">
-          <button type="button" class="canvas-action-button environment-toggle" data-control="environment-toggle"
-            aria-label="Cycle environment">
-            <svg class="environment-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
-              <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
-              <path
-                d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25" />
-            </svg>
-            <span class="visually-hidden" data-environment-label>Environment: Forest</span>
-          </button>
-          <button type="button" class="canvas-action-button fullscreen-toggle" data-control="fullscreen"
-            aria-pressed="false" aria-label="Enter fullscreen">
-            <svg class="fullscreen-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
-              data-icon="enter">
-              <path d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <svg class="fullscreen-toggle__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
-              data-icon="exit" hidden>
-              <path d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2" stroke-linecap="round" stroke-linejoin="round" />
-              <path d="M15 9h4M15 15h4M5 9h4M5 15h4" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span class="visually-hidden" data-fullscreen-label>Enter Fullscreen</span>
+      <!-- Settings gear button (corner) -->
+      <button type="button" class="settings-gear-button" data-control="settings-open" aria-label="Open settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+        </svg>
+      </button>
+
+      <!-- Settings overlay -->
+      <div class="settings-overlay" data-settings-overlay aria-hidden="true">
+        <div class="settings-panel">
+          <h2 class="settings-title">Settings</h2>
+          <div class="settings-buttons">
+            <!-- Environment toggle -->
+            <button type="button" class="settings-button" data-control="environment-toggle" aria-label="Cycle environment">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z" />
+                <path d="M3.9 9.75h16.2m-16.2 4.5h16.2" />
+                <path d="M12 3.75c2.3 2.4 3.45 5.4 3.45 8.25S14.3 17.85 12 20.25m0-16.5c-2.3 2.4-3.45 5.4-3.45 8.25S9.7 17.85 12 20.25" />
+              </svg>
+              <span data-environment-label>Forest</span>
+            </button>
+            <!-- Exit fullscreen -->
+            <button type="button" class="settings-button" data-control="fullscreen" aria-label="Exit fullscreen">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M15 9h4M15 15h4M5 9h4M5 15h4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Windowed</span>
+            </button>
+            <!-- How to play -->
+            <button type="button" class="settings-button" data-control="info" aria-label="How to play">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+              <span>How to Play</span>
+            </button>
+            <!-- Feedback (disabled) -->
+            <button type="button" class="settings-button settings-button--disabled" disabled aria-label="Feedback (coming soon)">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <span>Feedback</span>
+            </button>
+          </div>
+          <button type="button" class="settings-close" data-control="settings-close" aria-label="Close settings">
+            Resume
           </button>
         </div>
+      </div>
+
+      <!-- Info/How-to-play overlay -->
+      <div class="info-overlay" data-info-overlay aria-hidden="true">
+        <img src="./info.jpg" alt="How to Play - Fly around, nest to shoot, don't get hit" class="info-image">
+        <button type="button" class="info-close" data-control="info-close" aria-label="Close">Got it!</button>
       </div>
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
@@ -878,12 +1119,18 @@
 
     // Splash screen - dismiss on tap/click
     const splashScreen = document.querySelector('[data-splash-screen]');
+    // Deferred fullscreen trigger (called after enterFullscreen is defined)
+    let triggerAutoFullscreen = null;
     if (splashScreen) {
       const dismissSplash = () => {
         splashScreen.classList.add('is-hidden');
         // Remove from DOM after fade animation
         setTimeout(() => {
           splashScreen.remove();
+          // Trigger auto-fullscreen after splash is gone
+          if (typeof triggerAutoFullscreen === 'function') {
+            triggerAutoFullscreen();
+          }
         }, 500);
       };
       splashScreen.addEventListener('click', dismissSplash, { once: true });
@@ -891,6 +1138,49 @@
         e.preventDefault();
         dismissSplash();
       }, { once: true, passive: false });
+    }
+
+    // Settings & Info Overlay State
+    const settingsState = {
+      isOpen: false,
+      wasPlaying: true  // Track if game was playing before settings opened
+    };
+    const infoState = { isOpen: false };
+
+    // DOM references for settings UI (assigned after elements exist)
+    const settingsGearButton = document.querySelector('[data-control="settings-open"]');
+    const settingsOverlay = document.querySelector('[data-settings-overlay]');
+    const settingsCloseButton = document.querySelector('[data-control="settings-close"]');
+    const settingsEnvButton = document.querySelector('[data-control="environment-toggle"]');
+    const settingsFullscreenButton = document.querySelector('[data-control="fullscreen"]');
+    const settingsInfoButton = document.querySelector('[data-control="info"]');
+    const infoOverlay = document.querySelector('[data-info-overlay]');
+    const infoCloseButton = document.querySelector('[data-control="info-close"]');
+    const environmentLabel = document.querySelector('[data-environment-label]');
+
+    // Settings UI will be wired up after game functions are defined (see bottom of script)
+
+    // Info overlay - tap anywhere to dismiss (like splash screen)
+    if (infoOverlay) {
+      const dismissInfo = () => {
+        infoState.isOpen = false;
+        infoOverlay.classList.remove('is-open');
+        infoOverlay.setAttribute('aria-hidden', 'true');
+      };
+
+      infoOverlay.addEventListener('click', dismissInfo);
+      infoOverlay.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        dismissInfo();
+      }, { passive: false });
+
+      // Also close button
+      if (infoCloseButton) {
+        infoCloseButton.addEventListener('click', (e) => {
+          e.stopPropagation();
+          dismissInfo();
+        });
+      }
     }
 
     let THREE,
@@ -976,7 +1266,6 @@
     }
 
     const canvasWrapper = document.querySelector(".canvas-wrapper");
-    const canvasActions = document.querySelector("[data-draggable-panel]");
     const canvas = document.querySelector("#scene");
 
     const statusMetric = document.querySelector('[data-metric="status"]');
@@ -1018,16 +1307,6 @@
       height: 0,
       pixelRatio: 1,
       dirty: true,
-    };
-    const actionPaletteState = {
-      pointerId: null,
-      offsetX: 0,
-      offsetY: 0,
-      width: 0,
-      height: 0,
-      hasCustomPosition: false,
-      relativeX: 0,
-      relativeY: 0,
     };
 
     // ============ AUDIO SYSTEM (Preloaded for instant playback) ============
@@ -1115,92 +1394,6 @@
         return 0;
       }
       return Math.min(Math.max(value, min), max);
-    }
-
-    function repositionActionPalette() {
-      if (!canvasActions || !canvasWrapper || !actionPaletteState.hasCustomPosition)
-        return;
-      const wrapperRect = canvasWrapper.getBoundingClientRect();
-      const width = canvasActions.offsetWidth;
-      const height = canvasActions.offsetHeight;
-      const maxX = Math.max(0, wrapperRect.width - width);
-      const maxY = Math.max(0, wrapperRect.height - height);
-      const left = clamp(actionPaletteState.relativeX * maxX, 0, maxX);
-      const top = clamp(actionPaletteState.relativeY * maxY, 0, maxY);
-      canvasActions.style.left = `${left}px`;
-      canvasActions.style.top = `${top}px`;
-      canvasActions.style.right = "auto";
-      canvasActions.style.bottom = "auto";
-    }
-
-    if (canvasActions && canvasWrapper) {
-      const dragListenerOptions = { passive: false };
-
-      const handlePointerDown = (event) => {
-        if (event.button !== 0 && event.pointerType !== "touch") return;
-        const target = event.target;
-        if (target && target.closest("button")) return;
-        const actionsRect = canvasActions.getBoundingClientRect();
-        actionPaletteState.pointerId = event.pointerId;
-        actionPaletteState.offsetX = event.clientX - actionsRect.left;
-        actionPaletteState.offsetY = event.clientY - actionsRect.top;
-        actionPaletteState.width = actionsRect.width;
-        actionPaletteState.height = actionsRect.height;
-        canvasActions.classList.add("is-dragging");
-        if (typeof canvasActions.setPointerCapture === "function") {
-          try {
-            canvasActions.setPointerCapture(event.pointerId);
-          } catch (error) {
-            // Ignore pointer capture errors in unsupported browsers.
-          }
-        }
-        event.preventDefault();
-      };
-
-      const handlePointerMove = (event) => {
-        if (actionPaletteState.pointerId !== event.pointerId) return;
-        event.preventDefault();
-        const wrapperRect = canvasWrapper.getBoundingClientRect();
-        const width = canvasActions.offsetWidth;
-        const height = canvasActions.offsetHeight;
-        const maxX = Math.max(0, wrapperRect.width - width);
-        const maxY = Math.max(0, wrapperRect.height - height);
-        const rawLeft = event.clientX - actionPaletteState.offsetX - wrapperRect.left;
-        const rawTop = event.clientY - actionPaletteState.offsetY - wrapperRect.top;
-        const clampedLeft = clamp(rawLeft, 0, maxX);
-        const clampedTop = clamp(rawTop, 0, maxY);
-        canvasActions.style.left = `${clampedLeft}px`;
-        canvasActions.style.top = `${clampedTop}px`;
-        canvasActions.style.right = "auto";
-        canvasActions.style.bottom = "auto";
-        actionPaletteState.width = width;
-        actionPaletteState.height = height;
-        actionPaletteState.hasCustomPosition = true;
-        actionPaletteState.relativeX = maxX > 0 ? clampedLeft / maxX : 0;
-        actionPaletteState.relativeY = maxY > 0 ? clampedTop / maxY : 0;
-      };
-
-      const handlePointerEnd = (event) => {
-        if (actionPaletteState.pointerId !== event.pointerId) return;
-        if (
-          typeof canvasActions.hasPointerCapture === "function" &&
-          canvasActions.hasPointerCapture(event.pointerId) &&
-          typeof canvasActions.releasePointerCapture === "function"
-        ) {
-          canvasActions.releasePointerCapture(event.pointerId);
-        }
-        canvasActions.classList.remove("is-dragging");
-        actionPaletteState.pointerId = null;
-        event.preventDefault();
-      };
-
-      canvasActions.addEventListener("pointerdown", handlePointerDown, dragListenerOptions);
-      canvasActions.addEventListener("pointermove", handlePointerMove, dragListenerOptions);
-      ["pointerup", "pointercancel", "lostpointercapture"].forEach((eventName) => {
-        canvasActions.addEventListener(eventName, handlePointerEnd, dragListenerOptions);
-      });
-
-      window.addEventListener("resize", repositionActionPalette, { passive: true });
     }
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -2836,10 +3029,9 @@
       // Show/hide nest mode UI
       showNestUI(isNested);
 
-      // Hide the entire canvas-actions container while nested
-      // This hides the environment and fullscreen toggle buttons
-      if (canvasActions) {
-        canvasActions.hidden = isNested;
+      // Hide the settings gear button while nested
+      if (settingsGearButton) {
+        settingsGearButton.hidden = isNested;
       }
 
       // Show/hide proximity indicator
@@ -2864,7 +3056,35 @@
       }
       if (aimRig) {
         if (isNested) {
-          aimRig.setReferenceFromQuaternion(flightController.quaternion);
+          // Compute a clean reference frame based on sphere's local up
+          // This prevents tilt/bank from the landing orientation from affecting aim
+          const pos = flightController.position;
+          const localUp = pos.clone().normalize(); // Radial direction = local up on sphere
+
+          // Get bird's forward and project onto tangent plane
+          const birdForward = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
+          const forwardOnTangent = birdForward.clone()
+            .sub(localUp.clone().multiplyScalar(birdForward.dot(localUp)))
+            .normalize();
+
+          // If forward is too close to up (looking straight up/down), use a fallback
+          if (forwardOnTangent.lengthSq() < 0.01) {
+            // Use world-X projected onto tangent as fallback forward
+            const fallback = new THREE.Vector3(1, 0, 0);
+            forwardOnTangent.copy(fallback)
+              .sub(localUp.clone().multiplyScalar(fallback.dot(localUp)))
+              .normalize();
+          }
+
+          // Build orthonormal basis
+          const right = new THREE.Vector3().crossVectors(forwardOnTangent, localUp).normalize();
+          const correctedUp = new THREE.Vector3().crossVectors(right, forwardOnTangent).normalize();
+
+          // Build rotation matrix and extract quaternion
+          const matrix = new THREE.Matrix4().makeBasis(right, correctedUp, forwardOnTangent.clone().negate());
+          const cleanQuaternion = new THREE.Quaternion().setFromRotationMatrix(matrix);
+
+          aimRig.setReferenceFromQuaternion(cleanQuaternion);
           aimRig.setActive(true);
         } else {
           aimRig.setActive(false);
@@ -3368,6 +3588,100 @@
       }
       flightControls.dispose();
     });
+
+    // ============ SETTINGS UI WIRE-UP ============
+    // Now that all game functions are defined, wire up the settings UI
+
+    // Open settings - pause game
+    function openSettings() {
+      if (settingsState.isOpen) return;
+      settingsState.isOpen = true;
+      settingsState.wasPlaying = !document.hidden;
+
+      // Pause game
+      renderer.setAnimationLoop(null);
+
+      // Show settings overlay
+      if (settingsOverlay) {
+        settingsOverlay.classList.add('is-open');
+        settingsOverlay.setAttribute('aria-hidden', 'false');
+      }
+
+      // Update environment label
+      if (environmentLabel && environmentState?.current) {
+        const def = getEnvironmentDefinition(environmentState.current);
+        environmentLabel.textContent = def?.name || environmentState.current;
+      }
+    }
+
+    // Close settings - resume game
+    function closeSettings() {
+      if (!settingsState.isOpen) return;
+      settingsState.isOpen = false;
+
+      // Hide settings overlay
+      if (settingsOverlay) {
+        settingsOverlay.classList.remove('is-open');
+        settingsOverlay.setAttribute('aria-hidden', 'true');
+      }
+
+      // Resume game if it was playing before
+      if (settingsState.wasPlaying && !document.hidden) {
+        renderer.setAnimationLoop(renderFrame);
+      }
+    }
+
+    // Open info overlay
+    function openInfo() {
+      infoState.isOpen = true;
+      if (infoOverlay) {
+        infoOverlay.classList.add('is-open');
+        infoOverlay.setAttribute('aria-hidden', 'false');
+      }
+    }
+
+    // Settings gear button
+    if (settingsGearButton) {
+      settingsGearButton.addEventListener('click', openSettings);
+    }
+
+    // Settings close button (Resume)
+    if (settingsCloseButton) {
+      settingsCloseButton.addEventListener('click', closeSettings);
+    }
+
+    // Environment toggle in settings
+    if (settingsEnvButton) {
+      settingsEnvButton.addEventListener('click', () => {
+        cycleEnvironment(1);
+        // Update label
+        if (environmentLabel && environmentState?.current) {
+          const def = getEnvironmentDefinition(environmentState.current);
+          environmentLabel.textContent = def?.name || environmentState.current;
+        }
+      });
+    }
+
+    // Fullscreen toggle in settings (exit fullscreen when clicked in settings)
+    if (settingsFullscreenButton) {
+      settingsFullscreenButton.addEventListener('click', () => {
+        exitFullscreen();
+        closeSettings();
+      });
+    }
+
+    // Info button in settings
+    if (settingsInfoButton) {
+      settingsInfoButton.addEventListener('click', () => {
+        closeSettings();
+        openInfo();
+      });
+    }
+
+    // Set up auto-fullscreen trigger (called when splash screen is dismissed)
+    triggerAutoFullscreen = () => {
+      enterFullscreen();
+    };
 
     scheduleRendererResize(true);
     renderFrame(0);

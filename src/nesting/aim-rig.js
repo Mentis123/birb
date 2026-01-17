@@ -1,12 +1,12 @@
 export const AIM_RIG_DEFAULTS = {
-  yawRate: Math.PI * 0.6,     // Slightly faster horizontal rotation
-  pitchRate: Math.PI * 0.5,   // Slightly faster vertical rotation
-  maxPitch: (85 * Math.PI) / 180,
-  smoothing: 12,              // Slightly higher for smoother response
-  pointerSmoothing: 18,       // Smooths mouse/touch deltas for consistent look
-  lookSensitivity: 0.002,
-  pointerDeadzone: 0.15,      // Ignore tiny pointer jitter (pixels)
-  maxPointerDelta: 40,        // Clamp sudden spikes when pointer lock resumes
+  yawRate: Math.PI * 0.8,     // Faster horizontal rotation for responsive feel
+  pitchRate: Math.PI * 0.65,  // Faster vertical rotation
+  maxPitch: (80 * Math.PI) / 180,  // Slightly reduced to prevent disorienting extremes
+  smoothing: 8,               // Less smoothing for more direct feel
+  pointerSmoothing: 12,       // Reduced for faster pointer response
+  lookSensitivity: 0.0025,    // Slightly higher for better pointer control
+  pointerDeadzone: 0.08,      // Smaller deadzone for tighter control
+  maxPointerDelta: 50,        // Allow larger pointer movements
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
