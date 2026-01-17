@@ -1007,13 +1007,13 @@
               </svg>
               <span data-environment-label>Forest</span>
             </button>
-            <!-- Exit fullscreen -->
-            <button type="button" class="settings-button" data-control="fullscreen" aria-label="Exit fullscreen">
+            <!-- Fullscreen toggle -->
+            <button type="button" class="settings-button" data-control="fullscreen" aria-label="Toggle fullscreen">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2" stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M15 9h4M15 15h4M5 9h4M5 15h4" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>Windowed</span>
+              <span data-fullscreen-label>Windowed</span>
             </button>
             <!-- How to play -->
             <button type="button" class="settings-button" data-control="info" aria-label="How to play">
@@ -1157,15 +1157,22 @@
     const infoOverlay = document.querySelector('[data-info-overlay]');
     const infoCloseButton = document.querySelector('[data-control="info-close"]');
     const environmentLabel = document.querySelector('[data-environment-label]');
+    const fullscreenLabel = document.querySelector('[data-fullscreen-label]');
 
     // Settings UI will be wired up after game functions are defined (see bottom of script)
 
     // Info overlay - tap anywhere to dismiss (like splash screen)
+    // Game stays paused until both settings AND info are closed
     if (infoOverlay) {
       const dismissInfo = () => {
         infoState.isOpen = false;
         infoOverlay.classList.remove('is-open');
         infoOverlay.setAttribute('aria-hidden', 'true');
+        // Resume game only if settings is also closed
+        if (!settingsState.isOpen && settingsState.wasPlaying && !document.hidden) {
+          // Will be set after renderer is defined - use deferred call
+          if (typeof resumeGameIfReady === 'function') resumeGameIfReady();
+        }
       };
 
       infoOverlay.addEventListener('click', dismissInfo);
@@ -3592,6 +3599,20 @@
     // ============ SETTINGS UI WIRE-UP ============
     // Now that all game functions are defined, wire up the settings UI
 
+    // Helper to update fullscreen button label based on current state
+    function updateFullscreenLabel() {
+      if (fullscreenLabel) {
+        fullscreenLabel.textContent = isFullscreenActive() ? 'Windowed' : 'Fullscreen';
+      }
+    }
+
+    // Resume game if ready (both settings and info closed)
+    function resumeGameIfReady() {
+      if (!settingsState.isOpen && !infoState.isOpen && settingsState.wasPlaying && !document.hidden) {
+        renderer.setAnimationLoop(renderFrame);
+      }
+    }
+
     // Open settings - pause game
     function openSettings() {
       if (settingsState.isOpen) return;
@@ -3610,12 +3631,15 @@
       // Update environment label
       if (environmentLabel && environmentState?.current) {
         const def = getEnvironmentDefinition(environmentState.current);
-        environmentLabel.textContent = def?.name || environmentState.current;
+        environmentLabel.textContent = def?.label || environmentState.current;
       }
+
+      // Update fullscreen label
+      updateFullscreenLabel();
     }
 
-    // Close settings - resume game
-    function closeSettings() {
+    // Close settings - resume game only if info is also closed
+    function closeSettings(skipResume = false) {
       if (!settingsState.isOpen) return;
       settingsState.isOpen = false;
 
@@ -3625,13 +3649,13 @@
         settingsOverlay.setAttribute('aria-hidden', 'true');
       }
 
-      // Resume game if it was playing before
-      if (settingsState.wasPlaying && !document.hidden) {
-        renderer.setAnimationLoop(renderFrame);
+      // Resume game if it was playing before (unless skipped or info is open)
+      if (!skipResume) {
+        resumeGameIfReady();
       }
     }
 
-    // Open info overlay
+    // Open info overlay (keeps game paused)
     function openInfo() {
       infoState.isOpen = true;
       if (infoOverlay) {
@@ -3657,23 +3681,27 @@
         // Update label
         if (environmentLabel && environmentState?.current) {
           const def = getEnvironmentDefinition(environmentState.current);
-          environmentLabel.textContent = def?.name || environmentState.current;
+          environmentLabel.textContent = def?.label || environmentState.current;
         }
+        // Render a frame to show the new environment behind the semi-transparent overlay
+        renderFrame(performance.now());
       });
     }
 
-    // Fullscreen toggle in settings (exit fullscreen when clicked in settings)
+    // Fullscreen toggle in settings
     if (settingsFullscreenButton) {
       settingsFullscreenButton.addEventListener('click', () => {
-        exitFullscreen();
-        closeSettings();
+        toggleFullscreen();
+        // Update label after a short delay (fullscreen state changes async)
+        setTimeout(updateFullscreenLabel, 100);
       });
     }
 
     // Info button in settings
     if (settingsInfoButton) {
       settingsInfoButton.addEventListener('click', () => {
-        closeSettings();
+        // Close settings but skip resume (game stays paused for info overlay)
+        closeSettings(true);
         openInfo();
       });
     }
