@@ -173,6 +173,7 @@ export function createSpeedTrail(THREE, environmentId) {
 
 /**
  * Create wing tip vortices for added effect
+ * OPTIMIZED: Pre-allocated scratch vectors to eliminate per-frame allocations
  */
 export function createWingVortices(THREE) {
   const vortexCount = 60;
@@ -206,6 +207,10 @@ export function createWingVortices(THREE) {
   let emitIndex = 0;
   const wingOffset = 0.8; // Distance from center to wingtip
 
+  // Pre-allocated scratch vectors (ZERO allocations per frame)
+  const _rightWing = new THREE.Vector3();
+  const _leftWing = new THREE.Vector3();
+
   return {
     particles,
 
@@ -224,28 +229,28 @@ export function createWingVortices(THREE) {
         }
       }
 
-      // Emit particles at wing tips
+      // Emit particles at wing tips (using pre-allocated vectors - NO allocations)
       if (Math.random() < delta * 30) {
-        const rightWing = new THREE.Vector3(wingOffset, 0, 0);
-        rightWing.applyQuaternion(birbQuaternion);
-        rightWing.add(birbPosition);
+        _rightWing.set(wingOffset, 0, 0);
+        _rightWing.applyQuaternion(birbQuaternion);
+        _rightWing.add(birbPosition);
 
-        positions[emitIndex * 3] = rightWing.x;
-        positions[emitIndex * 3 + 1] = rightWing.y;
-        positions[emitIndex * 3 + 2] = rightWing.z;
+        positions[emitIndex * 3] = _rightWing.x;
+        positions[emitIndex * 3 + 1] = _rightWing.y;
+        positions[emitIndex * 3 + 2] = _rightWing.z;
         ages[emitIndex] = 0;
         sizes[emitIndex] = 0.06;
 
         emitIndex = (emitIndex + 1) % vortexCount;
 
         if (Math.random() > 0.5) {
-          const leftWing = new THREE.Vector3(-wingOffset, 0, 0);
-          leftWing.applyQuaternion(birbQuaternion);
-          leftWing.add(birbPosition);
+          _leftWing.set(-wingOffset, 0, 0);
+          _leftWing.applyQuaternion(birbQuaternion);
+          _leftWing.add(birbPosition);
 
-          positions[emitIndex * 3] = leftWing.x;
-          positions[emitIndex * 3 + 1] = leftWing.y;
-          positions[emitIndex * 3 + 2] = leftWing.z;
+          positions[emitIndex * 3] = _leftWing.x;
+          positions[emitIndex * 3 + 1] = _leftWing.y;
+          positions[emitIndex * 3 + 2] = _leftWing.z;
           ages[emitIndex] = 0;
           sizes[emitIndex] = 0.06;
 
