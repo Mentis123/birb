@@ -8,10 +8,10 @@ const DRONE_CONFIG = {
   count: 8,                    // Total drones maintained in world
   minAltitude: 35,             // Sphere radius (30) + 5
   maxAltitude: 45,             // Sphere radius (30) + 15
-  orbitSpeed: 0.3,             // Base radians per second
+  orbitSpeed: 0.15,            // Base radians per second (half speed)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
-  collisionRadius: 1.5,        // Hit detection radius
+  collisionRadius: 3.0,        // Hit detection radius (doubled for larger drones)
   birbCollisionRadius: 0.8,    // Birb collision radius
 };
 
@@ -23,7 +23,7 @@ function createDroneMesh(THREE) {
   group.name = 'drone';
 
   // Main body - glowing octahedron (diamond shape)
-  const bodyGeometry = new THREE.OctahedronGeometry(0.8, 0);
+  const bodyGeometry = new THREE.OctahedronGeometry(1.6, 0);
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color: 0xff3366,
     emissive: 0xff2255,
@@ -35,7 +35,7 @@ function createDroneMesh(THREE) {
   group.add(body);
 
   // Spinning ring around the body
-  const ringGeometry = new THREE.TorusGeometry(1.2, 0.08, 8, 24);
+  const ringGeometry = new THREE.TorusGeometry(2.4, 0.16, 8, 24);
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: 0xff6699,
     transparent: true,
