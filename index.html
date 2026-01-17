@@ -804,6 +804,11 @@
       stroke-linejoin: round;
     }
 
+    /* Ensure hidden attribute works even with display: flex */
+    .settings-gear-button[hidden] {
+      display: none !important;
+    }
+
     /* Settings Overlay */
     .settings-overlay {
       position: absolute;
@@ -1013,7 +1018,7 @@
                 <path d="M9 7H7V5M17 7V5h-2M9 17v2H7M17 17h-2v2" stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M15 9h4M15 15h4M5 9h4M5 15h4" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span data-fullscreen-label>Windowed</span>
+              <span data-fullscreen-label>Fullscreen</span>
             </button>
             <!-- How to play -->
             <button type="button" class="settings-button" data-control="info" aria-label="How to play">
@@ -1604,14 +1609,8 @@
     const environmentToggleButton = document.querySelector(
       '[data-control="environment-toggle"]'
     );
-    const environmentOrder = Array.from(new Set([
-      ...ENVIRONMENT_VARIANTS.map((variant) => variant.id),
-      "canyons",
-      "city",
-    ])).filter((variantId) => {
-      const definition = getEnvironmentDefinition(variantId);
-      return definition?.id === variantId;
-    });
+    // Use ENVIRONMENT_VARIANTS directly - it's the source of truth for all available environments
+    const environmentOrder = ENVIRONMENT_VARIANTS.map((variant) => variant.id);
     const defaultEnvironmentId = environmentOrder[0] ?? "forest";
     const defaultEnvironment =
       getEnvironmentDefinition(defaultEnvironmentId) ?? {
@@ -2671,15 +2670,12 @@
     function syncFullscreenUi() {
       if (!fullscreenToggleButton) return;
       const active = isFullscreenActive();
-      const labelText = active ? "Exit Fullscreen" : "Enter Fullscreen";
+      // Consistent label text: "Fullscreen" when not active, "Exit Fullscreen" when active
+      const labelText = active ? "Exit Fullscreen" : "Fullscreen";
       fullscreenToggleButton.setAttribute("aria-pressed", String(active));
       fullscreenToggleButton.setAttribute("aria-label", labelText);
       if (fullscreenToggleLabel) {
         fullscreenToggleLabel.textContent = labelText;
-      }
-      if (fullscreenEnterIcon && fullscreenExitIcon) {
-        fullscreenEnterIcon.toggleAttribute("hidden", active);
-        fullscreenExitIcon.toggleAttribute("hidden", !active);
       }
     }
 
