@@ -21,8 +21,13 @@ export const MAX_TOTAL_SPEED = 7;
 // Rotation rates for pitch and yaw (radians per second at full stick deflection)
 export const PITCH_RATE = Math.PI * 0.6;
 export const YAW_RATE = Math.PI * 0.75;
-// How quickly the visual bank angle responds to yaw input
-export const BANK_RESPONSE = 8;
+// How quickly the smoothed yaw (used for banking) tracks the actual input
+// Lower = more lag, feels more weighted. Higher = more responsive.
+export const BANK_YAW_SMOOTHING = 5;
+// How quickly bank responds when rolling INTO a turn (faster = more responsive)
+export const BANK_ENTRY_RESPONSE = 10;
+// How quickly bank responds when leveling OUT of a turn (slower = smoother settling)
+export const BANK_EXIT_RESPONSE = 3;
 // Upper bound on how far the bird can bank for readability and comfort.
 export const MAX_BANK_ANGLE = (65 * Math.PI) / 180;
 // Maximum visual pitch tilt when climbing/diving (nose up/down effect)
@@ -150,6 +155,8 @@ export class FreeFlightController {
     // Smoothed input for nest look mode to reduce jitter
     this._smoothedNestYaw = 0;
     this._smoothedNestPitch = 0;
+    // Smoothed yaw specifically for banking - adds lag for more weighted feel
+    this._smoothedBankYaw = 0;
 
     // Track heading as a scalar angle to avoid quaternion accumulation issues
     this.heading = 0;
@@ -493,9 +500,21 @@ export class FreeFlightController {
     // Turn right (positive yaw) = bank right = right wing down = positive roll in Three.js
     // Turn left (negative yaw) = bank left = left wing down = negative roll in Three.js
     // No banking in nest mode (bird is stationary)
-    const targetBank = this._nestLookMode ? 0 : combinedYaw * MAX_BANK_ANGLE;
 
-    const bankStep = 1 - Math.exp(-BANK_RESPONSE * rotationDeltaTime);
+    // Smooth the yaw input for banking - adds a weighted, lag feel
+    // This makes the bank feel more physical rather than directly tied to input
+    const bankYawStep = 1 - Math.exp(-BANK_YAW_SMOOTHING * rotationDeltaTime);
+    this._smoothedBankYaw += (combinedYaw - this._smoothedBankYaw) * bankYawStep;
+
+    // Calculate target bank from the smoothed yaw
+    const targetBank = this._nestLookMode ? 0 : this._smoothedBankYaw * MAX_BANK_ANGLE;
+
+    // Asymmetric response: faster when banking into a turn, slower when leveling out
+    // This makes the bird feel more weighted - responsive going into turns but smooth settling out
+    // "Banking deeper" = magnitude increasing OR changing direction (need to respond quickly)
+    const isBankingDeeper = Math.abs(targetBank) >= Math.abs(this.bank) || (targetBank * this.bank < 0);
+    const bankResponseRate = isBankingDeeper ? BANK_ENTRY_RESPONSE : BANK_EXIT_RESPONSE;
+    const bankStep = 1 - Math.exp(-bankResponseRate * rotationDeltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
@@ -794,6 +813,7 @@ export class FreeFlightController {
     this.elapsed = 0;
     this._pendingYaw = 0;
     this._pendingPitch = 0;
+    this._smoothedBankYaw = 0;
     this._yawOnlyMode = false;
     this._pitchOnlyMode = false;
     this._nestLookMode = false;
