@@ -3,7 +3,10 @@ export const AIM_RIG_DEFAULTS = {
   pitchRate: Math.PI * 0.5,   // Slightly faster vertical rotation
   maxPitch: (85 * Math.PI) / 180,
   smoothing: 12,              // Slightly higher for smoother response
+  pointerSmoothing: 18,       // Smooths mouse/touch deltas for consistent look
   lookSensitivity: 0.002,
+  pointerDeadzone: 0.15,      // Ignore tiny pointer jitter (pixels)
+  maxPointerDelta: 40,        // Clamp sudden spikes when pointer lock resumes
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -27,7 +30,10 @@ export class AimRig {
     this.pitchRate = options.pitchRate ?? AIM_RIG_DEFAULTS.pitchRate;
     this.maxPitch = options.maxPitch ?? AIM_RIG_DEFAULTS.maxPitch;
     this.smoothing = options.smoothing ?? AIM_RIG_DEFAULTS.smoothing;
+    this.pointerSmoothing = options.pointerSmoothing ?? AIM_RIG_DEFAULTS.pointerSmoothing;
     this.lookSensitivity = options.lookSensitivity ?? AIM_RIG_DEFAULTS.lookSensitivity;
+    this.pointerDeadzone = options.pointerDeadzone ?? AIM_RIG_DEFAULTS.pointerDeadzone;
+    this.maxPointerDelta = options.maxPointerDelta ?? AIM_RIG_DEFAULTS.maxPointerDelta;
 
     this._referenceUp = new Vector3(0, 1, 0);
     this._referenceForward = new Vector3(0, 0, -1);
@@ -40,6 +46,8 @@ export class AimRig {
 
     this._smoothedX = 0;
     this._smoothedY = 0;
+    this._smoothedDeltaX = 0;
+    this._smoothedDeltaY = 0;
     this._yaw = 0;
     this._pitch = 0;
     this._active = false;
@@ -51,6 +59,8 @@ export class AimRig {
     this._active = next;
     this._smoothedX = 0;
     this._smoothedY = 0;
+    this._smoothedDeltaX = 0;
+    this._smoothedDeltaY = 0;
     if (!next) {
       this._yaw = 0;
       this._pitch = 0;
@@ -70,6 +80,8 @@ export class AimRig {
     this._pitch = 0;
     this._smoothedX = 0;
     this._smoothedY = 0;
+    this._smoothedDeltaX = 0;
+    this._smoothedDeltaY = 0;
   }
 
   update({ axisX = 0, axisY = 0, deltaX = 0, deltaY = 0 } = {}, deltaTime = 0) {
@@ -84,9 +96,27 @@ export class AimRig {
       this._pitch += this._smoothedY * this.pitchRate * limitedDelta;
     }
 
-    if (Number.isFinite(deltaX) || Number.isFinite(deltaY)) {
-      this._yaw += -deltaX * this.lookSensitivity;
-      this._pitch += deltaY * this.lookSensitivity;
+    const safeDeltaX = Number.isFinite(deltaX) ? deltaX : 0;
+    const safeDeltaY = Number.isFinite(deltaY) ? deltaY : 0;
+    const targetDeltaX = Math.abs(safeDeltaX) < this.pointerDeadzone
+      ? 0
+      : clamp(safeDeltaX, -this.maxPointerDelta, this.maxPointerDelta);
+    const targetDeltaY = Math.abs(safeDeltaY) < this.pointerDeadzone
+      ? 0
+      : clamp(safeDeltaY, -this.maxPointerDelta, this.maxPointerDelta);
+
+    if (limitedDelta > 0) {
+      const pointerSmoothStep = 1 - Math.exp(-this.pointerSmoothing * limitedDelta);
+      this._smoothedDeltaX += (targetDeltaX - this._smoothedDeltaX) * pointerSmoothStep;
+      this._smoothedDeltaY += (targetDeltaY - this._smoothedDeltaY) * pointerSmoothStep;
+    } else {
+      this._smoothedDeltaX = targetDeltaX;
+      this._smoothedDeltaY = targetDeltaY;
+    }
+
+    if (this._smoothedDeltaX !== 0 || this._smoothedDeltaY !== 0) {
+      this._yaw += -this._smoothedDeltaX * this.lookSensitivity;
+      this._pitch += this._smoothedDeltaY * this.lookSensitivity;
     }
 
     // Clamp pitch to prevent looking past vertical
