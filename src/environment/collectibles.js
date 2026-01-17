@@ -1,6 +1,12 @@
 /**
  * Collectible Ring System
  * Creates themed collectible rings for each environment with particles and glow effects
+ *
+ * OPTIMIZED:
+ * - Uses squared distance for collision detection (avoids sqrt)
+ * - Pre-allocated scratch vectors
+ * - Removed separate RAF loop (uses game loop timing)
+ * - Batch buffer updates
  */
 
 const RING_CONFIGS = {
@@ -287,6 +293,13 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
   const ringParticles = [];
   const burstParticles = [];
 
+  // Pre-allocated scratch vectors for collision detection (ZERO allocations per frame)
+  const _scratchWorldPos = new THREE.Vector3();
+  const _scratchDelta = new THREE.Vector3();
+
+  // Animation state for ring collection (avoids separate RAF)
+  const collectingRings = []; // { ringGroup, startTime, startScale }
+
   // Create rings with particles
   placements.forEach((placement) => {
     const ringGroup = new THREE.Group();
@@ -389,34 +402,62 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
         burst.geometry.attributes.position.needsUpdate = true;
         burst.material.opacity = burst.userData.life;
       }
+
+      // Update collecting ring animations (OPTIMIZED: runs in game loop, not separate RAF)
+      for (let i = collectingRings.length - 1; i >= 0; i--) {
+        const anim = collectingRings[i];
+        const elapsed = animationTime - anim.startTime;
+        const t = Math.min(elapsed / 0.3, 1);
+
+        if (t < 1) {
+          anim.ringGroup.scale.setScalar(anim.startScale * (1 + t * 0.5));
+          if (anim.ring.userData.ring) {
+            anim.ring.userData.ring.material.opacity = anim.ring.userData.baseOpacity * (1 - t);
+          }
+          if (anim.ring.userData.glow) {
+            anim.ring.userData.glow.material.opacity = 0.4 * (1 - t);
+          }
+        } else {
+          anim.ringGroup.visible = false;
+          collectingRings.splice(i, 1);
+        }
+      }
     },
 
     /**
-     * Check for ring collection
+     * Check for ring collection (OPTIMIZED: uses squared distance)
      */
     checkCollection(position, radius = 1.0) {
       const collectedIndices = [];
+      const radiusSq = radius * radius;
 
-      rings.forEach((ringGroup, index) => {
-        if (ringGroup.userData.collected) return;
+      for (let index = 0; index < rings.length; index++) {
+        const ringGroup = rings[index];
+        if (ringGroup.userData.collected) continue;
 
-        const ringWorldPos = new THREE.Vector3();
-        ringGroup.getWorldPosition(ringWorldPos);
+        // Get world position using pre-allocated vector (NO allocation)
+        ringGroup.getWorldPosition(_scratchWorldPos);
 
-        const distance = position.distanceTo(ringWorldPos);
-        const collisionThreshold = ringGroup.userData.collisionRadius + radius;
+        // Use squared distance to avoid sqrt (OPTIMIZED)
+        _scratchDelta.subVectors(position, _scratchWorldPos);
+        const distSq = _scratchDelta.x * _scratchDelta.x +
+                       _scratchDelta.y * _scratchDelta.y +
+                       _scratchDelta.z * _scratchDelta.z;
 
-        if (distance < collisionThreshold) {
-          this.collectRing(index, ringWorldPos);
+        const collisionRadius = ringGroup.userData.collisionRadius;
+        const thresholdSq = (collisionRadius + radius) * (collisionRadius + radius);
+
+        if (distSq < thresholdSq) {
+          this.collectRing(index, _scratchWorldPos);
           collectedIndices.push(index);
         }
-      });
+      }
 
       return collectedIndices;
     },
 
     /**
-     * Collect a ring
+     * Collect a ring (OPTIMIZED: no separate RAF loop)
      */
     collectRing(index, worldPosition) {
       const ringGroup = rings[index];
@@ -429,27 +470,13 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
       container.add(burst);
       burstParticles.push(burst);
 
-      // Animate ring out
-      const ring = ringGroup.children[0];
-      const startScale = ringGroup.scale.x;
-      const startTime = animationTime;
-
-      const animateOut = () => {
-        const elapsed = animationTime - startTime;
-        const t = Math.min(elapsed / 0.3, 1);
-
-        if (t < 1) {
-          ringGroup.scale.setScalar(startScale * (1 + t * 0.5));
-          ring.userData.ring.material.opacity = ring.userData.baseOpacity * (1 - t);
-          ring.userData.glow.material.opacity *= (1 - t * 0.5);
-
-          requestAnimationFrame(animateOut);
-        } else {
-          ringGroup.visible = false;
-        }
-      };
-
-      animateOut();
+      // Queue animation in game loop instead of separate RAF
+      collectingRings.push({
+        ringGroup,
+        startTime: animationTime,
+        startScale: ringGroup.scale.x,
+        ring: ringGroup.children[0]
+      });
     },
 
     /**
@@ -473,6 +500,9 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
         burst.material.dispose();
       });
       burstParticles.length = 0;
+
+      // Clear collecting animations
+      collectingRings.length = 0;
     },
 
     /**

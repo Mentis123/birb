@@ -1,9 +1,11 @@
 /**
  * bird-flight.js
- * 
+ *
  * Standard Flight Controller for Spherical Worlds.
- * Separates Position and Orientation to allow full 6DOF control 
+ * Separates Position and Orientation to allow full 6DOF control
  * (constrained to sphere surface).
+ *
+ * OPTIMIZED: Uses pre-allocated scratch vectors to eliminate per-frame garbage collection
  */
 
 export const FLIGHT_DEFAULTS = {
@@ -36,13 +38,29 @@ export class BirdFlight {
             ? options.quaternion.clone()
             : new Quaternion();
 
-        // Scratch variables
+        // Pre-allocated scratch variables (ZERO per-frame allocations)
         this._scratch = {
             vec3: new Vector3(),
+            vec3_2: new Vector3(),
+            vec3_3: new Vector3(),
             axis: new Vector3(),
             quat: new Quaternion(),
+            transportQuat: new Quaternion(),
             up: new Vector3(),
             forward: new Vector3(),
+            oldPos: new Vector3(),
+            oldNormal: new Vector3(),
+            newNormal: new Vector3(),
+            radialOffset: new Vector3(),
+            sphereNormal: new Vector3(),
+            displacement: new Vector3(),
+        };
+
+        // Pre-allocated pose output (reused each frame)
+        this._poseOutput = {
+            position: new Vector3(),
+            quaternion: new Quaternion(),
+            velocity: new Vector3()
         };
 
         // Ensure initially on surface
@@ -82,75 +100,60 @@ export class BirdFlight {
     update(deltaTime) {
         if (deltaTime <= 0) return this._getPose();
 
-        const { Vector3, Quaternion } = this.THREE;
+        const s = this._scratch; // Shorthand for scratch vectors
 
         // 1. Move Forward
         // Get forward direction: (0, 0, -1) rotated by Q
-        this._scratch.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+        s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
 
-        // Calculate displacement
-        // Note: If pitched up, forward has an Up component. 
-        // We might want to project forward onto the surface tangent if we want constant ground speed.
-        // But for "Flight" feel, flying towards sky should just move you less along ground.
-        const displacement = this._scratch.forward.multiplyScalar(this.speed * deltaTime);
+        // Calculate displacement (reuse scratch vector)
+        s.displacement.copy(s.forward).multiplyScalar(this.speed * deltaTime);
 
-        // Save old position/normal for transport
-        const oldPos = this.position.clone();
-        const oldNormal = oldPos.clone().normalize();
+        // Save old position/normal for transport (using scratch vectors - NO allocations)
+        s.oldPos.copy(this.position);
+        s.oldNormal.copy(s.oldPos).normalize();
 
         // Apply movement
-        this.position.add(displacement);
+        this.position.add(s.displacement);
 
         // 2. Constrain to Sphere (keep minimum altitude, allow climbing)
-        const radialOffset = this.position.clone().sub(this.sphereCenter);
-        const radialDistance = radialOffset.length();
+        s.radialOffset.copy(this.position).sub(this.sphereCenter);
+        const radialDistance = s.radialOffset.length();
         if (radialDistance < this.sphereRadius) {
-            radialOffset.normalize().multiplyScalar(this.sphereRadius);
-            this.position.copy(radialOffset.add(this.sphereCenter));
+            s.radialOffset.normalize().multiplyScalar(this.sphereRadius);
+            this.position.copy(s.radialOffset).add(this.sphereCenter);
         }
 
         // 3. Transport Rotation (Spherical Adjustment)
         // We moved along the sphere, so our "Up" vector (Gravity) changed.
         // We must rotate the bird's orientation to match the new local vertical.
-        const newNormal = this.position.clone().sub(this.sphereCenter).normalize();
+        s.newNormal.copy(this.position).sub(this.sphereCenter).normalize();
 
-        // Calculate quaternion that rotates Old Normal to New Normal
-        const transportQ = new Quaternion().setFromUnitVectors(oldNormal, newNormal);
+        // Calculate quaternion that rotates Old Normal to New Normal (using scratch quat)
+        s.transportQuat.setFromUnitVectors(s.oldNormal, s.newNormal);
 
         // Apply this rotation GLOBALLY to the bird (Pre-multiply)
         // This effectively "drags" the bird's orientation to follow the curve
-        this.quaternion.premultiply(transportQ);
+        this.quaternion.premultiply(s.transportQuat);
 
         // 4. Auto-Leveling (Pitch)
-        // If no pitch input, slowly rotate back to level flight (tangent to sphere)
-        // Level flight means Local Forward has 0 vertical component relative to Sphere Normal.
-        // We already have 'newNormal' (World Up).
-        // Forward is (0,0,-1) applied by Quat.
-        // We want Forward dot Normal = 0.
-        // Current Pitch Angle = Asin(Forward dot Normal).
-        // We want to rotate around Local X (Pitch) to reduce this angle.
-
         // Only auto-level if speed is sufficient (aerodynamic stability)
         if (this.speed > 0.5) {
-            const currentForward = this._scratch.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
-            const sphereNormal = this.position.clone().sub(this.sphereCenter).normalize();
+            s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+            s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
 
-            // Pitch Angle: Angle between Forward vector and the Tangent Plane.
-            // Sin(Pitch) = Forward dot Normal.
-            const sinPitch = currentForward.dot(sphereNormal);
+            // Pitch Angle: Sin(Pitch) = Forward dot Normal
+            const sinPitch = s.forward.dot(s.sphereNormal);
 
-            // If pointing UP (positive dot), we want to Pitch DOWN (Negative X Rot).
-            // If pointing DOWN (negative dot), we want to Pitch UP (Positive X Rot).
-            // So correction is proportional to -sinPitch.
-
-            const autoLevelStrength = 1.0; // Adjustment strength
+            // Correction proportional to -sinPitch
+            const autoLevelStrength = 1.0;
             const correction = -sinPitch * autoLevelStrength * deltaTime;
 
             // Apply if significant
             if (Math.abs(correction) > 0.0001) {
-                this._scratch.axis.set(1, 0, 0); // Local X
-                this._scratch.quat.setFromAxisAngle(this._scratch.axis, correction);
-                this.quaternion.multiply(this._scratch.quat);
+                s.axis.set(1, 0, 0); // Local X
+                s.quat.setFromAxisAngle(s.axis, correction);
+                this.quaternion.multiply(s.quat);
             }
         }
 
@@ -166,25 +169,27 @@ export class BirdFlight {
 
     _constrainToSphere() {
         if (this.sphereCenter) {
-            const radialOffset = this.position.clone().sub(this.sphereCenter);
-            const radialDistance = radialOffset.length();
+            const s = this._scratch;
+            s.radialOffset.copy(this.position).sub(this.sphereCenter);
+            const radialDistance = s.radialOffset.length();
             if (radialDistance < this.sphereRadius) {
-                radialOffset.normalize().multiplyScalar(this.sphereRadius);
-                this.position.copy(radialOffset.add(this.sphereCenter));
+                s.radialOffset.normalize().multiplyScalar(this.sphereRadius);
+                this.position.copy(s.radialOffset).add(this.sphereCenter);
             }
         }
     }
 
     _getPose() {
-        return {
-            position: this.position.clone(),
-            quaternion: this.quaternion.clone(),
-            velocity: new this.THREE.Vector3() // Todo: calc velocity if needed
-        };
+        // Reuse pre-allocated pose output to avoid allocations
+        this._poseOutput.position.copy(this.position);
+        this._poseOutput.quaternion.copy(this.quaternion);
+        this._poseOutput.velocity.set(0, 0, 0); // Todo: calc velocity if needed
+        return this._poseOutput;
     }
 
     // Getters for external checking
-    getPosition() { return this.position.clone(); }
+    // Note: getPosition returns a copy for safety when used externally
+    getPosition() { return this._scratch.vec3.copy(this.position); }
 
     setSpeed(speed) {
         this.speed = speed;

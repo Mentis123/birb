@@ -3109,6 +3109,24 @@
         // BirdFlight.speed will be 0 when nested, preventing position change,
         // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
         pose = flight.tick(resolvedInput, delta);
+
+        // 2b. Object Collision Detection (trees, rocks, etc.)
+        // Only check when flying (not nested) and collision system exists
+        if (!isNested && sphericalWorld?.collisionSystem) {
+          const birdRadius = 0.4; // Bird collision radius
+          const collisionResult = sphericalWorld.collisionSystem.checkObjectCollision(
+            THREE,
+            pose.position,
+            birdRadius
+          );
+
+          if (collisionResult.collided) {
+            // Push bird away from the object
+            pose.position.copy(collisionResult.correctedPosition);
+            flight.position.copy(collisionResult.correctedPosition);
+          }
+        }
+
         if (nestedAimQuaternion) {
           pose.quaternion.copy(nestedAimQuaternion);
           flight.quaternion.copy(nestedAimQuaternion);
