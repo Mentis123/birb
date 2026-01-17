@@ -34,6 +34,7 @@ export class AimRig {
     this._referenceRight = new Vector3(1, 0, 0);
     this._scratchForward = new Vector3(0, 0, -1);
     this._scratchRight = new Vector3(1, 0, 0);
+    this._scratchUp = new Vector3(0, 1, 0);
     this._scratchQuat = new Quaternion();
     this._scratchMatrix = new Matrix4();
 
@@ -97,22 +98,40 @@ export class AimRig {
   }
 
   getQuaternion(target = new this.THREE.Quaternion()) {
-    const up = this._referenceUp;
-    const yawedForward = this._scratchForward.copy(this._referenceForward);
+    // Standard FPS/turret camera approach:
+    // 1. Apply yaw around reference up
+    // 2. Apply pitch around the yawed right axis
+    // 3. Calculate up from right × forward to maintain orthonormal basis
+    //
+    // Key insight: right stays constant for a given yaw (it's the pitch axis).
+    // Recalculating right from pitchedForward × up fails at high pitch angles
+    // because pitchedForward becomes nearly parallel to up.
+
+    const forward = this._scratchForward.copy(this._referenceForward);
+
+    // Apply yaw rotation around reference up
     if (Math.abs(this._yaw) > 1e-8) {
-      this._scratchQuat.setFromAxisAngle(up, this._yaw);
-      yawedForward.applyQuaternion(this._scratchQuat).normalize();
+      this._scratchQuat.setFromAxisAngle(this._referenceUp, this._yaw);
+      forward.applyQuaternion(this._scratchQuat).normalize();
     }
 
-    const right = this._scratchRight.crossVectors(yawedForward, up).normalize();
-    const pitchedForward = this._scratchForward.copy(yawedForward);
+    // Calculate right vector (perpendicular to yawed forward and reference up)
+    // This right vector stays constant regardless of pitch
+    const right = this._scratchRight.crossVectors(forward, this._referenceUp).normalize();
+
+    // Apply pitch rotation around the right vector
     if (Math.abs(this._pitch) > 1e-8) {
       this._scratchQuat.setFromAxisAngle(right, this._pitch);
-      pitchedForward.applyQuaternion(this._scratchQuat).normalize();
+      forward.applyQuaternion(this._scratchQuat).normalize();
     }
 
-    const finalRight = this._scratchRight.crossVectors(pitchedForward, up).normalize();
-    this._scratchMatrix.makeBasis(finalRight, up, pitchedForward.clone().negate());
+    // Calculate up vector to be perpendicular to both right and forward
+    // This ensures an orthonormal basis even at extreme pitch angles
+    const up = this._scratchUp.crossVectors(right, forward).normalize();
+
+    // Build rotation matrix from orthonormal basis
+    // In Three.js camera convention, we look down -Z, so negate forward
+    this._scratchMatrix.makeBasis(right, up, forward.clone().negate());
     return target.setFromRotationMatrix(this._scratchMatrix);
   }
 
