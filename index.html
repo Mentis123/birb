@@ -740,7 +740,9 @@
     }
 
     .splash-image {
-      max-width: 90%;
+      display: block;
+      width: 100%;
+      max-width: 90vw;
       max-height: 70vh;
       object-fit: contain;
       border-radius: 1rem;
@@ -759,6 +761,68 @@
     @keyframes splash-pulse {
       0%, 100% { opacity: 0.6; }
       50% { opacity: 1; }
+    }
+
+    /* Border electricity pulse animation */
+    .splash-image-container {
+      position: relative;
+      border-radius: 1.25rem;
+      padding: 3px;
+      background: linear-gradient(135deg, rgba(20, 30, 50, 0.8), rgba(10, 15, 30, 0.9));
+      overflow: hidden;
+    }
+
+    .splash-image-container::before {
+      content: '';
+      position: absolute;
+      inset: -50%;
+      background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        transparent 340deg,
+        #00d4ff 350deg,
+        #4df0ff 355deg,
+        #ffffff 358deg,
+        #4df0ff 360deg
+      );
+      animation: border-pulse-rotate 4.5s linear infinite;
+      filter: drop-shadow(0 0 8px rgba(77, 240, 255, 0.8)) drop-shadow(0 0 16px rgba(0, 212, 255, 0.5));
+    }
+
+    .splash-image-container::after {
+      content: '';
+      position: absolute;
+      inset: 3px;
+      border-radius: calc(1.25rem - 3px);
+      background: #060918;
+    }
+
+    .splash-image-container .splash-image {
+      position: relative;
+      z-index: 1;
+    }
+
+    @keyframes border-pulse-rotate {
+      0% {
+        transform: rotate(0deg);
+        opacity: 1;
+      }
+      33.33% {
+        transform: rotate(360deg);
+        opacity: 1;
+      }
+      38% {
+        transform: rotate(360deg);
+        opacity: 0;
+      }
+      95% {
+        transform: rotate(360deg);
+        opacity: 0;
+      }
+      100% {
+        transform: rotate(360deg);
+        opacity: 1;
+      }
     }
 
     /* Settings Gear Button */
@@ -982,7 +1046,9 @@
 <body>
   <!-- Splash Screen - tap to dismiss -->
   <div class="splash-screen" data-splash-screen>
-    <img src="./splash.jpg" alt="Birb Flight Lab" class="splash-image">
+    <div class="splash-image-container">
+      <img src="./splash.jpg" alt="Birb Flight Lab" class="splash-image">
+    </div>
     <div class="splash-prompt">Tap to start</div>
   </div>
 
