@@ -2744,6 +2744,12 @@
       },
     });
 
+    // Set collision targets for rocket system if environment already loaded
+    // (This handles the case where the default environment is set before rocketSystem is created)
+    if (sphericalWorld && sphericalWorld.root) {
+      rocketSystem.setCollisionTargets([sphericalWorld.root]);
+    }
+
     // Initialize drone target system
     droneSystem = createDroneSystem(THREE, scene, {
       onDroneDestroyed: (position) => {
