@@ -2128,11 +2128,8 @@
       });
     }
 
-    if (environmentToggleButton) {
-      environmentToggleButton.addEventListener("click", () => {
-        cycleEnvironment(1);
-      });
-    }
+    // Note: environment toggle click handler is attached later in SETTINGS UI WIRE-UP section
+    // to avoid duplicate event listeners
 
 
     birbAnchor = new THREE.Group();
