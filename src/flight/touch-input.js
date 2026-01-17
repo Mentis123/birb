@@ -26,6 +26,7 @@ export function createTouchInput(containerElement, nippleLib) {
     size: 100,
     color: '#ffffff',
     fadeTime: 100,
+    restOpacity: 0,
   });
 
   // Handle joystick movement
