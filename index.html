@@ -1245,6 +1245,8 @@
       var createRocketSystem = rocketModule.createRocketSystem;
       const droneModule = await import("./src/nesting/drone-system.js");
       var createDroneSystem = droneModule.createDroneSystem;
+      const balloonModule = await import("./src/environment/balloon-system.js");
+      var createBalloonSystem = balloonModule.createBalloonSystem;
       const gltfLoaderModule = await import(
         "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
       );
@@ -1394,6 +1396,81 @@
     // Play explosion sound (instant from preloaded pool)
     const playExplosionSound = () => {
       playFromPool(preloadedSounds.explosion);
+    };
+
+    // Play balloon pop sound (synthesized using Web Audio API)
+    let popAudioContext = null;
+    const playPopSound = () => {
+      if (!audioUnlocked) return;
+      try {
+        // Create or reuse audio context
+        if (!popAudioContext || popAudioContext.state === 'closed') {
+          popAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = popAudioContext;
+
+        // Resume context if suspended (iOS requirement)
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+
+        const now = ctx.currentTime;
+
+        // Create a short noise burst for the pop
+        const bufferSize = ctx.sampleRate * 0.08; // 80ms
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        // Fill with noise that decays quickly
+        for (let i = 0; i < bufferSize; i++) {
+          const t = i / bufferSize;
+          // Exponential decay envelope
+          const envelope = Math.exp(-t * 15);
+          // Random noise
+          data[i] = (Math.random() * 2 - 1) * envelope;
+        }
+
+        const noiseSource = ctx.createBufferSource();
+        noiseSource.buffer = buffer;
+
+        // Bandpass filter for "pop" character
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 800;
+        filter.Q.value = 1.5;
+
+        // Gain for volume control
+        const gainNode = ctx.createGain();
+        gainNode.gain.setValueAtTime(0.4, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+        // Also add a quick "thump" for impact
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.05);
+
+        const oscGain = ctx.createGain();
+        oscGain.gain.setValueAtTime(0.3, now);
+        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+
+        // Connect noise path
+        noiseSource.connect(filter);
+        filter.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        // Connect oscillator path
+        osc.connect(oscGain);
+        oscGain.connect(ctx.destination);
+
+        // Play
+        noiseSource.start(now);
+        noiseSource.stop(now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } catch (e) {
+        console.warn('Pop sound failed:', e);
+      }
     };
 
     function clamp(value, min, max) {
@@ -1643,6 +1720,7 @@
     let nestingSystem = null;
     let rocketSystem = null;
     let droneSystem = null;
+    let balloonSystem = null;
     let nestToastTimeout = null;
 
     // Freeze state (when birb collides with drone)
@@ -1938,6 +2016,20 @@
           rocketSystem.reset();
         } catch (e) {
           console.warn("Rocket system reset error:", e);
+        }
+      }
+
+      // Reset balloons with new environment theme
+      if (balloonSystem) {
+        try {
+          balloonSystem.dispose();
+          balloonSystem = createBalloonSystem(THREE, scene, variantId, {
+            onBalloonPopped: (position) => {
+              playPopSound();
+            },
+          });
+        } catch (e) {
+          console.warn("Balloon system reset error:", e);
         }
       }
 
@@ -3027,6 +3119,13 @@
       },
     });
 
+    // Initialize balloon pop system
+    balloonSystem = createBalloonSystem(THREE, scene, environmentState.id, {
+      onBalloonPopped: (position) => {
+        playPopSound();
+      },
+    });
+
     // Initialize nesting system with state change callback
     const handleNestingStateChange = (newState, previousState, currentNest) => {
       const isNested = newState === NESTING_STATES.NESTED;
@@ -3398,6 +3497,19 @@
       // Update freeze state
       updateFreezeState(delta);
 
+      // Update balloons
+      if (balloonSystem) {
+        balloonSystem.update(delta);
+
+        // Check birb-balloon collisions (only when flying, not nested)
+        if (flightController && !isNested) {
+          const balloonHit = balloonSystem.checkBirbCollision(flightController.position);
+          if (balloonHit.hit) {
+            balloonSystem.popBalloon(balloonHit.index);
+          }
+        }
+      }
+
       let pose;
       let visualQuat = null;
 
@@ -3584,6 +3696,9 @@
       }
       if (droneSystem) {
         droneSystem.dispose();
+      }
+      if (balloonSystem) {
+        balloonSystem.dispose();
       }
       renderer.dispose();
       if (sphericalWorld) {
