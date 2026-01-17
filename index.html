@@ -3602,7 +3602,7 @@
     // Helper to update fullscreen button label based on current state
     function updateFullscreenLabel() {
       if (fullscreenLabel) {
-        fullscreenLabel.textContent = isFullscreenActive() ? 'Windowed' : 'Fullscreen';
+        fullscreenLabel.textContent = isFullscreenActive() ? 'Exit Fullscreen' : 'Fullscreen';
       }
     }
 
@@ -3629,9 +3629,9 @@
       }
 
       // Update environment label
-      if (environmentLabel && environmentState?.current) {
-        const def = getEnvironmentDefinition(environmentState.current);
-        environmentLabel.textContent = def?.label || environmentState.current;
+      if (environmentLabel && environmentState?.id) {
+        const def = getEnvironmentDefinition(environmentState.id);
+        environmentLabel.textContent = def?.label || environmentState.id;
       }
 
       // Update fullscreen label
@@ -3671,7 +3671,7 @@
 
     // Settings close button (Resume)
     if (settingsCloseButton) {
-      settingsCloseButton.addEventListener('click', closeSettings);
+      settingsCloseButton.addEventListener('click', () => closeSettings());
     }
 
     // Environment toggle in settings
@@ -3679,9 +3679,9 @@
       settingsEnvButton.addEventListener('click', () => {
         cycleEnvironment(1);
         // Update label
-        if (environmentLabel && environmentState?.current) {
-          const def = getEnvironmentDefinition(environmentState.current);
-          environmentLabel.textContent = def?.label || environmentState.current;
+        if (environmentLabel && environmentState?.id) {
+          const def = getEnvironmentDefinition(environmentState.id);
+          environmentLabel.textContent = def?.label || environmentState.id;
         }
         // Render a frame to show the new environment behind the semi-transparent overlay
         renderFrame(performance.now());
