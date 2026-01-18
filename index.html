@@ -1034,6 +1034,171 @@
     .info-close:active {
       transform: scale(0.97);
     }
+
+    /* Game Mode Overlay */
+    .game-mode-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 150;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(4, 8, 18, 0.92);
+      backdrop-filter: blur(10px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 300ms ease;
+    }
+
+    .game-mode-overlay.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .game-mode-panel {
+      width: min(92%, 24rem);
+      max-height: 85vh;
+      padding: 1.5rem;
+      border-radius: 1.25rem;
+      background: rgba(12, 20, 40, 0.98);
+      border: 1px solid rgba(120, 160, 255, 0.2);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+      overflow-y: auto;
+    }
+
+    .game-mode-title {
+      margin: 0 0 1.25rem;
+      font-size: 1rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      text-align: center;
+      color: rgba(200, 220, 255, 0.9);
+    }
+
+    .game-mode-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .game-mode-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.85rem;
+      padding: 1rem;
+      border: 1px solid rgba(140, 180, 255, 0.2);
+      border-radius: 0.85rem;
+      background: linear-gradient(145deg, rgba(25, 40, 75, 0.7), rgba(18, 30, 55, 0.85));
+      color: #f1f5ff;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 150ms ease, background 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      text-align: left;
+      width: 100%;
+    }
+
+    .game-mode-option:hover:not(.game-mode-option--disabled) {
+      border-color: rgba(180, 210, 255, 0.45);
+      background: linear-gradient(145deg, rgba(35, 55, 100, 0.8), rgba(24, 38, 70, 0.9));
+    }
+
+    .game-mode-option:active:not(.game-mode-option--disabled) {
+      transform: scale(0.98);
+    }
+
+    .game-mode-option--active {
+      border-color: rgba(100, 220, 160, 0.5);
+      background: linear-gradient(145deg, rgba(25, 60, 50, 0.7), rgba(18, 45, 38, 0.85));
+    }
+
+    .game-mode-option--active:hover {
+      border-color: rgba(120, 240, 180, 0.6);
+      background: linear-gradient(145deg, rgba(30, 70, 58, 0.8), rgba(22, 52, 44, 0.9));
+    }
+
+    .game-mode-option--disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .game-mode-radio {
+      width: 1.1rem;
+      height: 1.1rem;
+      flex-shrink: 0;
+      margin-top: 0.15rem;
+      border: 2px solid rgba(140, 180, 255, 0.5);
+      border-radius: 50%;
+      background: transparent;
+      transition: border-color 150ms ease, background 150ms ease;
+    }
+
+    .game-mode-option--active .game-mode-radio {
+      border-color: rgba(100, 220, 160, 0.8);
+      background: rgba(100, 220, 160, 0.8);
+      box-shadow: 0 0 8px rgba(100, 220, 160, 0.4);
+    }
+
+    .game-mode-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .game-mode-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .game-mode-tag {
+      font-size: 0.65rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.15rem 0.4rem;
+      border-radius: 0.25rem;
+      background: rgba(255, 180, 100, 0.2);
+      color: rgba(255, 200, 140, 0.9);
+    }
+
+    .game-mode-tag--active {
+      background: rgba(100, 220, 160, 0.2);
+      color: rgba(140, 240, 180, 0.95);
+    }
+
+    .game-mode-description {
+      font-size: 0.78rem;
+      color: rgba(180, 200, 230, 0.75);
+      line-height: 1.4;
+    }
+
+    .game-mode-close {
+      width: 100%;
+      margin-top: 1.25rem;
+      padding: 0.75rem;
+      border: 1px solid rgba(140, 180, 255, 0.35);
+      border-radius: 0.75rem;
+      background: linear-gradient(145deg, rgba(30, 45, 80, 0.7), rgba(20, 32, 58, 0.85));
+      color: rgba(200, 220, 255, 0.95);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .game-mode-close:hover {
+      border-color: rgba(180, 210, 255, 0.5);
+    }
+
+    .game-mode-close:active {
+      transform: scale(0.98);
+    }
   </style>
 </head>
 
@@ -1072,6 +1237,16 @@
               </svg>
               <span data-environment-label>Forest</span>
             </button>
+            <!-- Game Mode -->
+            <button type="button" class="settings-button" data-control="game-mode" aria-label="Select game mode">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <path d="M6 12h4M8 10v4" />
+                <circle cx="16" cy="10" r="1" fill="currentColor" />
+                <circle cx="18" cy="12" r="1" fill="currentColor" />
+              </svg>
+              <span>Game Mode</span>
+            </button>
             <!-- Fullscreen toggle -->
             <button type="button" class="settings-button" data-control="fullscreen" aria-label="Toggle fullscreen">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1107,6 +1282,63 @@
         <img src="./info.jpg" alt="How to Play - Fly around, nest to shoot, don't get hit" class="info-image">
         <button type="button" class="info-close" data-control="info-close" aria-label="Close">Got it!</button>
       </div>
+
+      <!-- Game Mode overlay -->
+      <div class="game-mode-overlay" data-game-mode-overlay aria-hidden="true">
+        <div class="game-mode-panel">
+          <h2 class="game-mode-title">Game Mode</h2>
+          <div class="game-mode-list">
+            <!-- Casual (Active) -->
+            <button type="button" class="game-mode-option game-mode-option--active" data-game-mode="casual">
+              <div class="game-mode-radio"></div>
+              <div class="game-mode-content">
+                <div class="game-mode-name">
+                  Casual
+                  <span class="game-mode-tag game-mode-tag--active">Active</span>
+                </div>
+                <div class="game-mode-description">Free flight with no objectives. Explore, nest, and shoot drones at your own pace.</div>
+              </div>
+            </button>
+            <!-- Ring Rush (Coming Soon) -->
+            <button type="button" class="game-mode-option game-mode-option--disabled" data-game-mode="ring-rush" disabled>
+              <div class="game-mode-radio"></div>
+              <div class="game-mode-content">
+                <div class="game-mode-name">
+                  Ring Rush
+                  <span class="game-mode-tag">Coming Soon</span>
+                </div>
+                <div class="game-mode-description">Collect all 20 rings as fast as possible. Race against your best time.</div>
+              </div>
+            </button>
+            <!-- Drone Hunter (Coming Soon) -->
+            <button type="button" class="game-mode-option game-mode-option--disabled" data-game-mode="drone-hunter" disabled>
+              <div class="game-mode-radio"></div>
+              <div class="game-mode-content">
+                <div class="game-mode-name">
+                  Drone Hunter
+                  <span class="game-mode-tag">Coming Soon</span>
+                </div>
+                <div class="game-mode-description">60 seconds of chaos. Destroy drones, collect power-ups, chase the high score.</div>
+              </div>
+            </button>
+            <!-- Turret Defense (Coming Soon) -->
+            <button type="button" class="game-mode-option game-mode-option--disabled" data-game-mode="turret-defense" disabled>
+              <div class="game-mode-radio"></div>
+              <div class="game-mode-content">
+                <div class="game-mode-name">
+                  Turret Defense
+                  <span class="game-mode-tag">Coming Soon</span>
+                </div>
+                <div class="game-mode-description">Defend your nest from waves of attacking drones. How long can you survive?</div>
+              </div>
+            </button>
+          </div>
+          <button type="button" class="game-mode-close" data-control="game-mode-close" aria-label="Close game mode selection">
+            Done
+          </button>
+        </div>
+      </div>
+
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
           <div class="thumbstick" data-thumbstick="left">
@@ -1211,6 +1443,7 @@
       wasPlaying: true  // Track if game was playing before settings opened
     };
     const infoState = { isOpen: false };
+    const gameModeState = { isOpen: false };
 
     // DOM references for settings UI (assigned after elements exist)
     const settingsGearButton = document.querySelector('[data-control="settings-open"]');
@@ -1219,8 +1452,11 @@
     const settingsEnvButton = document.querySelector('[data-control="environment-toggle"]');
     const settingsFullscreenButton = document.querySelector('[data-control="fullscreen"]');
     const settingsInfoButton = document.querySelector('[data-control="info"]');
+    const settingsGameModeButton = document.querySelector('[data-control="game-mode"]');
     const infoOverlay = document.querySelector('[data-info-overlay]');
     const infoCloseButton = document.querySelector('[data-control="info-close"]');
+    const gameModeOverlay = document.querySelector('[data-game-mode-overlay]');
+    const gameModeCloseButton = document.querySelector('[data-control="game-mode-close"]');
     const environmentLabel = document.querySelector('[data-environment-label]');
     const fullscreenLabel = document.querySelector('[data-fullscreen-label]');
 
@@ -1253,6 +1489,34 @@
           dismissInfo();
         });
       }
+    }
+
+    // Game Mode overlay handlers
+    function openGameMode() {
+      if (gameModeState.isOpen) return;
+      gameModeState.isOpen = true;
+      if (gameModeOverlay) {
+        gameModeOverlay.classList.add('is-open');
+        gameModeOverlay.setAttribute('aria-hidden', 'false');
+      }
+    }
+
+    function closeGameMode() {
+      if (!gameModeState.isOpen) return;
+      gameModeState.isOpen = false;
+      if (gameModeOverlay) {
+        gameModeOverlay.classList.remove('is-open');
+        gameModeOverlay.setAttribute('aria-hidden', 'true');
+      }
+      // Resume game only if settings is also closed
+      if (!settingsState.isOpen && settingsState.wasPlaying && !document.hidden) {
+        if (typeof resumeGameIfReady === 'function') resumeGameIfReady();
+      }
+    }
+
+    // Game mode close button
+    if (gameModeCloseButton) {
+      gameModeCloseButton.addEventListener('click', () => closeGameMode());
     }
 
     let THREE,
@@ -3668,7 +3932,7 @@
 
     // Resume game if ready (both settings and info closed)
     function resumeGameIfReady() {
-      if (!settingsState.isOpen && !infoState.isOpen && settingsState.wasPlaying && !document.hidden) {
+      if (!settingsState.isOpen && !infoState.isOpen && !gameModeState.isOpen && settingsState.wasPlaying && !document.hidden) {
         renderer.setAnimationLoop(renderFrame);
       }
     }
@@ -3763,6 +4027,15 @@
         // Close settings but skip resume (game stays paused for info overlay)
         closeSettings(true);
         openInfo();
+      });
+    }
+
+    // Game mode button in settings
+    if (settingsGameModeButton) {
+      settingsGameModeButton.addEventListener('click', () => {
+        // Close settings but skip resume (game stays paused for game mode overlay)
+        closeSettings(true);
+        openGameMode();
       });
     }
 
