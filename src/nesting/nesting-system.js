@@ -40,6 +40,11 @@ export function createNestingSystem(THREE, {
   // Temporary vectors for calculations
   const _tempVec = new THREE.Vector3();
   const _tempQuat = new THREE.Quaternion();
+  const _tempUp = new THREE.Vector3();
+  const _tempForward = new THREE.Vector3();
+  const _tempRight = new THREE.Vector3();
+  const _tempForwardNeg = new THREE.Vector3();
+  const _tempMatrix = new THREE.Matrix4();
 
   function applyVelocity(direction, speed) {
     if (flightController.velocity) {
@@ -127,6 +132,31 @@ export function createNestingSystem(THREE, {
       const clearanceOffset = Math.max(0.6, Math.min(hostClearance * 0.2, 3.0));
       if (worldSurfaceNormal) {
         targetPosition.addScaledVector(worldSurfaceNormal, clearanceOffset);
+
+        // Align landing orientation to the surface normal and current approach direction.
+        // This avoids inconsistent sideways viewpoints when entering nests.
+        const up = _tempUp.copy(worldSurfaceNormal).normalize();
+        const currentForward = _tempForward
+          .set(0, 0, -1)
+          .applyQuaternion(flightController.lookQuaternion || flightController.quaternion);
+        currentForward.addScaledVector(up, -currentForward.dot(up));
+
+        if (currentForward.lengthSq() < 1e-6) {
+          currentForward
+            .set(0, 0, -1)
+            .applyQuaternion(targetQuaternion);
+          currentForward.addScaledVector(up, -currentForward.dot(up));
+        }
+
+        if (currentForward.lengthSq() < 1e-6) {
+          currentForward.set(0, 0, -1);
+          currentForward.addScaledVector(up, -currentForward.dot(up));
+        }
+
+        currentForward.normalize();
+        _tempRight.crossVectors(currentForward, up).normalize();
+        _tempMatrix.makeBasis(_tempRight, up, _tempForwardNeg.copy(currentForward).negate());
+        targetQuaternion.setFromRotationMatrix(_tempMatrix);
       }
 
       setState(NESTING_STATES.LANDING);
