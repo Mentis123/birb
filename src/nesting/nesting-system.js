@@ -250,15 +250,14 @@ export function createNestingSystem(THREE, {
             flightController.position.addScaledVector(direction, speed * delta);
 
             // Smoothly rotate to face landing orientation
-            if (flightController.lookQuaternion) {
-              flightController.lookQuaternion.slerp(targetQuaternion, delta * 3);
-            }
+            // Note: lookQuaternion is aliased to quaternion in FreeFlightController,
+            // so we only SLERP once to avoid double interpolation
             if (flightController.quaternion) {
               flightController.quaternion.slerp(targetQuaternion, delta * 3);
-            }
-            // Sync heading/pitch/bank with the slerped quaternion
-            if (typeof flightController.setOrientation === 'function' && flightController.quaternion) {
-              flightController.setOrientation(flightController.quaternion, { preserveBank: true });
+              // Sync heading/pitch/bank with the slerped quaternion
+              if (typeof flightController.setOrientation === 'function') {
+                flightController.setOrientation(flightController.quaternion, { preserveBank: true });
+              }
             }
           }
           break;
