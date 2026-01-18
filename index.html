@@ -3122,12 +3122,13 @@
       }
       if (aimRig) {
         if (isNested) {
-          // Compute a clean reference frame based on sphere's local up
-          // This prevents tilt/bank from the landing orientation from affecting aim
-          const pos = flightController.position;
-          const localUp = pos.clone().normalize(); // Radial direction = local up on sphere
+          // Compute a clean reference frame using the bird's orientation-derived up.
+          // This must match follow-camera.js which uses bird's local up when stationary,
+          // NOT the radial up from sphere center. Using radial up causes "squirrelly"
+          // behavior on tilted nest surfaces where the nest normal differs from radial.
+          const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(flightController.quaternion).normalize();
 
-          // Get bird's forward and project onto tangent plane
+          // Get bird's forward and project onto tangent plane (perpendicular to local up)
           const birdForward = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
           const forwardOnTangent = birdForward.clone()
             .sub(localUp.clone().multiplyScalar(birdForward.dot(localUp)))
