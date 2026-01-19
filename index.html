@@ -3063,35 +3063,16 @@
       }
       if (aimRig) {
         if (isNested) {
-          // Compute a clean reference frame based on sphere's local up
-          // This prevents tilt/bank from the landing orientation from affecting aim
+          // Use the new setReferenceFromVectors for perfect horizon
+          // This guarantees the horizon is always level regardless of landing angle
           const pos = flightController.position;
-          const localUp = pos.clone().normalize(); // Radial direction = local up on sphere
+          const localUp = pos.clone().normalize(); // Radial direction = true local up on sphere
 
-          // Get bird's forward and project onto tangent plane
+          // Get bird's forward direction (we'll project it to tangent plane in setReferenceFromVectors)
           const birdForward = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
-          const forwardOnTangent = birdForward.clone()
-            .sub(localUp.clone().multiplyScalar(birdForward.dot(localUp)))
-            .normalize();
 
-          // If forward is too close to up (looking straight up/down), use a fallback
-          if (forwardOnTangent.lengthSq() < 0.01) {
-            // Use world-X projected onto tangent as fallback forward
-            const fallback = new THREE.Vector3(1, 0, 0);
-            forwardOnTangent.copy(fallback)
-              .sub(localUp.clone().multiplyScalar(fallback.dot(localUp)))
-              .normalize();
-          }
-
-          // Build orthonormal basis
-          const right = new THREE.Vector3().crossVectors(forwardOnTangent, localUp).normalize();
-          const correctedUp = new THREE.Vector3().crossVectors(right, forwardOnTangent).normalize();
-
-          // Build rotation matrix and extract quaternion
-          const matrix = new THREE.Matrix4().makeBasis(right, correctedUp, forwardOnTangent.clone().negate());
-          const cleanQuaternion = new THREE.Quaternion().setFromRotationMatrix(matrix);
-
-          aimRig.setReferenceFromQuaternion(cleanQuaternion);
+          // Use the new method that directly accepts localUp for perfect horizon
+          aimRig.setReferenceFromVectors(birdForward, localUp);
           aimRig.setActive(true);
         } else {
           aimRig.setActive(false);

@@ -7,6 +7,10 @@ export const AIM_RIG_DEFAULTS = {
   lookSensitivity: 0.0025,    // Slightly higher for better pointer control
   pointerDeadzone: 0.08,      // Smaller deadzone for tighter control
   maxPointerDelta: 50,        // Allow larger pointer movements
+  // Banking settings for visual feedback during turns
+  bankInfluence: 0.15,        // How much yaw rate affects bank angle (radians per rad/s)
+  maxBank: (15 * Math.PI) / 180,  // Maximum bank angle (15 degrees) - subtle, never flip
+  bankSmoothing: 4,           // Smoothing for bank transitions
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -34,6 +38,9 @@ export class AimRig {
     this.lookSensitivity = options.lookSensitivity ?? AIM_RIG_DEFAULTS.lookSensitivity;
     this.pointerDeadzone = options.pointerDeadzone ?? AIM_RIG_DEFAULTS.pointerDeadzone;
     this.maxPointerDelta = options.maxPointerDelta ?? AIM_RIG_DEFAULTS.maxPointerDelta;
+    this.bankInfluence = options.bankInfluence ?? AIM_RIG_DEFAULTS.bankInfluence;
+    this.maxBank = options.maxBank ?? AIM_RIG_DEFAULTS.maxBank;
+    this.bankSmoothing = options.bankSmoothing ?? AIM_RIG_DEFAULTS.bankSmoothing;
 
     this._referenceUp = new Vector3(0, 1, 0);
     this._referenceForward = new Vector3(0, 0, -1);
@@ -51,6 +58,10 @@ export class AimRig {
     this._yaw = 0;
     this._pitch = 0;
     this._active = false;
+    // Banking state
+    this._previousYaw = 0;
+    this._yawVelocity = 0;
+    this._smoothedBank = 0;
   }
 
   setActive(isActive) {
@@ -64,6 +75,9 @@ export class AimRig {
     if (!next) {
       this._yaw = 0;
       this._pitch = 0;
+      this._previousYaw = 0;
+      this._yawVelocity = 0;
+      this._smoothedBank = 0;
     }
   }
 
@@ -82,6 +96,47 @@ export class AimRig {
     this._smoothedY = 0;
     this._smoothedDeltaX = 0;
     this._smoothedDeltaY = 0;
+  }
+
+  /**
+   * Set reference frame directly from forward direction and local up vector.
+   * This ensures a perfect horizon regardless of how the bird landed.
+   * @param {Vector3} forward - The forward direction (will be projected to tangent plane)
+   * @param {Vector3} localUp - The true local up vector (e.g., radial from sphere center)
+   */
+  setReferenceFromVectors(forward, localUp) {
+    if (!forward || !localUp) return;
+
+    // Use the provided localUp directly (this is the key to perfect horizon)
+    this._referenceUp.copy(localUp).normalize();
+
+    // Project forward onto the tangent plane perpendicular to localUp
+    const forwardProjected = forward.clone()
+      .sub(this._referenceUp.clone().multiplyScalar(forward.dot(this._referenceUp)))
+      .normalize();
+
+    // Handle edge case: if forward was parallel to up, pick a fallback
+    if (forwardProjected.lengthSq() < 0.001) {
+      // Use world X projected as fallback
+      const fallback = new this.THREE.Vector3(1, 0, 0);
+      forwardProjected.copy(fallback)
+        .sub(this._referenceUp.clone().multiplyScalar(fallback.dot(this._referenceUp)))
+        .normalize();
+    }
+
+    this._referenceForward.copy(forwardProjected);
+    this._referenceRight.crossVectors(this._referenceForward, this._referenceUp).normalize();
+
+    // Reset aim angles and banking state
+    this._yaw = 0;
+    this._pitch = 0;
+    this._smoothedX = 0;
+    this._smoothedY = 0;
+    this._smoothedDeltaX = 0;
+    this._smoothedDeltaY = 0;
+    this._previousYaw = 0;
+    this._yawVelocity = 0;
+    this._smoothedBank = 0;
   }
 
   update({ axisX = 0, axisY = 0, deltaX = 0, deltaY = 0 } = {}, deltaTime = 0) {
@@ -125,6 +180,25 @@ export class AimRig {
     // Normalize yaw to prevent floating point drift over long sessions
     // This allows continuous 360° rotation while keeping values bounded
     this._yaw = normalizeAngle(this._yaw);
+
+    // Calculate yaw velocity for banking effect
+    if (limitedDelta > 0) {
+      const yawDelta = normalizeAngle(this._yaw - this._previousYaw);
+      this._yawVelocity = yawDelta / limitedDelta;
+      this._previousYaw = this._yaw;
+
+      // Calculate target bank based on yaw velocity (turn left = bank left, etc.)
+      // Negative because turning right (negative yaw change) should bank right (negative bank)
+      const targetBank = clamp(
+        -this._yawVelocity * this.bankInfluence,
+        -this.maxBank,
+        this.maxBank
+      );
+
+      // Smooth the bank for pleasant transitions
+      const bankSmoothStep = 1 - Math.exp(-this.bankSmoothing * limitedDelta);
+      this._smoothedBank += (targetBank - this._smoothedBank) * bankSmoothStep;
+    }
   }
 
   getQuaternion(target = new this.THREE.Quaternion()) {
@@ -157,7 +231,16 @@ export class AimRig {
 
     // Calculate up vector to be perpendicular to both right and forward
     // This ensures an orthonormal basis even at extreme pitch angles
-    const up = this._scratchUp.crossVectors(right, forward).normalize();
+    let up = this._scratchUp.crossVectors(right, forward).normalize();
+
+    // Apply banking (roll around the forward axis) for visual feedback during turns
+    // This tilts the horizon slightly when turning, creating a more immersive feel
+    if (Math.abs(this._smoothedBank) > 1e-6) {
+      this._scratchQuat.setFromAxisAngle(forward, this._smoothedBank);
+      up.applyQuaternion(this._scratchQuat).normalize();
+      // Recalculate right to maintain orthonormal basis after bank
+      right.crossVectors(forward, up).normalize();
+    }
 
     // Build rotation matrix from orthonormal basis
     // In Three.js camera convention, we look down -Z, so negate forward

@@ -8,6 +8,7 @@ const ROCKET_SPEED = 25.0;
 const ROCKET_GRAVITY = 5.0;
 const ROCKET_LIFETIME = 8.0; // seconds
 const ROCKET_COOLDOWN = 2.0; // seconds between shots
+const ROCKET_ARM_DISTANCE = 3.0; // Distance rocket must travel before collision detection activates
 
 /**
  * Create a single rocket mesh
@@ -209,6 +210,8 @@ export function createRocketSystem(THREE, scene, options = {}) {
       rocket.userData.trail = trail;
       rocket.userData.trailIndex = 0;
       rocket.userData.previousPosition = position.clone();
+      rocket.userData.launchPosition = position.clone(); // Track original launch position
+      rocket.userData.distanceTraveled = 0; // Track total distance for arming
 
       container.add(rocket);
       container.add(trail);
@@ -250,13 +253,18 @@ export function createRocketSystem(THREE, scene, options = {}) {
         // Update position
         rocket.position.addScaledVector(rocket.userData.velocity, delta);
 
-        // Collision detection along travel path
+        // Collision detection along travel path (only after arm distance)
         _movementVec.copy(rocket.position).sub(previousPosition);
-        const distanceTraveled = _movementVec.length();
-        if (distanceTraveled > 0 && collisionTargets.length > 0) {
+        const frameDistance = _movementVec.length();
+        rocket.userData.distanceTraveled += frameDistance;
+
+        // Only check collisions after rocket has traveled the arm distance
+        // This prevents immediate explosions when launching from nests on trees/buildings
+        if (frameDistance > 0 && collisionTargets.length > 0 &&
+            rocket.userData.distanceTraveled > ROCKET_ARM_DISTANCE) {
           _rayDirection.copy(_movementVec).normalize();
           _raycaster.set(previousPosition, _rayDirection);
-          _raycaster.far = distanceTraveled;
+          _raycaster.far = frameDistance;
 
           const intersections = _raycaster.intersectObjects(collisionTargets, true);
           if (intersections.length > 0) {
