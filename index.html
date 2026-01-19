@@ -549,7 +549,14 @@
 
     .nest-launch-button {
       bottom: clamp(1rem, 4vw, 2rem);
-      left: clamp(1rem, 4vw, 2rem);
+      left: 50%;
+      transform: translateX(-50%);
+      width: clamp(4.5rem, 18vw, 5.5rem);
+      height: clamp(4.5rem, 18vw, 5.5rem);
+    }
+
+    .nest-launch-button:active {
+      transform: translateX(-50%) scale(0.95);
     }
 
     .nest-launch-button .cooldown-ring {
