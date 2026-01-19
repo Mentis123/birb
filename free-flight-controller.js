@@ -121,6 +121,8 @@ export class FreeFlightController {
     this._nestForward = new Vector3(0, 0, -1);
     this._nestRight = new Vector3(1, 0, 0);
     this._nestFrameLocked = false;
+    // Flag indicating nest vectors were pre-set by setOrientation (ready for nest mode)
+    this._nestOrientationReady = false;
     this._ambientPosition = new Vector3();
     this._ambientQuaternion = new Quaternion();
     this._ambientEuler = new Euler(0, 0, 0, "YXZ");
@@ -222,16 +224,25 @@ export class FreeFlightController {
 
     if (this._nestLookMode && !wasNestMode) {
       // Entering nest mode: lock the current reference frame to prevent drift
-      // This captures the nest's orientation as our stable basis for look-around
-      this._nestUp.copy(this._flightUp);
-      this._nestForward.copy(this._flightForward);
-      this._nestRight.copy(this._flightRight);
+      // If setOrientation was already called (indicated by _nestOrientationReady),
+      // use those pre-set vectors which came directly from the nest quaternion.
+      // This prevents race conditions where update() might have modified _flightUp.
+      if (!this._nestOrientationReady) {
+        // Fallback: capture current flight vectors if not pre-set
+        this._nestUp.copy(this._flightUp);
+        this._nestForward.copy(this._flightForward);
+        this._nestRight.copy(this._flightRight);
+      }
+      // Nest vectors are now the authoritative reference frame
       this._nestFrameLocked = true;
+      // Clear the ready flag - it served its purpose
+      this._nestOrientationReady = false;
       // Reset pitch to 0 when entering nest mode for a clean start
       this.pitch = 0;
     } else if (!this._nestLookMode && wasNestMode) {
       // Exiting nest mode: unlock frame and restore normal flight behavior
       this._nestFrameLocked = false;
+      this._nestOrientationReady = false;
       // Reset pitch to avoid stuck at extreme angles
       this.pitch = clamp(this.pitch, -MAX_VISUAL_PITCH_ANGLE, MAX_VISUAL_PITCH_ANGLE, 0);
       // Sync flight vectors with nest frame (so takeoff direction is correct)
@@ -298,6 +309,8 @@ export class FreeFlightController {
     this._nestUp.copy(this._flightUp);
     this._nestForward.copy(this._flightForward);
     this._nestRight.copy(this._flightRight);
+    // Mark nest orientation as ready - setNestLookMode will use these vectors
+    this._nestOrientationReady = true;
 
     // Sync legacy vector
     this._persistentForward.copy(this._flightForward);
@@ -807,6 +820,7 @@ export class FreeFlightController {
     this._nestForward.copy(this._flightForward);
     this._nestRight.copy(this._flightRight);
     this._nestFrameLocked = false;
+    this._nestOrientationReady = false;
 
     this.forwardSpeed = 0;
     this.verticalVelocity = 0;

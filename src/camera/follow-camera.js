@@ -173,9 +173,23 @@ export function createFollowCameraRig(three, options = {}) {
     }
 
     // Compute local "up" direction
-    // For spherical worlds: up is radial from sphere center
-    // For flat worlds: up is world Y axis (0, 1, 0)
-    if (state.sphereCenter) {
+    // When stationary (nested), derive up from bird's orientation to match its horizon.
+    // This prevents horizon flips when yawing on tilted nest surfaces - the camera's
+    // up must match the bird's frame, not the sphere's radial direction.
+    // When moving (flying), use radial up from sphere center for natural flight feel.
+    const isStationary = !velocity || velocity.lengthSq() < 0.01;
+
+    if (isStationary && pose.quaternion) {
+      // Extract up from bird's orientation - this is the bird's local up axis
+      // which matches the nest surface normal when nested
+      state.up.set(0, 1, 0).applyQuaternion(pose.quaternion);
+      if (state.up.lengthSq() < 1e-6) {
+        state.up.set(0, 1, 0);
+      } else {
+        state.up.normalize();
+      }
+    } else if (state.sphereCenter) {
+      // Flying: use radial up from sphere center
       state.up.copy(pose.position).sub(state.sphereCenter);
       if (state.up.lengthSq() < 1e-6) {
         state.up.set(0, 1, 0);
