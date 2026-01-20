@@ -610,23 +610,24 @@
       bottom: clamp(1rem, 4vw, 2rem);
       left: 50%;
       transform: translateX(-50%);
-      padding: 0.5rem 1rem;
-      background: rgba(255, 80, 50, 0.15);
-      border: 1px solid rgba(255, 100, 70, 0.4);
-      border-radius: 2rem;
-      color: rgba(255, 180, 150, 0.95);
-      font-size: clamp(0.65rem, 2vw, 0.75rem);
-      font-family: inherit;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
+      width: clamp(56px, 14vw, 72px);
+      height: clamp(56px, 14vw, 72px);
+      padding: 0;
+      background: rgba(60, 40, 20, 0.85);
+      border: 2px solid rgba(255, 180, 100, 0.7);
+      border-radius: 12px;
       opacity: 0;
-      transition: opacity 300ms ease, transform 150ms ease, background 150ms ease;
+      transition: opacity 300ms ease, transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
       pointer-events: none;
       z-index: 11;
       cursor: pointer;
       touch-action: none;
       -webkit-touch-callout: none;
       user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
     }
 
     .nest-indicator.is-visible {
@@ -635,8 +636,14 @@
     }
 
     .nest-indicator:active {
-      transform: translateX(-50%) scale(0.95);
-      background: rgba(255, 80, 50, 0.3);
+      transform: translateX(-50%) scale(0.92);
+      background: rgba(80, 55, 30, 0.95);
+      box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+    }
+
+    .nest-indicator svg {
+      width: 75%;
+      height: 75%;
     }
 
     /* Freeze indicator - shows when birb collides with drone */
@@ -1386,7 +1393,20 @@
 
       <!-- Nest proximity indicator (shows when approaching) -->
       <button type="button" class="nest-indicator" data-nest-indicator aria-label="Land on nest">
-        Nest nearby - Tap to land
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Bird silhouette descending -->
+          <path d="M32 8 L38 16 L50 14 L42 20 L44 26 L36 22 L32 28 L28 22 L20 26 L22 20 L14 14 L26 16 Z"
+                fill="#FFD088" stroke="#FF9944" stroke-width="1.5"/>
+          <!-- Down arrow indicating landing -->
+          <path d="M32 30 L32 42 M26 36 L32 42 L38 36"
+                stroke="#FFD088" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- Nest bowl shape -->
+          <path d="M16 50 Q18 58 32 58 Q46 58 48 50"
+                stroke="#CC8844" stroke-width="4" stroke-linecap="round" fill="none"/>
+          <!-- Nest twigs/texture -->
+          <path d="M14 50 L20 52 M50 50 L44 52 M18 54 L26 54 M46 54 L38 54"
+                stroke="#AA6633" stroke-width="2" stroke-linecap="round"/>
+        </svg>
       </button>
 
       <!-- Freeze indicator (shows when birb collides with drone) -->

@@ -1,16 +1,16 @@
 export const AIM_RIG_DEFAULTS = {
   yawRate: Math.PI * 0.8,     // Faster horizontal rotation for responsive feel
   pitchRate: Math.PI * 0.65,  // Faster vertical rotation
-  maxPitch: (80 * Math.PI) / 180,  // Slightly reduced to prevent disorienting extremes
+  maxPitch: (60 * Math.PI) / 180,  // Reduced from 80° to keep horizon more stable
   smoothing: 8,               // Less smoothing for more direct feel
   pointerSmoothing: 12,       // Reduced for faster pointer response
   lookSensitivity: 0.0025,    // Slightly higher for better pointer control
   pointerDeadzone: 0.08,      // Smaller deadzone for tighter control
   maxPointerDelta: 50,        // Allow larger pointer movements
-  // Banking settings for visual feedback during turns
-  bankInfluence: 0.15,        // How much yaw rate affects bank angle (radians per rad/s)
-  maxBank: (15 * Math.PI) / 180,  // Maximum bank angle (15 degrees) - subtle, never flip
-  bankSmoothing: 4,           // Smoothing for bank transitions
+  // Banking disabled for stable horizon during turns
+  bankInfluence: 0,           // Disabled - horizon stays level during turns
+  maxBank: 0,                 // Disabled - no horizon tilt
+  bankSmoothing: 4,           // (unused when banking disabled)
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
