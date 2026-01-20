@@ -1213,6 +1213,117 @@
     .game-mode-close:active {
       transform: scale(0.98);
     }
+
+    /* Game HUD for active mini-games */
+    .game-hud {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1rem;
+      pointer-events: none;
+      z-index: 90;
+      opacity: 0;
+      transition: opacity 300ms ease;
+    }
+    .game-hud[data-active="true"] {
+      opacity: 1;
+    }
+    .hud-top {
+      display: flex;
+      gap: 2rem;
+      font-size: 1.5rem;
+      font-weight: 700;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
+    .hud-time { color: #fff; }
+    .hud-score { color: #ffdd44; }
+    .hud-lives { color: #ff6666; }
+    .hud-wave { color: #88ff88; }
+    .hud-combo {
+      font-size: 1rem;
+      color: #ff9944;
+      margin-left: 0.5rem;
+    }
+    .hud-bottom {
+      margin-top: 0.5rem;
+      font-size: 1rem;
+      color: rgba(255,255,255,0.8);
+    }
+
+    /* Game Results overlay */
+    .game-results {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.85);
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 300ms ease;
+    }
+    .game-results[data-active="true"] {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .results-title {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+    .results-stat {
+      font-size: 1.5rem;
+      color: #ffdd44;
+      margin: 0.5rem 0;
+    }
+    .results-best {
+      font-size: 1.2rem;
+      color: #88ff88;
+      margin: 0.5rem 0;
+    }
+    .results-new-best {
+      font-size: 1rem;
+      color: #ff9944;
+      animation: pulse-best 1s infinite;
+    }
+    @keyframes pulse-best {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.1); opacity: 0.8; }
+    }
+    .results-buttons {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .results-btn {
+      padding: 0.75rem 2rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 0.5rem;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+    .results-btn:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.5);
+    }
+    .results-btn--primary {
+      background: rgba(100,220,160,0.3);
+      border-color: rgba(100,220,160,0.5);
+    }
+    .results-btn--primary:hover {
+      background: rgba(100,220,160,0.4);
+    }
   </style>
 </head>
 
@@ -1314,34 +1425,31 @@
               </div>
             </button>
             <!-- Ring Rush (Coming Soon) -->
-            <button type="button" class="game-mode-option game-mode-option--disabled" data-game-mode="ring-rush" disabled>
+            <button type="button" class="game-mode-option" data-game-mode="ring-rush">
               <div class="game-mode-radio"></div>
               <div class="game-mode-content">
                 <div class="game-mode-name">
                   Ring Rush
-                  <span class="game-mode-tag">Coming Soon</span>
                 </div>
                 <div class="game-mode-description">Collect all 20 rings as fast as possible. Race against your best time.</div>
               </div>
             </button>
-            <!-- Drone Hunter (Coming Soon) -->
-            <button type="button" class="game-mode-option game-mode-option--disabled" data-game-mode="drone-hunter" disabled>
+            <!-- Drone Hunter -->
+            <button type="button" class="game-mode-option" data-game-mode="drone-hunter">
               <div class="game-mode-radio"></div>
               <div class="game-mode-content">
                 <div class="game-mode-name">
                   Drone Hunter
-                  <span class="game-mode-tag">Coming Soon</span>
                 </div>
-                <div class="game-mode-description">60 seconds of chaos. Destroy drones, collect power-ups, chase the high score.</div>
+                <div class="game-mode-description">60 seconds of chaos. Destroy drones, chase the high score with combos.</div>
               </div>
             </button>
-            <!-- Turret Defense (Coming Soon) -->
-            <button type="button" class="game-mode-option game-mode-option--disabled" data-game-mode="turret-defense" disabled>
+            <!-- Turret Defense -->
+            <button type="button" class="game-mode-option" data-game-mode="turret-defense">
               <div class="game-mode-radio"></div>
               <div class="game-mode-content">
                 <div class="game-mode-name">
                   Turret Defense
-                  <span class="game-mode-tag">Coming Soon</span>
                 </div>
                 <div class="game-mode-description">Defend your nest from waves of attacking drones. How long can you survive?</div>
               </div>
@@ -1350,6 +1458,29 @@
           <button type="button" class="game-mode-close" data-control="game-mode-close" aria-label="Close game mode selection">
             Done
           </button>
+        </div>
+      </div>
+
+      <!-- Game HUD for mini-games -->
+      <div class="game-hud" data-game-hud>
+        <div class="hud-top">
+          <span class="hud-time" data-hud-time></span>
+          <span class="hud-score" data-hud-score></span>
+          <span class="hud-lives" data-hud-lives></span>
+          <span class="hud-wave" data-hud-wave></span>
+        </div>
+        <div class="hud-bottom" data-hud-info></div>
+      </div>
+
+      <!-- Game Results overlay -->
+      <div class="game-results" data-game-results>
+        <div class="results-title" data-results-title>Game Over</div>
+        <div class="results-stat" data-results-stat></div>
+        <div class="results-best" data-results-best></div>
+        <div class="results-new-best" data-results-new-best></div>
+        <div class="results-buttons">
+          <button class="results-btn results-btn--primary" data-results-retry>Play Again</button>
+          <button class="results-btn" data-results-quit>Quit</button>
         </div>
       </div>
 
@@ -1552,6 +1683,37 @@
       gameModeCloseButton.addEventListener('click', () => closeGameMode());
     }
 
+    // Game mode selection buttons
+    document.querySelectorAll('[data-game-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-game-mode');
+
+        // Update UI active states
+        document.querySelectorAll('[data-game-mode]').forEach(b => {
+          b.classList.remove('game-mode-option--active');
+        });
+        btn.classList.add('game-mode-option--active');
+
+        // Close overlay and start the selected mode
+        closeGameMode();
+
+        // Map mode strings to GAME_MODES enum (will be available after script loads)
+        setTimeout(() => {
+          if (mode === 'casual') {
+            currentGameMode = GAME_MODES.CASUAL;
+            miniGameState.active = false;
+            showGameHud(false);
+          } else if (mode === 'ring-rush') {
+            startGameMode(GAME_MODES.RING_RUSH);
+          } else if (mode === 'drone-hunter') {
+            startGameMode(GAME_MODES.DRONE_HUNTER);
+          } else if (mode === 'turret-defense') {
+            startGameMode(GAME_MODES.TURRET_DEFENSE);
+          }
+        }, 100);
+      });
+    });
+
     let THREE,
       GLTFLoader,
       FreeFlightController,
@@ -1607,6 +1769,8 @@
       var createRocketSystem = rocketModule.createRocketSystem;
       const droneModule = await import("./src/nesting/drone-system.js");
       var createDroneSystem = droneModule.createDroneSystem;
+      const collectiblesModule = await import("./src/environment/collectibles.js");
+      var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
       const gltfLoaderModule = await import(
         "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
       );
@@ -2019,6 +2183,249 @@
       savedSpeed: null,
     };
 
+    // ========== GAME MODE SYSTEM ==========
+    const GAME_MODES = {
+      CASUAL: 'casual',
+      RING_RUSH: 'ring_rush',
+      DRONE_HUNTER: 'drone_hunter',
+      TURRET_DEFENSE: 'turret_defense'
+    };
+
+    let currentGameMode = GAME_MODES.CASUAL;
+    let collectiblesSystem = null; // Will be assigned when spherical world loads
+
+    const miniGameState = {
+      active: false,
+      time: 0,
+      score: 0,
+      ringsCollected: 0,
+      ringsTotal: 20,
+      dronesDestroyed: 0,
+      combo: 1,
+      comboTimer: 0,
+      wave: 1,
+      lives: 3,
+      waveSpawnCount: 3,
+      waveSpawnedThisWave: 0,
+      droneSpawnTimer: 0,
+      started: false, // For Ring Rush - starts on first ring
+    };
+
+    // Game HUD elements
+    const gameHud = document.querySelector('[data-game-hud]');
+    const hudTime = document.querySelector('[data-hud-time]');
+    const hudScore = document.querySelector('[data-hud-score]');
+    const hudLives = document.querySelector('[data-hud-lives]');
+    const hudWave = document.querySelector('[data-hud-wave]');
+    const hudInfo = document.querySelector('[data-hud-info]');
+
+    // Game results elements
+    const gameResults = document.querySelector('[data-game-results]');
+    const resultsTitle = document.querySelector('[data-results-title]');
+    const resultsStat = document.querySelector('[data-results-stat]');
+    const resultsBest = document.querySelector('[data-results-best]');
+    const resultsNewBest = document.querySelector('[data-results-new-best]');
+    const resultsRetry = document.querySelector('[data-results-retry]');
+    const resultsQuit = document.querySelector('[data-results-quit]');
+
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      const ms = Math.floor((seconds % 1) * 100);
+      return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+    }
+
+    function updateGameHud() {
+      if (!gameHud) return;
+
+      switch (currentGameMode) {
+        case GAME_MODES.RING_RUSH:
+          hudTime.textContent = formatTime(miniGameState.time);
+          hudScore.textContent = `${miniGameState.ringsCollected}/${miniGameState.ringsTotal}`;
+          hudLives.textContent = '';
+          hudWave.textContent = '';
+          hudInfo.textContent = miniGameState.started ? '' : 'Collect a ring to start!';
+          break;
+
+        case GAME_MODES.DRONE_HUNTER:
+          const remaining = Math.max(0, 60 - miniGameState.time);
+          hudTime.textContent = formatTime(remaining);
+          hudScore.textContent = `${miniGameState.score}`;
+          if (miniGameState.combo > 1) {
+            hudScore.innerHTML = `${miniGameState.score} <span class="hud-combo">×${miniGameState.combo.toFixed(1)}</span>`;
+          }
+          hudLives.textContent = '';
+          hudWave.textContent = '';
+          hudInfo.textContent = '';
+          break;
+
+        case GAME_MODES.TURRET_DEFENSE:
+          hudTime.textContent = '';
+          hudScore.textContent = '';
+          hudLives.textContent = '❤'.repeat(miniGameState.lives);
+          hudWave.textContent = `Wave ${miniGameState.wave}`;
+          hudInfo.textContent = '';
+          break;
+      }
+    }
+
+    function showGameHud(visible) {
+      if (gameHud) {
+        gameHud.setAttribute('data-active', visible ? 'true' : 'false');
+      }
+    }
+
+    function showGameResults(title, stat, best, isNewBest) {
+      if (!gameResults) return;
+      resultsTitle.textContent = title;
+      resultsStat.textContent = stat;
+      resultsBest.textContent = best;
+      resultsNewBest.textContent = isNewBest ? '🎉 NEW BEST!' : '';
+      resultsNewBest.style.display = isNewBest ? 'block' : 'none';
+      gameResults.setAttribute('data-active', 'true');
+    }
+
+    function hideGameResults() {
+      if (gameResults) {
+        gameResults.setAttribute('data-active', 'false');
+      }
+    }
+
+    function startGameMode(mode) {
+      currentGameMode = mode;
+      miniGameState.active = true;
+      miniGameState.time = 0;
+      miniGameState.score = 0;
+      miniGameState.ringsCollected = 0;
+      miniGameState.dronesDestroyed = 0;
+      miniGameState.combo = 1;
+      miniGameState.comboTimer = 0;
+      miniGameState.wave = 1;
+      miniGameState.lives = 3;
+      miniGameState.waveSpawnCount = 3;
+      miniGameState.waveSpawnedThisWave = 0;
+      miniGameState.droneSpawnTimer = 0;
+      miniGameState.started = false;
+
+      // Reset collectibles if they exist
+      if (collectiblesSystem && collectiblesSystem.reset) {
+        collectiblesSystem.reset();
+      }
+
+      hideGameResults();
+      showGameHud(true);
+      updateGameHud();
+
+      // Mode-specific setup
+      if (mode === GAME_MODES.TURRET_DEFENSE) {
+        // Auto-land on nearest nest for turret defense
+        if (nestingSystem && nestPointsSystem) {
+          const nearestNest = nestPointsSystem.getNearestNest(flightController.position);
+          if (nearestNest) {
+            nestingSystem.forceNestAt(nearestNest);
+          }
+        }
+      }
+    }
+
+    function endGameMode(completed = true) {
+      miniGameState.active = false;
+      showGameHud(false);
+
+      let title, stat, bestKey, bestValue, isNewBest = false;
+
+      switch (currentGameMode) {
+        case GAME_MODES.RING_RUSH:
+          title = completed ? 'Ring Rush Complete!' : 'Ring Rush';
+          stat = `Time: ${formatTime(miniGameState.time)}`;
+          bestKey = 'birb_best_ring_rush';
+          const savedBestTime = parseFloat(localStorage.getItem(bestKey)) || Infinity;
+          if (completed && miniGameState.time < savedBestTime) {
+            localStorage.setItem(bestKey, miniGameState.time.toString());
+            isNewBest = true;
+          }
+          bestValue = localStorage.getItem(bestKey);
+          stat = completed ? `Time: ${formatTime(miniGameState.time)}` : 'Quit';
+          resultsBest.textContent = bestValue ? `Best: ${formatTime(parseFloat(bestValue))}` : '';
+          break;
+
+        case GAME_MODES.DRONE_HUNTER:
+          title = 'Time Up!';
+          stat = `Score: ${miniGameState.score}`;
+          bestKey = 'birb_best_drone_hunter';
+          const savedBestScore = parseInt(localStorage.getItem(bestKey)) || 0;
+          if (miniGameState.score > savedBestScore) {
+            localStorage.setItem(bestKey, miniGameState.score.toString());
+            isNewBest = true;
+          }
+          bestValue = localStorage.getItem(bestKey);
+          resultsBest.textContent = bestValue ? `Best: ${bestValue}` : '';
+          break;
+
+        case GAME_MODES.TURRET_DEFENSE:
+          title = 'Nest Destroyed!';
+          stat = `Survived ${miniGameState.wave} waves`;
+          bestKey = 'birb_best_turret_defense';
+          const savedBestWave = parseInt(localStorage.getItem(bestKey)) || 0;
+          if (miniGameState.wave > savedBestWave) {
+            localStorage.setItem(bestKey, miniGameState.wave.toString());
+            isNewBest = true;
+          }
+          bestValue = localStorage.getItem(bestKey);
+          resultsBest.textContent = bestValue ? `Best: Wave ${bestValue}` : '';
+          break;
+      }
+
+      showGameResults(title, stat, '', isNewBest);
+    }
+
+    function quitToMenu() {
+      currentGameMode = GAME_MODES.CASUAL;
+      miniGameState.active = false;
+      showGameHud(false);
+      hideGameResults();
+
+      // Reset collectibles
+      if (collectiblesSystem && collectiblesSystem.reset) {
+        collectiblesSystem.reset();
+      }
+
+      // Take off if nested
+      if (nestingSystem && nestingSystem.isNested()) {
+        nestingSystem.takeOff();
+      }
+
+      // Update mode selector UI
+      updateGameModeUI();
+    }
+
+    function updateGameModeUI() {
+      const buttons = document.querySelectorAll('[data-game-mode]');
+      buttons.forEach(btn => {
+        const mode = btn.getAttribute('data-game-mode');
+        const isActive = (mode === 'casual' && currentGameMode === GAME_MODES.CASUAL) ||
+                         (mode === 'ring-rush' && currentGameMode === GAME_MODES.RING_RUSH) ||
+                         (mode === 'drone-hunter' && currentGameMode === GAME_MODES.DRONE_HUNTER) ||
+                         (mode === 'turret-defense' && currentGameMode === GAME_MODES.TURRET_DEFENSE);
+        btn.classList.toggle('game-mode-option--active', isActive);
+      });
+    }
+
+    // Results button handlers
+    if (resultsRetry) {
+      resultsRetry.addEventListener('click', () => {
+        hideGameResults();
+        startGameMode(currentGameMode);
+      });
+    }
+    if (resultsQuit) {
+      resultsQuit.addEventListener('click', () => {
+        quitToMenu();
+      });
+    }
+
+    // ========== END GAME MODE SYSTEM ==========
+
     // Freeze UI elements
     const freezeIndicator = document.querySelector('[data-freeze-indicator]');
     const freezeProgress = document.querySelector('[data-freeze-progress]');
@@ -2360,6 +2767,17 @@
 
           if (rocketSystem && typeof rocketSystem.setCollisionTargets === 'function') {
             rocketSystem.setCollisionTargets([sphericalWorld.root]);
+          }
+
+          // Initialize collectibles system for Ring Rush mode
+          if (collectiblesSystem) {
+            collectiblesSystem.dispose();
+          }
+          try {
+            collectiblesSystem = createCollectiblesSystem(THREE, scene, definition.id);
+          } catch (collectiblesError) {
+            console.warn("Collectibles system creation failed:", collectiblesError);
+            collectiblesSystem = null;
           }
 
         } catch (nestError) {
@@ -3714,6 +4132,16 @@
             if (droneHit.hit) {
               droneSystem.destroyDrone(droneHit.index);
               rocketSystem.removeRocket(i);
+              // Game mode scoring
+              if (miniGameState.active && currentGameMode === GAME_MODES.DRONE_HUNTER) {
+                const baseScore = 100;
+                miniGameState.score += Math.round(baseScore * miniGameState.combo);
+                miniGameState.combo = Math.min(5, miniGameState.combo + 0.25);
+                miniGameState.comboTimer = 3; // Reset combo decay timer
+              }
+              if (miniGameState.active && currentGameMode === GAME_MODES.TURRET_DEFENSE) {
+                miniGameState.dronesDestroyed++;
+              }
             }
           }
         }
@@ -3735,6 +4163,88 @@
 
       // Update freeze state
       updateFreezeState(delta);
+
+      // ========== GAME MODE UPDATE ==========
+      if (miniGameState.active) {
+        // Ring Rush Mode
+        if (currentGameMode === GAME_MODES.RING_RUSH) {
+          // Check ring collection
+          if (collectiblesSystem && flightController) {
+            const collected = collectiblesSystem.checkCollection(flightController.position, 1.5);
+            if (collected.length > 0) {
+              // Start timer on first ring
+              if (!miniGameState.started) {
+                miniGameState.started = true;
+              }
+              miniGameState.ringsCollected += collected.length;
+
+              // Check win condition
+              if (miniGameState.ringsCollected >= miniGameState.ringsTotal) {
+                endGameMode(true);
+              }
+            }
+          }
+
+          // Update timer only if started
+          if (miniGameState.started) {
+            miniGameState.time += delta;
+          }
+
+          // Update collectibles animation
+          if (collectiblesSystem && collectiblesSystem.update) {
+            collectiblesSystem.update(delta);
+          }
+        }
+
+        // Drone Hunter Mode
+        if (currentGameMode === GAME_MODES.DRONE_HUNTER) {
+          miniGameState.time += delta;
+
+          // Combo decay
+          if (miniGameState.comboTimer > 0) {
+            miniGameState.comboTimer -= delta;
+            if (miniGameState.comboTimer <= 0) {
+              miniGameState.combo = 1;
+            }
+          }
+
+          // End game at 60 seconds
+          if (miniGameState.time >= 60) {
+            endGameMode(true);
+          }
+        }
+
+        // Turret Defense Mode
+        if (currentGameMode === GAME_MODES.TURRET_DEFENSE) {
+          // Check if any drones have reached the nest position
+          if (droneSystem && nestingSystem && nestingSystem.isNested()) {
+            const nestPos = flightController.position;
+            const drones = droneSystem.getDrones();
+            for (let i = drones.length - 1; i >= 0; i--) {
+              const drone = drones[i];
+              const distToNest = drone.position.distanceTo(nestPos);
+              if (distToNest < 8) { // Drone reached nest
+                droneSystem.destroyDrone(i);
+                miniGameState.lives--;
+                if (miniGameState.lives <= 0) {
+                  endGameMode(false);
+                }
+              }
+            }
+
+            // Check if wave is cleared
+            if (drones.length === 0 && miniGameState.dronesDestroyed >= miniGameState.waveSpawnCount) {
+              miniGameState.wave++;
+              miniGameState.waveSpawnCount = 3 + miniGameState.wave;
+              miniGameState.dronesDestroyed = 0;
+            }
+          }
+        }
+
+        // Update HUD
+        updateGameHud();
+      }
+      // ========== END GAME MODE UPDATE ==========
 
       let pose;
       let visualQuat = null;
