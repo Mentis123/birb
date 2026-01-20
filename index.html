@@ -1445,12 +1445,14 @@
     const splashScreen = document.querySelector('[data-splash-screen]');
     // Deferred fullscreen trigger (called after enterFullscreen is defined)
     let triggerAutoFullscreen = null;
+    let splashDismissed = false; // Track if splash was dismissed before triggerAutoFullscreen was set
     if (splashScreen) {
       const dismissSplash = () => {
         splashScreen.classList.add('is-hidden');
         // Remove from DOM after fade animation
         setTimeout(() => {
           splashScreen.remove();
+          splashDismissed = true;
           // Trigger auto-fullscreen after splash is gone
           if (typeof triggerAutoFullscreen === 'function') {
             triggerAutoFullscreen();
@@ -4051,6 +4053,10 @@
     triggerAutoFullscreen = () => {
       enterFullscreen();
     };
+    // If splash was dismissed before this point (fast tap), trigger fullscreen now
+    if (splashDismissed) {
+      enterFullscreen();
+    }
 
     scheduleRendererResize(true);
     renderFrame(0);
