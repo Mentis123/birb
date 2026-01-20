@@ -247,8 +247,9 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     // If this is a nestable tree, calculate the nest position at the TOP of the canopy
     if (nestableTreeIndices.has(i)) {
       // Calculate the world position of the tree top
-      // Cone tip is at: trunkHeight + canopyHeight - 0.1, add small offset to place nest ON TOP
-      const treeTopLocalY = trunkHeight + canopyHeight;
+      // Cone tip is at: trunkHeight + canopyHeight - 0.1, add small clearance above
+      const clearance = 0.2;
+      const treeTopLocalY = trunkHeight + canopyHeight + clearance;
       const nestOffset = treeTopLocalY * scale; // Scale the local position
       const nestPos = pos.clone().add(up.clone().multiplyScalar(nestOffset));
 
@@ -474,9 +475,10 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     // If this is a nestable spire, calculate the nest position at the TOP
     if (nestableSpireIndices.has(i)) {
-      // Spire center is at pos + up*height/2, top extends up by height/2*scale
-      // So spire top = pos + up*height/2 + up*height/2*scale = pos + up*height/2*(1+scale)
-      const spireTopOffset = (height / 2) * (1 + scale);
+      // Spire center is at pos + up*height/2 (set before scaling), top extends up by height/2*scale
+      // Add small clearance above spire top for reliable nest placement
+      const clearance = 0.3 * scale;
+      const spireTopOffset = (height / 2) * (1 + scale) + clearance;
       const nestPos = pos.clone().add(up.clone().multiplyScalar(spireTopOffset));
 
       nestablePositions.push({
@@ -662,8 +664,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
 
     if (nestablePeakIndices.has(i)) {
       // Snow cap tip is at local Y = height + snowHeight - 0.15
-      // Place nest slightly above the peak
-      const nestHeight = (height + snowHeight) * scale;
+      // Add small clearance above peak for reliable nest placement
+      const clearance = 0.3;
+      const nestHeight = (height + snowHeight + clearance) * scale;
       const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
 
       nestablePositions.push({
@@ -910,7 +913,9 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem }) {
     // If this is a nestable tower, calculate the nest position at the TOP
     if (nestableTowerIndices.has(i)) {
       // Calculate the world position of the tower top
-      const towerTopOffset = height * scale; // Full height scaled
+      // Add small clearance (0.3 units) above tower to ensure nest sits clearly on top
+      const clearance = 0.3;
+      const towerTopOffset = (height + clearance) * scale;
       const nestPos = pos.clone().add(up.clone().multiplyScalar(towerTopOffset));
 
       nestablePositions.push({
