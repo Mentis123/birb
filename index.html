@@ -2258,7 +2258,7 @@
           hudScore.textContent = `${miniGameState.ringsCollected}/${miniGameState.ringsTotal}`;
           hudLives.textContent = '';
           hudWave.textContent = '';
-          hudInfo.textContent = miniGameState.started ? '' : 'Collect a ring to start!';
+          hudInfo.textContent = miniGameState.started ? '' : '2 fingers = sprint! Collect a ring to start';
           break;
 
         case GAME_MODES.DRONE_HUNTER:
@@ -2342,16 +2342,7 @@
       updateGameHud();
 
       // Mode-specific setup
-      if (mode === GAME_MODES.RING_RUSH) {
-        // Show sprint hint
-        if (hudInfo) {
-          hudInfo.textContent = 'Touch with 2 fingers to sprint!';
-          hudInfo.style.opacity = '1';
-          setTimeout(() => {
-            hudInfo.style.opacity = '0';
-          }, 4000);
-        }
-      } else if (mode === GAME_MODES.TURRET_DEFENSE) {
+      if (mode === GAME_MODES.TURRET_DEFENSE) {
         // Auto-land on nearest nest for turret defense
         if (nestingSystem && nestPointsSystem) {
           const nearestNest = nestPointsSystem.getNearestNest(flightController.position);
@@ -4028,11 +4019,13 @@
 
     // Sprint: second finger touch doubles speed (document-level to catch touches anywhere)
     const updateSprintState = (touchCount) => {
-      const shouldSprint = touchCount >= 2 && !isNested && currentGameMode === GAME_MODES.RING_RUSH;
+      const currentlyNested = nestingSystem?.isNested?.() ?? false;
+      const shouldSprint = touchCount >= 2 && !currentlyNested && currentGameMode === GAME_MODES.RING_RUSH;
       if (shouldSprint !== sprintState.active) {
         sprintState.active = shouldSprint;
         if (flightController && flightController.speed !== undefined) {
           flightController.speed = shouldSprint ? sprintState.sprintSpeed : sprintState.baseSpeed;
+          console.log('Sprint:', shouldSprint ? 'ON (speed 8)' : 'OFF (speed 4)');
         }
       }
     };
