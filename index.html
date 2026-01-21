@@ -995,6 +995,160 @@
       transform: scale(0.98);
     }
 
+    /* Sound Settings Overlay */
+    .sound-settings-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 160;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(4, 8, 18, 0.95);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 300ms ease;
+    }
+
+    .sound-settings-overlay.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .sound-settings-panel {
+      width: min(320px, 90vw);
+      padding: 1.25rem;
+      border: 1px solid rgba(100, 200, 150, 0.25);
+      border-radius: 1rem;
+      background: linear-gradient(145deg, rgba(20, 45, 35, 0.95), rgba(12, 28, 22, 0.98));
+      box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(120, 220, 170, 0.08);
+    }
+
+    .sound-settings-title {
+      margin: 0 0 1rem;
+      text-align: center;
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: rgba(180, 255, 200, 0.95);
+      letter-spacing: 0.05em;
+    }
+
+    .sound-setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid rgba(100, 200, 150, 0.15);
+    }
+
+    .sound-setting-row:last-child {
+      border-bottom: none;
+    }
+
+    .sound-setting-label {
+      font-size: 0.9rem;
+      color: rgba(160, 220, 180, 0.9);
+    }
+
+    .sound-toggle {
+      position: relative;
+      width: 48px;
+      height: 26px;
+      border: none;
+      border-radius: 13px;
+      background: rgba(40, 60, 50, 0.8);
+      cursor: pointer;
+      transition: background 200ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .sound-toggle::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(120, 160, 140, 0.8);
+      transition: transform 200ms ease, background 200ms ease;
+    }
+
+    .sound-toggle.is-on {
+      background: rgba(60, 140, 100, 0.9);
+    }
+
+    .sound-toggle.is-on::after {
+      transform: translateX(22px);
+      background: rgba(180, 255, 200, 0.95);
+    }
+
+    .volume-slider-container {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .volume-slider {
+      width: 100px;
+      height: 6px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(40, 60, 50, 0.8);
+      border-radius: 3px;
+      cursor: pointer;
+    }
+
+    .volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(120, 220, 170, 0.9);
+      cursor: pointer;
+      transition: background 150ms ease;
+    }
+
+    .volume-slider::-webkit-slider-thumb:hover {
+      background: rgba(160, 255, 200, 0.95);
+    }
+
+    .volume-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(120, 220, 170, 0.9);
+      cursor: pointer;
+    }
+
+    .volume-value {
+      min-width: 2.5rem;
+      text-align: right;
+      font-size: 0.85rem;
+      color: rgba(160, 220, 180, 0.8);
+    }
+
+    .sound-settings-close {
+      width: 100%;
+      margin-top: 1rem;
+      padding: 0.6rem;
+      border: 1px solid rgba(100, 200, 150, 0.4);
+      border-radius: 0.75rem;
+      background: linear-gradient(145deg, rgba(30, 80, 60, 0.7), rgba(20, 55, 45, 0.85));
+      color: rgba(180, 255, 200, 0.95);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .sound-settings-close:active {
+      transform: scale(0.98);
+    }
+
     /* Info/How-to-play Overlay */
     .info-overlay {
       position: absolute;
@@ -1390,6 +1544,15 @@
               </svg>
               <span>How to Play</span>
             </button>
+            <!-- Sound Settings -->
+            <button type="button" class="settings-button" data-control="sound-settings" aria-label="Sound settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+              </svg>
+              <span>Sound</span>
+            </button>
             <!-- Feedback (disabled) -->
             <button type="button" class="settings-button settings-button--disabled" disabled aria-label="Feedback (coming soon)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1408,6 +1571,29 @@
       <div class="info-overlay" data-info-overlay aria-hidden="true">
         <img src="./info.jpg" alt="How to Play - Fly around, nest to shoot, don't get hit" class="info-image">
         <button type="button" class="info-close" data-control="info-close" aria-label="Close">Got it!</button>
+      </div>
+
+      <!-- Sound Settings overlay -->
+      <div class="sound-settings-overlay" data-sound-settings-overlay aria-hidden="true">
+        <div class="sound-settings-panel">
+          <h2 class="sound-settings-title">Sound Settings</h2>
+          <div class="sound-setting-row">
+            <span class="sound-setting-label">Master Volume</span>
+            <div class="volume-slider-container">
+              <input type="range" class="volume-slider" data-volume="master" min="0" max="100" value="70">
+              <span class="volume-value" data-volume-display="master">70%</span>
+            </div>
+          </div>
+          <div class="sound-setting-row">
+            <span class="sound-setting-label">Sound Effects</span>
+            <button type="button" class="sound-toggle is-on" data-sound-toggle="sfx" aria-label="Toggle sound effects"></button>
+          </div>
+          <div class="sound-setting-row">
+            <span class="sound-setting-label">Music</span>
+            <button type="button" class="sound-toggle is-on" data-sound-toggle="music" aria-label="Toggle music"></button>
+          </div>
+          <button type="button" class="sound-settings-close" data-control="sound-settings-close">Done</button>
+        </div>
       </div>
 
       <!-- Game Mode overlay -->
@@ -1716,6 +1902,108 @@
       });
     });
 
+    // ============ SOUND SETTINGS UI HANDLERS ============
+    const soundSettingsOverlay = document.querySelector('[data-sound-settings-overlay]');
+    const soundSettingsButton = document.querySelector('[data-control="sound-settings"]');
+    const soundSettingsCloseButton = document.querySelector('[data-control="sound-settings-close"]');
+    const soundSettingsState = { isOpen: false };
+
+    function openSoundSettings() {
+      if (soundSettingsState.isOpen) return;
+      soundSettingsState.isOpen = true;
+      if (soundSettingsOverlay) {
+        soundSettingsOverlay.classList.add('is-open');
+        soundSettingsOverlay.setAttribute('aria-hidden', 'false');
+      }
+      // Sync UI with current settings
+      syncSoundSettingsUI();
+    }
+
+    function closeSoundSettings() {
+      if (!soundSettingsState.isOpen) return;
+      soundSettingsState.isOpen = false;
+      if (soundSettingsOverlay) {
+        soundSettingsOverlay.classList.remove('is-open');
+        soundSettingsOverlay.setAttribute('aria-hidden', 'true');
+      }
+      // Resume game only if settings is also closed
+      if (!settingsState.isOpen && settingsState.wasPlaying && !document.hidden) {
+        if (typeof resumeGameIfReady === 'function') resumeGameIfReady();
+      }
+    }
+
+    // Sync UI sliders/toggles with current settings
+    function syncSoundSettingsUI() {
+      const masterSlider = document.querySelector('[data-volume="master"]');
+      const masterDisplay = document.querySelector('[data-volume-display="master"]');
+      const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
+      const musicToggle = document.querySelector('[data-sound-toggle="music"]');
+
+      if (masterSlider) {
+        masterSlider.value = Math.round(soundSettings.masterVolume * 100);
+      }
+      if (masterDisplay) {
+        masterDisplay.textContent = Math.round(soundSettings.masterVolume * 100) + '%';
+      }
+      if (sfxToggle) {
+        sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
+      }
+      if (musicToggle) {
+        musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
+      }
+    }
+
+    // Sound settings button in main settings
+    if (soundSettingsButton) {
+      soundSettingsButton.addEventListener('click', () => openSoundSettings());
+    }
+
+    // Sound settings close button
+    if (soundSettingsCloseButton) {
+      soundSettingsCloseButton.addEventListener('click', () => closeSoundSettings());
+    }
+
+    // Master volume slider
+    const masterVolumeSlider = document.querySelector('[data-volume="master"]');
+    if (masterVolumeSlider) {
+      masterVolumeSlider.addEventListener('input', (e) => {
+        soundSettings.masterVolume = parseInt(e.target.value) / 100;
+        const display = document.querySelector('[data-volume-display="master"]');
+        if (display) display.textContent = e.target.value + '%';
+        updateAllSoundVolumes();
+        saveSoundSettings();
+      });
+    }
+
+    // SFX toggle
+    const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
+    if (sfxToggle) {
+      sfxToggle.addEventListener('click', () => {
+        soundSettings.sfxEnabled = !soundSettings.sfxEnabled;
+        sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
+        updateAllSoundVolumes();
+        saveSoundSettings();
+      });
+    }
+
+    // Music toggle
+    const musicToggle = document.querySelector('[data-sound-toggle="music"]');
+    if (musicToggle) {
+      musicToggle.addEventListener('click', () => {
+        soundSettings.musicEnabled = !soundSettings.musicEnabled;
+        musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
+        if (soundSettings.musicEnabled) {
+          setAmbientMusic(true);
+        } else {
+          if (continuousSounds.ambient) continuousSounds.ambient.pause();
+        }
+        saveSoundSettings();
+      });
+    }
+
+    // Initialize UI state
+    syncSoundSettingsUI();
+
     let THREE,
       GLTFLoader,
       FreeFlightController,
@@ -1847,34 +2135,122 @@
     // ============ AUDIO SYSTEM (Preloaded for instant playback) ============
     let audioUnlocked = false;
 
+    // Sound settings (persisted to localStorage)
+    const soundSettings = {
+      masterVolume: parseFloat(localStorage.getItem('birb_masterVolume') ?? '0.7'),
+      sfxEnabled: localStorage.getItem('birb_sfxEnabled') !== 'false',
+      musicEnabled: localStorage.getItem('birb_musicEnabled') !== 'false',
+    };
+
+    // Save sound settings to localStorage
+    const saveSoundSettings = () => {
+      localStorage.setItem('birb_masterVolume', soundSettings.masterVolume.toString());
+      localStorage.setItem('birb_sfxEnabled', soundSettings.sfxEnabled.toString());
+      localStorage.setItem('birb_musicEnabled', soundSettings.musicEnabled.toString());
+    };
+
+    // Get effective volume for a sound type
+    const getEffectiveVolume = (baseVolume, isSfx = true) => {
+      const enabled = isSfx ? soundSettings.sfxEnabled : soundSettings.musicEnabled;
+      return enabled ? baseVolume * soundSettings.masterVolume : 0;
+    };
+
     // Preload audio files for instant playback (no loading delay)
     const SOUND_POOL_SIZE = 3; // Multiple instances for overlapping sounds
     const preloadedSounds = {
       rocketFire: [],
       explosion: [],
+      ringCollect: [],
+      speedBoost: [],
+      droneDestroyed: [],
+      nestLand: [],
+    };
+
+    // Base volumes for each sound (before master volume)
+    const BASE_VOLUMES = {
+      rocketFire: 0.6,
+      explosion: 0.7,
+      ringCollect: 0.5,
+      speedBoost: 0.5,
+      droneDestroyed: 0.6,
+      nestLand: 0.4,
+      droneHum: 0.4,
+      wind: 0.3,
+      ambient: 0.25,
     };
 
     // Create audio pool for a sound
-    const createSoundPool = (src, poolSize, volume) => {
+    const createSoundPool = (src, poolSize, baseVolume) => {
       const pool = [];
       for (let i = 0; i < poolSize; i++) {
         const audio = new Audio(src);
-        audio.volume = volume;
+        audio.volume = getEffectiveVolume(baseVolume);
         audio.preload = 'auto';
-        pool.push({ audio, playing: false });
+        pool.push({ audio, playing: false, baseVolume });
       }
       return pool;
     };
 
     // Initialize sound pools (preload immediately)
     const initSoundPools = () => {
-      preloadedSounds.rocketFire = createSoundPool('/sound/rocket-fire.mp3', SOUND_POOL_SIZE, 0.6);
-      preloadedSounds.explosion = createSoundPool('/sound/explosion.mp3', SOUND_POOL_SIZE, 0.7);
+      preloadedSounds.rocketFire = createSoundPool('/sound/rocket-fire.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.rocketFire);
+      preloadedSounds.explosion = createSoundPool('/sound/explosion.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.explosion);
+      // New sounds - will use placeholders until generated
+      preloadedSounds.ringCollect = createSoundPool('/sound/ring-collect.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.ringCollect);
+      preloadedSounds.speedBoost = createSoundPool('/sound/speed-boost.mp3', 2, BASE_VOLUMES.speedBoost);
+      preloadedSounds.droneDestroyed = createSoundPool('/sound/drone-destroyed.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.droneDestroyed);
+      preloadedSounds.nestLand = createSoundPool('/sound/nest-land.mp3', 2, BASE_VOLUMES.nestLand);
     };
     initSoundPools();
 
+    // Continuous/looping sounds (single instance each)
+    const continuousSounds = {
+      wind: null,
+      droneHum: null,
+      ambient: null,
+    };
+
+    // Initialize continuous sounds
+    const initContinuousSounds = () => {
+      // Wind whoosh - loops, volume tied to flight speed
+      continuousSounds.wind = new Audio('/sound/wind-whoosh.mp3');
+      continuousSounds.wind.loop = true;
+      continuousSounds.wind.volume = 0;
+      continuousSounds.wind.preload = 'auto';
+
+      // Drone hum - loops, spatial based on nearest drone
+      continuousSounds.droneHum = new Audio('/sound/drone-hum.mp3');
+      continuousSounds.droneHum.loop = true;
+      continuousSounds.droneHum.volume = 0;
+      continuousSounds.droneHum.preload = 'auto';
+
+      // Ambient background music - use existing ambient files
+      continuousSounds.ambient = new Audio('/sound/ambient-forest.mp3');
+      continuousSounds.ambient.loop = true;
+      continuousSounds.ambient.volume = 0;
+      continuousSounds.ambient.preload = 'auto';
+    };
+    initContinuousSounds();
+
+    // Update all sound volumes when settings change
+    const updateAllSoundVolumes = () => {
+      // Update pooled sounds
+      Object.keys(preloadedSounds).forEach(key => {
+        const baseVol = BASE_VOLUMES[key];
+        preloadedSounds[key].forEach(slot => {
+          slot.audio.volume = getEffectiveVolume(baseVol);
+        });
+      });
+      // Update continuous sounds (they manage their own volume curves)
+      if (continuousSounds.ambient) {
+        continuousSounds.ambient.volume = getEffectiveVolume(BASE_VOLUMES.ambient, false);
+      }
+    };
+
     // Play from preloaded pool (instant, no loading delay)
     const playFromPool = (pool) => {
+      if (!soundSettings.sfxEnabled) return;
+
       // Find an available audio element
       let slot = pool.find(s => !s.playing);
       if (!slot) {
@@ -1885,6 +2261,7 @@
 
       slot.playing = true;
       slot.audio.currentTime = 0;
+      slot.audio.volume = getEffectiveVolume(slot.baseVolume);
       slot.audio.play().then(() => {
         // Mark as available when done
         slot.audio.addEventListener('ended', () => {
@@ -1893,6 +2270,94 @@
       }).catch(() => {
         slot.playing = false;
       });
+    };
+
+    // Play from pool with spatial volume (distance-based attenuation)
+    const playFromPoolSpatial = (pool, distance, maxDistance = 50) => {
+      if (!soundSettings.sfxEnabled) return;
+
+      // Calculate spatial volume (1 at distance 0, 0 at maxDistance)
+      const spatialFactor = Math.max(0, 1 - (distance / maxDistance));
+      if (spatialFactor <= 0.05) return; // Too far, don't play
+
+      let slot = pool.find(s => !s.playing);
+      if (!slot) {
+        slot = pool[0];
+        slot.audio.currentTime = 0;
+      }
+
+      slot.playing = true;
+      slot.audio.currentTime = 0;
+      slot.audio.volume = getEffectiveVolume(slot.baseVolume) * spatialFactor;
+      slot.audio.play().then(() => {
+        slot.audio.addEventListener('ended', () => {
+          slot.playing = false;
+        }, { once: true });
+      }).catch(() => {
+        slot.playing = false;
+      });
+    };
+
+    // Update wind sound based on flight speed
+    const updateWindSound = (speed, maxSpeed = 8) => {
+      if (!continuousSounds.wind || !soundSettings.sfxEnabled) {
+        if (continuousSounds.wind) continuousSounds.wind.volume = 0;
+        return;
+      }
+      // Volume scales with speed (0 at rest, full at maxSpeed)
+      const speedFactor = Math.min(1, speed / maxSpeed);
+      continuousSounds.wind.volume = getEffectiveVolume(BASE_VOLUMES.wind) * speedFactor;
+    };
+
+    // Update drone hum based on nearest drone distance
+    const updateDroneHumSound = (nearestDroneDistance, maxDistance = 40) => {
+      if (!continuousSounds.droneHum || !soundSettings.sfxEnabled) {
+        if (continuousSounds.droneHum) continuousSounds.droneHum.volume = 0;
+        return;
+      }
+      if (nearestDroneDistance === null || nearestDroneDistance > maxDistance) {
+        continuousSounds.droneHum.volume = 0;
+        return;
+      }
+      // Volume inverse to distance
+      const spatialFactor = Math.max(0, 1 - (nearestDroneDistance / maxDistance));
+      continuousSounds.droneHum.volume = getEffectiveVolume(BASE_VOLUMES.droneHum) * spatialFactor;
+    };
+
+    // Start/stop ambient music
+    const setAmbientMusic = (playing, environmentId = 'forest') => {
+      if (!continuousSounds.ambient) return;
+
+      // Switch ambient track based on environment
+      const trackMap = {
+        forest: '/sound/ambient-forest.mp3',
+        mountain: '/sound/ambient-mountain.mp3',
+        canyons: '/sound/ambient-forest.mp3', // Fallback
+        city: '/sound/ambient-mountain.mp3',   // Fallback
+      };
+      const track = trackMap[environmentId] || trackMap.forest;
+
+      if (continuousSounds.ambient.src !== location.origin + track) {
+        continuousSounds.ambient.src = track;
+      }
+
+      if (playing && soundSettings.musicEnabled) {
+        continuousSounds.ambient.volume = getEffectiveVolume(BASE_VOLUMES.ambient, false);
+        continuousSounds.ambient.play().catch(() => {});
+      } else {
+        continuousSounds.ambient.pause();
+      }
+    };
+
+    // Start continuous sounds (called after audio unlock)
+    const startContinuousSounds = () => {
+      if (continuousSounds.wind) {
+        continuousSounds.wind.play().catch(() => {});
+      }
+      if (continuousSounds.droneHum) {
+        continuousSounds.droneHum.play().catch(() => {});
+      }
+      // Ambient starts separately via setAmbientMusic
     };
 
     // Unlock audio on first user interaction (required for iOS)
@@ -1904,8 +2369,21 @@
         silence.pause();
         audioUnlocked = true;
         // Also "warm up" the preloaded sounds by playing them silently
-        preloadedSounds.rocketFire.forEach(s => { s.audio.volume = 0; s.audio.play().then(() => { s.audio.pause(); s.audio.currentTime = 0; s.audio.volume = 0.6; }).catch(() => {}); });
-        preloadedSounds.explosion.forEach(s => { s.audio.volume = 0; s.audio.play().then(() => { s.audio.pause(); s.audio.currentTime = 0; s.audio.volume = 0.7; }).catch(() => {}); });
+        Object.keys(preloadedSounds).forEach(key => {
+          preloadedSounds[key].forEach(s => {
+            const originalVol = s.audio.volume;
+            s.audio.volume = 0;
+            s.audio.play().then(() => {
+              s.audio.pause();
+              s.audio.currentTime = 0;
+              s.audio.volume = originalVol;
+            }).catch(() => {});
+          });
+        });
+        // Start continuous sounds (at volume 0 initially)
+        startContinuousSounds();
+        // Start ambient music
+        setAmbientMusic(true);
       }).catch(() => {});
     };
 
@@ -1913,6 +2391,8 @@
     ['touchstart', 'touchend', 'mousedown', 'click', 'keydown'].forEach(event => {
       document.addEventListener(event, unlockAudio, { passive: true, once: false });
     });
+
+    // ============ SOUND EFFECT FUNCTIONS ============
 
     // Play rocket fire sound (instant from preloaded pool)
     const playRocketFireSound = () => {
@@ -1922,6 +2402,35 @@
     // Play explosion sound (instant from preloaded pool)
     const playExplosionSound = () => {
       playFromPool(preloadedSounds.explosion);
+    };
+
+    // Play explosion with spatial audio (distance-based)
+    const playExplosionSoundSpatial = (distance) => {
+      playFromPoolSpatial(preloadedSounds.explosion, distance, 50);
+    };
+
+    // Play ring collect sound
+    const playRingCollectSound = () => {
+      playFromPool(preloadedSounds.ringCollect);
+    };
+
+    // Play speed boost sound
+    const playSpeedBoostSound = () => {
+      playFromPool(preloadedSounds.speedBoost);
+    };
+
+    // Play drone destroyed sound (with spatial)
+    const playDroneDestroyedSound = (distance = 0) => {
+      if (distance > 0) {
+        playFromPoolSpatial(preloadedSounds.droneDestroyed, distance, 50);
+      } else {
+        playFromPool(preloadedSounds.droneDestroyed);
+      }
+    };
+
+    // Play nest landing sound
+    const playNestLandSound = () => {
+      playFromPool(preloadedSounds.nestLand);
     };
 
     function clamp(value, min, max) {
@@ -3846,6 +4355,7 @@
 
       // Show welcome toast on landing
       if (isNested && previousState === NESTING_STATES.LANDING) {
+        playNestLandSound();
         showNestToast();
       }
 
@@ -4026,6 +4536,10 @@
         if (flightController && flightController.speed !== undefined) {
           flightController.speed = shouldSprint ? sprintState.sprintSpeed : sprintState.baseSpeed;
           console.log('Sprint:', shouldSprint ? 'ON (speed 8)' : 'OFF (speed 4)');
+          // Play speed boost sound when sprint activates
+          if (shouldSprint) {
+            playSpeedBoostSound();
+          }
         }
       }
     };
@@ -4182,8 +4696,12 @@
             const rocket = rockets[i];
             const droneHit = droneSystem.checkRocketCollision(rocket.position);
             if (droneHit.hit) {
+              // Calculate distance from bird to explosion for spatial audio
+              const distToExplosion = flightController ? flightController.position.distanceTo(rocket.position) : 0;
               droneSystem.destroyDrone(droneHit.index);
               rocketSystem.removeRocket(i);
+              // Play drone destroyed sound with spatial audio
+              playDroneDestroyedSound(distToExplosion);
               // Game mode scoring
               if (miniGameState.active && currentGameMode === GAME_MODES.DRONE_HUNTER) {
                 const baseScore = 100;
@@ -4212,6 +4730,32 @@
             droneSystem.destroyDrone(birbHit.index);
           }
         }
+
+        // Update drone hum spatial audio (find nearest drone distance)
+        if (flightController) {
+          const drones = droneSystem.getDrones();
+          let nearestDistance = null;
+          for (const drone of drones) {
+            const dist = flightController.position.distanceTo(drone.position);
+            if (nearestDistance === null || dist < nearestDistance) {
+              nearestDistance = dist;
+            }
+          }
+          updateDroneHumSound(nearestDistance);
+        }
+      } else {
+        // No drones, mute the hum
+        updateDroneHumSound(null);
+      }
+
+      // Update wind sound based on flight speed
+      if (flightController && !isNested) {
+        const currentSpeed = typeof flightController.getSpeed === 'function'
+          ? flightController.getSpeed()
+          : (flightController.speed || 0);
+        updateWindSound(currentSpeed);
+      } else {
+        updateWindSound(0); // No wind when nested
       }
 
       // Update freeze state
@@ -4225,6 +4769,8 @@
           if (collectiblesSystem && flightController) {
             const collected = collectiblesSystem.checkCollection(flightController.position, 1.5);
             if (collected.length > 0) {
+              // Play ring collect sound
+              playRingCollectSound();
               // Start timer on first ring
               if (!miniGameState.started) {
                 miniGameState.started = true;
