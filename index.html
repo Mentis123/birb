@@ -1902,108 +1902,6 @@
       });
     });
 
-    // ============ SOUND SETTINGS UI HANDLERS ============
-    const soundSettingsOverlay = document.querySelector('[data-sound-settings-overlay]');
-    const soundSettingsButton = document.querySelector('[data-control="sound-settings"]');
-    const soundSettingsCloseButton = document.querySelector('[data-control="sound-settings-close"]');
-    const soundSettingsState = { isOpen: false };
-
-    function openSoundSettings() {
-      if (soundSettingsState.isOpen) return;
-      soundSettingsState.isOpen = true;
-      if (soundSettingsOverlay) {
-        soundSettingsOverlay.classList.add('is-open');
-        soundSettingsOverlay.setAttribute('aria-hidden', 'false');
-      }
-      // Sync UI with current settings
-      syncSoundSettingsUI();
-    }
-
-    function closeSoundSettings() {
-      if (!soundSettingsState.isOpen) return;
-      soundSettingsState.isOpen = false;
-      if (soundSettingsOverlay) {
-        soundSettingsOverlay.classList.remove('is-open');
-        soundSettingsOverlay.setAttribute('aria-hidden', 'true');
-      }
-      // Resume game only if settings is also closed
-      if (!settingsState.isOpen && settingsState.wasPlaying && !document.hidden) {
-        if (typeof resumeGameIfReady === 'function') resumeGameIfReady();
-      }
-    }
-
-    // Sync UI sliders/toggles with current settings
-    function syncSoundSettingsUI() {
-      const masterSlider = document.querySelector('[data-volume="master"]');
-      const masterDisplay = document.querySelector('[data-volume-display="master"]');
-      const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
-      const musicToggle = document.querySelector('[data-sound-toggle="music"]');
-
-      if (masterSlider) {
-        masterSlider.value = Math.round(soundSettings.masterVolume * 100);
-      }
-      if (masterDisplay) {
-        masterDisplay.textContent = Math.round(soundSettings.masterVolume * 100) + '%';
-      }
-      if (sfxToggle) {
-        sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
-      }
-      if (musicToggle) {
-        musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
-      }
-    }
-
-    // Sound settings button in main settings
-    if (soundSettingsButton) {
-      soundSettingsButton.addEventListener('click', () => openSoundSettings());
-    }
-
-    // Sound settings close button
-    if (soundSettingsCloseButton) {
-      soundSettingsCloseButton.addEventListener('click', () => closeSoundSettings());
-    }
-
-    // Master volume slider
-    const masterVolumeSlider = document.querySelector('[data-volume="master"]');
-    if (masterVolumeSlider) {
-      masterVolumeSlider.addEventListener('input', (e) => {
-        soundSettings.masterVolume = parseInt(e.target.value) / 100;
-        const display = document.querySelector('[data-volume-display="master"]');
-        if (display) display.textContent = e.target.value + '%';
-        updateAllSoundVolumes();
-        saveSoundSettings();
-      });
-    }
-
-    // SFX toggle
-    const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
-    if (sfxToggle) {
-      sfxToggle.addEventListener('click', () => {
-        soundSettings.sfxEnabled = !soundSettings.sfxEnabled;
-        sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
-        updateAllSoundVolumes();
-        saveSoundSettings();
-      });
-    }
-
-    // Music toggle
-    const musicToggle = document.querySelector('[data-sound-toggle="music"]');
-    if (musicToggle) {
-      musicToggle.addEventListener('click', () => {
-        soundSettings.musicEnabled = !soundSettings.musicEnabled;
-        musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
-        if (soundSettings.musicEnabled) {
-          setAmbientMusic(true);
-        } else {
-          if (continuousSounds.ambient) continuousSounds.ambient.pause();
-        }
-        saveSoundSettings();
-      });
-    }
-
-    // Initialize UI state
-    syncSoundSettingsUI();
-
     let THREE,
       GLTFLoader,
       FreeFlightController,
@@ -2432,6 +2330,108 @@
     const playNestLandSound = () => {
       playFromPool(preloadedSounds.nestLand);
     };
+
+    // ============ SOUND SETTINGS UI HANDLERS ============
+    const soundSettingsOverlay = document.querySelector('[data-sound-settings-overlay]');
+    const soundSettingsButton = document.querySelector('[data-control="sound-settings"]');
+    const soundSettingsCloseButton = document.querySelector('[data-control="sound-settings-close"]');
+    const soundSettingsState = { isOpen: false };
+
+    function openSoundSettings() {
+      if (soundSettingsState.isOpen) return;
+      soundSettingsState.isOpen = true;
+      if (soundSettingsOverlay) {
+        soundSettingsOverlay.classList.add('is-open');
+        soundSettingsOverlay.setAttribute('aria-hidden', 'false');
+      }
+      // Sync UI with current settings
+      syncSoundSettingsUI();
+    }
+
+    function closeSoundSettings() {
+      if (!soundSettingsState.isOpen) return;
+      soundSettingsState.isOpen = false;
+      if (soundSettingsOverlay) {
+        soundSettingsOverlay.classList.remove('is-open');
+        soundSettingsOverlay.setAttribute('aria-hidden', 'true');
+      }
+      // Resume game only if settings is also closed
+      if (!settingsState.isOpen && settingsState.wasPlaying && !document.hidden) {
+        if (typeof resumeGameIfReady === 'function') resumeGameIfReady();
+      }
+    }
+
+    // Sync UI sliders/toggles with current settings
+    function syncSoundSettingsUI() {
+      const masterSlider = document.querySelector('[data-volume="master"]');
+      const masterDisplay = document.querySelector('[data-volume-display="master"]');
+      const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
+      const musicToggle = document.querySelector('[data-sound-toggle="music"]');
+
+      if (masterSlider) {
+        masterSlider.value = Math.round(soundSettings.masterVolume * 100);
+      }
+      if (masterDisplay) {
+        masterDisplay.textContent = Math.round(soundSettings.masterVolume * 100) + '%';
+      }
+      if (sfxToggle) {
+        sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
+      }
+      if (musicToggle) {
+        musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
+      }
+    }
+
+    // Sound settings button in main settings
+    if (soundSettingsButton) {
+      soundSettingsButton.addEventListener('click', () => openSoundSettings());
+    }
+
+    // Sound settings close button
+    if (soundSettingsCloseButton) {
+      soundSettingsCloseButton.addEventListener('click', () => closeSoundSettings());
+    }
+
+    // Master volume slider
+    const masterVolumeSlider = document.querySelector('[data-volume="master"]');
+    if (masterVolumeSlider) {
+      masterVolumeSlider.addEventListener('input', (e) => {
+        soundSettings.masterVolume = parseInt(e.target.value) / 100;
+        const display = document.querySelector('[data-volume-display="master"]');
+        if (display) display.textContent = e.target.value + '%';
+        updateAllSoundVolumes();
+        saveSoundSettings();
+      });
+    }
+
+    // SFX toggle
+    const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
+    if (sfxToggle) {
+      sfxToggle.addEventListener('click', () => {
+        soundSettings.sfxEnabled = !soundSettings.sfxEnabled;
+        sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
+        updateAllSoundVolumes();
+        saveSoundSettings();
+      });
+    }
+
+    // Music toggle
+    const musicToggle = document.querySelector('[data-sound-toggle="music"]');
+    if (musicToggle) {
+      musicToggle.addEventListener('click', () => {
+        soundSettings.musicEnabled = !soundSettings.musicEnabled;
+        musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
+        if (soundSettings.musicEnabled) {
+          setAmbientMusic(true);
+        } else {
+          if (continuousSounds.ambient) continuousSounds.ambient.pause();
+        }
+        saveSoundSettings();
+      });
+    }
+
+    // Initialize UI state on load (deferred to not block)
+    setTimeout(syncSoundSettingsUI, 100);
 
     function clamp(value, min, max) {
       if (!Number.isFinite(value)) {
