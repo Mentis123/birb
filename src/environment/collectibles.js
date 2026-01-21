@@ -1,224 +1,98 @@
 /**
- * Collectible Ring System
- * Creates themed collectible rings for each environment with particles and glow effects
+ * Collectible Ring System for Ring Rush Mode
  *
- * OPTIMIZED:
- * - Uses squared distance for collision detection (avoids sqrt)
- * - Pre-allocated scratch vectors
- * - Removed separate RAF loop (uses game loop timing)
- * - Batch buffer updates
+ * Rings are placed at good flying altitudes around the sphere.
+ * Only visible during Ring Rush mode.
  */
 
+const SPHERE_RADIUS = 30;
+const RING_ALTITUDE_MIN = 6;  // Above sphere surface
+const RING_ALTITUDE_MAX = 12;
+const RING_COUNT = 20;
+
+// Ring visual config - environment-themed colors
 const RING_CONFIGS = {
-  mountain: {
-    color: 0x76d8ff,
-    emissive: 0x3aa8ff,
-    emissiveIntensity: 0.8,
-    glowColor: 0x76d8ff,
-    particleColor: 0xc4e8ff,
-  },
-  forest: {
-    color: 0x4fcc88,
-    emissive: 0x2d9966,
-    emissiveIntensity: 0.7,
-    glowColor: 0x4fcc88,
-    particleColor: 0xb5ffdb,
-  },
-  canyons: {
-    color: 0xffb563,
-    emissive: 0xff8833,
-    emissiveIntensity: 0.85,
-    glowColor: 0xffb563,
-    particleColor: 0xffe4c4,
-  },
-  city: {
-    color: 0x69c8ff,
-    emissive: 0x2e8bff,
-    emissiveIntensity: 0.9,
-    glowColor: 0x7fd8ff,
-    particleColor: 0xe0f4ff,
-  },
+  mountain: { color: 0x44ddff, emissive: 0x22aaff, glow: 0x66eeff },
+  forest: { color: 0x44ff88, emissive: 0x22dd66, glow: 0x66ffaa },
+  canyons: { color: 0xffaa44, emissive: 0xff8822, glow: 0xffcc66 },
+  city: { color: 0x44aaff, emissive: 0x2288ff, glow: 0x66ccff },
 };
 
 /**
- * Generate ring placements on spherical world surface
- * Sphere radius is 30, rings placed at altitude 5-12 above surface
+ * Generate ring positions distributed around the sphere at flying altitude
  */
-const SPHERE_RADIUS = 30;
+function generateRingPositions(count = RING_COUNT) {
+  const positions = [];
 
-function generateRingPlacements(environmentId, count = 20) {
-  const placements = [];
+  // Use fibonacci sphere for even distribution
+  const goldenRatio = (1 + Math.sqrt(5)) / 2;
 
-  // All environments use spherical placement now
   for (let i = 0; i < count; i++) {
-    const t = i / count;
+    // Fibonacci sphere distribution
+    const theta = 2 * Math.PI * i / goldenRatio;
+    const phi = Math.acos(1 - 2 * (i + 0.5) / count);
 
-    // Spread rings around sphere using spherical coordinates
-    // theta = longitude (around equator), phi = latitude (pole to pole)
-    const theta = t * Math.PI * 4 + Math.random() * 0.5; // 2 full loops
-    const phi = Math.PI * 0.25 + Math.random() * Math.PI * 0.5; // Stay in middle band (avoid poles)
+    // Random altitude variation
+    const altitude = SPHERE_RADIUS + RING_ALTITUDE_MIN +
+                     Math.random() * (RING_ALTITUDE_MAX - RING_ALTITUDE_MIN);
 
-    // Altitude above sphere surface (5-12 units)
-    const altitude = SPHERE_RADIUS + 5 + Math.random() * 7;
-
-    // Convert spherical to cartesian
+    // Convert to cartesian
     const x = altitude * Math.sin(phi) * Math.cos(theta);
     const y = altitude * Math.cos(phi);
     const z = altitude * Math.sin(phi) * Math.sin(theta);
 
-    // Ring should face outward from sphere center (radial direction)
-    // Calculate rotation to make ring perpendicular to radial
-    const radialAngle = Math.atan2(z, x);
-    const elevationAngle = Math.acos(y / altitude);
-
-    placements.push({
-      position: [x, y, z],
-      // Rotate ring to face tangent to sphere surface
-      rotation: [elevationAngle - Math.PI/2, radialAngle, 0],
-      scale: 1.0 + Math.random() * 0.3,
-    });
+    positions.push({ x, y, z, altitude });
   }
 
-  return placements;
+  return positions;
 }
 
 /**
- * Create a single collectible ring with glow effect
+ * Create a single ring mesh - small, glowing torus
  */
 function createRing(THREE, config) {
   const group = new THREE.Group();
+  group.name = 'collectible-ring';
 
-  // Main ring geometry
-  const ringGeometry = new THREE.TorusGeometry(1.2, 0.12, 16, 32);
-  const ringMaterial = new THREE.MeshStandardMaterial({
+  // Main ring - small torus
+  const ringGeo = new THREE.TorusGeometry(0.6, 0.08, 12, 24);
+  const ringMat = new THREE.MeshBasicMaterial({
     color: config.color,
-    emissive: config.emissive,
-    emissiveIntensity: config.emissiveIntensity,
-    metalness: 0.3,
-    roughness: 0.2,
     transparent: true,
     opacity: 0.95,
   });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+  const ring = new THREE.Mesh(ringGeo, ringMat);
   group.add(ring);
 
-  // Outer glow ring
-  const glowGeometry = new THREE.TorusGeometry(1.35, 0.06, 12, 32);
-  const glowMaterial = new THREE.MeshBasicMaterial({
-    color: config.glowColor,
+  // Outer glow
+  const glowGeo = new THREE.TorusGeometry(0.7, 0.04, 8, 24);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: config.glow,
     transparent: true,
-    opacity: 0.4,
-    side: THREE.DoubleSide,
+    opacity: 0.5,
     depthWrite: false,
   });
-  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+  const glow = new THREE.Mesh(glowGeo, glowMat);
   group.add(glow);
 
-  // Inner highlight
-  const innerGeometry = new THREE.TorusGeometry(1.05, 0.04, 12, 32);
-  const innerMaterial = new THREE.MeshBasicMaterial({
+  // Inner bright core
+  const coreGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 24);
+  const coreMat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.7,
     depthWrite: false,
   });
-  const inner = new THREE.Mesh(innerGeometry, innerMaterial);
-  group.add(inner);
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  group.add(core);
 
-  // Store references for animation
-  group.userData.ring = ring;
-  group.userData.glow = glow;
-  group.userData.inner = inner;
-  group.userData.baseOpacity = ringMaterial.opacity;
+  // Store for animation
+  group.userData.ringMat = ringMat;
+  group.userData.glowMat = glowMat;
+  group.userData.coreMat = coreMat;
   group.userData.collected = false;
 
   return group;
-}
-
-/**
- * Create particle sparkles around a ring
- */
-function createRingParticles(THREE, config, count = 24) {
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array(count * 3);
-  const velocities = [];
-  const baseAngles = [];
-
-  for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2;
-    const radius = 1.2;
-
-    positions[i * 3] = Math.cos(angle) * radius;
-    positions[i * 3 + 1] = Math.sin(angle) * radius;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 0.2;
-
-    velocities.push(0);
-    baseAngles.push(angle);
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-  const material = new THREE.PointsMaterial({
-    color: config.particleColor,
-    size: 0.1,
-    transparent: true,
-    opacity: 0.8,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-
-  const particles = new THREE.Points(geometry, material);
-  particles.userData.velocities = velocities;
-  particles.userData.baseAngles = baseAngles;
-  particles.userData.time = Math.random() * Math.PI * 2;
-
-  return particles;
-}
-
-/**
- * Create burst effect for collection
- */
-function createCollectionBurst(THREE, config, position) {
-  const count = 40;
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array(count * 3);
-  const velocities = [];
-
-  for (let i = 0; i < count; i++) {
-    // Start at ring position
-    positions[i * 3] = position.x;
-    positions[i * 3 + 1] = position.y;
-    positions[i * 3 + 2] = position.z;
-
-    // Random velocities
-    const phi = Math.random() * Math.PI * 2;
-    const theta = Math.random() * Math.PI;
-    const speed = 2 + Math.random() * 4;
-
-    velocities.push({
-      x: Math.sin(theta) * Math.cos(phi) * speed,
-      y: Math.sin(theta) * Math.sin(phi) * speed,
-      z: Math.cos(theta) * speed,
-    });
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-  const material = new THREE.PointsMaterial({
-    color: config.particleColor,
-    size: 0.15,
-    transparent: true,
-    opacity: 1.0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-
-  const burst = new THREE.Points(geometry, material);
-  burst.userData.velocities = velocities;
-  burst.userData.life = 1.0;
-  burst.userData.isBurst = true;
-
-  return burst;
 }
 
 /**
@@ -226,253 +100,127 @@ function createCollectionBurst(THREE, config, position) {
  */
 export function createCollectiblesSystem(THREE, scene, environmentId) {
   const config = RING_CONFIGS[environmentId] || RING_CONFIGS.mountain;
-  const placements = generateRingPlacements(environmentId, 20);
+  const positions = generateRingPositions(RING_COUNT);
 
   const container = new THREE.Group();
   container.name = 'collectibles';
+  container.visible = false; // Hidden by default - only show in Ring Rush
   scene.add(container);
 
   const rings = [];
-  const ringParticles = [];
-  const burstParticles = [];
-
-  // Pre-allocated scratch vectors for collision detection (ZERO allocations per frame)
-  const _scratchWorldPos = new THREE.Vector3();
-  const _scratchDelta = new THREE.Vector3();
-
-  // Animation state for ring collection (avoids separate RAF)
-  const collectingRings = []; // { ringGroup, startTime, startScale }
-
-  // Create rings with particles
-  placements.forEach((placement) => {
-    const ringGroup = new THREE.Group();
-
-    const ring = createRing(THREE, config);
-    ringGroup.add(ring);
-
-    const particles = createRingParticles(THREE, config);
-    ringGroup.add(particles);
-
-    ringGroup.position.set(...placement.position);
-    ringGroup.rotation.set(...placement.rotation);
-    ringGroup.scale.setScalar(placement.scale);
-
-    // Add collision sphere for collection detection
-    ringGroup.userData.collisionRadius = 1.5 * placement.scale;
-    ringGroup.userData.index = rings.length;
-
-    container.add(ringGroup);
-    rings.push(ringGroup);
-    ringParticles.push(particles);
-  });
-
-  // Animation state
   let animationTime = 0;
+
+  // Scratch vectors for collision detection
+  const _scratchPos = new THREE.Vector3();
+
+  // Create rings
+  positions.forEach((pos, index) => {
+    const ring = createRing(THREE, config);
+    ring.position.set(pos.x, pos.y, pos.z);
+
+    // Orient ring to face outward from sphere center
+    const radial = new THREE.Vector3(pos.x, pos.y, pos.z).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, radial);
+    if (right.lengthSq() < 0.01) {
+      right.set(1, 0, 0);
+    }
+    right.normalize();
+    const forward = new THREE.Vector3().crossVectors(radial, right).normalize();
+
+    // Make ring face radially (fly through it toward/away from center)
+    ring.lookAt(ring.position.x + radial.x, ring.position.y + radial.y, ring.position.z + radial.z);
+
+    ring.userData.index = index;
+    container.add(ring);
+    rings.push(ring);
+  });
 
   return {
     rings,
     container,
-    burstParticles,
+
+    /**
+     * Show/hide all rings (for Ring Rush mode toggle)
+     */
+    setVisible(visible) {
+      container.visible = visible;
+    },
 
     /**
      * Update ring animations
      */
     update(delta) {
+      if (!container.visible) return;
+
       animationTime += delta;
 
-      // Animate rings
-      rings.forEach((ringGroup, index) => {
-        if (ringGroup.userData.collected) return;
-
-        const ring = ringGroup.children[0];
-        const particles = ringGroup.children[1];
+      rings.forEach((ring, i) => {
+        if (ring.userData.collected) return;
 
         // Gentle rotation
-        ring.rotation.z += delta * 0.5;
+        ring.rotation.z += delta * 2;
 
         // Pulse glow
-        const pulse = Math.sin(animationTime * 2 + index * 0.5) * 0.5 + 0.5;
-        if (ring.userData.glow) {
-          ring.userData.glow.material.opacity = 0.3 + pulse * 0.3;
-        }
-
-        // Animate particles in orbit
-        if (particles.userData.baseAngles) {
-          const positions = particles.geometry.attributes.position.array;
-          const count = particles.userData.baseAngles.length;
-
-          for (let i = 0; i < count; i++) {
-            const baseAngle = particles.userData.baseAngles[i];
-            const angle = baseAngle + animationTime * 0.8;
-            const radius = 1.3 + Math.sin(animationTime * 3 + i * 0.5) * 0.15;
-            const wobble = Math.sin(animationTime * 2 + i) * 0.1;
-
-            positions[i * 3] = Math.cos(angle) * radius;
-            positions[i * 3 + 1] = Math.sin(angle) * radius;
-            positions[i * 3 + 2] = wobble;
-          }
-
-          particles.geometry.attributes.position.needsUpdate = true;
-        }
-      });
-
-      // Update burst particles
-      for (let i = burstParticles.length - 1; i >= 0; i--) {
-        const burst = burstParticles[i];
-        burst.userData.life -= delta * 1.5;
-
-        if (burst.userData.life <= 0) {
-          container.remove(burst);
-          burst.geometry.dispose();
-          burst.material.dispose();
-          burstParticles.splice(i, 1);
-          continue;
-        }
-
-        // Update particles
-        const positions = burst.geometry.attributes.position.array;
-        const velocities = burst.userData.velocities;
-
-        for (let j = 0; j < velocities.length; j++) {
-          positions[j * 3] += velocities[j].x * delta;
-          positions[j * 3 + 1] += velocities[j].y * delta;
-          positions[j * 3 + 2] += velocities[j].z * delta;
-
-          // Gravity
-          velocities[j].y -= delta * 3;
-        }
-
-        burst.geometry.attributes.position.needsUpdate = true;
-        burst.material.opacity = burst.userData.life;
-      }
-
-      // Update collecting ring animations (OPTIMIZED: runs in game loop, not separate RAF)
-      for (let i = collectingRings.length - 1; i >= 0; i--) {
-        const anim = collectingRings[i];
-        const elapsed = animationTime - anim.startTime;
-        const t = Math.min(elapsed / 0.3, 1);
-
-        if (t < 1) {
-          anim.ringGroup.scale.setScalar(anim.startScale * (1 + t * 0.5));
-          if (anim.ring.userData.ring) {
-            anim.ring.userData.ring.material.opacity = anim.ring.userData.baseOpacity * (1 - t);
-          }
-          if (anim.ring.userData.glow) {
-            anim.ring.userData.glow.material.opacity = 0.4 * (1 - t);
-          }
-        } else {
-          anim.ringGroup.visible = false;
-          collectingRings.splice(i, 1);
-        }
-      }
-    },
-
-    /**
-     * Check for ring collection (OPTIMIZED: uses squared distance)
-     */
-    checkCollection(position, radius = 1.0) {
-      const collectedIndices = [];
-      const radiusSq = radius * radius;
-
-      for (let index = 0; index < rings.length; index++) {
-        const ringGroup = rings[index];
-        if (ringGroup.userData.collected) continue;
-
-        // Get world position using pre-allocated vector (NO allocation)
-        ringGroup.getWorldPosition(_scratchWorldPos);
-
-        // Use squared distance to avoid sqrt (OPTIMIZED)
-        _scratchDelta.subVectors(position, _scratchWorldPos);
-        const distSq = _scratchDelta.x * _scratchDelta.x +
-                       _scratchDelta.y * _scratchDelta.y +
-                       _scratchDelta.z * _scratchDelta.z;
-
-        const collisionRadius = ringGroup.userData.collisionRadius;
-        const thresholdSq = (collisionRadius + radius) * (collisionRadius + radius);
-
-        if (distSq < thresholdSq) {
-          this.collectRing(index, _scratchWorldPos);
-          collectedIndices.push(index);
-        }
-      }
-
-      return collectedIndices;
-    },
-
-    /**
-     * Collect a ring (OPTIMIZED: no separate RAF loop)
-     */
-    collectRing(index, worldPosition) {
-      const ringGroup = rings[index];
-      if (ringGroup.userData.collected) return;
-
-      ringGroup.userData.collected = true;
-
-      // Create burst effect
-      const burst = createCollectionBurst(THREE, config, worldPosition);
-      container.add(burst);
-      burstParticles.push(burst);
-
-      // Queue animation in game loop instead of separate RAF
-      collectingRings.push({
-        ringGroup,
-        startTime: animationTime,
-        startScale: ringGroup.scale.x,
-        ring: ringGroup.children[0]
+        const pulse = Math.sin(animationTime * 3 + i * 0.5) * 0.3 + 0.7;
+        ring.userData.glowMat.opacity = 0.4 * pulse;
+        ring.userData.coreMat.opacity = 0.6 * pulse;
       });
     },
 
     /**
-     * Reset all rings
+     * Check for ring collection
      */
-    reset() {
-      rings.forEach((ringGroup) => {
-        ringGroup.visible = true;
-        ringGroup.userData.collected = false;
-        ringGroup.scale.setScalar(1);
+    checkCollection(birbPosition, radius = 1.2) {
+      if (!container.visible) return [];
 
-        const ring = ringGroup.children[0];
-        ring.userData.ring.material.opacity = ring.userData.baseOpacity;
-        ring.userData.glow.material.opacity = 0.4;
+      const collected = [];
+
+      rings.forEach((ring, i) => {
+        if (ring.userData.collected) return;
+
+        ring.getWorldPosition(_scratchPos);
+        const dist = birbPosition.distanceTo(_scratchPos);
+
+        if (dist < radius + 0.6) { // ring radius is 0.6
+          ring.userData.collected = true;
+          ring.visible = false;
+          collected.push(i);
+        }
       });
 
-      // Clear bursts
-      burstParticles.forEach((burst) => {
-        container.remove(burst);
-        burst.geometry.dispose();
-        burst.material.dispose();
-      });
-      burstParticles.length = 0;
-
-      // Clear collecting animations
-      collectingRings.length = 0;
+      return collected;
     },
 
     /**
      * Get collection stats
      */
     getStats() {
-      const collected = rings.filter(r => r.userData.collected).length;
       const total = rings.length;
+      const collected = rings.filter(r => r.userData.collected).length;
       return { collected, total };
     },
 
     /**
-     * Dispose of resources
+     * Reset all rings
+     */
+    reset() {
+      rings.forEach((ring) => {
+        ring.userData.collected = false;
+        ring.visible = true;
+      });
+    },
+
+    /**
+     * Dispose resources
      */
     dispose() {
-      rings.forEach((ringGroup) => {
-        ringGroup.traverse((child) => {
+      rings.forEach((ring) => {
+        ring.traverse((child) => {
           if (child.geometry) child.geometry.dispose();
           if (child.material) child.material.dispose();
         });
       });
-
-      burstParticles.forEach((burst) => {
-        burst.geometry.dispose();
-        burst.material.dispose();
-      });
-
       scene.remove(container);
     },
   };

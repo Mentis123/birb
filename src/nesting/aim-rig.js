@@ -1,13 +1,12 @@
 export const AIM_RIG_DEFAULTS = {
-  yawRate: Math.PI * 1.0,     // Responsive horizontal rotation
-  pitchRate: Math.PI * 0.5,   // Moderate vertical - less swoopy
-  maxPitch: (45 * Math.PI) / 180,  // Limited to 45° - keeps horizon stable
-  smoothing: 12,              // More smoothing for stability
-  pointerSmoothing: 15,       // Smooth pointer for consistent feel
-  lookSensitivity: 0.002,     // Slightly reduced
-  pointerDeadzone: 0.1,       // Moderate deadzone
-  maxPointerDelta: 40,        // Limit large movements
-  // Banking completely disabled for rock-stable horizon
+  yawRate: Math.PI * 1.2,     // Fast horizontal rotation
+  pitchRate: Math.PI * 0.4,   // Gentle vertical
+  maxPitch: (30 * Math.PI) / 180,  // Limited to 30° - minimal pitch
+  smoothing: 10,
+  pointerSmoothing: 12,
+  lookSensitivity: 0.002,
+  pointerDeadzone: 0.1,
+  maxPointerDelta: 40,
   bankInfluence: 0,
   maxBank: 0,
   bankSmoothing: 4,
@@ -125,7 +124,8 @@ export class AimRig {
     }
 
     this._referenceForward.copy(forwardProjected);
-    this._referenceRight.crossVectors(this._referenceForward, this._referenceUp).normalize();
+    // Right = up × forward (right-handed coordinate system)
+    this._referenceRight.crossVectors(this._referenceUp, this._referenceForward).normalize();
 
     // Reset aim angles and banking state
     this._yaw = 0;

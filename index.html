@@ -2322,9 +2322,10 @@
       miniGameState.waveTimer = 0;
       miniGameState.waveComplete = false;
 
-      // Reset collectibles if they exist
-      if (collectiblesSystem && collectiblesSystem.reset) {
+      // Reset and show/hide collectibles based on mode
+      if (collectiblesSystem) {
         collectiblesSystem.reset();
+        collectiblesSystem.setVisible(mode === GAME_MODES.RING_RUSH);
       }
 
       hideGameResults();
@@ -2400,8 +2401,9 @@
       showGameHud(false);
       hideGameResults();
 
-      // Reset collectibles
-      if (collectiblesSystem && collectiblesSystem.reset) {
+      // Hide and reset collectibles
+      if (collectiblesSystem) {
+        collectiblesSystem.setVisible(false);
         collectiblesSystem.reset();
       }
 
@@ -4233,49 +4235,50 @@
         // Turret Defense Mode
         if (currentGameMode === GAME_MODES.TURRET_DEFENSE) {
           if (droneSystem && flightController) {
-            const nestPos = flightController.position;
             const drones = droneSystem.getDrones();
 
-            // Move all drones TOWARD the nest
-            const droneSpeed = 6 + miniGameState.wave; // Wave 1=7, 2=8, 3=9, 4=10...
-            for (let i = drones.length - 1; i >= 0; i--) {
-              const drone = drones[i];
-              // Calculate direction to nest
-              const dirToNest = nestPos.clone().sub(drone.position).normalize();
-              // Move drone toward nest
-              drone.position.addScaledVector(dirToNest, droneSpeed * delta);
+            // Only move drones toward nest when birb is nested
+            if (isNested) {
+              const nestPos = flightController.position;
+              const droneSpeed = 6 + miniGameState.wave; // Wave 1=7, 2=8, 3=9, 4=10...
 
-              // Check if drone reached nest
-              const distToNest = drone.position.distanceTo(nestPos);
-              if (distToNest < 6) {
-                droneSystem.destroyDrone(i);
-                miniGameState.lives--;
-                if (miniGameState.lives <= 0) {
-                  endGameMode(false);
+              for (let i = drones.length - 1; i >= 0; i--) {
+                const drone = drones[i];
+                // Calculate direction to nest
+                const dirToNest = nestPos.clone().sub(drone.position).normalize();
+                // Move drone toward nest
+                drone.position.addScaledVector(dirToNest, droneSpeed * delta);
+
+                // Check if drone reached nest
+                const distToNest = drone.position.distanceTo(nestPos);
+                if (distToNest < 6) {
+                  droneSystem.destroyDrone(i);
+                  miniGameState.lives--;
+                  if (miniGameState.lives <= 0) {
+                    endGameMode(false);
+                  }
                 }
               }
             }
+            // If birb left nest, drones just orbit normally (default behavior)
 
-            // Track drones remaining in current wave
+            // Track drones remaining
             miniGameState.dronesRemaining = drones.length;
 
-            // Wave transition logic
-            if (drones.length === 0) {
-              // Wave cleared! Start countdown for next wave
+            // Wave transition logic (only when nested)
+            if (isNested && drones.length === 0) {
               if (miniGameState.waveTimer <= 0 && !miniGameState.waveComplete) {
                 miniGameState.waveComplete = true;
-                miniGameState.waveTimer = 3; // 3 second countdown
+                miniGameState.waveTimer = 3;
               }
 
               if (miniGameState.waveComplete) {
                 miniGameState.waveTimer -= delta;
                 if (miniGameState.waveTimer <= 0) {
-                  // Start next wave
                   miniGameState.wave++;
-                  miniGameState.waveSpawnCount = 2 + miniGameState.wave; // 3, 4, 5, 6...
+                  miniGameState.waveSpawnCount = 2 + miniGameState.wave;
                   miniGameState.waveKills = 0;
                   miniGameState.waveComplete = false;
-                  // Spawn drones for new wave (drone system auto-respawns, just trigger them)
                 }
               }
             }

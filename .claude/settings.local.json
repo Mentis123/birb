@@ -12,7 +12,45 @@
       "Bash(copy:*)",
       "Bash(copy \"C:\\\\Users\\\\user\\\\Downloads\\\\explosion.mp3\" \"C:\\\\Users\\\\user\\\\Documents\\\\birb\\\\sound\\\\explosion.mp3\")",
       "Bash(curl:*)",
-      "Bash(vercel --prod:*)"
+      "Bash(vercel --prod:*)",
+      "Bash(dir \"C:\\\\Users\\\\user\\\\Downloads\" /o:-d /a:-d)",
+      "Bash(findstr:*)",
+      "Bash(timeout:*)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -X POST \"http://localhost:${MCP_VOICE_HOOKS_PORT:-5111}/api/hooks/stop\" || echo '{}'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "_voice-hooks__speak$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -X POST \"http://localhost:${MCP_VOICE_HOOKS_PORT:-5111}/api/hooks/pre-speak\" || echo '{}'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(?!.*_voice-hooks__)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -s -X POST \"http://localhost:${MCP_VOICE_HOOKS_PORT:-5111}/api/hooks/post-tool\" || echo '{}'"
+          }
+        ]
+      }
     ]
   }
 }
