@@ -1251,7 +1251,9 @@
     .hud-bottom {
       margin-top: 0.5rem;
       font-size: 1rem;
-      color: rgba(255,255,255,0.8);
+      color: rgba(255,255,255,0.9);
+      transition: opacity 0.5s ease;
+      text-align: center;
     }
 
     /* Game Results overlay */
@@ -2206,7 +2208,7 @@
       time: 0,
       score: 0,
       ringsCollected: 0,
-      ringsTotal: 10,
+      ringsTotal: 20,
       dronesDestroyed: 0,
       combo: 1,
       comboTimer: 0,
@@ -2340,7 +2342,16 @@
       updateGameHud();
 
       // Mode-specific setup
-      if (mode === GAME_MODES.TURRET_DEFENSE) {
+      if (mode === GAME_MODES.RING_RUSH) {
+        // Show sprint hint
+        if (hudInfo) {
+          hudInfo.textContent = 'Touch with 2 fingers to sprint!';
+          hudInfo.style.opacity = '1';
+          setTimeout(() => {
+            hudInfo.style.opacity = '0';
+          }, 4000);
+        }
+      } else if (mode === GAME_MODES.TURRET_DEFENSE) {
         // Auto-land on nearest nest for turret defense
         if (nestingSystem && nestPointsSystem) {
           const nearestNest = nestPointsSystem.getNearestNest(flightController.position);
@@ -4013,29 +4024,30 @@
         }
       }, { passive: true });
 
-      // Sprint: second finger touch doubles speed
-      const updateSprintState = (touchCount) => {
-        const shouldSprint = touchCount >= 2 && !isNested && currentGameMode === GAME_MODES.RING_RUSH;
-        if (shouldSprint !== sprintState.active) {
-          sprintState.active = shouldSprint;
-          if (flightController && typeof flightController.setSpeed === 'function') {
-            flightController.setSpeed(shouldSprint ? sprintState.sprintSpeed : sprintState.baseSpeed);
-          }
-        }
-      };
-
-      touchZone.addEventListener('touchstart', (e) => {
-        updateSprintState(e.touches.length);
-      }, { passive: true });
-
-      touchZone.addEventListener('touchend', (e) => {
-        updateSprintState(e.touches.length);
-      }, { passive: true });
-
-      touchZone.addEventListener('touchcancel', (e) => {
-        updateSprintState(e.touches.length);
-      }, { passive: true });
     }
+
+    // Sprint: second finger touch doubles speed (document-level to catch touches anywhere)
+    const updateSprintState = (touchCount) => {
+      const shouldSprint = touchCount >= 2 && !isNested && currentGameMode === GAME_MODES.RING_RUSH;
+      if (shouldSprint !== sprintState.active) {
+        sprintState.active = shouldSprint;
+        if (flightController && flightController.speed !== undefined) {
+          flightController.speed = shouldSprint ? sprintState.sprintSpeed : sprintState.baseSpeed;
+        }
+      }
+    };
+
+    document.addEventListener('touchstart', (e) => {
+      updateSprintState(e.touches.length);
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+      updateSprintState(e.touches.length);
+    }, { passive: true });
+
+    document.addEventListener('touchcancel', (e) => {
+      updateSprintState(e.touches.length);
+    }, { passive: true });
 
     const applyThrottleFromInput = () => {
       if (!glideSpeedInput) return;
