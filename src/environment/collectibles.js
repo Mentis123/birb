@@ -41,99 +41,42 @@ const RING_CONFIGS = {
 };
 
 /**
- * Generate interesting flight paths for rings
+ * Generate ring placements on spherical world surface
+ * Sphere radius is 30, rings placed at altitude 5-12 above surface
  */
+const SPHERE_RADIUS = 30;
+
 function generateRingPlacements(environmentId, count = 20) {
   const placements = [];
 
-  switch (environmentId) {
-    case 'mountain':
-      // Rings weave through mountain peaks at various heights
-      for (let i = 0; i < count; i++) {
-        const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
-        const radius = 15 + Math.random() * 25;
-        const height = 3 + Math.sin(i * 0.5) * 8 + Math.random() * 5;
-        placements.push({
-          position: [
-            Math.cos(angle) * radius,
-            height,
-            Math.sin(angle) * radius,
-          ],
-          rotation: [Math.random() * 0.3 - 0.15, angle + Math.PI / 2, Math.random() * 0.2 - 0.1],
-          scale: 0.9 + Math.random() * 0.3,
-        });
-      }
-      break;
+  // All environments use spherical placement now
+  for (let i = 0; i < count; i++) {
+    const t = i / count;
 
-    case 'forest':
-      // Rings create a winding path through the forest canopy
-      for (let i = 0; i < count; i++) {
-        const t = i / count;
-        const spiralAngle = t * Math.PI * 3;
-        const radius = 18 + Math.sin(t * Math.PI * 2) * 12;
-        const height = 2 + Math.sin(t * Math.PI * 4) * 6;
-        placements.push({
-          position: [
-            Math.cos(spiralAngle) * radius,
-            height,
-            Math.sin(spiralAngle) * radius,
-          ],
-          rotation: [Math.random() * 0.2 - 0.1, spiralAngle + Math.PI / 2, 0],
-          scale: 0.95 + Math.random() * 0.25,
-        });
-      }
-      break;
+    // Spread rings around sphere using spherical coordinates
+    // theta = longitude (around equator), phi = latitude (pole to pole)
+    const theta = t * Math.PI * 4 + Math.random() * 0.5; // 2 full loops
+    const phi = Math.PI * 0.25 + Math.random() * Math.PI * 0.5; // Stay in middle band (avoid poles)
 
-    case 'canyons':
-      // Rings follow a canyon corridor with altitude changes
-      for (let i = 0; i < count; i++) {
-        const t = i / count;
-        const pathAngle = t * Math.PI * 2.5;
-        const radius = 20 + Math.sin(t * Math.PI * 1.5) * 15;
-        const height = 4 + Math.cos(t * Math.PI * 3) * 7;
-        placements.push({
-          position: [
-            Math.cos(pathAngle) * radius,
-            height,
-            Math.sin(pathAngle) * radius,
-          ],
-          rotation: [Math.random() * 0.25 - 0.125, pathAngle + Math.PI / 2, Math.random() * 0.15 - 0.075],
-          scale: 1.0 + Math.random() * 0.2,
-        });
-      }
-      break;
+    // Altitude above sphere surface (5-12 units)
+    const altitude = SPHERE_RADIUS + 5 + Math.random() * 7;
 
-    case 'city':
-      // Rings create a challenging urban flight course between buildings
-      for (let i = 0; i < count; i++) {
-        const t = i / count;
-        const angle = t * Math.PI * 4;
-        const radius = 16 + Math.sin(t * Math.PI * 3) * 18;
-        const height = 5 + Math.sin(t * Math.PI * 5) * 8;
-        placements.push({
-          position: [
-            Math.cos(angle) * radius,
-            height,
-            Math.sin(angle) * radius,
-          ],
-          rotation: [Math.random() * 0.3 - 0.15, angle + Math.PI / 2, 0],
-          scale: 0.85 + Math.random() * 0.35,
-        });
-      }
-      break;
+    // Convert spherical to cartesian
+    const x = altitude * Math.sin(phi) * Math.cos(theta);
+    const y = altitude * Math.cos(phi);
+    const z = altitude * Math.sin(phi) * Math.sin(theta);
 
-    default:
-      // Default circular pattern
-      for (let i = 0; i < count; i++) {
-        const angle = (i / count) * Math.PI * 2;
-        const radius = 20;
-        const height = 5;
-        placements.push({
-          position: [Math.cos(angle) * radius, height, Math.sin(angle) * radius],
-          rotation: [0, angle + Math.PI / 2, 0],
-          scale: 1.0,
-        });
-      }
+    // Ring should face outward from sphere center (radial direction)
+    // Calculate rotation to make ring perpendicular to radial
+    const radialAngle = Math.atan2(z, x);
+    const elevationAngle = Math.acos(y / altitude);
+
+    placements.push({
+      position: [x, y, z],
+      // Rotate ring to face tangent to sphere surface
+      rotation: [elevationAngle - Math.PI/2, radialAngle, 0],
+      scale: 1.0 + Math.random() * 0.3,
+    });
   }
 
   return placements;

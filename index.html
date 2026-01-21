@@ -2209,6 +2209,11 @@
       waveSpawnedThisWave: 0,
       droneSpawnTimer: 0,
       started: false, // For Ring Rush - starts on first ring
+      // Turret Defense specific
+      waveKills: 0,
+      dronesRemaining: 0,
+      waveTimer: 0,
+      waveComplete: false,
     };
 
     // Game HUD elements
@@ -2260,9 +2265,14 @@
           break;
 
         case GAME_MODES.TURRET_DEFENSE:
-          hudTime.textContent = '';
-          hudScore.textContent = '';
-          hudLives.textContent = '❤'.repeat(miniGameState.lives);
+          // Show wave countdown or drones remaining
+          if (miniGameState.waveComplete && miniGameState.waveTimer > 0) {
+            hudTime.textContent = `Next wave in ${Math.ceil(miniGameState.waveTimer)}...`;
+          } else {
+            hudTime.textContent = `🎯 ${miniGameState.dronesRemaining}`;
+          }
+          hudScore.textContent = `Kills: ${miniGameState.waveKills}`;
+          hudLives.textContent = '❤'.repeat(Math.max(0, miniGameState.lives));
           hudWave.textContent = `Wave ${miniGameState.wave}`;
           hudInfo.textContent = '';
           break;
@@ -2306,6 +2316,11 @@
       miniGameState.waveSpawnedThisWave = 0;
       miniGameState.droneSpawnTimer = 0;
       miniGameState.started = false;
+      // Turret Defense fields
+      miniGameState.waveKills = 0;
+      miniGameState.dronesRemaining = 0;
+      miniGameState.waveTimer = 0;
+      miniGameState.waveComplete = false;
 
       // Reset collectibles if they exist
       if (collectiblesSystem && collectiblesSystem.reset) {
@@ -4140,6 +4155,7 @@
                 miniGameState.comboTimer = 3; // Reset combo decay timer
               }
               if (miniGameState.active && currentGameMode === GAME_MODES.TURRET_DEFENSE) {
+                miniGameState.waveKills++;
                 miniGameState.dronesDestroyed++;
               }
             }
@@ -4216,14 +4232,22 @@
 
         // Turret Defense Mode
         if (currentGameMode === GAME_MODES.TURRET_DEFENSE) {
-          // Check if any drones have reached the nest position
-          if (droneSystem && nestingSystem && nestingSystem.isNested()) {
+          if (droneSystem && flightController) {
             const nestPos = flightController.position;
             const drones = droneSystem.getDrones();
+
+            // Move all drones TOWARD the nest
+            const droneSpeed = 8 + miniGameState.wave * 0.5; // Gets faster each wave
             for (let i = drones.length - 1; i >= 0; i--) {
               const drone = drones[i];
+              // Calculate direction to nest
+              const dirToNest = nestPos.clone().sub(drone.position).normalize();
+              // Move drone toward nest
+              drone.position.addScaledVector(dirToNest, droneSpeed * delta);
+
+              // Check if drone reached nest
               const distToNest = drone.position.distanceTo(nestPos);
-              if (distToNest < 8) { // Drone reached nest
+              if (distToNest < 6) {
                 droneSystem.destroyDrone(i);
                 miniGameState.lives--;
                 if (miniGameState.lives <= 0) {
@@ -4232,11 +4256,28 @@
               }
             }
 
-            // Check if wave is cleared
-            if (drones.length === 0 && miniGameState.dronesDestroyed >= miniGameState.waveSpawnCount) {
-              miniGameState.wave++;
-              miniGameState.waveSpawnCount = 3 + miniGameState.wave;
-              miniGameState.dronesDestroyed = 0;
+            // Track drones remaining in current wave
+            miniGameState.dronesRemaining = drones.length;
+
+            // Wave transition logic
+            if (drones.length === 0) {
+              // Wave cleared! Start countdown for next wave
+              if (miniGameState.waveTimer <= 0 && !miniGameState.waveComplete) {
+                miniGameState.waveComplete = true;
+                miniGameState.waveTimer = 3; // 3 second countdown
+              }
+
+              if (miniGameState.waveComplete) {
+                miniGameState.waveTimer -= delta;
+                if (miniGameState.waveTimer <= 0) {
+                  // Start next wave
+                  miniGameState.wave++;
+                  miniGameState.waveSpawnCount = 2 + miniGameState.wave; // 3, 4, 5, 6...
+                  miniGameState.waveKills = 0;
+                  miniGameState.waveComplete = false;
+                  // Spawn drones for new wave (drone system auto-respawns, just trigger them)
+                }
+              }
             }
           }
         }
