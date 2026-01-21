@@ -8,7 +8,7 @@
 const SPHERE_RADIUS = 30;
 const RING_ALTITUDE_MIN = 6;  // Above sphere surface
 const RING_ALTITUDE_MAX = 12;
-const RING_COUNT = 20;
+const RING_COUNT = 10;
 
 // Ring visual config - environment-themed colors
 const RING_CONFIGS = {

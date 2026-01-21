@@ -124,8 +124,8 @@ export class AimRig {
     }
 
     this._referenceForward.copy(forwardProjected);
-    // Right = up × forward (right-handed coordinate system)
-    this._referenceRight.crossVectors(this._referenceUp, this._referenceForward).normalize();
+    // Right = forward × up (consistent with getQuaternion)
+    this._referenceRight.crossVectors(this._referenceForward, this._referenceUp).normalize();
 
     // Reset aim angles and banking state
     this._yaw = 0;
