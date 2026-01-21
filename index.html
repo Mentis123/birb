@@ -2271,7 +2271,7 @@
           } else {
             hudTime.textContent = `🎯 ${miniGameState.dronesRemaining}`;
           }
-          hudScore.textContent = `Kills: ${miniGameState.waveKills}`;
+          hudScore.textContent = '';
           hudLives.textContent = '❤'.repeat(Math.max(0, miniGameState.lives));
           hudWave.textContent = `Wave ${miniGameState.wave}`;
           hudInfo.textContent = '';
@@ -4237,7 +4237,7 @@
             const drones = droneSystem.getDrones();
 
             // Move all drones TOWARD the nest
-            const droneSpeed = 8 + miniGameState.wave * 0.5; // Gets faster each wave
+            const droneSpeed = 6 + miniGameState.wave; // Wave 1=7, 2=8, 3=9, 4=10...
             for (let i = drones.length - 1; i >= 0; i--) {
               const drone = drones[i];
               // Calculate direction to nest
