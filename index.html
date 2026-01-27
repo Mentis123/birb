@@ -2261,7 +2261,25 @@
     // Unlock audio on first user interaction (required for iOS)
     const unlockAudio = () => {
       if (audioUnlocked) return;
-      // Play silent audio to unlock
+
+      // On mobile, we need to play audio directly in the user gesture, not in a promise callback
+      // Try to start ambient music immediately (this is the key fix for mobile)
+      if (continuousSounds.ambient && soundSettings.musicEnabled) {
+        continuousSounds.ambient.volume = getEffectiveVolume(BASE_VOLUMES.ambient, false);
+        continuousSounds.ambient.play().catch(() => {});
+      }
+
+      // Also try to start other continuous sounds directly
+      if (continuousSounds.wind) {
+        continuousSounds.wind.volume = 0;
+        continuousSounds.wind.play().catch(() => {});
+      }
+      if (continuousSounds.droneHum) {
+        continuousSounds.droneHum.volume = 0;
+        continuousSounds.droneHum.play().catch(() => {});
+      }
+
+      // Play silent audio to fully unlock the audio context
       const silence = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
       silence.play().then(() => {
         silence.pause();
@@ -2278,11 +2296,11 @@
             }).catch(() => {});
           });
         });
-        // Start continuous sounds (at volume 0 initially)
-        startContinuousSounds();
-        // Start ambient music
-        setAmbientMusic(true);
-      }).catch(() => {});
+      }).catch(() => {
+        // Even if silent audio fails, mark as unlocked if we got this far
+        // (the ambient music may have started successfully)
+        audioUnlocked = true;
+      });
     };
 
     // Unlock on any user interaction
@@ -2767,7 +2785,12 @@
           hudScore.textContent = `${miniGameState.ringsCollected}/${miniGameState.ringsTotal}`;
           hudLives.textContent = '';
           hudWave.textContent = '';
-          hudInfo.textContent = miniGameState.started ? '' : '2 fingers = sprint! Collect a ring to start';
+          // Show different hint for desktop (fine pointer) vs mobile (coarse pointer)
+          const isTouch = window.matchMedia('(pointer: coarse)').matches;
+          const sprintHint = isTouch
+            ? '2 fingers = sprint! Collect a ring to start'
+            : 'WASD to fly, mouse to look, click to sprint!';
+          hudInfo.textContent = miniGameState.started ? '' : sprintHint;
           break;
 
         case GAME_MODES.DRONE_HUNTER:
@@ -4527,10 +4550,23 @@
 
     }
 
-    // Sprint: second finger touch doubles speed (document-level to catch touches anywhere)
-    const updateSprintState = (touchCount) => {
+    // Sprint: second finger touch OR mouse click doubles speed
+    // Track mouse sprint state separately from touch
+    let mouseSprintActive = false;
+
+    const updateSprintState = (touchCount, forceMouseSprint = null) => {
       const currentlyNested = nestingSystem?.isNested?.() ?? false;
-      const shouldSprint = touchCount >= 2 && !currentlyNested && currentGameMode === GAME_MODES.RING_RUSH;
+      const isSprintMode = currentGameMode === GAME_MODES.RING_RUSH;
+
+      // Mouse sprint override (for desktop)
+      if (forceMouseSprint !== null) {
+        mouseSprintActive = forceMouseSprint && !currentlyNested && isSprintMode;
+      }
+
+      // Sprint if either 2+ touches OR mouse is held down (in eligible mode)
+      const touchSprint = touchCount >= 2 && !currentlyNested && isSprintMode;
+      const shouldSprint = touchSprint || mouseSprintActive;
+
       if (shouldSprint !== sprintState.active) {
         sprintState.active = shouldSprint;
         if (flightController && flightController.speed !== undefined) {
@@ -4555,6 +4591,23 @@
     document.addEventListener('touchcancel', (e) => {
       updateSprintState(e.touches.length);
     }, { passive: true });
+
+    // Mouse click to sprint (desktop only - fine pointer devices)
+    const isDesktopPointer = window.matchMedia('(pointer: fine)').matches;
+    if (isDesktopPointer) {
+      document.addEventListener('mousedown', (e) => {
+        // Only sprint on left click, and not on UI elements
+        if (e.button === 0 && !e.target.closest('button, input, select, [data-control], [role="button"]')) {
+          updateSprintState(0, true);
+        }
+      }, { passive: true });
+
+      document.addEventListener('mouseup', (e) => {
+        if (e.button === 0) {
+          updateSprintState(0, false);
+        }
+      }, { passive: true });
+    }
 
     const applyThrottleFromInput = () => {
       if (!glideSpeedInput) return;
