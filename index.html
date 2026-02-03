@@ -2697,6 +2697,7 @@
     // Nesting system state
     let nestPointsSystem = null;
     let nestingSystem = null;
+    let nestLookEnabled = false;
     let rocketSystem = null;
     let droneSystem = null;
     let nestToastTimeout = null;
@@ -4202,6 +4203,88 @@
     const keyboardInput = createKeyboardInput();
     const flightInput = touchInput ? combineInputs(touchInput, keyboardInput) : keyboardInput;
 
+    const nestLookInput = (() => {
+      const state = {
+        activeId: null,
+        lastX: 0,
+        lastY: 0,
+        deltaX: 0,
+        deltaY: 0,
+        active: false,
+      };
+
+      const reset = () => {
+        state.activeId = null;
+        state.lastX = 0;
+        state.lastY = 0;
+        state.deltaX = 0;
+        state.deltaY = 0;
+        state.active = false;
+      };
+
+      const consume = () => {
+        const delta = { x: state.deltaX, y: state.deltaY, active: state.active };
+        state.deltaX = 0;
+        state.deltaY = 0;
+        return delta;
+      };
+
+      const start = (touch) => {
+        state.activeId = touch.identifier;
+        state.lastX = touch.clientX;
+        state.lastY = touch.clientY;
+        state.active = true;
+      };
+
+      const update = (touch) => {
+        const dx = touch.clientX - state.lastX;
+        const dy = touch.clientY - state.lastY;
+        state.lastX = touch.clientX;
+        state.lastY = touch.clientY;
+        state.deltaX += dx;
+        state.deltaY += dy;
+      };
+
+      if (touchZone) {
+        touchZone.addEventListener('touchstart', (event) => {
+          if (!nestLookEnabled) return;
+          if (state.activeId !== null) return;
+          const touch = event.changedTouches[0];
+          if (!touch) return;
+          start(touch);
+        }, { passive: true });
+
+        touchZone.addEventListener('touchmove', (event) => {
+          if (!nestLookEnabled || state.activeId === null) return;
+          const touch = Array.from(event.changedTouches).find(
+            (entry) => entry.identifier === state.activeId,
+          );
+          if (!touch) return;
+          update(touch);
+          event.preventDefault();
+        }, { passive: false });
+
+        const endHandler = (event) => {
+          if (state.activeId === null) return;
+          const match = Array.from(event.changedTouches).some(
+            (entry) => entry.identifier === state.activeId,
+          );
+          if (match) {
+            reset();
+          }
+        };
+
+        touchZone.addEventListener('touchend', endHandler, { passive: true });
+        touchZone.addEventListener('touchcancel', endHandler, { passive: true });
+      }
+
+      return {
+        consume,
+        reset,
+        isActive: () => state.active,
+      };
+    })();
+
     // 2. Flight Physics (BirdFlight)
     const flight = new BirdFlight(THREE, {
       sphereCenter: new THREE.Vector3(0, 0, 0),
@@ -4394,6 +4477,10 @@
       // Enable/disable nest look mode for free camera look-around
       if (typeof flightController.setNestLookMode === 'function') {
         flightController.setNestLookMode(isNested);
+      }
+      nestLookEnabled = isNested;
+      if (nestLookInput) {
+        nestLookInput.reset();
       }
       if (aimRig) {
         if (isNested) {
@@ -4723,12 +4810,15 @@
         // When nested, use the touch/keyboard input for look-around
         // flightControls.getAnalogLookState() doesn't work because nipplejs isn't passed to it
         const pointerDelta = flightControls.consumePointerLookDelta?.() ?? { x: 0, y: 0 };
+        const touchDelta = nestLookInput?.consume?.() ?? { x: 0, y: 0, active: false };
+        const axisX = touchDelta.active ? 0 : inputState.x;
+        const axisY = touchDelta.active ? 0 : inputState.y;
         aimRig.update(
           {
-            axisX: inputState.x,
-            axisY: inputState.y,
-            deltaX: pointerDelta.x,
-            deltaY: pointerDelta.y,
+            axisX,
+            axisY,
+            deltaX: pointerDelta.x + touchDelta.x,
+            deltaY: pointerDelta.y + touchDelta.y,
           },
           lookDeltaTime
         );
