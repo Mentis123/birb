@@ -154,7 +154,9 @@ export function createNestingSystem(THREE, {
         }
 
         currentForward.normalize();
+        // Rebuild an orthonormal basis to prevent roll skew when entering nests.
         _tempRight.crossVectors(currentForward, up).normalize();
+        currentForward.crossVectors(up, _tempRight).normalize();
         _tempMatrix.makeBasis(_tempRight, up, _tempForwardNeg.copy(currentForward).negate());
         targetQuaternion.setFromRotationMatrix(_tempMatrix);
       }
