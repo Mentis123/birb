@@ -4217,6 +4217,7 @@
     });
 
     const aimRig = new AimRig(THREE);
+    const nestAimUp = new THREE.Vector3();
 
     // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
     flightController = flight;
@@ -4400,7 +4401,12 @@
           // This guarantees the horizon is always level regardless of landing angle
           // Using radial up (from sphere center) gives true horizon - this is intentional
           const pos = flightController.position;
-          const localUp = pos.clone().normalize(); // Radial direction = true local up on sphere
+          const nestUp = currentNest && nestPointsSystem?.getNestWorldSurfaceNormal
+            ? nestPointsSystem.getNestWorldSurfaceNormal(currentNest, nestAimUp)
+            : null;
+          const localUp = nestUp && nestUp.lengthSq() > 0
+            ? nestUp.normalize()
+            : pos.clone().normalize(); // Radial direction = true local up on sphere
 
           // Get bird's forward direction (we'll project it to tangent plane in setReferenceFromVectors)
           const birdForward = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
