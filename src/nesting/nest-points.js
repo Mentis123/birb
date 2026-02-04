@@ -215,8 +215,8 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
     // Forward is perpendicular to both up and right, lying in the tangent plane
     const forward = new THREE.Vector3().crossVectors(up, right).normalize();
 
-    // Build quaternion from basis vectors (right, up, -forward for camera convention)
-    const basisMatrix = new THREE.Matrix4().makeBasis(right, up, forward.clone().negate());
+    // Build quaternion from a right-handed basis so the nest's local +Y matches the surface normal.
+    const basisMatrix = new THREE.Matrix4().makeBasis(right, up, forward);
     const quaternion = new THREE.Quaternion().setFromRotationMatrix(basisMatrix);
     nestGroup.quaternion.copy(quaternion);
 
