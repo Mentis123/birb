@@ -4811,14 +4811,15 @@
         // flightControls.getAnalogLookState() doesn't work because nipplejs isn't passed to it
         const pointerDelta = flightControls.consumePointerLookDelta?.() ?? { x: 0, y: 0 };
         const touchDelta = nestLookInput?.consume?.() ?? { x: 0, y: 0, active: false };
-        const axisX = touchDelta.active ? 0 : inputState.x;
-        const axisY = touchDelta.active ? 0 : inputState.y;
+        const useTouchDrag = touchDelta.active && !inputState.active;
+        const axisX = useTouchDrag ? 0 : inputState.x;
+        const axisY = useTouchDrag ? 0 : inputState.y;
         aimRig.update(
           {
             axisX,
             axisY,
-            deltaX: pointerDelta.x + touchDelta.x,
-            deltaY: pointerDelta.y + touchDelta.y,
+            deltaX: pointerDelta.x + (useTouchDrag ? touchDelta.x : 0),
+            deltaY: pointerDelta.y + (useTouchDrag ? touchDelta.y : 0),
           },
           lookDeltaTime
         );

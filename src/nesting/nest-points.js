@@ -195,36 +195,22 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
     nestGroup.position.copy(placement.position);
     console.log(`[NestSystem] Nest ${index}: pos (${placement.position.x.toFixed(1)}, ${placement.position.y.toFixed(1)}, ${placement.position.z.toFixed(1)}), distance from origin: ${placement.position.length().toFixed(1)}`);
 
-    // Orient nest to face outward from sphere center (surface normal)
-    // AND ensure forward direction lies along the horizon (tangent plane)
+    // Orient nest to face outward from sphere center (surface normal).
+    // Use a simple up alignment to avoid unstable roll/twist near the poles.
     const up = placement.surfaceNormal.clone().normalize();
-
-    // Compute a horizontal forward direction in the tangent plane
-    // Use world up to derive a consistent "east-west" tangent direction
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    const right = new THREE.Vector3().crossVectors(worldUp, up);
-
-    // Handle poles where worldUp is parallel to surface normal
-    if (right.lengthSq() < 1e-6) {
-      // At poles, use world forward as reference instead
-      const worldForward = new THREE.Vector3(0, 0, -1);
-      right.crossVectors(worldForward, up);
-    }
-    right.normalize();
-
-    // Forward is perpendicular to both up and right, lying in the tangent plane
-    const forward = new THREE.Vector3().crossVectors(up, right).normalize();
-
-    // Build quaternion from a right-handed basis so the nest's local +Y matches the surface normal.
-    const basisMatrix = new THREE.Matrix4().makeBasis(right, up, forward);
-    const quaternion = new THREE.Quaternion().setFromRotationMatrix(basisMatrix);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      up
+    );
     nestGroup.quaternion.copy(quaternion);
 
     // Store metadata
     nestGroup.userData.index = index;
     nestGroup.userData.landingPosition = nestGroup.position.clone();
     nestGroup.userData.landingQuaternion = nestGroup.quaternion.clone();
-    nestGroup.userData.surfaceNormal = up.clone();
+    // Store local +Y as the surface normal (local space) so world-space normals
+    // can be derived via the nest's world quaternion.
+    nestGroup.userData.surfaceNormal = new THREE.Vector3(0, 1, 0);
     nestGroup.userData.hostObject = placement.hostObject;
     nestGroup.userData.hostClearance = computeHostClearance(placement.hostObject, up);
 
