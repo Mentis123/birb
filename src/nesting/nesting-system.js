@@ -181,7 +181,13 @@ export function createNestingSystem(THREE, {
         const worldNormal = nestPointsSystem.getNestWorldSurfaceNormal(currentNest, takeOffDirection);
         if (!worldNormal) {
           // Fallback to local normal if world normal unavailable
-          takeOffDirection.copy(currentNest.userData.surfaceNormal);
+          const localNormal = currentNest.userData.surfaceNormal;
+          if (localNormal) {
+            currentNest.getWorldQuaternion(_tempQuat);
+            takeOffDirection.copy(localNormal).applyQuaternion(_tempQuat).normalize();
+          } else {
+            takeOffDirection.set(0, 1, 0);
+          }
         }
 
         // Add some forward momentum based on current look direction
