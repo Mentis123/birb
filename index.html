@@ -4543,6 +4543,49 @@
       });
     }
 
+    const AIM_ASSIST_CONFIG = {
+      maxAngle: (12 * Math.PI) / 180,
+      maxDistance: 90,
+      blend: 0.7,
+    };
+
+    const applyAimAssist = (direction, origin) => {
+      if (!droneSystem || !direction || !origin) {
+        return direction;
+      }
+
+      const drones = droneSystem.getDrones();
+      if (!drones.length) {
+        return direction;
+      }
+
+      let bestTarget = null;
+      let bestAngle = AIM_ASSIST_CONFIG.maxAngle;
+      const lookDir = direction.clone().normalize();
+
+      for (const drone of drones) {
+        const toDrone = drone.position.clone().sub(origin);
+        const distance = toDrone.length();
+        if (distance > AIM_ASSIST_CONFIG.maxDistance || distance < 0.01) {
+          continue;
+        }
+        toDrone.normalize();
+        const dot = Math.min(1, Math.max(-1, lookDir.dot(toDrone)));
+        const angle = Math.acos(dot);
+        if (angle <= bestAngle) {
+          bestAngle = angle;
+          bestTarget = toDrone;
+        }
+      }
+
+      if (!bestTarget) {
+        return direction;
+      }
+
+      const assisted = lookDir.clone().lerp(bestTarget, AIM_ASSIST_CONFIG.blend).normalize();
+      return assisted;
+    };
+
     if (nestLaunchButton) {
       let lastTouchLaunchAt = 0;
 
@@ -4562,7 +4605,8 @@
         unlockAudio();
 
         if (nestingSystem && nestingSystem.isNested() && rocketSystem && rocketSystem.canFire()) {
-          const launchDirection = nestingSystem.getLookDirection();
+          const rawDirection = nestingSystem.getLookDirection();
+          const launchDirection = applyAimAssist(rawDirection, flightController.position);
           const launchPosition = flightController.position.clone().addScaledVector(launchDirection, 1.0);
           const fired = rocketSystem.fire(launchPosition, launchDirection);
           if (fired) {

@@ -1,10 +1,10 @@
 export const AIM_RIG_DEFAULTS = {
-  yawRate: Math.PI * 1.2,     // Fast horizontal rotation
-  pitchRate: Math.PI * 0.4,   // Gentle vertical
-  maxPitch: (80 * Math.PI) / 180,  // Turret-style vertical range
+  yawRate: Math.PI * 1.5,     // Snappier horizontal rotation
+  pitchRate: Math.PI * 0.55,  // More responsive vertical
+  maxPitch: (85 * Math.PI) / 180,  // Turret-style vertical range
   smoothing: 10,
   pointerSmoothing: 12,
-  lookSensitivity: 0.002,
+  lookSensitivity: 0.0025,
   pointerDeadzone: 0.1,
   maxPointerDelta: 40,
   bankInfluence: 0,
