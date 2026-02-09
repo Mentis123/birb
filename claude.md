@@ -149,3 +149,28 @@ Working iOS audio pattern from: https://github.com/Mentis123/data3-cisco-live
 - **Expected vs. actual:** Describe what good behavior would be (per above) and what deviated (lag, wobble, artifact, missing model, etc.).
 - **Triage:** File an issue labeled `mobile-regression` and `controls` or `render`. Add severity (P0 crash, P1 major jitter, P2 minor drift) and assign an owner.
 - **Verification:** Attach test replay or manual checklist results showing the fix removes the regression without new side effects on target devices.
+
+---
+
+## Dashboard Sync
+
+After any significant change to this project:
+1. Update `C:\Users\user\Documents\dashboard.html` with:
+   - Current commit hash (line ~399, class `commit-hash`)
+   - Status badge: clean/dirty (line ~395)
+   - Current bug/phase status (line ~400)
+2. Update stats bar counters if dirty/clean status changes
+
+---
+
+## Next Steps (Plan)
+
+**Current Priority: Fix Spherical Flight Direction Bug**
+
+1. [ ] Implement clean rewrite of spherical flight controller (see FLIGHT_CONTROLS_PLAN.md)
+2. [ ] Track `forward` as persistent Vector3, not derived from heading angle
+3. [ ] Derive quaternion for rendering only, not for velocity calculation
+4. [ ] Test at multiple positions on sphere including poles
+5. [ ] Verify turn input correctly rotates forward vector around local-up axis
+6. [ ] Remove eruda debug console after flight direction confirmed working
+7. [ ] Complete iOS audio testing (check full sound duration, explosion at distance)
