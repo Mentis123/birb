@@ -881,6 +881,72 @@
       display: none !important;
     }
 
+    /* Onboarding tooltip for mini-games */
+    .onboarding-tooltip {
+      position: absolute;
+      bottom: calc(var(--space-2) + 3.5rem);
+      right: var(--space-2);
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1rem;
+      background: rgba(14, 23, 41, 0.92);
+      border: 1px solid rgba(100, 220, 160, 0.5);
+      border-radius: 0.75rem;
+      color: #f1f5ff;
+      font-size: 0.85rem;
+      font-family: system-ui, -apple-system, sans-serif;
+      white-space: nowrap;
+      pointer-events: auto;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(6, 14, 31, 0.6), 0 0 20px rgba(100, 220, 160, 0.15);
+      backdrop-filter: blur(12px);
+      animation: onboarding-fade-in 0.5s ease-out;
+      opacity: 1;
+      transition: opacity 0.4s ease-out;
+    }
+
+    .onboarding-tooltip.is-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Arrow pointing down toward the gear button */
+    .onboarding-tooltip::after {
+      content: '';
+      position: absolute;
+      bottom: -6px;
+      right: 1.1rem;
+      width: 12px;
+      height: 12px;
+      background: rgba(14, 23, 41, 0.92);
+      border-right: 1px solid rgba(100, 220, 160, 0.5);
+      border-bottom: 1px solid rgba(100, 220, 160, 0.5);
+      transform: rotate(45deg);
+    }
+
+    .onboarding-tooltip__icon {
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+
+    @keyframes onboarding-fade-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Pulse ring on the gear button during onboarding */
+    .settings-gear-button.is-onboarding-highlight {
+      border-color: rgba(100, 220, 160, 0.7);
+      animation: gear-pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes gear-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(100, 220, 160, 0.4), 0 8px 24px rgba(6, 14, 31, 0.5); }
+      50% { box-shadow: 0 0 0 8px rgba(100, 220, 160, 0), 0 8px 24px rgba(6, 14, 31, 0.5); }
+    }
+
     /* Settings Overlay */
     .settings-overlay {
       position: absolute;
@@ -1504,6 +1570,12 @@
         </svg>
       </button>
 
+      <!-- Mini-game onboarding tooltip -->
+      <div class="onboarding-tooltip is-hidden" data-onboarding-tooltip aria-hidden="true">
+        <span class="onboarding-tooltip__icon">&#127918;</span>
+        <span>Mini games in Settings!</span>
+      </div>
+
       <!-- Settings overlay -->
       <div class="settings-overlay" data-settings-overlay aria-hidden="true">
         <div class="settings-panel">
@@ -1780,6 +1852,8 @@
           if (typeof triggerAutoFullscreen === 'function') {
             triggerAutoFullscreen();
           }
+          // Show mini-game onboarding tooltip after splash is gone
+          showMinigameOnboarding();
         }, 500);
       };
       splashScreen.addEventListener('click', dismissSplash, { once: true });
@@ -1787,6 +1861,40 @@
         e.preventDefault();
         dismissSplash();
       }, { once: true, passive: false });
+    }
+
+    // Mini-game onboarding tooltip (shows once after first splash dismiss)
+    function showMinigameOnboarding() {
+      if (localStorage.getItem('birb_onboarding_seen')) return;
+
+      const tooltip = document.querySelector('[data-onboarding-tooltip]');
+      const gearBtn = document.querySelector('[data-control="settings-open"]');
+      if (!tooltip || !gearBtn) return;
+
+      // Brief delay so the player can orient themselves first
+      setTimeout(() => {
+        tooltip.classList.remove('is-hidden');
+        tooltip.setAttribute('aria-hidden', 'false');
+        gearBtn.classList.add('is-onboarding-highlight');
+
+        const dismiss = () => {
+          tooltip.classList.add('is-hidden');
+          tooltip.setAttribute('aria-hidden', 'true');
+          gearBtn.classList.remove('is-onboarding-highlight');
+          localStorage.setItem('birb_onboarding_seen', '1');
+          // Clean up after fade
+          setTimeout(() => tooltip.remove(), 400);
+        };
+
+        // Dismiss on tap/click of the tooltip itself
+        tooltip.addEventListener('click', dismiss, { once: true });
+        // Also dismiss when the gear button is tapped
+        gearBtn.addEventListener('click', dismiss, { once: true });
+        // Auto-dismiss after 6 seconds
+        setTimeout(() => {
+          if (!tooltip.classList.contains('is-hidden')) dismiss();
+        }, 6000);
+      }, 1500);
     }
 
     // Settings & Info Overlay State
