@@ -117,12 +117,14 @@ export function createRocketSystem(THREE, scene, options = {}) {
   let cooldownTimer = 0;
   let animationTime = 0;
   let collisionTargets = [];
+  let sphereCenter = null;
 
   // Temporary vectors
   const _tempVec = new THREE.Vector3();
   const _tempQuat = new THREE.Quaternion();
   const _movementVec = new THREE.Vector3();
   const _rayDirection = new THREE.Vector3();
+  const _gravityDir = new THREE.Vector3();
   const _raycaster = new THREE.Raycaster();
 
   const createExplosion = (position) => {
@@ -249,8 +251,14 @@ export function createRocketSystem(THREE, scene, options = {}) {
 
         const previousPosition = rocket.userData.previousPosition || rocket.position.clone();
 
-        // Apply gravity
-        rocket.userData.velocity.y -= ROCKET_GRAVITY * delta;
+        // Apply gravity toward sphere center (radial) so rockets arc
+        // toward the ground regardless of position on the sphere
+        if (sphereCenter) {
+          _gravityDir.copy(sphereCenter).sub(rocket.position).normalize();
+          rocket.userData.velocity.addScaledVector(_gravityDir, ROCKET_GRAVITY * delta);
+        } else {
+          rocket.userData.velocity.y -= ROCKET_GRAVITY * delta;
+        }
 
         // Update position
         rocket.position.addScaledVector(rocket.userData.velocity, delta);
@@ -387,6 +395,13 @@ export function createRocketSystem(THREE, scene, options = {}) {
      */
     getRocketCount() {
       return rockets.length;
+    },
+
+    /**
+     * Set the sphere center so gravity pulls rockets radially inward
+     */
+    setSphereCenter(center) {
+      sphereCenter = center ? new THREE.Vector3().copy(center) : null;
     },
 
     /**

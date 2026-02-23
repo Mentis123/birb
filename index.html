@@ -3412,6 +3412,9 @@
       if (flightController && typeof flightController.setSphereCenter === 'function') {
         flightController.setSphereCenter(sphereCenter);
       }
+      if (rocketSystem && typeof rocketSystem.setSphereCenter === 'function') {
+        rocketSystem.setSphereCenter(sphereCenter);
+      }
 
       if (sphericalWorld) {
         try {
@@ -3460,6 +3463,9 @@
         }
         if (flightController && typeof flightController.setSphereCenter === 'function') {
           flightController.setSphereCenter(null);
+        }
+        if (rocketSystem && typeof rocketSystem.setSphereCenter === 'function') {
+          rocketSystem.setSphereCenter(null);
         }
         if (rocketSystem && typeof rocketSystem.setCollisionTargets === 'function') {
           rocketSystem.setCollisionTargets([]);
@@ -4534,10 +4540,11 @@
       },
     });
 
-    // Set collision targets for rocket system if environment already loaded
+    // Set collision targets and sphere center for rocket system if environment already loaded
     // (This handles the case where the default environment is set before rocketSystem is created)
     if (sphericalWorld && sphericalWorld.root) {
       rocketSystem.setCollisionTargets([sphericalWorld.root]);
+      rocketSystem.setSphereCenter(new THREE.Vector3(0, 0, 0));
     }
 
     // Initialize drone target system
