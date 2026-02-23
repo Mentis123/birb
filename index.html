@@ -4959,22 +4959,26 @@
       const inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
 
       if (isNested && aimRig?.isActive?.()) {
-        // When nested, use the touch/keyboard input for look-around
-        // flightControls.getAnalogLookState() doesn't work because nipplejs isn't passed to it
+        // Turret aiming: joystick controls rate-based rotation,
+        // pointer/touch-drag controls delta-based fine adjustment.
+        // Both channels feed the AimRig simultaneously — the AimRig's
+        // deadzone + expo handle joystick shaping, pointer smoothing
+        // handles mouse/touch deltas.
         const pointerDelta = flightControls.consumePointerLookDelta?.() ?? { x: 0, y: 0 };
         const touchDelta = nestLookInput?.consume?.() ?? { x: 0, y: 0, active: false };
-        const useTouchDrag = touchDelta.active && !inputState.active;
-        const axisX = useTouchDrag ? 0 : inputState.x;
-        const axisY = useTouchDrag ? 0 : inputState.y;
-        aimRig.update(
-          {
-            axisX,
-            axisY,
-            deltaX: pointerDelta.x + (useTouchDrag ? touchDelta.x : 0),
-            deltaY: pointerDelta.y + (useTouchDrag ? touchDelta.y : 0),
-          },
-          lookDeltaTime
-        );
+
+        // Joystick axis always feeds rate-based rotation
+        const axisX = inputState.x;
+        const axisY = inputState.y;
+
+        // Pointer lock (mouse) + touch-drag feed delta-based rotation.
+        // When the joystick is active, touch drag is from the same finger
+        // so we skip it to avoid double-counting; pointer lock still applies.
+        const skipTouchDrag = inputState.active && touchDelta.active;
+        const deltaX = pointerDelta.x + (skipTouchDrag ? 0 : touchDelta.x);
+        const deltaY = pointerDelta.y + (skipTouchDrag ? 0 : touchDelta.y);
+
+        aimRig.update({ axisX, axisY, deltaX, deltaY }, lookDeltaTime);
         nestedAimQuaternion = aimRig.getQuaternion();
       } else {
         // Apply look controls during flight
