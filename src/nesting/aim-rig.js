@@ -1,15 +1,29 @@
 export const AIM_RIG_DEFAULTS = {
-  yawRate: Math.PI * 1.5,          // Horizontal rotation (270°/s)
-  pitchRate: Math.PI * 1.2,        // Vertical rotation (216°/s) — close to yaw for balanced aiming
-  maxPitch: (85 * Math.PI) / 180,  // Turret-style vertical range
-  minPitch: 0,                     // Keep horizon as the lowest aim angle (no ground aiming)
-  smoothing: 15,                   // Snappy convergence (~150ms to 90%)
-  pointerSmoothing: 12,
-  lookSensitivity: 0.0025,
-  pointerDeadzone: 0.1,
-  maxPointerDelta: 40,
-  axisDeadzone: 0.08,              // Filter joystick noise/drift near center
-  axisExpo: 0.4,                   // Non-linear: fine control at small deflections, fast sweeps at full
+  // Rotation speed targets (rad/s at full joystick deflection)
+  yawRate: Math.PI * 1.5,          // Horizontal: 270°/s target
+  pitchRate: Math.PI * 1.2,        // Vertical: 216°/s target
+
+  // Pitch limits
+  maxPitch: (85 * Math.PI) / 180,  // 85° up
+  minPitch: (-30 * Math.PI) / 180, // 30° below horizon (needed for distant targets on sphere)
+
+  // Input stabilization
+  smoothing: 15,                    // Joystick exponential smoothing
+  pointerSmoothing: 12,             // Pointer/touch drag smoothing
+  lookSensitivity: 0.0025,          // Pointer delta → angle scaling
+  pointerDeadzone: 0.1,             // Min pointer movement to register (px)
+  maxPointerDelta: 40,              // Max pointer movement per frame (px)
+  axisDeadzone: 0.08,               // Joystick center deadzone
+  axisExpo: 0.4,                    // Non-linear: fine control at small deflections
+
+  // Inertia system — creates "heavy turret" feel
+  // Uses asymmetric stiffness: high tracking during input, low friction on release
+  trackingStiffness: 25,            // How fast velocity tracks input (higher = snappier response)
+  coastStiffness: 4.0,              // Velocity decay on release (lower = more momentum glide)
+  maxYawVelocity: Math.PI * 1.5,    // Max horizontal rotation speed (rad/s)
+  maxPitchVelocity: Math.PI * 1.2,  // Max vertical rotation speed (rad/s)
+
+  // Banking (visual roll during horizontal turns)
   bankInfluence: 0,
   maxBank: 0,
   bankSmoothing: 4,
@@ -45,6 +59,10 @@ export class AimRig {
     this.maxPointerDelta = options.maxPointerDelta ?? AIM_RIG_DEFAULTS.maxPointerDelta;
     this.axisDeadzone = options.axisDeadzone ?? AIM_RIG_DEFAULTS.axisDeadzone;
     this.axisExpo = options.axisExpo ?? AIM_RIG_DEFAULTS.axisExpo;
+    this.trackingStiffness = options.trackingStiffness ?? AIM_RIG_DEFAULTS.trackingStiffness;
+    this.coastStiffness = options.coastStiffness ?? AIM_RIG_DEFAULTS.coastStiffness;
+    this.maxYawVelocity = options.maxYawVelocity ?? AIM_RIG_DEFAULTS.maxYawVelocity;
+    this.maxPitchVelocity = options.maxPitchVelocity ?? AIM_RIG_DEFAULTS.maxPitchVelocity;
     this.bankInfluence = options.bankInfluence ?? AIM_RIG_DEFAULTS.bankInfluence;
     this.maxBank = options.maxBank ?? AIM_RIG_DEFAULTS.maxBank;
     this.bankSmoothing = options.bankSmoothing ?? AIM_RIG_DEFAULTS.bankSmoothing;
@@ -65,9 +83,12 @@ export class AimRig {
     this._yaw = 0;
     this._pitch = 0;
     this._active = false;
-    // Banking state
-    this._previousYaw = 0;
+
+    // Velocity-driven inertia state
     this._yawVelocity = 0;
+    this._pitchVelocity = 0;
+
+    // Banking state
     this._smoothedBank = 0;
   }
 
@@ -82,8 +103,8 @@ export class AimRig {
     if (!next) {
       this._yaw = 0;
       this._pitch = 0;
-      this._previousYaw = 0;
       this._yawVelocity = 0;
+      this._pitchVelocity = 0;
       this._smoothedBank = 0;
     }
   }
@@ -99,6 +120,8 @@ export class AimRig {
     this._referenceRight.crossVectors(this._referenceForward, this._referenceUp).normalize();
     this._yaw = 0;
     this._pitch = 0;
+    this._yawVelocity = 0;
+    this._pitchVelocity = 0;
     this._smoothedX = 0;
     this._smoothedY = 0;
     this._smoothedDeltaX = 0;
@@ -135,15 +158,15 @@ export class AimRig {
     // Right = forward × up (consistent with getQuaternion)
     this._referenceRight.crossVectors(this._referenceForward, this._referenceUp).normalize();
 
-    // Reset aim angles and banking state
+    // Reset all state
     this._yaw = 0;
     this._pitch = 0;
+    this._yawVelocity = 0;
+    this._pitchVelocity = 0;
     this._smoothedX = 0;
     this._smoothedY = 0;
     this._smoothedDeltaX = 0;
     this._smoothedDeltaY = 0;
-    this._previousYaw = 0;
-    this._yawVelocity = 0;
     this._smoothedBank = 0;
   }
 
@@ -163,19 +186,23 @@ export class AimRig {
 
   update({ axisX = 0, axisY = 0, deltaX = 0, deltaY = 0 } = {}, deltaTime = 0) {
     if (!this._active) return;
-    const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
-    if (limitedDelta > 0) {
-      const shapedX = this._shapeAxis(axisX);
-      const shapedY = this._shapeAxis(axisY);
+    const dt = Math.min(Math.max(deltaTime, 0), 0.05);
+    if (dt <= 0) return;
 
-      const smoothStep = 1 - Math.exp(-this.smoothing * limitedDelta);
-      this._smoothedX += (shapedX - this._smoothedX) * smoothStep;
-      this._smoothedY += (shapedY - this._smoothedY) * smoothStep;
+    // ── Channel 1: Joystick (rate-based) ───────────────────────────
+    // Shape raw input through deadzone + expo curve, then smooth
+    const shapedX = this._shapeAxis(axisX);
+    const shapedY = this._shapeAxis(axisY);
 
-      this._yaw += -this._smoothedX * this.yawRate * limitedDelta;
-      this._pitch += this._smoothedY * this.pitchRate * limitedDelta;
-    }
+    const smoothStep = 1 - Math.exp(-this.smoothing * dt);
+    this._smoothedX += (shapedX - this._smoothedX) * smoothStep;
+    this._smoothedY += (shapedY - this._smoothedY) * smoothStep;
 
+    // Joystick drives desired angular velocity
+    let desiredYawVel = -this._smoothedX * this.yawRate;
+    let desiredPitchVel = this._smoothedY * this.pitchRate;
+
+    // ── Channel 2: Pointer/touch drag (delta-based) ────────────────
     const safeDeltaX = Number.isFinite(deltaX) ? deltaX : 0;
     const safeDeltaY = Number.isFinite(deltaY) ? deltaY : 0;
     const targetDeltaX = Math.abs(safeDeltaX) < this.pointerDeadzone
@@ -185,46 +212,75 @@ export class AimRig {
       ? 0
       : clamp(safeDeltaY, -this.maxPointerDelta, this.maxPointerDelta);
 
-    if (limitedDelta > 0) {
-      const pointerSmoothStep = 1 - Math.exp(-this.pointerSmoothing * limitedDelta);
-      this._smoothedDeltaX += (targetDeltaX - this._smoothedDeltaX) * pointerSmoothStep;
-      this._smoothedDeltaY += (targetDeltaY - this._smoothedDeltaY) * pointerSmoothStep;
-    } else {
-      this._smoothedDeltaX = targetDeltaX;
-      this._smoothedDeltaY = targetDeltaY;
+    const pointerSmoothStep = 1 - Math.exp(-this.pointerSmoothing * dt);
+    this._smoothedDeltaX += (targetDeltaX - this._smoothedDeltaX) * pointerSmoothStep;
+    this._smoothedDeltaY += (targetDeltaY - this._smoothedDeltaY) * pointerSmoothStep;
+
+    // Convert pointer frame-delta to velocity contribution
+    if (Math.abs(this._smoothedDeltaX) > 0.01 || Math.abs(this._smoothedDeltaY) > 0.01) {
+      desiredYawVel += -this._smoothedDeltaX * this.lookSensitivity / dt;
+      desiredPitchVel += this._smoothedDeltaY * this.lookSensitivity / dt;
     }
 
-    if (this._smoothedDeltaX !== 0 || this._smoothedDeltaY !== 0) {
-      this._yaw += -this._smoothedDeltaX * this.lookSensitivity;
-      this._pitch += this._smoothedDeltaY * this.lookSensitivity;
-    }
+    // ── Inertia layer: asymmetric tracking ─────────────────────────
+    // High stiffness when input actively drives velocity (responsive)
+    // Low stiffness when decelerating/releasing (momentum glide)
+    //
+    // "Coasting" = there's existing velocity but desired is significantly less
+    // (e.g., finger lifted, joystick released, or input fading out)
+    // Exception: actively pushing opposite direction → track responsively
 
-    // Clamp pitch to the allowed turret elevation window.
-    // Default behavior keeps horizon as the lowest angle and allows looking up to near-vertical.
+    const oppositeYaw = Math.sign(desiredYawVel) !== 0 &&
+                        Math.sign(desiredYawVel) !== Math.sign(this._yawVelocity);
+    const coastingYaw = !oppositeYaw &&
+                        Math.abs(this._yawVelocity) > 0.01 &&
+                        Math.abs(desiredYawVel) < Math.abs(this._yawVelocity) * 0.8;
+
+    const oppositePitch = Math.sign(desiredPitchVel) !== 0 &&
+                          Math.sign(desiredPitchVel) !== Math.sign(this._pitchVelocity);
+    const coastingPitch = !oppositePitch &&
+                          Math.abs(this._pitchVelocity) > 0.01 &&
+                          Math.abs(desiredPitchVel) < Math.abs(this._pitchVelocity) * 0.8;
+
+    const yawStiff = coastingYaw ? this.coastStiffness : this.trackingStiffness;
+    const pitchStiff = coastingPitch ? this.coastStiffness : this.trackingStiffness;
+
+    const yawStep = 1 - Math.exp(-yawStiff * dt);
+    const pitchStep = 1 - Math.exp(-pitchStiff * dt);
+
+    this._yawVelocity += (desiredYawVel - this._yawVelocity) * yawStep;
+    this._pitchVelocity += (desiredPitchVel - this._pitchVelocity) * pitchStep;
+
+    // ── Velocity limits ────────────────────────────────────────────
+    this._yawVelocity = clamp(this._yawVelocity, -this.maxYawVelocity, this.maxYawVelocity);
+    this._pitchVelocity = clamp(this._pitchVelocity, -this.maxPitchVelocity, this.maxPitchVelocity);
+
+    // Kill tiny velocities to prevent endless micro-drift
+    if (Math.abs(this._yawVelocity) < 0.005) this._yawVelocity = 0;
+    if (Math.abs(this._pitchVelocity) < 0.005) this._pitchVelocity = 0;
+
+    // ── Apply velocity to angles ───────────────────────────────────
+    this._yaw += this._yawVelocity * dt;
+    this._pitch += this._pitchVelocity * dt;
+
+    // ── Pitch boundaries ───────────────────────────────────────────
     this._pitch = clamp(this._pitch, this.minPitch, this.maxPitch);
+    // Kill velocity at hard stops (prevents energy buildup against limits)
+    if (this._pitch >= this.maxPitch && this._pitchVelocity > 0) this._pitchVelocity = 0;
+    if (this._pitch <= this.minPitch && this._pitchVelocity < 0) this._pitchVelocity = 0;
 
-    // Normalize yaw to prevent floating point drift over long sessions
-    // This allows continuous 360° rotation while keeping values bounded
+    // ── Yaw normalization ──────────────────────────────────────────
     this._yaw = normalizeAngle(this._yaw);
 
-    // Calculate yaw velocity for banking effect
-    if (limitedDelta > 0) {
-      const yawDelta = normalizeAngle(this._yaw - this._previousYaw);
-      this._yawVelocity = yawDelta / limitedDelta;
-      this._previousYaw = this._yaw;
-
-      // Calculate target bank based on yaw velocity (turn left = bank left, etc.)
-      // Negative because turning right (negative yaw change) should bank right (negative bank)
-      const targetBank = clamp(
-        -this._yawVelocity * this.bankInfluence,
-        -this.maxBank,
-        this.maxBank
-      );
-
-      // Smooth the bank for pleasant transitions
-      const bankSmoothStep = 1 - Math.exp(-this.bankSmoothing * limitedDelta);
-      this._smoothedBank += (targetBank - this._smoothedBank) * bankSmoothStep;
-    }
+    // ── Banking from yaw velocity ──────────────────────────────────
+    // _yawVelocity is now the true angular velocity from the inertia system
+    const targetBank = clamp(
+      -this._yawVelocity * this.bankInfluence,
+      -this.maxBank,
+      this.maxBank
+    );
+    const bankSmoothStep = 1 - Math.exp(-this.bankSmoothing * dt);
+    this._smoothedBank += (targetBank - this._smoothedBank) * bankSmoothStep;
   }
 
   getQuaternion(target = new this.THREE.Quaternion()) {
