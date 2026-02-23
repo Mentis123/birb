@@ -1,7 +1,7 @@
 export const AIM_RIG_DEFAULTS = {
   // Rotation speed targets (rad/s at full joystick deflection)
-  yawRate: Math.PI * 1.5,          // Horizontal: 270°/s target
-  pitchRate: Math.PI * 1.2,        // Vertical: 216°/s target
+  yawRate: Math.PI * 1.2,          // Horizontal: 216°/s target
+  pitchRate: Math.PI * 0.96,       // Vertical: 173°/s target
 
   // Pitch limits
   maxPitch: (85 * Math.PI) / 180,  // 85° up
@@ -20,8 +20,8 @@ export const AIM_RIG_DEFAULTS = {
   // Uses asymmetric stiffness: high tracking during input, low friction on release
   trackingStiffness: 25,            // How fast velocity tracks input (higher = snappier response)
   coastStiffness: 4.0,              // Velocity decay on release (lower = more momentum glide)
-  maxYawVelocity: Math.PI * 1.5,    // Max horizontal rotation speed (rad/s)
-  maxPitchVelocity: Math.PI * 1.2,  // Max vertical rotation speed (rad/s)
+  maxYawVelocity: Math.PI * 1.2,    // Max horizontal rotation speed (rad/s)
+  maxPitchVelocity: Math.PI * 0.96, // Max vertical rotation speed (rad/s)
 
   // Banking (visual roll during horizontal turns)
   bankInfluence: 0,
