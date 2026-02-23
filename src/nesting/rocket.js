@@ -194,15 +194,17 @@ export function createRocketSystem(THREE, scene, options = {}) {
 
       // Create trail (uses world coordinates in geometry, so don't offset position)
       const trail = createRocketTrail(THREE);
-      // Initialize trail positions spread behind the launch point to avoid stacking flash
+      // Initialize all trail positions to the launch point
       const trailPositions = trail.geometry.attributes.position.array;
-      const backDirection = direction.clone().normalize().multiplyScalar(-0.05);
       for (let i = 0; i < trail.userData.maxPositions; i++) {
-        trailPositions[i * 3] = position.x + backDirection.x * i;
-        trailPositions[i * 3 + 1] = position.y + backDirection.y * i;
-        trailPositions[i * 3 + 2] = position.z + backDirection.z * i;
+        trailPositions[i * 3] = position.x;
+        trailPositions[i * 3 + 1] = position.y;
+        trailPositions[i * 3 + 2] = position.z;
       }
       trail.geometry.attributes.position.needsUpdate = true;
+      // Hide trail until enough real positions are tracked to avoid flash
+      // (initial positions are near the camera and appear huge with size attenuation)
+      trail.visible = false;
 
       // Store rocket data
       rocket.userData.velocity = direction.clone().normalize().multiplyScalar(ROCKET_SPEED);
@@ -299,6 +301,11 @@ export function createRocketSystem(THREE, scene, options = {}) {
           trail.userData.positions.unshift(rocket.position.clone());
           if (trail.userData.positions.length > trail.userData.maxPositions) {
             trail.userData.positions.pop();
+          }
+
+          // Show trail once we have enough real tracked positions
+          if (!trail.visible && trail.userData.positions.length >= 3) {
+            trail.visible = true;
           }
 
           // Update trail geometry
