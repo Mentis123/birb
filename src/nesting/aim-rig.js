@@ -2,6 +2,7 @@ export const AIM_RIG_DEFAULTS = {
   yawRate: Math.PI * 1.5,          // Horizontal rotation (270°/s)
   pitchRate: Math.PI * 1.2,        // Vertical rotation (216°/s) — close to yaw for balanced aiming
   maxPitch: (85 * Math.PI) / 180,  // Turret-style vertical range
+  minPitch: 0,                     // Keep horizon as the lowest aim angle (no ground aiming)
   smoothing: 15,                   // Snappy convergence (~150ms to 90%)
   pointerSmoothing: 12,
   lookSensitivity: 0.0025,
@@ -33,7 +34,10 @@ export class AimRig {
     this.THREE = THREE;
     this.yawRate = options.yawRate ?? AIM_RIG_DEFAULTS.yawRate;
     this.pitchRate = options.pitchRate ?? AIM_RIG_DEFAULTS.pitchRate;
-    this.maxPitch = options.maxPitch ?? AIM_RIG_DEFAULTS.maxPitch;
+    const configuredMaxPitch = options.maxPitch ?? AIM_RIG_DEFAULTS.maxPitch;
+    const configuredMinPitch = options.minPitch ?? AIM_RIG_DEFAULTS.minPitch;
+    this.maxPitch = Math.max(configuredMaxPitch, configuredMinPitch);
+    this.minPitch = Math.min(configuredMinPitch, configuredMaxPitch);
     this.smoothing = options.smoothing ?? AIM_RIG_DEFAULTS.smoothing;
     this.pointerSmoothing = options.pointerSmoothing ?? AIM_RIG_DEFAULTS.pointerSmoothing;
     this.lookSensitivity = options.lookSensitivity ?? AIM_RIG_DEFAULTS.lookSensitivity;
@@ -195,8 +199,9 @@ export class AimRig {
       this._pitch += this._smoothedDeltaY * this.lookSensitivity;
     }
 
-    // Clamp pitch to prevent looking past vertical
-    this._pitch = clamp(this._pitch, -this.maxPitch, this.maxPitch);
+    // Clamp pitch to the allowed turret elevation window.
+    // Default behavior keeps horizon as the lowest angle and allows looking up to near-vertical.
+    this._pitch = clamp(this._pitch, this.minPitch, this.maxPitch);
 
     // Normalize yaw to prevent floating point drift over long sessions
     // This allows continuous 360° rotation while keeping values bounded
