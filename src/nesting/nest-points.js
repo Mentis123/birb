@@ -71,7 +71,7 @@ function createNestMarker(THREE, config) {
   glow.position.y = 0.2;
   group.add(glow);
 
-  // Inner bright core (increased size)
+  // Inner bright core (sits inside the bowl)
   const coreGeometry = new THREE.SphereGeometry(0.5, 16, 12);
   const coreMaterial = new THREE.MeshBasicMaterial({
     color: 0xffaa88,
@@ -80,31 +80,8 @@ function createNestMarker(THREE, config) {
     depthWrite: false,
   });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
-  core.position.y = 0.3;
+  core.position.y = 0.15;
   group.add(core);
-
-  // Tall beacon for visibility - a glowing column above the nest (made thicker)
-  const beaconHeight = 12.0;
-  const beaconGeometry = new THREE.CylinderGeometry(0.2, 0.4, beaconHeight, 8);
-  const beaconMaterial = new THREE.MeshBasicMaterial({
-    color: config.glowColor,
-    transparent: true,
-    opacity: 0.8,
-  });
-  const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
-  beacon.position.y = beaconHeight / 2 + 0.5;
-  group.add(beacon);
-
-  // Beacon tip sphere for extra visibility (made larger)
-  const tipGeometry = new THREE.SphereGeometry(0.8, 12, 8);
-  const tipMaterial = new THREE.MeshBasicMaterial({
-    color: config.color,
-    transparent: true,
-    opacity: 0.95,
-  });
-  const tip = new THREE.Mesh(tipGeometry, tipMaterial);
-  tip.position.y = beaconHeight + 1.0;
-  group.add(tip);
 
   // Store references for animation and interaction
   group.userData.nest = nest;
