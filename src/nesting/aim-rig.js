@@ -1,12 +1,14 @@
 export const AIM_RIG_DEFAULTS = {
-  yawRate: Math.PI * 1.5,     // Snappier horizontal rotation
-  pitchRate: Math.PI * 0.55,  // More responsive vertical
+  yawRate: Math.PI * 1.5,          // Horizontal rotation (270°/s)
+  pitchRate: Math.PI * 1.2,        // Vertical rotation (216°/s) — close to yaw for balanced aiming
   maxPitch: (85 * Math.PI) / 180,  // Turret-style vertical range
-  smoothing: 10,
+  smoothing: 15,                   // Snappy convergence (~150ms to 90%)
   pointerSmoothing: 12,
   lookSensitivity: 0.0025,
   pointerDeadzone: 0.1,
   maxPointerDelta: 40,
+  axisDeadzone: 0.08,              // Filter joystick noise/drift near center
+  axisExpo: 0.4,                   // Non-linear: fine control at small deflections, fast sweeps at full
   bankInfluence: 0,
   maxBank: 0,
   bankSmoothing: 4,
@@ -37,6 +39,8 @@ export class AimRig {
     this.lookSensitivity = options.lookSensitivity ?? AIM_RIG_DEFAULTS.lookSensitivity;
     this.pointerDeadzone = options.pointerDeadzone ?? AIM_RIG_DEFAULTS.pointerDeadzone;
     this.maxPointerDelta = options.maxPointerDelta ?? AIM_RIG_DEFAULTS.maxPointerDelta;
+    this.axisDeadzone = options.axisDeadzone ?? AIM_RIG_DEFAULTS.axisDeadzone;
+    this.axisExpo = options.axisExpo ?? AIM_RIG_DEFAULTS.axisExpo;
     this.bankInfluence = options.bankInfluence ?? AIM_RIG_DEFAULTS.bankInfluence;
     this.maxBank = options.maxBank ?? AIM_RIG_DEFAULTS.maxBank;
     this.bankSmoothing = options.bankSmoothing ?? AIM_RIG_DEFAULTS.bankSmoothing;
@@ -139,13 +143,30 @@ export class AimRig {
     this._smoothedBank = 0;
   }
 
+  // Apply deadzone and expo curve to a single axis value.
+  // Deadzone eliminates joystick noise near center.
+  // Expo blends linear with cubic for fine control at small deflections
+  // and fast sweeps at full deflection.
+  _shapeAxis(value) {
+    const magnitude = Math.abs(value);
+    if (magnitude < this.axisDeadzone) return 0;
+    const sign = value > 0 ? 1 : -1;
+    const remapped = (magnitude - this.axisDeadzone) / (1 - this.axisDeadzone);
+    const clamped = Math.min(remapped, 1);
+    const k = this.axisExpo;
+    return sign * ((1 - k) * clamped + k * clamped * clamped * clamped);
+  }
+
   update({ axisX = 0, axisY = 0, deltaX = 0, deltaY = 0 } = {}, deltaTime = 0) {
     if (!this._active) return;
     const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
     if (limitedDelta > 0) {
+      const shapedX = this._shapeAxis(axisX);
+      const shapedY = this._shapeAxis(axisY);
+
       const smoothStep = 1 - Math.exp(-this.smoothing * limitedDelta);
-      this._smoothedX += (axisX - this._smoothedX) * smoothStep;
-      this._smoothedY += (axisY - this._smoothedY) * smoothStep;
+      this._smoothedX += (shapedX - this._smoothedX) * smoothStep;
+      this._smoothedY += (shapedY - this._smoothedY) * smoothStep;
 
       this._yaw += -this._smoothedX * this.yawRate * limitedDelta;
       this._pitch += this._smoothedY * this.pitchRate * limitedDelta;
