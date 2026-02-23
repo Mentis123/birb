@@ -5226,7 +5226,17 @@
         // If cameraMode is FOLLOW, 'bCam' handles it.
         const currentMode = cameraState.getMode();
 
-        if (currentMode === CAMERA_MODES.FOLLOW) {
+        if (isNested && nestedAimQuaternion) {
+          // Turret mode: set camera directly from aim rig.
+          // FPV camera's Euler roll-correction assumes world-Y-up which breaks
+          // on a spherical world (misinterprets local-up rotation as "roll").
+          // The aim rig already produces the exact correct orientation.
+          const cam = cameraState?.camera;
+          if (cam) {
+            cam.position.copy(pose.position);
+            cam.quaternion.copy(nestedAimQuaternion);
+          }
+        } else if (currentMode === CAMERA_MODES.FOLLOW) {
           // Use New Flight Camera
           bCam.update(pose.position, pose.quaternion, delta);
         } else {
