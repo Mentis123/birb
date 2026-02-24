@@ -833,6 +833,101 @@
       }
     }
 
+    /* Vibe Academy Secondary Splash */
+    .vibe-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 10001;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(3, 7, 18, 0.95);
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      opacity: 0;
+      transition: opacity 0.5s ease-out;
+      pointer-events: none;
+    }
+
+    .vibe-splash.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .vibe-splash.is-fading {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .vibe-splash__content {
+      max-width: 22rem;
+      padding: 0 1.5rem;
+      text-align: center;
+    }
+
+    .vibe-splash__title {
+      font-size: clamp(1.05rem, 3.5vw, 1.3rem);
+      font-weight: 600;
+      color: #fff;
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    .vibe-splash__cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1rem;
+      padding: 0.5rem 1.25rem;
+      border-radius: 999px;
+      border: 1px solid rgba(96, 165, 250, 0.6);
+      background: transparent;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: rgba(191, 219, 254, 1);
+      text-decoration: none;
+      transition: border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .vibe-splash__cta:hover {
+      border-color: rgba(147, 197, 253, 1);
+      color: #fff;
+    }
+
+    .vibe-splash__attribution {
+      margin-top: 1.25rem;
+      font-size: 0.875rem;
+      color: rgba(209, 213, 219, 1);
+      line-height: 1.6;
+    }
+
+    .vibe-splash__attribution a {
+      font-weight: 600;
+      color: rgba(191, 219, 254, 1);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .vibe-splash__attribution a:hover {
+      color: #fff;
+    }
+
+    .vibe-splash__hint {
+      position: absolute;
+      bottom: 2rem;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 0.875rem;
+      color: rgba(156, 163, 175, 0.7);
+      transition: opacity 0.3s ease;
+    }
+
+    .vibe-splash.is-fading .vibe-splash__hint {
+      opacity: 0;
+    }
+
     /* Settings Gear Button */
     .settings-gear-button {
       position: absolute;
@@ -1558,6 +1653,32 @@
     <div class="splash-prompt">Tap to start</div>
   </div>
 
+  <!-- Vibe Academy Secondary Splash -->
+  <div class="vibe-splash" data-vibe-splash>
+    <div class="vibe-splash__content">
+      <p class="vibe-splash__title">
+        A Birb Labs Artefact &mdash; Build Yours at the Vibe Academy
+      </p>
+      <a
+        href="https://atmanacademy.io/academy"
+        target="_blank"
+        rel="noreferrer"
+        class="vibe-splash__cta"
+      >Open Vibe Academy</a>
+      <div class="vibe-splash__attribution">
+        <p>
+          From the Mind of
+          <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a>
+        </p>
+        <p>Love it? Got Feedback?</p>
+        <p>
+          <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">DMs Always Open!</a>
+        </p>
+      </div>
+    </div>
+    <div class="vibe-splash__hint">Tap to continue</div>
+  </div>
+
   <main>
     <header>Birb Flight Lab</header>
     <div class="canvas-wrapper">
@@ -1838,22 +1959,69 @@
 
     // Splash screen - dismiss on tap/click
     const splashScreen = document.querySelector('[data-splash-screen]');
+    const vibeSplash = document.querySelector('[data-vibe-splash]');
     // Deferred fullscreen trigger (called after enterFullscreen is defined)
     let triggerAutoFullscreen = null;
     let splashDismissed = false; // Track if splash was dismissed before triggerAutoFullscreen was set
+
+    // Vibe Academy splash helpers
+    function showVibeSplash() {
+      if (!vibeSplash) {
+        finishAllSplashes();
+        return;
+      }
+      // Check sessionStorage so we only show once per session
+      if (sessionStorage.getItem('vibe-splash-shown')) {
+        vibeSplash.remove();
+        finishAllSplashes();
+        return;
+      }
+      // Fade in
+      requestAnimationFrame(() => vibeSplash.classList.add('is-visible'));
+
+      let vibeDismissedAlready = false;
+
+      const dismissVibe = () => {
+        if (vibeDismissedAlready) return;
+        vibeDismissedAlready = true;
+        vibeSplash.classList.add('is-fading');
+        vibeSplash.classList.remove('is-visible');
+        sessionStorage.setItem('vibe-splash-shown', 'true');
+        setTimeout(() => {
+          vibeSplash.remove();
+          finishAllSplashes();
+        }, 500);
+      };
+
+      // Tap/click to dismiss (but don't dismiss when tapping links)
+      const handleVibeTap = (e) => {
+        if (e.target.closest('a')) return; // let links work
+        dismissVibe();
+      };
+
+      vibeSplash.addEventListener('click', handleVibeTap);
+      vibeSplash.addEventListener('touchend', (e) => {
+        if (e.target.closest('a')) return;
+        e.preventDefault();
+        dismissVibe();
+      }, { passive: false });
+    }
+
+    function finishAllSplashes() {
+      splashDismissed = true;
+      if (typeof triggerAutoFullscreen === 'function') {
+        triggerAutoFullscreen();
+      }
+      showMinigameOnboarding();
+    }
+
     if (splashScreen) {
       const dismissSplash = () => {
         splashScreen.classList.add('is-hidden');
-        // Remove from DOM after fade animation
+        // Remove from DOM after fade animation, then show Vibe splash
         setTimeout(() => {
           splashScreen.remove();
-          splashDismissed = true;
-          // Trigger auto-fullscreen after splash is gone
-          if (typeof triggerAutoFullscreen === 'function') {
-            triggerAutoFullscreen();
-          }
-          // Show mini-game onboarding tooltip after splash is gone
-          showMinigameOnboarding();
+          showVibeSplash();
         }, 500);
       };
       splashScreen.addEventListener('click', dismissSplash, { once: true });
