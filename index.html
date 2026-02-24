@@ -1979,7 +1979,6 @@
       // Fade in
       requestAnimationFrame(() => vibeSplash.classList.add('is-visible'));
 
-      const vibeDuration = 4000;
       let vibeDismissedAlready = false;
 
       const dismissVibe = () => {
@@ -1994,21 +1993,9 @@
         }, 500);
       };
 
-      // Auto-dismiss after duration
-      const fadeTimer = setTimeout(() => {
-        vibeSplash.classList.add('is-fading');
-        vibeSplash.classList.remove('is-visible');
-      }, vibeDuration - 500);
-
-      const completeTimer = setTimeout(() => {
-        dismissVibe();
-      }, vibeDuration);
-
-      // Tap/click to dismiss early (but don't dismiss when tapping links)
+      // Tap/click to dismiss (but don't dismiss when tapping links)
       const handleVibeTap = (e) => {
         if (e.target.closest('a')) return; // let links work
-        clearTimeout(fadeTimer);
-        clearTimeout(completeTimer);
         dismissVibe();
       };
 
@@ -2016,8 +2003,6 @@
       vibeSplash.addEventListener('touchend', (e) => {
         if (e.target.closest('a')) return;
         e.preventDefault();
-        clearTimeout(fadeTimer);
-        clearTimeout(completeTimer);
         dismissVibe();
       }, { passive: false });
     }
