@@ -1705,14 +1705,8 @@
       100% { opacity:0; transform: translateX(-50%) translateY(-20px); }
     }
 
-    /* ===== Ring Arrow ===== */
-    .ring-arrow {
-      position: fixed; top: 50%; left: 50%; width: 50px; height: 50px;
-      margin: 60px 0 0 -25px; pointer-events: none; z-index: 190;
-      opacity: 0; transition: opacity 0.3s;
-    }
-    .ring-arrow.is-visible { opacity: 0.8; }
-    .ring-arrow svg { width:100%; height:100%; filter: drop-shadow(0 0 6px rgba(255,215,0,0.8)); }
+    /* ===== Ring Arrow (removed – minimap edge arrows serve this purpose) ===== */
+    .ring-arrow { display: none !important; }
 
     /* ===== Countdown ===== */
     .countdown-display {
@@ -1740,14 +1734,15 @@
 
     /* ===== Minimap ===== */
     .minimap-radar {
-      position: fixed !important; bottom: 12% !important; left: 3% !important;
+      position: fixed !important; bottom: 3% !important; left: 3% !important;
       width: 120px !important; height: 120px !important;
       max-width: 120px !important; max-height: 120px !important;
-      pointer-events: none; z-index: 195; opacity: 0; transition: opacity 0.3s;
-      border-radius: 50%;
+      pointer-events: auto; z-index: 195; opacity: 0; transition: opacity 0.3s;
+      border-radius: 50%; cursor: grab; touch-action: none;
       box-shadow: 0 0 12px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.3);
     }
     .minimap-radar.is-visible { opacity: 0.92; }
+    .minimap-radar.is-dragging { cursor: grabbing; opacity: 1 !important; }
     @media (min-width: 48rem) { .minimap-radar { width: 140px !important; height: 140px !important; max-width: 140px !important; max-height: 140px !important; } }
 
     /* ===== Time Critical Pulse ===== */
@@ -2917,6 +2912,47 @@
       minimapCanvas.style.maxHeight = mapDisplaySize;
     }
     const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
+
+    // ===== Draggable minimap =====
+    if (minimapCanvas) {
+      let mmDragging = false, mmStartX = 0, mmStartY = 0, mmOrigLeft = 0, mmOrigBottom = 0;
+
+      const mmPointerDown = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        mmDragging = true;
+        const touch = e.touches ? e.touches[0] : e;
+        mmStartX = touch.clientX; mmStartY = touch.clientY;
+        const rect = minimapCanvas.getBoundingClientRect();
+        mmOrigLeft = rect.left;
+        mmOrigBottom = window.innerHeight - rect.bottom;
+        minimapCanvas.classList.add('is-dragging');
+      };
+      const mmPointerMove = (e) => {
+        if (!mmDragging) return;
+        e.preventDefault();
+        const touch = e.touches ? e.touches[0] : e;
+        const dx = touch.clientX - mmStartX;
+        const dy = touch.clientY - mmStartY;
+        const newLeft = Math.max(0, Math.min(window.innerWidth - minimapCanvas.offsetWidth, mmOrigLeft + dx));
+        const newBottom = Math.max(0, Math.min(window.innerHeight - minimapCanvas.offsetHeight, mmOrigBottom - dy));
+        minimapCanvas.style.left = newLeft + 'px';
+        minimapCanvas.style.bottom = newBottom + 'px';
+        minimapCanvas.style.right = 'auto';
+        minimapCanvas.style.top = 'auto';
+      };
+      const mmPointerUp = () => {
+        if (!mmDragging) return;
+        mmDragging = false;
+        minimapCanvas.classList.remove('is-dragging');
+      };
+
+      minimapCanvas.addEventListener('mousedown', mmPointerDown);
+      minimapCanvas.addEventListener('touchstart', mmPointerDown, { passive: false });
+      window.addEventListener('mousemove', mmPointerMove);
+      window.addEventListener('touchmove', mmPointerMove, { passive: false });
+      window.addEventListener('mouseup', mmPointerUp);
+      window.addEventListener('touchend', mmPointerUp);
+    }
 
     // ===== Helper: show combo popup =====
     let comboPopupTimeout = null;
@@ -6065,37 +6101,7 @@
         if (hudTime) hudTime.classList.remove('hud-time-critical');
       }
 
-      // IMPROVEMENT 2: Ring arrow pointing to nearest ring
-      if (miniGameState.active && currentGameMode === GAME_MODES.RING_RUSH && collectiblesSystem && birdPos && cam) {
-        const _ringWorldPos = new THREE.Vector3();
-        const ringsArr = collectiblesSystem.rings || [];
-        let nearest = null;
-        let nearestDist = Infinity;
-        let nearestWorldPos = null;
-        for (const ring of ringsArr) {
-          if (ring.userData.collected) continue;
-          ring.getWorldPosition(_ringWorldPos);
-          const d = birdPos.distanceTo(_ringWorldPos);
-          if (d < nearestDist) { nearestDist = d; nearest = ring; nearestWorldPos = _ringWorldPos.clone(); }
-        }
-        if (nearest && ringArrow && nearestWorldPos) {
-          const projected = nearestWorldPos.clone().project(cam);
-          if (projected.z > 0 && projected.z < 1) {
-            const dx = projected.x;
-            const dy = -projected.y;
-            const angle = Math.atan2(dy, dx) - Math.PI / 2;
-            ringArrow.style.transform = `rotate(${angle}rad)`;
-            ringArrow.classList.add('is-visible');
-          } else {
-            ringArrow.style.transform = `rotate(180deg)`;
-            ringArrow.classList.add('is-visible');
-          }
-        } else if (ringArrow) {
-          ringArrow.classList.remove('is-visible');
-        }
-      } else if (ringArrow) {
-        ringArrow.classList.remove('is-visible');
-      }
+      // Ring arrow removed – minimap edge arrows serve this purpose
 
       // IMPROVEMENT 7: Minimap radar
       if (miniGameState.active && minimapCtx && birdPos && birdQuat) {
