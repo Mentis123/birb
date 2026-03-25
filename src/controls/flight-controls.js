@@ -434,11 +434,15 @@ export function createFlightControls({
   };
 
   const resetLookTouchJoystick = () => {
-    // Reset smoothed input state
-    const smoothed = smoothTouchInput(0, 0, false);
+    // Force smoothed input state to zero on release so no residual yaw/pitch
+    // lingers (the 50% decay in smoothTouchInput may not reach zero in one call,
+    // leaving a value that survives the deadzone and keeps the bird banking).
+    smoothTouchInput(0, 0, false);
+    smoothedTouchInput.x = 0;
+    smoothedTouchInput.y = 0;
     // Reset flight control inputs when touch joystick is released
     handleLeftStickChange(
-      { x: smoothed.x, y: smoothed.y },
+      { x: 0, y: 0 },
       { isActive: false, pointerType: 'touch', magnitude: 0, rawMagnitude: 0 }
     );
   };

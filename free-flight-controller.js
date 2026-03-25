@@ -519,6 +519,12 @@ export class FreeFlightController {
     const bankYawStep = 1 - Math.exp(-BANK_YAW_SMOOTHING * rotationDeltaTime);
     this._smoothedBankYaw += (combinedYaw - this._smoothedBankYaw) * bankYawStep;
 
+    // Snap smoothed bank yaw to zero when input is neutral and residual is tiny
+    // to prevent floating-point drift from keeping a permanent slight bank
+    if (combinedYaw === 0 && Math.abs(this._smoothedBankYaw) < 0.001) {
+      this._smoothedBankYaw = 0;
+    }
+
     // Calculate target bank from the smoothed yaw
     const targetBank = this._nestLookMode ? 0 : this._smoothedBankYaw * MAX_BANK_ANGLE;
 
@@ -529,6 +535,10 @@ export class FreeFlightController {
     const bankResponseRate = isBankingDeeper ? BANK_ENTRY_RESPONSE : BANK_EXIT_RESPONSE;
     const bankStep = 1 - Math.exp(-bankResponseRate * rotationDeltaTime);
     this.bank += (targetBank - this.bank) * bankStep;
+    // Snap bank to zero when very small to ensure bird fully levels out
+    if (Math.abs(this.bank) < 0.0005) {
+      this.bank = 0;
+    }
     this.bank = clamp(this.bank, -MAX_BANK_ANGLE, MAX_BANK_ANGLE, this.bank);
 
     // Visual pitch - nose up when pushing up, nose down when pushing down
