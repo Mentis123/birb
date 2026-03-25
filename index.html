@@ -1641,6 +1641,115 @@
     .results-btn--primary:hover {
       background: rgba(100,220,160,0.4);
     }
+
+    /* ===== IMPROVEMENT: Environment Transition Fade ===== */
+    .env-transition-overlay {
+      position: fixed; inset: 0; background: black; opacity: 0;
+      pointer-events: none; z-index: 9000; transition: opacity 0.4s ease;
+    }
+    .env-transition-overlay.is-fading { opacity: 1; }
+
+    /* ===== IMPROVEMENT: Combo Visual Feedback ===== */
+    .combo-popup {
+      position: fixed; top: 12%; left: 50%;
+      transform: translateX(-50%) scale(0.5);
+      font-size: 2rem; font-weight: 900; color: #ffd700;
+      text-shadow: 0 0 20px rgba(255,215,0,0.8), 0 0 40px rgba(255,165,0,0.4);
+      opacity: 0; pointer-events: none; z-index: 200;
+    }
+    .combo-popup.is-showing { animation: combo-pop 0.8s ease-out forwards; }
+    @keyframes combo-pop {
+      0% { opacity:1; transform: translateX(-50%) scale(0.5); }
+      30% { opacity:1; transform: translateX(-50%) scale(1.3); }
+      50% { opacity:1; transform: translateX(-50%) scale(1.0); }
+      100% { opacity:0; transform: translateX(-50%) scale(1.0) translateY(-20px); }
+    }
+    .combo-timer-bar {
+      position: fixed; top: 7.5%; left: 50%; transform: translateX(-50%);
+      width: min(60vw,200px); height: 3px; background: rgba(255,255,255,0.15);
+      border-radius: 2px; overflow: hidden; pointer-events: none; z-index: 200;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .combo-timer-bar.is-visible { opacity: 1; }
+    .combo-timer-bar__fill {
+      height: 100%; width: 100%; background: #4cff88; border-radius: 2px;
+      transform-origin: left; transition: transform 0.1s linear, background-color 0.3s;
+    }
+    .combo-multiplier {
+      position: fixed; top: 4.5%; right: 12%;
+      font-size: 1.4rem; font-weight: 900; color: #ffd700;
+      text-shadow: 0 0 12px rgba(255,215,0,0.6);
+      opacity: 0; pointer-events: none; z-index: 200; transition: opacity 0.3s;
+    }
+    .combo-multiplier.is-visible { opacity: 1; }
+    .kill-vignette {
+      position: fixed; inset: 0; pointer-events: none; z-index: 180;
+      opacity: 0; transition: opacity 0.15s ease-out;
+      background: radial-gradient(ellipse at center, transparent 50%, rgba(255,255,255,0.3) 100%);
+    }
+
+    /* ===== Wave Banner ===== */
+    .wave-banner {
+      position: fixed; top: 15%; left: 50%;
+      transform: translateX(-50%) translateY(-40px);
+      font-size: 1.5rem; font-weight: 800; color: #ff6b4a;
+      text-shadow: 0 0 20px rgba(255,107,74,0.6);
+      text-transform: uppercase; letter-spacing: 0.1em;
+      opacity: 0; pointer-events: none; z-index: 200;
+    }
+    .wave-banner.is-showing { animation: wave-slide 2s ease-out forwards; }
+    @keyframes wave-slide {
+      0% { opacity:0; transform: translateX(-50%) translateY(-40px); }
+      15% { opacity:1; transform: translateX(-50%) translateY(0); }
+      75% { opacity:1; transform: translateX(-50%) translateY(0); }
+      100% { opacity:0; transform: translateX(-50%) translateY(-20px); }
+    }
+
+    /* ===== Ring Arrow ===== */
+    .ring-arrow {
+      position: fixed; top: 50%; left: 50%; width: 50px; height: 50px;
+      margin: 60px 0 0 -25px; pointer-events: none; z-index: 190;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .ring-arrow.is-visible { opacity: 0.8; }
+    .ring-arrow svg { width:100%; height:100%; filter: drop-shadow(0 0 6px rgba(255,215,0,0.8)); }
+
+    /* ===== Countdown ===== */
+    .countdown-display {
+      position: fixed; top: 35%; left: 50%; transform: translateX(-50%);
+      font-size: 5rem; font-weight: 900; color: #fff;
+      text-shadow: 0 0 40px rgba(255,255,255,0.6);
+      opacity: 0; pointer-events: none; z-index: 250;
+    }
+    .countdown-display.is-showing { animation: cd-pulse 0.85s ease-out forwards; }
+    @keyframes cd-pulse {
+      0% { opacity:1; transform: translateX(-50%) scale(0.3); }
+      35% { opacity:1; transform: translateX(-50%) scale(1.15); }
+      100% { opacity:0; transform: translateX(-50%) scale(1.6); }
+    }
+
+    /* ===== Speed Lines ===== */
+    .speed-lines {
+      position: fixed; inset: 0; pointer-events: none; z-index: 170;
+      opacity: 0; transition: opacity 0.3s; mix-blend-mode: screen;
+      background: radial-gradient(ellipse at center,
+        transparent 40%, rgba(255,255,255,0.03) 60%,
+        rgba(255,255,255,0.08) 80%, rgba(255,255,255,0.12) 100%);
+    }
+    .speed-lines.is-active { opacity: 1; }
+
+    /* ===== Minimap ===== */
+    .minimap-radar {
+      position: fixed; bottom: 12%; left: 3%; width: 80px; height: 80px;
+      pointer-events: none; z-index: 195; opacity: 0; transition: opacity 0.3s;
+    }
+    .minimap-radar.is-visible { opacity: 0.85; }
+    @media (min-width: 48rem) { .minimap-radar { width: 100px; height: 100px; } }
+
+    /* ===== Time Critical Pulse ===== */
+    .hud-time-critical { animation: time-pulse 0.5s ease-in-out infinite; color: #ff4444 !important; }
+    @keyframes time-pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
   </style>
 </head>
 
@@ -1864,6 +1973,27 @@
           <button class="results-btn" data-results-quit>Quit</button>
         </div>
       </div>
+
+
+      <!-- Environment transition overlay -->
+      <div class="env-transition-overlay" data-env-transition></div>
+      <!-- Combo feedback -->
+      <div class="combo-popup" data-combo-popup></div>
+      <div class="combo-timer-bar" data-combo-timer-bar><div class="combo-timer-bar__fill" data-combo-timer-fill></div></div>
+      <div class="combo-multiplier" data-combo-multiplier></div>
+      <div class="kill-vignette" data-kill-vignette></div>
+      <!-- Wave banner -->
+      <div class="wave-banner" data-wave-banner></div>
+      <!-- Ring Rush arrow -->
+      <div class="ring-arrow" data-ring-arrow>
+        <svg viewBox="0 0 40 40"><polygon points="20,4 36,36 20,28 4,36" fill="#ffd700"/></svg>
+      </div>
+      <!-- Countdown -->
+      <div class="countdown-display" data-countdown></div>
+      <!-- Speed lines -->
+      <div class="speed-lines" data-speed-lines></div>
+      <!-- Minimap -->
+      <canvas class="minimap-radar" data-minimap-radar width="100" height="100"></canvas>
 
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
@@ -2235,6 +2365,12 @@
       var createDroneSystem = droneModule.createDroneSystem;
       const collectiblesModule = await import("./src/environment/collectibles.js");
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
+
+      // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
+      const { createSkyDome } = await import("./src/environment/sky-dome.js");
+      const { ParticleSystem } = await import("./src/effects/particles.js");
+      const { ScreenShake } = await import("./src/effects/screen-shake.js");
+
       const gltfLoaderModule = await import(
         "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
       );
@@ -2739,9 +2875,180 @@
     renderer.toneMappingExposure = 1.22;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x050a14);
+    scene.background = null; // Replaced by sky dome
     // Extended fog for spherical world visibility (sphere radius is 30)
     scene.fog = new THREE.Fog(0x050a14, 40, 200);
+
+    // ===== IMPROVEMENT 1: Sky Dome =====
+    const skyDome = createSkyDome({
+      topColor: new THREE.Color(0x4d80c0),
+      bottomColor: new THREE.Color(0x071323),
+    });
+    scene.add(skyDome.mesh);
+
+    // ===== IMPROVEMENT 5: Particle System =====
+    const particleSystem = new ParticleSystem(scene);
+
+    // ===== IMPROVEMENT 6: Screen Shake =====
+    const screenShake = new ScreenShake();
+
+    // ===== IMPROVEMENT 3/7/9/10: DOM element refs =====
+    const envTransitionOverlay = document.querySelector('[data-env-transition]');
+    const comboPopup = document.querySelector('[data-combo-popup]');
+    const comboTimerBar = document.querySelector('[data-combo-timer-bar]');
+    const comboTimerFill = document.querySelector('[data-combo-timer-fill]');
+    const comboMultiplier = document.querySelector('[data-combo-multiplier]');
+    const killVignette = document.querySelector('[data-kill-vignette]');
+    const waveBanner = document.querySelector('[data-wave-banner]');
+    const ringArrow = document.querySelector('[data-ring-arrow]');
+    const countdownEl = document.querySelector('[data-countdown]');
+    const speedLines = document.querySelector('[data-speed-lines]');
+    const minimapCanvas = document.querySelector('[data-minimap-radar]');
+    const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
+
+    // ===== Helper: show combo popup =====
+    let comboPopupTimeout = null;
+    function showComboPopup(multiplier) {
+      if (!comboPopup) return;
+      comboPopup.textContent = multiplier >= 5 ? '5x MAX!' : multiplier + 'x!';
+      comboPopup.classList.remove('is-showing');
+      void comboPopup.offsetWidth; // reflow
+      comboPopup.classList.add('is-showing');
+      clearTimeout(comboPopupTimeout);
+      comboPopupTimeout = setTimeout(() => comboPopup.classList.remove('is-showing'), 900);
+    }
+
+    // ===== Helper: kill vignette flash =====
+    let vignetteTimeout = null;
+    function flashKillVignette(combo) {
+      if (!killVignette) return;
+      const colors = { 1: 'rgba(255,255,255,0.2)', 2: 'rgba(255,255,100,0.25)', 3: 'rgba(255,255,100,0.25)', 4: 'rgba(255,180,60,0.3)', 5: 'rgba(255,180,60,0.3)' };
+      killVignette.style.background = `radial-gradient(ellipse at center, transparent 50%, ${colors[Math.min(5,Math.floor(combo))] || colors[1]} 100%)`;
+      killVignette.style.opacity = '1';
+      clearTimeout(vignetteTimeout);
+      vignetteTimeout = setTimeout(() => { killVignette.style.opacity = '0'; }, 200);
+    }
+
+    // ===== Helper: wave banner =====
+    let waveBannerTimeout = null;
+    function showWaveBanner(waveNum) {
+      if (!waveBanner) return;
+      waveBanner.textContent = `Wave ${waveNum} incoming!`;
+      waveBanner.classList.remove('is-showing');
+      void waveBanner.offsetWidth;
+      waveBanner.classList.add('is-showing');
+      clearTimeout(waveBannerTimeout);
+      waveBannerTimeout = setTimeout(() => waveBanner.classList.remove('is-showing'), 2200);
+    }
+
+    // ===== Helper: countdown =====
+    let countdownInterval = null;
+    function runCountdown(onComplete) {
+      if (!countdownEl) { onComplete(); return; }
+      let count = 3;
+      const tick = () => {
+        if (count > 0) {
+          countdownEl.textContent = count;
+          countdownEl.classList.remove('is-showing');
+          void countdownEl.offsetWidth;
+          countdownEl.classList.add('is-showing');
+          count--;
+          countdownInterval = setTimeout(tick, 900);
+        } else {
+          countdownEl.textContent = 'GO!';
+          countdownEl.classList.remove('is-showing');
+          void countdownEl.offsetWidth;
+          countdownEl.classList.add('is-showing');
+          setTimeout(() => { countdownEl.classList.remove('is-showing'); }, 600);
+          onComplete();
+        }
+      };
+      tick();
+    }
+
+    // ===== Helper: minimap =====
+    function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos) {
+      if (!minimapCtx || !minimapCanvas) return;
+      const size = minimapCanvas.width;
+      const half = size / 2;
+      const scale = half / 60; // 60 units radius
+
+      minimapCtx.clearRect(0, 0, size, size);
+
+      // Background circle
+      minimapCtx.beginPath();
+      minimapCtx.arc(half, half, half - 2, 0, Math.PI * 2);
+      minimapCtx.fillStyle = 'rgba(10, 20, 40, 0.7)';
+      minimapCtx.fill();
+      minimapCtx.strokeStyle = 'rgba(100, 180, 255, 0.3)';
+      minimapCtx.lineWidth = 1;
+      minimapCtx.stroke();
+
+      // Get bird forward direction for rotation
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(birdQuat);
+      const angle = -Math.atan2(fwd.x, fwd.z);
+
+      // Helper to project world pos to minimap
+      const project = (worldPos) => {
+        const dx = worldPos.x - birdPos.x;
+        const dz = worldPos.z - birdPos.z;
+        // Rotate so forward is up
+        const rx = dx * Math.cos(angle) - dz * Math.sin(angle);
+        const rz = dx * Math.sin(angle) + dz * Math.cos(angle);
+        return { x: half + rx * scale, y: half - rz * scale };
+      };
+
+      // Draw nest
+      if (nestPos) {
+        const p = project(nestPos);
+        minimapCtx.beginPath();
+        minimapCtx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        minimapCtx.fillStyle = '#4cff88';
+        minimapCtx.fill();
+      }
+
+      // Draw collectibles (rings)
+      if (collectibles) {
+        for (const ring of collectibles) {
+          if (ring.collected) continue;
+          const p = project(ring.position);
+          if (p.x < 0 || p.x > size || p.y < 0 || p.y > size) continue;
+          minimapCtx.beginPath();
+          minimapCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          minimapCtx.fillStyle = '#ffd700';
+          minimapCtx.fill();
+        }
+      }
+
+      // Draw drones
+      if (drones) {
+        for (const drone of drones) {
+          const p = project(drone.position);
+          if (p.x < 0 || p.x > size || p.y < 0 || p.y > size) continue;
+          minimapCtx.beginPath();
+          minimapCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          minimapCtx.fillStyle = '#ff4444';
+          minimapCtx.fill();
+        }
+      }
+
+      // Bird at center
+      minimapCtx.beginPath();
+      minimapCtx.arc(half, half, 3, 0, Math.PI * 2);
+      minimapCtx.fillStyle = '#ffffff';
+      minimapCtx.fill();
+    }
+
+    // Sprint FOV state
+    let sprintFovTarget = 60;
+    const BASE_FOV = 60;
+    const SPRINT_FOV = 74;
+
+    // Track previous combo for popup
+    let prevCombo = 1;
+
+    // Wave banner tracking
+    let lastAnnouncedWave = 0;
 
     const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
     ambient.groundColor.set(0x1a2f32);
@@ -3149,6 +3456,23 @@
       hideGameResults();
       showGameHud(true);
       updateGameHud();
+
+      // ===== IMPROVEMENT 2: Countdown for Ring Rush =====
+      if (mode === GAME_MODES.RING_RUSH) {
+        miniGameState.started = false; // Don't start timer yet
+        runCountdown(() => {
+          // After countdown, rings become collectible (started flag set on first collect)
+        });
+      }
+
+      // ===== IMPROVEMENT 4: Wave 1 banner for Turret Defense =====
+      if (mode === GAME_MODES.TURRET_DEFENSE) {
+        lastAnnouncedWave = 1;
+        showWaveBanner(1);
+      }
+
+      // Reset combo tracking
+      prevCombo = 1;
 
       // Mode-specific setup
       if (mode === GAME_MODES.TURRET_DEFENSE) {
@@ -3643,21 +3967,62 @@
       environmentState.index = resolvedIndex >= 0 ? resolvedIndex : 0;
       updateEnvironmentControls(definition);
       applyLightingPreset(definition);
+
+      // ===== IMPROVEMENT 1: Update sky dome colors =====
+      if (skyDome && definition.sky) {
+        skyDome.setColors(definition.sky);
+      }
+      // Update fog color to match environment
+      if (scene.fog && definition.fogColor !== undefined) {
+        scene.fog.color.setHex(definition.fogColor);
+        if (definition.fogNear) scene.fog.near = definition.fogNear;
+        if (definition.fogFar) scene.fog.far = definition.fogFar;
+      }
+
+      // ===== IMPROVEMENT 5: Update ambient particles =====
+      if (particleSystem) {
+        particleSystem.setAmbientType(definition.id);
+      }
+
       if (flightControllerInitialized) {
         updateControlMetrics();
       }
     }
 
-    function cycleEnvironment(step = 1) {
+    // ===== IMPROVEMENT 9: Smooth environment transitions =====
+    const originalCycleEnvironment_inner = function(step) {
       const { order } = environmentState;
-      if (!order || order.length === 0) {
-        return;
-      }
-
+      if (!order || order.length === 0) return;
       const total = order.length;
       const nextIndex = (environmentState.index + step + total) % total;
       const nextId = order[nextIndex];
       setEnvironment(nextId);
+    };
+
+    let envTransitionLocked = false;
+    function cycleEnvironment(step = 1) {
+      if (envTransitionLocked) return;
+      const { order } = environmentState;
+      if (!order || order.length === 0) return;
+
+      const total = order.length;
+      const nextIndex = (environmentState.index + step + total) % total;
+      const nextId = order[nextIndex];
+
+      // ===== IMPROVEMENT 9: Fade transition =====
+      if (envTransitionOverlay) {
+        envTransitionLocked = true;
+        envTransitionOverlay.classList.add('is-fading');
+        setTimeout(() => {
+          setEnvironment(nextId);
+          setTimeout(() => {
+            envTransitionOverlay.classList.remove('is-fading');
+            envTransitionLocked = false;
+          }, 100);
+        }, 420);
+      } else {
+        setEnvironment(nextId);
+      }
     }
 
     try {
@@ -4716,6 +5081,10 @@
           rocketSystem.createExplosionAt(position);
         }
         playExplosionSound();
+        // ===== IMPROVEMENT 5: Particle explosion =====
+        if (particleSystem) particleSystem.createExplosion(position);
+        // ===== IMPROVEMENT 6: Screen shake on drone kill =====
+        screenShake.droneDestroyed();
       },
     });
 
@@ -5178,10 +5547,20 @@
               playDroneDestroyedSound(distToExplosion);
               // Game mode scoring
               if (miniGameState.active && currentGameMode === GAME_MODES.DRONE_HUNTER) {
-                const baseScore = 100;
+                // ===== IMPROVEMENT 8: Progressive difficulty scoring =====
+                const timeProgress = miniGameState.time / 60;
+                const isHeavy = miniGameState.time > 30 && Math.random() < 0.15;
+                const baseScore = isHeavy ? 250 : 100;
                 miniGameState.score += Math.round(baseScore * miniGameState.combo);
+                const oldComboFloor = Math.floor(miniGameState.combo);
                 miniGameState.combo = Math.min(5, miniGameState.combo + 0.25);
-                miniGameState.comboTimer = 3; // Reset combo decay timer
+                miniGameState.comboTimer = 3;
+                // ===== IMPROVEMENT 3: Combo visual feedback =====
+                const newComboFloor = Math.floor(miniGameState.combo);
+                if (newComboFloor > oldComboFloor && newComboFloor >= 2) {
+                  showComboPopup(newComboFloor);
+                }
+                flashKillVignette(miniGameState.combo);
               }
               if (miniGameState.active && currentGameMode === GAME_MODES.TURRET_DEFENSE) {
                 miniGameState.waveKills++;
@@ -5201,6 +5580,7 @@
           const birbHit = droneSystem.checkBirbCollision(flightController.position);
           if (birbHit.hit) {
             triggerFreeze();
+            screenShake.droneHit(); // IMPROVEMENT 6: shake on birb-drone collision
             droneSystem.destroyDrone(birbHit.index);
           }
         }
@@ -5245,6 +5625,10 @@
             if (collected.length > 0) {
               // Play ring collect sound
               playRingCollectSound();
+              // ===== IMPROVEMENT 5: Ring sparkle particles =====
+              if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
+              // ===== IMPROVEMENT 6: FOV kick on ring collect =====
+              screenShake.ringCollected();
               // Start timer on first ring
               if (!miniGameState.started) {
                 miniGameState.started = true;
@@ -5295,20 +5679,48 @@
             // Only move drones toward nest when birb is nested
             if (isNested) {
               const nestPos = flightController.position;
-              const droneSpeed = 2 + miniGameState.wave; // Wave 1=3, 2=4, 3=5, 4=6...
+              const baseSpeed = 2 + miniGameState.wave;
 
               for (let i = drones.length - 1; i >= 0; i--) {
                 const drone = drones[i];
-                // Calculate direction to nest
-                const dirToNest = nestPos.clone().sub(drone.position).normalize();
-                // Move drone toward nest
-                drone.position.addScaledVector(dirToNest, droneSpeed * delta);
+                // ===== IMPROVEMENT 4: Drone approach patterns =====
+                // Assign pattern based on drone index (stable per-drone)
+                if (!drone._pattern) {
+                  const r = Math.random();
+                  drone._pattern = r < 0.45 ? 'direct' : r < 0.75 ? 'spiral' : 'flank';
+                  drone._spiralAngle = Math.random() * Math.PI * 2;
+                  drone._flankOffset = (Math.random() - 0.5) * 30;
+                }
+
+                const dirToNest = nestPos.clone().sub(drone.position);
+                const distToNest = dirToNest.length();
+                dirToNest.normalize();
+                let droneSpeed = baseSpeed;
+
+                if (drone._pattern === 'spiral' && distToNest > 10) {
+                  // Spiral: orbit while closing in
+                  drone._spiralAngle += delta * 1.5;
+                  const tangent = new THREE.Vector3(-dirToNest.z, 0, dirToNest.x).normalize();
+                  const spiralDir = dirToNest.clone().multiplyScalar(0.6).add(tangent.multiplyScalar(Math.sin(drone._spiralAngle) * 0.8));
+                  spiralDir.normalize();
+                  drone.position.addScaledVector(spiralDir, droneSpeed * 0.7 * delta);
+                } else if (drone._pattern === 'flank' && distToNest > 12) {
+                  // Flanking: wide approach angle
+                  const side = new THREE.Vector3(-dirToNest.z, 0, dirToNest.x).normalize();
+                  const flankDir = dirToNest.clone().add(side.multiplyScalar(drone._flankOffset > 0 ? 0.5 : -0.5));
+                  flankDir.normalize();
+                  drone.position.addScaledVector(flankDir, droneSpeed * 0.8 * delta);
+                } else {
+                  // Direct rush (or close enough to beeline)
+                  drone.position.addScaledVector(dirToNest, droneSpeed * delta);
+                }
 
                 // Check if drone reached nest
                 const distToNest = drone.position.distanceTo(nestPos);
                 if (distToNest < 6) {
                   droneSystem.destroyDrone(i);
                   miniGameState.lives--;
+                  screenShake.nestHit(); // IMPROVEMENT 6: shake on nest hit
                   if (miniGameState.lives <= 0) {
                     endGameMode(false);
                   }
@@ -5334,6 +5746,11 @@
                   miniGameState.waveSpawnCount = 2 + miniGameState.wave;
                   miniGameState.waveKills = 0;
                   miniGameState.waveComplete = false;
+                  // ===== IMPROVEMENT 4: Wave banner =====
+                  if (miniGameState.wave > lastAnnouncedWave) {
+                    showWaveBanner(miniGameState.wave);
+                    lastAnnouncedWave = miniGameState.wave;
+                  }
                 }
               }
             }
@@ -5473,6 +5890,117 @@
       }
 
       headingTelemetry?.update(flightController);
+
+      // ===== PER-FRAME IMPROVEMENT UPDATES =====
+      const cam = cameraState.camera;
+      const birdPos = flightController?.position;
+      const birdQuat = flightController?.quaternion || (flightController && typeof flightController.getQuaternion === 'function' ? flightController.getQuaternion() : null);
+
+      // IMPROVEMENT 1: Sky dome follows camera
+      if (skyDome && cam) skyDome.followCamera(cam.position);
+
+      // IMPROVEMENT 5: Update particles
+      if (particleSystem) particleSystem.update(delta, cam?.position);
+
+      // IMPROVEMENT 6: Apply screen shake + FOV
+      if (screenShake) {
+        const shakeResult = screenShake.update(delta);
+        if (cam && shakeResult.offset) {
+          cam.position.x += shakeResult.offset.x;
+          cam.position.y += shakeResult.offset.y;
+          cam.position.z += shakeResult.offset.z;
+        }
+        // FOV kick from screen shake (ring collection) + sprint FOV
+        const targetFov = (sprintState.active && currentGameMode === GAME_MODES.RING_RUSH) ? SPRINT_FOV : BASE_FOV;
+        if (cam && cam.fov !== undefined) {
+          const desiredFov = targetFov + shakeResult.fovOffset;
+          cam.fov = cam.fov + (desiredFov - cam.fov) * Math.min(1, delta * 8);
+          cam.updateProjectionMatrix();
+        }
+      }
+
+      // IMPROVEMENT 10: Speed lines during sprint
+      if (speedLines) {
+        const isSprinting = sprintState.active && currentGameMode === GAME_MODES.RING_RUSH;
+        speedLines.classList.toggle('is-active', isSprinting);
+      }
+
+      // IMPROVEMENT 3: Combo timer bar + multiplier display
+      if (miniGameState.active && currentGameMode === GAME_MODES.DRONE_HUNTER) {
+        const comboFloor = Math.floor(miniGameState.combo);
+        if (comboTimerBar) {
+          comboTimerBar.classList.toggle('is-visible', miniGameState.comboTimer > 0 && comboFloor >= 2);
+          if (comboTimerFill && miniGameState.comboTimer > 0) {
+            const pct = miniGameState.comboTimer / 3;
+            comboTimerFill.style.transform = `scaleX(${pct})`;
+            comboTimerFill.style.backgroundColor = pct > 0.5 ? '#4cff88' : pct > 0.25 ? '#ffd700' : '#ff4444';
+          }
+        }
+        if (comboMultiplier) {
+          comboMultiplier.classList.toggle('is-visible', comboFloor >= 2);
+          comboMultiplier.textContent = comboFloor >= 2 ? `${comboFloor}x` : '';
+        }
+        // IMPROVEMENT 8: Time critical pulse (last 10 seconds)
+        if (hudTime) {
+          hudTime.classList.toggle('hud-time-critical', miniGameState.time >= 50);
+        }
+      } else {
+        if (comboTimerBar) comboTimerBar.classList.remove('is-visible');
+        if (comboMultiplier) comboMultiplier.classList.remove('is-visible');
+        if (hudTime) hudTime.classList.remove('hud-time-critical');
+      }
+
+      // IMPROVEMENT 2: Ring arrow pointing to nearest ring
+      if (miniGameState.active && currentGameMode === GAME_MODES.RING_RUSH && collectiblesSystem && birdPos && cam) {
+        const _ringWorldPos = new THREE.Vector3();
+        const ringsArr = collectiblesSystem.rings || [];
+        let nearest = null;
+        let nearestDist = Infinity;
+        let nearestWorldPos = null;
+        for (const ring of ringsArr) {
+          if (ring.userData.collected) continue;
+          ring.getWorldPosition(_ringWorldPos);
+          const d = birdPos.distanceTo(_ringWorldPos);
+          if (d < nearestDist) { nearestDist = d; nearest = ring; nearestWorldPos = _ringWorldPos.clone(); }
+        }
+        if (nearest && ringArrow && nearestWorldPos) {
+          const projected = nearestWorldPos.clone().project(cam);
+          if (projected.z > 0 && projected.z < 1) {
+            const dx = projected.x;
+            const dy = -projected.y;
+            const angle = Math.atan2(dy, dx) - Math.PI / 2;
+            ringArrow.style.transform = `rotate(${angle}rad)`;
+            ringArrow.classList.add('is-visible');
+          } else {
+            ringArrow.style.transform = `rotate(180deg)`;
+            ringArrow.classList.add('is-visible');
+          }
+        } else if (ringArrow) {
+          ringArrow.classList.remove('is-visible');
+        }
+      } else if (ringArrow) {
+        ringArrow.classList.remove('is-visible');
+      }
+
+      // IMPROVEMENT 7: Minimap radar
+      if (miniGameState.active && minimapCtx && birdPos && birdQuat) {
+        minimapCanvas.classList.add('is-visible');
+        const drones = droneSystem ? droneSystem.getDrones() : [];
+        // Build ring data from collectibles system
+        const ringData = [];
+        if (collectiblesSystem && collectiblesSystem.rings) {
+          const _rp = new THREE.Vector3();
+          for (const ring of collectiblesSystem.rings) {
+            ring.getWorldPosition(_rp);
+            ringData.push({ position: _rp.clone(), collected: ring.userData.collected });
+          }
+        }
+        const nestPos = (isNested && flightController) ? flightController.position : null;
+        updateMinimap(birdPos, birdQuat, ringData, drones, nestPos);
+      } else if (minimapCanvas) {
+        minimapCanvas.classList.remove('is-visible');
+      }
+
       renderer.render(scene, cameraState.camera);
     };
 
