@@ -2367,9 +2367,9 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
-      const { createSkyDome } = await import("./src/environment/sky-dome.js");
-      const { ParticleSystem } = await import("./src/effects/particles.js");
-      const { ScreenShake } = await import("./src/effects/screen-shake.js");
+      var { createSkyDome } = await import("./src/environment/sky-dome.js");
+      var { ParticleSystem } = await import("./src/effects/particles.js");
+      var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       const gltfLoaderModule = await import(
         "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
@@ -5716,8 +5716,8 @@
                 }
 
                 // Check if drone reached nest
-                const distToNest = drone.position.distanceTo(nestPos);
-                if (distToNest < 6) {
+                const distToNestCheck = drone.position.distanceTo(nestPos);
+                if (distToNestCheck < 6) {
                   droneSystem.destroyDrone(i);
                   miniGameState.lives--;
                   screenShake.nestHit(); // IMPROVEMENT 6: shake on nest hit
