@@ -1740,11 +1740,15 @@
 
     /* ===== Minimap ===== */
     .minimap-radar {
-      position: fixed; bottom: 12%; left: 3%; width: 80px; height: 80px;
+      position: fixed !important; bottom: 12% !important; left: 3% !important;
+      width: 120px !important; height: 120px !important;
+      max-width: 120px !important; max-height: 120px !important;
       pointer-events: none; z-index: 195; opacity: 0; transition: opacity 0.3s;
+      border-radius: 50%;
+      box-shadow: 0 0 12px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.3);
     }
-    .minimap-radar.is-visible { opacity: 0.85; }
-    @media (min-width: 48rem) { .minimap-radar { width: 100px; height: 100px; } }
+    .minimap-radar.is-visible { opacity: 0.92; }
+    @media (min-width: 48rem) { .minimap-radar { width: 140px !important; height: 140px !important; max-width: 140px !important; max-height: 140px !important; } }
 
     /* ===== Time Critical Pulse ===== */
     .hud-time-critical { animation: time-pulse 0.5s ease-in-out infinite; color: #ff4444 !important; }
@@ -1993,7 +1997,7 @@
       <!-- Speed lines -->
       <div class="speed-lines" data-speed-lines></div>
       <!-- Minimap -->
-      <canvas class="minimap-radar" data-minimap-radar width="100" height="100"></canvas>
+      <canvas class="minimap-radar" data-minimap-radar width="200" height="200" style="width:120px;height:120px;max-width:120px;max-height:120px;"></canvas>
 
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
@@ -2904,6 +2908,14 @@
     const countdownEl = document.querySelector('[data-countdown]');
     const speedLines = document.querySelector('[data-speed-lines]');
     const minimapCanvas = document.querySelector('[data-minimap-radar]');
+    if (minimapCanvas) {
+      // Force CSS display size - canvas intrinsic size (200) is for retina, display must be small
+      const mapDisplaySize = window.innerWidth >= 768 ? '140px' : '120px';
+      minimapCanvas.style.width = mapDisplaySize;
+      minimapCanvas.style.height = mapDisplaySize;
+      minimapCanvas.style.maxWidth = mapDisplaySize;
+      minimapCanvas.style.maxHeight = mapDisplaySize;
+    }
     const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
 
     // ===== Helper: show combo popup =====
@@ -2967,22 +2979,37 @@
     }
 
     // ===== Helper: minimap =====
-    function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos) {
+    let minimapPulseTime = 0;
+    function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos, delta) {
       if (!minimapCtx || !minimapCanvas) return;
-      const size = minimapCanvas.width;
+      minimapPulseTime += (delta || 0.016);
+      const size = minimapCanvas.width;  // 200 (2x resolution for retina)
       const half = size / 2;
-      const scale = half / 60; // 60 units radius
+      const scale = half / 80; // 80 units visible radius
 
       minimapCtx.clearRect(0, 0, size, size);
 
-      // Background circle
+      // Clip to circle
+      minimapCtx.save();
       minimapCtx.beginPath();
-      minimapCtx.arc(half, half, half - 2, 0, Math.PI * 2);
-      minimapCtx.fillStyle = 'rgba(10, 20, 40, 0.7)';
-      minimapCtx.fill();
-      minimapCtx.strokeStyle = 'rgba(100, 180, 255, 0.3)';
+      minimapCtx.arc(half, half, half - 1, 0, Math.PI * 2);
+      minimapCtx.clip();
+
+      // Background with subtle radial gradient
+      const bgGrad = minimapCtx.createRadialGradient(half, half, 0, half, half, half);
+      bgGrad.addColorStop(0, 'rgba(15, 25, 45, 0.85)');
+      bgGrad.addColorStop(1, 'rgba(8, 14, 30, 0.92)');
+      minimapCtx.fillStyle = bgGrad;
+      minimapCtx.fillRect(0, 0, size, size);
+
+      // Subtle range rings
+      minimapCtx.strokeStyle = 'rgba(80, 140, 200, 0.12)';
       minimapCtx.lineWidth = 1;
-      minimapCtx.stroke();
+      for (let r = 1; r <= 3; r++) {
+        minimapCtx.beginPath();
+        minimapCtx.arc(half, half, (half / 3.5) * r, 0, Math.PI * 2);
+        minimapCtx.stroke();
+      }
 
       // Get bird forward direction for rotation
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(birdQuat);
@@ -2992,51 +3019,139 @@
       const project = (worldPos) => {
         const dx = worldPos.x - birdPos.x;
         const dz = worldPos.z - birdPos.z;
-        // Rotate so forward is up
         const rx = dx * Math.cos(angle) - dz * Math.sin(angle);
         const rz = dx * Math.sin(angle) + dz * Math.cos(angle);
         return { x: half + rx * scale, y: half - rz * scale };
       };
 
+      // Clamp to edge helper - shows off-screen items as edge indicators
+      const clampToEdge = (p) => {
+        const dx = p.x - half;
+        const dy = p.y - half;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxR = half - 8;
+        if (dist > maxR) {
+          const s = maxR / dist;
+          return { x: half + dx * s, y: half + dy * s, clamped: true };
+        }
+        return { x: p.x, y: p.y, clamped: false };
+      };
+
+      // Find nearest uncollected ring
+      let nearestDist = Infinity;
+      let nearestIdx = -1;
+      if (collectibles) {
+        for (let i = 0; i < collectibles.length; i++) {
+          const ring = collectibles[i];
+          if (ring.collected) continue;
+          const dx = ring.position.x - birdPos.x;
+          const dy = ring.position.y - birdPos.y;
+          const dz = ring.position.z - birdPos.z;
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+        }
+      }
+
       // Draw nest
       if (nestPos) {
-        const p = project(nestPos);
+        const raw = project(nestPos);
+        const p = clampToEdge(raw);
         minimapCtx.beginPath();
-        minimapCtx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        minimapCtx.arc(p.x, p.y, p.clamped ? 4 : 5, 0, Math.PI * 2);
         minimapCtx.fillStyle = '#4cff88';
         minimapCtx.fill();
       }
 
       // Draw collectibles (rings)
       if (collectibles) {
-        for (const ring of collectibles) {
+        for (let i = 0; i < collectibles.length; i++) {
+          const ring = collectibles[i];
           if (ring.collected) continue;
-          const p = project(ring.position);
-          if (p.x < 0 || p.x > size || p.y < 0 || p.y > size) continue;
+          const isNearest = (i === nearestIdx);
+          const raw = project(ring.position);
+          const p = clampToEdge(raw);
+          const dotR = isNearest ? 6 : 4;
+
+          // Glow for nearest ring
+          if (isNearest) {
+            const pulse = 0.5 + 0.5 * Math.sin(minimapPulseTime * 4);
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, dotR + 4 + pulse * 3, 0, Math.PI * 2);
+            minimapCtx.fillStyle = `rgba(255, 215, 0, ${0.15 + pulse * 0.1})`;
+            minimapCtx.fill();
+          }
+
           minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-          minimapCtx.fillStyle = '#ffd700';
+          minimapCtx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+          minimapCtx.fillStyle = isNearest ? '#ffee44' : '#ffd700';
           minimapCtx.fill();
+
+          // Small border for visibility
+          if (!p.clamped) {
+            minimapCtx.strokeStyle = isNearest ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)';
+            minimapCtx.lineWidth = 1;
+            minimapCtx.stroke();
+          }
+
+          // Edge indicator arrow for clamped items
+          if (p.clamped) {
+            const adx = p.x - half;
+            const ady = p.y - half;
+            const a = Math.atan2(ady, adx);
+            minimapCtx.save();
+            minimapCtx.translate(p.x, p.y);
+            minimapCtx.rotate(a);
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(4, 0);
+            minimapCtx.lineTo(-2, -3);
+            minimapCtx.lineTo(-2, 3);
+            minimapCtx.closePath();
+            minimapCtx.fillStyle = isNearest ? '#ffee44' : '#ffd700';
+            minimapCtx.fill();
+            minimapCtx.restore();
+          }
         }
       }
 
-      // Draw drones
+      // Draw drones (red dots)
       if (drones) {
         for (const drone of drones) {
-          const p = project(drone.position);
-          if (p.x < 0 || p.x > size || p.y < 0 || p.y > size) continue;
+          const raw = project(drone.position);
+          const p = clampToEdge(raw);
           minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-          minimapCtx.fillStyle = '#ff4444';
+          minimapCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          minimapCtx.fillStyle = '#ff5555';
           minimapCtx.fill();
+          minimapCtx.strokeStyle = 'rgba(255,255,255,0.2)';
+          minimapCtx.lineWidth = 1;
+          minimapCtx.stroke();
         }
       }
 
-      // Bird at center
+      // Bird at center - directional triangle
+      minimapCtx.save();
+      minimapCtx.translate(half, half);
       minimapCtx.beginPath();
-      minimapCtx.arc(half, half, 3, 0, Math.PI * 2);
+      minimapCtx.moveTo(0, -7);   // nose pointing up (forward)
+      minimapCtx.lineTo(-5, 5);
+      minimapCtx.lineTo(0, 2);
+      minimapCtx.lineTo(5, 5);
+      minimapCtx.closePath();
       minimapCtx.fillStyle = '#ffffff';
       minimapCtx.fill();
+      minimapCtx.strokeStyle = 'rgba(100,180,255,0.5)';
+      minimapCtx.lineWidth = 1;
+      minimapCtx.stroke();
+      minimapCtx.restore();
+
+      minimapCtx.restore(); // Undo clip
+
+      // Outer ring border
+      minimapCtx.beginPath();
+      minimapCtx.arc(half, half, half - 2, 0, Math.PI * 2);
+      minimapCtx.strokeStyle = 'rgba(100, 180, 255, 0.35)';
+      minimapCtx.lineWidth = 2;
+      minimapCtx.stroke();
     }
 
     // Sprint FOV state
@@ -5996,7 +6111,7 @@
           }
         }
         const nestPos = (isNested && flightController) ? flightController.position : null;
-        updateMinimap(birdPos, birdQuat, ringData, drones, nestPos);
+        updateMinimap(birdPos, birdQuat, ringData, drones, nestPos, delta);
       } else if (minimapCanvas) {
         minimapCanvas.classList.remove('is-visible');
       }
