@@ -1740,13 +1740,15 @@
 
     /* ===== Minimap ===== */
     .minimap-radar {
-      position: fixed; bottom: 12%; left: 3%; width: 120px; height: 120px;
+      position: fixed !important; bottom: 12% !important; left: 3% !important;
+      width: 120px !important; height: 120px !important;
+      max-width: 120px !important; max-height: 120px !important;
       pointer-events: none; z-index: 195; opacity: 0; transition: opacity 0.3s;
       border-radius: 50%;
       box-shadow: 0 0 12px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.3);
     }
     .minimap-radar.is-visible { opacity: 0.92; }
-    @media (min-width: 48rem) { .minimap-radar { width: 140px; height: 140px; } }
+    @media (min-width: 48rem) { .minimap-radar { width: 140px !important; height: 140px !important; max-width: 140px !important; max-height: 140px !important; } }
 
     /* ===== Time Critical Pulse ===== */
     .hud-time-critical { animation: time-pulse 0.5s ease-in-out infinite; color: #ff4444 !important; }
@@ -1995,7 +1997,7 @@
       <!-- Speed lines -->
       <div class="speed-lines" data-speed-lines></div>
       <!-- Minimap -->
-      <canvas class="minimap-radar" data-minimap-radar width="200" height="200"></canvas>
+      <canvas class="minimap-radar" data-minimap-radar width="200" height="200" style="width:120px;height:120px;max-width:120px;max-height:120px;"></canvas>
 
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
@@ -2906,6 +2908,14 @@
     const countdownEl = document.querySelector('[data-countdown]');
     const speedLines = document.querySelector('[data-speed-lines]');
     const minimapCanvas = document.querySelector('[data-minimap-radar]');
+    if (minimapCanvas) {
+      // Force CSS display size - canvas intrinsic size (200) is for retina, display must be small
+      const mapDisplaySize = window.innerWidth >= 768 ? '140px' : '120px';
+      minimapCanvas.style.width = mapDisplaySize;
+      minimapCanvas.style.height = mapDisplaySize;
+      minimapCanvas.style.maxWidth = mapDisplaySize;
+      minimapCanvas.style.maxHeight = mapDisplaySize;
+    }
     const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
 
     // ===== Helper: show combo popup =====
