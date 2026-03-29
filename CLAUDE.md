@@ -21,6 +21,18 @@ A mobile-first 3D bird flight game built with Three.js. A bird flies on a spheri
 
 **Mentis** (Adam Rappaport) — call him Mentis, not Adam.
 
+## Default Interaction Mode
+
+**Assume the user is a Vibe Academy student** unless they indicate otherwise. This means:
+
+- **Teach, don't just do.** Walk through changes step by step. Explain *why*, not just *what*.
+- **Ask what they want to learn.** Before diving into code, understand their experience level and what they're trying to get out of this.
+- **Point them to the right starting place.** Use the "Notes for Vibe Academy" section below to suggest tasks matched to their level.
+- **Let them drive.** Offer options rather than making choices for them. The goal is learning, not shipping.
+- **Keep it fun.** This is a game. The vibe should be playful and encouraging.
+
+**To exit student mode:** If the user says "admin", "Mentis", or otherwise implies they're the project owner, switch to direct execution mode — just make the changes, skip the teaching, and focus on shipping.
+
 ## House Rules
 
 1. **Never test locally unless you must** — push to git, Vercel auto-deploys at birbmobile.vercel.app
@@ -94,13 +106,13 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `docs/PRD-game-modes.md` | Game mode specifications |
 | `basic/index.html` | Minimal reference implementation (single-file) |
 
-## Critical Open Bug
+## Flight Direction — Historical Bug (Believed Resolved)
 
-**Spherical flight direction** — the bird always flies in the same absolute world direction regardless of facing. Turning rotates the model visually but doesn't change movement direction. This breaks gameplay on the sphere.
+The spherical flight direction bug — where the bird flew in a fixed world direction regardless of facing — was the longest-running issue in this project. It has been through multiple fix attempts (see `KNOWN_ISSUES.md` Issue 5 for the full saga).
 
-**Root cause:** Heading is a scalar angle rotated around world Y-axis. On a sphere, local "up" changes with position, so Euler-based heading breaks.
+**Current status:** The game plays correctly on mobile in production. The active controller (`src/flight/bird-flight.js`) uses fixed-axis rotation which theoretically breaks on a sphere, but in practice the parallel transport and sphere re-projection keep things working. If this bug resurfaces, the legacy `free-flight-controller.js` has a full vector-based fix that could be ported.
 
-**Required fix:** Track forward direction as a persistent Vector3. Yaw rotates forward around local-up (not world Y). Derive quaternion from forward+up for rendering only. See `FLIGHT_CONTROLS_PLAN.md` Phase 0 and `KNOWN_ISSUES.md` Issue 5 for full analysis.
+**Don't touch flight code without reading** `KNOWN_ISSUES.md` and `FLIGHT_CONTROLS_PLAN.md` first.
 
 ## Key Technical Patterns
 
@@ -181,8 +193,8 @@ For mobile testing: use Edge DevTools device emulation, or access via local netw
 
 ## Known Issues
 
-1. **Spherical flight direction bug** (CRITICAL) — see above
-2. Eruda debug console still enabled in `index.html` — remove after flight fix confirmed
+1. ~~Spherical flight direction bug~~ — believed resolved, working in production. See history in `KNOWN_ISSUES.md`.
+2. Eruda debug console still enabled in `index.html` — can be removed now
 3. iOS audio full duration testing incomplete
 
 See `KNOWN_ISSUES.md` for detailed history and fix attempts.
@@ -256,8 +268,8 @@ Real features. Real shipping. Real learning.
 
 If you're an AI assistant working on this repo:
 
-1. **Read `KNOWN_ISSUES.md` and `FLIGHT_CONTROLS_PLAN.md`** before touching flight code
-2. **The spherical flight bug is the #1 priority** — but it's hard. Read all context first.
+1. **Default to student mode.** Assume the user is a Vibe Academy learner. Teach, explain, offer choices. See "Default Interaction Mode" above.
+2. **Read `KNOWN_ISSUES.md` and `FLIGHT_CONTROLS_PLAN.md`** before touching flight code
 3. **Good quick wins:** Remove eruda console, clean up debug UI, improve mobile CSS
 4. **Good improvement:** Add screen shake intensity options, improve ring spawn variety
 5. **Always test on mobile** — desktop behaviour is not representative
