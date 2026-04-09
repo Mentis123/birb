@@ -35,13 +35,13 @@ const EXPLOSION_CONFIG = {
 
 const DRONE_CONFIG = {
   count: 8,                    // Total drones maintained in world
-  minAltitude: 35,             // Sphere radius (30) + 5
-  maxAltitude: 45,             // Sphere radius (30) + 15
-  orbitSpeed: 0.15,            // Base radians per second (half speed)
+  minAltitude: 135,            // Sphere radius (120) + 15 — above surface objects
+  maxAltitude: 175,            // Sphere radius (120) + 55 — above most trees/buildings
+  orbitSpeed: 0.15,            // Base radians per second (angular, scale-independent)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
-  collisionRadius: 3.0,        // Hit detection radius (doubled for larger drones)
-  birbCollisionRadius: 0.8,    // Birb collision radius
+  collisionRadius: 3.0,        // Hit detection — bird-scale, not world-scale
+  birbCollisionRadius: 0.8,    // Birb collision radius — bird hasn't changed size
 };
 
 /**

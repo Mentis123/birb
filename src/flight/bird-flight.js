@@ -9,7 +9,7 @@
  */
 
 export const FLIGHT_DEFAULTS = {
-    speed: 4,
+    speed: 8,
     yawRate: Math.PI * 0.8,
     pitchRate: Math.PI * 0.6,
     maxPitch: Math.PI * 0.4,

@@ -4,11 +4,11 @@
  */
 
 // Rocket configuration
-const ROCKET_SPEED = 25.0;
-const ROCKET_GRAVITY = 5.0;
-const ROCKET_LIFETIME = 8.0; // seconds
-const ROCKET_COOLDOWN = 2.0; // seconds between shots
-const ROCKET_ARM_DISTANCE = 3.0; // Distance rocket must travel before collision detection activates
+const ROCKET_SPEED = 50.0;           // Faster to cover bigger world distances
+const ROCKET_GRAVITY = 8.0;          // Slightly more gravity for satisfying arcs
+const ROCKET_LIFETIME = 8.0;         // Time-based, stays same
+const ROCKET_COOLDOWN = 2.0;         // Gameplay feel, stays same
+const ROCKET_ARM_DISTANCE = 5.0;     // Slightly further to clear taller nests
 
 /**
  * Create a single rocket mesh

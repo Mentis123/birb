@@ -4,9 +4,9 @@ const DEG2RAD = Math.PI / 180;
 const BASE_SPACE_SCALE = 3.2;
 
 const DEFAULT_HAZE_LAYERS = [
-  { radius: 38, height: 22, opacity: 0.2 },
-  { radius: 52, height: 26, opacity: 0.16 },
-  { radius: 64, height: 30, opacity: 0.13 },
+  { radius: 152, height: 88, opacity: 0.2 },
+  { radius: 208, height: 104, opacity: 0.16 },
+  { radius: 256, height: 120, opacity: 0.13 },
 ];
 
 const DEFAULT_OPTIONS = {
@@ -622,14 +622,14 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 118,
     backgroundColor: 0x071422,
     fogColor: 0x0a1b2e,
-    fogNear: 24,
-    fogFar: 160,
+    fogNear: 80,
+    fogFar: 500,
     sky: { top: 0x4d80c0, bottom: 0x071323, glow: 0.28 },
     hazeColor: 0x112a3f,
     hazeLayers: [
-      { radius: 44, height: 26, opacity: 0.2 },
-      { radius: 58, height: 30, opacity: 0.16 },
-      { radius: 70, height: 34, opacity: 0.12 },
+      { radius: 176, height: 104, opacity: 0.2 },
+      { radius: 232, height: 120, opacity: 0.16 },
+      { radius: 280, height: 136, opacity: 0.12 },
     ],
     groundColor: 0x123324,
     floor: { color: 0x1e5f3c, opacity: 0.82 },
@@ -652,14 +652,14 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 134,
     backgroundColor: 0x1e0f0d,
     fogColor: 0x2b150f,
-    fogNear: 28,
-    fogFar: 185,
+    fogNear: 90,
+    fogFar: 550,
     sky: { top: 0xf8b274, bottom: 0x2a080a, glow: 0.34 },
     hazeColor: 0x3c1b12,
     hazeLayers: [
-      { radius: 48, height: 26, opacity: 0.22 },
-      { radius: 64, height: 32, opacity: 0.18 },
-      { radius: 78, height: 36, opacity: 0.14 },
+      { radius: 192, height: 104, opacity: 0.22 },
+      { radius: 256, height: 128, opacity: 0.18 },
+      { radius: 312, height: 144, opacity: 0.14 },
     ],
     groundColor: 0x4a2518,
     floor: { color: 0x6e3520, opacity: 0.78 },
@@ -682,14 +682,14 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 132,
     backgroundColor: 0x0b1521,
     fogColor: 0x0f1f2f,
-    fogNear: 24,
-    fogFar: 182,
+    fogNear: 80,
+    fogFar: 540,
     sky: { top: 0x6da0df, bottom: 0x08121f, glow: 0.32 },
     hazeColor: 0x1a2f42,
     hazeLayers: [
-      { radius: 46, height: 26, opacity: 0.19 },
-      { radius: 60, height: 30, opacity: 0.15 },
-      { radius: 74, height: 34, opacity: 0.12 },
+      { radius: 184, height: 104, opacity: 0.19 },
+      { radius: 240, height: 120, opacity: 0.15 },
+      { radius: 296, height: 136, opacity: 0.12 },
     ],
     groundColor: 0x1d2e2f,
     floor: { color: 0x24424b, opacity: 0.84 },
@@ -712,14 +712,14 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 126,
     backgroundColor: 0x050a16,
     fogColor: 0x0b1524,
-    fogNear: 22,
-    fogFar: 175,
+    fogNear: 75,
+    fogFar: 520,
     sky: { top: 0x6b96ff, bottom: 0x040910, glow: 0.36 },
     hazeColor: 0x162740,
     hazeLayers: [
-      { radius: 46, height: 26, opacity: 0.18 },
-      { radius: 60, height: 30, opacity: 0.15 },
-      { radius: 72, height: 34, opacity: 0.12 },
+      { radius: 184, height: 104, opacity: 0.18 },
+      { radius: 240, height: 120, opacity: 0.15 },
+      { radius: 288, height: 136, opacity: 0.12 },
     ],
     groundColor: 0x0d1b2e,
     floor: { color: 0x132d44, opacity: 0.86 },
@@ -768,7 +768,7 @@ export function createWorldShell(
   const fogColor = new THREE.Color(definition.fogColor ?? 0x0a1426);
   const backgroundColor = new THREE.Color(definition.backgroundColor ?? definition.fogColor ?? 0x0a1426);
   const fogNear = definition.fogNear ?? 24;
-  const fogFar = definition.fogFar ?? 150;
+  const fogFar = definition.fogFar ?? 500;
 
   if (scene.fog) {
     scene.fog.color.copy(fogColor);

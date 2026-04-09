@@ -125,10 +125,10 @@ export function createCameraState({ three, scene, flightController, sphereCenter
   // Track the sphere center for spherical world support
   let activeSphereCenter = sphereCenter ? sphereCenter.clone() : null;
 
-  const camera = new PerspectiveCamera(60, 1, 0.1, 500);
-  // Default camera position for spherical world (bird starts at y = 33)
-  const defaultPosition = new Vector3(5, 38, 8);
-  const defaultTarget = new Vector3(0, 33, 0);
+  const camera = new PerspectiveCamera(75, 1, 0.1, 2000);
+  // Default camera position for spherical world (bird starts at y = SPHERE_RADIUS + 3)
+  const defaultPosition = new Vector3(5, 128, 8);
+  const defaultTarget = new Vector3(0, 123, 0);
 
   const followState = {
     rig: createFollowCameraRig(three),

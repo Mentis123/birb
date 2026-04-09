@@ -5,9 +5,9 @@
  * Only visible during Ring Rush mode.
  */
 
-const SPHERE_RADIUS = 30;
-const RING_ALTITUDE_MIN = 3;  // Above sphere surface
-const RING_ALTITUDE_MAX = 6;
+const SPHERE_RADIUS = 120;
+const RING_ALTITUDE_MIN = 8;  // Above sphere surface (scaled for bigger world)
+const RING_ALTITUDE_MAX = 20;
 const RING_COUNT = 10;
 
 // Ring visual config - environment-themed colors

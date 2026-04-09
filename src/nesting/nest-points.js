@@ -35,9 +35,9 @@ const NEST_CONFIGS = {
 };
 
 // Detection range for "pretty close" proximity
-export const NEST_PROXIMITY_RANGE = 5.0;
-// Range at which nest starts glowing brighter
-export const NEST_GLOW_RANGE = 8.0;
+export const NEST_PROXIMITY_RANGE = 7.0;  // Bird-scale interaction, slightly forgiving for taller objects
+// Range at which nest starts glowing brighter (bigger world = need to see from further)
+export const NEST_GLOW_RANGE = 18.0;
 
 /**
  * Create a single nest marker with glow effect

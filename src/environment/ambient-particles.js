@@ -12,8 +12,8 @@ function createSnowParticles(THREE, count = 400) {
   const velocities = [];
   const phases = [];
 
-  const radius = 40;
-  const height = 30;
+  const radius = 120;
+  const height = 80;
 
   for (let i = 0; i < count; i++) {
     // Distribute in cylindrical volume
@@ -63,8 +63,8 @@ function createLeafParticles(THREE, count = 200) {
   const rotations = [];
   const sizes = new Float32Array(count);
 
-  const radius = 45;
-  const height = 25;
+  const radius = 130;
+  const height = 70;
 
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
@@ -116,12 +116,12 @@ function createFireflies(THREE, count = 80) {
   const basePositions = [];
   const phases = [];
 
-  const radius = 35;
+  const radius = 100;
 
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const r = 10 + Math.random() * radius;
-    const height = 1 + Math.random() * 12;
+    const r = 30 + Math.random() * radius;
+    const height = 3 + Math.random() * 40;
 
     const x = Math.cos(angle) * r;
     const y = height;
@@ -162,8 +162,8 @@ function createDustParticles(THREE, count = 300) {
   const velocities = [];
   const sizes = new Float32Array(count);
 
-  const radius = 50;
-  const height = 20;
+  const radius = 140;
+  const height = 60;
 
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;

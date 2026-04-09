@@ -2875,8 +2875,8 @@
 
     const scene = new THREE.Scene();
     scene.background = null; // Replaced by sky dome
-    // Extended fog for spherical world visibility (sphere radius is 30)
-    scene.fog = new THREE.Fog(0x050a14, 40, 200);
+    // Extended fog for spherical world visibility (sphere radius is 120)
+    scene.fog = new THREE.Fog(0x050a14, 80, 500);
 
     // ===== IMPROVEMENT 1: Sky Dome =====
     const skyDome = createSkyDome({
@@ -3021,7 +3021,7 @@
       minimapPulseTime += (delta || 0.016);
       const size = minimapCanvas.width;  // 200 (2x resolution for retina)
       const half = size / 2;
-      const scale = half / 80; // 80 units visible radius
+      const scale = half / 320; // 320 units visible radius (scaled for r=120 sphere)
 
       minimapCtx.clearRect(0, 0, size, size);
 
@@ -3461,8 +3461,8 @@
     // Sprint state (second finger touch = sprint)
     const sprintState = {
       active: false,
-      baseSpeed: 4,
-      sprintSpeed: 8,
+      baseSpeed: 8,
+      sprintSpeed: 18,
     };
 
     const miniGameState = {
