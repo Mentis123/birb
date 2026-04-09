@@ -190,95 +190,24 @@ Added `DEBUG_MOBILE_INPUT` flag for debugging touch input issues on mobile devic
 | Climb on joystick up | Resolved | Fixed (cross product order) | N/A |
 | Follow camera position | Resolved | Fixed (offset sign) | N/A |
 | Mobile flight direction | Resolved | Fixed (heading init + GLB offset) | N/A |
-| Spherical world velocity mismatch | **UNRESOLVED** | Multiple attempts failed | HIGH |
+| Spherical world velocity mismatch | ✅ Resolved | Fixed in `src/flight/bird-flight.js` | N/A |
 
 ---
 
-## Issue 5: Spherical World Velocity Direction Mismatch (UNRESOLVED)
+## Issue 5: Spherical World Velocity Direction Mismatch — ✅ RESOLVED
 
-### Problem
-On the spherical world, the bird flies in a fixed world direction regardless of which way the model is visually facing. When the user turns (yaw input), the visual model rotates but the velocity/movement direction doesn't follow. The bird appears to "strafe" - flying sideways relative to its visual orientation.
+### History
+The bird previously flew in a fixed world direction regardless of facing on the spherical world. This was the longest-running bug in the project, with multiple fix attempts between Dec 2025 - Jan 2026 (see git history).
 
-### Root Cause Analysis
-The heading system uses a **scalar angle** (`this.heading`) which is interpreted as rotation around **world Y axis** via Euler angles:
-```javascript
-this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
-this.quaternion.setFromEuler(this._ambientEuler);
-```
+### Resolution
+Fixed in `src/flight/bird-flight.js` — the active flight controller uses vector-based forward direction tracking with parallel transport and sphere re-projection. The bird now flies the direction it faces on the sphere.
 
-On a spherical world, the local "up" direction changes based on position. The current approach of using world-Y-based heading doesn't correctly represent direction in the local tangent plane.
+The legacy `free-flight-controller.js` still contains the old heading-based approach and debug comments from the investigation. It is kept for reference only.
 
-### What Has Been Tried (Dec 29, 2025 Session)
-
-| Approach | Change | Result |
-|----------|--------|--------|
-| GLB model offset fix | Changed `guessedForward` from `(-1,0,0)` to `(1,0,0)` to `(0,0,1)` to `(0,0,-1)` | Model visual changed but velocity still wrong |
-| Parallel transport compensation | Added heading adjustment when `_localUp` changes between frames | Didn't fix the core issue |
-| Local-up quaternion building | Rebuilt quaternions using `_localUp` as yaw axis instead of world Y | Visual and velocity still mismatched |
-| Direct velocity calculation | Computed forward by projecting -Z onto tangent plane and rotating by `_yawQuaternion` | Partial progress - forward changes with position but not clearly with heading |
-
-### Debug Findings
-
-1. **Input chain works**: YAW INPUT reaches the controller, HEADING value changes
-2. **Quaternions update**: `_yawQuaternion` is being built from heading
-3. **Forward direction computes**: forwardDirection vector is calculated
-4. **Velocity is set**: velocity vector is assigned from forwardDirection
-5. **BUT**: The velocity direction doesn't follow heading changes - it drifts with position on sphere but doesn't respond to yaw turns
-
-### Key Debug URLs
-- `http://localhost:8000/?debugVectors` - Shows debug arrows:
-  - Blue (0x4ad8ff): Model forward direction
-  - Yellow (0xffd166): Camera forward direction
-  - Pink (0xff61d8): Velocity direction
-
-### Console Debug Flags Added
-- `free-flight-controller.js:442` - Logs YAW INPUT and HEADING
-- `free-flight-controller.js:527` - Logs HEADING and FWD direction
-- `flight-controls.js:15` - `DEBUG_MOBILE_INPUT` flag
-
-### Attempted Resolution (Dec 30, 2025) - DID NOT WORK
-
-After studying the [Cesium Flight Simulator](https://github.com/WilliamAvHolmberg/cesium-flight-simulator), the key insight was identified:
-
-**Track forward direction as a persistent vector, not a scalar heading.**
-
-The Cesium approach:
-1. Store `forwardDirection` as a `Vector3` that persists between frames
-2. Update it directly by rotating around `localUp` for yaw input
-3. Use this vector directly for velocity calculation: `velocity = forwardDirection * speed`
-4. Derive quaternion FROM the forward vector (not the other way around)
-
-**Implementation Attempted:**
-
-1. Added `_persistentForward` vector to `FreeFlightController` constructor
-2. In spherical world mode, yaw input rotates `_persistentForward` around `_localUp`:
-   ```javascript
-   this._turnQuaternion.setFromAxisAngle(this._localUp, yawRotation);
-   this._persistentForward.applyQuaternion(this._turnQuaternion);
-   ```
-3. Parallel transport: Re-project forward to tangent plane when localUp changes
-4. Build quaternion using `Matrix4.makeBasis()` from orthonormal basis vectors
-5. Velocity uses `_persistentForward` directly (not extracted from quaternion)
-
-**Files Modified:**
-- `free-flight-controller.js` - Vector-based spherical flight direction
-- `node_modules/three/index.js` - Added Matrix4 mock for tests
-
-**Key Cross Product Fix:**
-The cross product order matters for right-handed coordinates:
-- `localRight = persistentForward × localUp` (NOT `localUp × persistentForward`)
-- `localForward = localUp × localRight`
-
-### Why It Still Doesn't Work (Jan 2026)
-
-**The bug persists despite the above changes.** Possible reasons:
-1. `_persistentForward` may not actually be used for velocity calculation
-2. Parallel transport may not be re-projecting correctly
-3. There may still be code paths using the old scalar heading
-4. The quaternion may still be overriding the vector-based direction
-5. Integration with visual rendering may be conflicting with physics
-
-**Recommended approach: Clean rewrite in isolated module (see FLIGHT_CONTROLS_PLAN.md)**
+### Key Learnings
+- Scalar heading angles break on curved surfaces — track `forward` as a persistent Vector3
+- Derive quaternion FROM the forward vector for rendering, not the other way around
+- Parallel transport (re-projecting forward to new tangent plane after movement) is essential
 
 ---
 

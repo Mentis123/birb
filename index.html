@@ -2321,7 +2321,7 @@
       BirdFlight, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs;
 
     try {
-      THREE = await import("https://esm.sh/three@0.161.0");
+      THREE = await import("https://esm.sh/three@0.183.2");
       const flightModule = await import("./free-flight-controller.js");
       FreeFlightController = flightModule.FreeFlightController;
 
@@ -2371,7 +2371,7 @@
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       const gltfLoaderModule = await import(
-        "https://esm.sh/three@0.161.0/examples/jsm/loaders/GLTFLoader.js"
+        "https://esm.sh/three@0.183.2/examples/jsm/loaders/GLTFLoader.js"
       );
       GLTFLoader = gltfLoaderModule.GLTFLoader;
       try {

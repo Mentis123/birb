@@ -77,105 +77,15 @@ MAX_FORWARD_SPEED = 7
 
 ---
 
-## ⚠️ CRITICAL BLOCKING ISSUE: Spherical World Flight Direction
+## Spherical World Flight Direction — ✅ RESOLVED
 
-### Status: UNRESOLVED - Must Fix Before Anything Else
+This was the longest-running bug in the project (Dec 2025 – Jan 2026). The bird previously flew in a fixed world direction regardless of facing on the sphere.
 
-### The Problem
-On the spherical world, **the bird flies in a fixed absolute direction regardless of which way it's visually facing**. When the user turns (yaw input), the visual model rotates but movement continues in the original direction. The bird appears to "strafe" sideways.
+**Fix:** Implemented in `src/flight/bird-flight.js` using vector-based forward direction tracking with parallel transport and sphere re-projection. The bird now flies the direction it faces.
 
-**This breaks gameplay entirely** - you cannot control where you fly on the sphere.
+**Key pattern:** `forward (persistent Vector3, updated by yaw) → quaternion (derived for rendering only)`. The old scalar heading approach in `free-flight-controller.js` is kept as legacy reference.
 
-### Root Cause
-The heading system uses a **scalar angle** (`this.heading`) interpreted as rotation around **world Y axis**:
-```javascript
-this._ambientEuler.set(this.pitch, this.heading, 0, 'YXZ');
-this.quaternion.setFromEuler(this._ambientEuler);
-```
-
-On a spherical world, local "up" changes based on position. World-Y-based heading doesn't correctly represent direction in the local tangent plane.
-
-### What Has Been Tried (Multiple Sessions)
-
-| Approach | Result |
-|----------|--------|
-| GLB model offset fixes | Visual changed, velocity still wrong |
-| Parallel transport compensation | Didn't fix core issue |
-| Local-up quaternion building | Visual and velocity still mismatched |
-| Direct velocity from `_yawQuaternion` | Partial - forward changes with position but not with heading |
-| Vector-based `_persistentForward` | Implemented but **still not working correctly** |
-
-### Debug Tools Available
-- URL param `?debugVectors` - Shows colored arrows:
-  - Blue: Model forward direction
-  - Yellow: Camera forward direction
-  - Pink: Velocity direction
-- `DEBUG_MOBILE_INPUT = true` in `flight-controls.js:15`
-- Console logs for YAW INPUT, HEADING, FORWARD DIR
-
-### The Correct Solution (From Cesium Flight Simulator)
-
-**Track forward direction as a persistent Vector3, not a scalar heading.**
-
-```javascript
-class SphericalFlight {
-  constructor() {
-    this.position = new Vector3();
-    this.forward = new Vector3(0, 0, -1);  // Tangent to sphere
-    this.speed = 0;
-  }
-
-  getLocalUp() {
-    return this.position.clone().sub(sphereCenter).normalize();
-  }
-
-  turn(deltaRadians) {
-    // Rotate forward around local up - THIS IS THE KEY
-    const localUp = this.getLocalUp();
-    const q = new Quaternion().setFromAxisAngle(localUp, deltaRadians);
-    this.forward.applyQuaternion(q).normalize();
-    this._projectToTangent();  // Keep forward in tangent plane
-  }
-
-  _projectToTangent() {
-    const localUp = this.getLocalUp();
-    const dot = this.forward.dot(localUp);
-    this.forward.addScaledVector(localUp, -dot).normalize();
-  }
-
-  update(dt) {
-    // Move along forward - velocity IS the forward vector
-    this.position.addScaledVector(this.forward, this.speed * dt);
-    // Re-project to sphere surface
-    const toCenter = this.position.clone().sub(sphereCenter);
-    toCenter.normalize().multiplyScalar(sphereRadius);
-    this.position.copy(sphereCenter).add(toCenter);
-    // Re-project forward to new tangent plane (parallel transport)
-    this._projectToTangent();
-  }
-
-  getQuaternion() {
-    // Derive quaternion FROM forward + up (for rendering only)
-    const localUp = this.getLocalUp();
-    const localRight = new Vector3().crossVectors(this.forward, localUp).normalize();
-    const m = new Matrix4().makeBasis(localRight, localUp, this.forward.clone().negate());
-    return new Quaternion().setFromRotationMatrix(m);
-  }
-}
-```
-
-**Key insight**: Current code does `heading → quaternion → forward`.
-Correct approach: `forward (updated directly by yaw) → quaternion (derived for rendering)`.
-
-### Why Previous "Fix" Didn't Work
-
-The code has `_persistentForward` but something in the chain is broken:
-1. Maybe `_persistentForward` isn't being used for velocity calculation
-2. Maybe the parallel transport isn't re-projecting correctly
-3. Maybe there's still a path using the old scalar heading
-4. Maybe the quaternion is still overriding the vector-based direction
-
-**This needs a ground-up rewrite of the spherical flight path, not patches.**
+See `KNOWN_ISSUES.md` Issue 5 for the full investigation history.
 
 ---
 

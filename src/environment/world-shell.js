@@ -1,4 +1,4 @@
-import * as THREEImported from "https://esm.sh/three@0.161.0";
+import * as THREEImported from "https://esm.sh/three@0.183.2";
 
 const DEG2RAD = Math.PI / 180;
 const BASE_SPACE_SCALE = 3.2;
@@ -914,6 +914,7 @@ export function createWorldShell(
     anchors.setMatrixAt(i, dummy.matrix);
   }
   anchors.instanceMatrix.needsUpdate = true;
+  anchors.computeBoundingSphere();
   root.add(anchors);
 
   const builder = definition.builder;

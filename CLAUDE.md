@@ -79,7 +79,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 ```
 
 **Key CDN imports:**
-- `three@0.161.0` from esm.sh
+- `three@0.183.2` from esm.sh
 - `nipplejs@0.10.1` from esm.sh
 - GLTFLoader from Three.js examples
 
@@ -106,13 +106,13 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `docs/PRD-game-modes.md` | Game mode specifications |
 | `basic/index.html` | Minimal reference implementation (single-file) |
 
-## Flight Direction — Historical Bug (Believed Resolved)
+## Flight Direction — ✅ RESOLVED
 
-The spherical flight direction bug — where the bird flew in a fixed world direction regardless of facing — was the longest-running issue in this project. It has been through multiple fix attempts (see `KNOWN_ISSUES.md` Issue 5 for the full saga).
+The spherical flight direction bug — where the bird flew in a fixed world direction regardless of facing — was the longest-running issue in this project (Dec 2025 – Jan 2026). It is now **fixed and working in production.**
 
-**Current status:** The game plays correctly on mobile in production. The active controller (`src/flight/bird-flight.js`) uses fixed-axis rotation which theoretically breaks on a sphere, but in practice the parallel transport and sphere re-projection keep things working. If this bug resurfaces, the legacy `free-flight-controller.js` has a full vector-based fix that could be ported.
+The active controller (`src/flight/bird-flight.js`) uses vector-based forward direction tracking with parallel transport and sphere re-projection. The legacy `free-flight-controller.js` is kept as reference only.
 
-**Don't touch flight code without reading** `KNOWN_ISSUES.md` and `FLIGHT_CONTROLS_PLAN.md` first.
+See `KNOWN_ISSUES.md` Issue 5 for the investigation history.
 
 ## Key Technical Patterns
 
@@ -193,7 +193,7 @@ For mobile testing: use Edge DevTools device emulation, or access via local netw
 
 ## Known Issues
 
-1. ~~Spherical flight direction bug~~ — believed resolved, working in production. See history in `KNOWN_ISSUES.md`.
+1. ~~Spherical flight direction bug~~ — **RESOLVED.** Fixed in `src/flight/bird-flight.js`. See `KNOWN_ISSUES.md` for history.
 2. Eruda debug console still enabled in `index.html` — can be removed now
 3. iOS audio full duration testing incomplete
 
@@ -251,7 +251,7 @@ Real features. Real shipping. Real learning.
 
 ### The Big Challenge
 
-- **Fix the spherical flight direction bug** — this is the real one. The bird doesn't fly the direction it's facing on the sphere. Read `KNOWN_ISSUES.md` Issue 5 and `FLIGHT_CONTROLS_PLAN.md` Phase 0. If you crack this, you've earned serious respect. This is a real, unsolved problem involving quaternions, spherical geometry, and vector-based direction tracking.
+- **Study how the spherical flight bug was solved** — the bird used to fly in a fixed world direction regardless of facing. Read `KNOWN_ISSUES.md` Issue 5 for the investigation saga, then study the fix in `src/flight/bird-flight.js`. This is a masterclass in quaternions, spherical geometry, and vector-based direction tracking on curved surfaces.
 
 ### What You'll Learn Along the Way
 

@@ -464,6 +464,9 @@ export class InstancedLOD {
     this.instancedMeshes.high.instanceMatrix.needsUpdate = true
     this.instancedMeshes.medium.instanceMatrix.needsUpdate = true
     this.instancedMeshes.low.instanceMatrix.needsUpdate = true
+    this.instancedMeshes.high.computeBoundingSphere()
+    this.instancedMeshes.medium.computeBoundingSphere()
+    this.instancedMeshes.low.computeBoundingSphere()
   }
 
   /**

@@ -1,4 +1,4 @@
-import * as THREEImported from "https://esm.sh/three@0.161.0";
+import * as THREEImported from "https://esm.sh/three@0.183.2";
 
 const DEG2RAD = Math.PI / 180;
 

@@ -1,4 +1,4 @@
-import * as THREE from "https://esm.sh/three@0.161.0";
+import * as THREE from "https://esm.sh/three@0.183.2";
 
 /**
  * Creates a sky dome with a smooth gradient shader.
