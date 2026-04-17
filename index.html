@@ -2875,15 +2875,106 @@
 
     const scene = new THREE.Scene();
     scene.background = null; // Replaced by sky dome
-    // Extended fog for spherical world visibility (sphere radius is 120)
-    scene.fog = new THREE.Fog(0x050a14, 80, 500);
+    // Atmospheric distance haze: exponential fog for painterly depth.
+    // Density tuned so near objects (<30u) are essentially unaffected
+    // (~0.6% fog at 30u) and far geometry dissolves softly into the sky's
+    // mid band by the world horizon. Color is updated per-environment.
+    scene.fog = new THREE.FogExp2(0x6d9ed0, 0.0028);
 
-    // ===== IMPROVEMENT 1: Sky Dome =====
+    // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
     const skyDome = createSkyDome({
-      topColor: new THREE.Color(0x4d80c0),
-      bottomColor: new THREE.Color(0x071323),
+      topColor: new THREE.Color(0x1b2a55),     // deep indigo zenith
+      midColor: new THREE.Color(0x6d9ed0),     // soft painterly blue
+      horizonColor: new THREE.Color(0xf5d8a6), // warm golden-hour cream
+      bottomColor: new THREE.Color(0x2a1a28),  // muted plum below
     });
     scene.add(skyDome.mesh);
+
+    // ===== IMPROVEMENT 1b: Cloud shell (high wispy clouds, single mesh) =====
+    // Procedural canvas noise generated ONCE at load -> tiled cloud texture.
+    // Single transparent sphere shell, no shadow casting/receiving.
+    const cloudShell = (() => {
+      // Build a soft cloud noise canvas (one-shot, ~96KB).
+      const C = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = C; canvas.height = C;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(C, C);
+      // Layered value noise via cheap hash for soft cloud blobs.
+      const hash = (x, y) => {
+        const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+        return s - Math.floor(s);
+      };
+      const smoothNoise = (x, y) => {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        const xf = x - xi, yf = y - yi;
+        const u = xf * xf * (3 - 2 * xf);
+        const v = yf * yf * (3 - 2 * yf);
+        const a = hash(xi, yi);
+        const b = hash(xi + 1, yi);
+        const c = hash(xi, yi + 1);
+        const d = hash(xi + 1, yi + 1);
+        return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+      };
+      for (let y = 0; y < C; y++) {
+        for (let x = 0; x < C; x++) {
+          // Wrapping fbm: sample at multiple frequencies, modulo C for tileability.
+          let n = 0, amp = 0.5, freq = 1 / 32;
+          for (let o = 0; o < 4; o++) {
+            n += smoothNoise(x * freq, y * freq) * amp;
+            amp *= 0.5; freq *= 2;
+          }
+          // Bias so most pixels are clear sky, only ~30% are wispy cloud.
+          const cloud = Math.max(0, n - 0.45) * 2.2;
+          const a = Math.min(1, cloud) * 200;
+          const i = (y * C + x) * 4;
+          img.data[i] = 255;
+          img.data[i + 1] = 252;
+          img.data[i + 2] = 248;
+          img.data[i + 3] = a;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      const cloudTex = new THREE.CanvasTexture(canvas);
+      cloudTex.wrapS = THREE.RepeatWrapping;
+      cloudTex.wrapT = THREE.RepeatWrapping;
+      cloudTex.repeat.set(3, 2);
+      cloudTex.anisotropy = 2;
+
+      const cloudGeo = new THREE.SphereGeometry(380, 24, 16);
+      const cloudMat = new THREE.MeshBasicMaterial({
+        map: cloudTex,
+        transparent: true,
+        opacity: 0.45,
+        depthWrite: false,
+        side: THREE.BackSide,
+        fog: false,
+      });
+      const mesh = new THREE.Mesh(cloudGeo, cloudMat);
+      mesh.renderOrder = -900; // Above sky dome (-1000), below world.
+      mesh.frustumCulled = false;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      scene.add(mesh);
+      // Pre-allocated time accumulator for zero-alloc rotation.
+      const state = { time: 0 };
+      return {
+        mesh,
+        update(delta) {
+          state.time += delta;
+          // ~0.0005 rad/sec — extremely slow drift.
+          mesh.rotation.y = state.time * 0.0005;
+        },
+        followCamera(camPos) {
+          mesh.position.copy(camPos);
+        },
+        dispose() {
+          cloudGeo.dispose();
+          cloudMat.dispose();
+          cloudTex.dispose();
+        }
+      };
+    })();
 
     // ===== IMPROVEMENT 5: Particle System =====
     const particleSystem = new ParticleSystem(scene);
@@ -3201,11 +3292,15 @@
     // Wave banner tracking
     let lastAnnouncedWave = 0;
 
-    const ambient = new THREE.HemisphereLight(0xd4f1ff, 0x1a2f32, 0.92);
-    ambient.groundColor.set(0x1a2f32);
+    // Hemisphere: warm cream sky bounce, cooler indigo-tinted ground bounce
+    // so shadows pick up sky color and aren't pitch black.
+    const ambient = new THREE.HemisphereLight(0xfde8c4, 0x2a3a4e, 1.05);
+    ambient.groundColor.set(0x2a3a4e);
     scene.add(ambient);
 
-    const keyLight = new THREE.DirectionalLight(0xf3f0d2, 1.2);
+    // Key light: subtle warm golden-hour tint (was 0xf3f0d2, now slightly
+    // warmer toward amber). Not saturated — reads as "late afternoon sun".
+    const keyLight = new THREE.DirectionalLight(0xffe4b5, 1.25);
     keyLight.position.set(7.5, 8.2, 5.2);
     scene.add(keyLight);
 
@@ -4123,11 +4218,16 @@
       if (skyDome && definition.sky) {
         skyDome.setColors(definition.sky);
       }
-      // Update fog color to match environment
-      if (scene.fog && definition.fogColor !== undefined) {
-        scene.fog.color.setHex(definition.fogColor);
-        if (definition.fogNear) scene.fog.near = definition.fogNear;
-        if (definition.fogFar) scene.fog.far = definition.fogFar;
+      // Atmospheric haze: tint fog toward the sky's mid band so far geometry
+      // dissolves softly into the painterly sky instead of a flat slate color.
+      // FogExp2 ignores near/far; density was tuned globally and we keep it.
+      if (scene.fog) {
+        const skyMid = skyDome && typeof skyDome.getMidColor === 'function' ? skyDome.getMidColor() : null;
+        if (skyMid) {
+          scene.fog.color.copy(skyMid);
+        } else if (definition.fogColor !== undefined) {
+          scene.fog.color.setHex(definition.fogColor);
+        }
       }
 
       // ===== IMPROVEMENT 5: Update ambient particles =====
@@ -6049,6 +6149,12 @@
 
       // IMPROVEMENT 1: Sky dome follows camera
       if (skyDome && cam) skyDome.followCamera(cam.position);
+
+      // IMPROVEMENT 1b: Cloud shell — slow drift + follow camera
+      if (cloudShell && cam) {
+        cloudShell.update(delta);
+        cloudShell.followCamera(cam.position);
+      }
 
       // IMPROVEMENT 5: Update particles
       if (particleSystem) particleSystem.update(delta, cam?.position);

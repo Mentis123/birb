@@ -48,7 +48,8 @@ function generateRingPositions(count = RING_COUNT) {
 }
 
 /**
- * Create a single ring mesh - small, glowing torus
+ * Create a single ring mesh - small, glowing torus.
+ * Pre-allocates color scratch values for zero-alloc shimmer.
  */
 function createRing(THREE, config) {
   const group = new THREE.Group();
@@ -86,10 +87,18 @@ function createRing(THREE, config) {
   const core = new THREE.Mesh(coreGeo, coreMat);
   group.add(core);
 
+  // Pre-allocated color endpoints for shimmer (no per-frame allocs).
+  // Base = config color (slightly dimmed); bright = base lifted toward white
+  // so the ring reads as an emissive pulse rather than a hue shift.
+  const baseColor = new THREE.Color(config.color).multiplyScalar(0.85);
+  const brightColor = new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.55);
+
   // Store for animation
   group.userData.ringMat = ringMat;
   group.userData.glowMat = glowMat;
   group.userData.coreMat = coreMat;
+  group.userData.baseColor = baseColor;
+  group.userData.brightColor = brightColor;
   group.userData.collected = false;
 
   return group;
@@ -165,6 +174,17 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
         const pulse = Math.sin(animationTime * 3 + i * 0.5) * 0.3 + 0.7;
         ring.userData.glowMat.opacity = 0.4 * pulse;
         ring.userData.coreMat.opacity = 0.6 * pulse;
+
+        // Ring shimmer: subtle sine-wave emissive pulse on the main torus.
+        // MeshBasicMaterial has no emissive prop, so we lerp the existing
+        // color in place between pre-allocated base/bright endpoints.
+        // shimmerT in [0, 1], biased low so it glimmers, not strobes.
+        const shimmerT = (Math.sin(animationTime * 2.2 + i * 1.37) * 0.5 + 0.5) * 0.55;
+        ring.userData.ringMat.color.lerpColors(
+          ring.userData.baseColor,
+          ring.userData.brightColor,
+          shimmerT
+        );
       });
     },
 

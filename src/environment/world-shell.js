@@ -772,16 +772,18 @@ export function createWorldShell(
 
   if (scene.fog) {
     scene.fog.color.copy(fogColor);
-    scene.fog.near = fogNear;
-    scene.fog.far = fogFar;
+    // Linear fog uses near/far; FogExp2 uses density (set globally elsewhere).
+    if (scene.fog.isFog) {
+      scene.fog.near = fogNear;
+      scene.fog.far = fogFar;
+    }
   } else {
     scene.fog = new THREE.Fog(fogColor.getHex(), fogNear, fogFar);
   }
 
+  // Background is owned by the sky dome — leave it null so the dome shows.
   if (scene.background && scene.background.isColor) {
     scene.background.copy(backgroundColor);
-  } else {
-    scene.background = backgroundColor.clone();
   }
 
   const root = new THREE.Group();
