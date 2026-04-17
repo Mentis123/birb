@@ -646,6 +646,42 @@
       height: 80%;
     }
 
+    .flight-recovery-button {
+      position: absolute;
+      bottom: clamp(1rem, 4vw, 2rem);
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: clamp(96px, 24vw, 132px);
+      height: clamp(56px, 14vw, 70px);
+      padding: 0 clamp(1rem, 3vw, 1.4rem);
+      border-radius: 999px;
+      border: 2px solid rgba(170, 255, 210, 0.85);
+      background: linear-gradient(145deg, rgba(24, 85, 62, 0.92), rgba(15, 56, 42, 0.95));
+      color: rgba(220, 255, 236, 0.95);
+      font-size: clamp(0.9rem, 2.6vw, 1.05rem);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 220ms ease, transform 160ms ease, box-shadow 160ms ease;
+      z-index: 12;
+      box-shadow: 0 3px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(200, 255, 225, 0.2);
+      touch-action: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+
+    .flight-recovery-button.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .flight-recovery-button:active {
+      transform: translateX(-50%) scale(0.94);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+
     /* Freeze indicator - shows when birb collides with drone */
     .freeze-indicator {
       position: fixed;
@@ -2090,6 +2126,11 @@
           <!-- Nest rim highlight -->
           <path d="M18 43 Q32 40 46 43" stroke="#A67C52" stroke-width="2" stroke-linecap="round" fill="none"/>
         </svg>
+      </button>
+
+      <!-- Flight recovery button (appears after impact/landing) -->
+      <button type="button" class="flight-recovery-button" data-flight-recovery aria-label="Fly again">
+        Fly
       </button>
 
       <!-- Freeze indicator (shows when birb collides with drone) -->
@@ -3673,6 +3714,21 @@
     let rocketSystem = null;
     let droneSystem = null;
     let nestToastTimeout = null;
+    const FLIGHT_RECOVERY_STATES = {
+      FLYING: 'flying',
+      FALLING: 'falling',
+      GROUNDED: 'grounded',
+    };
+    const FLIGHT_RECOVERY_CONFIG = {
+      birdRadius: 0.4,
+      walkSpeed: 2.1,
+      knockbackFallSpeed: 16.5,
+      minFlightResumeSpeed: 3.5,
+    };
+    let flightRecoveryState = FLIGHT_RECOVERY_STATES.FLYING;
+    const flightRecoveryScratch = {
+      radial: new THREE.Vector3(),
+    };
 
     // Freeze state (when birb collides with drone)
     const freezeState = {
@@ -4165,6 +4221,7 @@
     const nestLaunchButton = document.querySelector('[data-nest-launch]');
     const nestToast = document.querySelector('[data-nest-toast]');
     const nestIndicator = document.querySelector('[data-nest-indicator]');
+    const flightRecoveryButton = document.querySelector('[data-flight-recovery]');
 
     function showNestUI(visible) {
       if (nestUI) {
@@ -4176,6 +4233,34 @@
     function showNestIndicator(visible) {
       if (nestIndicator) {
         nestIndicator.classList.toggle('is-visible', visible);
+      }
+    }
+
+    function showFlightRecoveryButton(visible, { grounded = false } = {}) {
+      if (!flightRecoveryButton) return;
+      flightRecoveryButton.classList.toggle('is-visible', visible);
+      flightRecoveryButton.textContent = grounded ? 'Fly' : 'Self Arrest';
+      flightRecoveryButton.setAttribute('aria-label', grounded ? 'Take off and fly again' : 'Self arrest and fly again');
+    }
+
+    function forceGroundedPose() {
+      if (!flightController?.position) return;
+      const radial = flightRecoveryScratch.radial.copy(flightController.position);
+      if (radial.lengthSq() <= 0.000001) return;
+      radial.normalize().multiplyScalar(SPHERE_RADIUS + FLIGHT_RECOVERY_CONFIG.birdRadius);
+      flightController.position.copy(radial);
+    }
+
+    function applyFlightRecoveryState(nextState) {
+      if (flightRecoveryState === nextState) return;
+      flightRecoveryState = nextState;
+
+      if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+        showFlightRecoveryButton(false);
+      } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
+        showFlightRecoveryButton(true, { grounded: false });
+      } else {
+        showFlightRecoveryButton(true, { grounded: true });
       }
     }
 
@@ -4340,6 +4425,7 @@
       // Hide nest UI when changing environments
       showNestUI(false);
       showNestIndicator(false);
+      applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
 
       if (sphericalWorld) {
         try {
@@ -5655,6 +5741,16 @@
 
       // Show/hide nest mode UI
       showNestUI(isNested);
+      if (isNested) {
+        showFlightRecoveryButton(false);
+      } else if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FLYING) {
+        showFlightRecoveryButton(true, {
+          grounded: flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED
+        });
+      }
+      if (isLeavingNest) {
+        applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
+      }
 
       // Hide the settings gear button while nested
       if (settingsGearButton) {
@@ -5744,6 +5840,19 @@
         if (nestingSystem) {
           nestingSystem.takeOff();
         }
+      });
+    }
+
+    if (flightRecoveryButton) {
+      const recoverFlight = () => {
+        if (!flightController || nestingSystem?.isNested?.()) return;
+        applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
+      };
+
+      flightRecoveryButton.addEventListener('click', recoverFlight);
+      flightRecoveryButton.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        recoverFlight();
       });
     }
 
@@ -5999,6 +6108,7 @@
         }
         showNestUI(false);
         showNestIndicator(false);
+        applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
         updateControlMetrics();
       });
     }
@@ -6381,7 +6491,27 @@
         // inputState already obtained above for aim rig
         const resolvedInput = isNested
           ? { x: 0, y: 0, active: false }
-          : inputState;
+          : flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED
+            ? { x: inputState.x, y: 0, active: inputState.active }
+            : flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING
+              ? { x: 0, y: 0, active: false }
+              : inputState;
+
+        const sprintingNow = Boolean(sprintState?.active);
+        const cruiseSpeed = sprintingNow
+          ? sprintState.sprintSpeed
+          : sprintState.baseSpeed;
+        const resumeSpeed = Math.max(FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed, cruiseSpeed);
+
+        if (!isNested) {
+          if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
+            flight.speed = FLIGHT_RECOVERY_CONFIG.walkSpeed;
+          } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
+            flight.speed = FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed;
+          } else {
+            flight.speed = resumeSpeed;
+          }
+        }
 
         // 2. Physics Update
         // IMPORTANT: We pass delta even when nested!
@@ -6389,10 +6519,19 @@
         // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
         pose = flight.tick(resolvedInput, delta);
 
+        if (!isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
+          const radial = flightRecoveryScratch.radial.copy(pose.position);
+          if (radial.lengthSq() > 0.000001) {
+            radial.normalize();
+            pose.position.addScaledVector(radial, -FLIGHT_RECOVERY_CONFIG.knockbackFallSpeed * delta);
+            flight.position.copy(pose.position);
+          }
+        }
+
         // 2b. Object Collision Detection (trees, rocks, etc.)
         // Only check when flying (not nested) and collision system exists
         if (!isNested && sphericalWorld?.collisionSystem) {
-          const birdRadius = 0.4; // Bird collision radius
+          const birdRadius = FLIGHT_RECOVERY_CONFIG.birdRadius; // Bird collision radius
           const collisionResult = sphericalWorld.collisionSystem.checkObjectCollision(
             THREE,
             pose.position,
@@ -6403,6 +6542,30 @@
             // Push bird away from the object
             pose.position.copy(collisionResult.correctedPosition);
             flight.position.copy(collisionResult.correctedPosition);
+            if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+              applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
+              if (statusMetric) {
+                statusMetric.textContent = "Impact! You're dropping—tap Self Arrest to recover flight.";
+              }
+            }
+          }
+
+          const groundResult = sphericalWorld.collisionSystem.checkGroundCollision(
+            THREE,
+            pose.position,
+            birdRadius
+          );
+          if (groundResult.collided) {
+            pose.position.copy(groundResult.correctedPosition);
+            flight.position.copy(groundResult.correctedPosition);
+            applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
+            if (statusMetric) {
+              statusMetric.textContent = "Landed. You're gliding along the ground—tap Fly to take off.";
+            }
+          } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
+            // Keep grounded movement hugging the surface while walking/sliding.
+            forceGroundedPose();
+            pose.position.copy(flight.position);
           }
         }
 
