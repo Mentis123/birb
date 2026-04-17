@@ -3339,6 +3339,11 @@
 
     // ===== Helper: minimap =====
     let minimapPulseTime = 0;
+    // Zero-alloc scratch: reused forward vector (avoid `new Vector3` per frame).
+    const _minimapFwd = new THREE.Vector3(0, 0, -1);
+    // Permanent pool of ring data entries for minimap — grown once to ring count,
+    // reused every frame during Ring Rush. Each entry: { position: Vec3, collected: bool }.
+    const minimapRingScratch = [];
     function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos, delta) {
       if (!minimapCtx || !minimapCanvas) return;
       minimapPulseTime += (delta || 0.016);
@@ -3370,9 +3375,9 @@
         minimapCtx.stroke();
       }
 
-      // Get bird forward direction for rotation
-      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(birdQuat);
-      const angle = -Math.atan2(fwd.x, fwd.z);
+      // Get bird forward direction for rotation (reuse scratch, zero-alloc)
+      _minimapFwd.set(0, 0, -1).applyQuaternion(birdQuat);
+      const angle = -Math.atan2(_minimapFwd.x, _minimapFwd.z);
 
       // Helper to project world pos to minimap
       const project = (worldPos) => {
@@ -6150,9 +6155,12 @@
         }
       }
 
-      // Update drones (skipped entirely in Zen mode — no enemies in chill mode)
-      const zenSuppressDrones = currentGameMode === GAME_MODES.ZEN;
-      if (droneSystem && !zenSuppressDrones) {
+      // Update drones (skipped in Zen + Ring Rush — no enemies in those modes).
+      // Ring Rush focus = rings; drone updates were silent cost even with no
+      // drones spawned, because droneSystem.update() still iterates internals.
+      const suppressDrones = currentGameMode === GAME_MODES.ZEN
+        || currentGameMode === GAME_MODES.RING_RUSH;
+      if (droneSystem && !suppressDrones) {
         droneSystem.update(delta);
 
         // Check birb-drone collisions (only when flying, not nested, not frozen)
@@ -6213,7 +6221,7 @@
               // Haptic: ring collected (20ms)
               triggerHaptic(20);
               // ===== IMPROVEMENT 5: Ring sparkle particles =====
-              if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
+              if (particleSystem) particleSystem.createSparkle(flightController.position);
               // ===== IMPROVEMENT 6: FOV kick on ring collect =====
               screenShake.ringCollected();
               // Start timer on first ring
@@ -6358,7 +6366,7 @@
           const collected = collectiblesSystem.checkCollection(flightController.position, 1.8);
           if (collected.length > 0) {
             playRingCollectSound();
-            if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
+            if (particleSystem) particleSystem.createSparkle(flightController.position);
             // Respawn collected rings after a short delay so the world stays full.
             setTimeout(() => {
               if (currentGameMode !== GAME_MODES.ZEN) return;
@@ -6608,17 +6616,26 @@
       // Ring arrow removed – minimap edge arrows serve this purpose
 
       // IMPROVEMENT 7: Minimap radar
+      // ZERO-ALLOC: minimapRingScratch is a permanent pool of { position, collected }
+      // entries reused each frame — previous version allocated 10 Vec3 clones +
+      // 10 object literals per frame during Ring Rush (20 allocs/frame = 1200/sec).
       if (miniGameState.active && minimapCtx && birdPos && birdQuat) {
         minimapCanvas.classList.add('is-visible');
         const drones = droneSystem ? droneSystem.getDrones() : [];
-        // Build ring data from collectibles system
-        const ringData = [];
+        let ringData = null;
         if (collectiblesSystem && collectiblesSystem.rings) {
-          const _rp = new THREE.Vector3();
-          for (const ring of collectiblesSystem.rings) {
-            ring.getWorldPosition(_rp);
-            ringData.push({ position: _rp.clone(), collected: ring.userData.collected });
+          const rings = collectiblesSystem.rings;
+          // Grow the scratch pool to match ring count (one-time per env change).
+          while (minimapRingScratch.length < rings.length) {
+            minimapRingScratch.push({ position: new THREE.Vector3(), collected: false });
           }
+          for (let i = 0; i < rings.length; i++) {
+            const entry = minimapRingScratch[i];
+            rings[i].getWorldPosition(entry.position);
+            entry.collected = rings[i].userData.collected;
+          }
+          minimapRingScratch.length = rings.length;
+          ringData = minimapRingScratch;
         }
         const nestPos = (isNested && flightController) ? flightController.position : null;
         updateMinimap(birdPos, birdQuat, ringData, drones, nestPos, delta);
