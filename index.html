@@ -2537,9 +2537,11 @@
       droneDestroyed: 0.6,
       nestLand: 0.4,
       droneHum: 0.4,
-      wind: 0.55,
+      // wind + ambientBirds removed — user wanted only the original audio.
+      // Keys left here commented for graceful re-introduction later.
+      // wind: 0.55,
       ambient: 0.25,
-      ambientBirds: 0.15,
+      // ambientBirds: 0.15,
     };
 
     // Create audio pool for a sound
@@ -2567,6 +2569,9 @@
     initSoundPools();
 
     // Continuous/looping sounds (single instance each)
+    // `wind` intentionally left null — the immersion-pass wind bed was
+    // overlapping the original music. Slot preserved so the public API
+    // stays stable and re-enabling is a one-line change.
     const continuousSounds = {
       wind: null,
       droneHum: null,
@@ -2575,15 +2580,6 @@
 
     // Initialize continuous sounds
     const initContinuousSounds = () => {
-      // Wind whoosh - loops, volume + playbackRate tied to flight speed.
-      // No dedicated wind mp3 shipped yet; reuse ambient-mountain as a low
-      // airy bed. Pitch-shifted via playbackRate to read as wind at speed.
-      continuousSounds.wind = new Audio('/sound/ambient-mountain.mp3');
-      continuousSounds.wind.loop = true;
-      continuousSounds.wind.volume = 0;
-      continuousSounds.wind.preload = 'auto';
-      continuousSounds.wind.playbackRate = 0.85;
-
       // Drone hum - loops, spatial based on nearest drone
       continuousSounds.droneHum = new Audio('/sound/drone-hum.mp3');
       continuousSounds.droneHum.loop = true;
@@ -2664,97 +2660,13 @@
       });
     };
 
-    // ============ AMBIENT BIRD CALLS (Casual free-flight only) ============
-    // Snippets pulled from random offsets in the forest ambient track,
-    // pitch-shifted slightly so successive calls don't feel looped.
-    // Pool of 2 keeps GC pressure to zero per-frame.
-    const ambientBirdPool = [];
-    const initAmbientBirdPool = () => {
-      for (let i = 0; i < 2; i++) {
-        const a = new Audio('/sound/ambient-forest.mp3');
-        a.volume = 0;
-        a.preload = 'auto';
-        ambientBirdPool.push({ audio: a, playing: false, stopAt: 0 });
-      }
-    };
-    initAmbientBirdPool();
-
-    // Scheduling state — next chirp interval randomized each fire.
-    const ambientBirdState = {
-      nextAt: performance.now() + 8000,
-      enabled: true,
-    };
-
-    const playAmbientBirdCall = () => {
-      if (!soundSettings.sfxEnabled) return;
-      const slot = ambientBirdPool.find(s => !s.playing) || ambientBirdPool[0];
-      const a = slot.audio;
-      // Seek to a random spot far enough from end to allow ~1.2-1.8s playback.
-      const dur = Number.isFinite(a.duration) && a.duration > 3 ? a.duration : 30;
-      const snippetLen = 1.2 + Math.random() * 0.6;
-      const maxStart = Math.max(0, dur - snippetLen - 0.1);
-      try {
-        a.currentTime = Math.random() * maxStart;
-      } catch (_) { /* ignore seek errors before metadata */ }
-      a.playbackRate = 0.9 + Math.random() * 0.2;
-      a.volume = getEffectiveVolume(BASE_VOLUMES.ambientBirds);
-      slot.playing = true;
-      slot.stopAt = performance.now() + snippetLen * 1000 / a.playbackRate;
-      a.play().catch(() => { slot.playing = false; });
-    };
-
-    // Per-frame tick: stop expired snippets, schedule next call.
-    // Caller passes whether ambient birds are eligible (Casual + flying).
-    const tickAmbientBirds = (eligible) => {
-      const now = performance.now();
-      // Always check stop deadlines so leftover snippets don't drone on.
-      for (let i = 0; i < ambientBirdPool.length; i++) {
-        const slot = ambientBirdPool[i];
-        if (slot.playing && now >= slot.stopAt) {
-          try { slot.audio.pause(); } catch (_) {}
-          slot.playing = false;
-        }
-      }
-      if (!eligible) {
-        // Push next chirp time forward so it doesn't fire instantly on resume.
-        ambientBirdState.nextAt = now + 8000 + Math.random() * 4000;
-        return;
-      }
-      if (now >= ambientBirdState.nextAt) {
-        playAmbientBirdCall();
-        // 8-20s gap to next chirp
-        ambientBirdState.nextAt = now + 8000 + Math.random() * 12000;
-      }
-    };
-
-    // Update wind sound based on flight speed.
-    // Volume ramps 0.0 -> ~0.4 at top speed, pitch climbs 0.85 -> 1.25.
-    // Smoothed toward target each call to avoid iOS HTMLAudio pops.
-    const WIND_PITCH_MIN = 0.85;
-    const WIND_PITCH_MAX = 1.25;
-    const WIND_SMOOTH = 0.12; // Per-call smoothing factor (iOS-safe ramp)
-    let _windCurrentVol = 0;
-    let _windCurrentRate = WIND_PITCH_MIN;
-    const updateWindSound = (speed, maxSpeed = 8) => {
-      if (!continuousSounds.wind || !soundSettings.sfxEnabled) {
-        if (continuousSounds.wind) {
-          // Ramp toward zero for pop-free mute
-          _windCurrentVol += (0 - _windCurrentVol) * WIND_SMOOTH;
-          continuousSounds.wind.volume = _windCurrentVol;
-        }
-        return;
-      }
-      const speedFactor = Math.min(1, Math.max(0, speed / maxSpeed));
-      // Ease speedFactor so wind emerges nicely rather than linearly
-      const eased = speedFactor * speedFactor;
-      const targetVol = getEffectiveVolume(BASE_VOLUMES.wind) * eased;
-      const targetRate = WIND_PITCH_MIN + (WIND_PITCH_MAX - WIND_PITCH_MIN) * speedFactor;
-      _windCurrentVol += (targetVol - _windCurrentVol) * WIND_SMOOTH;
-      _windCurrentRate += (targetRate - _windCurrentRate) * WIND_SMOOTH;
-      continuousSounds.wind.volume = Math.max(0, Math.min(1, _windCurrentVol));
-      // playbackRate guarded: iOS Safari accepts 0.5–4 range reliably
-      continuousSounds.wind.playbackRate = _windCurrentRate;
-    };
+    // ============ AMBIENT BIRD CALLS / WIND — DISABLED ============
+    // User feedback: the immersion-pass wind bed + random ambient bird
+    // snippets were overlapping the existing music. Both are gated no-ops
+    // so the call sites in the game loop stay in place and re-enabling is
+    // a one-line change should we ever want to layer them back in.
+    const tickAmbientBirds = (_eligible) => { /* intentionally no-op */ };
+    const updateWindSound = (_speed, _maxSpeed = 8) => { /* intentionally no-op */ };
 
     // Update drone hum based on nearest drone distance
     const updateDroneHumSound = (nearestDroneDistance, maxDistance = 40) => {
