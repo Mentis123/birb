@@ -9,18 +9,18 @@
  */
 
 export const FLIGHT_DEFAULTS = {
-    speed: 8,
+    speed: 11,                  // bumped 8 -> 11 (~37%) for traversable 4× world
     yawRate: Math.PI * 0.8,
     pitchRate: Math.PI * 0.6,
     maxPitch: Math.PI * 0.4,
 };
 
-// Zen mode tuning — softer, floatier, no-pressure
+// Zen mode tuning — chill and floaty, NOT slow.
 // Applied as read-time multipliers so base constants stay intact for other modes.
 export const ZEN_TUNING = {
-    speedMul: 0.7,    // ~30% slower forward speed
-    yawMul: 0.75,     // ~25% slower yaw
-    pitchMul: 0.75,   // ~25% slower pitch
+    speedMul: 1.0,    // no speed nerf — Zen is the default, players need to cover ground
+    yawMul: 0.9,      // gentle softening only
+    pitchMul: 0.9,    // gentle softening only
 };
 
 export class BirdFlight {

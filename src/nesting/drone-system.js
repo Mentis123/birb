@@ -37,12 +37,21 @@ const DRONE_CONFIG = {
   count: 8,                    // Total drones maintained in world
   minAltitude: 135,            // Sphere radius (120) + 15 — above surface objects
   maxAltitude: 175,            // Sphere radius (120) + 55 — above most trees/buildings
-  orbitSpeed: 0.15,            // Base radians per second (angular, scale-independent)
+  // orbitSpeed bumped 0.15 -> 0.45 rad/s so motion is clearly visible from the
+  // player's typical viewing distance on the 4× world. At altitude ~175 this
+  // gives ~78 u/s linear speed — fast enough to read as motion, slow enough
+  // to be trackable by the player.
+  orbitSpeed: 0.45,            // Base radians per second (angular, scale-independent)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
   collisionRadius: 3.0,        // Hit detection — bird-scale, not world-scale
   birbCollisionRadius: 0.8,    // Birb collision radius — bird hasn't changed size
 };
+
+// Lightweight debug hook. Enabled via `?debug=drones` query param.
+// Logs once per second: drone count, first drone position, last delta.
+const DEBUG_DRONES = (typeof window !== 'undefined' &&
+  window?.location?.search?.includes('debug=drones')) || false;
 
 /**
  * Create a single drone mesh with visual components
@@ -383,6 +392,9 @@ export function createDroneSystem(THREE, scene, options = {}) {
   const _tempVec = new THREE.Vector3();
   const _tempVec2 = new THREE.Vector3();
 
+  // Debug state (gated behind ?debug=drones query param)
+  let _debugAccum = 0;
+
   /**
    * Spawn a drone at a random position on the sphere
    */
@@ -448,6 +460,23 @@ export function createDroneSystem(THREE, scene, options = {}) {
      * Update all drones (call each frame)
      */
     update(delta) {
+      if (DEBUG_DRONES) {
+        _debugAccum += delta;
+        if (_debugAccum >= 1) {
+          _debugAccum = 0;
+          const alive = drones.filter(d => d.userData.isAlive);
+          const first = alive[0];
+          console.log('[drones]', {
+            delta: delta.toFixed(4),
+            total: drones.length,
+            alive: alive.length,
+            containerVisible: container.visible,
+            firstPos: first ? first.position.toArray().map(n => n.toFixed(1)) : null,
+            firstSpeed: first ? first.userData.orbitSpeed.toFixed(3) : null,
+          });
+        }
+      }
+
       // Update pending respawns
       for (let i = pendingRespawns.length - 1; i >= 0; i--) {
         pendingRespawns[i].timer -= delta;
