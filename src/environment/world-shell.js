@@ -622,8 +622,8 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 118,
     backgroundColor: 0x071422,
     fogColor: 0x0a1b2e,
-    fogNear: 80,
-    fogFar: 500,
+    fogNear: 110,
+    fogFar: 720,
     sky: { top: 0x4d80c0, bottom: 0x071323, glow: 0.28 },
     hazeColor: 0x112a3f,
     hazeLayers: [
@@ -652,8 +652,8 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 134,
     backgroundColor: 0x1e0f0d,
     fogColor: 0x2b150f,
-    fogNear: 90,
-    fogFar: 550,
+    fogNear: 120,
+    fogFar: 780,
     sky: { top: 0xf8b274, bottom: 0x2a080a, glow: 0.34 },
     hazeColor: 0x3c1b12,
     hazeLayers: [
@@ -682,8 +682,8 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 132,
     backgroundColor: 0x0b1521,
     fogColor: 0x0f1f2f,
-    fogNear: 80,
-    fogFar: 540,
+    fogNear: 110,
+    fogFar: 760,
     sky: { top: 0x6da0df, bottom: 0x08121f, glow: 0.32 },
     hazeColor: 0x1a2f42,
     hazeLayers: [
@@ -712,8 +712,8 @@ const ENVIRONMENT_VARIANTS = [
     terrainScale: 126,
     backgroundColor: 0x050a16,
     fogColor: 0x0b1524,
-    fogNear: 75,
-    fogFar: 520,
+    fogNear: 105,
+    fogFar: 740,
     sky: { top: 0x6b96ff, bottom: 0x040910, glow: 0.36 },
     hazeColor: 0x162740,
     hazeLayers: [

@@ -3101,6 +3101,36 @@
     // ===== IMPROVEMENT 5: Particle System =====
     const particleSystem = new ParticleSystem(scene);
 
+    // ===== Proximity cue state =====
+    // Pre-allocated working vectors (zero-alloc per frame).
+    // proxState.targets is rebuilt on environment change (a plain array of
+    // { position: Vector3, radius, tint }). cooldowns is a parallel Float32Array.
+    const proxState = {
+      targets: [],
+      cooldowns: new Float32Array(0),
+      _vec: new THREE.Vector3(),
+      _fwd: new THREE.Vector3(0, 0, -1),
+      _hapticsEnabled: null, // resolved lazily from localStorage
+      triggerDist: 8,        // bird must be within this many units
+      cooldownAfterTrigger: 0.6,
+    };
+    function setProxTargets(list) {
+      proxState.targets = Array.isArray(list) ? list : [];
+      proxState.cooldowns = new Float32Array(proxState.targets.length);
+    }
+    function isHapticsEnabled() {
+      if (proxState._hapticsEnabled !== null) return proxState._hapticsEnabled;
+      try {
+        const v = localStorage.getItem('birb.haptics');
+        // Default on if unset (forward-compatible with parallel haptics branch);
+        // user explicitly opting out via 'false'/'0' disables.
+        proxState._hapticsEnabled = !(v === 'false' || v === '0' || v === 'off');
+      } catch (e) {
+        proxState._hapticsEnabled = false;
+      }
+      return proxState._hapticsEnabled;
+    }
+
     // ===== IMPROVEMENT 6: Screen Shake =====
     const screenShake = new ScreenShake();
 
@@ -4356,6 +4386,9 @@
       if (particleSystem) {
         particleSystem.setAmbientType(definition.id);
       }
+
+      // ===== Proximity cue targets — refresh when world rebuilds =====
+      setProxTargets(sphericalWorld?.proximityTargets || []);
 
       if (flightControllerInitialized) {
         updateControlMetrics();
@@ -6294,6 +6327,41 @@
 
       // IMPROVEMENT 5: Update particles
       if (particleSystem) particleSystem.update(delta, cam?.position);
+
+      // ===== Proximity "speed of passage" cue =====
+      // Pooled whoosh streak + optional haptic when bird flies close to a giant prop.
+      // Squared-distance compare; cooldown per-target; zero allocations in the hot path.
+      if (proxState.targets.length > 0 && birdPos && particleSystem) {
+        const triggerD2 = proxState.triggerDist * proxState.triggerDist;
+        for (let pi = 0; pi < proxState.targets.length; pi++) {
+          const cd = proxState.cooldowns[pi];
+          if (cd > 0) {
+            proxState.cooldowns[pi] = Math.max(0, cd - delta);
+            continue;
+          }
+          const target = proxState.targets[pi];
+          const tp = target.position;
+          const dx = tp.x - birdPos.x;
+          const dy = tp.y - birdPos.y;
+          const dz = tp.z - birdPos.z;
+          // Use the broader of the prop's "near" radius and the global trigger distance.
+          const r = Math.max(proxState.triggerDist, target.radius || proxState.triggerDist);
+          const r2 = r * r;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < r2) {
+            // Bird forward (only allocate-free when birdQuat exists)
+            if (birdQuat) {
+              proxState._fwd.set(0, 0, -1).applyQuaternion(birdQuat);
+            }
+            particleSystem.createWhoosh(tp, birdPos, proxState._fwd, target.tint || 0xffffff);
+            proxState.cooldowns[pi] = proxState.cooldownAfterTrigger;
+            // Haptic — opt-in via localStorage['birb.haptics']
+            if (isHapticsEnabled() && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+              try { navigator.vibrate(15); } catch (_) { /* ignore */ }
+            }
+          }
+        }
+      }
 
       // IMPROVEMENT 6: Apply screen shake + FOV
       if (screenShake) {

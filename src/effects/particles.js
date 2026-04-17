@@ -16,6 +16,134 @@ export class ParticleSystem {
 
     // Shared texture - soft circle
     this.texture = this._createCircleTexture();
+
+    // Pre-allocated whoosh streak pool — for proximity "flying past" cue.
+    // 4 slots is plenty; streaks last ~0.35s and are at most rare per frame.
+    this._whooshPoolSize = 4;
+    this._whooshPool = [];
+    this._whooshPerStreak = 10;
+    this._initWhooshPool();
+  }
+
+  _initWhooshPool() {
+    for (let i = 0; i < this._whooshPoolSize; i++) {
+      const count = this._whooshPerStreak;
+      const positions = new Float32Array(count * 3);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const material = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 0.55,
+        map: this.texture,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      });
+      const points = new THREE.Points(geometry, material);
+      points.visible = false;
+      points.frustumCulled = false;
+      this.scene.add(points);
+      this._whooshPool.push({
+        points,
+        geometry,
+        material,
+        velocities: new Float32Array(count * 3),
+        basePositions: new Float32Array(count * 3),
+        active: false,
+        age: 0,
+        maxAge: 0.35,
+      });
+    }
+  }
+
+  /**
+   * Trigger a whoosh streak near the bird when it flies close to a large prop.
+   * origin: world-space point on the prop the bird is passing.
+   * birdPos, birdForward: used to lay the streak along the bird's passing axis.
+   * Fully pooled — no allocations per call.
+   */
+  createWhoosh(origin, birdPos, birdForward, tint = 0xdfeeff) {
+    // Find a free slot
+    let slot = null;
+    for (let i = 0; i < this._whooshPool.length; i++) {
+      if (!this._whooshPool[i].active) { slot = this._whooshPool[i]; break; }
+    }
+    if (!slot) return; // All streaks in flight — skip silently
+
+    const count = this._whooshPerStreak;
+    // Build a streak axis roughly along bird forward, offset to the side of origin.
+    // We scatter points along a short line and give them a drift perpendicular
+    // to forward so they read as "going past."
+    const fx = birdForward.x, fy = birdForward.y, fz = birdForward.z;
+    const ox = origin.x - birdPos.x, oy = origin.y - birdPos.y, oz = origin.z - birdPos.z;
+    // Side vector = forward × (origin - bird), then normalize roughly
+    let sx = fy * oz - fz * oy;
+    let sy = fz * ox - fx * oz;
+    let sz = fx * oy - fy * ox;
+    const sl = Math.sqrt(sx*sx + sy*sy + sz*sz) || 1;
+    sx /= sl; sy /= sl; sz /= sl;
+
+    const pos = slot.geometry.getAttribute('position').array;
+    const vel = slot.velocities;
+    const base = slot.basePositions;
+
+    for (let i = 0; i < count; i++) {
+      const t = (i / count - 0.5) * 6.0; // streak length ~6 units
+      // start behind the bird a bit, along forward
+      const px = birdPos.x + fx * t + sx * (Math.random() - 0.5) * 1.2;
+      const py = birdPos.y + fy * t + sy * (Math.random() - 0.5) * 1.2;
+      const pz = birdPos.z + fz * t + sz * (Math.random() - 0.5) * 1.2;
+      pos[i * 3]     = px;
+      pos[i * 3 + 1] = py;
+      pos[i * 3 + 2] = pz;
+      base[i * 3]     = px;
+      base[i * 3 + 1] = py;
+      base[i * 3 + 2] = pz;
+      // Drift opposite to forward (streak trails behind) + slight outward push
+      const driftSpeed = 14 + Math.random() * 8;
+      vel[i * 3]     = -fx * driftSpeed + sx * 2;
+      vel[i * 3 + 1] = -fy * driftSpeed + sy * 2;
+      vel[i * 3 + 2] = -fz * driftSpeed + sz * 2;
+    }
+
+    slot.geometry.getAttribute('position').needsUpdate = true;
+    slot.material.color.setHex(tint);
+    slot.material.opacity = 0.85;
+    slot.material.size = 0.55;
+    slot.points.visible = true;
+    slot.active = true;
+    slot.age = 0;
+  }
+
+  _updateWhooshes(delta) {
+    for (let i = 0; i < this._whooshPool.length; i++) {
+      const slot = this._whooshPool[i];
+      if (!slot.active) continue;
+      slot.age += delta;
+      if (slot.age >= slot.maxAge) {
+        slot.active = false;
+        slot.points.visible = false;
+        continue;
+      }
+      const pos = slot.geometry.getAttribute('position').array;
+      const vel = slot.velocities;
+      const count = this._whooshPerStreak;
+      for (let j = 0; j < count; j++) {
+        pos[j * 3]     += vel[j * 3]     * delta;
+        pos[j * 3 + 1] += vel[j * 3 + 1] * delta;
+        pos[j * 3 + 2] += vel[j * 3 + 2] * delta;
+        // Drag
+        vel[j * 3]     *= 0.92;
+        vel[j * 3 + 1] *= 0.92;
+        vel[j * 3 + 2] *= 0.92;
+      }
+      slot.geometry.getAttribute('position').needsUpdate = true;
+      const lifeT = slot.age / slot.maxAge;
+      slot.material.opacity = Math.max(0, 0.85 * (1 - lifeT));
+      slot.material.size = 0.55 * (1 - lifeT * 0.4);
+    }
   }
 
   _createCircleTexture() {
@@ -289,6 +417,9 @@ export class ParticleSystem {
       oldest.geometry.dispose();
       oldest.material.dispose();
     }
+
+    // Pooled whoosh streaks (proximity cue)
+    this._updateWhooshes(delta);
   }
 
   dispose() {
@@ -304,6 +435,16 @@ export class ParticleSystem {
       this.ambientParticles.geometry.dispose();
       this.ambientParticles.material.dispose();
       this.ambientParticles = null;
+    }
+
+    // Dispose pooled whoosh streaks
+    if (this._whooshPool) {
+      for (const slot of this._whooshPool) {
+        this.scene.remove(slot.points);
+        slot.geometry.dispose();
+        slot.material.dispose();
+      }
+      this._whooshPool = [];
     }
 
     if (this.texture) {
