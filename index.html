@@ -5110,7 +5110,83 @@
       fpsState.lastSampleTime = time;
       const formatted = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
       fpsMetric.textContent = formatted;
+
+      // Feed the adaptive quality tier manager with the sampled FPS.
+      adaptiveTier.sampleFps(fps, time);
     }
+
+    // ============ ADAPTIVE QUALITY TIER ============
+    // Downshifts rendering quality when sustained FPS drops below 55 for 2s;
+    // restores when sustained FPS > 58 for 4s. Tiers:
+    //   0 = full (initial on mobile/desktop as configured above)
+    //   1 = DPR 1.0, cloud shell off (already off on mobile — no-op there)
+    //   2 = tier 1 + pixel ratio clamp more aggressive + haze off
+    // Logged to console when ?debug=perf.
+    const adaptiveTier = (() => {
+      const state = {
+        tier: 0,
+        fpsSum: 0,
+        fpsCount: 0,
+        windowStart: 0,
+        lastTierChange: 0,
+      };
+      const LOW_FPS_THRESHOLD = 55;
+      const RESTORE_FPS_THRESHOLD = 58;
+      const LOW_WINDOW_MS = 2000;     // 2s of bad FPS before downshift
+      const HIGH_WINDOW_MS = 4000;    // 4s of good FPS before upshift
+      const MIN_INTERVAL_MS = 1500;   // anti-flip-flop
+
+      function applyTier(newTier) {
+        if (newTier === state.tier) return;
+        state.tier = newTier;
+        state.lastTierChange = performance.now();
+
+        // Tier 1+: drop DPR to 1.0.
+        // Tier 2+: drop DPR below 1.0 (0.85) and hide haze layers if any.
+        if (newTier === 0) {
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
+          if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = true;
+        } else if (newTier === 1) {
+          renderer.setPixelRatio(1.0);
+          if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
+        } else if (newTier >= 2) {
+          renderer.setPixelRatio(0.85);
+          if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
+        }
+
+        if (window.__birbPerfDebug) {
+          console.log(`[perf] adaptive tier -> ${newTier}`);
+        }
+      }
+
+      return {
+        sampleFps(fps, time) {
+          if (state.windowStart === 0) state.windowStart = time;
+          state.fpsSum += fps;
+          state.fpsCount += 1;
+
+          // Respect anti-flip-flop minimum dwell between tier changes.
+          if (time - state.lastTierChange < MIN_INTERVAL_MS) return;
+
+          const elapsed = time - state.windowStart;
+          const window = state.tier >= 1 ? HIGH_WINDOW_MS : LOW_WINDOW_MS;
+          if (elapsed < window) return;
+
+          const avgFps = state.fpsSum / Math.max(1, state.fpsCount);
+          if (avgFps < LOW_FPS_THRESHOLD && state.tier < 2) {
+            applyTier(state.tier + 1);
+          } else if (avgFps > RESTORE_FPS_THRESHOLD && state.tier > 0) {
+            applyTier(state.tier - 1);
+          }
+
+          // Reset rolling window.
+          state.fpsSum = 0;
+          state.fpsCount = 0;
+          state.windowStart = time;
+        },
+        getTier() { return state.tier; },
+      };
+    })();
 
     function updateControlMetrics(speed) {
       const throttleSetting = Number.isFinite(flightController?.throttle)
