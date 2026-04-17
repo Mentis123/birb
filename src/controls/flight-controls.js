@@ -10,6 +10,9 @@ const TOUCH_JOYSTICK_SIZE = 120;
 // Smoothing factor for touch input (0 = instant, 1 = very slow)
 // This creates a more responsive feel on mobile by reducing jitter
 const TOUCH_INPUT_SMOOTHING = 0.3;
+// Zen mode multiplier: ~40% more smoothing for a floatier, no-pressure feel.
+// 0.3 * 1.4 = 0.42, capped at 0.95 for safety.
+const ZEN_TOUCH_INPUT_SMOOTHING = Math.min(TOUCH_INPUT_SMOOTHING * 1.4, 0.95);
 
 // Debug mode for mobile input diagnostics - set to true to log all touch input
 const DEBUG_MOBILE_INPUT = false;
@@ -194,6 +197,9 @@ export function createFlightControls({
   let isPitchInverted = Boolean(invertPitch);
   let isFrozen = Boolean(frozen);
   let isStagedMode = false;
+  // Zen mode flag — when true, touch input uses ZEN_TOUCH_INPUT_SMOOTHING for a
+  // floatier feel. Does not affect any other mode.
+  let isZenMode = false;
   const yawOnlyState = { yaw: 0, isActive: false };
   const logTelemetry = createTelemetryLogger(telemetryLogger);
   const telemetryState = {
@@ -253,8 +259,9 @@ export function createFlightControls({
       if (Math.abs(smoothedTouchInput.x) < 0.01) smoothedTouchInput.x = 0;
       if (Math.abs(smoothedTouchInput.y) < 0.01) smoothedTouchInput.y = 0;
     } else {
-      // Smooth interpolation toward target
-      const smoothing = TOUCH_INPUT_SMOOTHING;
+      // Smooth interpolation toward target. Zen mode uses a higher smoothing factor
+      // for a floatier feel (still zero allocations).
+      const smoothing = isZenMode ? ZEN_TOUCH_INPUT_SMOOTHING : TOUCH_INPUT_SMOOTHING;
       smoothedTouchInput.x += (targetX - smoothedTouchInput.x) * (1 - smoothing);
       smoothedTouchInput.y += (targetY - smoothedTouchInput.y) * (1 - smoothing);
     }
@@ -821,6 +828,9 @@ export function createFlightControls({
     },
     setInvertPitch: (invert) => {
       isPitchInverted = Boolean(invert);
+    },
+    setZenMode: (enabled) => {
+      isZenMode = Boolean(enabled);
     },
     setFrozen,
     reset: resetInputs,
