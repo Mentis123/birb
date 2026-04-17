@@ -1708,6 +1708,35 @@
     /* ===== Ring Arrow (removed – minimap edge arrows serve this purpose) ===== */
     .ring-arrow { display: none !important; }
 
+    /* ===== Zen Mode entry cue ===== */
+    .zen-cue {
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 220;
+      opacity: 0;
+    }
+    .zen-cue.is-showing { animation: zen-fade 2.4s ease-out forwards; }
+    .zen-cue__tint {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center,
+        rgba(160, 200, 240, 0.18) 0%,
+        rgba(120, 170, 220, 0.10) 45%,
+        rgba(80, 130, 180, 0.0) 80%);
+    }
+    .zen-cue__label {
+      position: absolute; top: 28%; left: 50%;
+      transform: translateX(-50%);
+      font-size: 1.4rem; font-weight: 600; letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(220, 240, 255, 0.95);
+      text-shadow: 0 0 24px rgba(160, 220, 255, 0.7);
+    }
+    @keyframes zen-fade {
+      0%   { opacity: 0; }
+      20%  { opacity: 1; }
+      75%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
     /* ===== Countdown ===== */
     .countdown-display {
       position: fixed; top: 35%; left: 50%; transform: translateX(-50%);
@@ -1917,6 +1946,16 @@
                 <div class="game-mode-description">Free flight with no objectives. Explore, nest, and shoot drones at your own pace.</div>
               </div>
             </button>
+            <!-- Zen -->
+            <button type="button" class="game-mode-option" data-game-mode="zen">
+              <div class="game-mode-radio"></div>
+              <div class="game-mode-content">
+                <div class="game-mode-name">
+                  Zen 🪷
+                </div>
+                <div class="game-mode-description">No timer, no enemies, no pressure. Softer flight, gentler turns, soft chimes when you drift through a ring.</div>
+              </div>
+            </button>
             <!-- Ring Rush (Coming Soon) -->
             <button type="button" class="game-mode-option" data-game-mode="ring-rush">
               <div class="game-mode-radio"></div>
@@ -1987,6 +2026,11 @@
       <div class="kill-vignette" data-kill-vignette></div>
       <!-- Wave banner -->
       <div class="wave-banner" data-wave-banner></div>
+      <!-- Zen mode entry cue: soft tint + label that fade out after ~2s -->
+      <div class="zen-cue" data-zen-cue>
+        <div class="zen-cue__tint"></div>
+        <div class="zen-cue__label">Zen 🪷</div>
+      </div>
       <!-- Ring Rush arrow -->
       <div class="ring-arrow" data-ring-arrow>
         <svg viewBox="0 0 40 40"><polygon points="20,4 36,36 20,28 4,36" fill="#ffd700"/></svg>
@@ -2300,13 +2344,21 @@
             currentGameMode = GAME_MODES.CASUAL;
             miniGameState.active = false;
             showGameHud(false);
+            applyZenMode(false);
+          } else if (mode === 'zen') {
+            startZenMode();
           } else if (mode === 'ring-rush') {
+            applyZenMode(false);
             startGameMode(GAME_MODES.RING_RUSH);
           } else if (mode === 'drone-hunter') {
+            applyZenMode(false);
             startGameMode(GAME_MODES.DRONE_HUNTER);
           } else if (mode === 'turret-defense') {
+            applyZenMode(false);
             startGameMode(GAME_MODES.TURRET_DEFENSE);
           }
+          // Persist last selected mode for return visits
+          try { localStorage.setItem(LAST_MODE_STORAGE_KEY, mode); } catch (e) { /* ignore */ }
         }, 100);
       });
     });
@@ -3699,8 +3751,39 @@
       CASUAL: 'casual',
       RING_RUSH: 'ring_rush',
       DRONE_HUNTER: 'drone_hunter',
-      TURRET_DEFENSE: 'turret_defense'
+      TURRET_DEFENSE: 'turret_defense',
+      ZEN: 'zen'
     };
+
+    // Persistence: remember last selected mode across reloads.
+    const LAST_MODE_STORAGE_KEY = 'birb.lastMode';
+
+    // Zen mode input smoothing (touch path). Applied at read-time only when Zen
+    // is the active mode. Pre-allocated to honour the zero-allocation game loop.
+    const ZEN_INPUT_SMOOTHING = 0.42; // ~40% more smoothing than the default 0.3
+    const _zenSmoothedInput = { x: 0, y: 0, active: false };
+    const _zenInputOut = { x: 0, y: 0, active: false };
+    function applyZenInputSmoothing(rawInput) {
+      // Reuse the output object — no allocations.
+      const targetX = rawInput.x || 0;
+      const targetY = rawInput.y || 0;
+      const isActive = Boolean(rawInput.active);
+      if (!isActive) {
+        // Quickly decay to zero on release so the bird doesn't drift.
+        _zenSmoothedInput.x *= 0.5;
+        _zenSmoothedInput.y *= 0.5;
+        if (Math.abs(_zenSmoothedInput.x) < 0.01) _zenSmoothedInput.x = 0;
+        if (Math.abs(_zenSmoothedInput.y) < 0.01) _zenSmoothedInput.y = 0;
+      } else {
+        const s = ZEN_INPUT_SMOOTHING;
+        _zenSmoothedInput.x += (targetX - _zenSmoothedInput.x) * (1 - s);
+        _zenSmoothedInput.y += (targetY - _zenSmoothedInput.y) * (1 - s);
+      }
+      _zenInputOut.x = _zenSmoothedInput.x;
+      _zenInputOut.y = _zenSmoothedInput.y;
+      _zenInputOut.active = isActive;
+      return _zenInputOut;
+    }
 
     let currentGameMode = GAME_MODES.CASUAL;
     let collectiblesSystem = null; // Will be assigned when spherical world loads
@@ -3940,6 +4023,8 @@
       miniGameState.active = false;
       showGameHud(false);
       hideGameResults();
+      // Make sure Zen tuning is cleared when returning to Casual.
+      applyZenMode(false);
 
       // Hide and reset collectibles
       if (collectiblesSystem) {
@@ -3961,12 +4046,60 @@
       buttons.forEach(btn => {
         const mode = btn.getAttribute('data-game-mode');
         const isActive = (mode === 'casual' && currentGameMode === GAME_MODES.CASUAL) ||
+                         (mode === 'zen' && currentGameMode === GAME_MODES.ZEN) ||
                          (mode === 'ring-rush' && currentGameMode === GAME_MODES.RING_RUSH) ||
                          (mode === 'drone-hunter' && currentGameMode === GAME_MODES.DRONE_HUNTER) ||
                          (mode === 'turret-defense' && currentGameMode === GAME_MODES.TURRET_DEFENSE);
         btn.classList.toggle('game-mode-option--active', isActive);
       });
     }
+
+    // ===== Zen Mode helpers =====
+    // Zen is a no-pressure free-flight mode. We thread a single zenMode flag
+    // through the flight controller and input layer; nothing else changes when
+    // Zen is off, so existing modes remain byte-identical.
+    function applyZenMode(enabled) {
+      if (typeof flightController?.setZenMode === 'function') {
+        flightController.setZenMode(enabled);
+      }
+      if (typeof flightControls?.setZenMode === 'function') {
+        flightControls.setZenMode(enabled);
+      }
+      // Hide the drone container while Zen is active so the world looks empty
+      // and serene. The drone update is also suppressed in the game loop.
+      try {
+        const droneContainer = scene?.getObjectByName?.('drone-targets');
+        if (droneContainer) droneContainer.visible = !enabled;
+      } catch (e) { /* scene may not be ready */ }
+    }
+
+    function showZenCue() {
+      const cue = document.querySelector('[data-zen-cue]');
+      if (!cue) return;
+      // Restart the animation cleanly even on re-entry.
+      cue.classList.remove('is-showing');
+      // Force reflow so the animation restarts.
+      void cue.offsetWidth;
+      cue.classList.add('is-showing');
+    }
+
+    function startZenMode() {
+      currentGameMode = GAME_MODES.ZEN;
+      // Treat Zen like Casual structurally: no mini-game timer, no enemies, no HUD.
+      miniGameState.active = false;
+      showGameHud(false);
+      hideGameResults();
+      // Show rings in Zen for ambient chimes — no score, no win condition.
+      // Rings re-appear after collection so the world stays gently populated.
+      if (collectiblesSystem) {
+        collectiblesSystem.reset();
+        collectiblesSystem.setVisible(true);
+      }
+      applyZenMode(true);
+      updateGameModeUI();
+      showZenCue();
+    }
+    // ===== End Zen Mode helpers =====
 
     // Results button handlers
     if (resultsRetry) {
@@ -5466,6 +5599,19 @@
 
     applyInvertPitchPreference(savedInvertPitch, { persist: false });
 
+    // ===== Restore last-selected mode from localStorage =====
+    // Only Zen is auto-restored on load (Casual is the natural default for the
+    // existing modes — re-entering Ring Rush / Drone Hunter / Turret Defense on
+    // page load would surprise users with an immediate timer or wave). Returning
+    // Zen players get their preferred no-pressure mode without having to re-pick.
+    try {
+      const savedMode = localStorage.getItem(LAST_MODE_STORAGE_KEY);
+      if (savedMode === 'zen') {
+        startZenMode();
+      }
+    } catch (e) { /* localStorage may be unavailable */ }
+    // ===== End mode restore =====
+
     // Initialize rocket system with explosion sound callback
     rocketSystem = createRocketSystem(THREE, scene, {
       onExplosion: () => {
@@ -5902,8 +6048,12 @@
 
       let nestedAimQuaternion = null;
 
-      // Get input state early (needed for both flight and aim rig when nested)
-      const inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
+      // Get input state early (needed for both flight and aim rig when nested).
+      // In Zen mode, apply additional smoothing for a floatier feel.
+      let inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
+      if (currentGameMode === GAME_MODES.ZEN) {
+        inputState = applyZenInputSmoothing(inputState);
+      }
 
       if (isNested && aimRig?.isActive?.()) {
         // Turret aiming: joystick controls rate-based rotation,
@@ -5984,8 +6134,9 @@
         }
       }
 
-      // Update drones
-      if (droneSystem) {
+      // Update drones (skipped entirely in Zen mode — no enemies in chill mode)
+      const zenSuppressDrones = currentGameMode === GAME_MODES.ZEN;
+      if (droneSystem && !zenSuppressDrones) {
         droneSystem.update(delta);
 
         // Check birb-drone collisions (only when flying, not nested, not frozen)
@@ -6179,6 +6330,33 @@
 
         // Update HUD
         updateGameHud();
+      }
+
+      // ========== ZEN MODE UPDATE ==========
+      // Runs when Zen is the active mode. No timer, no score, no enemies — just
+      // ring chimes when the bird drifts through one. Rings respawn so the
+      // world stays gently populated.
+      if (currentGameMode === GAME_MODES.ZEN) {
+        if (collectiblesSystem && flightController) {
+          // Slightly more forgiving collection radius for relaxed play.
+          const collected = collectiblesSystem.checkCollection(flightController.position, 1.8);
+          if (collected.length > 0) {
+            playRingCollectSound();
+            if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
+            // Respawn collected rings after a short delay so the world stays full.
+            setTimeout(() => {
+              if (currentGameMode !== GAME_MODES.ZEN) return;
+              collected.forEach((idx) => {
+                const ring = collectiblesSystem.rings?.[idx];
+                if (ring) {
+                  ring.userData.collected = false;
+                  ring.visible = true;
+                }
+              });
+            }, 6000);
+          }
+          if (collectiblesSystem.update) collectiblesSystem.update(delta);
+        }
       }
       // ========== END GAME MODE UPDATE ==========
 

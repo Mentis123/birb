@@ -15,6 +15,14 @@ export const FLIGHT_DEFAULTS = {
     maxPitch: Math.PI * 0.4,
 };
 
+// Zen mode tuning — softer, floatier, no-pressure
+// Applied as read-time multipliers so base constants stay intact for other modes.
+export const ZEN_TUNING = {
+    speedMul: 0.7,    // ~30% slower forward speed
+    yawMul: 0.75,     // ~25% slower yaw
+    pitchMul: 0.75,   // ~25% slower pitch
+};
+
 export class BirdFlight {
     constructor(THREE, options = {}) {
         this.THREE = THREE;
@@ -26,6 +34,10 @@ export class BirdFlight {
         this.speed = options.speed ?? FLIGHT_DEFAULTS.speed;
         this.yawRate = options.yawRate ?? FLIGHT_DEFAULTS.yawRate;
         this.pitchRate = options.pitchRate ?? FLIGHT_DEFAULTS.pitchRate;
+
+        // Zen mode flag — when true, applies ZEN_TUNING multipliers at read-time.
+        // Does NOT mutate base constants, so toggling back is byte-identical for other modes.
+        this.zenMode = Boolean(options.zenMode);
 
         // State identifiers
         // 1. Position: Absolute world position
@@ -73,7 +85,8 @@ export class BirdFlight {
      */
     yaw(input, deltaTime) {
         if (!input) return;
-        const angle = -input * this.yawRate * deltaTime; // Input+ (Right) -> Neg Angle (Right Turn?)
+        const yawMul = this.zenMode ? ZEN_TUNING.yawMul : 1;
+        const angle = -input * this.yawRate * yawMul * deltaTime; // Input+ (Right) -> Neg Angle (Right Turn?)
         // Standard: Rotate Around Y.
         // If input +1 (Right), we want to turn Right.
         // RotY(-ang) turns Right.
@@ -90,7 +103,8 @@ export class BirdFlight {
         if (!input) return;
         // User request: "Push Up (Input +1) should Fly Up"
         // +1 Input -> Positive Rotation around X -> Nose Up
-        const angle = input * this.pitchRate * deltaTime;
+        const pitchMul = this.zenMode ? ZEN_TUNING.pitchMul : 1;
+        const angle = input * this.pitchRate * pitchMul * deltaTime;
 
         this._scratch.axis.set(1, 0, 0);
         this._scratch.quat.setFromAxisAngle(this._scratch.axis, angle);
@@ -107,7 +121,9 @@ export class BirdFlight {
         s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
 
         // Calculate displacement (reuse scratch vector)
-        s.displacement.copy(s.forward).multiplyScalar(this.speed * deltaTime);
+        // Zen mode applies a speed multiplier at read-time without mutating this.speed.
+        const speedMul = this.zenMode ? ZEN_TUNING.speedMul : 1;
+        s.displacement.copy(s.forward).multiplyScalar(this.speed * speedMul * deltaTime);
 
         // Save old position/normal for transport (using scratch vectors - NO allocations)
         s.oldPos.copy(this.position);
@@ -164,7 +180,42 @@ export class BirdFlight {
         const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
         this.yaw(input.x, limitedDelta);
         this.pitch(input.y, limitedDelta);
+
+        // Zen mode: gentle auto-level-roll when stick is near-centered.
+        // Rotates around local Z to align the bird's local "up" with the sphere normal,
+        // preventing accidental disorientation. Small per-frame correction, not snappy.
+        if (this.zenMode) {
+            const inputMag = Math.hypot(input.x || 0, input.y || 0);
+            if (inputMag < 0.1) {
+                this._applyZenAutoLevelRoll(limitedDelta);
+            }
+        }
+
         return this.update(limitedDelta);
+    }
+
+    /**
+     * Zen auto-level-roll. Gently interpolates the bird's local-up toward the
+     * sphere normal by rotating around local Z. Zero allocations.
+     */
+    _applyZenAutoLevelRoll(deltaTime) {
+        const s = this._scratch;
+        // Local up of the bird in world space
+        s.up.set(0, 1, 0).applyQuaternion(this.quaternion).normalize();
+        // Sphere outward normal at bird position
+        s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
+        // Local right of the bird
+        const localRight = s.vec3_2.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+        // Roll angle = angle between local-up and sphere-normal projected onto roll plane
+        // sin(roll) ≈ sphereNormal dot localRight (right component of normal)
+        const sinRoll = s.sphereNormal.dot(localRight);
+        // Gentle correction proportional to -sinRoll. Strength keeps it floaty.
+        const correction = -sinRoll * 1.2 * deltaTime;
+        if (Math.abs(correction) > 0.0001) {
+            s.axis.set(0, 0, 1); // Local Z (roll axis)
+            s.quat.setFromAxisAngle(s.axis, correction);
+            this.quaternion.multiply(s.quat);
+        }
     }
 
     _constrainToSphere() {
@@ -193,5 +244,13 @@ export class BirdFlight {
 
     setSpeed(speed) {
         this.speed = speed;
+    }
+
+    /**
+     * Toggle Zen mode. When enabled, applies ZEN_TUNING multipliers to forward
+     * speed, yaw rate, and pitch rate at read-time. Base constants are not mutated.
+     */
+    setZenMode(enabled) {
+        this.zenMode = Boolean(enabled);
     }
 }
