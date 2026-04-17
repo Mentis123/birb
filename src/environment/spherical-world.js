@@ -389,7 +389,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const ceilingPlacements = []; // { pos, up, radius }
 
   let treeIndex = 0;
-  const nestInterval = 15; // Every 15th tree is nestable
+  const nestInterval = 8; // Every 8th tree is nestable — baseline coverage
 
   groveCenters.forEach((groveCenter, groveIdx) => {
     // Each grove: 12-20 trees clustered tightly around center
@@ -692,9 +692,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       spireGroup.add(spire);
       collisionSystem.addCollider(pos, baseRadius * scale * 0.8, 'spire');
 
-      // Nests on tallest spires
-      if (spireIndex % 12 === 0 && height > 35) {
-        const nestPos = pos.clone().add(up.clone().multiplyScalar(height * scale + 1));
+      // Nests on spires — every 6th spire for reliable coverage.
+      // Champion spires (scale 2.2-2.9) place the nest at 0.6× height so
+      // it's visible from below without being unreachable.
+      if (spireIndex % 6 === 0 && height > 28) {
+        const isChamp = s === championIdx;
+        const nestHeight = isChamp ? (height * scale) * 0.6 + 1 : height * scale + 1;
+        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
         nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: spire });
       }
 
@@ -934,9 +938,17 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       peakGroup.add(peak);
       collisionSystem.addCollider(pos, baseRadius * scale * 0.8, 'mountain');
 
-      // Nest on tallest peaks (champion always gets a nest)
-      if ((peakIndex % 8 === 0 && height > 40) || isChampion) {
-        const nestPos = pos.clone().add(up.clone().multiplyScalar((height + 2) * scale));
+      // Nest on peaks. Baseline: every 4th peak (reliable coverage).
+      // Champions only get a nest ~1 in 3 of the time (cap dramatic nests).
+      // For champions the nest sits at 0.55× scaled height so it stays
+      // reachable rather than floating at the unreachable apex.
+      const wantsBaselineNest = peakIndex % 4 === 0 && height > 30;
+      const wantsChampionNest = isChampion && Math.random() < 0.34;
+      if (wantsBaselineNest || wantsChampionNest) {
+        const nestHeight = wantsChampionNest
+          ? (height * scale) * 0.55 + 2   // mid-spire — reachable
+          : (height + 2) * scale;         // original: true peak
+        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
         nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: peak });
       }
 
@@ -1270,9 +1282,14 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
       towerGroup.add(tower);
       collisionSystem.addCollider(pos, Math.max(width, depth) * 0.6, 'tower');
 
-      // Nest on tallest buildings (champions always get nests)
-      if ((buildingIndex % 12 === 0 && height > 45) || b === championIdx) {
-        const nestPos = pos.clone().add(up.clone().multiplyScalar(height + 1));
+      // Nest on buildings. Baseline: every 6th building (visible coverage).
+      // Champion towers (140-190 units) only get a nest ~1 in 3 of the time
+      // and it sits at 0.5× height so it's actually approachable.
+      const wantsBaselineNest = buildingIndex % 6 === 0 && height > 30;
+      const wantsChampionNest = b === championIdx && Math.random() < 0.34;
+      if (wantsBaselineNest || wantsChampionNest) {
+        const nestHeight = wantsChampionNest ? height * 0.5 + 1 : height + 1;
+        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
         nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: tower });
       }
 
