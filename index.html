@@ -2450,14 +2450,38 @@
       throw new Error(message);
     };
 
+    // ============ MOBILE PERF DETECTION ============
+    // Perf research: on iPhone 12 Safari the GPU chokes on overdraw + draw calls
+    // far more than on tri count. Ring Rush adds 10 rings × 3 meshes (30 draw
+    // calls) on top of a forest env that ships ~200+ meshes. Combined with the
+    // cloud shell's full-screen transparent sphere and 14 canopy disc instances,
+    // fill rate dies. isMobile gates aggressive cuts; isLowEnd gates deeper cuts.
+    const _uaMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+    const _coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+    const isMobile = _uaMobile || _coarsePointer;
+    const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 4) <= 4);
+    // Expose globally so environment modules can inspect it without prop drilling.
+    window.__birbIsMobile = isMobile;
+    window.__birbIsLowEnd = isLowEnd;
+    // Debug flag — ?debug=perf in URL enables console logs for quality tier shifts.
+    const _perfDebug = new URLSearchParams(window.location.search).get('debug') === 'perf';
+    window.__birbPerfDebug = _perfDebug;
+
     let renderer;
     try {
       renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias: true,
+        // AA costs ~15% GPU on mobile — disable on mobile, DPR does the heavy lifting.
+        antialias: !isMobile,
         alpha: true,
-        powerPreference: "low-power",
+        // Desktop prefers high-perf discrete GPU. Mobile 'low-power' causes
+        // integrated GPU on iOS; 'high-performance' on mobile Safari is a hint
+        // to use the performance core. Overall: mobile -> high-perf, desktop low-power.
+        powerPreference: isMobile ? "high-performance" : "low-power",
         failIfMajorPerformanceCaveat: false,
+        // stencil/depth defaults are fine; explicitly disable preserve-drawing to
+        // allow the browser to discard the backbuffer after present (perf win).
+        preserveDrawingBuffer: false,
       });
     } catch (error) {
       showFatalError("Unable to start WebGL — your browser may not support it.");
@@ -2467,14 +2491,23 @@
       showFatalError("WebGL context unavailable. Please enable hardware acceleration.");
     }
 
+    // Shadows are brutal on mobile WebGL — each shadow-casting light doubles
+    // geometry submission (shadow pass + main pass). Currently no code calls
+    // castShadow=true, so this is defence-in-depth.
+    renderer.shadowMap.enabled = false;
+
     if (statusMetric) {
       statusMetric.textContent = "Renderer ready. Building scene...";
     }
 
     const contextState = { lost: false };
 
-    const prefersCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
-    const DPR_CAP = prefersCoarsePointer ? 1.4 : 1.8;
+    // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
+    // Adaptive quality further drops this to 1.0 below 55 FPS.
+    const DPR_CAP = isMobile ? 1.2 : 1.8;
+    if (_perfDebug) {
+      console.log(`[perf] isMobile=${isMobile} isLowEnd=${isLowEnd} DPR_CAP=${DPR_CAP} antialias=${!isMobile}`);
+    }
     const resizeState = {
       width: 0,
       height: 0,
@@ -3029,8 +3062,11 @@
     }
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.22;
+    // Tone mapping cost: ACESFilmic = per-pixel curve (expensive on mobile).
+    // On mobile the scene is already saturated/colourful so cheaper Linear
+    // tone mapping looks nearly identical — tuned exposure compensates.
+    renderer.toneMapping = isMobile ? THREE.LinearToneMapping : THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = isMobile ? 1.08 : 1.22;
 
     const scene = new THREE.Scene();
     scene.background = null; // Replaced by sky dome
@@ -3038,7 +3074,9 @@
     // Density tuned so near objects (<30u) are essentially unaffected
     // (~0.6% fog at 30u) and far geometry dissolves softly into the sky's
     // mid band by the world horizon. Color is updated per-environment.
-    scene.fog = new THREE.FogExp2(0x6d9ed0, 0.0028);
+    // On mobile we lower density slightly — every surface does a fog lookup,
+    // and a denser fog forces more shader work; minor cut adds up.
+    scene.fog = new THREE.FogExp2(0x6d9ed0, isMobile ? 0.0022 : 0.0028);
 
     // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
     const skyDome = createSkyDome({
