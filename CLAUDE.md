@@ -10,6 +10,20 @@ Birb Mobile is a **breakable toy** — a real, shipped, playable game that also 
 **Repo:** git@github.com:Mentis123/birb.git
 **Ecosystem:** Part of the Vibe ecosystem (vibeacademy.com.au)
 
+### Sibling artefacts (Birb Labs showcase)
+
+Birb Mobile is one of three showcase artefacts for Birb Labs inside Vibe Academy. All three share the same splash treatment: primary image splash with animated conic-gradient border → Vibe Academy attribution splash → game.
+
+1. **Birb Mobile** — birbmobile.vercel.app (3D flight, this repo)
+2. **Rogue Mobile** — roguemobile.vercel.app / yagamentis.vercel.app/rogue (turn-based roguelike)
+3. **Frosty Spider** — (Next.js spider solitaire)
+
+All three link their Vibe Academy CTA to `https://www.vibeacademy.com.au/`. Never `atmanacademy.io` — that domain is retired.
+
+### Game state (2026-04-17)
+
+Stable. Splash CTA migrated to `vibeacademy.com.au`. All four game modes (Casual, Ring Rush, Drone Hunter, Turret Defense) playable. Spherical flight bug resolved. Eruda debug still present in `index.html` — safe to strip when next touching.
+
 ## What This Is
 
 A mobile-first 3D bird flight game built with Three.js. A bird flies on a spherical world — you control it with touch (virtual joystick), collect rings, shoot rockets from nests, and fight drones. Four game modes: Casual free flight, Ring Rush (timed collection), Drone Hunter (60s survival), Turret Defense (wave-based).
