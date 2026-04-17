@@ -2576,6 +2576,7 @@
       ambient: 0.25,
       // ambientBirds: 0.15,
     };
+    const ORIGINAL_AMBIENT_TRACK = '/sound/ambient-forest.mp3';
 
     // Create audio pool for a sound
     const createSoundPool = (src, poolSize, baseVolume) => {
@@ -2620,7 +2621,7 @@
       continuousSounds.droneHum.preload = 'auto';
 
       // Ambient background music - use existing ambient files
-      continuousSounds.ambient = new Audio('/sound/ambient-forest.mp3');
+      continuousSounds.ambient = new Audio(ORIGINAL_AMBIENT_TRACK);
       continuousSounds.ambient.loop = true;
       continuousSounds.ambient.volume = 0;
       continuousSounds.ambient.preload = 'auto';
@@ -2717,20 +2718,13 @@
     };
 
     // Start/stop ambient music
-    const setAmbientMusic = (playing, environmentId = 'forest') => {
+    const setAmbientMusic = (playing, _environmentId = 'forest') => {
       if (!continuousSounds.ambient) return;
 
-      // Switch ambient track based on environment
-      const trackMap = {
-        forest: '/sound/ambient-forest.mp3',
-        mountain: '/sound/ambient-mountain.mp3',
-        canyons: '/sound/ambient-forest.mp3', // Fallback
-        city: '/sound/ambient-mountain.mp3',   // Fallback
-      };
-      const track = trackMap[environmentId] || trackMap.forest;
-
-      if (continuousSounds.ambient.src !== location.origin + track) {
-        continuousSounds.ambient.src = track;
+      // Keep the original track fixed; switching tracks mid-session was
+      // producing jarring changes and users asked for the original mp3 back.
+      if (continuousSounds.ambient.src !== location.origin + ORIGINAL_AMBIENT_TRACK) {
+        continuousSounds.ambient.src = ORIGINAL_AMBIENT_TRACK;
       }
 
       if (playing && soundSettings.musicEnabled) {
@@ -6055,6 +6049,9 @@
       if (nestingSystem) {
         nestingSystem.update(delta, flightController.position);
         isNested = nestingSystem.isNested();
+      }
+      if (particleSystem?.setSuspended) {
+        particleSystem.setSuspended(isNested);
       }
 
       let nestedAimQuaternion = null;

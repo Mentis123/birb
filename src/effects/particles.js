@@ -13,6 +13,7 @@ export class ParticleSystem {
     this.ambientParticles = null;
     this.ambientType = 'default';
     this.ambientTime = 0;
+    this.suspended = false;
 
     // Shared texture - soft circle
     this.texture = this._createCircleTexture();
@@ -65,6 +66,7 @@ export class ParticleSystem {
    * Fully pooled — no allocations per call.
    */
   createWhoosh(origin, birdPos, birdForward, tint = 0xdfeeff) {
+    if (this.suspended) return;
     // Find a free slot
     let slot = null;
     for (let i = 0; i < this._whooshPool.length; i++) {
@@ -167,6 +169,7 @@ export class ParticleSystem {
    * Create an explosion burst at a position (drone destruction)
    */
   createExplosion(position, color = 0xff6633) {
+    if (this.suspended) return;
     const count = 24;
     const positions = new Float32Array(count * 3);
     const velocities = [];
@@ -223,6 +226,7 @@ export class ParticleSystem {
    * Create sparkle burst at position (ring collection)
    */
   createSparkle(position) {
+    if (this.suspended) return;
     const count = 16;
     const positions = new Float32Array(count * 3);
     const velocities = [];
@@ -334,12 +338,43 @@ export class ParticleSystem {
       basePositions,
       config,
     };
+
+    if (this.suspended) {
+      this.ambientParticles.points.visible = false;
+    }
+  }
+
+  setSuspended(suspended) {
+    const next = Boolean(suspended);
+    if (this.suspended === next) return;
+    this.suspended = next;
+
+    if (this.ambientParticles?.points) {
+      this.ambientParticles.points.visible = !next;
+    }
+
+    if (next) {
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const p = this.particles[i];
+        this.scene.remove(p.points);
+        p.geometry.dispose();
+        p.material.dispose();
+      }
+      this.particles.length = 0;
+    }
+
+    for (let i = 0; i < this._whooshPool.length; i++) {
+      const slot = this._whooshPool[i];
+      slot.active = !next && slot.active;
+      if (next) slot.points.visible = false;
+    }
   }
 
   /**
    * Update all particle systems
    */
   update(delta, cameraPosition) {
+    if (this.suspended) return;
     // Update burst particles (explosions, sparkles)
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
