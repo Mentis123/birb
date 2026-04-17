@@ -6,6 +6,13 @@ const DEG2RAD = Math.PI / 180;
 // At speed 8, loop time ~94s — room to breathe, fly THROUGH environments
 const SPHERE_RADIUS = 120;
 
+// Mobile gate — env builders read this to disable heavy fill-rate effects
+// (transparent canopy ceilings, cloud puffs) and trim prop density.
+// Set by index.html before any env module loads; default false on server tests.
+function _isMobile() {
+  return typeof window !== 'undefined' && window.__birbIsMobile === true;
+}
+
 // Collision detection helper
 export class SphericalCollisionSystem {
   constructor(sphereRadius, objectColliders = []) {
@@ -513,7 +520,11 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   root.add(treeGroup);
 
   // --- Build one InstancedMesh for all canopy ceilings (single draw call) ---
-  if (ceilingPlacements.length > 0) {
+  // Mobile fill-rate: canopy ceilings are large transparent discs rendered
+  // from the inside of groves. Even with just 1 draw call the overdraw cost
+  // on mobile during Ring Rush is significant (player often flies under them).
+  // Gate disabled on mobile; desktop keeps the painterly canopy feel.
+  if (ceilingPlacements.length > 0 && !_isMobile()) {
     // Slight noisy edge once, applied to the shared base geometry.
     const baseDiscGeom = new THREE.CircleGeometry(1.0, 10);
     const posAttr = baseDiscGeom.getAttribute('position');
@@ -545,7 +556,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     root.add(ceilings);
   }
 
-  console.log(`[Forest] ${treeIndex} trees in ${groveCount} groves, ${nestablePositions.length} nests, ${ceilingPlacements.length} canopy ceilings (instanced)`);
+  console.log(`[Forest] ${treeIndex} trees in ${groveCount} groves, ${nestablePositions.length} nests, ${_isMobile() ? 0 : ceilingPlacements.length} canopy ceilings (${_isMobile() ? 'mobile gated' : 'instanced'})`);
 
   // --- Shrubs at grove edges (ground-level scale anchors) ---
   const shrubGroup = new THREE.Group();
@@ -593,20 +604,26 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   root.add(rockGroup);
 
   // --- Clouds — higher up, bigger, fewer ---
+  // PERF: 20 cloud groups × 4 puff meshes = 80 transparent draw calls. Each
+  // icosahedron is ~80 tris but transparency forces sort+blend. Mobile only
+  // shows 4 clouds (1 puff each, opaque-like) to keep the sky "lived-in" for
+  // free; desktop keeps the full cloud field.
   const cloudGroup = new THREE.Group();
   cloudGroup.name = 'forest-clouds';
   const cloudMat = new THREE.MeshLambertMaterial({
-    color: 0xdfeeff, transparent: true, opacity: 0.7, flatShading: true,
+    color: 0xdfeeff, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.7, flatShading: true,
   });
 
-  for (let i = 0; i < 20; i++) {
+  const cloudCount = _isMobile() ? 4 : 20;
+  const puffsPerCloud = _isMobile() ? 1 : 4;
+  for (let i = 0; i < cloudCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
     const cloudHeight = randomInRange(40, 80);
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, cloudHeight);
 
     const cloud = new THREE.Group();
-    for (let j = 0; j < 4; j++) {
+    for (let j = 0; j < puffsPerCloud; j++) {
       const puff = new THREE.Mesh(
         new THREE.IcosahedronGeometry(randomInRange(3, 6), 1),
         cloudMat
@@ -1100,7 +1117,8 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
   });
   root.add(pineGroup);
-  if (pineCeilingPlacements.length > 0) {
+  // Mobile: skip the pine canopy ceiling (same fill-rate story as forest).
+  if (pineCeilingPlacements.length > 0 && !_isMobile()) {
     const baseDiscGeom = new THREE.CircleGeometry(1.0, 9);
     const posAttr = baseDiscGeom.getAttribute('position');
     for (let v = 1; v < posAttr.count; v++) {
@@ -1147,15 +1165,18 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   root.add(boulderGroup);
 
   // --- Mist clouds weaving between peaks ---
+  // Mobile: 4 clouds × 1 puff (was 18 × 3 = 54 transparent draw calls).
   const cloudGroup = new THREE.Group();
   cloudGroup.name = 'mountain-clouds';
-  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xe7eef9, transparent: true, opacity: 0.6, flatShading: true });
-  for (let i = 0; i < 18; i++) {
+  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xe7eef9, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.6, flatShading: true });
+  const mtnCloudCount = _isMobile() ? 4 : 18;
+  const mtnPuffsPer = _isMobile() ? 1 : 3;
+  for (let i = 0; i < mtnCloudCount; i++) {
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(1 - 2 * Math.random());
     const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(25, 55));
     const cloud = new THREE.Group();
-    for (let j = 0; j < 3; j++) {
+    for (let j = 0; j < mtnPuffsPer; j++) {
       const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(randomInRange(3, 7), 1), cloudMat);
       puff.position.set(randomInRange(-5, 5), randomInRange(-1, 2), randomInRange(-5, 5));
       puff.raycast = () => {};

@@ -3090,7 +3090,12 @@
     // ===== IMPROVEMENT 1b: Cloud shell (high wispy clouds, single mesh) =====
     // Procedural canvas noise generated ONCE at load -> tiled cloud texture.
     // Single transparent sphere shell, no shadow casting/receiving.
-    const cloudShell = (() => {
+    //
+    // PERF: this is a ~380u radius full-screen transparent textured sphere.
+    // Every screen pixel samples the cloud texture + blends with the sky dome
+    // behind it. Mobile fill rate can't afford this during Ring Rush. Disabled
+    // entirely on mobile — desktop keeps the visual polish.
+    const cloudShell = isMobile ? null : (() => {
       // Build a soft cloud noise canvas (one-shot, ~96KB).
       const C = 256;
       const canvas = document.createElement('canvas');
