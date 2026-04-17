@@ -389,11 +389,17 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const groveCount = 14;
   const groveCenters = fibonacciSpherePoints(groveCount, sphereRadius);
 
-  const treeGroup = new THREE.Group();
-  treeGroup.name = 'forest-trees';
-
   // Pre-collect ceiling placements; we'll build one InstancedMesh after the loop.
   const ceilingPlacements = []; // { pos, up, radius }
+
+  // PERF: instead of ~210 tree Groups × 2 meshes = ~420 draw calls, we collect
+  // placements here and build 1 trunk InstancedMesh + 3 canopy InstancedMeshes
+  // (one per color material) after the grove loop — 4 draw calls total.
+  // Unit trunk geom (radius 1, height 1, centered at origin+0.5 up); per-instance
+  // scale encodes trunk radius * treeScale (X/Z) and trunk height * treeScale (Y).
+  const trunkPlacements = []; // { pos, up, trunkRadiusBottom, trunkHeight, treeScale }
+  const canopyPlacementsByColor = [[], [], []]; // one bucket per canopy material
+  // { pos, up, canopyRadius, canopyHeight, treeScale, trunkHeight }
 
   let treeIndex = 0;
   const nestInterval = 15; // Every 15th tree is nestable
@@ -425,29 +431,12 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const jitterPhi = groveCenter.phi + randomInRange(-clusterSpread * 0.6, clusterSpread * 0.6);
       const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
       const up = pos.clone().normalize();
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultUp, up);
 
-      const tree = new THREE.Group();
-
-      // Trunk — tall enough to create corridors between
       const trunkHeight = randomInRange(8, 16);
       const trunkRadiusBottom = randomInRange(0.5, 1.0);
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(trunkRadiusBottom * 0.4, trunkRadiusBottom, trunkHeight, 6),
-        trunkMat
-      );
-      trunk.position.y = trunkHeight / 2;
-      tree.add(trunk);
-
-      // Canopy — forms the ceiling layer
       const canopyHeight = randomInRange(8, 16);
       const canopyRadius = randomInRange(3, 6);
-      const canopy = new THREE.Mesh(
-        new THREE.ConeGeometry(canopyRadius, canopyHeight, 7),
-        canopyMats[Math.floor(Math.random() * canopyMats.length)]
-      );
-      canopy.position.y = trunkHeight + canopyHeight * 0.4;
-      tree.add(canopy);
+      const canopyColorIdx = Math.floor(Math.random() * canopyMats.length);
 
       // Scale variation with champion / shrimp overrides for dramatic height variation
       let scale;
@@ -460,10 +449,11 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       } else {
         scale = randomInRange(1.0, 2.0);
       }
-      tree.position.copy(pos);
-      tree.quaternion.copy(quaternion);
-      tree.scale.setScalar(scale);
-      treeGroup.add(tree);
+
+      trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
+      canopyPlacementsByColor[canopyColorIdx].push({
+        pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight,
+      });
 
       // Collision
       collisionSystem.addCollider(pos, trunkRadiusBottom * scale * 1.2, 'tree');
@@ -475,14 +465,16 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
         championTopPos = pos;
       }
 
-      // Nest positions — on the tallest trees in each grove
+      // Nest positions — on the tallest trees in each grove.
+      // No per-tree host object now (trees are instanced); nests attach via world
+      // position only which is what the nest system uses anyway.
       if (treeIndex % nestInterval === 0 || isChampion) {
         const nestPos = pos.clone().add(up.clone().multiplyScalar(treeTopOffset));
         if (treeIndex % nestInterval === 0) {
           nestablePositions.push({
             position: nestPos,
             surfaceNormal: up.clone(),
-            hostObject: tree,
+            hostObject: null,
           });
         }
         // Champions are proximity targets (whoosh cue)
@@ -517,7 +509,74 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
   });
 
-  root.add(treeGroup);
+  // --- Build instanced trunks (1 draw call for ALL trunks) ---
+  // Unit trunk geom: cylinder with radius 1 at bottom, 0.4 at top, height 1,
+  // centred so y=0 sits at the base and y=1 at the top. Per-instance scale
+  // gives final proportions; rotation orients trunk along surface normal.
+  if (trunkPlacements.length > 0) {
+    const trunkUnitGeom = new THREE.CylinderGeometry(0.4, 1.0, 1.0, 6);
+    // Translate up by 0.5 so the cylinder base sits at y=0 in local space.
+    trunkUnitGeom.translate(0, 0.5, 0);
+    const trunkInst = new THREE.InstancedMesh(trunkUnitGeom, trunkMat, trunkPlacements.length);
+    trunkInst.name = 'forest-trunks';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    for (let i = 0; i < trunkPlacements.length; i++) {
+      const p = trunkPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      dummy.position.copy(p.pos);
+      dummy.quaternion.copy(orientQ);
+      // Non-uniform scale bakes trunkRadiusBottom / trunkHeight into the unit geom.
+      dummy.scale.set(
+        p.trunkRadiusBottom * p.treeScale,
+        p.trunkHeight * p.treeScale,
+        p.trunkRadiusBottom * p.treeScale,
+      );
+      dummy.updateMatrix();
+      trunkInst.setMatrixAt(i, dummy.matrix);
+    }
+    trunkInst.instanceMatrix.needsUpdate = true;
+    trunkInst.computeBoundingSphere();
+    root.add(trunkInst);
+  }
+
+  // --- Build instanced canopies, one InstancedMesh per color bucket ---
+  // Unit canopy geom: cone with radius 1, height 1, base at y=0, tip at y=1.
+  const canopyUnitGeom = new THREE.ConeGeometry(1, 1, 7);
+  canopyUnitGeom.translate(0, 0.5, 0);
+  const localUp = new THREE.Vector3();
+  for (let c = 0; c < canopyPlacementsByColor.length; c++) {
+    const bucket = canopyPlacementsByColor[c];
+    if (bucket.length === 0) continue;
+    const canopyInst = new THREE.InstancedMesh(canopyUnitGeom, canopyMats[c], bucket.length);
+    canopyInst.name = `forest-canopies-${c}`;
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    for (let i = 0; i < bucket.length; i++) {
+      const p = bucket[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      // Original: canopy's center was at local-y = trunkHeight + canopyHeight*0.4.
+      // Original ConeGeometry was centered (base at -h/2, tip at +h/2).
+      // So canopy BASE was at local-y = trunkHeight + canopyHeight*0.4 - canopyHeight*0.5
+      //   = trunkHeight - canopyHeight*0.1
+      // We use a unit cone with base at y=0, tip at y=1, scaled by canopyHeight.
+      // So place the instance origin at pos + up * (trunkHeight - canopyHeight*0.1) * treeScale.
+      const baseYWorld = (p.trunkHeight - p.canopyHeight * 0.1) * p.treeScale;
+      localUp.copy(p.up).multiplyScalar(baseYWorld);
+      dummy.position.copy(p.pos).add(localUp);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(
+        p.canopyRadius * p.treeScale,
+        p.canopyHeight * p.treeScale,
+        p.canopyRadius * p.treeScale,
+      );
+      dummy.updateMatrix();
+      canopyInst.setMatrixAt(i, dummy.matrix);
+    }
+    canopyInst.instanceMatrix.needsUpdate = true;
+    canopyInst.computeBoundingSphere();
+    root.add(canopyInst);
+  }
 
   // --- Build one InstancedMesh for all canopy ceilings (single draw call) ---
   // Mobile fill-rate: canopy ceilings are large transparent discs rendered
@@ -559,9 +618,8 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   console.log(`[Forest] ${treeIndex} trees in ${groveCount} groves, ${nestablePositions.length} nests, ${_isMobile() ? 0 : ceilingPlacements.length} canopy ceilings (${_isMobile() ? 'mobile gated' : 'instanced'})`);
 
   // --- Shrubs at grove edges (ground-level scale anchors) ---
-  const shrubGroup = new THREE.Group();
-  shrubGroup.name = 'forest-shrubs';
-
+  // Collect placements then build one InstancedMesh (was ~126 draw calls).
+  const shrubPlacements = []; // { pos, up, baseRadius, scaleMul }
   groveCenters.forEach((grove) => {
     const shrubsPerGrove = Math.floor(randomInRange(6, 12));
     const shrubSpread = 0.08; // Wider than tree cluster — fills edges
@@ -570,38 +628,60 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const phi = grove.phi + randomInRange(-shrubSpread * 0.6, shrubSpread * 0.6);
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
-
-      const shrub = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(randomInRange(1.0, 2.5), 0),
-        shrubMat
-      );
-      shrub.position.copy(pos);
-      shrub.quaternion.setFromUnitVectors(defaultUp, up);
-      shrub.scale.set(1, 0.6, 1).multiplyScalar(randomInRange(1.0, 2.0));
-      shrubGroup.add(shrub);
+      shrubPlacements.push({
+        pos, up,
+        baseRadius: randomInRange(1.0, 2.5),
+        scaleMul: randomInRange(1.0, 2.0),
+      });
     }
   });
-  root.add(shrubGroup);
+  if (shrubPlacements.length > 0) {
+    // Unit icosahedron radius 1; scale encodes per-instance radius & flatten.
+    const shrubUnitGeom = new THREE.IcosahedronGeometry(1, 0);
+    const shrubInst = new THREE.InstancedMesh(shrubUnitGeom, shrubMat, shrubPlacements.length);
+    shrubInst.name = 'forest-shrubs';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    for (let i = 0; i < shrubPlacements.length; i++) {
+      const p = shrubPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      dummy.position.copy(p.pos);
+      dummy.quaternion.copy(orientQ);
+      const s = p.baseRadius * p.scaleMul;
+      dummy.scale.set(s, s * 0.6, s); // squash Y for low bush look
+      dummy.updateMatrix();
+      shrubInst.setMatrixAt(i, dummy.matrix);
+    }
+    shrubInst.instanceMatrix.needsUpdate = true;
+    shrubInst.computeBoundingSphere();
+    root.add(shrubInst);
+  }
 
-  // --- Rocks scattered between groves ---
-  const rockGroup = new THREE.Group();
-  rockGroup.name = 'forest-rocks';
-  const rockCount = 50;
+  // --- Rocks scattered between groves (instanced, 50 -> 1 draw call) ---
+  const rockCount = _isMobile() ? 30 : 50;
   const rockPoints = fibonacciSpherePoints(rockCount, sphereRadius);
-
-  rockPoints.forEach((point) => {
-    const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.15, 0.15), point.phi + randomInRange(-0.08, 0.08), -0.2);
-    const rock = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(randomInRange(0.8, 2.0), 0),
-      rockMat
-    );
-    rock.position.copy(pos);
-    rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    rock.scale.setScalar(randomInRange(1.0, 2.5));
-    rockGroup.add(rock);
-    collisionSystem.addCollider(pos, 1.0 * rock.scale.x, 'rock');
-  });
-  root.add(rockGroup);
+  if (rockPoints.length > 0) {
+    const rockUnitGeom = new THREE.DodecahedronGeometry(1, 0);
+    const rockInst = new THREE.InstancedMesh(rockUnitGeom, rockMat, rockPoints.length);
+    rockInst.name = 'forest-rocks';
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < rockPoints.length; i++) {
+      const point = rockPoints[i];
+      const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.15, 0.15), point.phi + randomInRange(-0.08, 0.08), -0.2);
+      const baseRadius = randomInRange(0.8, 2.0);
+      const scaleMul = randomInRange(1.0, 2.5);
+      const s = baseRadius * scaleMul;
+      dummy.position.copy(pos);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.scale.set(s, s, s);
+      dummy.updateMatrix();
+      rockInst.setMatrixAt(i, dummy.matrix);
+      collisionSystem.addCollider(pos, 1.0 * s, 'rock');
+    }
+    rockInst.instanceMatrix.needsUpdate = true;
+    rockInst.computeBoundingSphere();
+    root.add(rockInst);
+  }
 
   // --- Clouds — higher up, bigger, fewer ---
   // PERF: 20 cloud groups × 4 puff meshes = 80 transparent draw calls. Each
@@ -658,78 +738,99 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e3520, flatShading: true });
 
   // --- Ridge clusters (parallel lines of tall spires) ---
+  // PERF: ~110 spires → 2 InstancedMesh draw calls (one per material tint).
   const ridgeCount = 10;
   const ridgeCenters = fibonacciSpherePoints(ridgeCount, sphereRadius);
-  const spireGroup = new THREE.Group();
-  spireGroup.name = 'canyon-spires';
 
+  // Per-material buckets: index 0 = spireMat, 1 = darkSpireMat.
+  const spirePlacementsByMat = [[], []];
   let spireIndex = 0;
 
   ridgeCenters.forEach((ridge, rIdx) => {
     const spiresInRidge = Math.floor(randomInRange(8, 14));
-    // Ridge direction — a random tangent angle
     const ridgeAngle = Math.random() * Math.PI;
-    const ridgeLength = randomInRange(0.06, 0.1); // Angular extent of ridge
+    const ridgeLength = randomInRange(0.06, 0.1);
 
-    // Champion: 1 spire per ridge gets 2-3× scale to anchor the eye
     const championIdx = Math.floor(Math.random() * spiresInRidge);
     const shrimpIdx = (championIdx + Math.floor(spiresInRidge / 2)) % spiresInRidge;
 
     for (let s = 0; s < spiresInRidge; s++) {
-      const t = (s / spiresInRidge - 0.5) * 2; // -1 to 1 along ridge
+      const t = (s / spiresInRidge - 0.5) * 2;
       const along = t * ridgeLength;
-      const across = randomInRange(-0.008, 0.008); // Very tight perpendicular spread = wall
+      const across = randomInRange(-0.008, 0.008);
 
       const theta = ridge.theta + along * Math.cos(ridgeAngle) + across * Math.sin(ridgeAngle);
       const phi = ridge.phi + along * Math.sin(ridgeAngle) * 0.5 + across * Math.cos(ridgeAngle) * 0.5;
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
 
-      // Tall wall-like spires
       const height = randomInRange(20, 50);
       const baseRadius = randomInRange(2.0, 4.5);
-      const spire = new THREE.Mesh(
-        new THREE.CylinderGeometry(baseRadius * 0.3, baseRadius, height, 6, 1),
-        Math.random() > 0.5 ? spireMat : darkSpireMat
-      );
-      spire.position.copy(pos).addScaledVector(up, height / 2);
-      spire.quaternion.setFromUnitVectors(defaultUp, up);
-      spire.rotateX(randomInRange(-0.08, 0.08));
-      spire.rotateZ(randomInRange(-0.08, 0.08));
+      const matIdx = Math.random() > 0.5 ? 0 : 1;
 
       let scale;
-      if (s === championIdx) {
-        scale = randomInRange(2.2, 2.9); // Towering champion spire
-      } else if (s === shrimpIdx) {
-        scale = randomInRange(0.5, 0.7);
-      } else {
-        scale = randomInRange(1.0, 1.5);
-      }
-      spire.scale.setScalar(scale);
-      spireGroup.add(spire);
+      if (s === championIdx) scale = randomInRange(2.2, 2.9);
+      else if (s === shrimpIdx) scale = randomInRange(0.5, 0.7);
+      else scale = randomInRange(1.0, 1.5);
+
+      spirePlacementsByMat[matIdx].push({
+        pos, up, height, baseRadius, scale,
+        rotX: randomInRange(-0.08, 0.08),
+        rotZ: randomInRange(-0.08, 0.08),
+      });
       collisionSystem.addCollider(pos, baseRadius * scale * 0.8, 'spire');
 
-      // Nests on tallest spires
+      // Nests on tallest spires (hostObject = null; nest system uses world pos).
       if (spireIndex % 12 === 0 && height > 35) {
         const nestPos = pos.clone().add(up.clone().multiplyScalar(height * scale + 1));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: spire });
+        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
       }
 
-      // Champion spires register as proximity targets
       if (s === championIdx && proximityTargets) {
         const apex = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.6));
-        proximityTargets.push({
-          position: apex,
-          radius: 14,
-          tint: 0xffd0a0,
-        });
+        proximityTargets.push({ position: apex, radius: 14, tint: 0xffd0a0 });
       }
       spireIndex++;
     }
   });
 
-  root.add(spireGroup);
-  console.log(`[Canyon] ${spireIndex} spires in ${ridgeCount} ridges, ${nestablePositions.length} nests`);
+  // Build InstancedMesh per material bucket.
+  // Unit cylinder: top radius 0.3 (was baseRadius*0.3), bottom radius 1, height 1,
+  // base at y=0, tip at y=1. Per-instance scale = (baseRadius, height, baseRadius) * treeScale.
+  const spireMats = [spireMat, darkSpireMat];
+  for (let mi = 0; mi < 2; mi++) {
+    const bucket = spirePlacementsByMat[mi];
+    if (bucket.length === 0) continue;
+    const spireUnitGeom = new THREE.CylinderGeometry(0.3, 1.0, 1.0, 6, 1);
+    spireUnitGeom.translate(0, 0.5, 0); // base at y=0
+    const inst = new THREE.InstancedMesh(spireUnitGeom, spireMats[mi], bucket.length);
+    inst.name = `canyon-spires-${mi}`;
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const tiltQ = new THREE.Quaternion();
+    const tiltEuler = new THREE.Euler();
+    for (let i = 0; i < bucket.length; i++) {
+      const p = bucket[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      // Apply rotX/Z as a local rotation AFTER orientQ (same as original spire.rotateX/Z).
+      tiltEuler.set(p.rotX, 0, p.rotZ);
+      tiltQ.setFromEuler(tiltEuler);
+      orientQ.multiply(tiltQ);
+      dummy.position.copy(p.pos); // instance origin sits ON the surface (base of spire)
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(
+        p.baseRadius * p.scale,
+        p.height * p.scale,
+        p.baseRadius * p.scale,
+      );
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    inst.computeBoundingSphere();
+    root.add(inst);
+  }
+  console.log(`[Canyon] ${spireIndex} spires in ${ridgeCount} ridges (instanced), ${nestablePositions.length} nests`);
 
   // --- Towering canyon corridor walls (single InstancedMesh = 1 draw call) ---
   // Pair two parallel cliff walls per cluster to form a flyable corridor.
@@ -822,42 +923,64 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   }
   console.log(`[Canyon] ${wallPlacements.length} corridor walls in ${corridorRidgeIndices.length} canyons (instanced)`);
 
-  // --- Arches spanning between ridges (fly-through challenges) ---
-  const archGroup = new THREE.Group();
-  archGroup.name = 'canyon-arches';
+  // --- Arches spanning between ridges (instanced) ---
   const archMat = new THREE.MeshLambertMaterial({ color: 0xb25e34, flatShading: true });
-
-  for (let i = 0; i < 8; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(1 - 2 * Math.random());
-    const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(10, 25));
-    const arch = new THREE.Mesh(new THREE.TorusGeometry(8, 1.2, 6, 16), archMat);
-    arch.position.copy(pos);
-    const up = pos.clone().normalize();
-    arch.quaternion.setFromUnitVectors(defaultUp, up);
-    arch.rotateX(Math.PI / 2);
-    arch.rotateZ(Math.random() * Math.PI);
-    arch.scale.setScalar(randomInRange(1.2, 2.0));
-    archGroup.add(arch);
-    collisionSystem.addCollider(pos, 6 * arch.scale.x, 'arch');
+  const archCount = 8;
+  {
+    const archGeom = new THREE.TorusGeometry(8, 1.2, 6, 16);
+    const archInst = new THREE.InstancedMesh(archGeom, archMat, archCount);
+    archInst.name = 'canyon-arches';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const flatXQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+    const spinZQ = new THREE.Quaternion();
+    const zAxis = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < archCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(1 - 2 * Math.random());
+      const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(10, 25));
+      const up = pos.clone().normalize();
+      const s = randomInRange(1.2, 2.0);
+      orientQ.setFromUnitVectors(defaultUp, up).multiply(flatXQ);
+      spinZQ.setFromAxisAngle(zAxis, Math.random() * Math.PI);
+      orientQ.multiply(spinZQ);
+      dummy.position.copy(pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.setScalar(s);
+      dummy.updateMatrix();
+      archInst.setMatrixAt(i, dummy.matrix);
+      collisionSystem.addCollider(pos, 6 * s, 'arch');
+    }
+    archInst.instanceMatrix.needsUpdate = true;
+    archInst.computeBoundingSphere();
+    root.add(archInst);
   }
-  root.add(archGroup);
 
-  // --- Boulders at ground level ---
-  const boulderGroup = new THREE.Group();
-  boulderGroup.name = 'canyon-boulders';
-  const boulderPoints = fibonacciSpherePoints(40, sphereRadius);
-
-  boulderPoints.forEach((point) => {
-    const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.12, 0.12), point.phi + randomInRange(-0.06, 0.06), -0.2);
-    const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(randomInRange(1.5, 4), 0), boulderMat);
-    boulder.position.copy(pos);
-    boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    boulder.scale.setScalar(randomInRange(1.0, 2.0));
-    boulderGroup.add(boulder);
-    collisionSystem.addCollider(pos, 2.0 * boulder.scale.x, 'boulder');
-  });
-  root.add(boulderGroup);
+  // --- Boulders at ground level (instanced) ---
+  const boulderCount = _isMobile() ? 24 : 40;
+  const boulderPoints = fibonacciSpherePoints(boulderCount, sphereRadius);
+  if (boulderPoints.length > 0) {
+    const boulderUnitGeom = new THREE.IcosahedronGeometry(1, 0);
+    const boulderInst = new THREE.InstancedMesh(boulderUnitGeom, boulderMat, boulderPoints.length);
+    boulderInst.name = 'canyon-boulders';
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < boulderPoints.length; i++) {
+      const point = boulderPoints[i];
+      const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.12, 0.12), point.phi + randomInRange(-0.06, 0.06), -0.2);
+      const baseR = randomInRange(1.5, 4);
+      const scaleMul = randomInRange(1.0, 2.0);
+      const s = baseR * scaleMul;
+      dummy.position.copy(pos);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.scale.set(s, s, s);
+      dummy.updateMatrix();
+      boulderInst.setMatrixAt(i, dummy.matrix);
+      collisionSystem.addCollider(pos, 2.0 * s, 'boulder');
+    }
+    boulderInst.instanceMatrix.needsUpdate = true;
+    boulderInst.computeBoundingSphere();
+    root.add(boulderInst);
+  }
 
   return nestablePositions;
 }
@@ -886,10 +1009,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   });
 
   // --- Mountain ranges (clusters of peaks) ---
+  // PERF: ~40 peaks × 1-2 meshes each → 2 InstancedMesh (body + snow) = 2 calls.
   const rangeCount = 8;
   const rangeCenters = fibonacciSpherePoints(rangeCount, sphereRadius);
-  const peakGroup = new THREE.Group();
-  peakGroup.name = 'mountain-peaks';
+  const peakPlacements = []; // { pos, up, height, baseRadius, scale, rotX, rotZ }
+  const snowPlacements = []; // { pos, up, height, baseRadius, scale, snowHeight, rotX, rotZ }
   let peakIndex = 0;
 
   rangeCenters.forEach((range, rIdx) => {
@@ -897,7 +1021,6 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const rangeSpread = randomInRange(0.04, 0.07);
     const rangeAngle = Math.random() * Math.PI;
 
-    // Champion / shrimp picks — eye references for scale
     const championIdx = Math.floor(Math.random() * peaksInRange);
     const shrimpIdx = (championIdx + Math.floor(peaksInRange / 2)) % peaksInRange;
 
@@ -910,67 +1033,106 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
 
-      const peak = new THREE.Group();
       const height = randomInRange(25, 65);
       const baseRadius = randomInRange(5, 12);
-
-      const body = new THREE.Mesh(
-        new THREE.CylinderGeometry(baseRadius * 0.2, baseRadius, height, 7, 1),
-        stoneMat
-      );
-      body.position.y = height / 2;
-      peak.add(body);
-
-      // Snow cap on tall peaks
-      if (height > 35) {
-        const snowHeight = randomInRange(5, 12);
-        const snowCap = new THREE.Mesh(
-          new THREE.ConeGeometry(baseRadius * 0.5, snowHeight, 6),
-          snowMat
-        );
-        snowCap.position.y = height + snowHeight * 0.3;
-        peak.add(snowCap);
-      }
-
-      peak.position.copy(pos);
-      peak.quaternion.setFromUnitVectors(defaultUp, up);
-      peak.rotateX(randomInRange(-0.06, 0.06));
-      peak.rotateZ(randomInRange(-0.06, 0.06));
+      const rotX = randomInRange(-0.06, 0.06);
+      const rotZ = randomInRange(-0.06, 0.06);
 
       let scale;
       const isChampion = p === championIdx;
       const isShrimp = p === shrimpIdx;
-      if (isChampion) {
-        scale = randomInRange(2.0, 2.8); // Towering champion peak
-      } else if (isShrimp) {
-        scale = randomInRange(0.5, 0.7);
-      } else {
-        scale = randomInRange(1.0, 1.4);
+      if (isChampion) scale = randomInRange(2.0, 2.8);
+      else if (isShrimp) scale = randomInRange(0.5, 0.7);
+      else scale = randomInRange(1.0, 1.4);
+
+      peakPlacements.push({ pos, up, height, baseRadius, scale, rotX, rotZ });
+      if (height > 35) {
+        snowPlacements.push({
+          pos, up, height, baseRadius, scale,
+          snowHeight: randomInRange(5, 12),
+          rotX, rotZ,
+        });
       }
-      peak.scale.setScalar(scale);
-      peakGroup.add(peak);
       collisionSystem.addCollider(pos, baseRadius * scale * 0.8, 'mountain');
 
-      // Nest on tallest peaks (champion always gets a nest)
       if ((peakIndex % 8 === 0 && height > 40) || isChampion) {
         const nestPos = pos.clone().add(up.clone().multiplyScalar((height + 2) * scale));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: peak });
+        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
       }
 
-      // Champion peaks get proximity cues
       if (isChampion && proximityTargets) {
         const apex = pos.clone().addScaledVector(up, height * scale * 0.7);
-        proximityTargets.push({
-          position: apex,
-          radius: 18,
-          tint: 0xeaf4ff,
-        });
+        proximityTargets.push({ position: apex, radius: 18, tint: 0xeaf4ff });
       }
       peakIndex++;
     }
   });
-  root.add(peakGroup);
-  console.log(`[Mountain] ${peakIndex} peaks in ${rangeCount} ranges, ${nestablePositions.length} nests`);
+
+  // Build mountain body InstancedMesh. Unit cylinder: top radius 0.2, bottom 1,
+  // height 1, base at y=0; per-instance scale (baseRadius, height, baseRadius) × peakScale.
+  if (peakPlacements.length > 0) {
+    const bodyUnitGeom = new THREE.CylinderGeometry(0.2, 1.0, 1.0, 7, 1);
+    bodyUnitGeom.translate(0, 0.5, 0);
+    const bodyInst = new THREE.InstancedMesh(bodyUnitGeom, stoneMat, peakPlacements.length);
+    bodyInst.name = 'mountain-peaks-body';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const tiltQ = new THREE.Quaternion();
+    const tiltEuler = new THREE.Euler();
+    for (let i = 0; i < peakPlacements.length; i++) {
+      const p = peakPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      tiltEuler.set(p.rotX, 0, p.rotZ);
+      tiltQ.setFromEuler(tiltEuler);
+      orientQ.multiply(tiltQ);
+      dummy.position.copy(p.pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(p.baseRadius * p.scale, p.height * p.scale, p.baseRadius * p.scale);
+      dummy.updateMatrix();
+      bodyInst.setMatrixAt(i, dummy.matrix);
+    }
+    bodyInst.instanceMatrix.needsUpdate = true;
+    bodyInst.computeBoundingSphere();
+    root.add(bodyInst);
+  }
+
+  // Build snow cap InstancedMesh. Unit cone: radius 1, height 1, base at y=0.
+  // Original: snowCap.position.y = height + snowHeight * 0.3, ConeGeometry was
+  // centered, so snow BASE was at height + snowHeight*0.3 - snowHeight*0.5 =
+  // height - snowHeight*0.2. Radius scale = baseRadius * 0.5.
+  if (snowPlacements.length > 0) {
+    const snowUnitGeom = new THREE.ConeGeometry(1, 1, 6);
+    snowUnitGeom.translate(0, 0.5, 0);
+    const snowInst = new THREE.InstancedMesh(snowUnitGeom, snowMat, snowPlacements.length);
+    snowInst.name = 'mountain-peaks-snow';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const tiltQ = new THREE.Quaternion();
+    const tiltEuler = new THREE.Euler();
+    const upShift = new THREE.Vector3();
+    for (let i = 0; i < snowPlacements.length; i++) {
+      const p = snowPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      tiltEuler.set(p.rotX, 0, p.rotZ);
+      tiltQ.setFromEuler(tiltEuler);
+      orientQ.multiply(tiltQ);
+      const baseWorldY = (p.height - p.snowHeight * 0.2) * p.scale;
+      upShift.copy(p.up).multiplyScalar(baseWorldY);
+      dummy.position.copy(p.pos).add(upShift);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(
+        p.baseRadius * 0.5 * p.scale,
+        p.snowHeight * p.scale,
+        p.baseRadius * 0.5 * p.scale,
+      );
+      dummy.updateMatrix();
+      snowInst.setMatrixAt(i, dummy.matrix);
+    }
+    snowInst.instanceMatrix.needsUpdate = true;
+    snowInst.computeBoundingSphere();
+    root.add(snowInst);
+  }
+  console.log(`[Mountain] ${peakIndex} peaks in ${rangeCount} ranges (instanced body + snow), ${nestablePositions.length} nests`);
 
   // --- Cliff corridor walls between selected mountain ranges (3 spots, instanced) ---
   const cliffRangeIndices = [
@@ -1060,11 +1222,10 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   console.log(`[Mountain] ${cliffPlacements.length} cliff corridor walls (instanced)`);
 
   // --- Pine forests between ranges (clustered, shorter than peaks) ---
-  const pineGroup = new THREE.Group();
-  pineGroup.name = 'mountain-pines';
-  // Pine canopy ceiling placements (built into one InstancedMesh after the loop)
+  // PERF: ~168 pines × 2 meshes → 2 InstancedMesh draw calls (trunk + canopy).
   const pineCeilingPlacements = []; // { pos, up, radius }
-  // Place pine groves between ranges
+  const pineTrunkPlacements = []; // { pos, up, trunkH, scale }
+  const pineCanopyPlacements = []; // { pos, up, canopyH, canopyR, trunkH, scale }
   const pineGroveCount = 12;
   const pineGroveCenters = fibonacciSpherePoints(pineGroveCount, sphereRadius);
 
@@ -1079,35 +1240,19 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
 
-      const pine = new THREE.Group();
       const trunkH = randomInRange(5, 10);
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.3, 0.6, trunkH, 5),
-        pineTrunkMat
-      );
-      trunk.position.y = trunkH / 2;
-      pine.add(trunk);
-
       const canopyH = randomInRange(6, 12);
-      const canopy = new THREE.Mesh(
-        new THREE.ConeGeometry(randomInRange(2, 4), canopyH, 6),
-        pineCanopyMat
-      );
-      canopy.position.y = trunkH + canopyH * 0.35;
-      pine.add(canopy);
-
-      pine.position.copy(pos);
-      pine.quaternion.setFromUnitVectors(defaultUp, up);
+      const canopyR = randomInRange(2, 4);
       const scale = (t === championIdx)
         ? randomInRange(2.4, 3.0)
         : randomInRange(1.0, 1.8);
-      pine.scale.setScalar(scale);
-      pineGroup.add(pine);
+
+      pineTrunkPlacements.push({ pos, up, trunkH, scale });
+      pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
       collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
       const topOffset = (trunkH + canopyH * 0.85) * scale;
       if (topOffset > maxTopOffset) maxTopOffset = topOffset;
     }
-    // Defer pine canopy ceiling — one InstancedMesh after the loop
     if (maxTopOffset > 8) {
       const ceilingPos = placeOnSphere(THREE, sphereRadius, grove.theta, grove.phi, 0);
       const up = ceilingPos.clone().normalize();
@@ -1116,7 +1261,57 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       pineCeilingPlacements.push({ pos: finalPos, up, radius: discRadius });
     }
   });
-  root.add(pineGroup);
+
+  // Build pine trunk InstancedMesh. Unit cylinder: top 0.3, bottom 0.6, height 1.
+  // Original: trunk.position.y = trunkH/2 (centered), so base was at y=0.
+  // Unit geom base-at-0 matches that. Per-instance scale Y = trunkH * scale.
+  if (pineTrunkPlacements.length > 0) {
+    const trunkUnitGeom = new THREE.CylinderGeometry(0.3, 0.6, 1.0, 5);
+    trunkUnitGeom.translate(0, 0.5, 0);
+    const trunkInst = new THREE.InstancedMesh(trunkUnitGeom, pineTrunkMat, pineTrunkPlacements.length);
+    trunkInst.name = 'mountain-pine-trunks';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    for (let i = 0; i < pineTrunkPlacements.length; i++) {
+      const p = pineTrunkPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      dummy.position.copy(p.pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(p.scale, p.trunkH * p.scale, p.scale);
+      dummy.updateMatrix();
+      trunkInst.setMatrixAt(i, dummy.matrix);
+    }
+    trunkInst.instanceMatrix.needsUpdate = true;
+    trunkInst.computeBoundingSphere();
+    root.add(trunkInst);
+  }
+
+  // Build pine canopy InstancedMesh. Unit cone radius 1, height 1, base at y=0.
+  // Original: canopy.position.y = trunkH + canopyH*0.35, ConeGeometry was centered.
+  // So canopy BASE was at trunkH + canopyH*0.35 - canopyH*0.5 = trunkH - canopyH*0.15.
+  if (pineCanopyPlacements.length > 0) {
+    const canopyUnitGeom = new THREE.ConeGeometry(1, 1, 6);
+    canopyUnitGeom.translate(0, 0.5, 0);
+    const canopyInst = new THREE.InstancedMesh(canopyUnitGeom, pineCanopyMat, pineCanopyPlacements.length);
+    canopyInst.name = 'mountain-pine-canopies-mesh';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const upShift = new THREE.Vector3();
+    for (let i = 0; i < pineCanopyPlacements.length; i++) {
+      const p = pineCanopyPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      const baseYWorld = (p.trunkH - p.canopyH * 0.15) * p.scale;
+      upShift.copy(p.up).multiplyScalar(baseYWorld);
+      dummy.position.copy(p.pos).add(upShift);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(p.canopyR * p.scale, p.canopyH * p.scale, p.canopyR * p.scale);
+      dummy.updateMatrix();
+      canopyInst.setMatrixAt(i, dummy.matrix);
+    }
+    canopyInst.instanceMatrix.needsUpdate = true;
+    canopyInst.computeBoundingSphere();
+    root.add(canopyInst);
+  }
   // Mobile: skip the pine canopy ceiling (same fill-rate story as forest).
   if (pineCeilingPlacements.length > 0 && !_isMobile()) {
     const baseDiscGeom = new THREE.CircleGeometry(1.0, 9);
@@ -1149,20 +1344,31 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     root.add(ceilings);
   }
 
-  // --- Boulder fields ---
-  const boulderGroup = new THREE.Group();
-  boulderGroup.name = 'mountain-boulders';
-  const boulderPoints = fibonacciSpherePoints(50, sphereRadius);
-  boulderPoints.forEach((point) => {
-    const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.15, 0.15), point.phi + randomInRange(-0.08, 0.08), -0.2);
-    const boulder = new THREE.Mesh(new THREE.IcosahedronGeometry(randomInRange(1.5, 4), 0), boulderMat);
-    boulder.position.copy(pos);
-    boulder.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    boulder.scale.setScalar(randomInRange(1.0, 2.0));
-    boulderGroup.add(boulder);
-    collisionSystem.addCollider(pos, 2.0 * boulder.scale.x, 'boulder');
-  });
-  root.add(boulderGroup);
+  // --- Boulder fields (instanced) ---
+  const boulderCount = _isMobile() ? 30 : 50;
+  const boulderPoints = fibonacciSpherePoints(boulderCount, sphereRadius);
+  if (boulderPoints.length > 0) {
+    const boulderUnitGeom = new THREE.IcosahedronGeometry(1, 0);
+    const boulderInst = new THREE.InstancedMesh(boulderUnitGeom, boulderMat, boulderPoints.length);
+    boulderInst.name = 'mountain-boulders';
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < boulderPoints.length; i++) {
+      const point = boulderPoints[i];
+      const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.15, 0.15), point.phi + randomInRange(-0.08, 0.08), -0.2);
+      const baseR = randomInRange(1.5, 4);
+      const scaleMul = randomInRange(1.0, 2.0);
+      const s = baseR * scaleMul;
+      dummy.position.copy(pos);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.scale.set(s, s, s);
+      dummy.updateMatrix();
+      boulderInst.setMatrixAt(i, dummy.matrix);
+      collisionSystem.addCollider(pos, 2.0 * s, 'boulder');
+    }
+    boulderInst.instanceMatrix.needsUpdate = true;
+    boulderInst.computeBoundingSphere();
+    root.add(boulderInst);
+  }
 
   // --- Mist clouds weaving between peaks ---
   // Mobile: 4 clouds × 1 puff (was 18 × 3 = 54 transparent draw calls).
@@ -1209,20 +1415,22 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x74d4ff, transparent: true, opacity: 0.15 });
   const antennaMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
 
-  const towerGroup = new THREE.Group();
-  towerGroup.name = 'city-towers';
-
   // --- City blocks (clusters of buildings in rough grids) ---
+  // PERF: ~150 buildings × (body + glow + maybe antenna) = ~300-450 draw calls.
+  // Instance by material: 3 body buckets + 1 glow + 1 antenna = 5 InstancedMesh.
   const blockCount = 10;
   const blockCenters = fibonacciSpherePoints(blockCount, sphereRadius);
+
+  // Per-mat buckets for building bodies.
+  const bodyPlacementsByMat = [[], [], []];
+  const glowPlacements = [];
+  const antennaPlacements = [];
   let buildingIndex = 0;
 
   blockCenters.forEach((block) => {
     const buildingsInBlock = Math.floor(randomInRange(10, 20));
-    const blockSpread = randomInRange(0.025, 0.045);
-    // Grid-like placement within block
     const gridSize = Math.ceil(Math.sqrt(buildingsInBlock));
-    const gridAngle = Math.random() * Math.PI; // Block orientation
+    const gridAngle = Math.random() * Math.PI;
 
     const championIdx = Math.floor(Math.random() * buildingsInBlock);
     const shrimpIdx = (championIdx + Math.floor(buildingsInBlock / 2)) % buildingsInBlock;
@@ -1230,8 +1438,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     for (let b = 0; b < buildingsInBlock; b++) {
       const row = Math.floor(b / gridSize);
       const col = b % gridSize;
-      // Grid spacing with some jitter (street gaps ~5-8 units)
-      const spacing = 0.012; // Angular spacing between buildings
+      const spacing = 0.012;
       const gx = (col - gridSize / 2) * spacing + randomInRange(-0.002, 0.002);
       const gy = (row - gridSize / 2) * spacing + randomInRange(-0.002, 0.002);
 
@@ -1240,8 +1447,6 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
 
-      const tower = new THREE.Group();
-      // Height varies: champions tower (160-200), shrimps stub (8-12), rest 15-70
       let height, width, depth;
       if (b === championIdx) {
         height = randomInRange(140, 190);
@@ -1257,79 +1462,145 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
         depth = randomInRange(3, 7);
       }
 
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, depth),
-        buildingMats[Math.floor(Math.random() * buildingMats.length)]
-      );
-      body.position.y = height / 2;
-      tower.add(body);
+      const matIdx = Math.floor(Math.random() * buildingMats.length);
+      const yaw = Math.random() * Math.PI * 0.5;
 
-      // Glow strips (subtle window effect)
-      const glow = new THREE.Mesh(
-        new THREE.BoxGeometry(width * 1.02, height * 0.9, depth * 1.02),
-        glowMat
-      );
-      glow.position.y = height / 2;
-      tower.add(glow);
-
-      // Antenna on tall buildings
+      const common = { pos, up, height, width, depth, yaw };
+      bodyPlacementsByMat[matIdx].push(common);
+      glowPlacements.push(common);
       if (height > 50) {
-        const antennaH = randomInRange(5, 12);
-        const antenna = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.15, 0.15, antennaH, 4),
-          antennaMat
-        );
-        antenna.position.y = height + antennaH / 2;
-        tower.add(antenna);
+        antennaPlacements.push({
+          pos, up, height, yaw,
+          antennaH: randomInRange(5, 12),
+        });
       }
-
-      tower.position.copy(pos);
-      tower.quaternion.setFromUnitVectors(defaultUp, up);
-      // Random rotation around local up for block variety
-      tower.rotateY(Math.random() * Math.PI * 0.5);
-
-      towerGroup.add(tower);
       collisionSystem.addCollider(pos, Math.max(width, depth) * 0.6, 'tower');
 
-      // Nest on tallest buildings (champions always get nests)
       if ((buildingIndex % 12 === 0 && height > 45) || b === championIdx) {
         const nestPos = pos.clone().add(up.clone().multiplyScalar(height + 1));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: tower });
+        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
       }
 
-      // Champion towers register as proximity cues
       if (b === championIdx && proximityTargets) {
         const apex = pos.clone().addScaledVector(up, height * 0.55);
-        proximityTargets.push({
-          position: apex,
-          radius: 18,
-          tint: 0x9bd5ff,
-        });
+        proximityTargets.push({ position: apex, radius: 18, tint: 0x9bd5ff });
       }
       buildingIndex++;
     }
   });
 
-  root.add(towerGroup);
-  console.log(`[City] ${buildingIndex} buildings in ${blockCount} blocks, ${nestablePositions.length} nests`);
+  // Helper to build an instanced box with per-instance yaw around local up.
+  // Unit box: 1×1×1 centered; translate +0.5Y so base sits on surface.
+  const bodyUnitGeom = new THREE.BoxGeometry(1, 1, 1);
+  bodyUnitGeom.translate(0, 0.5, 0);
 
-  // --- Hover vehicles between buildings ---
-  const hoverGroup = new THREE.Group();
-  hoverGroup.name = 'city-hover';
-  const hoverMat = new THREE.MeshLambertMaterial({ color: 0x6cc4ff, transparent: true, opacity: 0.6 });
-
-  for (let i = 0; i < 25; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(1 - 2 * Math.random());
-    const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(30, 60));
-    const hover = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.3, 6, 12), hoverMat);
-    hover.position.copy(pos);
-    hover.quaternion.setFromUnitVectors(defaultUp, pos.clone().normalize());
-    hover.rotateX(Math.PI / 2);
-    hover.scale.setScalar(randomInRange(1.5, 3.0));
-    hoverGroup.add(hover);
+  function buildBoxInstances(name, placements, material, widthMul = 1, depthMul = 1, heightMul = 1) {
+    if (placements.length === 0) return null;
+    const inst = new THREE.InstancedMesh(bodyUnitGeom, material, placements.length);
+    inst.name = name;
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const yawQ = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      yawQ.setFromAxisAngle(yAxis, p.yaw);
+      orientQ.multiply(yawQ);
+      dummy.position.copy(p.pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(p.width * widthMul, p.height * heightMul, p.depth * depthMul);
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    inst.computeBoundingSphere();
+    return inst;
   }
-  root.add(hoverGroup);
+
+  for (let mi = 0; mi < bodyPlacementsByMat.length; mi++) {
+    const inst = buildBoxInstances(`city-towers-${mi}`, bodyPlacementsByMat[mi], buildingMats[mi]);
+    if (inst) root.add(inst);
+  }
+
+  // Glow is an offset-scale box (width*1.02 × height*0.9 × depth*1.02) with
+  // its base slightly inset so it still hugs the body. Use a second instanced
+  // mesh with its own scale mul. On mobile: skip glow entirely (saves a full
+  // transparent pass over every building).
+  if (!_isMobile()) {
+    const glowInst = buildBoxInstances('city-tower-glow', glowPlacements, glowMat, 1.02, 1.02, 0.9);
+    if (glowInst) {
+      // Offset base up slightly so glow center aligns with body center.
+      // Original had glow.position.y = height/2 same as body; our unit box is
+      // base-at-0 scaled by height*0.9, so base lifts by height*0.05 naturally —
+      // we need to center the glow *inside* the body. Translate the unit geom
+      // before instancing? Simpler: accept 5% base offset (invisible at play
+      // distance). Desktop-only so worst case is cosmetic.
+      root.add(glowInst);
+    }
+  }
+
+  // Antennas: unit cylinder radius 0.15, height 1, base at y=0. Per-instance
+  // position sits at tower top (height from surface), scale Y = antennaH.
+  if (antennaPlacements.length > 0) {
+    const antennaUnitGeom = new THREE.CylinderGeometry(0.15, 0.15, 1.0, 4);
+    antennaUnitGeom.translate(0, 0.5, 0);
+    const antennaInst = new THREE.InstancedMesh(antennaUnitGeom, antennaMat, antennaPlacements.length);
+    antennaInst.name = 'city-antennas';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const yawQ = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const upShift = new THREE.Vector3();
+    for (let i = 0; i < antennaPlacements.length; i++) {
+      const p = antennaPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      yawQ.setFromAxisAngle(yAxis, p.yaw);
+      orientQ.multiply(yawQ);
+      // Antenna sits at the top of the building (height above surface).
+      upShift.copy(p.up).multiplyScalar(p.height);
+      dummy.position.copy(p.pos).add(upShift);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(1, p.antennaH, 1);
+      dummy.updateMatrix();
+      antennaInst.setMatrixAt(i, dummy.matrix);
+    }
+    antennaInst.instanceMatrix.needsUpdate = true;
+    antennaInst.computeBoundingSphere();
+    root.add(antennaInst);
+  }
+  console.log(`[City] ${buildingIndex} buildings in ${blockCount} blocks (instanced), ${nestablePositions.length} nests`);
+
+  // --- Hover vehicles between buildings (instanced; mobile halves count) ---
+  const hoverCount = _isMobile() ? 12 : 25;
+  const hoverMat = new THREE.MeshLambertMaterial({
+    color: 0x6cc4ff,
+    // Keep transparent on both (looks better), but low opacity = cheap blend.
+    transparent: true,
+    opacity: 0.6,
+  });
+  if (hoverCount > 0) {
+    const hoverGeom = new THREE.TorusGeometry(1.5, 0.3, 6, 12);
+    const hoverInst = new THREE.InstancedMesh(hoverGeom, hoverMat, hoverCount);
+    hoverInst.name = 'city-hover';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const flatXQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+    for (let i = 0; i < hoverCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(1 - 2 * Math.random());
+      const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(30, 60));
+      orientQ.setFromUnitVectors(defaultUp, pos.clone().normalize()).multiply(flatXQ);
+      dummy.position.copy(pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.setScalar(randomInRange(1.5, 3.0));
+      dummy.updateMatrix();
+      hoverInst.setMatrixAt(i, dummy.matrix);
+    }
+    hoverInst.instanceMatrix.needsUpdate = true;
+    hoverInst.computeBoundingSphere();
+    root.add(hoverInst);
+  }
 
   return nestablePositions;
 }
