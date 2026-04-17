@@ -1,3 +1,10 @@
+// Subtle camera breathing: sine-wave vertical offset (~0.4Hz, ±0.05 units)
+// Makes the camera feel hand-held/alive without inducing motion sickness.
+// Toggle off to disable entirely (no per-frame cost).
+const CAMERA_BREATH_ENABLED = true;
+const CAMERA_BREATH_HZ = 0.4;
+const CAMERA_BREATH_AMPLITUDE = 0.05;
+
 export function createFollowCameraRig(three, options = {}) {
   if (!three) {
     throw new Error("createFollowCameraRig requires the THREE namespace");
@@ -39,7 +46,12 @@ export function createFollowCameraRig(three, options = {}) {
     viewDir: new Vector3(),
     stableUp: new Vector3(),
     stableRight: new Vector3(),
+    _breathOffset: new Vector3(),
   };
+
+  // Accumulator for camera-breath sine wave (radians).
+  // Advances each frame by (2*PI*HZ*delta). Pre-allocated primitive, no GC.
+  let _breathTime = 0;
 
   // Compute a stable up vector that avoids gimbal lock when looking near poles.
   // When the view direction is nearly parallel to the up vector, the lookAt
@@ -362,7 +374,19 @@ export function createFollowCameraRig(three, options = {}) {
     state.position.lerp(state.desiredPosition, positionAlpha);
     state.lookAt.lerp(state.desiredLookAt, lookAtAlpha);
 
-    perspective.position.copy(state.position);
+    // Subtle camera breathing: ±0.05 units vertical sway along local up.
+    // Shifts only the final camera position (not lookAt) so the horizon tilts
+    // imperceptibly, giving a hand-held feel without motion sickness.
+    if (CAMERA_BREATH_ENABLED) {
+      const breathDelta = Number.isFinite(delta) ? Math.max(delta, 0) : 0;
+      _breathTime += breathDelta * (2 * Math.PI * CAMERA_BREATH_HZ);
+      if (_breathTime > 1e6) _breathTime -= 1e6; // Prevent FP drift over long sessions
+      const breathOffset = Math.sin(_breathTime) * CAMERA_BREATH_AMPLITUDE;
+      scratch._breathOffset.copy(state.up).multiplyScalar(breathOffset);
+      perspective.position.copy(state.position).add(scratch._breathOffset);
+    } else {
+      perspective.position.copy(state.position);
+    }
 
     // Use stable up to avoid gimbal lock at poles
     const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);

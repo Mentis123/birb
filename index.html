@@ -1893,6 +1893,10 @@
             <span class="sound-setting-label">Music</span>
             <button type="button" class="sound-toggle is-on" data-sound-toggle="music" aria-label="Toggle music"></button>
           </div>
+          <div class="sound-setting-row" data-haptics-row hidden>
+            <span class="sound-setting-label">Haptics</span>
+            <button type="button" class="sound-toggle is-on" data-sound-toggle="haptics" aria-label="Toggle haptic feedback"></button>
+          </div>
           <button type="button" class="sound-settings-close" data-control="sound-settings-close">Done</button>
         </div>
       </div>
@@ -2441,6 +2445,18 @@
       dirty: true,
     };
 
+    // ============ HAPTIC FEEDBACK (mobile only) ============
+    // navigator.vibrate is supported on Android Chrome / some mobile browsers.
+    // iOS Safari does NOT support it (silently no-ops). Toggleable, persisted.
+    const HAPTICS_SUPPORTED = typeof navigator !== 'undefined' && 'vibrate' in navigator;
+    const hapticsState = {
+      enabled: localStorage.getItem('birb.haptics') !== 'false',
+    };
+    const triggerHaptic = (durationMs) => {
+      if (!HAPTICS_SUPPORTED || !hapticsState.enabled) return;
+      try { navigator.vibrate(durationMs); } catch (_) { /* no-op */ }
+    };
+
     // ============ AUDIO SYSTEM (Preloaded for instant playback) ============
     let audioUnlocked = false;
 
@@ -2484,8 +2500,9 @@
       droneDestroyed: 0.6,
       nestLand: 0.4,
       droneHum: 0.4,
-      wind: 0.3,
+      wind: 0.55,
       ambient: 0.25,
+      ambientBirds: 0.15,
     };
 
     // Create audio pool for a sound
@@ -2521,11 +2538,14 @@
 
     // Initialize continuous sounds
     const initContinuousSounds = () => {
-      // Wind whoosh - loops, volume tied to flight speed
-      continuousSounds.wind = new Audio('/sound/wind-whoosh.mp3');
+      // Wind whoosh - loops, volume + playbackRate tied to flight speed.
+      // No dedicated wind mp3 shipped yet; reuse ambient-mountain as a low
+      // airy bed. Pitch-shifted via playbackRate to read as wind at speed.
+      continuousSounds.wind = new Audio('/sound/ambient-mountain.mp3');
       continuousSounds.wind.loop = true;
       continuousSounds.wind.volume = 0;
       continuousSounds.wind.preload = 'auto';
+      continuousSounds.wind.playbackRate = 0.85;
 
       // Drone hum - loops, spatial based on nearest drone
       continuousSounds.droneHum = new Audio('/sound/drone-hum.mp3');
@@ -2607,15 +2627,96 @@
       });
     };
 
-    // Update wind sound based on flight speed
-    const updateWindSound = (speed, maxSpeed = 8) => {
-      if (!continuousSounds.wind || !soundSettings.sfxEnabled) {
-        if (continuousSounds.wind) continuousSounds.wind.volume = 0;
+    // ============ AMBIENT BIRD CALLS (Casual free-flight only) ============
+    // Snippets pulled from random offsets in the forest ambient track,
+    // pitch-shifted slightly so successive calls don't feel looped.
+    // Pool of 2 keeps GC pressure to zero per-frame.
+    const ambientBirdPool = [];
+    const initAmbientBirdPool = () => {
+      for (let i = 0; i < 2; i++) {
+        const a = new Audio('/sound/ambient-forest.mp3');
+        a.volume = 0;
+        a.preload = 'auto';
+        ambientBirdPool.push({ audio: a, playing: false, stopAt: 0 });
+      }
+    };
+    initAmbientBirdPool();
+
+    // Scheduling state — next chirp interval randomized each fire.
+    const ambientBirdState = {
+      nextAt: performance.now() + 8000,
+      enabled: true,
+    };
+
+    const playAmbientBirdCall = () => {
+      if (!soundSettings.sfxEnabled) return;
+      const slot = ambientBirdPool.find(s => !s.playing) || ambientBirdPool[0];
+      const a = slot.audio;
+      // Seek to a random spot far enough from end to allow ~1.2-1.8s playback.
+      const dur = Number.isFinite(a.duration) && a.duration > 3 ? a.duration : 30;
+      const snippetLen = 1.2 + Math.random() * 0.6;
+      const maxStart = Math.max(0, dur - snippetLen - 0.1);
+      try {
+        a.currentTime = Math.random() * maxStart;
+      } catch (_) { /* ignore seek errors before metadata */ }
+      a.playbackRate = 0.9 + Math.random() * 0.2;
+      a.volume = getEffectiveVolume(BASE_VOLUMES.ambientBirds);
+      slot.playing = true;
+      slot.stopAt = performance.now() + snippetLen * 1000 / a.playbackRate;
+      a.play().catch(() => { slot.playing = false; });
+    };
+
+    // Per-frame tick: stop expired snippets, schedule next call.
+    // Caller passes whether ambient birds are eligible (Casual + flying).
+    const tickAmbientBirds = (eligible) => {
+      const now = performance.now();
+      // Always check stop deadlines so leftover snippets don't drone on.
+      for (let i = 0; i < ambientBirdPool.length; i++) {
+        const slot = ambientBirdPool[i];
+        if (slot.playing && now >= slot.stopAt) {
+          try { slot.audio.pause(); } catch (_) {}
+          slot.playing = false;
+        }
+      }
+      if (!eligible) {
+        // Push next chirp time forward so it doesn't fire instantly on resume.
+        ambientBirdState.nextAt = now + 8000 + Math.random() * 4000;
         return;
       }
-      // Volume scales with speed (0 at rest, full at maxSpeed)
-      const speedFactor = Math.min(1, speed / maxSpeed);
-      continuousSounds.wind.volume = getEffectiveVolume(BASE_VOLUMES.wind) * speedFactor;
+      if (now >= ambientBirdState.nextAt) {
+        playAmbientBirdCall();
+        // 8-20s gap to next chirp
+        ambientBirdState.nextAt = now + 8000 + Math.random() * 12000;
+      }
+    };
+
+    // Update wind sound based on flight speed.
+    // Volume ramps 0.0 -> ~0.4 at top speed, pitch climbs 0.85 -> 1.25.
+    // Smoothed toward target each call to avoid iOS HTMLAudio pops.
+    const WIND_PITCH_MIN = 0.85;
+    const WIND_PITCH_MAX = 1.25;
+    const WIND_SMOOTH = 0.12; // Per-call smoothing factor (iOS-safe ramp)
+    let _windCurrentVol = 0;
+    let _windCurrentRate = WIND_PITCH_MIN;
+    const updateWindSound = (speed, maxSpeed = 8) => {
+      if (!continuousSounds.wind || !soundSettings.sfxEnabled) {
+        if (continuousSounds.wind) {
+          // Ramp toward zero for pop-free mute
+          _windCurrentVol += (0 - _windCurrentVol) * WIND_SMOOTH;
+          continuousSounds.wind.volume = _windCurrentVol;
+        }
+        return;
+      }
+      const speedFactor = Math.min(1, Math.max(0, speed / maxSpeed));
+      // Ease speedFactor so wind emerges nicely rather than linearly
+      const eased = speedFactor * speedFactor;
+      const targetVol = getEffectiveVolume(BASE_VOLUMES.wind) * eased;
+      const targetRate = WIND_PITCH_MIN + (WIND_PITCH_MAX - WIND_PITCH_MIN) * speedFactor;
+      _windCurrentVol += (targetVol - _windCurrentVol) * WIND_SMOOTH;
+      _windCurrentRate += (targetRate - _windCurrentRate) * WIND_SMOOTH;
+      continuousSounds.wind.volume = Math.max(0, Math.min(1, _windCurrentVol));
+      // playbackRate guarded: iOS Safari accepts 0.5–4 range reliably
+      continuousSounds.wind.playbackRate = _windCurrentRate;
     };
 
     // Update drone hum based on nearest drone distance
@@ -2796,6 +2897,8 @@
       const masterDisplay = document.querySelector('[data-volume-display="master"]');
       const sfxToggle = document.querySelector('[data-sound-toggle="sfx"]');
       const musicToggle = document.querySelector('[data-sound-toggle="music"]');
+      const hapticsRow = document.querySelector('[data-haptics-row]');
+      const hapticsToggle = document.querySelector('[data-sound-toggle="haptics"]');
 
       if (masterSlider) {
         masterSlider.value = Math.round(soundSettings.masterVolume * 100);
@@ -2808,6 +2911,13 @@
       }
       if (musicToggle) {
         musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
+      }
+      // Show haptics row only on devices that support vibration.
+      if (hapticsRow) {
+        hapticsRow.hidden = !HAPTICS_SUPPORTED;
+      }
+      if (hapticsToggle) {
+        hapticsToggle.classList.toggle('is-on', hapticsState.enabled);
       }
     }
 
@@ -2856,6 +2966,18 @@
           if (continuousSounds.ambient) continuousSounds.ambient.pause();
         }
         saveSoundSettings();
+      });
+    }
+
+    // Haptics toggle (mobile only — row hidden when unsupported)
+    const hapticsToggleBtn = document.querySelector('[data-sound-toggle="haptics"]');
+    if (hapticsToggleBtn) {
+      hapticsToggleBtn.addEventListener('click', () => {
+        hapticsState.enabled = !hapticsState.enabled;
+        hapticsToggleBtn.classList.toggle('is-on', hapticsState.enabled);
+        localStorage.setItem('birb.haptics', hapticsState.enabled ? 'true' : 'false');
+        // Confirm-buzz so user feels it engage
+        if (hapticsState.enabled) triggerHaptic(20);
       });
     }
 
@@ -5236,6 +5358,8 @@
         if (particleSystem) particleSystem.createExplosion(position);
         // ===== IMPROVEMENT 6: Screen shake on drone kill =====
         screenShake.droneDestroyed();
+        // Haptic: explosion (60ms)
+        triggerHaptic(60);
       },
     });
 
@@ -5408,6 +5532,8 @@
           if (fired) {
             // Play sound synchronously using pre-generated buffer
             playRocketFireSound();
+            // Haptic: rocket fired (40ms)
+            triggerHaptic(40);
             updateLaunchButtonCooldown(true);
           }
         }
@@ -5692,6 +5818,9 @@
             if (droneHit.hit) {
               // Calculate distance from bird to explosion for spatial audio
               const distToExplosion = flightController ? flightController.position.distanceTo(rocket.position) : 0;
+              // Haptic: rocket hit on drone (30ms) — fires before destroyDrone
+              // so it precedes the 60ms explosion buzz from onDroneDestroyed.
+              triggerHaptic(30);
               droneSystem.destroyDrone(droneHit.index);
               rocketSystem.removeRocket(i);
               // Play drone destroyed sound with spatial audio
@@ -5763,6 +5892,11 @@
         updateWindSound(0); // No wind when nested
       }
 
+      // Ambient bird calls — Casual free-flight only, never while nested.
+      // Other game modes stay focused (no random chirps during Drone Hunter etc.)
+      const birdsEligible = !isNested && currentGameMode === GAME_MODES.CASUAL;
+      tickAmbientBirds(birdsEligible);
+
       // Update freeze state
       updateFreezeState(delta);
 
@@ -5776,6 +5910,8 @@
             if (collected.length > 0) {
               // Play ring collect sound
               playRingCollectSound();
+              // Haptic: ring collected (20ms)
+              triggerHaptic(20);
               // ===== IMPROVEMENT 5: Ring sparkle particles =====
               if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
               // ===== IMPROVEMENT 6: FOV kick on ring collect =====
