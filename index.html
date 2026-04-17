@@ -2450,14 +2450,38 @@
       throw new Error(message);
     };
 
+    // ============ MOBILE PERF DETECTION ============
+    // Perf research: on iPhone 12 Safari the GPU chokes on overdraw + draw calls
+    // far more than on tri count. Ring Rush adds 10 rings × 3 meshes (30 draw
+    // calls) on top of a forest env that ships ~200+ meshes. Combined with the
+    // cloud shell's full-screen transparent sphere and 14 canopy disc instances,
+    // fill rate dies. isMobile gates aggressive cuts; isLowEnd gates deeper cuts.
+    const _uaMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+    const _coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+    const isMobile = _uaMobile || _coarsePointer;
+    const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 4) <= 4);
+    // Expose globally so environment modules can inspect it without prop drilling.
+    window.__birbIsMobile = isMobile;
+    window.__birbIsLowEnd = isLowEnd;
+    // Debug flag — ?debug=perf in URL enables console logs for quality tier shifts.
+    const _perfDebug = new URLSearchParams(window.location.search).get('debug') === 'perf';
+    window.__birbPerfDebug = _perfDebug;
+
     let renderer;
     try {
       renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias: true,
+        // AA costs ~15% GPU on mobile — disable on mobile, DPR does the heavy lifting.
+        antialias: !isMobile,
         alpha: true,
-        powerPreference: "low-power",
+        // Desktop prefers high-perf discrete GPU. Mobile 'low-power' causes
+        // integrated GPU on iOS; 'high-performance' on mobile Safari is a hint
+        // to use the performance core. Overall: mobile -> high-perf, desktop low-power.
+        powerPreference: isMobile ? "high-performance" : "low-power",
         failIfMajorPerformanceCaveat: false,
+        // stencil/depth defaults are fine; explicitly disable preserve-drawing to
+        // allow the browser to discard the backbuffer after present (perf win).
+        preserveDrawingBuffer: false,
       });
     } catch (error) {
       showFatalError("Unable to start WebGL — your browser may not support it.");
@@ -2467,14 +2491,23 @@
       showFatalError("WebGL context unavailable. Please enable hardware acceleration.");
     }
 
+    // Shadows are brutal on mobile WebGL — each shadow-casting light doubles
+    // geometry submission (shadow pass + main pass). Currently no code calls
+    // castShadow=true, so this is defence-in-depth.
+    renderer.shadowMap.enabled = false;
+
     if (statusMetric) {
       statusMetric.textContent = "Renderer ready. Building scene...";
     }
 
     const contextState = { lost: false };
 
-    const prefersCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
-    const DPR_CAP = prefersCoarsePointer ? 1.4 : 1.8;
+    // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
+    // Adaptive quality further drops this to 1.0 below 55 FPS.
+    const DPR_CAP = isMobile ? 1.2 : 1.8;
+    if (_perfDebug) {
+      console.log(`[perf] isMobile=${isMobile} isLowEnd=${isLowEnd} DPR_CAP=${DPR_CAP} antialias=${!isMobile}`);
+    }
     const resizeState = {
       width: 0,
       height: 0,
@@ -2941,8 +2974,11 @@
     }
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.22;
+    // Tone mapping cost: ACESFilmic = per-pixel curve (expensive on mobile).
+    // On mobile the scene is already saturated/colourful so cheaper Linear
+    // tone mapping looks nearly identical — tuned exposure compensates.
+    renderer.toneMapping = isMobile ? THREE.LinearToneMapping : THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = isMobile ? 1.08 : 1.22;
 
     const scene = new THREE.Scene();
     scene.background = null; // Replaced by sky dome
@@ -2950,7 +2986,9 @@
     // Density tuned so near objects (<30u) are essentially unaffected
     // (~0.6% fog at 30u) and far geometry dissolves softly into the sky's
     // mid band by the world horizon. Color is updated per-environment.
-    scene.fog = new THREE.FogExp2(0x6d9ed0, 0.0028);
+    // On mobile we lower density slightly — every surface does a fog lookup,
+    // and a denser fog forces more shader work; minor cut adds up.
+    scene.fog = new THREE.FogExp2(0x6d9ed0, isMobile ? 0.0022 : 0.0028);
 
     // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
     const skyDome = createSkyDome({
@@ -2964,7 +3002,12 @@
     // ===== IMPROVEMENT 1b: Cloud shell (high wispy clouds, single mesh) =====
     // Procedural canvas noise generated ONCE at load -> tiled cloud texture.
     // Single transparent sphere shell, no shadow casting/receiving.
-    const cloudShell = (() => {
+    //
+    // PERF: this is a ~380u radius full-screen transparent textured sphere.
+    // Every screen pixel samples the cloud texture + blends with the sky dome
+    // behind it. Mobile fill rate can't afford this during Ring Rush. Disabled
+    // entirely on mobile — desktop keeps the visual polish.
+    const cloudShell = isMobile ? null : (() => {
       // Build a soft cloud noise canvas (one-shot, ~96KB).
       const C = 256;
       const canvas = document.createElement('canvas');
@@ -3208,6 +3251,11 @@
 
     // ===== Helper: minimap =====
     let minimapPulseTime = 0;
+    // Zero-alloc scratch: reused forward vector (avoid `new Vector3` per frame).
+    const _minimapFwd = new THREE.Vector3(0, 0, -1);
+    // Permanent pool of ring data entries for minimap — grown once to ring count,
+    // reused every frame during Ring Rush. Each entry: { position: Vec3, collected: bool }.
+    const minimapRingScratch = [];
     function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos, delta) {
       if (!minimapCtx || !minimapCanvas) return;
       minimapPulseTime += (delta || 0.016);
@@ -3239,9 +3287,9 @@
         minimapCtx.stroke();
       }
 
-      // Get bird forward direction for rotation
-      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(birdQuat);
-      const angle = -Math.atan2(fwd.x, fwd.z);
+      // Get bird forward direction for rotation (reuse scratch, zero-alloc)
+      _minimapFwd.set(0, 0, -1).applyQuaternion(birdQuat);
+      const angle = -Math.atan2(_minimapFwd.x, _minimapFwd.z);
 
       // Helper to project world pos to minimap
       const project = (worldPos) => {
@@ -4975,7 +5023,83 @@
       fpsState.lastSampleTime = time;
       const formatted = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
       fpsMetric.textContent = formatted;
+
+      // Feed the adaptive quality tier manager with the sampled FPS.
+      adaptiveTier.sampleFps(fps, time);
     }
+
+    // ============ ADAPTIVE QUALITY TIER ============
+    // Downshifts rendering quality when sustained FPS drops below 55 for 2s;
+    // restores when sustained FPS > 58 for 4s. Tiers:
+    //   0 = full (initial on mobile/desktop as configured above)
+    //   1 = DPR 1.0, cloud shell off (already off on mobile — no-op there)
+    //   2 = tier 1 + pixel ratio clamp more aggressive + haze off
+    // Logged to console when ?debug=perf.
+    const adaptiveTier = (() => {
+      const state = {
+        tier: 0,
+        fpsSum: 0,
+        fpsCount: 0,
+        windowStart: 0,
+        lastTierChange: 0,
+      };
+      const LOW_FPS_THRESHOLD = 55;
+      const RESTORE_FPS_THRESHOLD = 58;
+      const LOW_WINDOW_MS = 2000;     // 2s of bad FPS before downshift
+      const HIGH_WINDOW_MS = 4000;    // 4s of good FPS before upshift
+      const MIN_INTERVAL_MS = 1500;   // anti-flip-flop
+
+      function applyTier(newTier) {
+        if (newTier === state.tier) return;
+        state.tier = newTier;
+        state.lastTierChange = performance.now();
+
+        // Tier 1+: drop DPR to 1.0.
+        // Tier 2+: drop DPR below 1.0 (0.85) and hide haze layers if any.
+        if (newTier === 0) {
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
+          if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = true;
+        } else if (newTier === 1) {
+          renderer.setPixelRatio(1.0);
+          if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
+        } else if (newTier >= 2) {
+          renderer.setPixelRatio(0.85);
+          if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
+        }
+
+        if (window.__birbPerfDebug) {
+          console.log(`[perf] adaptive tier -> ${newTier}`);
+        }
+      }
+
+      return {
+        sampleFps(fps, time) {
+          if (state.windowStart === 0) state.windowStart = time;
+          state.fpsSum += fps;
+          state.fpsCount += 1;
+
+          // Respect anti-flip-flop minimum dwell between tier changes.
+          if (time - state.lastTierChange < MIN_INTERVAL_MS) return;
+
+          const elapsed = time - state.windowStart;
+          const window = state.tier >= 1 ? HIGH_WINDOW_MS : LOW_WINDOW_MS;
+          if (elapsed < window) return;
+
+          const avgFps = state.fpsSum / Math.max(1, state.fpsCount);
+          if (avgFps < LOW_FPS_THRESHOLD && state.tier < 2) {
+            applyTier(state.tier + 1);
+          } else if (avgFps > RESTORE_FPS_THRESHOLD && state.tier > 0) {
+            applyTier(state.tier - 1);
+          }
+
+          // Reset rolling window.
+          state.fpsSum = 0;
+          state.fpsCount = 0;
+          state.windowStart = time;
+        },
+        getTier() { return state.tier; },
+      };
+    })();
 
     function updateControlMetrics(speed) {
       const throttleSetting = Number.isFinite(flightController?.throttle)
@@ -6021,9 +6145,12 @@
         }
       }
 
-      // Update drones (skipped entirely in Zen mode — no enemies in chill mode)
-      const zenSuppressDrones = currentGameMode === GAME_MODES.ZEN;
-      if (droneSystem && !zenSuppressDrones) {
+      // Update drones (skipped in Zen + Ring Rush — no enemies in those modes).
+      // Ring Rush focus = rings; drone updates were silent cost even with no
+      // drones spawned, because droneSystem.update() still iterates internals.
+      const suppressDrones = currentGameMode === GAME_MODES.ZEN
+        || currentGameMode === GAME_MODES.RING_RUSH;
+      if (droneSystem && !suppressDrones) {
         droneSystem.update(delta);
 
         // Check birb-drone collisions (only when flying, not nested, not frozen)
@@ -6084,7 +6211,7 @@
               // Haptic: ring collected (20ms)
               triggerHaptic(20);
               // ===== IMPROVEMENT 5: Ring sparkle particles =====
-              if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
+              if (particleSystem) particleSystem.createSparkle(flightController.position);
               // ===== IMPROVEMENT 6: FOV kick on ring collect =====
               screenShake.ringCollected();
               // Start timer on first ring
@@ -6229,7 +6356,7 @@
           const collected = collectiblesSystem.checkCollection(flightController.position, 1.8);
           if (collected.length > 0) {
             playRingCollectSound();
-            if (particleSystem) particleSystem.createSparkle(flightController.position.clone());
+            if (particleSystem) particleSystem.createSparkle(flightController.position);
             // Respawn collected rings after a short delay so the world stays full.
             setTimeout(() => {
               if (currentGameMode !== GAME_MODES.ZEN) return;
@@ -6479,17 +6606,26 @@
       // Ring arrow removed – minimap edge arrows serve this purpose
 
       // IMPROVEMENT 7: Minimap radar
+      // ZERO-ALLOC: minimapRingScratch is a permanent pool of { position, collected }
+      // entries reused each frame — previous version allocated 10 Vec3 clones +
+      // 10 object literals per frame during Ring Rush (20 allocs/frame = 1200/sec).
       if (miniGameState.active && minimapCtx && birdPos && birdQuat) {
         minimapCanvas.classList.add('is-visible');
         const drones = droneSystem ? droneSystem.getDrones() : [];
-        // Build ring data from collectibles system
-        const ringData = [];
+        let ringData = null;
         if (collectiblesSystem && collectiblesSystem.rings) {
-          const _rp = new THREE.Vector3();
-          for (const ring of collectiblesSystem.rings) {
-            ring.getWorldPosition(_rp);
-            ringData.push({ position: _rp.clone(), collected: ring.userData.collected });
+          const rings = collectiblesSystem.rings;
+          // Grow the scratch pool to match ring count (one-time per env change).
+          while (minimapRingScratch.length < rings.length) {
+            minimapRingScratch.push({ position: new THREE.Vector3(), collected: false });
           }
+          for (let i = 0; i < rings.length; i++) {
+            const entry = minimapRingScratch[i];
+            rings[i].getWorldPosition(entry.position);
+            entry.collected = rings[i].userData.collected;
+          }
+          minimapRingScratch.length = rings.length;
+          ringData = minimapRingScratch;
         }
         const nestPos = (isNested && flightController) ? flightController.position : null;
         updateMinimap(birdPos, birdQuat, ringData, drones, nestPos, delta);

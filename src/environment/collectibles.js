@@ -10,6 +10,13 @@ const RING_ALTITUDE_MIN = 8;  // Above sphere surface (scaled for bigger world)
 const RING_ALTITUDE_MAX = 20;
 const RING_COUNT = 10;
 
+// Mobile gate — set by index.html. Disables per-frame shimmer color lerp
+// (10 uniform updates/frame × 60fps = 600 per sec) and drops the glow/core
+// meshes so each ring is 1 draw call instead of 3.
+function _isMobile() {
+  return typeof window !== 'undefined' && window.__birbIsMobile === true;
+}
+
 // Ring visual config - environment-themed colors
 const RING_CONFIGS = {
   mountain: { color: 0x44ddff, emissive: 0x22aaff, glow: 0x66eeff },
@@ -50,48 +57,63 @@ function generateRingPositions(count = RING_COUNT) {
 /**
  * Create a single ring mesh - small, glowing torus.
  * Pre-allocates color scratch values for zero-alloc shimmer.
+ *
+ * Mobile: skip glow + core meshes. Rings are still visually obvious (bright
+ * emissive torus against fog-tinted sky) and draw-call count drops from
+ * 3 meshes × 10 rings = 30 calls to 1 × 10 = 10 calls.
  */
 function createRing(THREE, config) {
+  const mobile = _isMobile();
   const group = new THREE.Group();
   group.name = 'collectible-ring';
 
-  // Main ring - small torus
-  const ringGeo = new THREE.TorusGeometry(0.6, 0.08, 12, 24);
+  // Main ring - small torus. Mobile uses a slightly brighter base (lerp toward
+  // white once at build) to compensate for the missing glow/core overlays.
+  const ringGeo = new THREE.TorusGeometry(0.6, 0.08, mobile ? 8 : 12, mobile ? 16 : 24);
   const ringMat = new THREE.MeshBasicMaterial({
-    color: config.color,
+    color: mobile
+      ? new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.35)
+      : config.color,
     transparent: true,
     opacity: 0.95,
   });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   group.add(ring);
 
-  // Outer glow
-  const glowGeo = new THREE.TorusGeometry(0.7, 0.04, 8, 24);
-  const glowMat = new THREE.MeshBasicMaterial({
-    color: config.glow,
-    transparent: true,
-    opacity: 0.5,
-    depthWrite: false,
-  });
-  const glow = new THREE.Mesh(glowGeo, glowMat);
-  group.add(glow);
+  let glowMat = null;
+  let coreMat = null;
+  let baseColor = null;
+  let brightColor = null;
 
-  // Inner bright core
-  const coreGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 24);
-  const coreMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.7,
-    depthWrite: false,
-  });
-  const core = new THREE.Mesh(coreGeo, coreMat);
-  group.add(core);
+  if (!mobile) {
+    // Outer glow
+    const glowGeo = new THREE.TorusGeometry(0.7, 0.04, 8, 24);
+    glowMat = new THREE.MeshBasicMaterial({
+      color: config.glow,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    group.add(glow);
 
-  // Pre-allocated color endpoints for shimmer (no per-frame allocs).
-  // Base = config color (slightly dimmed); bright = base lifted toward white
-  // so the ring reads as an emissive pulse rather than a hue shift.
-  const baseColor = new THREE.Color(config.color).multiplyScalar(0.85);
-  const brightColor = new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.55);
+    // Inner bright core
+    const coreGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 24);
+    coreMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    group.add(core);
+
+    // Pre-allocated color endpoints for shimmer (no per-frame allocs).
+    // Base = config color (slightly dimmed); bright = base lifted toward white
+    // so the ring reads as an emissive pulse rather than a hue shift.
+    baseColor = new THREE.Color(config.color).multiplyScalar(0.85);
+    brightColor = new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.55);
+  }
 
   // Store for animation
   group.userData.ringMat = ringMat;
@@ -157,18 +179,24 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
     },
 
     /**
-     * Update ring animations
+     * Update ring animations.
+     * Classic for-loop (no closure alloc per frame). Mobile skips the per-ring
+     * shimmer/glow pulse entirely — rings still rotate so they remain alive.
      */
     update(delta) {
       if (!container.visible) return;
 
       animationTime += delta;
+      const mobile = _isMobile();
 
-      rings.forEach((ring, i) => {
-        if (ring.userData.collected) return;
+      for (let i = 0; i < rings.length; i++) {
+        const ring = rings[i];
+        if (ring.userData.collected) continue;
 
-        // Gentle rotation
+        // Gentle rotation (cheap — just sets a Euler angle)
         ring.rotation.z += delta * 2;
+
+        if (mobile) continue; // no shimmer/glow on mobile
 
         // Pulse glow
         const pulse = Math.sin(animationTime * 3 + i * 0.5) * 0.3 + 0.7;
@@ -185,29 +213,36 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
           ring.userData.brightColor,
           shimmerT
         );
-      });
+      }
     },
 
     /**
-     * Check for ring collection
+     * Check for ring collection.
+     * Squared-distance compare (no Math.sqrt). Classic for-loop (no closure).
      */
     checkCollection(birbPosition, radius = 1.2) {
       if (!container.visible) return [];
 
       const collected = [];
+      const threshold = radius + 0.6; // ring radius is 0.6
+      const threshSq = threshold * threshold;
 
-      rings.forEach((ring, i) => {
-        if (ring.userData.collected) return;
+      for (let i = 0; i < rings.length; i++) {
+        const ring = rings[i];
+        if (ring.userData.collected) continue;
 
         ring.getWorldPosition(_scratchPos);
-        const dist = birbPosition.distanceTo(_scratchPos);
+        const dx = birbPosition.x - _scratchPos.x;
+        const dy = birbPosition.y - _scratchPos.y;
+        const dz = birbPosition.z - _scratchPos.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
 
-        if (dist < radius + 0.6) { // ring radius is 0.6
+        if (distSq < threshSq) {
           ring.userData.collected = true;
           ring.visible = false;
           collected.push(i);
         }
-      });
+      }
 
       return collected;
     },
