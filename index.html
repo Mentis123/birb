@@ -1935,23 +1935,13 @@
         <div class="game-mode-panel">
           <h2 class="game-mode-title">Game Mode</h2>
           <div class="game-mode-list">
-            <!-- Casual (Active) -->
-            <button type="button" class="game-mode-option game-mode-option--active" data-game-mode="casual">
-              <div class="game-mode-radio"></div>
-              <div class="game-mode-content">
-                <div class="game-mode-name">
-                  Casual
-                  <span class="game-mode-tag game-mode-tag--active">Active</span>
-                </div>
-                <div class="game-mode-description">Free flight with no objectives. Explore, nest, and shoot drones at your own pace.</div>
-              </div>
-            </button>
-            <!-- Zen -->
-            <button type="button" class="game-mode-option" data-game-mode="zen">
+            <!-- Zen (Default) -->
+            <button type="button" class="game-mode-option game-mode-option--active" data-game-mode="zen">
               <div class="game-mode-radio"></div>
               <div class="game-mode-content">
                 <div class="game-mode-name">
                   Zen 🪷
+                  <span class="game-mode-tag game-mode-tag--active">Active</span>
                 </div>
                 <div class="game-mode-description">No timer, no enemies, no pressure. Softer flight, gentler turns, soft chimes when you drift through a ring.</div>
               </div>
@@ -2340,12 +2330,7 @@
 
         // Map mode strings to GAME_MODES enum (will be available after script loads)
         setTimeout(() => {
-          if (mode === 'casual') {
-            currentGameMode = GAME_MODES.CASUAL;
-            miniGameState.active = false;
-            showGameHud(false);
-            applyZenMode(false);
-          } else if (mode === 'zen') {
+          if (mode === 'zen') {
             startZenMode();
           } else if (mode === 'ring-rush') {
             applyZenMode(false);
@@ -3785,7 +3770,7 @@
       return _zenInputOut;
     }
 
-    let currentGameMode = GAME_MODES.CASUAL;
+    let currentGameMode = GAME_MODES.ZEN;
     let collectiblesSystem = null; // Will be assigned when spherical world loads
 
     // Sprint state (second finger touch = sprint)
@@ -4019,12 +4004,9 @@
     }
 
     function quitToMenu() {
-      currentGameMode = GAME_MODES.CASUAL;
-      miniGameState.active = false;
-      showGameHud(false);
+      // Zen is the default free-flight experience.
+      startZenMode();
       hideGameResults();
-      // Make sure Zen tuning is cleared when returning to Casual.
-      applyZenMode(false);
 
       // Hide and reset collectibles
       if (collectiblesSystem) {
@@ -4045,8 +4027,7 @@
       const buttons = document.querySelectorAll('[data-game-mode]');
       buttons.forEach(btn => {
         const mode = btn.getAttribute('data-game-mode');
-        const isActive = (mode === 'casual' && currentGameMode === GAME_MODES.CASUAL) ||
-                         (mode === 'zen' && currentGameMode === GAME_MODES.ZEN) ||
+        const isActive = (mode === 'zen' && currentGameMode === GAME_MODES.ZEN) ||
                          (mode === 'ring-rush' && currentGameMode === GAME_MODES.RING_RUSH) ||
                          (mode === 'drone-hunter' && currentGameMode === GAME_MODES.DRONE_HUNTER) ||
                          (mode === 'turret-defense' && currentGameMode === GAME_MODES.TURRET_DEFENSE);
@@ -5599,18 +5580,10 @@
 
     applyInvertPitchPreference(savedInvertPitch, { persist: false });
 
-    // ===== Restore last-selected mode from localStorage =====
-    // Only Zen is auto-restored on load (Casual is the natural default for the
-    // existing modes — re-entering Ring Rush / Drone Hunter / Turret Defense on
-    // page load would surprise users with an immediate timer or wave). Returning
-    // Zen players get their preferred no-pressure mode without having to re-pick.
-    try {
-      const savedMode = localStorage.getItem(LAST_MODE_STORAGE_KEY);
-      if (savedMode === 'zen') {
-        startZenMode();
-      }
-    } catch (e) { /* localStorage may be unavailable */ }
-    // ===== End mode restore =====
+    // Zen is the default free-flight mode. Mini-game modes (Ring Rush, Drone
+    // Hunter, Turret Defense) are never auto-restored because re-entering them
+    // on page load would ambush the player with an immediate timer or wave.
+    startZenMode();
 
     // Initialize rocket system with explosion sound callback
     rocketSystem = createRocketSystem(THREE, scene, {
@@ -6176,9 +6149,9 @@
         updateWindSound(0); // No wind when nested
       }
 
-      // Ambient bird calls — Casual free-flight only, never while nested.
-      // Other game modes stay focused (no random chirps during Drone Hunter etc.)
-      const birdsEligible = !isNested && currentGameMode === GAME_MODES.CASUAL;
+      // Ambient bird calls — Zen free-flight only, never while nested.
+      // Mini-game modes stay focused (no random chirps during Drone Hunter etc.)
+      const birdsEligible = !isNested && currentGameMode === GAME_MODES.ZEN;
       tickAmbientBirds(birdsEligible);
 
       // Update freeze state
