@@ -378,8 +378,11 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     depthWrite: false,
   });
 
-  // --- Generate grove center points (12-15 groves spread across sphere) ---
-  const groveCount = 14;
+  // --- Generate grove center points (spread across sphere) ---
+  // Reduced 14 -> 10 groves so they don't form a near-continuous canopy.
+  // With fibonacci distribution on sphereRadius=120, 10 groves gives
+  // ~112-unit average centre-to-centre spacing (was ~95).
+  const groveCount = 10;
   const groveCenters = fibonacciSpherePoints(groveCount, sphereRadius);
 
   const treeGroup = new THREE.Group();
@@ -392,11 +395,11 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const nestInterval = 8; // Every 8th tree is nestable — baseline coverage
 
   groveCenters.forEach((groveCenter, groveIdx) => {
-    // Each grove: 12-20 trees clustered tightly around center
-    const treesInGrove = Math.floor(randomInRange(12, 20));
-    // Cluster radius in angular space — tight enough to form corridors
-    // On radius 120, 0.04 radians ≈ 4.8 units at surface — trees ~3-8 units apart
-    const clusterSpread = randomInRange(0.03, 0.06);
+    // Each grove: 6-12 trees (was 12-20) — less "wall of forest" feel.
+    const treesInGrove = Math.floor(randomInRange(6, 12));
+    // Cluster radius in angular space — wider than before so trees aren't
+    // stacked. On radius 120, 0.07 rad ≈ 8.4 units at surface.
+    const clusterSpread = randomInRange(0.05, 0.08);
 
     // Pick 1-2 "champion" indices and 1-2 "shrimp" indices per grove
     const championCount = 1 + (Math.random() < 0.4 ? 1 : 0);
@@ -641,7 +644,9 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e3520, flatShading: true });
 
   // --- Ridge clusters (parallel lines of tall spires) ---
-  const ridgeCount = 10;
+  // 10 -> 7 ridges; fewer spires per ridge. Ridges feel like distinct
+  // canyons you fly toward, not continuous walls around the sphere.
+  const ridgeCount = 7;
   const ridgeCenters = fibonacciSpherePoints(ridgeCount, sphereRadius);
   const spireGroup = new THREE.Group();
   spireGroup.name = 'canyon-spires';
@@ -649,7 +654,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   let spireIndex = 0;
 
   ridgeCenters.forEach((ridge, rIdx) => {
-    const spiresInRidge = Math.floor(randomInRange(8, 14));
+    const spiresInRidge = Math.floor(randomInRange(5, 10));
     // Ridge direction — a random tangent angle
     const ridgeAngle = Math.random() * Math.PI;
     const ridgeLength = randomInRange(0.06, 0.1); // Angular extent of ridge
@@ -873,15 +878,18 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   });
 
   // --- Mountain ranges (clusters of peaks) ---
-  const rangeCount = 8;
+  // 8 -> 6 ranges so they feel discrete against the horizon rather than
+  // forming a continuous ring. Peaks per range slightly reduced too.
+  const rangeCount = 6;
   const rangeCenters = fibonacciSpherePoints(rangeCount, sphereRadius);
   const peakGroup = new THREE.Group();
   peakGroup.name = 'mountain-peaks';
   let peakIndex = 0;
 
   rangeCenters.forEach((range, rIdx) => {
-    const peaksInRange = Math.floor(randomInRange(4, 8));
-    const rangeSpread = randomInRange(0.04, 0.07);
+    const peaksInRange = Math.floor(randomInRange(3, 6));
+    // Slightly wider spread so peaks aren't stacked
+    const rangeSpread = randomInRange(0.05, 0.09);
     const rangeAngle = Math.random() * Math.PI;
 
     // Champion / shrimp picks — eye references for scale
@@ -1059,13 +1067,14 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   pineGroup.name = 'mountain-pines';
   // Pine canopy ceiling placements (built into one InstancedMesh after the loop)
   const pineCeilingPlacements = []; // { pos, up, radius }
-  // Place pine groves between ranges
-  const pineGroveCount = 12;
+  // Place pine groves between ranges — fewer groves, fewer trees each,
+  // slightly wider spread so they read as distinct clusters.
+  const pineGroveCount = 8;
   const pineGroveCenters = fibonacciSpherePoints(pineGroveCount, sphereRadius);
 
   pineGroveCenters.forEach((grove) => {
-    const pinesInGrove = Math.floor(randomInRange(10, 18));
-    const groveSpread = randomInRange(0.03, 0.05);
+    const pinesInGrove = Math.floor(randomInRange(6, 10));
+    const groveSpread = randomInRange(0.05, 0.08);
     const championIdx = Math.floor(Math.random() * pinesInGrove);
     let maxTopOffset = 0;
     for (let t = 0; t < pinesInGrove; t++) {
