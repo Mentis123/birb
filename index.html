@@ -4057,11 +4057,11 @@
       if (typeof flightControls?.setZenMode === 'function') {
         flightControls.setZenMode(enabled);
       }
-      // Hide the drone container while Zen is active so the world looks empty
-      // and serene. The drone update is also suppressed in the game loop.
+      // Keep drones visible in Zen so they remain ambient hazards and can
+      // still freeze the birb on contact.
       try {
         const droneContainer = scene?.getObjectByName?.('drone-targets');
-        if (droneContainer) droneContainer.visible = !enabled;
+        if (droneContainer) droneContainer.visible = true;
       } catch (e) { /* scene may not be ready */ }
     }
 
@@ -4077,7 +4077,8 @@
 
     function startZenMode() {
       currentGameMode = GAME_MODES.ZEN;
-      // Treat Zen like Casual structurally: no mini-game timer, no enemies, no HUD.
+      // Treat Zen like Casual structurally: no mini-game timer and no HUD.
+      // Drones remain active as ambient moving hazards.
       miniGameState.active = false;
       showGameHud(false);
       hideGameResults();
@@ -6252,11 +6253,9 @@
         }
       }
 
-      // Update drones (skipped in Zen + Ring Rush — no enemies in those modes).
-      // Ring Rush focus = rings; drone updates were silent cost even with no
-      // drones spawned, because droneSystem.update() still iterates internals.
-      const suppressDrones = currentGameMode === GAME_MODES.ZEN
-        || currentGameMode === GAME_MODES.RING_RUSH;
+      // Update drones (still active in Zen so collisions can freeze birb).
+      // Ring Rush remains drone-free to keep ring timing deterministic.
+      const suppressDrones = currentGameMode === GAME_MODES.RING_RUSH;
       if (droneSystem && !suppressDrones) {
         droneSystem.update(delta);
 
