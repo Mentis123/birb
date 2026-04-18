@@ -172,6 +172,16 @@ function randomInRange(min, max) {
   return min + Math.random() * (max - min);
 }
 
+function angularDistance(thetaA, phiA, thetaB, phiB) {
+  const sinPhiA = Math.sin(phiA);
+  const cosPhiA = Math.cos(phiA);
+  const sinPhiB = Math.sin(phiB);
+  const cosPhiB = Math.cos(phiB);
+  const cosDeltaTheta = Math.cos(thetaA - thetaB);
+  const dot = sinPhiA * sinPhiB * cosDeltaTheta + cosPhiA * cosPhiB;
+  return Math.acos(Math.max(-1, Math.min(1, dot)));
+}
+
 // ============================================================
 // Simplex-like noise for terrain displacement (CPU-side)
 // Uses a hash-based approach for no-dependency noise generation
@@ -386,10 +396,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   });
 
   // --- Generate grove center points (spread across sphere) ---
-  // Reduced 14 -> 10 groves so they don't form a near-continuous canopy.
-  // With fibonacci distribution on sphereRadius=120, 10 groves gives
-  // ~112-unit average centre-to-centre spacing (was ~95).
-  const groveCount = 10;
+  // Further reduced to avoid "tree walls" and heavy overlap on mobile.
+  // With fibonacci distribution on sphereRadius=120, 8 groves gives
+  // ~125-unit average centre-to-centre spacing.
+  const groveCount = 8;
   const groveCenters = fibonacciSpherePoints(groveCount, sphereRadius);
 
   // Pre-collect ceiling placements; we'll build one InstancedMesh after the loop.
@@ -408,11 +418,13 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const nestInterval = 8; // Every 8th tree is nestable — baseline coverage
 
   groveCenters.forEach((groveCenter, groveIdx) => {
-    // Each grove: 6-12 trees (was 12-20) — less "wall of forest" feel.
-    const treesInGrove = Math.floor(randomInRange(6, 12));
+    // Each grove: 4-8 trees so clusters feel intentional and flyable.
+    const treesInGrove = Math.floor(randomInRange(4, 8));
     // Cluster radius in angular space — wider than before so trees aren't
     // stacked. On radius 120, 0.07 rad ≈ 8.4 units at surface.
-    const clusterSpread = randomInRange(0.05, 0.08);
+    const clusterSpread = randomInRange(0.05, 0.09);
+    const minTreeAngularSpacing = randomInRange(0.028, 0.04);
+    const placedAngles = [];
 
     // Pick 1-2 "champion" indices and 1-2 "shrimp" indices per grove
     const championCount = 1 + (Math.random() < 0.4 ? 1 : 0);
@@ -430,8 +442,25 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     let championTopPos = null;
 
     for (let t = 0; t < treesInGrove; t++) {
-      const jitterTheta = groveCenter.theta + randomInRange(-clusterSpread, clusterSpread);
-      const jitterPhi = groveCenter.phi + randomInRange(-clusterSpread * 0.6, clusterSpread * 0.6);
+      let jitterTheta = groveCenter.theta;
+      let jitterPhi = groveCenter.phi;
+      let accepted = false;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        jitterTheta = groveCenter.theta + randomInRange(-clusterSpread, clusterSpread);
+        jitterPhi = groveCenter.phi + randomInRange(-clusterSpread * 0.65, clusterSpread * 0.65);
+        if (placedAngles.every((a) =>
+          angularDistance(jitterTheta, jitterPhi, a.theta, a.phi) >= minTreeAngularSpacing
+        )) {
+          accepted = true;
+          break;
+        }
+      }
+      if (!accepted && placedAngles.length > 0) {
+        const fallback = placedAngles[Math.floor(Math.random() * placedAngles.length)];
+        jitterTheta = fallback.theta + randomInRange(-clusterSpread * 0.45, clusterSpread * 0.45);
+        jitterPhi = fallback.phi + randomInRange(-clusterSpread * 0.35, clusterSpread * 0.35);
+      }
+      placedAngles.push({ theta: jitterTheta, phi: jitterPhi });
       const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
       const up = pos.clone().normalize();
 
@@ -1248,17 +1277,29 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // as distinct clusters. PERF: trunks + canopies batched via 2 InstancedMesh.
   const pineTrunkPlacements = []; // { pos, up, trunkH, scale }
   const pineCanopyPlacements = []; // { pos, up, canopyH, canopyR, trunkH, scale }
-  const pineGroveCount = 8;
+  const pineGroveCount = 6;
   const pineGroveCenters = fibonacciSpherePoints(pineGroveCount, sphereRadius);
 
   pineGroveCenters.forEach((grove) => {
-    const pinesInGrove = Math.floor(randomInRange(6, 10));
-    const groveSpread = randomInRange(0.05, 0.08);
+    const pinesInGrove = Math.floor(randomInRange(4, 7));
+    const groveSpread = randomInRange(0.05, 0.09);
+    const minPineAngularSpacing = randomInRange(0.026, 0.038);
+    const placedPineAngles = [];
     const championIdx = Math.floor(Math.random() * pinesInGrove);
     let maxTopOffset = 0;
     for (let t = 0; t < pinesInGrove; t++) {
-      const theta = grove.theta + randomInRange(-groveSpread, groveSpread);
-      const phi = grove.phi + randomInRange(-groveSpread * 0.6, groveSpread * 0.6);
+      let theta = grove.theta;
+      let phi = grove.phi;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        theta = grove.theta + randomInRange(-groveSpread, groveSpread);
+        phi = grove.phi + randomInRange(-groveSpread * 0.65, groveSpread * 0.65);
+        if (placedPineAngles.every((a) =>
+          angularDistance(theta, phi, a.theta, a.phi) >= minPineAngularSpacing
+        )) {
+          break;
+        }
+      }
+      placedPineAngles.push({ theta, phi });
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
 
