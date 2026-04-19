@@ -2603,6 +2603,7 @@
     // Splash / Vibe / Title pages. Assigned once the scene is ready.
     let startGameLoop = null;
     let pendingGameStart = false;
+    let gameLoopStarted = false;
 
     // Vibe Academy splash helpers
     function showVibeSplash() {
@@ -7551,7 +7552,8 @@
     canvas.addEventListener("webglcontextlost", handleContextLost, false);
     canvas.addEventListener("webglcontextrestored", handleContextRestored, false);
 
-    renderer.setAnimationLoop(renderFrame);
+    // Render loop is deferred until Tap-to-Start on the Title page. See
+    // startGameLoop below.
 
     if (statusMetric) {
       statusMetric.textContent = "Ready to fly! Use touch controls or arrow keys.";
@@ -7569,7 +7571,12 @@
       } else {
         flightControls.reset();
       }
-      renderer.setAnimationLoop(document.hidden ? null : renderFrame);
+      // Only resume the animation loop if the game was already started —
+      // never kick it off from a visibility-change while the user is still
+      // on the Splash / Vibe / Title pages.
+      if (gameLoopStarted) {
+        renderer.setAnimationLoop(document.hidden ? null : renderFrame);
+      }
     });
 
     window.addEventListener("beforeunload", () => {
@@ -7733,13 +7740,14 @@
 
     // Do NOT start the render loop yet — the game shouldn't be running while
     // the user is still on the Splash / Vibe / Title pages. startGameLoop() is
-    // called from the Tap-to-Start handler on the Title page.
-    let gameLoopStarted = false;
+    // called from the Tap-to-Start handler on the Title page. Flag is hoisted
+    // to the top of the script so the visibility-change listener (defined
+    // earlier) can safely read it.
     startGameLoop = () => {
       if (gameLoopStarted) return;
       gameLoopStarted = true;
       scheduleRendererResize(true);
-      renderFrame(0);
+      renderer.setAnimationLoop(renderFrame);
     };
     // If the user already tapped Start before the script finished loading
     // (very fast tap), start it now.
