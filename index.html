@@ -4145,6 +4145,10 @@
     };
     let flightRecoveryState = FLIGHT_RECOVERY_STATES.FLYING;
     let launchBoostTimer = 0;
+    let fallTimer = 0;
+    // Fall accelerates: 1× for first frame → 3× after FALL_RAMP_DURATION seconds.
+    const FALL_RAMP_DURATION = 3.0;
+    const FALL_RAMP_MAX_MULT = 3.0;
     const flightRecoveryScratch = {
       radial: new THREE.Vector3(),
     };
@@ -4681,6 +4685,7 @@
       } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
         // Committed knockdown — no recovery button during fall.
         showFlightRecoveryButton(false);
+        fallTimer = 0;
         if (screenShake?.treeImpact) screenShake.treeImpact();
         if (preloadedSounds?.nestLand) playFromPool(preloadedSounds.nestLand);
       } else {
@@ -6987,10 +6992,14 @@
         pose = flight.tick(resolvedInput, delta);
 
         if (!isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
+          fallTimer += delta;
+          // Linear ramp from 1× → 3× over FALL_RAMP_DURATION seconds, then hold.
+          const rampT = Math.min(fallTimer / FALL_RAMP_DURATION, 1);
+          const fallMult = 1 + rampT * (FALL_RAMP_MAX_MULT - 1);
           const radial = flightRecoveryScratch.radial.copy(pose.position);
           if (radial.lengthSq() > 0.000001) {
             radial.normalize();
-            pose.position.addScaledVector(radial, -FLIGHT_RECOVERY_CONFIG.knockbackFallSpeed * delta);
+            pose.position.addScaledVector(radial, -FLIGHT_RECOVERY_CONFIG.knockbackFallSpeed * fallMult * delta);
             flight.position.copy(pose.position);
           }
         }
