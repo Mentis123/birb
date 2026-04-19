@@ -284,6 +284,28 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
     },
 
     /**
+     * Find the nearest visible nest regardless of proximity range.
+     * Useful for game modes that need to snap/auto-land to a nest.
+     */
+    getNearestNest(birbPosition) {
+      let nearest = null;
+      let nearestDistance = Infinity;
+
+      nests.forEach((nestGroup) => {
+        if (!nestGroup.visible) return;
+
+        nestGroup.getWorldPosition(_worldPos);
+        const distance = birbPosition.distanceTo(_worldPos);
+        if (distance < nearestDistance) {
+          nearest = nestGroup;
+          nearestDistance = distance;
+        }
+      });
+
+      return nearest;
+    },
+
+    /**
      * Get the world position of a nest (for landing target)
      */
     getNestWorldPosition(nestGroup, target) {
