@@ -1014,12 +1014,167 @@
       transition: transform 150ms ease, border-color 150ms ease;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
+      z-index: 3;
     }
 
     .title-gear:hover, .title-gear:focus-visible {
       border-color: rgba(147, 197, 253, 0.9);
       transform: rotate(18deg);
       outline: none;
+    }
+
+    .title-help {
+      position: absolute;
+      top: 1.25rem;
+      right: 4.5rem;
+      width: 2.75rem;
+      height: 2.75rem;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(132, 174, 255, 0.35);
+      background: rgba(14, 23, 41, 0.85);
+      color: #cfe3ff;
+      font-size: 1.1rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(12px);
+      transition: transform 150ms ease, border-color 150ms ease, color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      z-index: 3;
+    }
+
+    .title-help:hover, .title-help:focus-visible {
+      border-color: rgba(147, 197, 253, 0.9);
+      color: #fff;
+      transform: scale(1.08);
+      outline: none;
+    }
+
+    /* Hero image block — Birb Labs Artefact treatment */
+    .title-hero {
+      position: relative;
+      width: min(70vw, 300px);
+      aspect-ratio: 1 / 1;
+      max-height: 300px;
+      margin: 0 auto 1.5rem;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      border: 1px solid rgba(77, 240, 255, 0.25);
+      box-shadow:
+        0 10px 40px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(132, 174, 255, 0.15) inset,
+        0 0 32px rgba(0, 169, 217, 0.18);
+      background: #03070f;
+    }
+
+    .title-hero-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .title-hero-particles {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      border-radius: inherit;
+    }
+
+    /* Feathers — tiny elongated diamond shapes, white or cyan, drifting */
+    .feather {
+      position: absolute;
+      width: 6px;
+      height: 14px;
+      border-radius: 60% 40% 50% 50% / 70% 70% 30% 30%;
+      background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(200,230,255,0.4));
+      box-shadow: 0 0 6px rgba(200, 240, 255, 0.55);
+      opacity: 0;
+      top: -10%;
+      will-change: transform, opacity;
+    }
+
+    .feather.cyan {
+      background: linear-gradient(180deg, rgba(140,240,255,0.9), rgba(0,169,217,0.35));
+      box-shadow: 0 0 8px rgba(77, 240, 255, 0.7);
+    }
+
+    .feather-1  { left: 8%;  animation: feather-drift 9s  linear infinite;      animation-delay: 0s;    }
+    .feather-2  { left: 22%; animation: feather-drift-b 11s linear infinite;    animation-delay: -2s;   }
+    .feather-3  { left: 38%; animation: feather-drift 7.5s linear infinite;     animation-delay: -1s;   }
+    .feather-4  { left: 52%; animation: feather-drift-b 12s linear infinite;    animation-delay: -4s;   }
+    .feather-5  { left: 64%; animation: feather-drift 10s linear infinite;      animation-delay: -6s;   }
+    .feather-6  { left: 78%; animation: feather-drift-b 8.5s linear infinite;   animation-delay: -3s;   }
+    .feather-7  { left: 90%; animation: feather-drift 13s linear infinite;      animation-delay: -7s;   }
+    .feather-8  { left: 15%; animation: feather-drift-b 10.5s linear infinite;  animation-delay: -8s;   }
+    .feather-9  { left: 45%; animation: feather-drift 11.5s linear infinite;    animation-delay: -5s;   }
+    .feather-10 { left: 72%; animation: feather-drift-b 9.5s linear infinite;   animation-delay: -9s;   }
+
+    @keyframes feather-drift {
+      0%   { transform: translate3d(0, 0, 0) rotate(0deg);      opacity: 0; }
+      10%  { opacity: 0.85; }
+      50%  { transform: translate3d(12px, 55%, 0) rotate(35deg); opacity: 0.7; }
+      90%  { opacity: 0.4; }
+      100% { transform: translate3d(-6px, 120%, 0) rotate(-25deg); opacity: 0; }
+    }
+
+    @keyframes feather-drift-b {
+      0%   { transform: translate3d(0, 0, 0) rotate(10deg);       opacity: 0; }
+      15%  { opacity: 0.75; }
+      50%  { transform: translate3d(-16px, 60%, 0) rotate(-40deg); opacity: 0.8; }
+      85%  { opacity: 0.45; }
+      100% { transform: translate3d(8px, 125%, 0) rotate(30deg);   opacity: 0; }
+    }
+
+    /* Sparks — cyan dots traversing horizontally, echoing bolt-border */
+    .spark {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: #baf4ff;
+      box-shadow:
+        0 0 6px #4df0ff,
+        0 0 14px rgba(77, 240, 255, 0.85),
+        0 0 28px rgba(0, 169, 217, 0.55);
+      mix-blend-mode: screen;
+      opacity: 0;
+      left: -5%;
+      will-change: transform, opacity;
+    }
+
+    .spark-1 { top: 28%; animation: spark-zip   6s ease-in-out infinite;   animation-delay: 1s; }
+    .spark-2 { top: 62%; animation: spark-zip-b 8s ease-in-out infinite;   animation-delay: 3.5s; }
+    .spark-3 { top: 45%; animation: spark-zip   7s ease-in-out infinite;   animation-delay: 5s; }
+
+    @keyframes spark-zip {
+      0%   { transform: translateX(0)     scale(0.6); opacity: 0; }
+      10%  { opacity: 1; }
+      50%  { transform: translateX(60vw)  scale(1);   opacity: 1; }
+      90%  { opacity: 0.9; }
+      100% { transform: translateX(120%)  scale(0.6); opacity: 0; }
+    }
+
+    @keyframes spark-zip-b {
+      0%   { transform: translateX(120%)  scale(0.6); opacity: 0; }
+      10%  { opacity: 1; }
+      50%  { transform: translateX(40vw)  scale(1);   opacity: 1; }
+      90%  { opacity: 0.9; }
+      100% { transform: translateX(0)     scale(0.6); opacity: 0; }
+    }
+
+    @media (max-width: 380px) {
+      .title-hero { width: 75vw; margin-bottom: 1rem; }
+      .title-help { right: 4rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .feather, .spark { animation: none; opacity: 0.3; }
     }
 
     .title-body {
@@ -2083,8 +2238,27 @@
 
   <!-- Title / Home Screen — shown after splash + vibe (every session) -->
   <div class="title-screen" data-title-screen hidden>
+    <button type="button" class="title-help" data-title-help aria-label="How to play">?</button>
     <button type="button" class="title-gear" data-title-gear aria-label="Sound &amp; settings">&#9881;</button>
     <div class="title-body">
+      <div class="title-hero" aria-hidden="true">
+        <img src="./splash.jpg" alt="" class="title-hero-image">
+        <div class="title-hero-particles">
+          <span class="feather feather-1"></span>
+          <span class="feather cyan feather-2"></span>
+          <span class="feather feather-3"></span>
+          <span class="feather feather-4"></span>
+          <span class="feather cyan feather-5"></span>
+          <span class="feather feather-6"></span>
+          <span class="feather feather-7"></span>
+          <span class="feather cyan feather-8"></span>
+          <span class="feather feather-9"></span>
+          <span class="feather feather-10"></span>
+          <span class="spark spark-1"></span>
+          <span class="spark spark-2"></span>
+          <span class="spark spark-3"></span>
+        </div>
+      </div>
       <div class="title-logo-wrap">
         <h1 class="title-logo">BIRB MOBILE</h1>
       </div>
@@ -2488,6 +2662,7 @@
     const titleStartBtn = document.querySelector('[data-title-start]');
     const titleHowtoBtn = document.querySelector('[data-title-howto]');
     const titleGearBtn = document.querySelector('[data-title-gear]');
+    const titleHelpBtn = document.querySelector('[data-title-help]');
 
     function showTitleScreen() {
       if (!titleScreen) {
@@ -2546,6 +2721,13 @@
       const openHowto = () => showHowto();
       titleHowtoBtn.addEventListener('click', openHowto);
       titleHowtoBtn.addEventListener('touchend', (e) => { e.preventDefault(); openHowto(); }, { passive: false });
+    }
+
+    if (titleHelpBtn) {
+      // Corner "?" button is a second trigger for the How-to-Play overlay.
+      const openHowtoFromHelp = () => showHowto();
+      titleHelpBtn.addEventListener('click', openHowtoFromHelp);
+      titleHelpBtn.addEventListener('touchend', (e) => { e.preventDefault(); openHowtoFromHelp(); }, { passive: false });
     }
 
     if (titleGearBtn) {
