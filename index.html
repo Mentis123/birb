@@ -2701,6 +2701,9 @@
     if (titleStartBtn) {
       const startGame = () => {
         splashDismissed = true;
+        // Unlock audio in the same user gesture as Start. This avoids starting
+        // ambient music from splash/tap interactions before gameplay begins.
+        unlockAudio();
         // Reveal the game UI now — it was hidden until Tap-to-Start so the
         // canvas-wrapper / HUD / header couldn't peek through the splash fade.
         const mainEl = document.querySelector('[data-game-main]');
@@ -2711,6 +2714,10 @@
           startGameLoop();
         } else {
           pendingGameStart = true;
+        }
+        // Start background music only after the user has explicitly started.
+        if (soundSettings.musicEnabled) {
+          setAmbientMusic(true);
         }
         hideTitleScreen();
         setTimeout(() => {
@@ -3318,14 +3325,11 @@
     const unlockAudio = () => {
       if (audioUnlocked) return;
 
-      // On mobile, we need to play audio directly in the user gesture, not in a promise callback
-      // Try to start ambient music immediately (this is the key fix for mobile)
-      if (continuousSounds.ambient && soundSettings.musicEnabled) {
-        continuousSounds.ambient.volume = getEffectiveVolume(BASE_VOLUMES.ambient, false);
-        continuousSounds.ambient.play().catch(() => {});
-      }
+      // On mobile, audio APIs must be touched in a user gesture. We unlock here,
+      // but we intentionally do NOT start ambient music yet — that only happens
+      // after the Start button is pressed.
 
-      // Also try to start other continuous sounds directly
+      // Start other continuous sounds directly at zero volume so they're unlocked.
       if (continuousSounds.wind) {
         continuousSounds.wind.volume = 0;
         continuousSounds.wind.play().catch(() => {});
@@ -3505,7 +3509,8 @@
         soundSettings.musicEnabled = !soundSettings.musicEnabled;
         musicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
         if (soundSettings.musicEnabled) {
-          setAmbientMusic(true);
+          // Respect pre-start title flow: don't begin music until gameplay starts.
+          if (gameLoopStarted) setAmbientMusic(true);
         } else {
           if (continuousSounds.ambient) continuousSounds.ambient.pause();
         }
