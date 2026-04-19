@@ -487,8 +487,13 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
         pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight,
       });
 
-      // Collision
+      // Collision — trunk at base, plus a canopy sphere at tree-top altitude
+      // so cruise-level birds actually bump into the visible tree.
       collisionSystem.addCollider(pos, trunkRadiusBottom * scale * 1.2, 'tree');
+      const treeCanopyCenter = pos.clone().add(
+        up.clone().multiplyScalar((trunkHeight + canopyHeight * 0.5) * scale)
+      );
+      collisionSystem.addCollider(treeCanopyCenter, canopyRadius * scale * 0.95, 'tree');
 
       const treeTopLocalY = trunkHeight + canopyHeight * 0.8 + 0.5;
       const treeTopOffset = treeTopLocalY * scale;
@@ -747,8 +752,11 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     cloud.position.copy(pos);
     const up = pos.clone().normalize();
     cloud.quaternion.setFromUnitVectors(defaultUp, up);
-    cloud.scale.setScalar(randomInRange(1.5, 3.0));
+    const cloudScale = randomInRange(1.5, 3.0);
+    cloud.scale.setScalar(cloudScale);
     cloudGroup.add(cloud);
+    // Soft collider so the bird can bump into clouds and get knocked down.
+    collisionSystem.addCollider(pos, 6 * cloudScale, 'cloud');
   }
   root.add(cloudGroup);
 
@@ -813,6 +821,9 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
         rotZ: randomInRange(-0.08, 0.08),
       });
       collisionSystem.addCollider(pos, baseRadius * scale * 0.8, 'spire');
+      // Mid-height collider so the spire is solid at cruise altitude.
+      const spireMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
+      collisionSystem.addCollider(spireMid, baseRadius * scale * 0.65, 'spire');
 
       // Nests on spires — every 6th spire for reliable coverage.
       // Champion spires (scale 2.2-2.9) place the nest at 0.6× height so it's
@@ -1095,6 +1106,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
         });
       }
       collisionSystem.addCollider(pos, baseRadius * scale * 0.8, 'mountain');
+      // Mid-height collider so peaks are solid at cruise altitude.
+      const mtnMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
+      collisionSystem.addCollider(mtnMid, baseRadius * scale * 0.55, 'mountain');
 
       // Nest on peaks. Baseline: every 4th peak. Champions get a nest only ~1/3
       // of the time and sit at 0.55× scaled height so they're reachable rather
@@ -1313,6 +1327,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       pineTrunkPlacements.push({ pos, up, trunkH, scale });
       pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
       collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
+      // Canopy collider so pines collide at flight altitude.
+      const pineCanopyCenter = pos.clone().add(
+        up.clone().multiplyScalar((trunkH + canopyH * 0.5) * scale)
+      );
+      collisionSystem.addCollider(pineCanopyCenter, canopyR * scale * 0.95, 'pine');
       const topOffset = (trunkH + canopyH * 0.85) * scale;
       if (topOffset > maxTopOffset) maxTopOffset = topOffset;
     }
@@ -1453,8 +1472,10 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
     cloud.position.copy(pos);
     cloud.quaternion.setFromUnitVectors(defaultUp, pos.clone().normalize());
-    cloud.scale.setScalar(randomInRange(1.5, 3.0));
+    const mtnCloudScale = randomInRange(1.5, 3.0);
+    cloud.scale.setScalar(mtnCloudScale);
     cloudGroup.add(cloud);
+    collisionSystem.addCollider(pos, 6 * mtnCloudScale, 'cloud');
   }
   root.add(cloudGroup);
 
@@ -1538,6 +1559,9 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
         });
       }
       collisionSystem.addCollider(pos, Math.max(width, depth) * 0.6, 'tower');
+      // Mid-height collider so buildings are solid at cruise altitude.
+      const towerMid = pos.clone().add(up.clone().multiplyScalar(height * 0.5));
+      collisionSystem.addCollider(towerMid, Math.max(width, depth) * 0.65, 'tower');
 
       // Nest on buildings. Baseline: every 6th building. Champion towers
       // (140-190u) get a nest only ~1/3 of the time and sit at 0.5× height so

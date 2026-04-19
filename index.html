@@ -6396,12 +6396,15 @@
       if (droneSystem && !suppressDrones) {
         droneSystem.update(delta);
 
-        // Check birb-drone collisions (only when flying, not nested, not frozen)
-        if (flightController && !isNested && !freezeState.isFrozen && freezeState.cooldownTimer <= 0) {
+        // Check birb-drone collisions — knock the bird down same as a tree hit
+        // so the collision is readable. Drone is destroyed either way.
+        if (flightController && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
           const birbHit = droneSystem.checkBirbCollision(flightController.position);
           if (birbHit.hit) {
-            triggerFreeze();
-            screenShake.droneHit(); // IMPROVEMENT 6: shake on birb-drone collision
+            applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
+            if (statusMetric) {
+              statusMetric.textContent = "Drone smacked you! Going down.";
+            }
             droneSystem.destroyDrone(birbHit.index);
           }
         }
