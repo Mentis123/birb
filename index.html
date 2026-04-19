@@ -2425,6 +2425,10 @@
     // Deferred fullscreen trigger (called after enterFullscreen is defined)
     let triggerAutoFullscreen = null;
     let splashDismissed = false; // Track if splash was dismissed before triggerAutoFullscreen was set
+    // Deferred game-loop kick-off so the render loop doesn't run behind the
+    // Splash / Vibe / Title pages. Assigned once the scene is ready.
+    let startGameLoop = null;
+    let pendingGameStart = false;
 
     // Vibe Academy splash helpers
     function showVibeSplash() {
@@ -2449,9 +2453,11 @@
         vibeSplash.classList.add('is-fading');
         vibeSplash.classList.remove('is-visible');
         sessionStorage.setItem('vibe-splash-shown', 'true');
+        // Reveal the Title page UNDER the fading vibe page so the canvas
+        // never peeks through during the transition.
+        showTitleScreen();
         setTimeout(() => {
           vibeSplash.remove();
-          finishAllSplashes();
         }, 500);
       };
 
@@ -2519,6 +2525,13 @@
     if (titleStartBtn) {
       const startGame = () => {
         splashDismissed = true;
+        // Kick off the render loop now (or mark it pending if the scene
+        // isn't ready yet — the late-load path picks it up).
+        if (typeof startGameLoop === 'function') {
+          startGameLoop();
+        } else {
+          pendingGameStart = true;
+        }
         hideTitleScreen();
         setTimeout(() => {
           if (typeof triggerAutoFullscreen === 'function') triggerAutoFullscreen();
@@ -7520,8 +7533,21 @@
       enterFullscreen();
     }
 
-    scheduleRendererResize(true);
-    renderFrame(0);
+    // Do NOT start the render loop yet — the game shouldn't be running while
+    // the user is still on the Splash / Vibe / Title pages. startGameLoop() is
+    // called from the Tap-to-Start handler on the Title page.
+    let gameLoopStarted = false;
+    startGameLoop = () => {
+      if (gameLoopStarted) return;
+      gameLoopStarted = true;
+      scheduleRendererResize(true);
+      renderFrame(0);
+    };
+    // If the user already tapped Start before the script finished loading
+    // (very fast tap), start it now.
+    if (pendingGameStart) {
+      startGameLoop();
+    }
   </script>
 </body>
 
