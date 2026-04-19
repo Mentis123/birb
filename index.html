@@ -5373,269 +5373,285 @@
     };
 
     const createProceduralBirb = () => {
+      // Built facing +X (beak points toward +X). Downstream orientation
+      // detection rotates the whole model so forward is -Z at render time.
+      // Chibi / stylized cute bird aesthetic: big head, big eyes, clearly
+      // visible triangular wing silhouettes, prominent yellow beak, egg body.
       const birbModel = new THREE.Group();
 
-      const plumageMaterial = new THREE.MeshStandardMaterial({
-        color: 0x6f9df2,
-        metalness: 0.18,
-        roughness: 0.46,
+      // -- Materials ----------------------------------------------------------
+      const bodyMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4a7cf0,
+        metalness: 0.15,
+        roughness: 0.5,
         emissive: 0x162a49,
+        emissiveIntensity: 0.15,
+      });
+
+      const headMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5a8cf5,
+        metalness: 0.15,
+        roughness: 0.5,
+        emissive: 0x1a2f55,
         emissiveIntensity: 0.18,
       });
 
-      const bodyGeometry = new THREE.SphereGeometry(0.62, 40, 28);
-      const body = new THREE.Mesh(bodyGeometry, plumageMaterial);
-      body.scale.set(1.46, 1.08, 1.04);
-      body.position.set(-0.02, -0.02, 0);
-      birbModel.add(body);
-
-      const bellyGeometry = new THREE.SphereGeometry(0.46, 36, 24);
       const bellyMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf3ede0,
-        metalness: 0.08,
-        roughness: 0.58,
-        emissive: 0x1b1a19,
-        emissiveIntensity: 0.06,
+        color: 0xe6efff,
+        metalness: 0.1,
+        roughness: 0.6,
+        emissive: 0x1c2230,
+        emissiveIntensity: 0.08,
       });
-      const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
-      belly.scale.set(1.08, 0.88, 0.86);
-      belly.position.set(0.28, -0.16, 0);
-      birbModel.add(belly);
 
-      const headGeometry = new THREE.SphereGeometry(0.32, 36, 24);
-      const headMaterial = plumageMaterial.clone();
-      headMaterial.color = new THREE.Color(0x83b8ff);
-      headMaterial.roughness = 0.4;
-      headMaterial.emissiveIntensity = 0.14;
-      const head = new THREE.Mesh(headGeometry, headMaterial);
-      head.position.set(0.82, 0.26, 0);
-      birbModel.add(head);
+      const wingMaterial = new THREE.MeshStandardMaterial({
+        color: 0x2b5dcc,
+        metalness: 0.15,
+        roughness: 0.48,
+        emissive: 0x0f1f45,
+        emissiveIntensity: 0.18,
+        side: THREE.DoubleSide,
+      });
 
-      const neckGeometry = new THREE.SphereGeometry(0.28, 32, 24, 0, Math.PI * 2, 0, Math.PI / 1.35);
-      const neck = new THREE.Mesh(neckGeometry, bellyMaterial.clone());
-      neck.scale.set(0.98, 0.82, 0.88);
-      neck.rotation.z = Math.PI / 2;
-      neck.position.set(0.46, 0.06, 0);
-      birbModel.add(neck);
+      const wingTipMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4df0ff,
+        metalness: 0.2,
+        roughness: 0.4,
+        emissive: 0x0a6b78,
+        emissiveIntensity: 0.4,
+      });
+
+      const tailMaterial = new THREE.MeshStandardMaterial({
+        color: 0x2b5dcc,
+        metalness: 0.15,
+        roughness: 0.5,
+        emissive: 0x0f1f45,
+        emissiveIntensity: 0.18,
+      });
 
       const beakMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf3ad58,
-        metalness: 0.18,
-        roughness: 0.34,
-        emissive: 0x3b1f08,
-        emissiveIntensity: 0.24,
-      });
-
-      const upperBeakGeometry = new THREE.ConeGeometry(0.11, 0.4, 32);
-      const upperBeak = new THREE.Mesh(upperBeakGeometry, beakMaterial);
-      upperBeak.scale.set(1.05, 0.82, 1.18);
-      upperBeak.rotation.set(0.14, 0, -Math.PI / 2.18);
-      upperBeak.position.set(1.18, 0.2, 0.02);
-      birbModel.add(upperBeak);
-
-      const lowerBeakMaterial = beakMaterial.clone();
-      lowerBeakMaterial.color = new THREE.Color(0xf09b3c);
-      lowerBeakMaterial.roughness = 0.42;
-      const lowerBeakGeometry = new THREE.ConeGeometry(0.095, 0.3, 30);
-      const lowerBeak = new THREE.Mesh(lowerBeakGeometry, lowerBeakMaterial);
-      lowerBeak.scale.set(1.02, 0.86, 1.08);
-      lowerBeak.rotation.set(0.14, 0, -Math.PI / 1.95);
-      lowerBeak.position.set(1.06, 0.12, -0.01);
-      birbModel.add(lowerBeak);
-
-      const eyeGeometry = new THREE.SphereGeometry(0.04, 20, 18);
-      const eyeMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0c0f1a,
-        metalness: 0.6,
-        roughness: 0.18,
-        emissive: 0x070a0f,
-        emissiveIntensity: 0.35,
-      });
-      const eyeHighlightMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf7f6f4,
+        color: 0xf5b942,
         metalness: 0.2,
-        roughness: 0.18,
-        emissive: 0x262626,
-        emissiveIntensity: 0.2,
+        roughness: 0.38,
+        emissive: 0x3b2406,
+        emissiveIntensity: 0.28,
       });
-      const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-      leftEye.position.set(0.9, 0.26, 0.12);
-      const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial.clone());
-      rightEye.position.set(0.9, 0.26, -0.12);
-      birbModel.add(leftEye);
-      birbModel.add(rightEye);
 
-      const eyeHighlightGeometry = new THREE.SphereGeometry(0.018, 16, 14);
-      const leftHighlight = new THREE.Mesh(eyeHighlightGeometry, eyeHighlightMaterial);
-      leftHighlight.position.set(0.93, 0.3, 0.12);
-      const rightHighlight = new THREE.Mesh(eyeHighlightGeometry, eyeHighlightMaterial.clone());
-      rightHighlight.position.set(0.93, 0.3, -0.12);
-      birbModel.add(leftHighlight);
-      birbModel.add(rightHighlight);
+      const footMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1a2438,
+        metalness: 0.1,
+        roughness: 0.65,
+      });
 
-      const crestMaterial = plumageMaterial.clone();
-      crestMaterial.color = new THREE.Color(0x91c7ff);
-      crestMaterial.roughness = 0.38;
-      crestMaterial.metalness = 0.12;
-      crestMaterial.emissive = new THREE.Color(0x1d334f);
-      crestMaterial.emissiveIntensity = 0.18;
-      const crestGeometry = new THREE.ConeGeometry(0.1, 0.42, 18);
-      crestGeometry.translate(0, 0.21, 0);
-      const crest = new THREE.Mesh(crestGeometry, crestMaterial);
-      crest.rotation.set(0, 0, -Math.PI / 2.1);
-      crest.position.set(0.64, 0.34, 0);
-      crest.scale.set(0.84, 1, 0.84);
+      // Pure pupil black / pure highlight white (unlit so eyes always read)
+      const eyeBlackMaterial = new THREE.MeshBasicMaterial({ color: 0x0a0a12 });
+      const eyeWhiteMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+      // -- Body (egg-shaped, taller than wide, tapered tail) ------------------
+      const bodyGeometry = new THREE.SphereGeometry(0.5, 36, 28);
+      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+      // Slightly elongated egg — a bit longer along X (beak->tail), taller than wide
+      body.scale.set(1.15, 1.08, 0.95);
+      body.position.set(-0.05, 0, 0);
+      birbModel.add(body);
+
+      // Belly patch — lighter underside so side profile reads as "bird"
+      const bellyGeometry = new THREE.SphereGeometry(0.46, 32, 24);
+      const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
+      belly.scale.set(1.05, 0.82, 0.78);
+      belly.position.set(0.02, -0.18, 0);
+      birbModel.add(belly);
+
+      // -- Head (big, chibi-proportioned) ------------------------------------
+      const headGeometry = new THREE.SphereGeometry(0.45, 36, 28);
+      const head = new THREE.Mesh(headGeometry, headMaterial);
+      head.scale.set(1.0, 1.0, 1.02);
+      head.position.set(0.62, 0.36, 0);
+      birbModel.add(head);
+
+      // Cheek highlight / chin patch — small accent that reads as a face line
+      const cheekGeometry = new THREE.SphereGeometry(0.18, 20, 16);
+      const cheek = new THREE.Mesh(cheekGeometry, bellyMaterial);
+      cheek.scale.set(0.7, 0.55, 1.6);
+      cheek.position.set(0.7, 0.2, 0);
+      birbModel.add(cheek);
+
+      // Crest tuft — cyan spike on top of head for character
+      const crestGeometry = new THREE.ConeGeometry(0.09, 0.28, 12);
+      const crest = new THREE.Mesh(crestGeometry, wingTipMaterial);
+      crest.rotation.set(0, 0, -Math.PI / 7);
+      crest.position.set(0.5, 0.8, 0);
       birbModel.add(crest);
 
-      const wingMaterial = plumageMaterial.clone();
-      wingMaterial.roughness = 0.35;
-      wingMaterial.metalness = 0.22;
-      wingMaterial.emissive = new THREE.Color(0x1a2d4c);
-      wingMaterial.emissiveIntensity = 0.22;
-      const wingGeometry = new THREE.CapsuleGeometry(0.26, 0.8, 16, 24);
-      wingGeometry.rotateZ(Math.PI / 2);
-      wingGeometry.translate(0, 0, 0);
+      // -- Beak (prominent, pointing forward along +X) -----------------------
+      // ConeGeometry points along +Y by default; rotate Z by -PI/2 so it points +X.
+      const upperBeakGeometry = new THREE.ConeGeometry(0.13, 0.42, 20);
+      upperBeakGeometry.rotateZ(-Math.PI / 2);
+      const upperBeak = new THREE.Mesh(upperBeakGeometry, beakMaterial);
+      upperBeak.scale.set(1.0, 0.85, 1.1);
+      upperBeak.position.set(1.14, 0.36, 0);
+      birbModel.add(upperBeak);
 
-      const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+      // Lower beak — slightly smaller, darker shade below for a "mouth line"
+      const lowerBeakGeometry = new THREE.ConeGeometry(0.1, 0.3, 18);
+      lowerBeakGeometry.rotateZ(-Math.PI / 2);
+      const lowerBeakMaterial = beakMaterial.clone();
+      lowerBeakMaterial.color = new THREE.Color(0xdb9a2e);
+      const lowerBeak = new THREE.Mesh(lowerBeakGeometry, lowerBeakMaterial);
+      lowerBeak.scale.set(1.0, 0.7, 0.95);
+      lowerBeak.position.set(1.06, 0.24, 0);
+      birbModel.add(lowerBeak);
+
+      // -- Eyes (big, expressive — 30% of the charm) -------------------------
+      const eyeGeometry = new THREE.SphereGeometry(0.1, 20, 16);
+      const leftEye = new THREE.Mesh(eyeGeometry, eyeBlackMaterial);
+      leftEye.position.set(0.82, 0.48, 0.26);
+      birbModel.add(leftEye);
+
+      const rightEye = new THREE.Mesh(eyeGeometry, eyeBlackMaterial);
+      rightEye.position.set(0.82, 0.48, -0.26);
+      birbModel.add(rightEye);
+
+      // White highlights — offset up and forward so eyes feel alive
+      const highlightGeometry = new THREE.SphereGeometry(0.035, 14, 12);
+      const leftHighlight = new THREE.Mesh(highlightGeometry, eyeWhiteMaterial);
+      leftHighlight.position.set(0.89, 0.53, 0.31);
+      birbModel.add(leftHighlight);
+
+      const rightHighlight = new THREE.Mesh(highlightGeometry, eyeWhiteMaterial);
+      rightHighlight.position.set(0.89, 0.53, -0.31);
+      birbModel.add(rightHighlight);
+
+      // Secondary tiny highlight for extra sparkle
+      const sparkleGeometry = new THREE.SphereGeometry(0.018, 10, 8);
+      const leftSparkle = new THREE.Mesh(sparkleGeometry, eyeWhiteMaterial);
+      leftSparkle.position.set(0.87, 0.44, 0.33);
+      birbModel.add(leftSparkle);
+      const rightSparkle = new THREE.Mesh(sparkleGeometry, eyeWhiteMaterial);
+      rightSparkle.position.set(0.87, 0.44, -0.33);
+      birbModel.add(rightSparkle);
+
+      // -- Wings --------------------------------------------------------------
+      // Single flattened ConeGeometry per wing, built into a Group so banking
+      // animations can rotate the whole wing cleanly around the shoulder.
+      // Cone's default Y-axis becomes the wing's LENGTH. We rotate so the length
+      // points outward along local +Z, then flatten along local X (thickness).
+      const buildWing = (side /* +1 left, -1 right */) => {
+        const wingGroup = new THREE.Group();
+
+        // Main feather plate — long triangular blade
+        const bladeGeom = new THREE.ConeGeometry(0.38, 0.95, 4, 1, false);
+        bladeGeom.scale(0.2, 1.0, 1.0);      // flatten on local X (thickness)
+        bladeGeom.rotateX(Math.PI / 2);      // tip points along +Z
+        bladeGeom.translate(0, 0, 0.42);     // shoulder at origin, tip at +Z ~0.9
+        const blade = new THREE.Mesh(bladeGeom, wingMaterial);
+        wingGroup.add(blade);
+
+        // Secondary feather — slightly shorter and offset inward/back
+        const secondaryGeom = new THREE.ConeGeometry(0.3, 0.7, 4, 1, false);
+        secondaryGeom.scale(0.15, 1.0, 1.0);
+        secondaryGeom.rotateX(Math.PI / 2);
+        secondaryGeom.translate(-0.07, -0.05, 0.32);
+        const secondary = new THREE.Mesh(secondaryGeom, wingMaterial);
+        wingGroup.add(secondary);
+
+        // Cyan tip accent — small cone sitting at the wingtip
+        const tipGeom = new THREE.ConeGeometry(0.12, 0.26, 4, 1, false);
+        tipGeom.scale(0.2, 1.0, 1.0);
+        tipGeom.rotateX(Math.PI / 2);
+        tipGeom.translate(0.02, 0.02, 0.88);
+        const tip = new THREE.Mesh(tipGeom, wingTipMaterial);
+        wingGroup.add(tip);
+
+        // Small rounded covert at the shoulder to hide the seam with the body
+        const covertGeom = new THREE.SphereGeometry(0.16, 16, 12);
+        const covert = new THREE.Mesh(covertGeom, wingMaterial);
+        covert.scale.set(0.6, 0.8, 0.7);
+        covert.position.set(0, 0.05, -0.02);
+        wingGroup.add(covert);
+
+        // Mirror for right-side wing: flip along Z so tip points -Z
+        if (side < 0) {
+          wingGroup.scale.z = -1;
+        }
+
+        return wingGroup;
+      };
+
+      const leftWing = buildWing(1);
       leftWing.name = 'leftWing';
-      leftWing.position.set(-0.18, 0.1, 0.64);
-      leftWing.rotation.set(Math.PI / 2.2, -Math.PI / 4, Math.PI / 2.6);
-      leftWing.scale.set(1.06, 1.06, 1.1);
+      // Shoulder: on top of body, slightly back from head, on +Z (left) side
+      leftWing.position.set(-0.08, 0.18, 0.38);
+      // Swept-back neutral pose: slight backward sweep (Y), tiny droop (X),
+      // slight upward tilt (Z) so the wing reads from above as well as side.
+      leftWing.rotation.set(-0.1, -0.35, 0.18);
       leftWing.userData.baseRotation = leftWing.rotation.clone();
       birbModel.add(leftWing);
 
-      const rightWing = new THREE.Mesh(wingGeometry, wingMaterial.clone());
+      const rightWing = buildWing(-1);
       rightWing.name = 'rightWing';
-      rightWing.position.set(-0.18, 0.1, -0.64);
-      rightWing.rotation.set(Math.PI / 2.2, Math.PI / 4, Math.PI / 2.6);
-      rightWing.scale.set(1.06, 1.06, 1.1);
+      rightWing.position.set(-0.08, 0.18, -0.38);
+      // Mirror across the X-Y plane: negate Y and Z rotation components.
+      rightWing.rotation.set(-0.1, 0.35, -0.18);
       rightWing.userData.baseRotation = rightWing.rotation.clone();
       birbModel.add(rightWing);
 
-      const tailMaterial = plumageMaterial.clone();
-      tailMaterial.color = new THREE.Color(0x5f8fd6);
-      tailMaterial.roughness = 0.42;
-      tailMaterial.emissive = new THREE.Color(0x13243d);
-      tailMaterial.emissiveIntensity = 0.2;
-      const tailFeatherMaterial = plumageMaterial.clone();
-      tailFeatherMaterial.color = new THREE.Color(0x6ea6f7);
-      tailFeatherMaterial.roughness = 0.4;
-      tailFeatherMaterial.emissive = new THREE.Color(0x162d4f);
-      tailFeatherMaterial.emissiveIntensity = 0.18;
+      // -- Tail (small triangular fan trailing from body rear, along -X) -----
+      // Cone default +Y → rotate Z by +PI/2 so the tip points along -X.
+      const tailGeom = new THREE.ConeGeometry(0.28, 0.55, 4, 1, false);
+      tailGeom.scale(1.0, 1.0, 0.3);       // flatten vertically into a fan
+      tailGeom.rotateZ(Math.PI / 2);       // tip now points along -X (rearward)
+      const tail = new THREE.Mesh(tailGeom, tailMaterial);
+      tail.position.set(-0.72, -0.02, 0);
+      tail.rotation.set(0, 0, -0.12);      // slight upward tilt at the tip
+      birbModel.add(tail);
 
-      const tailBaseGeometry = new THREE.ConeGeometry(0.32, 0.72, 20);
-      tailBaseGeometry.rotateZ(Math.PI / 2);
-      const tailBase = new THREE.Mesh(tailBaseGeometry, tailMaterial);
-      tailBase.position.set(-0.38, -0.16, 0);
-      tailBase.rotation.set(0.12, 0, Math.PI / 20);
-      tailBase.scale.set(1.08, 1, 0.92);
+      // Cyan tail tip accent
+      const tailTipGeom = new THREE.ConeGeometry(0.14, 0.2, 4, 1, false);
+      tailTipGeom.scale(1.0, 1.0, 0.3);
+      tailTipGeom.rotateZ(Math.PI / 2);
+      const tailTip = new THREE.Mesh(tailTipGeom, wingTipMaterial);
+      tailTip.position.set(-0.98, -0.02, 0);
+      tailTip.rotation.set(0, 0, -0.12);
+      birbModel.add(tailTip);
 
-      const tailFanGeometry = new THREE.ConeGeometry(0.34, 0.94, 18);
-      tailFanGeometry.rotateZ(Math.PI / 2);
-      const tailFan = new THREE.Mesh(tailFanGeometry, tailFeatherMaterial);
-      tailFan.position.set(-0.8, -0.16, 0);
-      tailFan.rotation.set(0.22, 0, Math.PI / 10);
-      tailFan.scale.set(1.2, 1.08, 1);
-
-      const tailGroup = new THREE.Group();
-      tailGroup.add(tailBase);
-      tailGroup.add(tailFan);
-      birbModel.add(tailGroup);
-
-      const legMaterial = new THREE.MeshStandardMaterial({
-        color: 0xd8995f,
-        metalness: 0.2,
-        roughness: 0.36,
-        emissive: 0x201204,
-        emissiveIntensity: 0.24,
-      });
-
-      const legGeometry = new THREE.CylinderGeometry(0.04, 0.055, 0.42, 14);
-      const ankleGeometry = new THREE.SphereGeometry(0.07, 16, 12);
-      const footPadGeometry = new THREE.SphereGeometry(0.14, 22, 18);
-      const toeGeometry = new THREE.CapsuleGeometry(0.03, 0.24, 8, 16);
-      const backToeGeometry = new THREE.CapsuleGeometry(0.026, 0.16, 6, 14);
-      const clawGeometry = new THREE.ConeGeometry(0.02, 0.08, 14);
-
-      const toeMaterial = new THREE.MeshStandardMaterial({
-        color: 0xe1ab73,
-        metalness: 0.22,
-        roughness: 0.4,
-        emissive: 0x29180a,
-        emissiveIntensity: 0.26,
-      });
-      const clawMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2d2a28,
-        metalness: 0.35,
-        roughness: 0.3,
-        emissive: 0x0d0c0b,
-        emissiveIntensity: 0.24,
-      });
-
-      const createFoot = (side = 1) => {
+      // -- Feet (small, readable, tuckable via Group rotation) ---------------
+      const createFoot = () => {
         const footGroup = new THREE.Group();
 
-        const leg = new THREE.Mesh(legGeometry, legMaterial);
-        leg.rotation.set(0.12, side * -0.08, Math.PI / 2.24);
-        leg.position.set(0.02, -0.2, side * -0.02);
+        // Short cylinder leg
+        const legGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.22, 10);
+        const leg = new THREE.Mesh(legGeom, footMaterial);
+        leg.position.set(0, -0.11, 0);
         footGroup.add(leg);
 
-        const ankle = new THREE.Mesh(ankleGeometry, legMaterial.clone());
-        ankle.scale.set(1.15, 0.82, 1.15);
-        ankle.position.set(0.18, -0.36, side * -0.02);
-        footGroup.add(ankle);
-
-        const pad = new THREE.Mesh(footPadGeometry, legMaterial.clone());
-        pad.scale.set(1.8, 0.42, 1.36);
-        pad.position.set(0.3, -0.42, side * -0.02);
+        // Flat squashed foot pad near-black
+        const padGeom = new THREE.SphereGeometry(0.1, 14, 10);
+        const pad = new THREE.Mesh(padGeom, footMaterial);
+        pad.scale.set(1.4, 0.45, 1.1);
+        pad.position.set(0.04, -0.24, 0);
         footGroup.add(pad);
 
-        const toeLayout = [
-          { angle: 0.34, z: 0.16, length: 1.08 },
-          { angle: 0.08, z: 0, length: 1.18 },
-          { angle: -0.28, z: -0.16, length: 1 },
-        ];
-
-        toeLayout.forEach(({ angle, z, length }) => {
-          const toeGroup = new THREE.Group();
-          toeGroup.rotation.y = angle * side;
-          toeGroup.position.set(0.38, -0.46, side * (z - 0.02));
-
-          const toe = new THREE.Mesh(toeGeometry, toeMaterial);
-          toe.scale.set(1, length, 1);
-          toe.rotation.set(Math.PI / 7, 0, Math.PI / 2);
-          toeGroup.add(toe);
-
-          const claw = new THREE.Mesh(clawGeometry, clawMaterial);
-          claw.rotation.set(Math.PI / 2.6, 0, -Math.PI / 2);
-          claw.position.set(0.18 * length + 0.04, -0.02, 0);
-          toeGroup.add(claw);
-
-          footGroup.add(toeGroup);
-        });
-
-        const backToe = new THREE.Mesh(backToeGeometry, toeMaterial);
-        backToe.rotation.set(-Math.PI / 2.1, 0, Math.PI / 2);
-        backToe.position.set(0.14, -0.42, side * -0.12);
-        footGroup.add(backToe);
-
-        const backClaw = new THREE.Mesh(clawGeometry, clawMaterial.clone());
-        backClaw.scale.set(0.9, 0.82, 0.9);
-        backClaw.rotation.set(-Math.PI / 2.4, 0, -Math.PI / 2);
-        backClaw.position.set(0.02, -0.4, side * -0.12);
-        footGroup.add(backClaw);
+        // Three tiny forward toes (small capsules, rotated to lie flat)
+        const toeGeom = new THREE.CapsuleGeometry(0.025, 0.1, 4, 8);
+        for (let i = -1; i <= 1; i++) {
+          const toe = new THREE.Mesh(toeGeom, footMaterial);
+          toe.rotation.set(0, 0, Math.PI / 2);
+          toe.position.set(0.14, -0.24, i * 0.06);
+          footGroup.add(toe);
+        }
 
         return footGroup;
       };
 
-      const leftFoot = createFoot(1);
-      leftFoot.position.set(0.26, -0.54, 0.34);
-      leftFoot.rotation.set(0.02, 0.08, -0.04);
+      const leftFoot = createFoot();
+      leftFoot.name = 'leftFoot';
+      leftFoot.position.set(0.04, -0.38, 0.18);
       birbModel.add(leftFoot);
 
-      const rightFoot = createFoot(-1);
-      rightFoot.position.set(0.26, -0.54, -0.34);
-      rightFoot.rotation.set(0.02, -0.08, 0.04);
+      const rightFoot = createFoot();
+      rightFoot.name = 'rightFoot';
+      rightFoot.position.set(0.04, -0.38, -0.18);
       birbModel.add(rightFoot);
 
       return birbModel;
