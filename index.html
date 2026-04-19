@@ -1800,15 +1800,15 @@
     /* ===== Minimap ===== */
     .minimap-radar {
       position: fixed !important; bottom: 3% !important; left: 3% !important;
-      width: 120px !important; height: 120px !important;
-      max-width: 120px !important; max-height: 120px !important;
+      width: 140px !important; height: 140px !important;
+      max-width: 140px !important; max-height: 140px !important;
       pointer-events: auto; z-index: 195; opacity: 0; transition: opacity 0.3s;
       border-radius: 50%; cursor: grab; touch-action: none;
-      box-shadow: 0 0 12px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.3);
+      box-shadow: 0 0 14px rgba(0,0,0,0.6), inset 0 0 10px rgba(0,0,0,0.45);
     }
-    .minimap-radar.is-visible { opacity: 0.92; }
+    .minimap-radar.is-visible { opacity: 0.95; }
     .minimap-radar.is-dragging { cursor: grabbing; opacity: 1 !important; }
-    @media (min-width: 48rem) { .minimap-radar { width: 140px !important; height: 140px !important; max-width: 140px !important; max-height: 140px !important; } }
+    @media (min-width: 48rem) { .minimap-radar { width: 160px !important; height: 160px !important; max-width: 160px !important; max-height: 160px !important; } }
 
     /* ===== Time Critical Pulse ===== */
     .hud-time-critical { animation: time-pulse 0.5s ease-in-out infinite; color: #ff4444 !important; }
@@ -2066,7 +2066,7 @@
       <!-- Speed lines -->
       <div class="speed-lines" data-speed-lines></div>
       <!-- Minimap -->
-      <canvas class="minimap-radar" data-minimap-radar width="200" height="200" style="width:120px;height:120px;max-width:120px;max-height:120px;"></canvas>
+      <canvas class="minimap-radar" data-minimap-radar width="200" height="200" style="width:140px;height:140px;max-width:140px;max-height:140px;"></canvas>
 
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
@@ -3174,8 +3174,9 @@
     const speedLines = document.querySelector('[data-speed-lines]');
     const minimapCanvas = document.querySelector('[data-minimap-radar]');
     if (minimapCanvas) {
-      // Force CSS display size - canvas intrinsic size (200) is for retina, display must be small
-      const mapDisplaySize = window.innerWidth >= 768 ? '140px' : '120px';
+      // Force CSS display size - canvas intrinsic size (200) is for retina, display must be large
+      // enough to read on mobile. Bumped up so icons/chevron are legible at arm's length.
+      const mapDisplaySize = window.innerWidth >= 768 ? '160px' : '140px';
       minimapCanvas.style.width = mapDisplaySize;
       minimapCanvas.style.height = mapDisplaySize;
       minimapCanvas.style.maxWidth = mapDisplaySize;
@@ -3298,6 +3299,24 @@
       const half = size / 2;
       const scale = half / 320; // 320 units visible radius (scaled for r=120 sphere)
 
+      // Mode flags — decide what to draw. Falls through to legacy "show all"
+      // if currentGameMode / GAME_MODES aren't reachable for some reason.
+      const mode = (typeof currentGameMode !== 'undefined') ? currentGameMode : null;
+      const MODES = (typeof GAME_MODES !== 'undefined') ? GAME_MODES : null;
+      let showRings = true, showDrones = true, showNest = true, showBird = true;
+      if (mode != null && MODES) {
+        if (mode === MODES.ZEN || mode === MODES.CASUAL) {
+          showRings = false; showDrones = false; showNest = true; showBird = true;
+        } else if (mode === MODES.RING_RUSH) {
+          showRings = true; showDrones = false; showNest = false; showBird = true;
+        } else if (mode === MODES.DRONE_HUNTER) {
+          showRings = false; showDrones = true; showNest = false; showBird = true;
+        } else if (mode === MODES.TURRET_DEFENSE) {
+          // Bird is stationary on nest — nest is the reference, bird arrow adds nothing.
+          showRings = false; showDrones = true; showNest = true; showBird = false;
+        }
+      }
+
       minimapCtx.clearRect(0, 0, size, size);
 
       // Clip to circle
@@ -3306,15 +3325,15 @@
       minimapCtx.arc(half, half, half - 1, 0, Math.PI * 2);
       minimapCtx.clip();
 
-      // Background with subtle radial gradient
+      // Background — darker for better icon contrast
       const bgGrad = minimapCtx.createRadialGradient(half, half, 0, half, half, half);
-      bgGrad.addColorStop(0, 'rgba(15, 25, 45, 0.85)');
-      bgGrad.addColorStop(1, 'rgba(8, 14, 30, 0.92)');
+      bgGrad.addColorStop(0, 'rgba(10, 18, 34, 0.92)');
+      bgGrad.addColorStop(1, 'rgba(3, 7, 18, 0.96)');
       minimapCtx.fillStyle = bgGrad;
       minimapCtx.fillRect(0, 0, size, size);
 
       // Subtle range rings
-      minimapCtx.strokeStyle = 'rgba(80, 140, 200, 0.12)';
+      minimapCtx.strokeStyle = 'rgba(110, 170, 220, 0.14)';
       minimapCtx.lineWidth = 1;
       for (let r = 1; r <= 3; r++) {
         minimapCtx.beginPath();
@@ -3340,7 +3359,7 @@
         const dx = p.x - half;
         const dy = p.y - half;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxR = half - 8;
+        const maxR = half - 10;
         if (dist > maxR) {
           const s = maxR / dist;
           return { x: half + dx * s, y: half + dy * s, clamped: true };
@@ -3348,119 +3367,185 @@
         return { x: p.x, y: p.y, clamped: false };
       };
 
-      // Find nearest uncollected ring
-      let nearestDist = Infinity;
-      let nearestIdx = -1;
-      if (collectibles) {
+      // Draw edge chevron pointing toward off-map target
+      const drawEdgeArrow = (p, fill) => {
+        const adx = p.x - half;
+        const ady = p.y - half;
+        const a = Math.atan2(ady, adx);
+        minimapCtx.save();
+        minimapCtx.translate(p.x, p.y);
+        minimapCtx.rotate(a);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(6, 0);
+        minimapCtx.lineTo(-3, -4);
+        minimapCtx.lineTo(-3, 4);
+        minimapCtx.closePath();
+        minimapCtx.fillStyle = fill;
+        minimapCtx.fill();
+        minimapCtx.restore();
+      };
+
+      const pulse = 0.5 + 0.5 * Math.sin(minimapPulseTime * 4);
+
+      // ===== Rings (yellow) =====
+      if (showRings && collectibles) {
+        // Find nearest uncollected ring
+        let nearestDist = Infinity;
+        let nearestIdx = -1;
         for (let i = 0; i < collectibles.length; i++) {
           const ring = collectibles[i];
           if (ring.collected) continue;
           const dx = ring.position.x - birdPos.x;
           const dy = ring.position.y - birdPos.y;
           const dz = ring.position.z - birdPos.z;
-          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          const d = dx * dx + dy * dy + dz * dz;
           if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
         }
-      }
 
-      // Draw nest
-      if (nestPos) {
-        const raw = project(nestPos);
-        const p = clampToEdge(raw);
-        minimapCtx.beginPath();
-        minimapCtx.arc(p.x, p.y, p.clamped ? 4 : 5, 0, Math.PI * 2);
-        minimapCtx.fillStyle = '#4cff88';
-        minimapCtx.fill();
-      }
-
-      // Draw collectibles (rings)
-      if (collectibles) {
         for (let i = 0; i < collectibles.length; i++) {
           const ring = collectibles[i];
           if (ring.collected) continue;
           const isNearest = (i === nearestIdx);
           const raw = project(ring.position);
           const p = clampToEdge(raw);
-          const dotR = isNearest ? 6 : 4;
+          const dotR = isNearest ? 7 : 6;
 
-          // Glow for nearest ring
+          // Yellow glow for nearest; cyan-yellow ambient glow for all
           if (isNearest) {
-            const pulse = 0.5 + 0.5 * Math.sin(minimapPulseTime * 4);
             minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, dotR + 4 + pulse * 3, 0, Math.PI * 2);
-            minimapCtx.fillStyle = `rgba(68, 255, 136, ${0.15 + pulse * 0.1})`;
+            minimapCtx.arc(p.x, p.y, dotR + 6 + pulse * 3, 0, Math.PI * 2);
+            minimapCtx.fillStyle = `rgba(255, 224, 80, ${0.20 + pulse * 0.12})`;
+            minimapCtx.fill();
+          } else {
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, dotR + 2, 0, Math.PI * 2);
+            minimapCtx.fillStyle = 'rgba(255, 224, 80, 0.18)';
             minimapCtx.fill();
           }
 
-          minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
-          minimapCtx.fillStyle = isNearest ? '#66ffaa' : '#44ff88';
-          minimapCtx.fill();
-
-          // Small border for visibility
-          if (!p.clamped) {
-            minimapCtx.strokeStyle = isNearest ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)';
-            minimapCtx.lineWidth = 1;
-            minimapCtx.stroke();
-          }
-
-          // Edge indicator arrow for clamped items
           if (p.clamped) {
-            const adx = p.x - half;
-            const ady = p.y - half;
-            const a = Math.atan2(ady, adx);
-            minimapCtx.save();
-            minimapCtx.translate(p.x, p.y);
-            minimapCtx.rotate(a);
+            drawEdgeArrow(p, isNearest ? '#ffe866' : '#ffd84a');
+          } else {
             minimapCtx.beginPath();
-            minimapCtx.moveTo(4, 0);
-            minimapCtx.lineTo(-2, -3);
-            minimapCtx.lineTo(-2, 3);
-            minimapCtx.closePath();
-            minimapCtx.fillStyle = isNearest ? '#66ffaa' : '#44ff88';
+            minimapCtx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+            minimapCtx.fillStyle = isNearest ? '#ffe866' : '#ffd84a';
             minimapCtx.fill();
-            minimapCtx.restore();
+            minimapCtx.strokeStyle = isNearest ? 'rgba(20,20,20,0.85)' : 'rgba(20,20,20,0.6)';
+            minimapCtx.lineWidth = 1.5;
+            minimapCtx.stroke();
           }
         }
       }
 
-      // Draw drones (red dots)
-      if (drones) {
+      // ===== Drones (red, pulsing) =====
+      if (showDrones && drones) {
         for (const drone of drones) {
           const raw = project(drone.position);
           const p = clampToEdge(raw);
+          // Pulsing red halo
           minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-          minimapCtx.fillStyle = '#ff5555';
+          minimapCtx.arc(p.x, p.y, 7 + pulse * 3, 0, Math.PI * 2);
+          minimapCtx.fillStyle = `rgba(255, 70, 70, ${0.22 + pulse * 0.15})`;
           minimapCtx.fill();
-          minimapCtx.strokeStyle = 'rgba(255,255,255,0.2)';
-          minimapCtx.lineWidth = 1;
-          minimapCtx.stroke();
+
+          if (p.clamped) {
+            drawEdgeArrow(p, '#ff4d4d');
+          } else {
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+            minimapCtx.fillStyle = '#ff3b3b';
+            minimapCtx.fill();
+            minimapCtx.strokeStyle = 'rgba(20,0,0,0.75)';
+            minimapCtx.lineWidth = 1.5;
+            minimapCtx.stroke();
+          }
         }
       }
 
-      // Bird at center - directional triangle
-      minimapCtx.save();
-      minimapCtx.translate(half, half);
-      minimapCtx.beginPath();
-      minimapCtx.moveTo(0, -7);   // nose pointing up (forward)
-      minimapCtx.lineTo(-5, 5);
-      minimapCtx.lineTo(0, 2);
-      minimapCtx.lineTo(5, 5);
-      minimapCtx.closePath();
-      minimapCtx.fillStyle = '#ffffff';
-      minimapCtx.fill();
-      minimapCtx.strokeStyle = 'rgba(100,180,255,0.5)';
-      minimapCtx.lineWidth = 1;
-      minimapCtx.stroke();
-      minimapCtx.restore();
+      // ===== Nest (green target/cross) =====
+      // In ZEN/CASUAL the bird isn't nested, so try nestPointsSystem for the nearest nest.
+      // In TURRET_DEFENSE the nestPos arg is populated (bird is on the nest).
+      let resolvedNestPos = nestPos;
+      if (showNest && !resolvedNestPos) {
+        const nps = (typeof nestPointsSystem !== 'undefined') ? nestPointsSystem : null;
+        if (nps && typeof nps.getNearestNest === 'function') {
+          try {
+            const near = nps.getNearestNest(birdPos);
+            // getNearestNest may return an Object3D or { position } — handle both.
+            if (near) {
+              if (near.position) resolvedNestPos = near.position;
+              else if (near.isVector3) resolvedNestPos = near;
+            }
+          } catch (_e) { /* no-op, nest direction just won't show */ }
+        }
+      }
+
+      if (showNest && resolvedNestPos) {
+        const raw = project(resolvedNestPos);
+        const p = clampToEdge(raw);
+
+        if (p.clamped) {
+          drawEdgeArrow(p, '#3cff88');
+        } else {
+          // Target reticle: outer ring + center dot + cross hairs
+          minimapCtx.beginPath();
+          minimapCtx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+          minimapCtx.fillStyle = 'rgba(60, 255, 136, 0.18)';
+          minimapCtx.fill();
+
+          minimapCtx.strokeStyle = '#3cff88';
+          minimapCtx.lineWidth = 2;
+          minimapCtx.beginPath();
+          minimapCtx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+          minimapCtx.stroke();
+
+          minimapCtx.strokeStyle = 'rgba(0, 40, 20, 0.85)';
+          minimapCtx.lineWidth = 1.5;
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(p.x - 10, p.y); minimapCtx.lineTo(p.x - 3, p.y);
+          minimapCtx.moveTo(p.x + 3, p.y);  minimapCtx.lineTo(p.x + 10, p.y);
+          minimapCtx.moveTo(p.x, p.y - 10); minimapCtx.lineTo(p.x, p.y - 3);
+          minimapCtx.moveTo(p.x, p.y + 3);  minimapCtx.lineTo(p.x, p.y + 10);
+          minimapCtx.stroke();
+
+          minimapCtx.beginPath();
+          minimapCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          minimapCtx.fillStyle = '#caffdb';
+          minimapCtx.fill();
+        }
+      }
+
+      // ===== Bird (white chevron, ~12px across) =====
+      if (showBird) {
+        minimapCtx.save();
+        minimapCtx.translate(half, half);
+        // Chevron pointing up (forward is up on the rotated minimap)
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(0, -8);     // nose
+        minimapCtx.lineTo(-6, 6);     // back-left
+        minimapCtx.lineTo(0, 3);      // notch
+        minimapCtx.lineTo(6, 6);      // back-right
+        minimapCtx.closePath();
+        // Dark outline for contrast
+        minimapCtx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+        minimapCtx.lineWidth = 2.5;
+        minimapCtx.stroke();
+        // Bright fill
+        minimapCtx.fillStyle = '#ffffff';
+        minimapCtx.fill();
+        // Inner cyan edge for recognisability
+        minimapCtx.strokeStyle = 'rgba(120, 220, 255, 0.9)';
+        minimapCtx.lineWidth = 1;
+        minimapCtx.stroke();
+        minimapCtx.restore();
+      }
 
       minimapCtx.restore(); // Undo clip
 
-      // Outer ring border
+      // Outer ring border — slightly brighter
       minimapCtx.beginPath();
       minimapCtx.arc(half, half, half - 2, 0, Math.PI * 2);
-      minimapCtx.strokeStyle = 'rgba(100, 180, 255, 0.35)';
+      minimapCtx.strokeStyle = 'rgba(140, 200, 255, 0.55)';
       minimapCtx.lineWidth = 2;
       minimapCtx.stroke();
     }
