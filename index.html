@@ -5359,10 +5359,13 @@
       birbBounds.getCenter(birbCenter);
 
       // The shipped GLB model already faces -Z (forward). No rotation needed.
-      // The procedural birb faces +X and needs its forward inferred to align with -Z.
+      // The procedural birb is built facing +X by construction — hardcode that
+      // instead of heuristically guessing. The auto-heuristic picks the longest
+      // axis, which breaks when the new wide-wing design makes the Z wingspan
+      // longer than the beak-to-tail X length.
       const guessedForward = isGLB
         ? new THREE.Vector3(0, 0, -1)
-        : computeModelForwardGuess(birbBounds, birbCenter);
+        : new THREE.Vector3(1, 0, 0);
       modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
       // Re-center the bird so yaw/roll rotations pivot around its body instead
       // of an offset point in space.
@@ -5540,9 +5543,12 @@
       const buildWing = (side /* +1 left, -1 right */) => {
         const wingGroup = new THREE.Group();
 
-        // Main feather plate — long triangular blade
+        // Main feather plate — long triangular blade laid FLAT (thin vertically).
+        // Scale Z (the pre-rotation depth axis) — after rotateX(PI/2) that
+        // becomes the cross-section's Y, so the blade is thin top-to-bottom
+        // and wide front-to-back like a real wing silhouette.
         const bladeGeom = new THREE.ConeGeometry(0.38, 0.95, 4, 1, false);
-        bladeGeom.scale(0.2, 1.0, 1.0);      // flatten on local X (thickness)
+        bladeGeom.scale(1.0, 1.0, 0.2);
         bladeGeom.rotateX(Math.PI / 2);      // tip points along +Z
         bladeGeom.translate(0, 0, 0.42);     // shoulder at origin, tip at +Z ~0.9
         const blade = new THREE.Mesh(bladeGeom, wingMaterial);
@@ -5550,7 +5556,7 @@
 
         // Secondary feather — slightly shorter and offset inward/back
         const secondaryGeom = new THREE.ConeGeometry(0.3, 0.7, 4, 1, false);
-        secondaryGeom.scale(0.15, 1.0, 1.0);
+        secondaryGeom.scale(1.0, 1.0, 0.15);
         secondaryGeom.rotateX(Math.PI / 2);
         secondaryGeom.translate(-0.07, -0.05, 0.32);
         const secondary = new THREE.Mesh(secondaryGeom, wingMaterial);
@@ -5558,7 +5564,7 @@
 
         // Cyan tip accent — small cone sitting at the wingtip
         const tipGeom = new THREE.ConeGeometry(0.12, 0.26, 4, 1, false);
-        tipGeom.scale(0.2, 1.0, 1.0);
+        tipGeom.scale(1.0, 1.0, 0.2);
         tipGeom.rotateX(Math.PI / 2);
         tipGeom.translate(0.02, 0.02, 0.88);
         const tip = new THREE.Mesh(tipGeom, wingTipMaterial);
