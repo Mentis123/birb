@@ -7204,6 +7204,7 @@
 
       let pose;
       let visualQuat = null;
+      let wingInputState = { x: 0, y: 0, active: false };
 
       // Update New Flight System
       if (newFlightSystem) {
@@ -7217,6 +7218,7 @@
             : flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING
               ? { x: 0, y: 0, active: false }
               : inputState;
+        wingInputState = resolvedInput;
 
         const sprintingNow = Boolean(sprintState?.active);
         const cruiseSpeed = sprintingNow
@@ -7366,7 +7368,8 @@
       const isGroundedVisual = flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED;
       if (leftWing && rightWing && leftWing.userData.baseRotation && rightWing.userData.baseRotation) {
         // Get yaw input from flight controller (-1 = left, +1 = right)
-        const yawInput = flightController?.smoothedYaw ?? flightController?.input?.yaw ?? 0;
+        const yawInput = wingInputState?.x ?? flightController?.smoothedYaw ?? flightController?.input?.yaw ?? 0;
+        const pitchInput = wingInputState?.y ?? 0;
         const wingDipAmount = 0.4; // Max wing dip angle in radians
 
         // Left turn (negative yaw): left wing dips down, right wing rises
@@ -7374,21 +7377,29 @@
         const leftDip = yawInput * wingDipAmount;  // Positive yaw = left rises
         const rightDip = -yawInput * wingDipAmount; // Positive yaw = right dips
 
-        // Flap cycle — slower/stronger when grounded (hopping), faster+subtler
-        // while airborne for a "gliding bird" feel. Disabled during knockdown
-        // fall so the bird looks limp.
+        // Flight-phase wing behavior:
+        // - Grounded/falling/downward/banking: wings hold a steady glide posture.
+        // - Climbing with low bank: sinusoidal flapping to suggest lift generation.
         // Right wing has scale.z = -1 (mirror) which inverts the visual effect
         // of rotation.x — so we NEGATE flap on the right side so both wings
         // physically flap up and down together instead of wobbling opposite.
+        const isFallingVisual = flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING;
+        const isAirborneVisual = !isGroundedVisual && !isFallingVisual;
+        const bankingHard = Math.abs(yawInput) > 0.25;
+        const climbing = pitchInput > 0.2;
+        const gliding = isAirborneVisual && (!climbing || bankingHard);
+
+        // Subtle downward wing sweep during glide, stronger while banking.
+        const glideSweep = gliding ? 0.18 + Math.min(Math.abs(yawInput), 1) * 0.14 : 0;
         let flapOffset = 0;
-        if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING) {
-          const flapFreq = isGroundedVisual ? 4.5 : 6.5;
-          const flapAmp = isGroundedVisual ? 0.55 : 0.38;
+        if (isAirborneVisual && climbing && !bankingHard) {
+          const flapFreq = 6.8;
+          const flapAmp = 0.34;
           flapOffset = Math.sin(motionState.elapsed * flapFreq) * flapAmp;
         }
 
-        leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip + flapOffset;
-        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip - flapOffset;
+        leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip - glideSweep + flapOffset;
+        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip - glideSweep - flapOffset;
       }
 
       // Walk cycle — body bob + alternating foot tilt while grounded & moving.
