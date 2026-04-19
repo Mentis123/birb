@@ -2280,7 +2280,7 @@
     <div class="howto-hint">Tap anywhere to close</div>
   </div>
 
-  <main>
+  <main hidden data-game-main>
     <header>Birb Flight Lab</header>
     <div class="canvas-wrapper">
       <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
@@ -2701,6 +2701,10 @@
     if (titleStartBtn) {
       const startGame = () => {
         splashDismissed = true;
+        // Reveal the game UI now — it was hidden until Tap-to-Start so the
+        // canvas-wrapper / HUD / header couldn't peek through the splash fade.
+        const mainEl = document.querySelector('[data-game-main]');
+        if (mainEl) mainEl.hidden = false;
         // Kick off the render loop now (or mark it pending if the scene
         // isn't ready yet — the late-load path picks it up).
         if (typeof startGameLoop === 'function') {
@@ -6534,10 +6538,32 @@
     }
 
     if (flightRecoveryButton) {
+      // Scratch vectors/matrix for the launch realignment — avoid per-tap allocs.
+      const _launchUp = new THREE.Vector3();
+      const _launchFwd = new THREE.Vector3();
+      const _launchRight = new THREE.Vector3();
+      const _launchMatrix = new THREE.Matrix4();
       const recoverFlight = () => {
         if (!flightController || nestingSystem?.isNested?.()) return;
         // Only the Fly button launches — no mid-fall recovery in committed mode.
         if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.GROUNDED) return;
+        // Realign the flight quaternion to sphere-tangent before launch.
+        // The tumble during FALL can leave the bird's local up skewed, which
+        // makes yaw feel broken ("can't turn") after the relaunch. Re-project
+        // forward onto the tangent plane and rebuild an orthonormal basis.
+        if (flightController.quaternion && flightController.position) {
+          _launchUp.copy(flightController.position).normalize();
+          _launchFwd.set(0, 0, -1).applyQuaternion(flightController.quaternion);
+          _launchFwd.addScaledVector(_launchUp, -_launchFwd.dot(_launchUp));
+          if (_launchFwd.lengthSq() < 1e-6) {
+            // Degenerate case (forward parallel to up) — pick any tangent.
+            _launchFwd.set(1, 0, 0).addScaledVector(_launchUp, -_launchUp.x);
+          }
+          _launchFwd.normalize();
+          _launchRight.crossVectors(_launchFwd, _launchUp).normalize();
+          _launchMatrix.makeBasis(_launchRight, _launchUp, _launchFwd.clone().negate());
+          flightController.quaternion.setFromRotationMatrix(_launchMatrix);
+        }
         launchBoostTimer = FLIGHT_RECOVERY_CONFIG.launchBoostDuration;
         if (preloadedSounds?.nestLand) playFromPool(preloadedSounds.nestLand);
         applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
@@ -7351,6 +7377,9 @@
         // Flap cycle — slower/stronger when grounded (hopping), faster+subtler
         // while airborne for a "gliding bird" feel. Disabled during knockdown
         // fall so the bird looks limp.
+        // Right wing has scale.z = -1 (mirror) which inverts the visual effect
+        // of rotation.x — so we NEGATE flap on the right side so both wings
+        // physically flap up and down together instead of wobbling opposite.
         let flapOffset = 0;
         if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING) {
           const flapFreq = isGroundedVisual ? 4.5 : 6.5;
@@ -7359,7 +7388,7 @@
         }
 
         leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip + flapOffset;
-        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip + flapOffset;
+        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip - flapOffset;
       }
 
       // Walk cycle — body bob + alternating foot tilt while grounded & moving.
