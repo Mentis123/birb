@@ -35,17 +35,16 @@ const EXPLOSION_CONFIG = {
 
 const DRONE_CONFIG = {
   count: 8,                    // Total drones maintained in world
-  minAltitude: 135,            // Sphere radius (120) + 15 — above surface objects
-  maxAltitude: 175,            // Sphere radius (120) + 55 — above most trees/buildings
-  // orbitSpeed bumped 0.15 -> 0.45 rad/s so motion is clearly visible from the
-  // player's typical viewing distance on the 4× world. At altitude ~175 this
-  // gives ~78 u/s linear speed — fast enough to read as motion, slow enough
-  // to be trackable by the player.
-  orbitSpeed: 0.45,            // Base radians per second (angular, scale-independent)
+  minAltitude: 128,            // Just above bird's typical cruising altitude (~125-132)
+  maxAltitude: 148,            // Keeps drones in the bird's flight band so they're visible
+  // Altitude band 128-148 puts drones in the bird's actual flight zone (bird
+  // flies ~125-132 on the 4× world). At 0.22 rad/s and ~138 altitude this
+  // gives ~30 u/s linear speed — readable as motion and trackable by the player.
+  orbitSpeed: 0.22,            // Base radians per second (angular, scale-independent)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
-  collisionRadius: 3.0,        // Hit detection — bird-scale, not world-scale
-  birbCollisionRadius: 0.8,    // Birb collision radius — bird hasn't changed size
+  collisionRadius: 5.5,        // Hit detection — sized for the larger 4× world drones
+  birbCollisionRadius: 1.5,    // Birb collision radius — bird hasn't changed size
 };
 
 // Lightweight debug hook. Enabled via `?debug=drones` query param.
@@ -61,7 +60,7 @@ function createDroneMesh(THREE) {
   group.name = 'drone';
 
   // Main body - glowing octahedron (diamond shape)
-  const bodyGeometry = new THREE.OctahedronGeometry(1.6, 0);
+  const bodyGeometry = new THREE.OctahedronGeometry(3.0, 0);
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color: 0xff3366,
     emissive: 0xff2255,
@@ -73,7 +72,7 @@ function createDroneMesh(THREE) {
   group.add(body);
 
   // Spinning ring around the body
-  const ringGeometry = new THREE.TorusGeometry(2.4, 0.16, 8, 24);
+  const ringGeometry = new THREE.TorusGeometry(4.5, 0.3, 8, 24);
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: 0xff6699,
     transparent: true,

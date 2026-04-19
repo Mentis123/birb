@@ -3720,12 +3720,19 @@
       GROUNDED: 'grounded',
     };
     const FLIGHT_RECOVERY_CONFIG = {
-      birdRadius: 0.4,
+      birdRadius: 0.6,
       walkSpeed: 2.1,
-      knockbackFallSpeed: 16.5,
+      // Committed knockdown: you're going down. Slow enough (~1s fall)
+      // that the tumble reads as a moment, not a teleport.
+      knockbackFallSpeed: 5.0,
       minFlightResumeSpeed: 3.5,
+      // Tap-to-launch impulse after walking. Outward boost for a short window
+      // so the bird pops off the ground with the same weight as a nest takeoff.
+      launchBoostSpeed: 6.0,
+      launchBoostDuration: 0.4,
     };
     let flightRecoveryState = FLIGHT_RECOVERY_STATES.FLYING;
+    let launchBoostTimer = 0;
     const flightRecoveryScratch = {
       radial: new THREE.Vector3(),
     };
@@ -4237,11 +4244,11 @@
       }
     }
 
-    function showFlightRecoveryButton(visible, { grounded = false } = {}) {
+    function showFlightRecoveryButton(visible) {
       if (!flightRecoveryButton) return;
       flightRecoveryButton.classList.toggle('is-visible', visible);
-      flightRecoveryButton.textContent = grounded ? 'Fly' : 'Self Arrest';
-      flightRecoveryButton.setAttribute('aria-label', grounded ? 'Take off and fly again' : 'Self arrest and fly again');
+      flightRecoveryButton.textContent = 'Fly';
+      flightRecoveryButton.setAttribute('aria-label', 'Take off and fly again');
     }
 
     function forceGroundedPose() {
@@ -4254,14 +4261,22 @@
 
     function applyFlightRecoveryState(nextState) {
       if (flightRecoveryState === nextState) return;
+      const prevState = flightRecoveryState;
       flightRecoveryState = nextState;
 
       if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
         showFlightRecoveryButton(false);
       } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
-        showFlightRecoveryButton(true, { grounded: false });
+        // Committed knockdown — no recovery button during fall.
+        showFlightRecoveryButton(false);
+        if (screenShake?.treeImpact) screenShake.treeImpact();
+        if (preloadedSounds?.nestLand) playFromPool(preloadedSounds.nestLand);
       } else {
-        showFlightRecoveryButton(true, { grounded: true });
+        // GROUNDED — offer the launch button.
+        showFlightRecoveryButton(true);
+        if (prevState === FLIGHT_RECOVERY_STATES.FALLING && screenShake?.groundLand) {
+          screenShake.groundLand();
+        }
       }
     }
 
@@ -5734,20 +5749,53 @@
       },
     });
 
+    // Names of world prop meshes to hide while nested so the horizon is clear.
+    // Ground sphere, sky, clouds, water stay visible — only tall obstructions go.
+    const NEST_OBSTRUCTION_NAME_PATTERNS = [
+      /^forest-(trunks|canopies|canopy-ceilings|shrubs)/,
+      /^canyon-(spires|walls|arches|archs)/,
+      /^mountain-/,
+      /^city-(towers|buildings)/,
+    ];
+    const hiddenObstructions = [];
+    function hideObstructionsForNest() {
+      if (!sphericalWorld?.root || hiddenObstructions.length > 0) return;
+      sphericalWorld.root.traverse((child) => {
+        if (!child?.name) return;
+        for (const pat of NEST_OBSTRUCTION_NAME_PATTERNS) {
+          if (pat.test(child.name) && child.visible) {
+            hiddenObstructions.push(child);
+            child.visible = false;
+            break;
+          }
+        }
+      });
+    }
+    function restoreObstructionsFromNest() {
+      for (const child of hiddenObstructions) {
+        child.visible = true;
+      }
+      hiddenObstructions.length = 0;
+    }
+
     // Initialize nesting system with state change callback
     const handleNestingStateChange = (newState, previousState, currentNest) => {
       const isNested = newState === NESTING_STATES.NESTED;
       const isApproaching = newState === NESTING_STATES.APPROACHING;
       const isLeavingNest = previousState === NESTING_STATES.NESTED && newState !== NESTING_STATES.NESTED;
 
+      if (isNested) {
+        hideObstructionsForNest();
+      } else if (isLeavingNest) {
+        restoreObstructionsFromNest();
+      }
+
       // Show/hide nest mode UI
       showNestUI(isNested);
       if (isNested) {
         showFlightRecoveryButton(false);
-      } else if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FLYING) {
-        showFlightRecoveryButton(true, {
-          grounded: flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED
-        });
+      } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
+        showFlightRecoveryButton(true);
       }
       if (isLeavingNest) {
         applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
@@ -5847,6 +5895,10 @@
     if (flightRecoveryButton) {
       const recoverFlight = () => {
         if (!flightController || nestingSystem?.isNested?.()) return;
+        // Only the Fly button launches — no mid-fall recovery in committed mode.
+        if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.GROUNDED) return;
+        launchBoostTimer = FLIGHT_RECOVERY_CONFIG.launchBoostDuration;
+        if (preloadedSounds?.nestLand) playFromPool(preloadedSounds.nestLand);
         applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
       };
 
@@ -6504,7 +6556,8 @@
 
         if (!isNested) {
           if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
-            flight.speed = FLIGHT_RECOVERY_CONFIG.walkSpeed;
+            // Walk only when the stick is engaged — no drift when idle.
+            flight.speed = inputState.active ? FLIGHT_RECOVERY_CONFIG.walkSpeed : 0;
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
             flight.speed = FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed;
           } else {
@@ -6527,6 +6580,17 @@
           }
         }
 
+        // Launch boost: brief outward impulse after tapping Fly from grounded.
+        if (!isNested && launchBoostTimer > 0) {
+          launchBoostTimer = Math.max(0, launchBoostTimer - delta);
+          const radial = flightRecoveryScratch.radial.copy(pose.position);
+          if (radial.lengthSq() > 0.000001) {
+            radial.normalize();
+            pose.position.addScaledVector(radial, FLIGHT_RECOVERY_CONFIG.launchBoostSpeed * delta);
+            flight.position.copy(pose.position);
+          }
+        }
+
         // 2b. Object Collision Detection (trees, rocks, etc.)
         // Only check when flying (not nested) and collision system exists
         if (!isNested && sphericalWorld?.collisionSystem) {
@@ -6544,7 +6608,7 @@
             if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
               applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
               if (statusMetric) {
-                statusMetric.textContent = "Impact! You're dropping—tap Self Arrest to recover flight.";
+                statusMetric.textContent = "Impact! You're going down.";
               }
             }
           }
@@ -6559,7 +6623,7 @@
             flight.position.copy(groundResult.correctedPosition);
             applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
             if (statusMetric) {
-              statusMetric.textContent = "Landed. You're gliding along the ground—tap Fly to take off.";
+              statusMetric.textContent = "Grounded. Push the stick to walk — tap Fly to take off.";
             }
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Keep grounded movement hugging the surface while walking/sliding.

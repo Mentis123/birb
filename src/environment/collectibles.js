@@ -6,9 +6,9 @@
  */
 
 const SPHERE_RADIUS = 120;
-const RING_ALTITUDE_MIN = 8;  // Above sphere surface (scaled for bigger world)
-const RING_ALTITUDE_MAX = 20;
-const RING_COUNT = 10;
+const RING_ALTITUDE_MIN = 12;  // Above sphere surface (scaled for bigger world)
+const RING_ALTITUDE_MAX = 24;
+const RING_COUNT = 18;
 
 // Mobile gate — set by index.html. Disables per-frame shimmer color lerp
 // (10 uniform updates/frame × 60fps = 600 per sec) and drops the glow/core
@@ -26,29 +26,91 @@ const RING_CONFIGS = {
 };
 
 /**
- * Generate ring positions distributed around the sphere at flying altitude
+ * Generate ring positions as an arc-ribbon that snakes around the sphere.
+ *
+ * Uses pure trig (no THREE imports available here). Builds an orthonormal basis
+ * (base, oscUp, tangent) from a random unit vector, then advances around the
+ * great-circle defined by (base, tangent) via Rodrigues' rotation, adding a
+ * small sine-wave sway along oscUp so the path weaves. Player sees the next
+ * 3-4 rings ahead of them forming a readable course to fly.
  */
 function generateRingPositions(count = RING_COUNT) {
   const positions = [];
 
-  // Use fibonacci sphere for even distribution
-  const goldenRatio = (1 + Math.sqrt(5)) / 2;
+  // --- Build a random orthonormal basis using pure numbers ---
+  // Random unit vector on the sphere (uniform via rejection-free method).
+  const u1 = Math.random();
+  const u2 = Math.random();
+  const z0 = 1 - 2 * u1;
+  const r0 = Math.sqrt(Math.max(0, 1 - z0 * z0));
+  const phi0 = 2 * Math.PI * u2;
+  let bx = r0 * Math.cos(phi0);
+  let by = r0 * Math.sin(phi0);
+  let bz = z0;
+
+  // Pick a helper vector not parallel to base.
+  let hx = 0, hy = 1, hz = 0;
+  if (Math.abs(by) > 0.9) { hx = 1; hy = 0; hz = 0; }
+
+  // oscUp = normalize(helper - (helper·base) * base)  (Gram-Schmidt)
+  const dotHB = hx * bx + hy * by + hz * bz;
+  let ox = hx - dotHB * bx;
+  let oy = hy - dotHB * by;
+  let oz = hz - dotHB * bz;
+  const oLen = Math.sqrt(ox * ox + oy * oy + oz * oz) || 1;
+  ox /= oLen; oy /= oLen; oz /= oLen;
+
+  // tangent = base × oscUp  (rotation axis for advancing around great circle)
+  let tx = by * oz - bz * oy;
+  let ty = bz * ox - bx * oz;
+  let tz = bx * oy - by * ox;
+  const tLen = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1;
+  tx /= tLen; ty /= tLen; tz /= tLen;
+
+  // Rodrigues' rotation: rotate vector v around unit axis k by angle a.
+  // v_rot = v*cos + (k×v)*sin + k*(k·v)*(1-cos)
+  function rotate(vx, vy, vz, kx, ky, kz, angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    const dot = kx * vx + ky * vy + kz * vz;
+    const cx = ky * vz - kz * vy;
+    const cy = kz * vx - kx * vz;
+    const cz = kx * vy - ky * vx;
+    return [
+      vx * c + cx * s + kx * dot * (1 - c),
+      vy * c + cy * s + ky * dot * (1 - c),
+      vz * c + cz * s + kz * dot * (1 - c),
+    ];
+  }
+
+  const stepAngle = (2 * Math.PI * 0.85) / Math.max(1, count - 1); // ~85% of a full loop
+  const oscAmplitude = 0.35; // radians of sway
 
   for (let i = 0; i < count; i++) {
-    // Fibonacci sphere distribution
-    const theta = 2 * Math.PI * i / goldenRatio;
-    const phi = Math.acos(1 - 2 * (i + 0.5) / count);
+    const t = i * stepAngle;
+    const sway = Math.sin(t * 2) * oscAmplitude;
 
-    // Random altitude variation
+    // Step 1: rotate base around tangent by t (advance along great circle).
+    const [ax, ay, az] = rotate(bx, by, bz, tx, ty, tz, t);
+
+    // Step 2: tilt that direction around oscUp by sway (weave perpendicular).
+    const [dx, dy, dz] = rotate(ax, ay, az, ox, oy, oz, sway);
+
+    // Normalize (should already be unit, but guard against drift).
+    const dLen = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    const nx = dx / dLen;
+    const ny = dy / dLen;
+    const nz = dz / dLen;
+
     const altitude = SPHERE_RADIUS + RING_ALTITUDE_MIN +
                      Math.random() * (RING_ALTITUDE_MAX - RING_ALTITUDE_MIN);
 
-    // Convert to cartesian
-    const x = altitude * Math.sin(phi) * Math.cos(theta);
-    const y = altitude * Math.cos(phi);
-    const z = altitude * Math.sin(phi) * Math.sin(theta);
-
-    positions.push({ x, y, z, altitude });
+    positions.push({
+      x: nx * altitude,
+      y: ny * altitude,
+      z: nz * altitude,
+      altitude,
+    });
   }
 
   return positions;
@@ -69,7 +131,7 @@ function createRing(THREE, config) {
 
   // Main ring - small torus. Mobile uses a slightly brighter base (lerp toward
   // white once at build) to compensate for the missing glow/core overlays.
-  const ringGeo = new THREE.TorusGeometry(0.6, 0.08, mobile ? 8 : 12, mobile ? 16 : 24);
+  const ringGeo = new THREE.TorusGeometry(2.5, 0.3, mobile ? 8 : 12, mobile ? 16 : 24);
   const ringMat = new THREE.MeshBasicMaterial({
     color: mobile
       ? new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.35)
@@ -87,7 +149,7 @@ function createRing(THREE, config) {
 
   if (!mobile) {
     // Outer glow
-    const glowGeo = new THREE.TorusGeometry(0.7, 0.04, 8, 24);
+    const glowGeo = new THREE.TorusGeometry(2.9, 0.15, 8, 24);
     glowMat = new THREE.MeshBasicMaterial({
       color: config.glow,
       transparent: true,
@@ -98,7 +160,7 @@ function createRing(THREE, config) {
     group.add(glow);
 
     // Inner bright core
-    const coreGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 24);
+    const coreGeo = new THREE.TorusGeometry(2.3, 0.12, 8, 24);
     coreMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -224,7 +286,7 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
       if (!container.visible) return [];
 
       const collected = [];
-      const threshold = radius + 0.6; // ring radius is 0.6
+      const threshold = radius + 2.5; // ring outer radius
       const threshSq = threshold * threshold;
 
       for (let i = 0; i < rings.length; i++) {

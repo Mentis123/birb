@@ -82,4 +82,6 @@ export class ScreenShake {
   nestHit() { this.shake(0.2, 0.5); }
   droneDestroyed() { this.shake(0.06, 0.2); }
   ringCollected() { this.kickFov(5); }
+  treeImpact() { this.shake(0.25, 0.6); this.kickFov(8); }
+  groundLand() { this.shake(0.12, 0.3); }
 }
