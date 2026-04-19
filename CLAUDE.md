@@ -20,9 +20,33 @@ Birb Mobile is one of three showcase artefacts for Birb Labs inside Vibe Academy
 
 All three link their Vibe Academy CTA to `https://www.vibeacademy.com.au/`. Never `atmanacademy.io` — that domain is retired.
 
-### Game state (2026-04-17)
+### Game state (2026-04-20)
 
-Stable. Splash CTA migrated to `vibeacademy.com.au`. All four game modes (Casual, Ring Rush, Drone Hunter, Turret Defense) playable. Spherical flight bug resolved. Eruda debug still present in `index.html` — safe to strip when next touching.
+Major overhaul session. Birb Mobile now ships the full **Birb Labs Artefact Treatment** — three-page entry flow (Splash → Vibe → Title) matching Rogue Mobile and Marco Mobile. See canonical spec at `vibeacademy-brain/wiki/brand/birb-labs-artefact-treatment.md`.
+
+**Shipped this session:**
+- Splash / Vibe / Title page flow with hero image + drifting feathers + cyan sparks on the Title page; "?" help and ⚙ settings in corners
+- Render loop **fully deferred** — nothing runs behind splashes; `<main hidden>` until Tap-to-Start
+- Procedural bird redesigned (chibi silhouette, layered-cone wings, big eyes, prominent beak) with `leftWing` / `rightWing` / `leftFoot` / `rightFoot` named groups preserved
+- Flap animation (symmetric, right wing flap is negated to counter the scale.z=-1 mirror) + walk cycle (body bob + alternating foot tilt, only when GROUNDED && input.active)
+- Committed knockdown — no Self Arrest. Fall ramps 1× → 3× over 3s, tree-impact shake + thud, Fly launches with outward impulse
+- Realign quaternion on launch so yaw still feels right after a tumble
+- Drones rescaled for 4× world (body 3.6, ring 5.4), slowed 20%, altitude moved into bird's flight layer
+- Ring Rush: r 0.6 → 2.5, count 10 → 18, fibonacci replaced with arc-ribbon across near hemisphere
+- Solid colliders at cruise altitude for trees/spires/mountains/towers + new cloud colliders — you can crash into things now
+- Drone-bird collision triggers the knockdown instead of a subtle freeze
+- Hide host tree + nearby props while nested so horizon is clear
+- Mode-aware minimap (Zen = compass+nest, Ring Rush = rings only, etc.)
+
+**Known / pending:**
+- Minimap is too zoomed-out per playtest — tighten the radius when next on this
+- Task 6 playtest pass on Drone Hunter + Turret Defense tuning still open
+- Eruda debug still present in `index.html` — can strip when next touching
+
+**Sibling siblings:**
+- Rogue Mobile (`Mentis123/yagamentis`) — full treatment
+- Marco Mobile (`Mentis123/marcomobile`) — full treatment
+- Frosty Spider (`Mentis123/FrostySpider`) — treatment alignment pending
 
 ## What This Is
 
