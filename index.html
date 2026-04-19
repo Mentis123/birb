@@ -5448,7 +5448,13 @@
 
     positionBirbModel(createProceduralBirb());
 
-    if (GLTFLoader) {
+    // Default to the procedural birb — it's richer, animates per-part (wings +
+    // feet are named groups), and behaves identically on iOS. The GLB path is
+    // kept behind a ?glb=1 query param for A/B comparison.
+    const FORCE_GLB_BIRB = typeof window !== 'undefined'
+      && /[?&]glb=1/.test(window.location?.search || '');
+
+    if (FORCE_GLB_BIRB && GLTFLoader) {
       const gltfLoader = new GLTFLoader();
       gltfLoader.load(
         "./birb.glb",
@@ -7113,6 +7119,7 @@
       // Wing banking animation - dip wing on turn direction
       const leftWing = birbAnchor.getObjectByName('leftWing');
       const rightWing = birbAnchor.getObjectByName('rightWing');
+      const isGroundedVisual = flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED;
       if (leftWing && rightWing && leftWing.userData.baseRotation && rightWing.userData.baseRotation) {
         // Get yaw input from flight controller (-1 = left, +1 = right)
         const yawInput = flightController?.smoothedYaw ?? flightController?.input?.yaw ?? 0;
@@ -7123,8 +7130,33 @@
         const leftDip = yawInput * wingDipAmount;  // Positive yaw = left rises
         const rightDip = -yawInput * wingDipAmount; // Positive yaw = right dips
 
-        leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip;
-        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip;
+        // Flap cycle — slower/stronger when grounded (hopping), faster+subtler
+        // while airborne for a "gliding bird" feel. Disabled during knockdown
+        // fall so the bird looks limp.
+        let flapOffset = 0;
+        if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING) {
+          const flapFreq = isGroundedVisual ? 4.5 : 6.5;
+          const flapAmp = isGroundedVisual ? 0.55 : 0.38;
+          flapOffset = Math.sin(motionState.elapsed * flapFreq) * flapAmp;
+        }
+
+        leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip + flapOffset;
+        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip + flapOffset;
+      }
+
+      // Walk cycle — body bob + alternating foot tilt while grounded & moving.
+      const leftFoot = birbAnchor.getObjectByName('leftFoot');
+      const rightFoot = birbAnchor.getObjectByName('rightFoot');
+      const isWalking = isGroundedVisual && !!inputState?.active;
+      if (isWalking) {
+        const walkPhase = motionState.elapsed * 9;
+        // Body bob at 2× step cadence so it bobs on each step.
+        birbAnchor.position.y += Math.sin(walkPhase * 2) * 0.04;
+        if (leftFoot) leftFoot.rotation.x = Math.sin(walkPhase) * 0.35;
+        if (rightFoot) rightFoot.rotation.x = Math.sin(walkPhase + Math.PI) * 0.35;
+      } else {
+        if (leftFoot) leftFoot.rotation.x = 0;
+        if (rightFoot) rightFoot.rotation.x = 0;
       }
 
       if (glideTrail && glideTrail.rotation) {
