@@ -62,6 +62,51 @@ export function createNestingSystem(THREE, {
     }
   }
 
+  function setLandingTargetFromNest(nestGroup) {
+    if (!nestGroup) return false;
+
+    currentNest = nestGroup;
+    nestPointsSystem.getNestWorldPosition(nestGroup, targetPosition);
+    nestPointsSystem.getNestWorldQuaternion(nestGroup, targetQuaternion);
+
+    // Get world-space surface normal for clearance offset
+    const worldSurfaceNormal = nestPointsSystem.getNestWorldSurfaceNormal(nestGroup, _tempVec);
+    const hostClearance = nestGroup.userData.hostClearance || 0;
+    const clearanceOffset = Math.max(0.6, Math.min(hostClearance * 0.2, 3.0));
+    if (worldSurfaceNormal) {
+      targetPosition.addScaledVector(worldSurfaceNormal, clearanceOffset);
+
+      // Align landing orientation to the surface normal and current approach direction.
+      // This avoids inconsistent sideways viewpoints when entering nests.
+      const up = _tempUp.copy(worldSurfaceNormal).normalize();
+      const currentForward = _tempForward
+        .set(0, 0, -1)
+        .applyQuaternion(flightController.lookQuaternion || flightController.quaternion);
+      currentForward.addScaledVector(up, -currentForward.dot(up));
+
+      if (currentForward.lengthSq() < 1e-6) {
+        currentForward
+          .set(0, 0, -1)
+          .applyQuaternion(targetQuaternion);
+        currentForward.addScaledVector(up, -currentForward.dot(up));
+      }
+
+      if (currentForward.lengthSq() < 1e-6) {
+        currentForward.set(0, 0, -1);
+        currentForward.addScaledVector(up, -currentForward.dot(up));
+      }
+
+      currentForward.normalize();
+      // Rebuild an orthonormal basis to prevent roll skew when entering nests.
+      _tempRight.crossVectors(currentForward, up).normalize();
+      currentForward.crossVectors(up, _tempRight).normalize();
+      _tempMatrix.makeBasis(_tempRight, up, _tempForwardNeg.copy(currentForward).negate());
+      targetQuaternion.setFromRotationMatrix(_tempMatrix);
+    }
+
+    return true;
+  }
+
   return {
     /**
      * Get current nesting state
@@ -120,50 +165,34 @@ export function createNestingSystem(THREE, {
       }
 
       // Start landing sequence
-      currentNest = nearestNest;
-
-      // Use WORLD coordinates for landing position (accounts for sphere rotation)
-      nestPointsSystem.getNestWorldPosition(nearestNest, targetPosition);
-      nestPointsSystem.getNestWorldQuaternion(nearestNest, targetQuaternion);
-
-      // Get world-space surface normal for clearance offset
-      const worldSurfaceNormal = nestPointsSystem.getNestWorldSurfaceNormal(nearestNest, _tempVec);
-      const hostClearance = nearestNest.userData.hostClearance || 0;
-      const clearanceOffset = Math.max(0.6, Math.min(hostClearance * 0.2, 3.0));
-      if (worldSurfaceNormal) {
-        targetPosition.addScaledVector(worldSurfaceNormal, clearanceOffset);
-
-        // Align landing orientation to the surface normal and current approach direction.
-        // This avoids inconsistent sideways viewpoints when entering nests.
-        const up = _tempUp.copy(worldSurfaceNormal).normalize();
-        const currentForward = _tempForward
-          .set(0, 0, -1)
-          .applyQuaternion(flightController.lookQuaternion || flightController.quaternion);
-        currentForward.addScaledVector(up, -currentForward.dot(up));
-
-        if (currentForward.lengthSq() < 1e-6) {
-          currentForward
-            .set(0, 0, -1)
-            .applyQuaternion(targetQuaternion);
-          currentForward.addScaledVector(up, -currentForward.dot(up));
-        }
-
-        if (currentForward.lengthSq() < 1e-6) {
-          currentForward.set(0, 0, -1);
-          currentForward.addScaledVector(up, -currentForward.dot(up));
-        }
-
-        currentForward.normalize();
-        // Rebuild an orthonormal basis to prevent roll skew when entering nests.
-        _tempRight.crossVectors(currentForward, up).normalize();
-        currentForward.crossVectors(up, _tempRight).normalize();
-        _tempMatrix.makeBasis(_tempRight, up, _tempForwardNeg.copy(currentForward).negate());
-        targetQuaternion.setFromRotationMatrix(_tempMatrix);
+      if (!setLandingTargetFromNest(nearestNest)) {
+        return false;
       }
 
       setState(NESTING_STATES.LANDING);
       nestPointsSystem.setNestOccupied(currentNest, true);
 
+      return true;
+    },
+
+    /**
+     * Force land sequence toward a specific nest (used by mode scripts).
+     */
+    forceNestAt(nestGroup) {
+      if (!nestGroup || currentState === NESTING_STATES.LANDING || currentState === NESTING_STATES.TAKING_OFF) {
+        return false;
+      }
+
+      if (currentNest && currentNest !== nestGroup) {
+        nestPointsSystem.setNestOccupied(currentNest, false);
+      }
+
+      if (!setLandingTargetFromNest(nestGroup)) {
+        return false;
+      }
+
+      nestPointsSystem.setNestOccupied(currentNest, true);
+      setState(NESTING_STATES.LANDING);
       return true;
     },
 
