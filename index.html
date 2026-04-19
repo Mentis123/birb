@@ -964,6 +964,236 @@
       opacity: 0;
     }
 
+    /* Title / Home Screen — shown after splash + vibe */
+    .title-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at top, #0a1228 0%, #060918 60%, #02040c 100%);
+      color: #f1f5ff;
+      cursor: default;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      opacity: 0;
+      transition: opacity 0.4s ease-out;
+      pointer-events: none;
+    }
+
+    .title-screen.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .title-screen.is-fading {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .title-screen[hidden] { display: none; }
+
+    .title-gear {
+      position: absolute;
+      top: 1.25rem;
+      right: 1.25rem;
+      width: 2.75rem;
+      height: 2.75rem;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(132, 174, 255, 0.35);
+      background: rgba(14, 23, 41, 0.85);
+      color: #cfe3ff;
+      font-size: 1.25rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(12px);
+      transition: transform 150ms ease, border-color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .title-gear:hover, .title-gear:focus-visible {
+      border-color: rgba(147, 197, 253, 0.9);
+      transform: rotate(18deg);
+      outline: none;
+    }
+
+    .title-body {
+      text-align: center;
+      padding: 2rem 1.5rem;
+      max-width: 22rem;
+      position: relative;
+    }
+
+    /* Reuse the splash border-pulse aesthetic around the logo block */
+    .title-logo-wrap {
+      position: relative;
+      display: inline-block;
+      padding: 0.9rem 1.4rem;
+      border-radius: 1.1rem;
+      overflow: hidden;
+    }
+
+    .title-logo-wrap::before {
+      content: '';
+      position: absolute;
+      inset: -50%;
+      background: conic-gradient(
+        from 0deg,
+        transparent 0deg,
+        transparent 340deg,
+        #00d4ff 350deg,
+        #4df0ff 355deg,
+        #ffffff 358deg,
+        #4df0ff 360deg
+      );
+      animation: border-pulse-rotate 4.5s linear infinite;
+      filter: drop-shadow(0 0 8px rgba(77, 240, 255, 0.8));
+    }
+
+    .title-logo-wrap::after {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border-radius: calc(1.1rem - 2px);
+      background: #060918;
+    }
+
+    .title-logo {
+      position: relative;
+      z-index: 1;
+      margin: 0;
+      font-size: clamp(2rem, 8vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #eaf4ff;
+      text-shadow: 0 0 24px rgba(77, 240, 255, 0.35);
+    }
+
+    .title-subtitle {
+      margin: 1.25rem 0 0.25rem;
+      font-size: clamp(0.95rem, 3vw, 1.05rem);
+      color: rgba(190, 210, 240, 0.85);
+    }
+
+    .title-meta {
+      margin: 0 0 1.75rem;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(160, 180, 220, 0.6);
+    }
+
+    .title-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: stretch;
+    }
+
+    .title-btn {
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 0.85rem 1.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: transform 120ms ease, background 150ms ease, border-color 150ms ease, color 150ms ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .title-btn-primary {
+      background: linear-gradient(180deg, #4df0ff 0%, #00a9d9 100%);
+      color: #03111c;
+      box-shadow: 0 8px 24px rgba(0, 169, 217, 0.35), 0 0 0 1px rgba(77, 240, 255, 0.4) inset;
+    }
+
+    .title-btn-primary:hover, .title-btn-primary:focus-visible {
+      transform: translateY(-1px);
+      outline: none;
+    }
+
+    .title-btn-secondary {
+      background: transparent;
+      border-color: rgba(132, 174, 255, 0.45);
+      color: rgba(207, 227, 255, 0.9);
+    }
+
+    .title-btn-secondary:hover, .title-btn-secondary:focus-visible {
+      border-color: rgba(147, 197, 253, 0.9);
+      color: #fff;
+      outline: none;
+    }
+
+    .title-footer {
+      position: absolute;
+      bottom: 1.25rem;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      color: rgba(140, 160, 200, 0.55);
+    }
+
+    .title-footer a {
+      color: rgba(180, 210, 255, 0.85);
+      text-decoration: none;
+    }
+
+    .title-footer a:hover { color: #fff; }
+
+    /* How-to-Play — full-screen info image, tap to dismiss */
+    .howto-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 10002;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #03060f;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.3s ease-out;
+      pointer-events: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .howto-screen.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .howto-screen[hidden] { display: none; }
+
+    .howto-image {
+      max-width: 92vw;
+      max-height: 85vh;
+      object-fit: contain;
+      border-radius: 0.75rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    }
+
+    .howto-hint {
+      position: absolute;
+      bottom: 1.5rem;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 0.85rem;
+      color: rgba(200, 220, 255, 0.7);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
     /* Settings Gear Button */
     .settings-gear-button {
       position: absolute;
@@ -1851,6 +2081,31 @@
     <div class="vibe-splash__hint">Tap to continue</div>
   </div>
 
+  <!-- Title / Home Screen — shown after splash + vibe (every session) -->
+  <div class="title-screen" data-title-screen hidden>
+    <button type="button" class="title-gear" data-title-gear aria-label="Sound &amp; settings">&#9881;</button>
+    <div class="title-body">
+      <div class="title-logo-wrap">
+        <h1 class="title-logo">BIRB MOBILE</h1>
+      </div>
+      <p class="title-subtitle">Fly the spherical world.</p>
+      <p class="title-meta">Four modes &middot; Mobile-first</p>
+      <div class="title-buttons">
+        <button type="button" class="title-btn title-btn-primary" data-title-start>Tap to Start</button>
+        <button type="button" class="title-btn title-btn-secondary" data-title-howto>How to Play</button>
+      </div>
+    </div>
+    <div class="title-footer">
+      From the Mind of <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a>
+    </div>
+  </div>
+
+  <!-- How-to-Play screen — full-screen info image -->
+  <div class="howto-screen" data-howto-screen hidden role="button" aria-label="Tap to close">
+    <img src="./info.jpg" alt="How to play Birb Mobile" class="howto-image">
+    <div class="howto-hint">Tap anywhere to close</div>
+  </div>
+
   <main>
     <header>Birb Flight Lab</header>
     <div class="canvas-wrapper">
@@ -2215,11 +2470,84 @@
     }
 
     function finishAllSplashes() {
-      splashDismissed = true;
-      if (typeof triggerAutoFullscreen === 'function') {
-        triggerAutoFullscreen();
+      // Show the branded title/home screen instead of dropping straight into
+      // the game. splashDismissed is only set once the user taps Start, so
+      // the late-load fullscreen safety net doesn't trigger prematurely.
+      showTitleScreen();
+    }
+
+    // ===== Title / How-to-Play screens =====
+    const titleScreen = document.querySelector('[data-title-screen]');
+    const howtoScreen = document.querySelector('[data-howto-screen]');
+    const titleStartBtn = document.querySelector('[data-title-start]');
+    const titleHowtoBtn = document.querySelector('[data-title-howto]');
+    const titleGearBtn = document.querySelector('[data-title-gear]');
+
+    function showTitleScreen() {
+      if (!titleScreen) {
+        // No title screen (shouldn't happen) — go straight to game.
+        if (typeof triggerAutoFullscreen === 'function') triggerAutoFullscreen();
+        showMinigameOnboarding();
+        return;
       }
-      showMinigameOnboarding();
+      titleScreen.hidden = false;
+      requestAnimationFrame(() => titleScreen.classList.add('is-visible'));
+    }
+
+    function hideTitleScreen() {
+      if (!titleScreen) return;
+      titleScreen.classList.remove('is-visible');
+      titleScreen.classList.add('is-fading');
+      setTimeout(() => {
+        titleScreen.hidden = true;
+        titleScreen.classList.remove('is-fading');
+      }, 400);
+    }
+
+    function showHowto() {
+      if (!howtoScreen) return;
+      howtoScreen.hidden = false;
+      requestAnimationFrame(() => howtoScreen.classList.add('is-visible'));
+    }
+
+    function hideHowto() {
+      if (!howtoScreen) return;
+      howtoScreen.classList.remove('is-visible');
+      setTimeout(() => { howtoScreen.hidden = true; }, 300);
+    }
+
+    if (titleStartBtn) {
+      const startGame = () => {
+        splashDismissed = true;
+        hideTitleScreen();
+        setTimeout(() => {
+          if (typeof triggerAutoFullscreen === 'function') triggerAutoFullscreen();
+          showMinigameOnboarding();
+        }, 300);
+      };
+      titleStartBtn.addEventListener('click', startGame);
+      titleStartBtn.addEventListener('touchend', (e) => { e.preventDefault(); startGame(); }, { passive: false });
+    }
+
+    if (titleHowtoBtn) {
+      const openHowto = () => showHowto();
+      titleHowtoBtn.addEventListener('click', openHowto);
+      titleHowtoBtn.addEventListener('touchend', (e) => { e.preventDefault(); openHowto(); }, { passive: false });
+    }
+
+    if (titleGearBtn) {
+      // Route the title gear to the existing settings overlay.
+      const openSettings = () => {
+        const gameGear = document.querySelector('[data-control="settings-open"]');
+        if (gameGear) gameGear.click();
+      };
+      titleGearBtn.addEventListener('click', openSettings);
+      titleGearBtn.addEventListener('touchend', (e) => { e.preventDefault(); openSettings(); }, { passive: false });
+    }
+
+    if (howtoScreen) {
+      howtoScreen.addEventListener('click', hideHowto);
+      howtoScreen.addEventListener('touchend', (e) => { e.preventDefault(); hideHowto(); }, { passive: false });
     }
 
     if (splashScreen) {
