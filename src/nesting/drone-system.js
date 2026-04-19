@@ -38,12 +38,12 @@ const DRONE_CONFIG = {
   minAltitude: 128,            // Just above bird's typical cruising altitude (~125-132)
   maxAltitude: 148,            // Keeps drones in the bird's flight band so they're visible
   // Altitude band 128-148 puts drones in the bird's actual flight zone (bird
-  // flies ~125-132 on the 4× world). At 0.22 rad/s and ~138 altitude this
-  // gives ~30 u/s linear speed — readable as motion and trackable by the player.
-  orbitSpeed: 0.22,            // Base radians per second (angular, scale-independent)
+  // flies ~125-132 on the 4× world). At 0.176 rad/s and ~138 altitude this
+  // gives ~24 u/s linear speed — readable as motion and trackable by the player.
+  orbitSpeed: 0.176,           // Base radians per second (angular, scale-independent)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
-  collisionRadius: 5.5,        // Hit detection — sized for the larger 4× world drones
+  collisionRadius: 6.6,        // Hit detection — sized for the larger 4× world drones
   birbCollisionRadius: 1.5,    // Birb collision radius — bird hasn't changed size
 };
 
@@ -60,7 +60,7 @@ function createDroneMesh(THREE) {
   group.name = 'drone';
 
   // Main body - glowing octahedron (diamond shape)
-  const bodyGeometry = new THREE.OctahedronGeometry(3.0, 0);
+  const bodyGeometry = new THREE.OctahedronGeometry(3.6, 0);
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color: 0xff3366,
     emissive: 0xff2255,
@@ -72,7 +72,7 @@ function createDroneMesh(THREE) {
   group.add(body);
 
   // Spinning ring around the body
-  const ringGeometry = new THREE.TorusGeometry(4.5, 0.3, 8, 24);
+  const ringGeometry = new THREE.TorusGeometry(5.4, 0.36, 8, 24);
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: 0xff6699,
     transparent: true,
