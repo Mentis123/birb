@@ -284,6 +284,13 @@ export function createNestingSystem(THREE, {
             flightController.setSpeed(0);
           }
 
+          // Nests are attached to rotating environment geometry, so their world
+          // transform can move while we're auto-flying. Refresh the target each
+          // frame to avoid "hover forever" stalls where the birb chases stale data.
+          if (currentNest) {
+            setLandingTargetFromNest(currentNest);
+          }
+
           // Auto-fly toward the nest
           const toTarget = _tempVec.copy(targetPosition).sub(flightController.position);
           const distance = toTarget.length();
