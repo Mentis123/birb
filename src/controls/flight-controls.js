@@ -2,17 +2,16 @@ import { createThumbstick } from './thumbstick.js';
 import { inputShaping } from './virtual-thumbstick.js';
 
 const DEFAULT_ANALOG_LOOK_SPEED = 480;
-const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.15;
+const DEFAULT_TOUCH_JOYSTICK_DEADZONE = 0.1;
 const DEFAULT_TOUCH_LOOK_DEADZONE = 0.08;
-const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.32;
+const DEFAULT_TOUCH_JOYSTICK_EXPO = 0.18;
 const DEFAULT_TOUCH_LOOK_EXPO = 0.18;
 const TOUCH_JOYSTICK_SIZE = 120;
 // Smoothing factor for touch input (0 = instant, 1 = very slow)
-// This creates a more responsive feel on mobile by reducing jitter
-const TOUCH_INPUT_SMOOTHING = 0.3;
-// Zen mode multiplier: ~40% more smoothing for a floatier, no-pressure feel.
-// 0.3 * 1.4 = 0.42, capped at 0.95 for safety.
-const ZEN_TOUCH_INPUT_SMOOTHING = Math.min(TOUCH_INPUT_SMOOTHING * 1.4, 0.95);
+// Lower values feel more immediate; keep just enough filtering for thumb jitter.
+const TOUCH_INPUT_SMOOTHING = 0.16;
+// Zen mode stays floatier than challenge modes without feeling laggy.
+const ZEN_TOUCH_INPUT_SMOOTHING = Math.min(TOUCH_INPUT_SMOOTHING * 1.6, 0.95);
 
 // Debug mode for mobile input diagnostics - set to true to log all touch input
 const DEBUG_MOBILE_INPUT = false;

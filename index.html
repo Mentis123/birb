@@ -29,6 +29,10 @@
     }
 
     html {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
@@ -36,8 +40,12 @@
 
     body {
       margin: 0;
+      width: 100%;
       min-height: 100vh;
       min-height: 100dvh;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
       display: flex;
       align-items: stretch;
       justify-content: center;
@@ -45,6 +53,7 @@
       color: #f6f8ff;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
       user-select: none;
     }
 
@@ -996,8 +1005,8 @@
 
     .title-gear {
       position: absolute;
-      top: 1.25rem;
-      right: 1.25rem;
+      top: max(1rem, env(safe-area-inset-top, 0px));
+      right: max(1rem, env(safe-area-inset-right, 0px));
       width: 2.75rem;
       height: 2.75rem;
       padding: 0;
@@ -1025,8 +1034,8 @@
 
     .title-help {
       position: absolute;
-      top: 1.25rem;
-      right: 4.5rem;
+      top: max(1rem, env(safe-area-inset-top, 0px));
+      right: calc(max(1rem, env(safe-area-inset-right, 0px)) + 3.25rem);
       width: 2.75rem;
       height: 2.75rem;
       padding: 0;
@@ -1180,8 +1189,18 @@
     .title-body {
       text-align: center;
       padding: 2rem 1.5rem;
+      width: min(100%, 22rem);
       max-width: 22rem;
+      max-height: calc(100dvh - 6rem);
+      overflow-y: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
       position: relative;
+    }
+
+    .title-body::-webkit-scrollbar {
+      display: none;
     }
 
     /* Reuse the splash border-pulse aesthetic around the logo block */
@@ -1304,6 +1323,111 @@
     }
 
     .title-footer a:hover { color: #fff; }
+
+    .title-settings {
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+      background: rgba(2, 6, 16, 0.82);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease;
+      backdrop-filter: blur(14px);
+    }
+
+    .title-settings.is-open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .title-settings[hidden] {
+      display: none;
+    }
+
+    .title-settings__panel {
+      width: min(100%, 19rem);
+      padding: 1rem;
+      border-radius: 1rem;
+      border: 1px solid rgba(132, 174, 255, 0.32);
+      background: rgba(10, 18, 34, 0.96);
+      box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55);
+    }
+
+    .title-settings__title {
+      margin: 0 0 0.8rem;
+      font-size: 0.9rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(210, 230, 255, 0.9);
+      text-align: center;
+    }
+
+    .title-settings__row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      min-height: 3rem;
+      padding: 0.55rem 0;
+      color: rgba(220, 235, 255, 0.92);
+      font-size: 0.92rem;
+      border-bottom: 1px solid rgba(132, 174, 255, 0.16);
+    }
+
+    .title-settings__row[hidden] {
+      display: none;
+    }
+
+    .title-settings__toggle {
+      position: relative;
+      width: 3.2rem;
+      height: 1.75rem;
+      flex: 0 0 auto;
+      border: 1px solid rgba(132, 174, 255, 0.28);
+      border-radius: 999px;
+      background: rgba(30, 44, 72, 0.95);
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .title-settings__toggle::after {
+      content: '';
+      position: absolute;
+      top: 0.2rem;
+      left: 0.2rem;
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 50%;
+      background: rgba(170, 195, 230, 0.9);
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .title-settings__toggle.is-on {
+      background: rgba(30, 126, 92, 0.9);
+      border-color: rgba(120, 230, 170, 0.45);
+    }
+
+    .title-settings__toggle.is-on::after {
+      transform: translateX(1.42rem);
+      background: rgba(210, 255, 232, 0.98);
+    }
+
+    .title-settings__close {
+      width: 100%;
+      min-height: 2.75rem;
+      margin-top: 0.9rem;
+      border: 1px solid rgba(77, 240, 255, 0.35);
+      border-radius: 999px;
+      background: rgba(12, 35, 58, 0.92);
+      color: rgba(215, 245, 255, 0.96);
+      font-weight: 700;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
 
     /* How-to-Play — full-screen info image, tap to dismiss */
     .howto-screen {
@@ -1959,7 +2083,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 1rem;
+      padding: max(0.75rem, env(safe-area-inset-top, 0px)) 1rem 1rem;
       pointer-events: none;
       z-index: 90;
       opacity: 0;
@@ -2184,16 +2308,41 @@
 
     /* ===== Minimap ===== */
     .minimap-radar {
-      position: fixed !important; bottom: 3% !important; left: 3% !important;
-      width: 140px !important; height: 140px !important;
-      max-width: 140px !important; max-height: 140px !important;
-      pointer-events: auto; z-index: 195; opacity: 0; transition: opacity 0.3s;
+      position: fixed !important;
+      top: max(0.75rem, env(safe-area-inset-top, 0px)) !important;
+      right: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
+      bottom: auto !important;
+      left: auto !important;
+      width: 128px !important; height: 128px !important;
+      max-width: 128px !important; max-height: 128px !important;
+      pointer-events: auto; z-index: 95; opacity: 0; transition: opacity 0.3s;
       border-radius: 50%; cursor: grab; touch-action: none;
       box-shadow: 0 0 14px rgba(0,0,0,0.6), inset 0 0 10px rgba(0,0,0,0.45);
     }
     .minimap-radar.is-visible { opacity: 0.95; }
     .minimap-radar.is-dragging { cursor: grabbing; opacity: 1 !important; }
-    @media (min-width: 48rem) { .minimap-radar { width: 160px !important; height: 160px !important; max-width: 160px !important; max-height: 160px !important; } }
+    @media (min-width: 48rem) { .minimap-radar { width: 152px !important; height: 152px !important; max-width: 152px !important; max-height: 152px !important; } }
+
+    @media (max-height: 700px) {
+      .title-body {
+        padding-top: 1.25rem;
+        padding-bottom: 1.25rem;
+      }
+
+      .title-hero {
+        width: min(52vw, 210px);
+        max-height: 210px;
+        margin-bottom: 0.9rem;
+      }
+
+      .title-subtitle {
+        margin-top: 0.85rem;
+      }
+
+      .title-meta {
+        margin-bottom: 1rem;
+      }
+    }
 
     /* ===== Time Critical Pulse ===== */
     .hud-time-critical { animation: time-pulse 0.5s ease-in-out infinite; color: #ff4444 !important; }
@@ -2271,6 +2420,24 @@
     </div>
     <div class="title-footer">
       From the Mind of <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a>
+    </div>
+    <div class="title-settings" data-title-settings hidden aria-hidden="true">
+      <div class="title-settings__panel" role="dialog" aria-modal="true" aria-label="Sound settings">
+        <h2 class="title-settings__title">Sound</h2>
+        <div class="title-settings__row">
+          <span>Music</span>
+          <button type="button" class="title-settings__toggle" data-title-sound-toggle="music" aria-label="Toggle music"></button>
+        </div>
+        <div class="title-settings__row">
+          <span>Sound Effects</span>
+          <button type="button" class="title-settings__toggle" data-title-sound-toggle="sfx" aria-label="Toggle sound effects"></button>
+        </div>
+        <div class="title-settings__row" data-title-haptics-row hidden>
+          <span>Haptics</span>
+          <button type="button" class="title-settings__toggle" data-title-sound-toggle="haptics" aria-label="Toggle haptics"></button>
+        </div>
+        <button type="button" class="title-settings__close" data-title-settings-close>Done</button>
+      </div>
     </div>
   </div>
 
@@ -2494,7 +2661,7 @@
       <!-- Speed lines -->
       <div class="speed-lines" data-speed-lines></div>
       <!-- Minimap -->
-      <canvas class="minimap-radar" data-minimap-radar width="200" height="200" style="width:140px;height:140px;max-width:140px;max-height:140px;"></canvas>
+      <canvas class="minimap-radar" data-minimap-radar width="200" height="200" style="width:128px;height:128px;max-width:128px;max-height:128px;"></canvas>
 
       <div class="touch-controls" aria-hidden="true">
         <div class="touch-controls__zone" data-touch-zone>
@@ -2593,6 +2760,23 @@
       console.error("Unhandled rejection:", event);
     });
 
+    // Mobile browser guardrails: keep the game canvas from triggering pull-to-refresh,
+    // text selection, or iOS edge gestures while preserving normal button taps.
+    const EDGE_SWIPE_GUARD_PX = 24;
+    document.addEventListener('touchstart', (event) => {
+      if (!event.touches || event.touches.length !== 1) return;
+      if (event.target?.closest?.('button, a, input, select, textarea, [role="button"]')) return;
+      const touch = event.touches[0];
+      const x = touch.clientX;
+      if (x <= EDGE_SWIPE_GUARD_PX || x >= window.innerWidth - EDGE_SWIPE_GUARD_PX) {
+        event.preventDefault();
+      }
+    }, { passive: false });
+
+    document.addEventListener('gesturestart', (event) => {
+      event.preventDefault();
+    }, { passive: false });
+
     // Splash screen - dismiss on tap/click
     const splashScreen = document.querySelector('[data-splash-screen]');
     const vibeSplash = document.querySelector('[data-vibe-splash]');
@@ -2664,6 +2848,9 @@
     const titleHowtoBtn = document.querySelector('[data-title-howto]');
     const titleGearBtn = document.querySelector('[data-title-gear]');
     const titleHelpBtn = document.querySelector('[data-title-help]');
+    const titleSettings = document.querySelector('[data-title-settings]');
+    const titleSettingsCloseBtn = document.querySelector('[data-title-settings-close]');
+    let syncTitleSettingsUI = () => {};
 
     function showTitleScreen() {
       if (!titleScreen) {
@@ -2696,6 +2883,21 @@
       if (!howtoScreen) return;
       howtoScreen.classList.remove('is-visible');
       setTimeout(() => { howtoScreen.hidden = true; }, 300);
+    }
+
+    function showTitleSettings() {
+      if (!titleSettings) return;
+      titleSettings.hidden = false;
+      titleSettings.setAttribute('aria-hidden', 'false');
+      syncTitleSettingsUI();
+      requestAnimationFrame(() => titleSettings.classList.add('is-open'));
+    }
+
+    function hideTitleSettings() {
+      if (!titleSettings) return;
+      titleSettings.classList.remove('is-open');
+      titleSettings.setAttribute('aria-hidden', 'true');
+      setTimeout(() => { titleSettings.hidden = true; }, 180);
     }
 
     if (titleStartBtn) {
@@ -2743,13 +2945,24 @@
     }
 
     if (titleGearBtn) {
-      // Route the title gear to the existing settings overlay.
-      const openSettings = () => {
-        const gameGear = document.querySelector('[data-control="settings-open"]');
-        if (gameGear) gameGear.click();
-      };
-      titleGearBtn.addEventListener('click', openSettings);
-      titleGearBtn.addEventListener('touchend', (e) => { e.preventDefault(); openSettings(); }, { passive: false });
+      titleGearBtn.addEventListener('click', showTitleSettings);
+      titleGearBtn.addEventListener('touchend', (e) => { e.preventDefault(); showTitleSettings(); }, { passive: false });
+    }
+
+    if (titleSettingsCloseBtn) {
+      titleSettingsCloseBtn.addEventListener('click', hideTitleSettings);
+      titleSettingsCloseBtn.addEventListener('touchend', (e) => { e.preventDefault(); hideTitleSettings(); }, { passive: false });
+    }
+
+    if (titleSettings) {
+      titleSettings.addEventListener('click', (e) => {
+        if (e.target === titleSettings) hideTitleSettings();
+      });
+      titleSettings.addEventListener('touchend', (e) => {
+        if (e.target !== titleSettings) return;
+        e.preventDefault();
+        hideTitleSettings();
+      }, { passive: false });
     }
 
     if (howtoScreen) {
@@ -3152,6 +3365,17 @@
       // ambientBirds: 0.15,
     };
     const ORIGINAL_AMBIENT_TRACK = '/sound/ambient-forest.mp3';
+    const SOUND_ASSETS = {
+      rocketFire: '/sound/rocket-fire.mp3',
+      explosion: '/sound/explosion.mp3',
+      // Dedicated micro-sounds are not shipped yet. Reuse existing assets so
+      // Vercel does not spend the first play session throwing 404s on effects.
+      ringCollect: '/sound/rocket-fire.mp3',
+      speedBoost: '/sound/rocket-fire.mp3',
+      droneDestroyed: '/sound/explosion.mp3',
+      nestLand: '/sound/rocket-fire.mp3',
+      droneHum: null,
+    };
 
     // Create audio pool for a sound
     const createSoundPool = (src, poolSize, baseVolume) => {
@@ -3167,13 +3391,12 @@
 
     // Initialize sound pools (preload immediately)
     const initSoundPools = () => {
-      preloadedSounds.rocketFire = createSoundPool('/sound/rocket-fire.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.rocketFire);
-      preloadedSounds.explosion = createSoundPool('/sound/explosion.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.explosion);
-      // New sounds - will use placeholders until generated
-      preloadedSounds.ringCollect = createSoundPool('/sound/ring-collect.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.ringCollect);
-      preloadedSounds.speedBoost = createSoundPool('/sound/speed-boost.mp3', 2, BASE_VOLUMES.speedBoost);
-      preloadedSounds.droneDestroyed = createSoundPool('/sound/drone-destroyed.mp3', SOUND_POOL_SIZE, BASE_VOLUMES.droneDestroyed);
-      preloadedSounds.nestLand = createSoundPool('/sound/nest-land.mp3', 2, BASE_VOLUMES.nestLand);
+      preloadedSounds.rocketFire = createSoundPool(SOUND_ASSETS.rocketFire, SOUND_POOL_SIZE, BASE_VOLUMES.rocketFire);
+      preloadedSounds.explosion = createSoundPool(SOUND_ASSETS.explosion, SOUND_POOL_SIZE, BASE_VOLUMES.explosion);
+      preloadedSounds.ringCollect = createSoundPool(SOUND_ASSETS.ringCollect, SOUND_POOL_SIZE, BASE_VOLUMES.ringCollect);
+      preloadedSounds.speedBoost = createSoundPool(SOUND_ASSETS.speedBoost, 2, BASE_VOLUMES.speedBoost);
+      preloadedSounds.droneDestroyed = createSoundPool(SOUND_ASSETS.droneDestroyed, SOUND_POOL_SIZE, BASE_VOLUMES.droneDestroyed);
+      preloadedSounds.nestLand = createSoundPool(SOUND_ASSETS.nestLand, 2, BASE_VOLUMES.nestLand);
     };
     initSoundPools();
 
@@ -3190,10 +3413,12 @@
     // Initialize continuous sounds
     const initContinuousSounds = () => {
       // Drone hum - loops, spatial based on nearest drone
-      continuousSounds.droneHum = new Audio('/sound/drone-hum.mp3');
-      continuousSounds.droneHum.loop = true;
-      continuousSounds.droneHum.volume = 0;
-      continuousSounds.droneHum.preload = 'auto';
+      if (SOUND_ASSETS.droneHum) {
+        continuousSounds.droneHum = new Audio(SOUND_ASSETS.droneHum);
+        continuousSounds.droneHum.loop = true;
+        continuousSounds.droneHum.volume = 0;
+        continuousSounds.droneHum.preload = 'auto';
+      }
 
       // Ambient background music - use existing ambient files
       continuousSounds.ambient = new Audio(ORIGINAL_AMBIENT_TRACK);
@@ -3220,7 +3445,7 @@
 
     // Play from preloaded pool (instant, no loading delay)
     const playFromPool = (pool) => {
-      if (!soundSettings.sfxEnabled) return;
+      if (!soundSettings.sfxEnabled || !pool?.length) return;
 
       // Find an available audio element
       let slot = pool.find(s => !s.playing);
@@ -3245,7 +3470,7 @@
 
     // Play from pool with spatial volume (distance-based attenuation)
     const playFromPoolSpatial = (pool, distance, maxDistance = 50) => {
-      if (!soundSettings.sfxEnabled) return;
+      if (!soundSettings.sfxEnabled || !pool?.length) return;
 
       // Calculate spatial volume (1 at distance 0, 0 at maxDistance)
       const spatialFactor = Math.max(0, 1 - (distance / maxDistance));
@@ -3469,6 +3694,50 @@
       }
     }
 
+    syncTitleSettingsUI = () => {
+      const titleSfxToggle = document.querySelector('[data-title-sound-toggle="sfx"]');
+      const titleMusicToggle = document.querySelector('[data-title-sound-toggle="music"]');
+      const titleHapticsRow = document.querySelector('[data-title-haptics-row]');
+      const titleHapticsToggle = document.querySelector('[data-title-sound-toggle="haptics"]');
+      if (titleSfxToggle) {
+        titleSfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
+      }
+      if (titleMusicToggle) {
+        titleMusicToggle.classList.toggle('is-on', soundSettings.musicEnabled);
+      }
+      if (titleHapticsRow) {
+        titleHapticsRow.hidden = !HAPTICS_SUPPORTED;
+      }
+      if (titleHapticsToggle) {
+        titleHapticsToggle.classList.toggle('is-on', hapticsState.enabled);
+      }
+    };
+
+    document.querySelectorAll('[data-title-sound-toggle]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const type = button.getAttribute('data-title-sound-toggle');
+        if (type === 'sfx') {
+          soundSettings.sfxEnabled = !soundSettings.sfxEnabled;
+          updateAllSoundVolumes();
+          saveSoundSettings();
+        } else if (type === 'music') {
+          soundSettings.musicEnabled = !soundSettings.musicEnabled;
+          if (soundSettings.musicEnabled) {
+            setAmbientMusic(true);
+          } else if (continuousSounds.ambient) {
+            continuousSounds.ambient.pause();
+          }
+          saveSoundSettings();
+        } else if (type === 'haptics') {
+          hapticsState.enabled = !hapticsState.enabled;
+          localStorage.setItem('birb.haptics', hapticsState.enabled ? 'true' : 'false');
+          if (hapticsState.enabled) triggerHaptic(20);
+        }
+        syncSoundSettingsUI();
+        syncTitleSettingsUI();
+      });
+    });
+
     // Sound settings button in main settings
     if (soundSettingsButton) {
       soundSettingsButton.addEventListener('click', () => openSoundSettings());
@@ -3499,6 +3768,7 @@
         sfxToggle.classList.toggle('is-on', soundSettings.sfxEnabled);
         updateAllSoundVolumes();
         saveSoundSettings();
+        syncTitleSettingsUI();
       });
     }
 
@@ -3515,6 +3785,7 @@
           if (continuousSounds.ambient) continuousSounds.ambient.pause();
         }
         saveSoundSettings();
+        syncTitleSettingsUI();
       });
     }
 
@@ -3527,11 +3798,15 @@
         localStorage.setItem('birb.haptics', hapticsState.enabled ? 'true' : 'false');
         // Confirm-buzz so user feels it engage
         if (hapticsState.enabled) triggerHaptic(20);
+        syncTitleSettingsUI();
       });
     }
 
     // Initialize UI state on load (deferred to not block)
-    setTimeout(syncSoundSettingsUI, 100);
+    setTimeout(() => {
+      syncSoundSettingsUI();
+      syncTitleSettingsUI();
+    }, 100);
 
     function clamp(value, min, max) {
       if (!Number.isFinite(value)) {
@@ -3708,7 +3983,7 @@
     if (minimapCanvas) {
       // Force CSS display size - canvas intrinsic size (200) is for retina, display must be large
       // enough to read on mobile. Bumped up so icons/chevron are legible at arm's length.
-      const mapDisplaySize = window.innerWidth >= 768 ? '160px' : '140px';
+      const mapDisplaySize = window.innerWidth >= 768 ? '152px' : '128px';
       minimapCanvas.style.width = mapDisplaySize;
       minimapCanvas.style.height = mapDisplaySize;
       minimapCanvas.style.maxWidth = mapDisplaySize;
@@ -3821,15 +4096,62 @@
     let minimapPulseTime = 0;
     // Zero-alloc scratch: reused forward vector (avoid `new Vector3` per frame).
     const _minimapFwd = new THREE.Vector3(0, 0, -1);
+    const _minimapRawPoint = { x: 0, y: 0 };
+    const _minimapEdgePoint = { x: 0, y: 0, clamped: false };
     // Permanent pool of ring data entries for minimap — grown once to ring count,
     // reused every frame during Ring Rush. Each entry: { position: Vec3, collected: bool }.
     const minimapRingScratch = [];
+
+    function projectMinimapPoint(worldPos, birdPos, half, scale, angle, out) {
+      const dx = worldPos.x - birdPos.x;
+      const dz = worldPos.z - birdPos.z;
+      const rx = dx * Math.cos(angle) - dz * Math.sin(angle);
+      const rz = dx * Math.sin(angle) + dz * Math.cos(angle);
+      out.x = half + rx * scale;
+      out.y = half - rz * scale;
+      return out;
+    }
+
+    function clampMinimapPoint(point, half, out) {
+      const dx = point.x - half;
+      const dy = point.y - half;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const maxR = half - 10;
+      if (dist > maxR) {
+        const s = maxR / dist;
+        out.x = half + dx * s;
+        out.y = half + dy * s;
+        out.clamped = true;
+      } else {
+        out.x = point.x;
+        out.y = point.y;
+        out.clamped = false;
+      }
+      return out;
+    }
+
+    function drawMinimapEdgeArrow(ctx, point, half, fill) {
+      const adx = point.x - half;
+      const ady = point.y - half;
+      const a = Math.atan2(ady, adx);
+      ctx.save();
+      ctx.translate(point.x, point.y);
+      ctx.rotate(a);
+      ctx.beginPath();
+      ctx.moveTo(6, 0);
+      ctx.lineTo(-3, -4);
+      ctx.lineTo(-3, 4);
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.restore();
+    }
+
     function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos, delta) {
       if (!minimapCtx || !minimapCanvas) return;
       minimapPulseTime += (delta || 0.016);
       const size = minimapCanvas.width;  // 200 (2x resolution for retina)
       const half = size / 2;
-      const scale = half / 320; // 320 units visible radius (scaled for r=120 sphere)
 
       // Mode flags — decide what to draw. Falls through to legacy "show all"
       // if currentGameMode / GAME_MODES aren't reachable for some reason.
@@ -3848,6 +4170,13 @@
           showRings = false; showDrones = true; showNest = true; showBird = false;
         }
       }
+
+      const visibleRadius = (mode === MODES?.RING_RUSH)
+        ? 190
+        : (mode === MODES?.DRONE_HUNTER || mode === MODES?.TURRET_DEFENSE)
+          ? 230
+          : 210;
+      const scale = (half - 12) / visibleRadius;
 
       minimapCtx.clearRect(0, 0, size, size);
 
@@ -3877,46 +4206,6 @@
       _minimapFwd.set(0, 0, -1).applyQuaternion(birdQuat);
       const angle = -Math.atan2(_minimapFwd.x, _minimapFwd.z);
 
-      // Helper to project world pos to minimap
-      const project = (worldPos) => {
-        const dx = worldPos.x - birdPos.x;
-        const dz = worldPos.z - birdPos.z;
-        const rx = dx * Math.cos(angle) - dz * Math.sin(angle);
-        const rz = dx * Math.sin(angle) + dz * Math.cos(angle);
-        return { x: half + rx * scale, y: half - rz * scale };
-      };
-
-      // Clamp to edge helper - shows off-screen items as edge indicators
-      const clampToEdge = (p) => {
-        const dx = p.x - half;
-        const dy = p.y - half;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxR = half - 10;
-        if (dist > maxR) {
-          const s = maxR / dist;
-          return { x: half + dx * s, y: half + dy * s, clamped: true };
-        }
-        return { x: p.x, y: p.y, clamped: false };
-      };
-
-      // Draw edge chevron pointing toward off-map target
-      const drawEdgeArrow = (p, fill) => {
-        const adx = p.x - half;
-        const ady = p.y - half;
-        const a = Math.atan2(ady, adx);
-        minimapCtx.save();
-        minimapCtx.translate(p.x, p.y);
-        minimapCtx.rotate(a);
-        minimapCtx.beginPath();
-        minimapCtx.moveTo(6, 0);
-        minimapCtx.lineTo(-3, -4);
-        minimapCtx.lineTo(-3, 4);
-        minimapCtx.closePath();
-        minimapCtx.fillStyle = fill;
-        minimapCtx.fill();
-        minimapCtx.restore();
-      };
-
       const pulse = 0.5 + 0.5 * Math.sin(minimapPulseTime * 4);
 
       // ===== Rings (yellow) =====
@@ -3938,8 +4227,8 @@
           const ring = collectibles[i];
           if (ring.collected) continue;
           const isNearest = (i === nearestIdx);
-          const raw = project(ring.position);
-          const p = clampToEdge(raw);
+          const raw = projectMinimapPoint(ring.position, birdPos, half, scale, angle, _minimapRawPoint);
+          const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
           const dotR = isNearest ? 7 : 6;
 
           // Yellow glow for nearest; cyan-yellow ambient glow for all
@@ -3956,7 +4245,7 @@
           }
 
           if (p.clamped) {
-            drawEdgeArrow(p, isNearest ? '#ffe866' : '#ffd84a');
+            drawMinimapEdgeArrow(minimapCtx, p, half, isNearest ? '#ffe866' : '#ffd84a');
           } else {
             minimapCtx.beginPath();
             minimapCtx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
@@ -3972,8 +4261,8 @@
       // ===== Drones (red, pulsing) =====
       if (showDrones && drones) {
         for (const drone of drones) {
-          const raw = project(drone.position);
-          const p = clampToEdge(raw);
+          const raw = projectMinimapPoint(drone.position, birdPos, half, scale, angle, _minimapRawPoint);
+          const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
           // Pulsing red halo
           minimapCtx.beginPath();
           minimapCtx.arc(p.x, p.y, 7 + pulse * 3, 0, Math.PI * 2);
@@ -3981,7 +4270,7 @@
           minimapCtx.fill();
 
           if (p.clamped) {
-            drawEdgeArrow(p, '#ff4d4d');
+            drawMinimapEdgeArrow(minimapCtx, p, half, '#ff4d4d');
           } else {
             minimapCtx.beginPath();
             minimapCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -4013,11 +4302,11 @@
       }
 
       if (showNest && resolvedNestPos) {
-        const raw = project(resolvedNestPos);
-        const p = clampToEdge(raw);
+        const raw = projectMinimapPoint(resolvedNestPos, birdPos, half, scale, angle, _minimapRawPoint);
+        const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
 
         if (p.clamped) {
-          drawEdgeArrow(p, '#3cff88');
+          drawMinimapEdgeArrow(minimapCtx, p, half, '#3cff88');
         } else {
           // Target reticle: outer ring + center dot + cross hairs
           minimapCtx.beginPath();
@@ -7551,7 +7840,10 @@
       // ZERO-ALLOC: minimapRingScratch is a permanent pool of { position, collected }
       // entries reused each frame — previous version allocated 10 Vec3 clones +
       // 10 object literals per frame during Ring Rush (20 allocs/frame = 1200/sec).
-      if (miniGameState.active && minimapCtx && birdPos && birdQuat) {
+      const minimapModeVisible = currentGameMode === GAME_MODES.ZEN
+        || currentGameMode === GAME_MODES.CASUAL
+        || miniGameState.active;
+      if (minimapModeVisible && minimapCtx && birdPos && birdQuat) {
         minimapCanvas.classList.add('is-visible');
         const drones = droneSystem ? droneSystem.getDrones() : [];
         let ringData = null;
