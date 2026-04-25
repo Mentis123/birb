@@ -4094,19 +4094,24 @@
 
     // ===== Helper: minimap =====
     let minimapPulseTime = 0;
-    // Zero-alloc scratch: reused forward vector (avoid `new Vector3` per frame).
-    const _minimapFwd = new THREE.Vector3(0, 0, -1);
+    // Zero-alloc scratch: tangent-plane basis at the bird's location on the sphere.
+    // The previous projection used world XZ, which only matches the bird's local
+    // tangent plane near the top pole of the sphere — anywhere else the rings,
+    // drones, and nest icon drifted relative to the actual world.
+    const _minimapFwd = new THREE.Vector3();
+    const _minimapUp = new THREE.Vector3();
+    const _minimapRight = new THREE.Vector3();
+    const _minimapDelta = new THREE.Vector3();
     const _minimapRawPoint = { x: 0, y: 0 };
     const _minimapEdgePoint = { x: 0, y: 0, clamped: false };
     // Permanent pool of ring data entries for minimap — grown once to ring count,
     // reused every frame during Ring Rush. Each entry: { position: Vec3, collected: bool }.
     const minimapRingScratch = [];
 
-    function projectMinimapPoint(worldPos, birdPos, half, scale, angle, out) {
-      const dx = worldPos.x - birdPos.x;
-      const dz = worldPos.z - birdPos.z;
-      const rx = dx * Math.cos(angle) - dz * Math.sin(angle);
-      const rz = dx * Math.sin(angle) + dz * Math.cos(angle);
+    function projectMinimapPoint(worldPos, birdPos, right, forward, half, scale, out) {
+      _minimapDelta.copy(worldPos).sub(birdPos);
+      const rx = _minimapDelta.dot(right);
+      const rz = _minimapDelta.dot(forward);
       out.x = half + rx * scale;
       out.y = half - rz * scale;
       return out;
@@ -4171,11 +4176,16 @@
         }
       }
 
+      // Tighter radii — playtest feedback was the old map showed essentially
+      // the whole hemisphere, so nearby targets sat clustered in the middle.
+      // Aim for "next 2-3 rings / incoming drones" worth of context.
       const visibleRadius = (mode === MODES?.RING_RUSH)
-        ? 190
-        : (mode === MODES?.DRONE_HUNTER || mode === MODES?.TURRET_DEFENSE)
-          ? 230
-          : 210;
+        ? 70
+        : (mode === MODES?.TURRET_DEFENSE)
+          ? 95
+          : (mode === MODES?.DRONE_HUNTER)
+            ? 80
+            : 65;
       const scale = (half - 12) / visibleRadius;
 
       minimapCtx.clearRect(0, 0, size, size);
@@ -4202,9 +4212,26 @@
         minimapCtx.stroke();
       }
 
-      // Get bird forward direction for rotation (reuse scratch, zero-alloc)
+      // Build a sphere-tangent basis at the bird so projection is correct
+      // anywhere on the world (not just near the +Y pole). Up = radial out
+      // from sphere center (origin); forward = bird forward projected to the
+      // tangent plane; right = forward × up.
+      _minimapUp.copy(birdPos);
+      if (_minimapUp.lengthSq() < 1e-6) {
+        _minimapUp.set(0, 1, 0);
+      } else {
+        _minimapUp.normalize();
+      }
       _minimapFwd.set(0, 0, -1).applyQuaternion(birdQuat);
-      const angle = -Math.atan2(_minimapFwd.x, _minimapFwd.z);
+      _minimapFwd.addScaledVector(_minimapUp, -_minimapFwd.dot(_minimapUp));
+      if (_minimapFwd.lengthSq() < 1e-6) {
+        // Bird looking straight up/down at the surface — fall back to a tangent.
+        _minimapFwd.set(1, 0, 0);
+        _minimapFwd.addScaledVector(_minimapUp, -_minimapFwd.dot(_minimapUp));
+        if (_minimapFwd.lengthSq() < 1e-6) _minimapFwd.set(0, 0, 1);
+      }
+      _minimapFwd.normalize();
+      _minimapRight.crossVectors(_minimapFwd, _minimapUp).normalize();
 
       const pulse = 0.5 + 0.5 * Math.sin(minimapPulseTime * 4);
 
@@ -4227,7 +4254,7 @@
           const ring = collectibles[i];
           if (ring.collected) continue;
           const isNearest = (i === nearestIdx);
-          const raw = projectMinimapPoint(ring.position, birdPos, half, scale, angle, _minimapRawPoint);
+          const raw = projectMinimapPoint(ring.position, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
           const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
           const dotR = isNearest ? 7 : 6;
 
@@ -4261,7 +4288,7 @@
       // ===== Drones (red, pulsing) =====
       if (showDrones && drones) {
         for (const drone of drones) {
-          const raw = projectMinimapPoint(drone.position, birdPos, half, scale, angle, _minimapRawPoint);
+          const raw = projectMinimapPoint(drone.position, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
           const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
           // Pulsing red halo
           minimapCtx.beginPath();
@@ -4302,7 +4329,7 @@
       }
 
       if (showNest && resolvedNestPos) {
-        const raw = projectMinimapPoint(resolvedNestPos, birdPos, half, scale, angle, _minimapRawPoint);
+        const raw = projectMinimapPoint(resolvedNestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
         const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
 
         if (p.clamped) {
@@ -7520,7 +7547,14 @@
           : sprintState.baseSpeed;
         const resumeSpeed = Math.max(FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed, cruiseSpeed);
 
-        if (!isNested) {
+        // Skip the speed override while the nesting system is hand-flying the bird
+        // toward a nest (LANDING) or holding it stationary (NESTED). Without this
+        // gate, the per-frame reset to resumeSpeed clobbers nestingSystem.setSpeed(0),
+        // so flight.tick() sails the bird forward and the auto-land never converges.
+        const nestingState = nestingSystem?.getState?.();
+        const nestingControlsBird = nestingState === NESTING_STATES.LANDING
+          || nestingState === NESTING_STATES.NESTED;
+        if (!isNested && !nestingControlsBird) {
           if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Walk only when the stick is engaged — no drift when idle.
             flight.speed = inputState.active ? FLIGHT_RECOVERY_CONFIG.walkSpeed : 0;
