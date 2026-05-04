@@ -9,6 +9,12 @@
   <meta name="description" content="Mobile-first Three.js playground for experimenting with gliding birbs." />
   <meta name="theme-color" content="#0b0d17" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Birb Mobile" />
   <style>
     :root {
       color-scheme: dark;
@@ -8130,6 +8136,17 @@
     // (very fast tap), start it now.
     if (pendingGameStart) {
       startGameLoop();
+    }
+  </script>
+  <script>
+    // Register the offline cache service worker. Wait for `load` so the
+    // initial render isn't competing with the SW install for bandwidth.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+          console.warn('Service worker registration failed', err);
+        });
+      });
     }
   </script>
 </body>

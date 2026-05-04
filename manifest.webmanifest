@@ -1,0 +1,20 @@
+{
+  "name": "Birb Mobile",
+  "short_name": "Birb",
+  "description": "Mobile-first Three.js bird flight game from Birb Labs.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0a1324",
+  "theme_color": "#0b0d17",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    }
+  ]
+}
