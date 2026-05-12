@@ -5800,6 +5800,24 @@
       belly.position.set(0.04, -0.18, 0);
       birbModel.add(belly);
 
+      // Back saddle — a darker mid-blue band wrapping the upper body. Scaled
+      // to be slightly wider/longer than the body so a thin ring pokes out
+      // around the upper equator (visible as an epaulet stripe from any
+      // angle) while the top hemisphere stays tucked inside the body's
+      // silhouette. Reads as natural plumage shading.
+      const saddleMaterial = new THREE.MeshStandardMaterial({
+        color: 0x223f9a,
+        metalness: 0.18,
+        roughness: 0.5,
+        emissive: 0x0a1432,
+        emissiveIntensity: 0.20,
+      });
+      const saddleGeometry = new THREE.SphereGeometry(0.5, 28, 20);
+      const saddle = new THREE.Mesh(saddleGeometry, saddleMaterial);
+      saddle.scale.set(1.34, 0.42, 0.84);
+      saddle.position.set(-0.08, 0.18, 0);
+      birbModel.add(saddle);
+
       // -- Head (big, chibi-proportioned) ------------------------------------
       const headGeometry = new THREE.SphereGeometry(0.45, 36, 28);
       const head = new THREE.Mesh(headGeometry, headMaterial);
@@ -5839,6 +5857,16 @@
       lowerBeak.scale.set(1.0, 0.7, 0.95);
       lowerBeak.position.set(1.06, 0.24, 0);
       birbModel.add(lowerBeak);
+
+      // Beak nostrils — two tiny dark dots near the beak base for character.
+      const nostrilGeometry = new THREE.SphereGeometry(0.018, 10, 8);
+      const nostrilMaterial = new THREE.MeshBasicMaterial({ color: 0x3a2207 });
+      const leftNostril = new THREE.Mesh(nostrilGeometry, nostrilMaterial);
+      leftNostril.position.set(1.00, 0.40, 0.07);
+      birbModel.add(leftNostril);
+      const rightNostril = new THREE.Mesh(nostrilGeometry, nostrilMaterial);
+      rightNostril.position.set(1.00, 0.40, -0.07);
+      birbModel.add(rightNostril);
 
       // -- Eyes (big, expressive — 30% of the charm) -------------------------
       const eyeGeometry = new THREE.SphereGeometry(0.1, 20, 16);
@@ -5904,10 +5932,12 @@
         const tip = new THREE.Mesh(tipGeom, wingTipMaterial);
         wingGroup.add(tip);
 
-        // Small rounded covert at the shoulder to hide the seam with the body
-        const covertGeom = new THREE.SphereGeometry(0.16, 16, 12);
+        // Larger rounded covert at the shoulder — a touch beefier than
+        // before so the seam between body and wing reads as a feathered
+        // joint, not a glued-on cone. Still hides the seam cleanly.
+        const covertGeom = new THREE.SphereGeometry(0.18, 16, 12);
         const covert = new THREE.Mesh(covertGeom, wingMaterial);
-        covert.scale.set(0.6, 0.8, 0.7);
+        covert.scale.set(0.7, 0.88, 0.78);
         covert.position.set(0, 0.05, -0.02);
         wingGroup.add(covert);
 
@@ -5929,32 +5959,66 @@
       leftWing.userData.baseRotation = leftWing.rotation.clone();
       birbModel.add(leftWing);
 
+      // Mirror rule for Euler 'XYZ' with scale.z = -1 on the right wing:
+      // each vertex v maps as right_world = S · left_world where S flips Z.
+      // Working that through Three.js's matrix M = T·R·S gives the constraint
+      // R_right = S · R_left · S, which in Euler XYZ means (-aL, -bL, +cL).
+      // So left (-0.1, -0.35, 0.18)  →  right (+0.1, +0.35, +0.18).
+      // (The previous values (-0.1, 0.35, -0.18) flipped the wrong components
+      //  and left the right wing tip sitting ~0.17 units low at base.)
       const rightWing = buildWing(-1);
       rightWing.name = 'rightWing';
       rightWing.position.set(-0.08, 0.18, -0.38);
-      // Mirror across the X-Y plane: negate Y and Z rotation components.
-      rightWing.rotation.set(-0.1, 0.35, -0.18);
+      rightWing.rotation.set(0.1, 0.35, 0.18);
       rightWing.userData.baseRotation = rightWing.rotation.clone();
       birbModel.add(rightWing);
 
-      // -- Tail (small triangular fan trailing from body rear, along -X) -----
+      // -- Tail (5-feather fan trailing from body rear, along -X) -----------
+      // Wrapped in a group so the whole fan can sway/wag together. Feathers
+      // are thin triangular cones laid flat; the center feather is the
+      // longest, outer ones are slightly shorter for a graceful fan shape.
       // Cone default +Y → rotate Z by +PI/2 so the tip points along -X.
-      const tailGeom = new THREE.ConeGeometry(0.28, 0.55, 4, 1, false);
-      tailGeom.scale(1.0, 1.0, 0.3);       // flatten vertically into a fan
-      tailGeom.rotateZ(Math.PI / 2);       // tip now points along -X (rearward)
-      const tail = new THREE.Mesh(tailGeom, tailMaterial);
-      tail.position.set(-0.72, -0.02, 0);
-      tail.rotation.set(0, 0, -0.12);      // slight upward tilt at the tip
-      birbModel.add(tail);
+      const tailGroup = new THREE.Group();
+      tailGroup.name = 'tail';
+      tailGroup.position.set(-0.62, -0.04, 0);
+      tailGroup.userData.baseRotation = new THREE.Euler(0, 0, -0.12);
+      tailGroup.rotation.copy(tailGroup.userData.baseRotation);
 
-      // Cyan tail tip accent
-      const tailTipGeom = new THREE.ConeGeometry(0.14, 0.2, 4, 1, false);
-      tailTipGeom.scale(1.0, 1.0, 0.3);
-      tailTipGeom.rotateZ(Math.PI / 2);
-      const tailTip = new THREE.Mesh(tailTipGeom, wingTipMaterial);
-      tailTip.position.set(-0.98, -0.02, 0);
-      tailTip.rotation.set(0, 0, -0.12);
-      birbModel.add(tailTip);
+      const tailTipAccentMaterial = wingTipMaterial.clone();
+      tailTipAccentMaterial.emissiveIntensity = 0.55;
+
+      const buildTailFeather = (length, splay, droop, isCenter) => {
+        const featherGroup = new THREE.Group();
+
+        const featherGeom = new THREE.ConeGeometry(0.08, length, 4, 1, false);
+        featherGeom.scale(1.0, 1.0, 0.3);
+        featherGeom.rotateZ(Math.PI / 2);            // tip points -X (rearward)
+        featherGeom.translate(-length * 0.5, 0, 0);  // shoulder at origin
+        const feather = new THREE.Mesh(featherGeom, tailMaterial);
+        featherGroup.add(feather);
+
+        // Cyan tip on each feather — slimmer than the main feather body.
+        const tipLen = isCenter ? 0.22 : 0.16;
+        const tipGeom = new THREE.ConeGeometry(0.055, tipLen, 4, 1, false);
+        tipGeom.scale(1.0, 1.0, 0.3);
+        tipGeom.rotateZ(Math.PI / 2);
+        tipGeom.translate(-length - tipLen * 0.4, 0, 0);
+        const tip = new THREE.Mesh(tipGeom, tailTipAccentMaterial);
+        featherGroup.add(tip);
+
+        // Splay around Y (fan spread) and slight droop around Z.
+        featherGroup.rotation.set(0, splay, droop);
+        return featherGroup;
+      };
+
+      // Center feather (longest) plus two pairs splaying outward.
+      tailGroup.add(buildTailFeather(0.58, 0, 0, true));
+      tailGroup.add(buildTailFeather(0.52, +0.22, -0.04, false));
+      tailGroup.add(buildTailFeather(0.52, -0.22, -0.04, false));
+      tailGroup.add(buildTailFeather(0.44, +0.40, -0.08, false));
+      tailGroup.add(buildTailFeather(0.44, -0.40, -0.08, false));
+
+      birbModel.add(tailGroup);
 
       // -- Feet (small, readable, tuckable via Group rotation) ---------------
       const createFoot = () => {
@@ -7718,8 +7782,12 @@
         // - Grounded/falling/downward/banking: wings hold a steady glide posture.
         // - Climbing with low bank: sinusoidal flapping to suggest lift generation.
         // Right wing has scale.z = -1 (mirror) which inverts the visual effect
-        // of rotation.x — so we NEGATE flap on the right side so both wings
-        // physically flap up and down together instead of wobbling opposite.
+        // of rotation.x — so any motion meant to look mirror-symmetric in world
+        // space MUST be applied with opposite signs to the two rotation.x
+        // values. That's why flap is +/- (both wings flap up together) AND
+        // glide-sweep is now +/- (both wings dip down together). Banking dip
+        // (leftDip / rightDip) is already opposite-sign so it preserves mirror
+        // too — wings stay glued in mirror-image at every frame.
         const isFallingVisual = flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING;
         const isAirborneVisual = !isGroundedVisual && !isFallingVisual;
         const bankingHard = Math.abs(yawInput) > 0.25;
@@ -7735,8 +7803,32 @@
           flapOffset = Math.sin(motionState.elapsed * flapFreq) * flapAmp;
         }
 
-        leftWing.rotation.x = leftWing.userData.baseRotation.x + leftDip - glideSweep + flapOffset;
-        rightWing.rotation.x = rightWing.userData.baseRotation.x + rightDip - glideSweep - flapOffset;
+        // Idle wing flutter — soft breathing-style oscillation when the bird
+        // is essentially stationary (grounded or hard-banked glide), so the
+        // model never feels frozen. Tiny amplitude, mirror-preserving signs.
+        const idleFlutter = !climbing && Math.abs(yawInput) < 0.1
+          ? Math.sin(motionState.elapsed * 1.7) * 0.035
+          : 0;
+
+        leftWing.rotation.x = leftWing.userData.baseRotation.x
+          + leftDip + glideSweep + flapOffset + idleFlutter;
+        rightWing.rotation.x = rightWing.userData.baseRotation.x
+          + rightDip - glideSweep - flapOffset - idleFlutter;
+      }
+
+      // Tail steering + idle sway — yaw input rotates the tail fan around Y
+      // for a steering/rudder feel, with a tiny ambient sway so it never
+      // feels frozen. Smoothed toward target via lerp to avoid jitter.
+      const tail = birbAnchor.getObjectByName('tail');
+      if (tail && tail.userData.baseRotation) {
+        const yawInputTail = wingInputState?.x ?? flightController?.smoothedYaw
+          ?? flightController?.input?.yaw ?? 0;
+        const tailSwayY = -yawInputTail * 0.32
+          + Math.sin(motionState.elapsed * 1.3) * 0.04;
+        const baseRot = tail.userData.baseRotation;
+        tail.rotation.x = baseRot.x;
+        tail.rotation.y += (tailSwayY - tail.rotation.y) * Math.min(1, delta * 8);
+        tail.rotation.z = baseRot.z;
       }
 
       // Walk cycle — body bob + alternating foot tilt while grounded & moving.
