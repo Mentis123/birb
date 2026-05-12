@@ -5783,18 +5783,21 @@
       const eyeWhiteMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
       // -- Body (egg-shaped, taller than wide, tapered tail) ------------------
+      // Length:width ≈ 1.67:1 (was 1.21:1, which read as a sphere). The
+      // chibi head + big eyes still carry the cute vibe; the body just no
+      // longer competes for the "round" silhouette.
       const bodyGeometry = new THREE.SphereGeometry(0.5, 36, 28);
       const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-      // Slightly elongated egg — a bit longer along X (beak->tail), taller than wide
-      body.scale.set(1.15, 1.08, 0.95);
-      body.position.set(-0.05, 0, 0);
+      body.scale.set(1.30, 1.00, 0.78);
+      body.position.set(-0.08, 0, 0);
       birbModel.add(body);
 
-      // Belly patch — lighter underside so side profile reads as "bird"
+      // Belly patch — lighter underside so side profile reads as "bird".
+      // Slimmed to match the slimmer body width.
       const bellyGeometry = new THREE.SphereGeometry(0.46, 32, 24);
       const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
-      belly.scale.set(1.05, 0.82, 0.78);
-      belly.position.set(0.02, -0.18, 0);
+      belly.scale.set(1.08, 0.78, 0.62);
+      belly.position.set(0.04, -0.18, 0);
       birbModel.add(belly);
 
       // -- Head (big, chibi-proportioned) ------------------------------------
