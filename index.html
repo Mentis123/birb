@@ -3144,7 +3144,6 @@
 
     let THREE,
       GLTFLoader,
-      FreeFlightController,
       createCameraState,
       CAMERA_MODES = { FOLLOW: 'follow', FPV: 'fpv' },
       createFlightControls,
@@ -3153,12 +3152,10 @@
       ENVIRONMENT_VARIANTS,
       getEnvironmentDefinition,
       nipplejs,
-      BirdFlight, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs;
+      BirdFlight, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
 
     try {
       THREE = await import("https://esm.sh/three@0.183.2");
-      const flightModule = await import("./free-flight-controller.js");
-      FreeFlightController = flightModule.FreeFlightController;
 
       // New Flight System Imports
       const birdFlightMod = await import("./src/flight/bird-flight.js");
@@ -3176,6 +3173,10 @@
       CAMERA_MODES = cameraModule.CAMERA_MODES;
       const controlsModule = await import("./src/controls/flight-controls.js");
       createFlightControls = controlsModule.createFlightControls;
+      const thumbstickModule = await import("./src/controls/virtual-thumbstick.js");
+      // shapeAxis is exported only inside the inputShaping object, not as a
+      // top-level named export (matches how flight-controls.js consumes it).
+      shapeAxis = thumbstickModule.inputShaping.shapeAxis;
       const worldModule = await import("./src/environment/world-shell.js");
       createWorldShell = worldModule.createWorldShell;
       ENVIRONMENT_VARIANTS = worldModule.ENVIRONMENT_VARIANTS;
@@ -7245,6 +7246,12 @@
       flightControls.reset({ releasePointerLock: true });
     });
 
+    // Deadzone + expo applied to the live stick for ALL modes (previously only
+    // Zen got any smoothing, so a resting thumb drifted and center aiming was
+    // twitchy). Reused scratch object keeps the loop zero-allocation.
+    const INPUT_SHAPE = { deadzone: 0.08, expo: 0.2 };
+    const _shapedInput = { x: 0, y: 0, active: false };
+
     const renderFrame = (time = 0) => {
       if (contextState.lost) {
         return;
@@ -7254,7 +7261,11 @@
         if (previousTime === null) {
           previousTime = time;
         }
-        delta = (time - previousTime) * 0.001;
+        // Clamp the per-frame delta once at the source. A tab-restore, GC
+        // hitch, or first frame after a pause can produce a huge gap; feeding
+        // that raw into nesting/flight/fall/rocket teleports the bird and snaps
+        // the camera. 0.05s (= 20fps floor) matches the lookDeltaTime cap below.
+        delta = Math.min((time - previousTime) * 0.001, 0.05);
         motionState.elapsed += delta;
         previousTime = time;
       } else {
@@ -7283,6 +7294,11 @@
       // Get input state early (needed for both flight and aim rig when nested).
       // In Zen mode, apply additional smoothing for a floatier feel.
       let inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
+      // Shape every mode's stick (deadzone + expo) before it drives flight.
+      _shapedInput.x = shapeAxis(inputState.x, INPUT_SHAPE);
+      _shapedInput.y = shapeAxis(inputState.y, INPUT_SHAPE);
+      _shapedInput.active = inputState.active;
+      inputState = _shapedInput;
       if (currentGameMode === GAME_MODES.ZEN) {
         inputState = applyZenInputSmoothing(inputState);
       }

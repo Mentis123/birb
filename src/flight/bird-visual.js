@@ -36,6 +36,10 @@ export class BirdVisual {
         this._visualQuaternion = new Quaternion();
         this._bankQuaternion = new Quaternion();
         this._pitchQuaternion = new Quaternion();
+
+        // Constant rotation axes (hoisted to avoid per-frame allocation)
+        this._axisX = new THREE.Vector3(1, 0, 0);
+        this._axisZ = new THREE.Vector3(0, 0, 1);
     }
 
     /**
@@ -72,14 +76,14 @@ export class BirdVisual {
 
         // Apply pitch tilt (nose up/down) around local X
         this._pitchQuaternion.setFromAxisAngle(
-            new this.THREE.Vector3(1, 0, 0),
+            this._axisX,
             this._pitchTilt
         );
         this._visualQuaternion.multiply(this._pitchQuaternion);
 
         // Apply bank (roll) around local Z
         this._bankQuaternion.setFromAxisAngle(
-            new this.THREE.Vector3(0, 0, 1),
+            this._axisZ,
             this._bank
         );
         this._visualQuaternion.multiply(this._bankQuaternion);

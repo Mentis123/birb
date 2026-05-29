@@ -59,10 +59,12 @@ export class SphericalCollisionSystem {
 
     for (const collider of this.objectColliders) {
       vec.copy(position).sub(collider.position);
-      const distance = vec.length();
       const minDistance = collider.radius + entityRadius;
+      // Squared-distance compare avoids a per-collider sqrt; only normalize
+      // (which takes the sqrt) on an actual hit.
+      const distanceSq = vec.lengthSq();
 
-      if (distance < minDistance) {
+      if (distanceSq < minDistance * minDistance) {
         // Collision detected - push entity away from object
         const pushDirection = vec.normalize();
         const correctedPosition = collider.position.clone().add(
@@ -1722,15 +1724,18 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   const floorOpacity = definition?.floor?.opacity ?? 0.9;
 
   // Create the sphere ground with terrain displacement + vertex coloring
-  // 128×96 = ~24K tris — fits in mobile budget with room for objects
-  const sphereGeometry = new THREE.SphereGeometry(sphereRadius, 128, 96);
+  // Desktop 128×96 = ~24K tris; mobile 96×64 trims vertex/raster cost while
+  // keeping the silhouette readable under flat shading.
+  const groundWidthSeg = _isMobile() ? 96 : 128;
+  const groundHeightSeg = _isMobile() ? 64 : 96;
+  const sphereGeometry = new THREE.SphereGeometry(sphereRadius, groundWidthSeg, groundHeightSeg);
   const terrainData = displaceSphereGeometry(sphereGeometry, sphereRadius, variant);
 
-  const sphereMaterial = new THREE.MeshStandardMaterial({
+  // Lambert (vs Standard) drops the PBR roughness/metalness pass — cheaper to
+  // shade and visually equivalent here under flat shading + vertex colors.
+  const sphereMaterial = new THREE.MeshLambertMaterial({
     vertexColors: true,
     flatShading: true,    // Low-poly aesthetic — every face visible
-    roughness: 0.82,
-    metalness: 0.05,
     side: THREE.FrontSide,
   });
 
@@ -1740,95 +1745,56 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   sphereGround.raycast = () => {};
   root.add(sphereGround);
 
-  // Multiple light sources to eliminate dark areas
+  // Multiple light sources to eliminate dark areas.
+  // PERF: on mobile, index.html already adds a separate 5-light scene rig, so
+  // stacking this 7-light world rig pushes the per-fragment lighting loop to 12
+  // lights. Gate the directional + point lights out on mobile and keep only the
+  // ambient hemisphere fill — index.html's lights still illuminate the world.
   // Key light - main directional
   const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
   keyLight.position.set(50, 80, 50);
-  root.add(keyLight);
 
   // Fill light - opposite side
   const fillLight = new THREE.DirectionalLight(0xaaccff, 0.6);
   fillLight.position.set(-50, -30, -50);
-  root.add(fillLight);
 
   // Rim light - from below
   const rimLight = new THREE.DirectionalLight(0xffc9a4, 0.4);
   rimLight.position.set(0, -80, 30);
-  root.add(rimLight);
 
   // Additional fill from another angle
   const fillLight2 = new THREE.DirectionalLight(0xd4f1ff, 0.5);
   fillLight2.position.set(60, -40, -60);
-  root.add(fillLight2);
 
   // Another directional to cover remaining dark spots
   const fillLight3 = new THREE.DirectionalLight(0xffeedd, 0.4);
   fillLight3.position.set(-60, 40, 60);
-  root.add(fillLight3);
 
   // Strong ambient hemisphere light for overall illumination
   const hemiLight = new THREE.HemisphereLight(0xd4f1ff, 0x1a4f32, 0.9);
-  root.add(hemiLight);
 
   // Point light at center for inner glow
   const centerLight = new THREE.PointLight(0x63d0ff, 0.8, sphereRadius * 3);
   centerLight.position.set(0, 0, 0);
-  root.add(centerLight);
 
-  // Create sky sphere (large sphere surrounding the world)
-  const skyRadius = sphereRadius * 6;
-  const skyGeometry = new THREE.SphereGeometry(skyRadius, 64, 48);
-
-  // Get sky colors from definition or use defaults
-  const skyTop = definition?.sky?.top ?? 0x4d80c0;
-  const skyBottom = definition?.sky?.bottom ?? 0x071323;
-
-  let skyMaterial;
-  try {
-    skyMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        topColor: { value: new THREE.Color(skyTop) },
-        bottomColor: { value: new THREE.Color(skyBottom) },
-        glowIntensity: { value: definition?.sky?.glow ?? 0.28 },
-      },
-      side: THREE.BackSide,
-      fog: false,
-      transparent: false,
-      vertexShader: `
-        varying float vGradient;
-        void main() {
-          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-          vGradient = smoothstep(-0.2, 0.8, normalize(worldPosition.xyz).y);
-          gl_Position = projectionMatrix * viewMatrix * worldPosition;
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 topColor;
-        uniform vec3 bottomColor;
-        uniform float glowIntensity;
-        varying float vGradient;
-        void main() {
-          vec3 base = mix(bottomColor, topColor, vGradient);
-          base += glowIntensity * 0.4 * vec3(0.18, 0.3, 0.55) * pow(vGradient, 2.5);
-          gl_FragColor = vec4(base, 1.0);
-        }
-      `,
-    });
-  } catch (shaderError) {
-    // Fallback to simple material if shader compilation fails
-    skyMaterial = new THREE.MeshBasicMaterial({
-      color: skyTop,
-      side: THREE.BackSide,
-      fog: false,
-    });
+  if (_isMobile()) {
+    // Mobile: hemisphere ambient only (at most one world light).
+    root.add(hemiLight);
+  } else {
+    root.add(keyLight);
+    root.add(fillLight);
+    root.add(rimLight);
+    root.add(fillLight2);
+    root.add(fillLight3);
+    root.add(hemiLight);
+    root.add(centerLight);
   }
 
-  const skydome = new THREE.Mesh(skyGeometry, skyMaterial);
-  skydome.name = 'sky-sphere';
-  skydome.renderOrder = -5;
-  // Exclude sky from rocket raycasting
-  skydome.raycast = () => {};
-  root.add(skydome);
+  // NOTE: the full-screen BackSide sky sphere that used to be built here has
+  // been removed. It enclosed the camera (skyRadius = sphereRadius * 6) and
+  // fully overwrote the painterly sky-dome that index.html adds, so it was
+  // redundant overdraw across the entire viewport with no visual benefit.
+  // index.html owns the sky-dome now; do not re-add a world sky sphere here.
 
   // Build environment-specific objects and get nestable positions
   let nestablePositions = [];

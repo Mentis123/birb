@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v1-2026-05-04';
+const CACHE_VERSION = 'v2-2026-05-29';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -16,8 +16,8 @@ const CORE_ASSETS = [
   './manifest.webmanifest',
   './favicon.svg',
   './splash.jpg',
-  './IMG_6115.png',
   './info.jpg',
+  './birb.glb',
   './sound/ambient-forest.mp3',
   './sound/rocket-fire.mp3',
   './sound/explosion.mp3',
@@ -43,15 +43,6 @@ const CORE_ASSETS = [
   './src/nesting/drone-system.js',
   './src/effects/particles.js',
   './src/effects/screen-shake.js',
-  './src/performance/index.js',
-  './src/performance/performance-manager.js',
-  './src/performance/object-pool.js',
-  './src/performance/scratch-allocations.js',
-  './src/performance/optimized-particles.js',
-  './src/performance/frustum-culling.js',
-  './src/performance/optimized-collision.js',
-  './src/performance/lod-system.js',
-  './src/performance/material-optimizer.js',
 ];
 
 const RUNTIME_CACHEABLE_HOSTS = new Set([
