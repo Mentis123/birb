@@ -34,6 +34,14 @@ export class BirdFlight {
         this.speed = options.speed ?? FLIGHT_DEFAULTS.speed;
         this.yawRate = options.yawRate ?? FLIGHT_DEFAULTS.yawRate;
         this.pitchRate = options.pitchRate ?? FLIGHT_DEFAULTS.pitchRate;
+        this.maxPitch = options.maxPitch ?? FLIGHT_DEFAULTS.maxPitch;
+
+        // Cruise speed at full throttle. `throttle` (0..1) scales cruise so the
+        // glide-speed slider has something to drive. Default 1.0 keeps the
+        // base speed unchanged (byte-identical feel when untouched).
+        this.baseSpeed = this.speed;
+        this.throttle = options.throttle ?? 1;
+        this.speed = this.baseSpeed * this.throttle;
 
         // Zen mode flag — when true, applies ZEN_TUNING multipliers at read-time.
         // Does NOT mutate base constants, so toggling back is byte-identical for other modes.
@@ -77,6 +85,15 @@ export class BirdFlight {
 
         // Ensure initially on surface
         this._constrainToSphere();
+
+        // Snapshot of the spawn pose, so reset() can restore it (used by the
+        // Reset button, which previously threw because BirdFlight had no reset).
+        this._initialPose = {
+            position: this.position.clone(),
+            quaternion: this.quaternion.clone(),
+            speed: this.baseSpeed,
+            throttle: this.throttle,
+        };
     }
 
     /**
@@ -173,6 +190,21 @@ export class BirdFlight {
             }
         }
 
+        // 5. Upper pitch clamp — hard ceiling so the bird can never pitch past
+        // ±maxPitch (no inverting/looping). sinPitch = forward · outward-normal:
+        // positive = nose-up. If beyond the limit, rotate back by the overage
+        // around local X (same convention as pitch()/auto-level).
+        s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+        s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
+        const sinPitchNow = Math.max(-1, Math.min(1, s.forward.dot(s.sphereNormal)));
+        const pitchNow = Math.asin(sinPitchNow);
+        if (Math.abs(pitchNow) > this.maxPitch) {
+            const over = pitchNow - Math.sign(pitchNow) * this.maxPitch;
+            s.axis.set(1, 0, 0);
+            s.quat.setFromAxisAngle(s.axis, -over);
+            this.quaternion.multiply(s.quat);
+        }
+
         return this._getPose();
     }
 
@@ -244,6 +276,31 @@ export class BirdFlight {
 
     setSpeed(speed) {
         this.speed = speed;
+    }
+
+    /**
+     * Glide-speed control (0..1). Scales cruise speed off baseSpeed and exposes
+     * `throttle` for the slider's % readout. Previously absent, so the glide
+     * slider threw on every input. NOTE: the main loop currently re-asserts a
+     * cruise speed each frame, so until that coupling is addressed (the deferred
+     * momentum/energy work) this primarily keeps the control from throwing and
+     * drives the % display rather than fully governing steady-state speed.
+     */
+    setThrottle(value) {
+        const t = Math.max(0, Math.min(1, Number.isFinite(value) ? value : this.throttle));
+        this.throttle = t;
+        this.speed = this.baseSpeed * t;
+    }
+
+    /** Restore the spawn pose/speed. Previously absent, so the Reset button threw. */
+    reset() {
+        if (!this._initialPose) return;
+        this.position.copy(this._initialPose.position);
+        this.quaternion.copy(this._initialPose.quaternion);
+        this.baseSpeed = this._initialPose.speed;
+        this.throttle = this._initialPose.throttle;
+        this.speed = this.baseSpeed * this.throttle;
+        this._constrainToSphere();
     }
 
     /**
