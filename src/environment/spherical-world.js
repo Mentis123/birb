@@ -49,14 +49,21 @@ export class SphericalCollisionSystem {
   checkGroundCollision(THREE, position, entityRadius = 0.5) {
     const vec = this._ensureVec(THREE);
     const distanceFromCenter = position.length();
-    // Landing floor stays a clean sphere at the base radius — this is the
-    // "you touched down, now you're grounded" check, NOT terrain following.
-    // (Terrain only carves valleys DOWNWARD from here, so the bird flying above
-    // the base radius never gets falsely grounded on a rise.)
-    const minAltitude = this.sphereRadius + entityRadius;
+    // Landing floor follows the carved valleys DOWNWARD (Math.min(0,...)) so the
+    // bird can descend into canyons and touch down on the valley floor — but the
+    // baseline is never raised, so flying level over flats/rises never falsely
+    // grounds the bird. Matches the bird-flight floor exactly (same sampler).
+    let terrain = 0;
+    if (distanceFromCenter > 1e-3) {
+      const inv = 1 / distanceFromCenter;
+      // Smooth valley floor (continental only) — must match the BirdFlight floor
+      // exactly, or the bird couldn't descend past the baseline into a canyon.
+      terrain = terrainFloorDir(position.x * inv, position.y * inv, position.z * inv);
+    }
+    const minAltitude = this.sphereRadius + terrain + entityRadius;
 
     if (distanceFromCenter < minAltitude) {
-      // Bird is below ground - push it up to surface
+      // Bird is below the local ground - push it up to the surface
       vec.copy(position).normalize().multiplyScalar(minAltitude);
       return { collided: true, correctedPosition: vec.clone(), normal: position.clone().normalize() };
     }
@@ -281,10 +288,31 @@ function terrainDisplacement(nx, ny, nz, profile) {
   return d;
 }
 
-// Sample the active environment's terrain height along a unit direction.
-// Zero-allocation (no THREE objects); safe to call per-frame from ground collision.
+// FULL terrain height (detail + carved continental) along a unit direction.
+// Used by the sphere MESH and prop placement so the ground has its fine texture.
+// Zero-allocation.
 function terrainHeightDir(nx, ny, nz) {
   return _activeTerrainProfile ? terrainDisplacement(nx, ny, nz, _activeTerrainProfile) : 0;
+}
+
+// SMOOTH valley floor (broad continental layer only, carved downward) along a
+// unit direction. This is the flyable/landing floor: it follows the big canyons
+// without the fine detail bumps, so descending into a valley feels smooth rather
+// than jittery. Zero-allocation. 0 before any world is built / no continental.
+function terrainFloorDir(nx, ny, nz) {
+  const p = _activeTerrainProfile;
+  if (!p || !p.continentAmplitude) return 0;
+  const R = SPHERE_RADIUS, cs = p.continentScale;
+  return Math.min(0, fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5)) * p.continentAmplitude;
+}
+
+// Public sampler for the flight controller: the smooth valley FLOOR (≤0) at a
+// WORLD position's direction. Zero-allocation (primitives only), safe per-frame.
+export function sampleTerrainHeight(x, y, z) {
+  const len = Math.sqrt(x * x + y * y + z * z);
+  if (len < 1e-6) return 0;
+  const inv = 1 / len;
+  return terrainFloorDir(x * inv, y * inv, z * inv);
 }
 
 // Height-based color palettes per biome (low altitude → high altitude)

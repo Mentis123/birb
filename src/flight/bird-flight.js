@@ -31,6 +31,10 @@ export class BirdFlight {
         // Configuration
         this.sphereCenter = options.sphereCenter ? options.sphereCenter.clone() : new Vector3(0, 0, 0);
         this.sphereRadius = options.sphereRadius ?? 100;
+        // Optional terrain sampler (x,y,z) -> signed height. When provided, the
+        // minimum-altitude floor follows carved valleys DOWNWARD (Math.min(0,..)
+        // applied here) so the bird can descend into canyons. Null = flat sphere.
+        this.terrainHeightAt = options.terrainHeightAt ?? null;
         this.speed = options.speed ?? FLIGHT_DEFAULTS.speed;
         this.yawRate = options.yawRate ?? FLIGHT_DEFAULTS.yawRate;
         this.pitchRate = options.pitchRate ?? FLIGHT_DEFAULTS.pitchRate;
@@ -149,11 +153,17 @@ export class BirdFlight {
         // Apply movement
         this.position.add(s.displacement);
 
-        // 2. Constrain to Sphere (keep minimum altitude, allow climbing)
+        // 2. Constrain to Sphere (keep minimum altitude, allow climbing).
+        //    The floor follows carved valleys downward so the bird can fly INTO
+        //    canyons; rises never lift it (no gravity here, so a raised floor
+        //    would ratchet the bird upward). See _floorAt().
         s.radialOffset.copy(this.position).sub(this.sphereCenter);
         const radialDistance = s.radialOffset.length();
-        if (radialDistance < this.sphereRadius) {
-            s.radialOffset.normalize().multiplyScalar(this.sphereRadius);
+        const floor = (this.terrainHeightAt && radialDistance > 1e-3)
+            ? this._floorAt(s.radialOffset.x / radialDistance, s.radialOffset.y / radialDistance, s.radialOffset.z / radialDistance)
+            : this.sphereRadius;
+        if (radialDistance < floor) {
+            s.radialOffset.normalize().multiplyScalar(floor);
             this.position.copy(s.radialOffset).add(this.sphereCenter);
         }
 
@@ -250,13 +260,25 @@ export class BirdFlight {
         }
     }
 
+    // Minimum allowed radius along an outward unit direction. Carved valleys
+    // lower it (Math.min(0,...)); rises never raise it above sphereRadius, so the
+    // cruising bird is never pushed up by terrain (it has no gravity to settle
+    // back down) and never falsely grounds / pops at spawn. Zero allocations.
+    _floorAt(nx, ny, nz) {
+        if (!this.terrainHeightAt) return this.sphereRadius;
+        return this.sphereRadius + Math.min(0, this.terrainHeightAt(nx, ny, nz));
+    }
+
     _constrainToSphere() {
         if (this.sphereCenter) {
             const s = this._scratch;
             s.radialOffset.copy(this.position).sub(this.sphereCenter);
             const radialDistance = s.radialOffset.length();
-            if (radialDistance < this.sphereRadius) {
-                s.radialOffset.normalize().multiplyScalar(this.sphereRadius);
+            const floor = (this.terrainHeightAt && radialDistance > 1e-3)
+                ? this._floorAt(s.radialOffset.x / radialDistance, s.radialOffset.y / radialDistance, s.radialOffset.z / radialDistance)
+                : this.sphereRadius;
+            if (radialDistance < floor) {
+                s.radialOffset.normalize().multiplyScalar(floor);
                 this.position.copy(s.radialOffset).add(this.sphereCenter);
             }
         }

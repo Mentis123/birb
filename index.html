@@ -3184,6 +3184,10 @@
       const sphericalWorldModule = await import("./src/environment/spherical-world.js");
       var createSphericalWorld = sphericalWorldModule.createSphericalWorld;
       var SPHERE_RADIUS = sphericalWorldModule.SPHERE_RADIUS;
+      // Terrain height sampler — lets the flight controller lower its floor into
+      // carved valleys so the bird can fly down INTO canyons (reads the live
+      // active environment, so it tracks environment switches automatically).
+      var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -5247,7 +5251,12 @@
       if (!flightController?.position) return;
       const radial = flightRecoveryScratch.radial.copy(flightController.position);
       if (radial.lengthSq() <= 0.000001) return;
-      radial.normalize().multiplyScalar(SPHERE_RADIUS + FLIGHT_RECOVERY_CONFIG.birdRadius);
+      // Hug the LOCAL ground — follow the carved valley floor (terrain ≤ 0) so a
+      // bird grounded in a canyon stays in the canyon instead of snapping back up
+      // to the baseline. Matches BirdFlight / checkGroundCollision floors.
+      const p = flightController.position;
+      const terrain = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
+      radial.normalize().multiplyScalar(SPHERE_RADIUS + terrain + FLIGHT_RECOVERY_CONFIG.birdRadius);
       flightController.position.copy(radial);
     }
 
@@ -6673,7 +6682,10 @@
       sphereCenter: new THREE.Vector3(0, 0, 0),
       sphereRadius: SPHERE_RADIUS,
       speed: 11,
-      position: new THREE.Vector3(0, birdStartHeight, 0)
+      position: new THREE.Vector3(0, birdStartHeight, 0),
+      // Lets the bird descend into carved valleys/canyons (floor follows terrain
+      // downward only). Safe before the world loads — sampler returns 0 then.
+      terrainHeightAt: (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight : null
     });
 
     // 3. Visuals
