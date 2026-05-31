@@ -569,6 +569,31 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
   });
 
+  // --- Global tree scatter — fills the bare ground BETWEEN groves so the world
+  // reads as a continuous forest, not a handful of isolated clusters. This is the
+  // real fix for "feels sparse": on a radius-120 sphere the horizon is only ~44u
+  // away, but groves sit ~125u apart, so most views land in an empty gap. These
+  // evenly-distributed singles guarantee trees are always in view. They ride the
+  // SAME trunk + canopy InstancedMeshes (zero new draw calls). Mobile-gated.
+  const scatterTreeCount = _isMobile() ? 150 : 240;
+  const scatterTreePoints = fibonacciSpherePoints(scatterTreeCount, sphereRadius);
+  for (let i = 0; i < scatterTreePoints.length; i++) {
+    const sp = scatterTreePoints[i];
+    const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    const up = pos.clone().normalize();
+    const trunkHeight = randomInRange(8, 15);
+    const trunkRadiusBottom = randomInRange(0.45, 0.9);
+    const canopyHeight = randomInRange(8, 15);
+    const canopyRadius = randomInRange(3, 5.5);
+    const scale = randomInRange(0.9, 2.0);
+    const canopyColorIdx = Math.floor(Math.random() * canopyMats.length);
+    trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
+    canopyPlacementsByColor[canopyColorIdx].push({ pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight });
+    collisionSystem.addCollider(pos, Math.min(trunkRadiusBottom * scale * 1.2, 3.5), 'tree');
+    const scatterCanopyCenter = pos.clone().add(up.clone().multiplyScalar((trunkHeight + canopyHeight * 0.5) * scale));
+    collisionSystem.addCollider(scatterCanopyCenter, canopyRadius * scale * 0.95, 'tree');
+  }
+
   // --- Build instanced trunks (1 draw call for ALL trunks) ---
   // Unit trunk geom: cylinder with radius 1 at bottom, 0.4 at top, height 1,
   // centred so y=0 sits at the base and y=1 at the top. Per-instance scale
@@ -906,6 +931,29 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       spireIndex++;
     }
   });
+
+  // --- Global spire scatter — fills the open ground BETWEEN ridges so the
+  // canyon floor reads as populated, not bare. Rides the SAME spire
+  // InstancedMeshes (zero new draw calls). Mobile-gated.
+  const scatterSpireCount = _isMobile() ? 70 : 120;
+  const scatterSpirePoints = fibonacciSpherePoints(scatterSpireCount, sphereRadius);
+  for (let i = 0; i < scatterSpirePoints.length; i++) {
+    const sp = scatterSpirePoints[i];
+    const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    const up = pos.clone().normalize();
+    const height = randomInRange(14, 44);
+    const baseRadius = randomInRange(1.6, 3.6);
+    const scale = randomInRange(0.8, 1.6);
+    const matIdx = Math.random() > 0.5 ? 0 : 1;
+    spirePlacementsByMat[matIdx].push({
+      pos, up, height, baseRadius, scale,
+      rotX: randomInRange(-0.08, 0.08),
+      rotZ: randomInRange(-0.08, 0.08),
+    });
+    collisionSystem.addCollider(pos, Math.min(baseRadius * scale * 0.8, 6.0), 'spire');
+    const scatterSpireMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
+    collisionSystem.addCollider(scatterSpireMid, baseRadius * scale * 0.65, 'spire');
+  }
 
   // Build InstancedMesh per material bucket.
   // Unit cylinder: top radius 0.3 (was baseRadius*0.3), bottom radius 1, height 1,
@@ -1447,6 +1495,26 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
   });
 
+  // --- Global pine scatter — fills the bare valleys BETWEEN ranges/groves so the
+  // mountain floor reads as a wooded landscape, not bare rock. Rides the SAME pine
+  // trunk + canopy InstancedMeshes (zero new draw calls). Mobile-gated.
+  const scatterPineCount = _isMobile() ? 110 : 180;
+  const scatterPinePoints = fibonacciSpherePoints(scatterPineCount, sphereRadius);
+  for (let i = 0; i < scatterPinePoints.length; i++) {
+    const sp = scatterPinePoints[i];
+    const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    const up = pos.clone().normalize();
+    const trunkH = randomInRange(5, 10);
+    const canopyH = randomInRange(6, 11);
+    const canopyR = randomInRange(2, 3.8);
+    const scale = randomInRange(0.9, 1.8);
+    pineTrunkPlacements.push({ pos, up, trunkH, scale });
+    pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
+    collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
+    const scatterPineCanopy = pos.clone().add(up.clone().multiplyScalar((trunkH + canopyH * 0.5) * scale));
+    collisionSystem.addCollider(scatterPineCanopy, canopyR * scale * 0.95, 'pine');
+  }
+
   // Build pine trunk InstancedMesh. Unit cylinder: top 0.3, bottom 0.6, height 1.
   // Original: trunk.position.y = trunkH/2 (centered), so base was at y=0.
   // Unit geom base-at-0 matches that. Per-instance scale Y = trunkH * scale.
@@ -1751,6 +1819,27 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     inst.instanceMatrix.needsUpdate = true;
     inst.computeBoundingSphere();
     return inst;
+  }
+
+  // --- Global building scatter — fills the gaps BETWEEN city blocks so the
+  // surface reads as continuous urban sprawl, not a few isolated downtowns.
+  // Rides the SAME body InstancedMeshes (zero new draw calls). Mobile-gated.
+  const scatterBldgCount = _isMobile() ? 120 : 200;
+  const scatterBldgPoints = fibonacciSpherePoints(scatterBldgCount, sphereRadius);
+  for (let i = 0; i < scatterBldgPoints.length; i++) {
+    const sp = scatterBldgPoints[i];
+    const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.04, 0.04), sp.phi + randomInRange(-0.04, 0.04), 0);
+    const up = pos.clone().normalize();
+    const height = randomInRange(12, 60);
+    const width = randomInRange(3, 6);
+    const depth = randomInRange(3, 6);
+    const yaw = Math.random() * Math.PI * 0.5;
+    const common = { pos, up, height, width, depth, yaw };
+    bodyPlacementsByMat[Math.floor(Math.random() * buildingMats.length)].push(common);
+    glowPlacements.push(common);
+    collisionSystem.addCollider(pos, Math.max(width, depth) * 0.6, 'tower');
+    const scatterTowerMid = pos.clone().add(up.clone().multiplyScalar(height * 0.5));
+    collisionSystem.addCollider(scatterTowerMid, Math.max(width, depth) * 0.65, 'tower');
   }
 
   for (let mi = 0; mi < bodyPlacementsByMat.length; mi++) {
