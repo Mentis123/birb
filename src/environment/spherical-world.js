@@ -6,6 +6,13 @@ const DEG2RAD = Math.PI / 180;
 // At speed 8, loop time ~94s — room to breathe, fly THROUGH environments
 const SPHERE_RADIUS = 120;
 
+// Active terrain profile for the environment currently being built. Lets
+// placeOnSphere() AND ground collision sample the SAME FBM displacement, so
+// props sit ON the rolling terrain and the bird flies over highlands / down
+// into valleys instead of skating a perfect sphere. Set at the top of
+// createSphericalWorld; null = flat sphere (server/test builds).
+let _activeTerrainProfile = null;
+
 // Mobile gate — env builders read this to disable heavy fill-rate effects
 // (transparent canopy ceilings, cloud puffs) and trim prop density.
 // Set by index.html before any env module loads; default false on server tests.
@@ -42,6 +49,10 @@ export class SphericalCollisionSystem {
   checkGroundCollision(THREE, position, entityRadius = 0.5) {
     const vec = this._ensureVec(THREE);
     const distanceFromCenter = position.length();
+    // Landing floor stays a clean sphere at the base radius — this is the
+    // "you touched down, now you're grounded" check, NOT terrain following.
+    // (Terrain only carves valleys DOWNWARD from here, so the bird flying above
+    // the base radius never gets falsely grounded on a rise.)
     const minAltitude = this.sphereRadius + entityRadius;
 
     if (distanceFromCenter < minAltitude) {
@@ -130,14 +141,16 @@ export class SphericalCollisionSystem {
   }
 }
 
-// Helper to place objects on sphere surface
+// Helper to place objects on sphere surface. Now terrain-aware: the active
+// environment's FBM displacement is added so props rest on the rolling ground
+// (heightOffset still stacks on top, e.g. clouds/arches at altitude).
 function placeOnSphere(THREE, radius, theta, phi, heightOffset = 0) {
-  const r = radius + heightOffset;
-  return new THREE.Vector3(
-    r * Math.sin(phi) * Math.cos(theta),
-    r * Math.cos(phi),
-    r * Math.sin(phi) * Math.sin(theta)
-  );
+  const sp = Math.sin(phi);
+  const nx = sp * Math.cos(theta);
+  const ny = Math.cos(phi);
+  const nz = sp * Math.sin(theta);
+  const r = radius + heightOffset + (_activeTerrainProfile ? terrainHeightDir(nx, ny, nz) : 0);
+  return new THREE.Vector3(r * nx, r * ny, r * nz);
 }
 
 // Helper to orient object to face outward from sphere center
@@ -240,13 +253,39 @@ function fbm(x, y, z, octaves = 5, lacunarity = 2.0, persistence = 0.5) {
   return value / maxAmplitude; // Normalized to roughly -1..1
 }
 
-// Biome-specific noise profiles
+// Biome-specific noise profiles.
+//  - scale/amplitude/octaves/...: medium-frequency DETAIL roughness (local hills)
+//  - continentScale/continentAmplitude: low-frequency CONTINENTAL layer that
+//    creates broad highlands and deep valleys/canyons you fly over and into.
 const TERRAIN_PROFILES = {
-  forest: { scale: 0.06, amplitude: 8, octaves: 5, persistence: 0.45, lacunarity: 2.1 },
-  canyons: { scale: 0.04, amplitude: 14, octaves: 4, persistence: 0.55, lacunarity: 2.3 },
-  mountain: { scale: 0.035, amplitude: 20, octaves: 6, persistence: 0.5, lacunarity: 2.0 },
-  city: { scale: 0.08, amplitude: 3, octaves: 3, persistence: 0.35, lacunarity: 2.0 },
+  forest:   { scale: 0.06,  amplitude: 8,  octaves: 5, persistence: 0.45, lacunarity: 2.1, continentScale: 0.014, continentAmplitude: 16 },
+  canyons:  { scale: 0.04,  amplitude: 14, octaves: 4, persistence: 0.55, lacunarity: 2.3, continentScale: 0.013, continentAmplitude: 24 },
+  mountain: { scale: 0.035, amplitude: 20, octaves: 6, persistence: 0.5,  lacunarity: 2.0, continentScale: 0.012, continentAmplitude: 26 },
+  city:     { scale: 0.08,  amplitude: 3,  octaves: 3, persistence: 0.35, lacunarity: 2.0, continentScale: 0.016, continentAmplitude: 9 },
 };
+
+// Combined terrain displacement at a unit direction (nx,ny,nz): medium-frequency
+// detail (local hills, symmetric) + a broad low-frequency continental layer that
+// only carves DOWNWARD — deep valleys/canyons below the base radius. The bird
+// cruises just above the base radius, so it flies OVER and sees INTO these without
+// ever rising into the bird (no new clipping, no false grounding). Shared by the
+// sphere mesh and prop placement so the ground and the props that sit on it agree.
+function terrainDisplacement(nx, ny, nz, profile) {
+  const R = SPHERE_RADIUS;
+  let d = fbm(nx * R * profile.scale, ny * R * profile.scale, nz * R * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
+  if (profile.continentAmplitude) {
+    const cs = profile.continentScale;
+    // Math.min(0, ...) → carve valleys down, never raise the ground.
+    d += Math.min(0, fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5)) * profile.continentAmplitude;
+  }
+  return d;
+}
+
+// Sample the active environment's terrain height along a unit direction.
+// Zero-allocation (no THREE objects); safe to call per-frame from ground collision.
+function terrainHeightDir(nx, ny, nz) {
+  return _activeTerrainProfile ? terrainDisplacement(nx, ny, nz, _activeTerrainProfile) : 0;
+}
 
 // Height-based color palettes per biome (low altitude → high altitude)
 const TERRAIN_COLORS = {
@@ -331,7 +370,7 @@ function displaceSphereGeometry(geometry, sphereRadius, variant = 'forest') {
     // Normalize to unit sphere for noise sampling
     const len = Math.sqrt(x * x + y * y + z * z);
     const nx = x / len, ny = y / len, nz = z / len;
-    const disp = fbm(nx * sphereRadius * profile.scale, ny * sphereRadius * profile.scale, nz * sphereRadius * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
+    const disp = terrainDisplacement(nx, ny, nz, profile);
     displacements[i] = disp;
     if (disp < minDisp) minDisp = disp;
     if (disp > maxDisp) maxDisp = disp;
@@ -575,17 +614,26 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // away, but groves sit ~125u apart, so most views land in an empty gap. These
   // evenly-distributed singles guarantee trees are always in view. They ride the
   // SAME trunk + canopy InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterTreeCount = _isMobile() ? 150 : 240;
+  const scatterTreeCount = _isMobile() ? 190 : 300;
   const scatterTreePoints = fibonacciSpherePoints(scatterTreeCount, sphereRadius);
   for (let i = 0; i < scatterTreePoints.length; i++) {
     const sp = scatterTreePoints[i];
-    const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    const jt = sp.theta + randomInRange(-0.05, 0.05);
+    const jp = sp.phi + randomInRange(-0.05, 0.05);
+    // Zone the forest by elevation: lush + dense in the valleys, thinning to
+    // bare, dwarfed trees on the high continental ridges (a soft tree line).
+    // This is the "low forest / high forest" variation, driven by the terrain.
+    const spp = Math.sin(jp);
+    const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
+    const highland = Math.max(0, Math.min(1, (th - 4) / 18)); // 0 valley → 1 high ridge
+    if (highland > 0.15 && Math.random() < highland * 0.8) continue; // bare highland tops
+    const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     const up = pos.clone().normalize();
     const trunkHeight = randomInRange(8, 15);
     const trunkRadiusBottom = randomInRange(0.45, 0.9);
     const canopyHeight = randomInRange(8, 15);
     const canopyRadius = randomInRange(3, 5.5);
-    const scale = randomInRange(0.9, 2.0);
+    const scale = randomInRange(0.9, 2.0) * (1 - highland * 0.45); // dwarf up high
     const canopyColorIdx = Math.floor(Math.random() * canopyMats.length);
     trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
     canopyPlacementsByColor[canopyColorIdx].push({ pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight });
@@ -935,7 +983,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // --- Global spire scatter — fills the open ground BETWEEN ridges so the
   // canyon floor reads as populated, not bare. Rides the SAME spire
   // InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterSpireCount = _isMobile() ? 70 : 120;
+  const scatterSpireCount = _isMobile() ? 95 : 155;
   const scatterSpirePoints = fibonacciSpherePoints(scatterSpireCount, sphereRadius);
   for (let i = 0; i < scatterSpirePoints.length; i++) {
     const sp = scatterSpirePoints[i];
@@ -1498,16 +1546,24 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // --- Global pine scatter — fills the bare valleys BETWEEN ranges/groves so the
   // mountain floor reads as a wooded landscape, not bare rock. Rides the SAME pine
   // trunk + canopy InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterPineCount = _isMobile() ? 110 : 180;
+  const scatterPineCount = _isMobile() ? 150 : 240;
   const scatterPinePoints = fibonacciSpherePoints(scatterPineCount, sphereRadius);
   for (let i = 0; i < scatterPinePoints.length; i++) {
     const sp = scatterPinePoints[i];
-    const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    const jt = sp.theta + randomInRange(-0.05, 0.05);
+    const jp = sp.phi + randomInRange(-0.05, 0.05);
+    // Alpine tree line: pines crowd the low slopes/valleys and give way to bare
+    // rock and snow on the high ridges between peaks.
+    const spp = Math.sin(jp);
+    const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
+    const highland = Math.max(0, Math.min(1, (th - 2) / 24)); // 0 valley → 1 high ridge
+    if (highland > 0.12 && Math.random() < highland * 0.85) continue; // bare alpine tops
+    const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     const up = pos.clone().normalize();
     const trunkH = randomInRange(5, 10);
     const canopyH = randomInRange(6, 11);
     const canopyR = randomInRange(2, 3.8);
-    const scale = randomInRange(0.9, 1.8);
+    const scale = randomInRange(0.9, 1.8) * (1 - highland * 0.4); // dwarf up high
     pineTrunkPlacements.push({ pos, up, trunkH, scale });
     pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
     collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
@@ -1824,7 +1880,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   // --- Global building scatter — fills the gaps BETWEEN city blocks so the
   // surface reads as continuous urban sprawl, not a few isolated downtowns.
   // Rides the SAME body InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterBldgCount = _isMobile() ? 120 : 200;
+  const scatterBldgCount = _isMobile() ? 150 : 250;
   const scatterBldgPoints = fibonacciSpherePoints(scatterBldgCount, sphereRadius);
   for (let i = 0; i < scatterBldgPoints.length; i++) {
     const sp = scatterBldgPoints[i];
@@ -2008,6 +2064,11 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
 
   const sphereRadius = SPHERE_RADIUS;
   const collisionSystem = new SphericalCollisionSystem(sphereRadius);
+
+  // Activate this environment's terrain profile so the sphere mesh, prop
+  // placement (placeOnSphere) and ground collision all sample the same rolling
+  // displacement. Set before anything is built.
+  _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
 
   const root = new THREE.Group();
   root.name = `spherical-world-${variant}`;
