@@ -48,6 +48,8 @@ Major overhaul session. Birb Mobile now ships the full **Birb Labs Artefact Trea
 - Marco Mobile (`Mentis123/marcomobile`) — full treatment
 - Frosty Spider (`Mentis123/FrostySpider`) — treatment alignment pending
 
+**Density / immersion pass (2026-05-31):** all four on-sphere environments densified for a fuller, more layered, exploration-feel world (terrain had been thinned for the 60fps mobile lift, which read as sparse). More trees/spires/peaks/buildings + new instanced prop layers (forest ferns + emergent snags, canyon needle-spires, mountain scree + champion-pine nests, city rooftop clutter + street pylons), taller champions/verticality, and ~2x nests across every biome. Drones are 50% bigger again (body 3.6→5.4, ring 5.4→8.1, collisionRadius 6.6→9.9) and +50% on desktop (12) / held at 8 on mobile. Forest + mountain **clouds refactored from 80/54 separate puff meshes to one InstancedMesh each** (cloud colliders preserved) — reclaims the desktop draw-call headroom that funds the pass. New props are InstancedMesh + collider-free; the remote's cruise-altitude colliders (tree/spire/peak/tower/pine canopies, solid clouds) are kept. Mobile structural counts gated to a middle tier (denser than the thinned base, lighter than desktop). Budgets hold: <100 draw calls, <80k tris, 60fps, per-env. See `src/environment/spherical-world.js` builders + `src/nesting/drone-system.js`.
+
 ## What This Is
 
 A mobile-first 3D bird flight game built with Three.js. A bird flies on a spherical world — you control it with touch (virtual joystick), collect rings, shoot rockets from nests, and fight drones. Four game modes: Casual free flight, Ring Rush (timed collection), Drone Hunter (60s survival), Turret Defense (wave-based).

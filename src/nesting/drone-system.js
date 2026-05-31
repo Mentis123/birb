@@ -43,9 +43,16 @@ const DRONE_CONFIG = {
   orbitSpeed: 0.176,           // Base radians per second (angular, scale-independent)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
-  collisionRadius: 6.6,        // Hit detection — sized for the larger 4× world drones
+  collisionRadius: 9.9,        // Hit detection — +50% with the bigger drone body (4× world)
   birbCollisionRadius: 1.5,    // Birb collision radius — bird hasn't changed size
 };
+
+// Mobile gate — mirrors spherical-world.js _isMobile(). Set by index.html before
+// createDroneSystem runs. Mobile holds the drone count down (drones are individual
+// meshes, not instanced — each is 2 draw calls — so phones can't afford more).
+function _isMobileDrones() {
+  return typeof window !== 'undefined' && window.__birbIsMobile === true;
+}
 
 // Lightweight debug hook. Enabled via `?debug=drones` query param.
 // Logs once per second: drone count, first drone position, last delta.
@@ -59,8 +66,8 @@ function createDroneMesh(THREE) {
   const group = new THREE.Group();
   group.name = 'drone';
 
-  // Main body - glowing octahedron (diamond shape)
-  const bodyGeometry = new THREE.OctahedronGeometry(3.6, 0);
+  // Main body - glowing octahedron — 50% bigger than the 4× base (3.6 -> 5.4)
+  const bodyGeometry = new THREE.OctahedronGeometry(5.4, 0);
   const bodyMaterial = new THREE.MeshStandardMaterial({
     color: 0xff3366,
     emissive: 0xff2255,
@@ -71,8 +78,9 @@ function createDroneMesh(THREE) {
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   group.add(body);
 
-  // Spinning ring around the body
-  const ringGeometry = new THREE.TorusGeometry(5.4, 0.36, 8, 24);
+  // Spinning ring — 50% bigger than the 4× base (5.4 -> 8.1, tube 0.36 -> 0.54).
+  // Segment counts unchanged, so triangle count per drone is identical.
+  const ringGeometry = new THREE.TorusGeometry(8.1, 0.54, 8, 24);
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: 0xff6699,
     transparent: true,
@@ -449,8 +457,14 @@ export function createDroneSystem(THREE, scene, options = {}) {
     });
   }
 
+  // Device-gated target count: desktop +50% (8 -> 12), mobile held at 8 to
+  // protect the draw-call budget (drones are individual meshes, 2 calls each).
+  const targetDroneCount = _isMobileDrones()
+    ? DRONE_CONFIG.count
+    : Math.round(DRONE_CONFIG.count * 1.5);
+
   // Initial spawn
-  for (let i = 0; i < DRONE_CONFIG.count; i++) {
+  for (let i = 0; i < targetDroneCount; i++) {
     spawnDrone();
   }
 
@@ -481,7 +495,7 @@ export function createDroneSystem(THREE, scene, options = {}) {
         pendingRespawns[i].timer -= delta;
         if (pendingRespawns[i].timer <= 0) {
           pendingRespawns.splice(i, 1);
-          if (drones.length < DRONE_CONFIG.count) {
+          if (drones.length < targetDroneCount) {
             spawnDrone();
           }
         }
