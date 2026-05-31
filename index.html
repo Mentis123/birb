@@ -4109,6 +4109,7 @@
     const _minimapUp = new THREE.Vector3();
     const _minimapRight = new THREE.Vector3();
     const _minimapDelta = new THREE.Vector3();
+    const _minimapNestPos = new THREE.Vector3(); // scratch for per-nest world pos (zero-alloc)
     const _minimapRawPoint = { x: 0, y: 0 };
     const _minimapEdgePoint = { x: 0, y: 0, clamped: false };
     // Permanent pool of ring data entries for minimap — grown once to ring count,
@@ -4317,56 +4318,103 @@
         }
       }
 
-      // ===== Nest (green target/cross) =====
-      // In ZEN/CASUAL the bird isn't nested, so try nestPointsSystem for the nearest nest.
-      // In TURRET_DEFENSE the nestPos arg is populated (bird is on the nest).
-      let resolvedNestPos = nestPos;
-      if (showNest && !resolvedNestPos) {
+      // ===== Nests (orange-red, matching the in-world nest markers) =====
+      // Show ALL nests within range, not just the nearest — players asked to
+      // see more of them. Nests inside the radius draw as orange-red dots (the
+      // nearest gets a target reticle); off-screen nests near enough to matter
+      // get a directional edge arrow (capped by distance to avoid rim clutter).
+      // Colour matches the in-world nest markers (red/orange glow).
+      const NEST_FILL = '#ff5a3c';
+      const NEST_EDGE = '#ff7a4a';
+      const NEST_GLOW = '255, 110, 70';
+      if (showNest) {
         const nps = (typeof nestPointsSystem !== 'undefined') ? nestPointsSystem : null;
-        if (nps && typeof nps.getNearestNest === 'function') {
-          try {
-            const near = nps.getNearestNest(birdPos);
-            // getNearestNest may return an Object3D or { position } — handle both.
-            if (near) {
-              if (near.position) resolvedNestPos = near.position;
-              else if (near.isVector3) resolvedNestPos = near;
+        const nestList = (nps && nps.nests) ? nps.nests : null;
+
+        if (nestList && nestList.length) {
+          // Pass 1: find the nearest nest (gets the highlighted reticle).
+          let nearIdx = -1, nearD2 = Infinity;
+          for (let i = 0; i < nestList.length; i++) {
+            const ng = nestList[i];
+            if (!ng || ng.visible === false) continue;
+            ng.getWorldPosition(_minimapNestPos);
+            const dx = _minimapNestPos.x - birdPos.x, dy = _minimapNestPos.y - birdPos.y, dz = _minimapNestPos.z - birdPos.z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 < nearD2) { nearD2 = d2; nearIdx = i; }
+          }
+          // Only arrow reasonably-close off-screen nests, so the rim doesn't fill up.
+          const arrowMaxD2 = (visibleRadius * 1.7) * (visibleRadius * 1.7);
+
+          // Pass 2: draw.
+          for (let i = 0; i < nestList.length; i++) {
+            const ng = nestList[i];
+            if (!ng || ng.visible === false) continue;
+            ng.getWorldPosition(_minimapNestPos);
+            const dx = _minimapNestPos.x - birdPos.x, dy = _minimapNestPos.y - birdPos.y, dz = _minimapNestPos.z - birdPos.z;
+            const d2 = dx * dx + dy * dy + dz * dz;
+            const isNearest = (i === nearIdx);
+            const raw = projectMinimapPoint(_minimapNestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
+            const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
+
+            if (p.clamped) {
+              if (isNearest || d2 <= arrowMaxD2) {
+                drawMinimapEdgeArrow(minimapCtx, p, half, isNearest ? NEST_EDGE : NEST_FILL);
+              }
+              continue;
             }
-          } catch (_e) { /* no-op, nest direction just won't show */ }
-        }
-      }
 
-      if (showNest && resolvedNestPos) {
-        const raw = projectMinimapPoint(resolvedNestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
-        const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
+            // Glow halo (nearest pulses brighter and larger)
+            const haloR = isNearest ? 10 + pulse * 3 : 7;
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, haloR, 0, Math.PI * 2);
+            minimapCtx.fillStyle = `rgba(${NEST_GLOW}, ${isNearest ? 0.22 + pulse * 0.12 : 0.16})`;
+            minimapCtx.fill();
 
-        if (p.clamped) {
-          drawMinimapEdgeArrow(minimapCtx, p, half, '#3cff88');
-        } else {
-          // Target reticle: outer ring + center dot + cross hairs
-          minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 10, 0, Math.PI * 2);
-          minimapCtx.fillStyle = 'rgba(60, 255, 136, 0.18)';
-          minimapCtx.fill();
+            if (isNearest) {
+              // Target reticle + cross hairs in nest colour
+              minimapCtx.strokeStyle = NEST_EDGE;
+              minimapCtx.lineWidth = 2;
+              minimapCtx.beginPath();
+              minimapCtx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+              minimapCtx.stroke();
+              minimapCtx.strokeStyle = 'rgba(40, 8, 0, 0.85)';
+              minimapCtx.lineWidth = 1.5;
+              minimapCtx.beginPath();
+              minimapCtx.moveTo(p.x - 10, p.y); minimapCtx.lineTo(p.x - 3, p.y);
+              minimapCtx.moveTo(p.x + 3, p.y);  minimapCtx.lineTo(p.x + 10, p.y);
+              minimapCtx.moveTo(p.x, p.y - 10); minimapCtx.lineTo(p.x, p.y - 3);
+              minimapCtx.moveTo(p.x, p.y + 3);  minimapCtx.lineTo(p.x, p.y + 10);
+              minimapCtx.stroke();
+            }
 
-          minimapCtx.strokeStyle = '#3cff88';
-          minimapCtx.lineWidth = 2;
-          minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-          minimapCtx.stroke();
-
-          minimapCtx.strokeStyle = 'rgba(0, 40, 20, 0.85)';
-          minimapCtx.lineWidth = 1.5;
-          minimapCtx.beginPath();
-          minimapCtx.moveTo(p.x - 10, p.y); minimapCtx.lineTo(p.x - 3, p.y);
-          minimapCtx.moveTo(p.x + 3, p.y);  minimapCtx.lineTo(p.x + 10, p.y);
-          minimapCtx.moveTo(p.x, p.y - 10); minimapCtx.lineTo(p.x, p.y - 3);
-          minimapCtx.moveTo(p.x, p.y + 3);  minimapCtx.lineTo(p.x, p.y + 10);
-          minimapCtx.stroke();
-
-          minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-          minimapCtx.fillStyle = '#caffdb';
-          minimapCtx.fill();
+            // Solid orange-red dot
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, isNearest ? 4 : 3.5, 0, Math.PI * 2);
+            minimapCtx.fillStyle = isNearest ? NEST_EDGE : NEST_FILL;
+            minimapCtx.fill();
+            minimapCtx.strokeStyle = 'rgba(30, 6, 0, 0.7)';
+            minimapCtx.lineWidth = 1.2;
+            minimapCtx.stroke();
+          }
+        } else if (nestPos) {
+          // Fallback: legacy single nestPos (e.g. TURRET_DEFENSE passes it in).
+          const raw = projectMinimapPoint(nestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
+          const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
+          if (p.clamped) {
+            drawMinimapEdgeArrow(minimapCtx, p, half, NEST_EDGE);
+          } else {
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+            minimapCtx.fillStyle = `rgba(${NEST_GLOW}, 0.18)`;
+            minimapCtx.fill();
+            minimapCtx.beginPath();
+            minimapCtx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+            minimapCtx.fillStyle = NEST_EDGE;
+            minimapCtx.fill();
+            minimapCtx.strokeStyle = 'rgba(30, 6, 0, 0.7)';
+            minimapCtx.lineWidth = 1.2;
+            minimapCtx.stroke();
+          }
         }
       }
 
