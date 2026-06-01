@@ -5,7 +5,10 @@ export const AIM_RIG_DEFAULTS = {
 
   // Pitch limits
   maxPitch: (85 * Math.PI) / 180,  // 85° up
-  minPitch: (-30 * Math.PI) / 180, // 30° below horizon (needed for distant targets on sphere)
+  // Down to -85° (near straight down): nests sit high on emergent trees, so you
+  // must be able to depress the turret steeply to point at the ground/targets far
+  // below. (Stops 5° short of vertical to avoid the look-axis singularity.)
+  minPitch: (-85 * Math.PI) / 180,
 
   // Input stabilization
   smoothing: 15,                    // Joystick exponential smoothing
