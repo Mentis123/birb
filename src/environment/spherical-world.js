@@ -49,15 +49,15 @@ export class SphericalCollisionSystem {
   checkGroundCollision(THREE, position, entityRadius = 0.5) {
     const vec = this._ensureVec(THREE);
     const distanceFromCenter = position.length();
-    // Landing floor follows the carved valleys DOWNWARD (Math.min(0,...)) so the
-    // bird can descend into canyons and touch down on the valley floor — but the
-    // baseline is never raised, so flying level over flats/rises never falsely
+    // Landing floor = the full carved terrain (<= 0), the SAME surface the mesh
+    // renders, so the bird lands exactly on what it sees and can't sink through
+    // detail. Downward-only, so flying level over the plateau never falsely
     // grounds the bird. Matches the bird-flight floor exactly (same sampler).
     let terrain = 0;
     if (distanceFromCenter > 1e-3) {
       const inv = 1 / distanceFromCenter;
-      // Smooth valley floor (continental only) — must match the BirdFlight floor
-      // exactly, or the bird couldn't descend past the baseline into a canyon.
+      // Full terrain floor (detail + continental) — must match the BirdFlight
+      // floor exactly, or the bird couldn't descend past the baseline into a canyon.
       terrain = terrainFloorDir(position.x * inv, position.y * inv, position.z * inv);
     }
     const minAltitude = this.sphereRadius + terrain + entityRadius;
@@ -265,27 +265,37 @@ function fbm(x, y, z, octaves = 5, lacunarity = 2.0, persistence = 0.5) {
 //  - continentScale/continentAmplitude: low-frequency CONTINENTAL layer that
 //    creates broad highlands and deep valleys/canyons you fly over and into.
 const TERRAIN_PROFILES = {
-  forest:   { scale: 0.06,  amplitude: 8,  octaves: 5, persistence: 0.45, lacunarity: 2.1, continentScale: 0.014, continentAmplitude: 16 },
-  canyons:  { scale: 0.04,  amplitude: 14, octaves: 4, persistence: 0.55, lacunarity: 2.3, continentScale: 0.013, continentAmplitude: 24 },
-  mountain: { scale: 0.035, amplitude: 20, octaves: 6, persistence: 0.5,  lacunarity: 2.0, continentScale: 0.012, continentAmplitude: 26 },
-  city:     { scale: 0.08,  amplitude: 3,  octaves: 3, persistence: 0.35, lacunarity: 2.0, continentScale: 0.016, continentAmplitude: 9 },
+  forest:   { scale: 0.05,  amplitude: 11, octaves: 5, persistence: 0.45, lacunarity: 2.1, continentScale: 0.013, continentAmplitude: 22 },
+  canyons:  { scale: 0.035, amplitude: 16, octaves: 4, persistence: 0.55, lacunarity: 2.3, continentScale: 0.012, continentAmplitude: 34 },
+  mountain: { scale: 0.03,  amplitude: 22, octaves: 6, persistence: 0.5,  lacunarity: 2.0, continentScale: 0.011, continentAmplitude: 36 },
+  city:     { scale: 0.07,  amplitude: 4,  octaves: 3, persistence: 0.35, lacunarity: 2.0, continentScale: 0.015, continentAmplitude: 12 },
 };
 
 // Combined terrain displacement at a unit direction (nx,ny,nz): medium-frequency
-// detail (local hills, symmetric) + a broad low-frequency continental layer that
-// only carves DOWNWARD — deep valleys/canyons below the base radius. The bird
-// cruises just above the base radius, so it flies OVER and sees INTO these without
-// ever rising into the bird (no new clipping, no false grounding). Shared by the
-// sphere mesh and prop placement so the ground and the props that sit on it agree.
+// detail (local roughness) + a broad low-frequency continental layer (deep
+// valleys/canyons). The WHOLE result is clamped to <= 0 ("carve down from a
+// baseline plateau"), which is the key invariant that lets the SAME function be
+// the visible mesh AND the flight/collision floor:
+//   * mesh == floor  -> the bird can never fly through what it sees (the old bug
+//     was detail hills poking ABOVE a smoother, continental-only floor).
+//   * height <= 0     -> the floor never rises above the base radius, so the
+//     gravity-less bird is never ratcheted upward, never falsely grounded, and
+//     never pops at spawn. Upward relief comes from PROPS (trees, mountains,
+//     towers) which have their own colliders; the terrain itself only descends.
+// Shared by the sphere mesh, prop placement, and the flight floor so all agree.
 function terrainDisplacement(nx, ny, nz, profile) {
   const R = SPHERE_RADIUS;
-  let d = fbm(nx * R * profile.scale, ny * R * profile.scale, nz * R * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
+  const detail = fbm(nx * R * profile.scale, ny * R * profile.scale, nz * R * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
+  let cont = 0;
   if (profile.continentAmplitude) {
     const cs = profile.continentScale;
-    // Math.min(0, ...) → carve valleys down, never raise the ground.
-    d += Math.min(0, fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5)) * profile.continentAmplitude;
+    // Math.min(0, ...) → broad continental carve (valleys/canyons), never raised.
+    cont = Math.min(0, fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5)) * profile.continentAmplitude;
   }
-  return d;
+  // Clamp the COMBINED height to <= 0. Detail textures the carved walls/floors and
+  // dimples the plateau, but the plateau itself is the ceiling — nothing rises
+  // above the base radius. (See invariant above.)
+  return Math.min(0, cont + detail);
 }
 
 // FULL terrain height (detail + carved continental) along a unit direction.
@@ -295,15 +305,16 @@ function terrainHeightDir(nx, ny, nz) {
   return _activeTerrainProfile ? terrainDisplacement(nx, ny, nz, _activeTerrainProfile) : 0;
 }
 
-// SMOOTH valley floor (broad continental layer only, carved downward) along a
-// unit direction. This is the flyable/landing floor: it follows the big canyons
-// without the fine detail bumps, so descending into a valley feels smooth rather
-// than jittery. Zero-allocation. 0 before any world is built / no continental.
+// The flyable/landing/collision FLOOR along a unit direction. This is now the
+// SAME full terrain the mesh uses (detail + continental, clamped <= 0), so the
+// bird rests exactly on the surface it sees — no flying through detail hills, and
+// solid canyon walls/floors when you descend in. The downward-only clamp (inside
+// terrainDisplacement) keeps it a true MINIMUM-altitude floor: it only ever dips
+// below the base radius, never lifts the cruising bird. The bird's birdRadius
+// clearance hides any sub-vertex skim jitter. Zero-allocation. 0 before any world
+// is built. Kept as its own name because callers are the flight/collision path.
 function terrainFloorDir(nx, ny, nz) {
-  const p = _activeTerrainProfile;
-  if (!p || !p.continentAmplitude) return 0;
-  const R = SPHERE_RADIUS, cs = p.continentScale;
-  return Math.min(0, fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5)) * p.continentAmplitude;
+  return _activeTerrainProfile ? terrainDisplacement(nx, ny, nz, _activeTerrainProfile) : 0;
 }
 
 // Public sampler for the flight controller: the smooth valley FLOOR (≤0) at a
@@ -418,8 +429,13 @@ function displaceSphereGeometry(geometry, sphereRadius, variant = 'forest') {
     // Displace along normal
     posAttr.setXYZ(i, nx * (sphereRadius + disp), ny * (sphereRadius + disp), nz * (sphereRadius + disp));
 
-    // Normalized height for coloring (0 = lowest, 1 = highest)
-    const normalizedHeight = (disp - minDisp) / dispRange;
+    // Color by depth. Terrain now carves DOWN (disp <= 0, maxDisp ~ 0), so the
+    // dominant plateau (disp ~ 0) is the biome's BASE ground and valleys deepen
+    // below it. Map plateau -> mid palette (ground tone) and the deepest carve ->
+    // low palette, so we never paint the plateau with the snow/peak top color
+    // (which the old "0=low,1=high" mapping did once everything went <= 0).
+    const depthN = minDisp < 0 ? (disp - minDisp) / (-minDisp) : 1; // 0 = deepest, 1 = plateau
+    const normalizedHeight = 0.1 + 0.5 * depthN;                    // valley 0.1 → plateau 0.6
     const col = sampleTerrainColor(palette, normalizedHeight);
     colors[i * 3] = col[0];
     colors[i * 3 + 1] = col[1];
@@ -648,20 +664,22 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const sp = scatterTreePoints[i];
     const jt = sp.theta + randomInRange(-0.05, 0.05);
     const jp = sp.phi + randomInRange(-0.05, 0.05);
-    // Zone the forest by elevation: lush + dense in the valleys, thinning to
-    // bare, dwarfed trees on the high continental ridges (a soft tree line).
-    // This is the "low forest / high forest" variation, driven by the terrain.
+    // Zone the forest by elevation: lush + dense down in the carved valleys,
+    // thinning to dwarfed trees on the exposed plateau tops (a soft tree line).
+    // Terrain is now <= 0 (carve-down), so depth = -th: 0 on the plateau, larger
+    // the deeper the valley. This is the "low forest / high forest" variation.
     const spp = Math.sin(jp);
     const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
-    const highland = Math.max(0, Math.min(1, (th - 4) / 18)); // 0 valley → 1 high ridge
-    if (highland > 0.15 && Math.random() < highland * 0.8) continue; // bare highland tops
+    const depth = -th;                                                  // 0 plateau → deep valley
+    const exposure = Math.max(0, Math.min(1, 1 - depth / 12));          // 1 exposed top → 0 valley
+    if (exposure > 0.75 && Math.random() < (exposure - 0.75) * 1.0) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     const up = pos.clone().normalize();
     const trunkHeight = randomInRange(8, 15);
     const trunkRadiusBottom = randomInRange(0.45, 0.9);
     const canopyHeight = randomInRange(8, 15);
     const canopyRadius = randomInRange(3, 5.5);
-    const scale = randomInRange(0.9, 2.0) * (1 - highland * 0.45); // dwarf up high
+    const scale = randomInRange(0.9, 2.0) * (0.78 + (1 - exposure) * 0.32); // dwarf tops, lush valleys
     const canopyColorIdx = Math.floor(Math.random() * canopyMats.length);
     trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
     canopyPlacementsByColor[canopyColorIdx].push({ pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight });
@@ -1581,17 +1599,19 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const jt = sp.theta + randomInRange(-0.05, 0.05);
     const jp = sp.phi + randomInRange(-0.05, 0.05);
     // Alpine tree line: pines crowd the low slopes/valleys and give way to bare
-    // rock and snow on the high ridges between peaks.
+    // rock and snow on the exposed plateau tops. Terrain is <= 0 (carve-down), so
+    // depth = -th: 0 on the plateau, larger the deeper the valley.
     const spp = Math.sin(jp);
     const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
-    const highland = Math.max(0, Math.min(1, (th - 2) / 24)); // 0 valley → 1 high ridge
-    if (highland > 0.12 && Math.random() < highland * 0.85) continue; // bare alpine tops
+    const depth = -th;                                                  // 0 plateau → deep valley
+    const exposure = Math.max(0, Math.min(1, 1 - depth / 16));          // 1 exposed top → 0 valley
+    if (exposure > 0.7 && Math.random() < (exposure - 0.7) * 0.9) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     const up = pos.clone().normalize();
     const trunkH = randomInRange(5, 10);
     const canopyH = randomInRange(6, 11);
     const canopyR = randomInRange(2, 3.8);
-    const scale = randomInRange(0.9, 1.8) * (1 - highland * 0.4); // dwarf up high
+    const scale = randomInRange(0.9, 1.8) * (0.8 + (1 - exposure) * 0.3); // dwarf tops, lush valleys
     pineTrunkPlacements.push({ pos, up, trunkH, scale });
     pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
     collisionSystem.addCollider(pos, 0.8 * scale, 'pine');

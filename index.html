@@ -697,6 +697,49 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     }
 
+    /* Boost / dash button — forward surge to punch through thickets and cover
+       ground. Bottom-right thumb position; only the nested-only takeoff button
+       shares that corner, so they never overlap. */
+    .boost-button {
+      position: absolute;
+      bottom: clamp(1rem, 4vw, 2rem);
+      right: clamp(1rem, 4vw, 2rem);
+      min-width: clamp(70px, 18vw, 96px);
+      height: clamp(54px, 13vw, 66px);
+      padding: 0 clamp(0.8rem, 2.6vw, 1.2rem);
+      border-radius: 999px;
+      border: 2px solid rgba(150, 230, 255, 0.85);
+      background: linear-gradient(145deg, rgba(20, 90, 120, 0.92), rgba(12, 52, 78, 0.95));
+      color: rgba(225, 248, 255, 0.96);
+      font-size: clamp(0.85rem, 2.5vw, 1rem);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 200ms ease, transform 140ms ease, box-shadow 140ms ease;
+      z-index: 12;
+      box-shadow: 0 3px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(190, 240, 255, 0.22);
+      touch-action: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+
+    .boost-button.is-visible {
+      opacity: 0.92;
+      pointer-events: auto;
+    }
+
+    .boost-button.is-cooling {
+      opacity: 0.38;
+      pointer-events: none;
+    }
+
+    .boost-button:active {
+      transform: scale(0.93);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+
     /* Freeze indicator - shows when birb collides with drone */
     .freeze-indicator {
       position: fixed;
@@ -2734,6 +2777,11 @@
         Fly
       </button>
 
+      <!-- Boost / dash button (forward surge while flying; takeoff while grounded) -->
+      <button type="button" class="boost-button" data-boost aria-label="Boost forward">
+        Boost
+      </button>
+
       <!-- Freeze indicator (shows when birb collides with drone) -->
       <div class="freeze-indicator" data-freeze-indicator aria-hidden="true">
         <div class="freeze-progress-ring">
@@ -4725,6 +4773,13 @@
     };
     let flightRecoveryState = FLIGHT_RECOVERY_STATES.FLYING;
     let launchBoostTimer = 0;
+    // Forward boost / dash — a flight-time speed surge (tap the Boost button) that
+    // punches the bird forward through thickets it's snagged in and covers ground.
+    // During the surge, tree brushes push the bird aside but do NOT knock it down,
+    // so you can dash out of a grove instead of getting stuck.
+    const BOOST_CONFIG = { speedMult: 2.4, duration: 0.6, cooldown: 1.1 };
+    let boostTimer = 0;
+    let boostCooldown = 0;
     let fallTimer = 0;
     // Fall accelerates: 1× for first frame → 3× after FALL_RAMP_DURATION seconds.
     const FALL_RAMP_DURATION = 3.0;
@@ -5226,6 +5281,9 @@
     const nestToast = document.querySelector('[data-nest-toast]');
     const nestIndicator = document.querySelector('[data-nest-indicator]');
     const flightRecoveryButton = document.querySelector('[data-flight-recovery]');
+    const boostButton = document.querySelector('[data-boost]');
+    let _boostBtnVisible = false;
+    let _boostBtnCooling = false;
 
     function showNestUI(visible) {
       if (nestUI) {
@@ -5272,12 +5330,20 @@
         showFlightRecoveryButton(false);
         fallTimer = 0;
         if (screenShake?.treeImpact) screenShake.treeImpact();
-        if (preloadedSounds?.nestLand) playFromPool(preloadedSounds.nestLand);
+        // Impact crash uses the explosion thud, not the rocket whoosh (nestLand),
+        // so hitting a tree sounds like a hit rather than a launch.
+        if (preloadedSounds?.explosion) playFromPool(preloadedSounds.explosion);
       } else {
         // GROUNDED — offer the launch button.
         showFlightRecoveryButton(true);
         if (prevState === FLIGHT_RECOVERY_STATES.FALLING && screenShake?.groundLand) {
           screenShake.groundLand();
+        }
+        // Touchdown cue — previously silent (shake only). Soft nestLand thump so
+        // landing/grounding has audible feedback. Only on the fall→ground path
+        // (not when re-hugging the floor while walking).
+        if (prevState === FLIGHT_RECOVERY_STATES.FALLING && preloadedSounds?.nestLand) {
+          playFromPool(preloadedSounds.nestLand);
         }
       }
     }
@@ -7029,6 +7095,28 @@
         e.preventDefault();
         recoverFlight();
       });
+
+      // Boost / dash: forward surge while flying; doubles as takeoff while grounded.
+      if (boostButton) {
+        const triggerBoost = () => {
+          if (!flightController || nestingSystem?.isNested?.()) return;
+          if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
+            recoverFlight(); // on the ground, Boost = take off
+            return;
+          }
+          if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FLYING) return; // not mid-fall
+          if (boostTimer > 0 || boostCooldown > 0) return;
+          boostTimer = BOOST_CONFIG.duration;
+          boostCooldown = BOOST_CONFIG.duration + BOOST_CONFIG.cooldown;
+          if (preloadedSounds?.speedBoost) playFromPool(preloadedSounds.speedBoost);
+          if (statusMetric) statusMetric.textContent = 'Boost!';
+        };
+        boostButton.addEventListener('click', triggerBoost);
+        boostButton.addEventListener('touchend', (e) => {
+          e.preventDefault();
+          triggerBoost();
+        }, { passive: false });
+      }
     }
 
     const AIM_ASSIST_CONFIG = {
@@ -7710,7 +7798,25 @@
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
             flight.speed = FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed;
           } else {
-            flight.speed = resumeSpeed;
+            // Forward boost surges cruise speed; otherwise normal cruise.
+            flight.speed = boostTimer > 0 ? resumeSpeed * BOOST_CONFIG.speedMult : resumeSpeed;
+          }
+        }
+
+        // Boost timers + button UI. Decrement every frame; show the Boost button
+        // only while actually flying (grounded shows the Fly button instead).
+        if (boostTimer > 0) boostTimer = Math.max(0, boostTimer - delta);
+        if (boostCooldown > 0) boostCooldown = Math.max(0, boostCooldown - delta);
+        if (boostButton) {
+          const wantVisible = !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
+          if (wantVisible !== _boostBtnVisible) {
+            boostButton.classList.toggle('is-visible', wantVisible);
+            _boostBtnVisible = wantVisible;
+          }
+          const cooling = boostCooldown > 0;
+          if (cooling !== _boostBtnCooling) {
+            boostButton.classList.toggle('is-cooling', cooling);
+            _boostBtnCooling = cooling;
           }
         }
 
@@ -7758,7 +7864,10 @@
             // Push bird away from the object
             pose.position.copy(collisionResult.correctedPosition);
             flight.position.copy(collisionResult.correctedPosition);
-            if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+            // Boosting = plowing through. Brush the obstacle aside (push above) but
+            // skip the knockdown so a dash punches you out of a thicket instead of
+            // snagging you. Normal flight still gets knocked down on impact.
+            if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING && boostTimer <= 0) {
               applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
               if (statusMetric) {
                 statusMetric.textContent = "Impact! You're going down.";
