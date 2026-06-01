@@ -38,6 +38,11 @@ const NEST_CONFIGS = {
 export const NEST_PROXIMITY_RANGE = 7.0;  // Bird-scale interaction, slightly forgiving for taller objects
 // Range at which nest starts glowing brighter (bigger world = need to see from further)
 export const NEST_GLOW_RANGE = 18.0;
+// Ground (horizontal, great-circle) range at which the "Land" prompt appears.
+// NOT 3D: nests sit high on emergent trees, so a small 3D range would force you to
+// climb right up to the nest just to get the prompt. With ground distance you fly
+// near the tree at any altitude, tap Land, and the system auto-flies you up.
+export const NEST_LAND_RANGE = 24.0;
 
 /**
  * Create a single nest marker with glow effect
@@ -268,13 +273,19 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
       let nearest = null;
       let nearestDistance = Infinity;
 
+      const bLen = birbPosition.length() || 1;
       nests.forEach((nestGroup) => {
         if (!nestGroup.visible) return;
 
         // Get nest's world position (accounts for sphere rotation)
         nestGroup.getWorldPosition(_worldPos);
-        const distance = birbPosition.distanceTo(_worldPos);
-        if (distance < NEST_PROXIMITY_RANGE && distance < nearestDistance) {
+        // GROUND distance (great-circle), not 3D: a nest high on a tall tree still
+        // triggers the Land prompt when you fly near its base at cruise altitude.
+        const nLen = _worldPos.length() || 1;
+        let cos = (birbPosition.x * _worldPos.x + birbPosition.y * _worldPos.y + birbPosition.z * _worldPos.z) / (bLen * nLen);
+        cos = cos < -1 ? -1 : cos > 1 ? 1 : cos;
+        const distance = sphereRadius * Math.acos(cos);
+        if (distance < NEST_LAND_RANGE && distance < nearestDistance) {
           nearest = nestGroup;
           nearestDistance = distance;
         }

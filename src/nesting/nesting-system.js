@@ -15,7 +15,11 @@ export const NESTING_STATES = {
 };
 
 // Auto-fly configuration
-const AUTO_FLY_SPEED = 4.0;
+// Bumped 4 -> 16: the Land prompt now triggers from a generous GROUND range while
+// nests sit high on emergent trees, so the auto-fly swoop has to cover the climb
+// (often ~70+ units) — at the old speed that was a ~20s crawl. The per-frame
+// `Math.min(speed, distance/delta)` cap still prevents overshoot on arrival.
+const AUTO_FLY_SPEED = 16.0;
 const AUTO_FLY_ARRIVAL_THRESHOLD = 0.3;
 const TAKE_OFF_DURATION = 0.5;
 const TAKE_OFF_BOOST = 3.0;
