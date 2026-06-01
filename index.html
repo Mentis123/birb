@@ -4161,6 +4161,7 @@
     const _minimapUp = new THREE.Vector3();
     const _minimapRight = new THREE.Vector3();
     const _minimapDelta = new THREE.Vector3();
+    const _minimapSurf = new THREE.Vector3(); // scratch: target dropped onto the reference sphere (altitude-invariant projection)
     const _minimapNestPos = new THREE.Vector3(); // scratch for per-nest world pos (zero-alloc)
     const _minimapRawPoint = { x: 0, y: 0 };
     const _minimapEdgePoint = { x: 0, y: 0, clamped: false };
@@ -4169,12 +4170,32 @@
     const minimapRingScratch = [];
 
     function projectMinimapPoint(worldPos, birdPos, right, forward, half, scale, out) {
-      _minimapDelta.copy(worldPos).sub(birdPos);
+      // Map by GROUND position, not raw 3D. Drop the target onto the reference
+      // sphere first, so its ALTITUDE (a nest high on a tree, a high drone) can't
+      // push it outward: without this the tangential projection scales with the
+      // target's radius, so a lifted nest reads ~2x too far and piles on the rim.
+      // (The bird's own radius already cancels — right/forward are ⊥ to its up.)
+      _minimapSurf.copy(worldPos);
+      const len = _minimapSurf.length();
+      if (len > 1e-6) _minimapSurf.multiplyScalar(SPHERE_RADIUS / len);
+      _minimapDelta.copy(_minimapSurf).sub(birdPos);
       const rx = _minimapDelta.dot(right);
       const rz = _minimapDelta.dot(forward);
       out.x = half + rx * scale;
       out.y = half - rz * scale;
       return out;
+    }
+
+    // Great-circle ground distance² from the bird to a world position, using the
+    // bird's ground direction (birdUp = normalized birdPos). Altitude-invariant —
+    // a tall nest's radial offset no longer dominates "nearest" / arrow gating.
+    // Zero-allocation (primitives only).
+    function minimapGroundDist2(worldPos, birdUp) {
+      const len = worldPos.length() || 1;
+      let cos = (worldPos.x * birdUp.x + worldPos.y * birdUp.y + worldPos.z * birdUp.z) / len;
+      cos = cos < -1 ? -1 : cos > 1 ? 1 : cos;
+      const arc = SPHERE_RADIUS * Math.acos(cos);
+      return arc * arc;
     }
 
     function clampMinimapPoint(point, half, out) {
@@ -4390,8 +4411,7 @@
             const ng = nestList[i];
             if (!ng || ng.visible === false) continue;
             ng.getWorldPosition(_minimapNestPos);
-            const dx = _minimapNestPos.x - birdPos.x, dy = _minimapNestPos.y - birdPos.y, dz = _minimapNestPos.z - birdPos.z;
-            const d2 = dx * dx + dy * dy + dz * dz;
+            const d2 = minimapGroundDist2(_minimapNestPos, _minimapUp);
             if (d2 < nearD2) { nearD2 = d2; nearIdx = i; }
           }
           // Only arrow reasonably-close off-screen nests, so the rim doesn't fill up.
@@ -4402,8 +4422,7 @@
             const ng = nestList[i];
             if (!ng || ng.visible === false) continue;
             ng.getWorldPosition(_minimapNestPos);
-            const dx = _minimapNestPos.x - birdPos.x, dy = _minimapNestPos.y - birdPos.y, dz = _minimapNestPos.z - birdPos.z;
-            const d2 = dx * dx + dy * dy + dz * dz;
+            const d2 = minimapGroundDist2(_minimapNestPos, _minimapUp);
             const isNearest = (i === nearIdx);
             const raw = projectMinimapPoint(_minimapNestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
             const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
