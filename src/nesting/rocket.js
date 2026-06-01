@@ -8,7 +8,15 @@ const ROCKET_SPEED = 50.0;           // Faster to cover bigger world distances
 const ROCKET_GRAVITY = 8.0;          // Slightly more gravity for satisfying arcs
 const ROCKET_LIFETIME = 8.0;         // Time-based, stays same
 const ROCKET_COOLDOWN = 2.0;         // Gameplay feel, stays same
-const ROCKET_ARM_DISTANCE = 5.0;     // Slightly further to clear taller nests
+// Muzzle-clearance corridor: a rocket ignores SCENERY (tree/canopy/cloud) hits
+// until it is this far — straight line — from its launch point, so a shot fired
+// from a nest always punches clear of the surrounding canopy clutter and heads
+// out toward the target instead of detonating on an invisible foreground frond.
+// Sized to clear a champion grove's overlapping canopies (nest sits inside its
+// own tree-top canopy; champion canopies reach ~18u radius, plus neighbours).
+// Terrain is already excluded from rocket raycasting (sphereGround.raycast = noop),
+// and drones are hit by a SEPARATE proximity check, so this never stops a kill.
+const MUZZLE_CLEAR_RADIUS = 28.0;
 
 /**
  * Create a single rocket mesh
@@ -123,6 +131,7 @@ export function createRocketSystem(THREE, scene, options = {}) {
   const _tempQuat = new THREE.Quaternion();
   const _movementVec = new THREE.Vector3();
   const _rayDirection = new THREE.Vector3();
+  const _gravityVec = new THREE.Vector3();
   const _raycaster = new THREE.Raycaster();
 
   const createExplosion = (position) => {
@@ -249,8 +258,12 @@ export function createRocketSystem(THREE, scene, options = {}) {
 
         const previousPosition = rocket.userData.previousPosition || rocket.position.clone();
 
-        // Apply gravity
-        rocket.userData.velocity.y -= ROCKET_GRAVITY * delta;
+        // Apply gravity toward the planet centre (origin), NOT world-Y. On a
+        // spherical world "down" is radial, so a world-Y pull made shots veer
+        // sideways depending where you stood on the planet. Radial gravity keeps
+        // the arc consistent everywhere and the shot tracking where you aimed.
+        const outward = _gravityVec.copy(rocket.position).normalize();
+        rocket.userData.velocity.addScaledVector(outward, -ROCKET_GRAVITY * delta);
 
         // Update position
         rocket.position.addScaledVector(rocket.userData.velocity, delta);
@@ -260,10 +273,13 @@ export function createRocketSystem(THREE, scene, options = {}) {
         const frameDistance = _movementVec.length();
         rocket.userData.distanceTraveled += frameDistance;
 
-        // Only check collisions after rocket has traveled the arm distance
-        // This prevents immediate explosions when launching from nests on trees/buildings
+        // Hold SCENERY collisions until the rocket has cleared the muzzle corridor
+        // (a straight-line radius around the launch point), so it never detonates
+        // on the nest's own canopy or a neighbouring grove tree right in front of
+        // it. Straight-line (not path length) so a gravity arc can't bank the gate.
+        const distFromLaunch = rocket.position.distanceTo(rocket.userData.launchPosition);
         if (frameDistance > 0 && collisionTargets.length > 0 &&
-            rocket.userData.distanceTraveled > ROCKET_ARM_DISTANCE) {
+            distFromLaunch > MUZZLE_CLEAR_RADIUS) {
           _rayDirection.copy(_movementVec).normalize();
           _raycaster.set(previousPosition, _rayDirection);
           _raycaster.far = frameDistance;
