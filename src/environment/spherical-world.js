@@ -559,9 +559,14 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       // Scale variation with champion / shrimp overrides for dramatic height variation
       let scale;
       const isChampion = championSet.has(t);
-      const isShrimp = shrimpSet.has(t);
-      if (isChampion) {
-        scale = randomInRange(2.6, 3.6); // Towering emergent giant — eye reference
+      // A tree hosts a nest if it's a champion OR lands on the nest interval. Nest
+      // trees are promoted to emergent height so the nest crowns the grove and is
+      // never buried in a neighbour's canopy (restores the "nests on the tallest
+      // trees" intent). A nest tree is therefore never a shrimp.
+      const isNestTree = isChampion || (treeIndex % nestInterval === 0);
+      const isShrimp = shrimpSet.has(t) && !isNestTree;
+      if (isNestTree) {
+        scale = randomInRange(2.6, 3.6); // Towering emergent giant — eye reference / nest host
       } else if (isShrimp) {
         scale = randomInRange(0.5, 0.7); // Undergrowth
       } else {
@@ -588,19 +593,19 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
         championTopPos = pos;
       }
 
-      // Nest positions — on the tallest trees in each grove.
-      // No per-tree host object now (trees are instanced); nests attach via world
-      // position only which is what the nest system uses anyway.
-      if (treeIndex % nestInterval === 0 || isChampion) {
-        const nestPos = pos.clone().add(up.clone().multiplyScalar(treeTopOffset));
-        if (treeIndex % nestInterval === 0) {
-          nestablePositions.push({
-            position: nestPos,
-            surfaceNormal: up.clone(),
-            hostObject: null,
-          });
-        }
-        // Champions are proximity targets (whoosh cue)
+      // Nest positions — on the (now emergent) nest trees, sat ABOVE the canopy
+      // crown + clearance rather than nestled inside the foliage, so every nest
+      // reads in the open and the approach from above is clear. Champions are
+      // included as hosts, which also lifts the overall nest count.
+      if (isNestTree) {
+        const nestHeight = (trunkHeight + canopyHeight) * scale + 3.0; // clear of the crown
+        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
+        nestablePositions.push({
+          position: nestPos,
+          surfaceNormal: up.clone(),
+          hostObject: null,
+        });
+        // Champions also fire the proximity whoosh cue.
         if (isChampion && proximityTargets) {
           proximityTargets.push({
             position: nestPos.clone(),
@@ -1573,10 +1578,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       collisionSystem.addCollider(pineCanopyCenter, canopyR * scale * 0.95, 'pine');
       const topOffset = (trunkH + canopyH * 0.85) * scale;
       if (topOffset > maxTopOffset) maxTopOffset = topOffset;
-      // Champion pine hosts a nest — adds a low-altitude nesting layer that
-      // pine groves never had before.
+      // Champion pine hosts a nest — sat above the canopy crown (+ clearance) so it
+      // crowns the pine instead of hiding inside the needles.
       if (t === championIdx) {
-        const pineNestPos = pos.clone().add(up.clone().multiplyScalar(topOffset));
+        const pineNestHeight = (trunkH + canopyH) * scale + 2.5;
+        const pineNestPos = pos.clone().add(up.clone().multiplyScalar(pineNestHeight));
         nestablePositions.push({ position: pineNestPos, surfaceNormal: up.clone(), hostObject: null });
       }
     }
