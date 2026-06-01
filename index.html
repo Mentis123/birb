@@ -8241,6 +8241,9 @@
       statusMetric.textContent = "Ready to fly! Use touch controls or arrow keys.";
     }
 
+    // Remembers whether the ambient track was playing when the page went to the
+    // background, so we only resume it on return if it was actually on.
+    let _ambientWasPlaying = false;
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         previousTime = null;
@@ -8250,8 +8253,26 @@
         if (fpsMetric) {
           fpsMetric.textContent = "--";
         }
+        // Stop all looping audio so the music/hum don't keep playing on the phone
+        // after you leave the browser (tab switch, app switch, screen lock). HTML5
+        // Audio elements run independently of the render loop, so pausing the loop
+        // above is not enough — pause the looping sounds explicitly.
+        if (continuousSounds.ambient) {
+          _ambientWasPlaying = !continuousSounds.ambient.paused;
+          continuousSounds.ambient.pause();
+        }
+        if (continuousSounds.droneHum) continuousSounds.droneHum.pause();
+        if (continuousSounds.wind) continuousSounds.wind.pause();
       } else {
         flightControls.reset();
+        // Back in the foreground — resume the loops we paused, if appropriate.
+        if (_ambientWasPlaying && soundSettings.musicEnabled) {
+          setAmbientMusic(true);
+        }
+        if (audioUnlocked) {
+          if (continuousSounds.droneHum) continuousSounds.droneHum.play().catch(() => {});
+          if (continuousSounds.wind) continuousSounds.wind.play().catch(() => {});
+        }
       }
       // Only resume the animation loop if the game was already started —
       // never kick it off from a visibility-change while the user is still
