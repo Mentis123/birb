@@ -698,12 +698,14 @@
     }
 
     /* Boost / dash button — forward surge to punch through thickets and cover
-       ground. Bottom-right thumb position; only the nested-only takeoff button
-       shares that corner, so they never overlap. */
+       ground. Bottom-CENTRE: it shows only while flying, and the "Fly" recovery
+       button (grounded) and launch button (nested) occupy that spot only when
+       boost is hidden, so they never overlap — one consistent action position. */
     .boost-button {
       position: absolute;
       bottom: clamp(1rem, 4vw, 2rem);
-      right: clamp(1rem, 4vw, 2rem);
+      left: 50%;
+      transform: translateX(-50%);
       min-width: clamp(70px, 18vw, 96px);
       height: clamp(54px, 13vw, 66px);
       padding: 0 clamp(0.8rem, 2.6vw, 1.2rem);
@@ -736,7 +738,7 @@
     }
 
     .boost-button:active {
-      transform: scale(0.93);
+      transform: translateX(-50%) scale(0.93);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     }
 

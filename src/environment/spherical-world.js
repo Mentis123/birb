@@ -265,11 +265,18 @@ function fbm(x, y, z, octaves = 5, lacunarity = 2.0, persistence = 0.5) {
 //  - continentScale/continentAmplitude: low-frequency CONTINENTAL layer that
 //    creates broad highlands and deep valleys/canyons you fly over and into.
 const TERRAIN_PROFILES = {
-  forest:   { scale: 0.05,  amplitude: 11, octaves: 5, persistence: 0.45, lacunarity: 2.1, continentScale: 0.013, continentAmplitude: 22 },
-  canyons:  { scale: 0.035, amplitude: 16, octaves: 4, persistence: 0.55, lacunarity: 2.3, continentScale: 0.012, continentAmplitude: 34 },
-  mountain: { scale: 0.03,  amplitude: 22, octaves: 6, persistence: 0.5,  lacunarity: 2.0, continentScale: 0.011, continentAmplitude: 36 },
-  city:     { scale: 0.07,  amplitude: 4,  octaves: 3, persistence: 0.35, lacunarity: 2.0, continentScale: 0.015, continentAmplitude: 12 },
+  forest:   { scale: 0.05,  amplitude: 13, octaves: 5, persistence: 0.45, lacunarity: 2.1, continentScale: 0.013, continentAmplitude: 26 },
+  canyons:  { scale: 0.035, amplitude: 18, octaves: 4, persistence: 0.55, lacunarity: 2.3, continentScale: 0.012, continentAmplitude: 40 },
+  mountain: { scale: 0.03,  amplitude: 24, octaves: 6, persistence: 0.5,  lacunarity: 2.0, continentScale: 0.011, continentAmplitude: 42 },
+  city:     { scale: 0.07,  amplitude: 5,  octaves: 3, persistence: 0.35, lacunarity: 2.0, continentScale: 0.015, continentAmplitude: 15 },
 };
+
+// Cliff-face shaping. The continental carve is pushed through tanh so the
+// transition from highland plateau to valley floor reads as a steep FACE — and
+// the plateau tops and valley floors flatten out — rather than a soft gradient.
+// Mesa / canyon look instead of rolling blobs. Higher = sharper faces.
+const FACE_STEEPNESS = 2.7;
+const TANH_FACE_NORM = Math.tanh(FACE_STEEPNESS);
 
 // Combined terrain displacement at a unit direction (nx,ny,nz): medium-frequency
 // detail (local roughness) + a broad low-frequency continental layer (deep
@@ -289,12 +296,15 @@ function terrainDisplacement(nx, ny, nz, profile) {
   let cont = 0;
   if (profile.continentAmplitude) {
     const cs = profile.continentScale;
-    // Math.min(0, ...) → broad continental carve (valleys/canyons), never raised.
-    cont = Math.min(0, fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5)) * profile.continentAmplitude;
+    const c = fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5); // ~[-1, 1]
+    // Carve only where c < 0, steepened by tanh into a cliff FACE: plateau above
+    // (flat), valley floor below (flat), a sharp face between. Never raised.
+    const carve = c < 0 ? -Math.tanh(-FACE_STEEPNESS * c) / TANH_FACE_NORM : 0; // [-1, 0]
+    cont = carve * profile.continentAmplitude;
   }
-  // Clamp the COMBINED height to <= 0. Detail textures the carved walls/floors and
-  // dimples the plateau, but the plateau itself is the ceiling — nothing rises
-  // above the base radius. (See invariant above.)
+  // Clamp the COMBINED height to <= 0 (downward-only — preserves the flight-floor
+  // invariant). Detail textures the cliff faces/floors and dimples the plateau,
+  // but the plateau itself is the ceiling — nothing rises above the base radius.
   return Math.min(0, cont + detail);
 }
 
@@ -484,7 +494,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // Further reduced to avoid "tree walls" and heavy overlap on mobile.
   // With fibonacci distribution on sphereRadius=120, 8 groves gives
   // ~125-unit average centre-to-centre spacing.
-  const groveCount = _isMobile() ? 8 : 10;
+  const groveCount = _isMobile() ? 9 : 12;
   const groveCenters = fibonacciSpherePoints(groveCount, sphereRadius);
 
   // Pre-collect ceiling placements; we'll build one InstancedMesh after the loop.
@@ -663,7 +673,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // away, but groves sit ~125u apart, so most views land in an empty gap. These
   // evenly-distributed singles guarantee trees are always in view. They ride the
   // SAME trunk + canopy InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterTreeCount = _isMobile() ? 190 : 300;
+  const scatterTreeCount = _isMobile() ? 270 : 420;
   const scatterTreePoints = fibonacciSpherePoints(scatterTreeCount, sphereRadius);
   for (let i = 0; i < scatterTreePoints.length; i++) {
     const sp = scatterTreePoints[i];
@@ -1598,7 +1608,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // --- Global pine scatter — fills the bare valleys BETWEEN ranges/groves so the
   // mountain floor reads as a wooded landscape, not bare rock. Rides the SAME pine
   // trunk + canopy InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterPineCount = _isMobile() ? 150 : 240;
+  const scatterPineCount = _isMobile() ? 210 : 320;
   const scatterPinePoints = fibonacciSpherePoints(scatterPineCount, sphereRadius);
   for (let i = 0; i < scatterPinePoints.length; i++) {
     const sp = scatterPinePoints[i];
