@@ -1452,9 +1452,10 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const mtnMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
       collisionSystem.addCollider(mtnMid, baseRadius * scale * 0.55, 'mountain');
 
-      // Nest on peaks. Baseline: every 4th peak. Champions get a nest only ~1/3
-      // of the time and sit at 0.55× scaled height so they're reachable rather
-      // than floating at the unreachable apex. hostObject = null (instanced).
+      // Nest on peaks. Baseline: every 3rd peak (height-gated). Champions always
+      // host (landmark) and sit at 0.55× scaled height so they're reachable rather
+      // than floating at the unreachable apex. The tryAddNest spacing gate stops
+      // same-range peaks from knotting nests. hostObject = null (instanced).
       const wantsBaselineNest = peakIndex % 3 === 0 && height > 28;
       const wantsChampionNest = isChampion;
       if (wantsBaselineNest || wantsChampionNest) {
@@ -2035,9 +2036,10 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
       const towerMid = pos.clone().add(up.clone().multiplyScalar(height * 0.5));
       collisionSystem.addCollider(towerMid, Math.max(width, depth) * 0.65, 'tower');
 
-      // Nest on buildings. Baseline: every 6th building. Champion towers
-      // (140-190u) get a nest only ~1/3 of the time and sit at 0.5× height so
-      // they're approachable. hostObject = null (instanced).
+      // Nest on buildings. Baseline: every 4th building (height-gated). Champion
+      // towers (170-240u) always host and sit at 0.5× height so they're
+      // approachable. The tryAddNest spacing gate stops the block's tight grid
+      // from knotting nests; the scatter pass spreads the rest. hostObject = null.
       const wantsBaselineNest = buildingIndex % 4 === 0 && height > 30;
       const wantsChampionNest = b === championIdx;
       if (wantsBaselineNest || wantsChampionNest) {
