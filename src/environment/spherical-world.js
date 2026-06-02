@@ -204,6 +204,28 @@ function angularDistance(thetaA, phiA, thetaB, phiB) {
   return Math.acos(Math.max(-1, Math.min(1, dot)));
 }
 
+// Push a nest ONLY if no existing nest is within `minWorldDist` world units.
+// This is the fix for "nests are too clumped": the non-forest biomes used to
+// emit nests straight off their tightly-packed cluster props (ridges/ranges/
+// blocks), so 2-5 nests knotted together while the evenly-distributed scatter
+// layer that actually fills the playfield got none. Routing every nest through
+// this spacing gate — for BOTH cluster props and a new scatter-prop pass —
+// gives an even, findable spread instead of distant knots. O(n²) over the small
+// nest list (~20-40), runs once at world build, zero per-frame cost. `position`
+// and `surfaceNormal` are retained by reference, so callers pass clones.
+function tryAddNest(nestablePositions, position, surfaceNormal, minWorldDist, hostObject = null) {
+  const md2 = minWorldDist * minWorldDist;
+  for (let i = 0; i < nestablePositions.length; i++) {
+    if (nestablePositions[i].position.distanceToSquared(position) < md2) return false;
+  }
+  nestablePositions.push({ position, surfaceNormal, hostObject });
+  return true;
+}
+
+// Even, world-spanning nest spacing (radius-120 sphere; horizon ≈ 44u). ~34u
+// keeps at most ~1 nest per horizon view — present and findable, never knotted.
+const NEST_MIN_SPACING = 34;
+
 // ============================================================
 // Simplex-like noise for terrain displacement (CPU-side)
 // Uses a hash-based approach for no-dependency noise generation
@@ -1036,15 +1058,16 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const spireMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
       collisionSystem.addCollider(spireMid, baseRadius * scale * 0.65, 'spire');
 
-      // Nests on spires — every 6th spire for reliable coverage.
-      // Champion spires (scale 2.2-2.9) place the nest at 0.6× height so it's
-      // visible from below without being unreachable. hostObject = null since
-      // spires are rendered via InstancedMesh; nest system uses world position.
-      if (spireIndex % 4 === 0 && height > 24) {
-        const isChamp = s === championIdx;
+      // Landmark nests on the cluster spires — champion spires always (placed at
+      // 0.6× height so they're visible from below without being unreachable),
+      // plus every 4th tall spire. The global spacing gate (tryAddNest) stops the
+      // ridge's tightly-packed spires from knotting nests together; the scatter
+      // pass below spreads the rest across the open floor between ridges.
+      const isChamp = s === championIdx;
+      if (isChamp || (spireIndex % 4 === 0 && height > 24)) {
         const nestHeight = isChamp ? (height * scale) * 0.6 + 1 : height * scale + 1;
         const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
+        tryAddNest(nestablePositions, nestPos, up.clone(), NEST_MIN_SPACING);
       }
 
       if (s === championIdx && proximityTargets) {
@@ -1076,6 +1099,12 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     collisionSystem.addCollider(pos, Math.min(baseRadius * scale * 0.8, 6.0), 'spire');
     const scatterSpireMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
     collisionSystem.addCollider(scatterSpireMid, baseRadius * scale * 0.65, 'spire');
+    // Scatter nests: piggyback on the evenly-distributed scatter spires so nests
+    // span the open floor between ridges, not just the ridges. Spacing-gated.
+    if (i % 9 === 0 && height > 30) {
+      const nestPos = pos.clone().add(up.clone().multiplyScalar(height * scale + 1));
+      tryAddNest(nestablePositions, nestPos, up.clone(), NEST_MIN_SPACING);
+    }
   }
 
   // Build InstancedMesh per material bucket.
@@ -1234,9 +1263,9 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       dummy.updateMatrix();
       archInst.setMatrixAt(i, dummy.matrix);
       collisionSystem.addCollider(pos, 6 * s, 'arch');
-      // Nest atop each arch — landmark nests in flyable mid-airspace.
+      // Nest atop each arch — landmark nests in flyable mid-airspace (spacing-gated).
       const archNestPos = pos.clone().add(up.clone().multiplyScalar(8 * s));
-      nestablePositions.push({ position: archNestPos, surfaceNormal: up.clone(), hostObject: null });
+      tryAddNest(nestablePositions, archNestPos, up.clone(), NEST_MIN_SPACING);
     }
     archInst.instanceMatrix.needsUpdate = true;
     archInst.computeBoundingSphere();
@@ -1300,6 +1329,51 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     root.add(needleInst);
   }
 
+  // --- Mesas / plateaus (instanced) — the canyon's missing signature landform.
+  // Broad flat-topped buttes with a gentle eroded batter (top radius 0.82×base).
+  // Mix of low skimmable buttes and tall plateau landmarks; the flat tops are
+  // ideal nest perches (a real surface, not a floating dot). Solid colliders at
+  // base + mid (capped so the no-fly bubble stays sane). 1 InstancedMesh.
+  const mesaCount = _isMobile() ? 12 : 20;
+  const mesaPoints = fibonacciSpherePoints(mesaCount, sphereRadius);
+  if (mesaPoints.length > 0) {
+    const mesaMat = new THREE.MeshLambertMaterial({ color: 0x9a5230, flatShading: true });
+    const mesaGeom = new THREE.CylinderGeometry(0.82, 1.0, 1.0, 10, 1);
+    mesaGeom.translate(0, 0.5, 0);
+    const mesaInst = new THREE.InstancedMesh(mesaGeom, mesaMat, mesaPoints.length);
+    mesaInst.name = 'canyon-mesas';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const yawQ = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < mesaPoints.length; i++) {
+      const mp = mesaPoints[i];
+      const pos = placeOnSphere(THREE, sphereRadius, mp.theta + randomInRange(-0.06, 0.06), mp.phi + randomInRange(-0.04, 0.04), 0);
+      const up = pos.clone().normalize();
+      const radius = randomInRange(11, 22);
+      const mesaH = Math.random() < 0.4 ? randomInRange(14, 26) : randomInRange(30, 56);
+      orientQ.setFromUnitVectors(defaultUp, up);
+      yawQ.setFromAxisAngle(yAxis, Math.random() * Math.PI);
+      orientQ.multiply(yawQ);
+      dummy.position.copy(pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(radius, mesaH, radius);
+      dummy.updateMatrix();
+      mesaInst.setMatrixAt(i, dummy.matrix);
+      collisionSystem.addCollider(pos, Math.min(radius * 0.85, 12), 'mesa');
+      const mesaMid = pos.clone().add(up.clone().multiplyScalar(mesaH * 0.5));
+      collisionSystem.addCollider(mesaMid, Math.min(radius * 0.7, 10), 'mesa');
+      const mesaNestPos = pos.clone().add(up.clone().multiplyScalar(mesaH + 2));
+      tryAddNest(nestablePositions, mesaNestPos, up.clone(), NEST_MIN_SPACING);
+      if (radius > 18 && proximityTargets) {
+        proximityTargets.push({ position: pos.clone().addScaledVector(up, mesaH + 2), radius: 16, tint: 0xffc090 });
+      }
+    }
+    mesaInst.instanceMatrix.needsUpdate = true;
+    mesaInst.computeBoundingSphere();
+    root.add(mesaInst);
+  }
+
   return nestablePositions;
 }
 
@@ -1329,14 +1403,14 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // --- Mountain ranges (clusters of peaks) ---
   // Fuller horizon of ridgelines (desktop 9 / mobile 7 — both > the old 6); wide
   // rangeSpread keeps them discrete. Peaks render via 2 InstancedMesh (body+snow).
-  const rangeCount = _isMobile() ? 7 : 9;
+  const rangeCount = _isMobile() ? 8 : 11;
   const rangeCenters = fibonacciSpherePoints(rangeCount, sphereRadius);
   const peakPlacements = []; // { pos, up, height, baseRadius, scale, rotX, rotZ }
   const snowPlacements = []; // { pos, up, height, baseRadius, scale, snowHeight, rotX, rotZ }
   let peakIndex = 0;
 
   rangeCenters.forEach((range, rIdx) => {
-    const peaksInRange = Math.floor(randomInRange(_isMobile() ? 3 : 4, _isMobile() ? 6 : 8));
+    const peaksInRange = Math.floor(randomInRange(_isMobile() ? 4 : 5, _isMobile() ? 7 : 9));
     // Slightly wider spread so peaks aren't stacked
     const rangeSpread = randomInRange(0.05, 0.09);
     const rangeAngle = Math.random() * Math.PI;
@@ -1366,7 +1440,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       else scale = randomInRange(1.0, 1.4);
 
       peakPlacements.push({ pos, up, height, baseRadius, scale, rotX, rotZ });
-      if (height > 35) {
+      if (height > 30) {
         snowPlacements.push({
           pos, up, height, baseRadius, scale,
           snowHeight: randomInRange(5, 12),
@@ -1382,13 +1456,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       // of the time and sit at 0.55× scaled height so they're reachable rather
       // than floating at the unreachable apex. hostObject = null (instanced).
       const wantsBaselineNest = peakIndex % 3 === 0 && height > 28;
-      const wantsChampionNest = isChampion && Math.random() < 0.55;
+      const wantsChampionNest = isChampion;
       if (wantsBaselineNest || wantsChampionNest) {
         const nestHeight = wantsChampionNest
           ? (height * scale) * 0.55 + 2
           : (height + 2) * scale;
         const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
+        tryAddNest(nestablePositions, nestPos, up.clone(), NEST_MIN_SPACING);
       }
 
       if (isChampion && proximityTargets) {
@@ -1559,7 +1633,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // as distinct clusters. PERF: trunks + canopies batched via 2 InstancedMesh.
   const pineTrunkPlacements = []; // { pos, up, trunkH, scale }
   const pineCanopyPlacements = []; // { pos, up, canopyH, canopyR, trunkH, scale }
-  const pineGroveCount = _isMobile() ? 6 : 8;
+  const pineGroveCount = _isMobile() ? 7 : 10;
   const pineGroveCenters = fibonacciSpherePoints(pineGroveCount, sphereRadius);
 
   pineGroveCenters.forEach((grove) => {
@@ -1607,7 +1681,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       if (t === championIdx) {
         const pineNestHeight = (trunkH + canopyH) * scale + 2.5;
         const pineNestPos = pos.clone().add(up.clone().multiplyScalar(pineNestHeight));
-        nestablePositions.push({ position: pineNestPos, surfaceNormal: up.clone(), hostObject: null });
+        tryAddNest(nestablePositions, pineNestPos, up.clone(), NEST_MIN_SPACING);
       }
     }
     if (maxTopOffset > 8) {
@@ -1647,6 +1721,14 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
     const scatterPineCanopy = pos.clone().add(up.clone().multiplyScalar((trunkH + canopyH * 0.5) * scale));
     collisionSystem.addCollider(scatterPineCanopy, canopyR * scale * 0.95, 'pine');
+    // Scatter nests ON the scatter pines — puts nests on actual trees across the
+    // wooded valleys (directly addresses "nests not on the trees"), spread evenly
+    // by the fibonacci layout + spacing gate. Only the larger valley pines (low
+    // exposure) qualify so the nest crowns a real tree, not a dwarfed ridge stub.
+    if (i % 11 === 0 && exposure < 0.5 && scale > 1.2) {
+      const pineNestPos = pos.clone().add(up.clone().multiplyScalar((trunkH + canopyH) * scale + 2.5));
+      tryAddNest(nestablePositions, pineNestPos, up.clone(), NEST_MIN_SPACING);
+    }
   }
 
   // Build pine trunk InstancedMesh. Unit cylinder: top 0.3, bottom 0.6, height 1.
@@ -1785,6 +1867,46 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     root.add(screeInst);
   }
 
+  // --- Rock crags (instanced) — thin, sharp grey spires jutting up between the
+  // rounded peaks. Adds alpine verticality and threadable gaps ("more" for the
+  // ranges). Anchored near peak placements so they read as part of the massif,
+  // not random litter. Solid mid collider; 1 draw call.
+  const cragCount = _isMobile() ? 18 : 34;
+  if (peakPlacements.length > 0) {
+    const cragGeom = new THREE.ConeGeometry(0.5, 1, 5);
+    cragGeom.translate(0, 0.5, 0);
+    const cragMat = new THREE.MeshLambertMaterial({ color: 0x6b7280, flatShading: true });
+    const cragInst = new THREE.InstancedMesh(cragGeom, cragMat, cragCount);
+    cragInst.name = 'mountain-crags';
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const tiltEuler = new THREE.Euler();
+    const tiltQ = new THREE.Quaternion();
+    for (let i = 0; i < cragCount; i++) {
+      const anchor = peakPlacements[Math.floor(Math.random() * peakPlacements.length)];
+      const theta = Math.atan2(anchor.up.z, anchor.up.x) + randomInRange(-0.06, 0.06);
+      const phi = Math.acos(Math.max(-1, Math.min(1, anchor.up.y))) + randomInRange(-0.04, 0.04);
+      const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
+      const up = pos.clone().normalize();
+      orientQ.setFromUnitVectors(defaultUp, up);
+      tiltEuler.set(randomInRange(-0.1, 0.1), 0, randomInRange(-0.1, 0.1));
+      tiltQ.setFromEuler(tiltEuler);
+      orientQ.multiply(tiltQ);
+      const r = randomInRange(2.5, 5);
+      const h = randomInRange(30, 70);
+      dummy.position.copy(pos);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(r, h, r);
+      dummy.updateMatrix();
+      cragInst.setMatrixAt(i, dummy.matrix);
+      const cragMid = pos.clone().add(up.clone().multiplyScalar(h * 0.5));
+      collisionSystem.addCollider(cragMid, r * 0.6, 'crag');
+    }
+    cragInst.instanceMatrix.needsUpdate = true;
+    cragInst.computeBoundingSphere();
+    root.add(cragInst);
+  }
+
   // --- Mist clouds — instanced puffs (1 draw call; was up to 54). Stay SOLID. ---
   const cloudMat = new THREE.MeshLambertMaterial({ color: 0xe7eef9, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.6, flatShading: true });
   const mtnCloudCount = _isMobile() ? 4 : 18;
@@ -1843,10 +1965,16 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x74d4ff, transparent: true, opacity: 0.15 });
   const antennaMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
 
+  // Cyberpunk neon palette — magenta / cyan / lime / amber. Used for per-instance
+  // colored emissive fins (via InstancedMesh.instanceColor → still 1 draw call).
+  const NEON_COLORS = [0xff2d95, 0x21e6ff, 0x9dff3c, 0xff7b2d, 0xb14bff];
+  const _neonColor = new THREE.Color();
+  const neonPlacements = []; // { pos, up, yaw, height, width, depth, colorIdx }
+
   // --- City blocks (clusters of buildings in rough grids) ---
   // PERF: ~150 buildings × (body + glow + maybe antenna) = ~300-450 draw calls.
   // Instance by material: 3 body buckets + 1 glow + 1 antenna = 5 InstancedMesh.
-  const blockCount = _isMobile() ? 11 : 13;
+  const blockCount = _isMobile() ? 13 : 16;
   const blockCenters = fibonacciSpherePoints(blockCount, sphereRadius);
 
   // Per-mat buckets for building bodies.
@@ -1911,11 +2039,16 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
       // (140-190u) get a nest only ~1/3 of the time and sit at 0.5× height so
       // they're approachable. hostObject = null (instanced).
       const wantsBaselineNest = buildingIndex % 4 === 0 && height > 30;
-      const wantsChampionNest = b === championIdx && Math.random() < 0.34;
+      const wantsChampionNest = b === championIdx;
       if (wantsBaselineNest || wantsChampionNest) {
         const nestHeight = wantsChampionNest ? height * 0.5 + 1 : height + 1;
         const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
+        tryAddNest(nestablePositions, nestPos, up.clone(), NEST_MIN_SPACING);
+      }
+
+      // Cyberpunk neon: a glowing vertical fin on a face of tall towers.
+      if (height > 45 && Math.random() < 0.5) {
+        neonPlacements.push({ pos, up, yaw, height, width, depth, colorIdx: Math.floor(Math.random() * NEON_COLORS.length) });
       }
 
       if (b === championIdx && proximityTargets) {
@@ -1958,13 +2091,13 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   // --- Global building scatter — fills the gaps BETWEEN city blocks so the
   // surface reads as continuous urban sprawl, not a few isolated downtowns.
   // Rides the SAME body InstancedMeshes (zero new draw calls). Mobile-gated.
-  const scatterBldgCount = _isMobile() ? 150 : 250;
+  const scatterBldgCount = _isMobile() ? 180 : 300;
   const scatterBldgPoints = fibonacciSpherePoints(scatterBldgCount, sphereRadius);
   for (let i = 0; i < scatterBldgPoints.length; i++) {
     const sp = scatterBldgPoints[i];
     const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.04, 0.04), sp.phi + randomInRange(-0.04, 0.04), 0);
     const up = pos.clone().normalize();
-    const height = randomInRange(12, 60);
+    const height = randomInRange(12, 70);
     const width = randomInRange(3, 6);
     const depth = randomInRange(3, 6);
     const yaw = Math.random() * Math.PI * 0.5;
@@ -1974,6 +2107,16 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     collisionSystem.addCollider(pos, Math.max(width, depth) * 0.6, 'tower');
     const scatterTowerMid = pos.clone().add(up.clone().multiplyScalar(height * 0.5));
     collisionSystem.addCollider(scatterTowerMid, Math.max(width, depth) * 0.65, 'tower');
+    // Scatter rooftop nests across the sprawl between blocks (spacing-gated) and a
+    // neon fin on the taller scatter towers so the whole skyline glows, not just
+    // the downtown blocks.
+    if (i % 10 === 0 && height > 35) {
+      const nestPos = pos.clone().add(up.clone().multiplyScalar(height + 1));
+      tryAddNest(nestablePositions, nestPos, up.clone(), NEST_MIN_SPACING);
+    }
+    if (height > 42 && Math.random() < 0.4) {
+      neonPlacements.push({ pos, up, yaw, height, width, depth, colorIdx: Math.floor(Math.random() * NEON_COLORS.length) });
+    }
   }
 
   for (let mi = 0; mi < bodyPlacementsByMat.length; mi++) {
@@ -2027,7 +2170,70 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     antennaInst.computeBoundingSphere();
     root.add(antennaInst);
   }
-  console.log(`[City] ${buildingIndex} buildings in ${blockCount} blocks (instanced), ${nestablePositions.length} nests`);
+
+  // --- Antenna beacon tips (instanced, instanceColor) — small glowing lights at
+  // the top of every rooftop antenna; red/cyan aircraft-warning vibe that reads
+  // as a living cyberpunk skyline. Unlit (MeshBasic) so they pop in the dark. ---
+  if (antennaPlacements.length > 0) {
+    const beaconGeom = new THREE.IcosahedronGeometry(1, 0);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const beaconInst = new THREE.InstancedMesh(beaconGeom, beaconMat, antennaPlacements.length);
+    beaconInst.name = 'city-antenna-beacons';
+    beaconInst.raycast = () => {};
+    const dummy = new THREE.Object3D();
+    const upShift = new THREE.Vector3();
+    for (let i = 0; i < antennaPlacements.length; i++) {
+      const p = antennaPlacements[i];
+      upShift.copy(p.up).multiplyScalar(p.height + p.antennaH);
+      dummy.position.copy(p.pos).add(upShift);
+      dummy.scale.setScalar(randomInRange(1.0, 1.8));
+      dummy.updateMatrix();
+      beaconInst.setMatrixAt(i, dummy.matrix);
+      beaconInst.setColorAt(i, _neonColor.setHex(i % 2 === 0 ? 0xff3344 : 0x40e0ff));
+    }
+    beaconInst.instanceMatrix.needsUpdate = true;
+    if (beaconInst.instanceColor) beaconInst.instanceColor.needsUpdate = true;
+    beaconInst.computeBoundingSphere();
+    root.add(beaconInst);
+  }
+
+  // --- Neon fins (instanced, instanceColor) — glowing vertical strips on tower
+  // faces, the signature cyberpunk pop. Per-instance color keeps the whole
+  // magenta/cyan/lime/amber palette in ONE draw call. Unlit + collider-free. ---
+  if (neonPlacements.length > 0) {
+    const neonGeom = new THREE.BoxGeometry(1, 1, 1);
+    const neonMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 });
+    const neonInst = new THREE.InstancedMesh(neonGeom, neonMat, neonPlacements.length);
+    neonInst.name = 'city-neon-fins';
+    neonInst.renderOrder = 2;
+    neonInst.raycast = () => {};
+    const dummy = new THREE.Object3D();
+    const orientQ = new THREE.Quaternion();
+    const yawQ = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const rightLocal = new THREE.Vector3();
+    const offset = new THREE.Vector3();
+    for (let i = 0; i < neonPlacements.length; i++) {
+      const p = neonPlacements[i];
+      orientQ.setFromUnitVectors(defaultUp, p.up);
+      yawQ.setFromAxisAngle(yAxis, p.yaw);
+      orientQ.multiply(yawQ);
+      rightLocal.set(1, 0, 0).applyQuaternion(orientQ);
+      // Center at half height, pushed onto the +X face of the tower.
+      offset.copy(p.up).multiplyScalar(p.height * 0.5).addScaledVector(rightLocal, p.width * 0.55);
+      dummy.position.copy(p.pos).add(offset);
+      dummy.quaternion.copy(orientQ);
+      dummy.scale.set(0.4, p.height * 0.82, Math.max(1.2, p.depth * 0.85));
+      dummy.updateMatrix();
+      neonInst.setMatrixAt(i, dummy.matrix);
+      neonInst.setColorAt(i, _neonColor.setHex(NEON_COLORS[p.colorIdx]));
+    }
+    neonInst.instanceMatrix.needsUpdate = true;
+    if (neonInst.instanceColor) neonInst.instanceColor.needsUpdate = true;
+    neonInst.computeBoundingSphere();
+    root.add(neonInst);
+  }
+  console.log(`[City] ${buildingIndex} buildings in ${blockCount} blocks (instanced), ${neonPlacements.length} neon fins, ${nestablePositions.length} nests`);
 
   // --- Rooftop clutter: vents/tanks on tall building tops (instanced, collider-free) ---
   // Reuses the building unit box + the already-collected placements (glowPlacements
@@ -2096,12 +2302,13 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   }
 
   // --- Hover vehicles between buildings (instanced; mobile holds count low) ---
-  const hoverCount = _isMobile() ? 14 : 38;
-  const hoverMat = new THREE.MeshLambertMaterial({
-    color: 0x6cc4ff,
-    // Keep transparent on both (looks better), but low opacity = cheap blend.
+  // Neon traffic — denser, and unlit (MeshBasic) + per-instance color so the
+  // hover rings read as glowing cyberpunk skylanes in the dark. 1 draw call.
+  const hoverCount = _isMobile() ? 20 : 52;
+  const hoverMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.75,
   });
   if (hoverCount > 0) {
     const hoverGeom = new THREE.TorusGeometry(1.5, 0.3, 6, 12);
@@ -2120,8 +2327,10 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
       dummy.scale.setScalar(randomInRange(2.0, 4.2));
       dummy.updateMatrix();
       hoverInst.setMatrixAt(i, dummy.matrix);
+      hoverInst.setColorAt(i, _neonColor.setHex(NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)]));
     }
     hoverInst.instanceMatrix.needsUpdate = true;
+    if (hoverInst.instanceColor) hoverInst.instanceColor.needsUpdate = true;
     hoverInst.computeBoundingSphere();
     root.add(hoverInst);
   }
