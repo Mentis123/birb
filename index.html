@@ -7845,7 +7845,7 @@
         // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
         pose = flight.tick(resolvedInput, delta);
 
-        if (!isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
+        if (!nestingControlsBird && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
           fallTimer += delta;
           // Linear ramp from 1× → 3× over FALL_RAMP_DURATION seconds, then hold.
           const rampT = Math.min(fallTimer / FALL_RAMP_DURATION, 1);
@@ -7870,8 +7870,16 @@
         }
 
         // 2b. Object Collision Detection (trees, rocks, etc.)
-        // Only check when flying (not nested) and collision system exists
-        if (!isNested && sphericalWorld?.collisionSystem) {
+        // Only check while the bird is flying under its OWN control. Skip it whenever
+        // the nesting system is hand-flying the bird (LANDING) or holding it put
+        // (NESTED) — `nestingControlsBird` covers both. This is load-bearing for
+        // nest landings: nests crown emergent trees, so the auto-fly climb passes
+        // straight through the host tree's canopy collider. With only the old
+        // `!isNested` guard, that collision fired mid-LANDING, knocked the bird into
+        // FALLING and pushed it away, so the auto-fly never converged and you never
+        // reached the nest view. Gating on `!nestingControlsBird` lets the swoop
+        // climb cleanly to the treetop nest.
+        if (!nestingControlsBird && sphericalWorld?.collisionSystem) {
           const birdRadius = FLIGHT_RECOVERY_CONFIG.birdRadius; // Bird collision radius
           const collisionResult = sphericalWorld.collisionSystem.checkObjectCollision(
             THREE,
