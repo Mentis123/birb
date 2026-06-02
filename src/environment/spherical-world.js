@@ -271,12 +271,24 @@ const TERRAIN_PROFILES = {
   city:     { scale: 0.07,  amplitude: 5,  octaves: 3, persistence: 0.35, lacunarity: 2.0, continentScale: 0.015, continentAmplitude: 15 },
 };
 
-// Cliff-face shaping. The continental carve is pushed through tanh so the
-// transition from highland plateau to valley floor reads as a steep FACE — and
-// the plateau tops and valley floors flatten out — rather than a soft gradient.
-// Mesa / canyon look instead of rolling blobs. Higher = sharper faces.
-const FACE_STEEPNESS = 2.7;
+// Face shaping. The continental carve is pushed through tanh to shape the
+// transition from highland to valley floor. Kept LOW so the faces ROLL (broad
+// gradients) rather than snapping to flat mesas/cliffs — the world should read as
+// undulating terrain everywhere, not a flat plain with the odd sharp pit. Higher
+// = sharper faces; lower = rounder, rolling relief.
+const FACE_STEEPNESS = 1.4;
 const TANH_FACE_NORM = Math.tanh(FACE_STEEPNESS);
+
+// Downward bias on the continental field. We can't raise terrain above the base
+// radius (it doubles as the flight/collision floor for a gravity-less bird that
+// must never be ratcheted upward — see invariant below), so "rolling hills" are
+// faked by carving DOWN across MOST of the surface: shifting the continental
+// field down by this much sinks the average ground into rolling lowlands and
+// leaves only the highest peaks at the baseline ceiling. Crucially it also
+// unlocks the medium-frequency DETAIL roughness almost everywhere — detail is
+// only visible where the ground is carved below baseline (otherwise it's clamped
+// flat), so a deeper average carve = rolling texture across the whole world.
+const CONTINENT_BIAS = 0.35;
 
 // Combined terrain displacement at a unit direction (nx,ny,nz): medium-frequency
 // detail (local roughness) + a broad low-frequency continental layer (deep
@@ -296,10 +308,12 @@ function terrainDisplacement(nx, ny, nz, profile) {
   let cont = 0;
   if (profile.continentAmplitude) {
     const cs = profile.continentScale;
-    const c = fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5); // ~[-1, 1]
-    // Carve only where c < 0, steepened by tanh into a cliff FACE: plateau above
-    // (flat), valley floor below (flat), a sharp face between. Never raised.
-    const carve = c < 0 ? -Math.tanh(-FACE_STEEPNESS * c) / TANH_FACE_NORM : 0; // [-1, 0]
+    // Shift the field DOWN by CONTINENT_BIAS so most of it is < 0 → carved, rolling
+    // lowlands; only the highest peaks (c > BIAS) stay at the baseline plateau.
+    const c = fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5) - CONTINENT_BIAS;
+    // Carve where c < 0, shaped by a GENTLE tanh face (rolling, not cliffs).
+    // Clamped to [-1, 0] so the bias overshoot can't carve past the amplitude.
+    const carve = c < 0 ? Math.max(-1, -Math.tanh(-FACE_STEEPNESS * c) / TANH_FACE_NORM) : 0;
     cont = carve * profile.continentAmplitude;
   }
   // Clamp the COMBINED height to <= 0 (downward-only — preserves the flight-floor
@@ -686,8 +700,8 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const spp = Math.sin(jp);
     const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
     const depth = -th;                                                  // 0 plateau → deep valley
-    const exposure = Math.max(0, Math.min(1, 1 - depth / 12));          // 1 exposed top → 0 valley
-    if (exposure > 0.75 && Math.random() < (exposure - 0.75) * 1.0) continue; // thin exposed tops
+    const exposure = Math.max(0, Math.min(1, 1 - depth / 24));          // 1 exposed top → 0 valley
+    if (exposure > 0.82 && Math.random() < (exposure - 0.82) * 1.0) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     const up = pos.clone().normalize();
     const trunkHeight = randomInRange(8, 15);
@@ -1620,8 +1634,8 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const spp = Math.sin(jp);
     const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
     const depth = -th;                                                  // 0 plateau → deep valley
-    const exposure = Math.max(0, Math.min(1, 1 - depth / 16));          // 1 exposed top → 0 valley
-    if (exposure > 0.7 && Math.random() < (exposure - 0.7) * 0.9) continue; // thin exposed tops
+    const exposure = Math.max(0, Math.min(1, 1 - depth / 30));          // 1 exposed top → 0 valley
+    if (exposure > 0.78 && Math.random() < (exposure - 0.78) * 0.9) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     const up = pos.clone().normalize();
     const trunkH = randomInRange(5, 10);
