@@ -314,14 +314,15 @@ const CONTINENT_BIAS = 0.35;
 // heightAt() probe. The slalom Run is anchored separately (SLALOM_ANCHOR).
 const VALLEY_ANCHOR = (() => { const x = 0.35, y = 0.78, z = 0.52; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
 const SLALOM_ANCHOR = (() => { const x = -0.55, y = 0.62, z = -0.58; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
-const VALLEY_PARAMS = { radiusAng: 0.16, depth: 26, riverHalfAng: 0.05, riverReachAng: 0.34, riverDepth: 4, poolRadius: 11 };
+const VALLEY_PARAMS = { radiusAng: 0.16, depth: 28, riverHalfAng: 0.05, riverReachAng: 0.30, riverDepth: 4, poolRadius: 11, canyonReachAng: 0.52, canyonHalfAng: 0.062, canyonDepth: 22 };
 
 let _valleyActive = false;
 let _vaX = 0, _vaY = 0, _vaZ = 0;   // anchor unit dir
 let _vfX = 0, _vfY = 0, _vfZ = 0;   // river forward (tangent)
 let _vrX = 0, _vrY = 0, _vrZ = 0;   // river across (tangent)
-let _valleyRadiusAng = 0.16, _valleyDepth = 26, _valleyCosCull = 0.92;
-let _riverHalfAng = 0.05, _riverReachAng = 0.34, _riverDepth = 4;
+let _valleyRadiusAng = 0.16, _valleyDepth = 28, _valleyCosCull = 0.85;
+let _riverHalfAng = 0.05, _riverReachAng = 0.30, _riverDepth = 4;
+let _canyonReachAng = 0.52, _canyonHalfAng = 0.062, _canyonDepth = 22;
 
 function setActiveValley(anchor, forward, right, params) {
   _valleyActive = true;
@@ -330,7 +331,8 @@ function setActiveValley(anchor, forward, right, params) {
   _vrX = right.x; _vrY = right.y; _vrZ = right.z;
   _valleyRadiusAng = params.radiusAng; _valleyDepth = params.depth;
   _riverHalfAng = params.riverHalfAng; _riverReachAng = params.riverReachAng; _riverDepth = params.riverDepth;
-  _valleyCosCull = Math.cos(Math.max(params.radiusAng, params.riverReachAng) + 0.05);
+  _canyonReachAng = params.canyonReachAng; _canyonHalfAng = params.canyonHalfAng; _canyonDepth = params.canyonDepth;
+  _valleyCosCull = Math.cos(Math.max(params.radiusAng, params.riverReachAng, params.canyonReachAng) + 0.05);
 }
 
 // Tangent frame (forward/right) at a unit anchor — the river axis + across axis.
@@ -368,6 +370,21 @@ function valleyCarveAt(nx, ny, nz) {
       const wf = w * w * (3 - 2 * w);
       const reach = 1 - ang / _riverReachAng;
       carve -= _riverDepth * wf * (reach > 0 ? reach : 0);
+    }
+  }
+  // Outflow canyon: a long, deep channel running DOWNSTREAM (−forward) from the
+  // basin, so the valley doesn't end at the pool — it carves away for a good
+  // distance below the waterfall before easing back up to the plateau.
+  if (along < 0 && ang < _canyonReachAng) {
+    const across = _vrX * nx + _vrY * ny + _vrZ * nz;
+    const acrossAng = Math.asin(across < -1 ? -1 : across > 1 ? 1 : across);
+    const w = 1 - Math.abs(acrossAng) / _canyonHalfAng;
+    if (w > 0) {
+      const wf = w * w * (3 - 2 * w);
+      const u = ang / _canyonReachAng;            // 0 at basin → 1 at far end
+      let lp = u < 0.15 ? u / 0.15 : u > 0.8 ? (1 - (u - 0.8) / 0.2) : 1;
+      lp = lp < 0 ? 0 : lp > 1 ? 1 : lp;
+      carve -= _canyonDepth * wf * (lp * lp * (3 - 2 * lp));
     }
   }
   // Final guard: never let a non-finite value reach terrainDisplacement's

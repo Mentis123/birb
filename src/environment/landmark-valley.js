@@ -58,7 +58,7 @@ export function createValleyFeature({
   const poolTex = makeWaterTexture(THREE);
   if (poolTex) { poolTex.rotation = Math.PI / 4; poolTex.repeat.set(2, 2); }
   const poolMat = new THREE.MeshBasicMaterial({
-    color: 0x2f7fc4, map: poolTex || null, transparent: true, opacity: 0.66,
+    color: 0x1f6fb8, map: poolTex || null, transparent: true, opacity: 0.84,
     depthWrite: false, side: THREE.DoubleSide,
   });
   const pool = new THREE.Mesh(new THREE.CircleGeometry(params.poolRadius, 28), poolMat);
@@ -76,10 +76,10 @@ export function createValleyFeature({
   const fallTex = makeWaterTexture(THREE);
   if (fallTex) fallTex.repeat.set(1.5, 2.2);
   const fallMat = new THREE.MeshBasicMaterial({
-    color: 0xbfe6ff, map: fallTex || null, transparent: true, opacity: 0.72,
+    color: 0xeaf6ff, map: fallTex || null, transparent: true, opacity: 0.95,
     depthWrite: false, side: THREE.DoubleSide,
   });
-  const fallWidth = params.poolRadius * 1.5;
+  const fallWidth = params.poolRadius * 1.8;
   const fallHeight = Math.max(8, rimTop.length() - poolLevelR + 3);
   const fall = new THREE.Mesh(new THREE.PlaneGeometry(fallWidth, fallHeight, 1, 1), fallMat);
   // Basis: local +Y → outward radial at the rim (sheet stands vertically); local
@@ -98,7 +98,7 @@ export function createValleyFeature({
   const riverTex = makeWaterTexture(THREE);
   if (riverTex) { riverTex.rotation = Math.PI / 2; riverTex.repeat.set(1, 6); }
   const riverMat = new THREE.MeshBasicMaterial({
-    color: 0x3a8fd0, map: riverTex || null, transparent: true, opacity: 0.6,
+    color: 0x3a8fd0, map: riverTex || null, transparent: true, opacity: 0.8,
     depthWrite: false, side: THREE.DoubleSide,
   });
   const segs = isMobile ? 10 : 16;
@@ -130,11 +130,54 @@ export function createValleyFeature({
   river.renderOrder = 2;
   group.add(river);
 
+  // ── Outflow river along the downstream canyon ─────────────────
+  // The valley continues well past the pool: a long river running through the
+  // carved canyon (−forward), hugging the deepening floor via heightAt so it
+  // descends with the terrain instead of ending at the basin.
+  const outTex = makeWaterTexture(THREE);
+  if (outTex) { outTex.rotation = Math.PI / 2; outTex.repeat.set(1, 12); }
+  const outMat = new THREE.MeshBasicMaterial({
+    color: 0x2f86cf, map: outTex || null, transparent: true, opacity: 0.8,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const outSegs = isMobile ? 18 : 30;
+  const outHalf = params.riverHalfAng * 1.5;
+  const outStart = (params.poolRadius / sphereRadius) * 0.5;
+  const dirOut = (ang) =>
+    A.clone().multiplyScalar(Math.cos(ang)).addScaledVector(F, -Math.sin(ang)).normalize();
+  const opos = [];
+  const ouv = [];
+  for (let k = 0; k <= outSegs; k++) {
+    const a = outStart + ((params.canyonReachAng || 0.5) - outStart) * (k / outSegs);
+    const center = dirOut(a);
+    const eL = center.clone().multiplyScalar(Math.cos(outHalf)).addScaledVector(Rt, Math.sin(outHalf)).normalize();
+    const eR = center.clone().multiplyScalar(Math.cos(outHalf)).addScaledVector(Rt, -Math.sin(outHalf)).normalize();
+    const pL = surfacePoint(eL, 0.6);
+    const pR = surfacePoint(eR, 0.6);
+    opos.push(pL.x, pL.y, pL.z, pR.x, pR.y, pR.z);
+    const v = k / outSegs;
+    ouv.push(0, v, 1, v);
+  }
+  const oidx = [];
+  for (let k = 0; k < outSegs; k++) {
+    const a0 = k * 2, b0 = k * 2 + 1, a1 = k * 2 + 2, b1 = k * 2 + 3;
+    oidx.push(a0, b0, a1, b0, b1, a1);
+  }
+  const outGeo = new THREE.BufferGeometry();
+  outGeo.setAttribute('position', new THREE.Float32BufferAttribute(opos, 3));
+  outGeo.setAttribute('uv', new THREE.Float32BufferAttribute(ouv, 2));
+  outGeo.setIndex(oidx);
+  outGeo.computeVertexNormals();
+  const outflow = new THREE.Mesh(outGeo, outMat);
+  outflow.renderOrder = 2;
+  group.add(outflow);
+
   // ── Per-frame water animation (driven by features.update) ─────
   const update = (timeMs) => {
     const t = (timeMs || 0) * 0.001;
     if (fallTex) fallTex.offset.y = (-t * 0.9) % 1;   // water plunges downward
     if (riverTex) riverTex.offset.y = (-t * 0.25) % 1; // flow toward the falls
+    if (outTex) outTex.offset.y = (-t * 0.3) % 1;       // flow down the canyon
     if (poolTex) { poolTex.offset.x = (t * 0.03) % 1; poolTex.offset.y = (t * 0.02) % 1; }
     poolMat.opacity = 0.6 + Math.sin(t * 1.3) * 0.06;
   };

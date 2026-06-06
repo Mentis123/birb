@@ -61,11 +61,11 @@ export function createSlalomRun({
   };
 
   // ── Weaving path: advance along F0, swing across R0 with a sine ──
-  const N = isMobile ? 12 : 18;
-  const stepAng = isMobile ? 0.020 : 0.016;
-  const weaveAmp = 0.030;
-  const weaveFreq = 0.9;
-  const corridorHalf = 0.032; // gate offset across the path (angular)
+  const N = isMobile ? 22 : 34;       // long run through the forest
+  const stepAng = isMobile ? 0.018 : 0.016;
+  const weaveAmp = 0.034;
+  const weaveFreq = 0.7;               // gentler, longer S-curves over the longer path
+  const corridorHalf = 0.058;         // gate offset across (~7 units) — wide enough to fly through
   const samples = [];
   for (let k = 0; k <= N; k++) {
     const a = k * stepAng;
@@ -91,11 +91,13 @@ export function createSlalomRun({
   gates.name = 'slalom-gate-trees';
   const dummy = new Object3D();
   let gc = 0;
-  for (let i = 0; i <= N; i++) {
+  // Start the walls a couple of samples IN so the mouth under the arch is a
+  // clear, open gateway you can fly straight into (was walled at sample 0).
+  for (let i = 2; i <= N; i++) {
     const acr = acrossAt(i);
     for (let side = -1; side <= 1; side += 2) {
       for (let row = 0; row < rows; row++) {
-        const offAng = corridorHalf + row * 0.018;
+        const offAng = corridorHalf + row * 0.024;
         const dir = samples[i].clone()
           .multiplyScalar(Math.cos(offAng))
           .addScaledVector(acr, side * Math.sin(offAng))
@@ -110,7 +112,9 @@ export function createSlalomRun({
         dummy.updateMatrix();
         if (gc < capacity) gates.setMatrixAt(gc++, dummy.matrix);
         if (collisionSystem && collisionSystem.addCollider) {
-          collisionSystem.addCollider(pos, Math.min(rad * 0.6, 1.6), 'tree');
+          // Small colliders only — clip a trunk and you bump, but the centre of
+          // the corridor stays clearly open so the Run is flyable.
+          collisionSystem.addCollider(pos, Math.min(rad * 0.35, 0.9), 'tree');
         }
       }
     }
@@ -126,8 +130,8 @@ export function createSlalomRun({
   const entryAcross = acrossAt(0);
   const entryTan = tangentAt(0);
   const baseR = sphereRadius + safeHeight(entry.x, entry.y, entry.z);
-  const archHalf = 7.5;
-  const archH = 16;
+  const archHalf = 10;   // wider than the corridor so you fly THROUGH the arch into it
+  const archH = 18;
   const neonMat = new THREE.MeshBasicMaterial({ color: 0xff2bd6 });
   const glowMat = new THREE.MeshBasicMaterial({
     color: 0xff7be6, transparent: true, opacity: 0.4,
