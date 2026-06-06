@@ -38,9 +38,9 @@ const DRONE_CONFIG = {
   minAltitude: 128,            // Just above bird's typical cruising altitude (~125-132)
   maxAltitude: 148,            // Keeps drones in the bird's flight band so they're visible
   // Altitude band 128-148 puts drones in the bird's actual flight zone (bird
-  // flies ~125-132 on the 4× world). At 0.176 rad/s and ~138 altitude this
-  // gives ~24 u/s linear speed — readable as motion and trackable by the player.
-  orbitSpeed: 0.176,           // Base radians per second (angular, scale-independent)
+  // flies ~125-132 on the 4× world). At 0.150 rad/s and ~138 altitude this
+  // gives ~20 u/s linear speed — a bit slower, easier to track and lead.
+  orbitSpeed: 0.150,           // Base radians per second (angular, scale-independent)
   orbitSpeedVariance: 0.4,     // Speed varies ±40%
   respawnDelay: 2.0,           // Seconds before respawn after destruction
   collisionRadius: 9.9,        // Hit detection — +50% with the bigger drone body (4× world)
@@ -517,9 +517,10 @@ export function createDroneSystem(THREE, scene, options = {}) {
           drone.position.normalize().multiplyScalar(targetAltitude);
         }
 
-        // Spin the ring
+        // Spin the ring (slowed to match the gentler orbit so the body and
+        // ring read as one slower object, not a sluggish body with a fast ring)
         if (drone.userData.ring) {
-          drone.userData.spinPhase += delta * 3;
+          drone.userData.spinPhase += delta * 2.4;
           drone.userData.ring.rotation.z = drone.userData.spinPhase;
         }
 

@@ -1,7 +1,18 @@
 export const AIM_RIG_DEFAULTS = {
-  // Rotation speed targets (rad/s at full joystick deflection)
-  yawRate: Math.PI * 1.2,          // Horizontal: 216°/s target
-  pitchRate: Math.PI * 0.96,       // Vertical: 173°/s target
+  // Rotation speed targets (rad/s at full joystick deflection).
+  // These are the GENTLE BASE rates — what a fresh, short push gives you,
+  // dialled to ~90% of the old feel so fine aiming doesn't overshoot. A
+  // sustained hold ramps up from here toward base × rampMaxMult (below).
+  yawRate: Math.PI * 1.08,         // Horizontal base: 194°/s (was 216°/s)
+  pitchRate: Math.PI * 0.864,      // Vertical base:   156°/s (was 173°/s)
+
+  // Hold-to-sweep ramp: while a joystick direction is held, the rate eases
+  // from the gentle base up to base × rampMaxMult over rampDuration seconds
+  // (quadratic ease-in, so brief corrections stay slow). Resets on release or
+  // direction reversal. This is the "slow for fine aim, faster the longer you
+  // push" behaviour.
+  rampDuration: 1.0,                // Seconds of continuous hold to reach full ramp
+  rampMaxMult: 1.6,                 // Top multiplier on the base rate at full hold
 
   // Pitch limits
   maxPitch: (85 * Math.PI) / 180,  // 85° up
@@ -13,7 +24,7 @@ export const AIM_RIG_DEFAULTS = {
   // Input stabilization
   smoothing: 15,                    // Joystick exponential smoothing
   pointerSmoothing: 12,             // Pointer/touch drag smoothing
-  lookSensitivity: 0.0025,          // Pointer delta → angle scaling
+  lookSensitivity: 0.00225,         // Pointer/drag delta → angle scaling (~90% of old)
   pointerDeadzone: 0.1,             // Min pointer movement to register (px)
   maxPointerDelta: 40,              // Max pointer movement per frame (px)
   axisDeadzone: 0.08,               // Joystick center deadzone
@@ -23,8 +34,9 @@ export const AIM_RIG_DEFAULTS = {
   // Uses asymmetric stiffness: high tracking during input, low friction on release
   trackingStiffness: 25,            // How fast velocity tracks input (higher = snappier response)
   coastStiffness: 4.0,              // Velocity decay on release (lower = more momentum glide)
-  maxYawVelocity: Math.PI * 1.2,    // Max horizontal rotation speed (rad/s)
-  maxPitchVelocity: Math.PI * 0.96, // Max vertical rotation speed (rad/s)
+  // Hard velocity ceilings — raised to let the hold-ramp reach base × rampMaxMult.
+  maxYawVelocity: Math.PI * 1.728,    // = yawRate × rampMaxMult (was Math.PI*1.2)
+  maxPitchVelocity: Math.PI * 1.3824, // = pitchRate × rampMaxMult (was Math.PI*0.96)
 
   // Banking (visual roll during horizontal turns)
   bankInfluence: 0,
@@ -51,6 +63,8 @@ export class AimRig {
     this.THREE = THREE;
     this.yawRate = options.yawRate ?? AIM_RIG_DEFAULTS.yawRate;
     this.pitchRate = options.pitchRate ?? AIM_RIG_DEFAULTS.pitchRate;
+    this.rampDuration = options.rampDuration ?? AIM_RIG_DEFAULTS.rampDuration;
+    this.rampMaxMult = options.rampMaxMult ?? AIM_RIG_DEFAULTS.rampMaxMult;
     const configuredMaxPitch = options.maxPitch ?? AIM_RIG_DEFAULTS.maxPitch;
     const configuredMinPitch = options.minPitch ?? AIM_RIG_DEFAULTS.minPitch;
     this.maxPitch = Math.max(configuredMaxPitch, configuredMinPitch);
@@ -91,6 +105,13 @@ export class AimRig {
     this._yawVelocity = 0;
     this._pitchVelocity = 0;
 
+    // Hold-to-sweep ramp state (per-axis): how long a joystick direction has
+    // been held, and which direction, so the rate can ease up over time.
+    this._yawHoldTime = 0;
+    this._pitchHoldTime = 0;
+    this._yawHoldDir = 0;
+    this._pitchHoldDir = 0;
+
     // Banking state
     this._smoothedBank = 0;
   }
@@ -103,6 +124,11 @@ export class AimRig {
     this._smoothedY = 0;
     this._smoothedDeltaX = 0;
     this._smoothedDeltaY = 0;
+    // Reset the hold-ramp so each fresh nest landing starts at the gentle base.
+    this._yawHoldTime = 0;
+    this._pitchHoldTime = 0;
+    this._yawHoldDir = 0;
+    this._pitchHoldDir = 0;
     if (!next) {
       this._yaw = 0;
       this._pitch = 0;
@@ -201,9 +227,41 @@ export class AimRig {
     this._smoothedX += (shapedX - this._smoothedX) * smoothStep;
     this._smoothedY += (shapedY - this._smoothedY) * smoothStep;
 
-    // Joystick drives desired angular velocity
-    let desiredYawVel = -this._smoothedX * this.yawRate;
-    let desiredPitchVel = this._smoothedY * this.pitchRate;
+    // ── Hold-to-sweep ramp (joystick channel only) ─────────────────
+    // While a joystick direction is held, ease the rate up from the gentle
+    // base toward base × rampMaxMult over rampDuration seconds. The quadratic
+    // ease-in keeps brief corrections near the base (fine aim); only a
+    // sustained push accelerates (fast sweeps). Direction is taken from the
+    // instantaneous shaped input so a reversal drops you back to fine speed.
+    const yawDir = Math.sign(shapedX);
+    if (yawDir !== 0 && yawDir === this._yawHoldDir) {
+      this._yawHoldTime += dt;
+    } else {
+      this._yawHoldDir = yawDir;
+      this._yawHoldTime = yawDir !== 0 ? dt : 0;
+    }
+    const pitchDir = Math.sign(shapedY);
+    if (pitchDir !== 0 && pitchDir === this._pitchHoldDir) {
+      this._pitchHoldTime += dt;
+    } else {
+      this._pitchHoldDir = pitchDir;
+      this._pitchHoldTime = pitchDir !== 0 ? dt : 0;
+    }
+    const rampSpan = this.rampMaxMult - 1;
+    const yawHoldFrac = this.rampDuration > 0
+      ? clamp(this._yawHoldTime / this.rampDuration, 0, 1)
+      : 1;
+    const pitchHoldFrac = this.rampDuration > 0
+      ? clamp(this._pitchHoldTime / this.rampDuration, 0, 1)
+      : 1;
+    const yawRamp = 1 + yawHoldFrac * yawHoldFrac * rampSpan;
+    const pitchRamp = 1 + pitchHoldFrac * pitchHoldFrac * rampSpan;
+
+    // Joystick drives desired angular velocity (ramped). The pointer/drag
+    // channel below adds on top UN-ramped — its speed already follows the
+    // finger, so a time-ramp there would feel wrong.
+    let desiredYawVel = -this._smoothedX * this.yawRate * yawRamp;
+    let desiredPitchVel = this._smoothedY * this.pitchRate * pitchRamp;
 
     // ── Channel 2: Pointer/touch drag (delta-based) ────────────────
     const safeDeltaX = Number.isFinite(deltaX) ? deltaX : 0;

@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v2-2026-05-29';
+const CACHE_VERSION = 'v3-2026-06-06';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -105,8 +105,42 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Same-origin JS modules: stale-while-revalidate. Serve the cached copy
+  // instantly (fast, offline-safe) but always re-fetch in the background so
+  // the NEXT load runs the freshest code even without a version bump. This is
+  // the self-healing layer that stops iOS pinning old module code.
+  if (sameOrigin && url.pathname.endsWith('.js')) {
+    event.respondWith(staleWhileRevalidate(event));
+    return;
+  }
+
   event.respondWith(cacheFirst(request));
 });
+
+// Serve from cache immediately, refresh the cache in the background. Heavy
+// media stays on cacheFirst — only code goes through here, so the extra
+// background fetches are small.
+async function staleWhileRevalidate(event) {
+  const { request } = event;
+  const cache = await caches.open(CORE_CACHE);
+  const cached = await cache.match(request, { ignoreSearch: false });
+  const network = fetch(request)
+    .then((response) => {
+      if (response && response.ok) {
+        cache.put(request, response.clone()).catch(() => {});
+      }
+      return response;
+    })
+    .catch(() => null);
+
+  if (cached) {
+    // Keep the worker alive long enough to finish the background refresh.
+    event.waitUntil(network);
+    return cached;
+  }
+  const fresh = await network;
+  return fresh || new Response('', { status: 504, statusText: 'Offline' });
+}
 
 async function networkFirst(request) {
   try {

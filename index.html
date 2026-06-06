@@ -8467,13 +8467,86 @@
     }
   </script>
   <script>
-    // Register the offline cache service worker. Wait for `load` so the
-    // initial render isn't competing with the SW install for bandwidth.
+    // Register the offline cache service worker AND keep it fresh. iOS Safari
+    // (and installed PWAs) will happily run stale cached code forever unless we
+    //   (a) tell it never to serve the SW script from the HTTP cache,
+    //   (b) actively poll for a new worker (on load, every 60s, on refocus), and
+    //   (c) reload the page once the new worker takes control.
+    // sw.js already skipWaiting()s + clients.claim()s, so a new deploy activates
+    // immediately; this client side turns that into a clean one-shot refresh.
     if ('serviceWorker' in navigator) {
+      // Tiny, dependency-free "updating" flash so the auto-reload isn't a
+      // mystery. It only shows for a moment before the reload fires.
+      const showUpdateBanner = () => {
+        if (document.getElementById('sw-update-banner')) return;
+        const el = document.createElement('div');
+        el.id = 'sw-update-banner';
+        el.textContent = '↻ Updating to the latest version…';
+        el.style.cssText = [
+          'position:fixed', 'left:50%', 'top:max(1rem,env(safe-area-inset-top))',
+          'transform:translateX(-50%)', 'z-index:99999',
+          'padding:0.55rem 1rem', 'border-radius:999px',
+          'background:rgba(12,16,24,0.92)', 'color:#fff',
+          'font:600 0.85rem/1 system-ui,-apple-system,sans-serif',
+          'box-shadow:0 4px 18px rgba(0,0,0,0.4)', 'pointer-events:none',
+          'backdrop-filter:blur(6px)', '-webkit-backdrop-filter:blur(6px)',
+        ].join(';');
+        document.body.appendChild(el);
+      };
+
+      // Guard against bouncing more than once per update. The local boolean
+      // stops the controllerchange path and the safety-net timer from both
+      // firing in one page context; the sessionStorage flag survives the reload
+      // so a quirky iOS re-emit of controllerchange right after can't loop us.
+      // It self-clears a few seconds after load so a LATER deploy still updates.
+      const RELOAD_FLAG = 'birb-sw-updating';
+      let refreshing = false;
+      const reloadForUpdate = () => {
+        if (refreshing) return;
+        try { if (sessionStorage.getItem(RELOAD_FLAG)) return; } catch (e) {}
+        refreshing = true;
+        try { sessionStorage.setItem(RELOAD_FLAG, '1'); } catch (e) {}
+        showUpdateBanner();
+        window.location.reload();
+      };
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch((err) => {
-          console.warn('Service worker registration failed', err);
-        });
+        setTimeout(() => {
+          try { sessionStorage.removeItem(RELOAD_FLAG); } catch (e) {}
+        }, 10000);
+      });
+
+      // Only arm auto-reload when the page is ALREADY controlled by a SW — i.e.
+      // a repeat visit. On the very first visit the initial clients.claim() also
+      // fires controllerchange, and we must not reload then (nothing is stale).
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdate);
+      }
+
+      window.addEventListener('load', () => {
+        navigator.serviceWorker
+          .register('/sw.js', { updateViaCache: 'none' })
+          .then((reg) => {
+            const poll = () => reg.update().catch(() => {});
+            poll();                                   // check right away
+            setInterval(poll, 60 * 1000);             // and once a minute
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'visible') poll();
+            });
+            // When a new worker is found, watch it install; once it's ready and
+            // we're already controlled, it's a genuine update → reload (with a
+            // safety-net timer in case controllerchange is slow on iOS).
+            reg.addEventListener('updatefound', () => {
+              const installing = reg.installing;
+              if (!installing) return;
+              installing.addEventListener('statechange', () => {
+                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                  showUpdateBanner();
+                  setTimeout(reloadForUpdate, 1500);
+                }
+              });
+            });
+          })
+          .catch((err) => console.warn('Service worker registration failed', err));
       });
     }
   </script>
