@@ -3674,6 +3674,51 @@
       playFromPool(preloadedSounds.ringCollect);
     };
 
+    // Synthesized ring chime (Web Audio) — a satisfying bell "ding" that climbs
+    // a semitone per quick successive ring (combo feel) and resets after a beat.
+    // No asset needed; respects the sfx/master volume settings. Called when the
+    // bird flies through a ring (RING_RUSH rings AND the slalom Run ring-gates,
+    // via window.playRingSynthChime). Lazily creates one AudioContext on first
+    // use — by then the user has tapped Start, so autoplay policy is satisfied.
+    let _ringAudioCtx = null;
+    let _ringChimeStep = 0;
+    let _ringChimeLast = -999;
+    const playRingSynthChime = () => {
+      try {
+        const vol = (typeof getEffectiveVolume === 'function') ? getEffectiveVolume(0.55, true) : 0.55;
+        if (!(vol > 0)) return; // sfx muted
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        if (!_ringAudioCtx) _ringAudioCtx = new AC();
+        const ctx = _ringAudioCtx;
+        if (ctx.state === 'suspended') ctx.resume();
+        const now = ctx.currentTime;
+        // Combo: climb a semitone per ring if they come quickly, else reset.
+        if (now - _ringChimeLast > 1.1) _ringChimeStep = 0;
+        else _ringChimeStep = Math.min(_ringChimeStep + 1, 7);
+        _ringChimeLast = now;
+        const base = 660 * Math.pow(2, _ringChimeStep / 12);
+        const master = ctx.createGain();
+        master.gain.value = Math.max(0.0001, vol);
+        master.connect(ctx.destination);
+        // Two partials → a bell-like timbre, each with a quick upward chirp + decay.
+        [[1, 'triangle', 0.5], [2.01, 'sine', 0.22]].forEach(([mult, type, peak]) => {
+          const osc = ctx.createOscillator();
+          osc.type = type;
+          osc.frequency.setValueAtTime(base * mult, now);
+          osc.frequency.exponentialRampToValueAtTime(base * mult * 1.5, now + 0.06);
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.0001, now);
+          g.gain.exponentialRampToValueAtTime(peak, now + 0.008); // fast attack
+          g.gain.exponentialRampToValueAtTime(0.0001, now + 0.45); // decay
+          osc.connect(g); g.connect(master);
+          osc.start(now); osc.stop(now + 0.5);
+        });
+      } catch (e) { /* audio not available — fail silent */ }
+    };
+    // Expose for the slalom Run ring-gates (a separate ES module).
+    window.playRingSynthChime = playRingSynthChime;
+
     // Play speed boost sound
     const playSpeedBoostSound = () => {
       playFromPool(preloadedSounds.speedBoost);
@@ -7456,6 +7501,13 @@
         particleSystem.setSuspended(isNested);
       }
 
+      // Animate the landmark valley water + slalom Run neon, and drive the Run's
+      // ring-gate chime. Runs every frame, every mode, so the Run works in free
+      // flight in every environment.
+      if (sphericalWorld?.features) {
+        sphericalWorld.features.update(flightController.position, delta, time);
+      }
+
       let nestedAimQuaternion = null;
 
       // Get input state early (needed for both flight and aim rig when nested).
@@ -7611,8 +7663,9 @@
           if (collectiblesSystem && flightController) {
             const collected = collectiblesSystem.checkCollection(flightController.position, 1.5);
             if (collected.length > 0) {
-              // Play ring collect sound
+              // Play ring collect sound (mp3 pool + satisfying synth chime)
               playRingCollectSound();
+              playRingSynthChime();
               // Haptic: ring collected (20ms)
               triggerHaptic(20);
               // ===== IMPROVEMENT 5: Ring sparkle particles =====

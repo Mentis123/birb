@@ -1,4 +1,6 @@
 import * as THREEImported from "https://esm.sh/three@0.183.2";
+import { createValleyFeature } from "./landmark-valley.js";
+import { createSlalomRun } from "./slalom-run.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -302,6 +304,77 @@ const CONTINENT_BIAS = 0.35;
 //     never pops at spawn. Upward relief comes from PROPS (trees, mountains,
 //     towers) which have their own colliders; the terrain itself only descends.
 // Shared by the sphere mesh, prop placement, and the flight floor so all agree.
+//
+// ── Landmark valley (one dramatic carved feature, in every environment) ──
+// A deep basin + a shallow inflow groove, carved into the SAME displacement the
+// mesh AND flight floor share. valleyCarveAt() returns <= 0 and is folded into
+// terrainDisplacement's Math.min(0,…), so the carve-down invariant holds (the
+// bird flies DOWN into the valley; the floor never rises). The overlaid water
+// (pool/waterfall/river) lives in landmark-valley.js and rides this carve via a
+// heightAt() probe. The slalom Run is anchored separately (SLALOM_ANCHOR).
+const VALLEY_ANCHOR = (() => { const x = 0.35, y = 0.78, z = 0.52; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
+const SLALOM_ANCHOR = (() => { const x = -0.55, y = 0.62, z = -0.58; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
+const VALLEY_PARAMS = { radiusAng: 0.16, depth: 26, riverHalfAng: 0.05, riverReachAng: 0.34, riverDepth: 4, poolRadius: 11 };
+
+let _valleyActive = false;
+let _vaX = 0, _vaY = 0, _vaZ = 0;   // anchor unit dir
+let _vfX = 0, _vfY = 0, _vfZ = 0;   // river forward (tangent)
+let _vrX = 0, _vrY = 0, _vrZ = 0;   // river across (tangent)
+let _valleyRadiusAng = 0.16, _valleyDepth = 26, _valleyCosCull = 0.92;
+let _riverHalfAng = 0.05, _riverReachAng = 0.34, _riverDepth = 4;
+
+function setActiveValley(anchor, forward, right, params) {
+  _valleyActive = true;
+  _vaX = anchor.x; _vaY = anchor.y; _vaZ = anchor.z;
+  _vfX = forward.x; _vfY = forward.y; _vfZ = forward.z;
+  _vrX = right.x; _vrY = right.y; _vrZ = right.z;
+  _valleyRadiusAng = params.radiusAng; _valleyDepth = params.depth;
+  _riverHalfAng = params.riverHalfAng; _riverReachAng = params.riverReachAng; _riverDepth = params.riverDepth;
+  _valleyCosCull = Math.cos(Math.max(params.radiusAng, params.riverReachAng) + 0.05);
+}
+
+// Tangent frame (forward/right) at a unit anchor — the river axis + across axis.
+function _tangentFrame(THREE, anchor) {
+  const A = new THREE.Vector3(anchor.x, anchor.y, anchor.z).normalize();
+  let f = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), A);
+  if (f.lengthSq() < 1e-4) f = new THREE.Vector3().crossVectors(new THREE.Vector3(1, 0, 0), A);
+  f.normalize();
+  const r = new THREE.Vector3().crossVectors(A, f).normalize();
+  return { forward: { x: f.x, y: f.y, z: f.z }, right: { x: r.x, y: r.y, z: r.z } };
+}
+
+// Extra downward carve for the landmark valley at a unit direction (always <= 0).
+// Single-dot early-out so the ~24k mesh samples and per-frame floor samples that
+// are far from the valley cost almost nothing.
+function valleyCarveAt(nx, ny, nz) {
+  if (!_valleyActive) return 0;
+  const d = _vaX * nx + _vaY * ny + _vaZ * nz;
+  if (d < _valleyCosCull) return 0;
+  // Clamp both sides before acos — the early-out above already keeps d well
+  // inside [_valleyCosCull, 1], but this guards the sacred floor invariant
+  // against any float drift making d slip just past ±1 (acos(±1.0000001) = NaN).
+  const ang = Math.acos(d > 1 ? 1 : d < -1 ? -1 : d);
+  let carve = 0;
+  if (ang < _valleyRadiusAng) {
+    const t = 1 - ang / _valleyRadiusAng;
+    carve -= _valleyDepth * (t * t * (3 - 2 * t)); // smoothstep bowl
+  }
+  const along = _vfX * nx + _vfY * ny + _vfZ * nz;
+  if (along > 0 && ang < _riverReachAng) {
+    const across = _vrX * nx + _vrY * ny + _vrZ * nz;
+    const acrossAng = Math.asin(across < -1 ? -1 : across > 1 ? 1 : across);
+    const w = 1 - Math.abs(acrossAng) / _riverHalfAng;
+    if (w > 0) {
+      const wf = w * w * (3 - 2 * w);
+      const reach = 1 - ang / _riverReachAng;
+      carve -= _riverDepth * wf * (reach > 0 ? reach : 0);
+    }
+  }
+  // Final guard: never let a non-finite value reach terrainDisplacement's
+  // Math.min(0,…) — a NaN there would corrupt the mesh AND the flight floor.
+  return Number.isFinite(carve) && carve < 0 ? carve : 0;
+}
+
 function terrainDisplacement(nx, ny, nz, profile) {
   const R = SPHERE_RADIUS;
   const detail = fbm(nx * R * profile.scale, ny * R * profile.scale, nz * R * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
@@ -319,7 +392,7 @@ function terrainDisplacement(nx, ny, nz, profile) {
   // Clamp the COMBINED height to <= 0 (downward-only — preserves the flight-floor
   // invariant). Detail textures the cliff faces/floors and dimples the plateau,
   // but the plateau itself is the ceiling — nothing rises above the base radius.
-  return Math.min(0, cont + detail);
+  return Math.min(0, cont + detail + valleyCarveAt(nx, ny, nz));
 }
 
 // FULL terrain height (detail + carved continental) along a unit direction.
@@ -2148,6 +2221,11 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // displacement. Set before anything is built.
   _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
 
+  // Carve the landmark valley into the SAME field the mesh & flight floor sample.
+  // Must happen BEFORE displaceSphereGeometry so the basin shows in the mesh.
+  const _valleyFrame = _tangentFrame(THREE, VALLEY_ANCHOR);
+  setActiveValley(VALLEY_ANCHOR, _valleyFrame.forward, _valleyFrame.right, VALLEY_PARAMS);
+
   const root = new THREE.Group();
   root.name = `spherical-world-${variant}`;
   scene.add(root);
@@ -2246,12 +2324,43 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   }
   console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions, ${proximityTargets.length} proximity targets`);
 
+  // ── Landmark valley water + slalom Run (added to EVERY environment) ──
+  // Added to root so they rotate with the world and are disposed with it. The
+  // returned `features.update(birdPos, delta, timeMs)` animates the water +
+  // neon and drives the ring-gate chime; index.html calls it once per frame.
+  let features = null;
+  try {
+    const mobile = _isMobile();
+    const slalomFrame = _tangentFrame(THREE, SLALOM_ANCHOR);
+    const heightAt = (nx, ny, nz) => terrainHeightDir(nx, ny, nz);
+    const valley = createValleyFeature({
+      THREE, sphereRadius, anchor: VALLEY_ANCHOR,
+      forward: _valleyFrame.forward, right: _valleyFrame.right,
+      params: VALLEY_PARAMS, heightAt, isMobile: mobile,
+    });
+    const slalom = createSlalomRun({
+      THREE, sphereRadius, collisionSystem, anchor: SLALOM_ANCHOR,
+      forward: slalomFrame.forward, right: slalomFrame.right, heightAt, isMobile: mobile,
+    });
+    root.add(valley.group);
+    root.add(slalom.group);
+    features = {
+      update(birdPos, delta, timeMs) {
+        valley.update(timeMs);
+        slalom.update(birdPos, delta, timeMs);
+      },
+    };
+  } catch (e) {
+    console.warn('[SphericalWorld] landmark features failed:', e);
+  }
+
   return {
     root,
     sphereRadius,
     collisionSystem,
     nestablePositions,
     proximityTargets,
+    features,
     dispose() {
       // Remove from scene first to prevent visual artifacts during environment switch
       scene.remove(root);
@@ -2261,11 +2370,15 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
         root.traverse((child) => {
           if (child.geometry) child.geometry.dispose();
           if (child.material) {
-            if (Array.isArray(child.material)) {
-              child.material.forEach(m => m && m.dispose());
-            } else {
-              child.material.dispose();
-            }
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach((m) => {
+              if (!m) return;
+              // Dispose CanvasTextures too (landmark water + RUN sign) — the
+              // material.dispose() alone leaks them on environment swaps.
+              if (m.map) m.map.dispose();
+              if (m.emissiveMap) m.emissiveMap.dispose();
+              m.dispose();
+            });
           }
         });
       } catch (e) {

@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v3-2026-06-06';
+const CACHE_VERSION = 'v4-2026-06-06';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -34,6 +34,8 @@ const CORE_ASSETS = [
   './src/controls/virtual-thumbstick.js',
   './src/environment/world-shell.js',
   './src/environment/spherical-world.js',
+  './src/environment/landmark-valley.js',
+  './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
   './src/environment/collectibles.js',
   './src/nesting/nest-points.js',
