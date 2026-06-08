@@ -857,18 +857,56 @@
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
     }
 
+    /* Prominent tap-to-start pill — an unmistakable, animated call-to-action.
+       Bottom-centre with safe-area inset, above the splash image, gold/cream
+       Birb Labs accent. Breathing scale + glow shimmer draws the eye; the whole
+       splash stays tappable (this is the visual cue, not the only hit target). */
     .splash-prompt {
-      margin-top: 2rem;
-      font-size: clamp(1rem, 4vw, 1.5rem);
-      color: rgba(200, 220, 255, 0.9);
+      position: absolute;
+      left: 50%;
+      bottom: max(env(safe-area-inset-bottom, 0px), 2rem);
+      transform: translateX(-50%);
+      z-index: 10001;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.7rem 1.6rem;
+      font-size: clamp(1.05rem, 4vw, 1.2rem);
+      font-weight: 700;
+      color: #fff6dc;
       text-transform: uppercase;
-      letter-spacing: 0.2em;
-      animation: splash-pulse 2s ease-in-out infinite;
+      letter-spacing: 0.18em;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 221, 68, 0.55);
+      background: rgba(20, 16, 4, 0.55);
+      box-shadow: 0 0 18px rgba(255, 215, 0, 0.35), inset 0 0 12px rgba(255, 215, 0, 0.12);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      pointer-events: none; /* tap goes to the whole splash, not just the pill */
+      animation: splash-pulse 1.7s ease-in-out infinite;
     }
 
+    /* Breathing pulse (scale ~1.0 <-> 1.06) + soft opacity/glow shimmer. */
     @keyframes splash-pulse {
-      0%, 100% { opacity: 0.6; }
-      50% { opacity: 1; }
+      0%, 100% {
+        transform: translateX(-50%) scale(1);
+        opacity: 0.92;
+        box-shadow: 0 0 14px rgba(255, 215, 0, 0.28), inset 0 0 10px rgba(255, 215, 0, 0.1);
+      }
+      50% {
+        transform: translateX(-50%) scale(1.06);
+        opacity: 1;
+        box-shadow: 0 0 26px rgba(255, 215, 0, 0.5), inset 0 0 14px rgba(255, 215, 0, 0.16);
+      }
+    }
+
+    /* Reduced-motion: keep the pill prominent but static (no breathing/shimmer). */
+    @media (prefers-reduced-motion: reduce) {
+      .splash-prompt {
+        animation: none;
+        transform: translateX(-50%);
+        opacity: 1;
+      }
     }
 
     /* Border electricity pulse animation */
@@ -1007,19 +1045,51 @@
       color: #fff;
     }
 
+    /* Prominent tap-to-continue pill — mirrors the primary splash CTA so the
+       affordance reads as an obvious button, not faint text. Bottom-centre with
+       safe-area inset, high z-index, gold/cream accent, breathing pulse + glow. */
     .vibe-splash__hint {
       position: absolute;
-      bottom: 2rem;
-      left: 0;
-      right: 0;
-      text-align: center;
-      font-size: 0.875rem;
-      color: rgba(156, 163, 175, 0.7);
+      left: 50%;
+      bottom: max(env(safe-area-inset-bottom, 0px), 2rem);
+      transform: translateX(-50%);
+      z-index: 10001;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.7rem 1.6rem;
+      font-size: clamp(1.05rem, 4vw, 1.2rem);
+      font-weight: 700;
+      color: #fff6dc;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 221, 68, 0.55);
+      background: rgba(20, 16, 4, 0.55);
+      box-shadow: 0 0 18px rgba(255, 215, 0, 0.35), inset 0 0 12px rgba(255, 215, 0, 0.12);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      pointer-events: none; /* tap goes to the whole vibe splash, not just the pill */
+      /* opacity is driven by splash-pulse; is-fading overrides it on dismiss. */
       transition: opacity 0.3s ease;
+      animation: splash-pulse 1.7s ease-in-out infinite;
     }
 
+    /* Fade-out on dismiss: stop the pulse so the transition's opacity wins
+       (an infinite animation would otherwise keep re-asserting opacity). */
     .vibe-splash.is-fading .vibe-splash__hint {
+      animation: none;
       opacity: 0;
+    }
+
+    /* Reduced-motion: static but still a prominent pill. Placed AFTER the rule
+       above so it wins the cascade (equal specificity, later source order). */
+    @media (prefers-reduced-motion: reduce) {
+      .vibe-splash__hint {
+        animation: none;
+        transform: translateX(-50%);
+        opacity: 1;
+      }
     }
 
     /* Title / Home Screen — shown after splash + vibe */
@@ -2406,6 +2476,7 @@
     <div class="splash-image-container">
       <img src="./splash.jpg" alt="Birb Flight Lab" class="splash-image">
     </div>
+    <div class="splash-prompt">Tap to start</div>
   </div>
 
   <!-- Vibe Academy Secondary Splash -->
@@ -6815,7 +6886,11 @@
       position: new THREE.Vector3(0, birdStartHeight, 0),
       // Lets the bird descend into carved valleys/canyons (floor follows terrain
       // downward only). Safe before the world loads — sampler returns 0 then.
-      terrainHeightAt: (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight : null
+      terrainHeightAt: (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight : null,
+      // Same clearance the ground-collision check uses, so the flight floor keeps
+      // the bird's body ABOVE the carved mesh (no sinking-in then force-grounding
+      // against rises) and the two stay one source of truth. See _floorAt().
+      birdRadius: FLIGHT_RECOVERY_CONFIG.birdRadius
     });
 
     // 3. Visuals

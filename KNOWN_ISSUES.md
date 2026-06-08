@@ -211,6 +211,71 @@ The legacy `free-flight-controller.js` still contains the old heading-based appr
 
 ---
 
+## Issue 6: Bird Clips Into / Gets Stuck Inside Terrain Rises — ✅ RESOLVED
+
+### Problem
+Flying low into a terrain rise (the carved ground ahead being higher than the
+altitude the bird was skimming at), the bird would clip into the mesh and stick /
+get force-grounded against it instead of gliding over or around the slope.
+
+### Root Cause Analysis
+The terrain is a single shared FBM field clamped to height `<= 0` ("carve down
+from a baseline plateau"), used as both the visible mesh AND the flight/collision
+floor (`src/environment/spherical-world.js`). Two floors consumed it, and they
+disagreed by exactly the bird's radius:
+
+- `src/flight/bird-flight.js` `_floorAt()` returned `sphereRadius + Math.min(0, terrain)`
+  — **no clearance**. So the flight controller let the bird's CENTRE descend to
+  `sphereRadius + terrain`, i.e. `birdRadius` (0.6) INTO the visible mesh. The
+  redundant `Math.min(0, …)` also double-clamped a sampler that is already `<= 0`.
+- `spherical-world.js` `checkGroundCollision()` used `sphereRadius + terrain + entityRadius`.
+
+The bird (governed by `BirdFlight`, with `checkGroundCollision` run each frame in
+`index.html`'s loop on the live pose) would therefore sink into a rise under its
+own floor, then trip the ground check on the next frame, which pushed it out AND
+flipped it to `GROUNDED` — reading as "stuck in the mountain." The flight floor
+also only ever **snapped** the bird straight up out of penetration; it never
+deflected the heading, so a rise hard-stopped forward progress.
+
+(Note: the FBM terrain never actually rises above the baseline — true upward
+relief, e.g. mountains/spires/trees, comes from PROPS with their own sphere
+colliders handled by `checkObjectCollision`. So "stuck inside terrain" is the
+carve-down equivalent of flying into a rise: the bird sinking into higher carved
+ground than it was skimming.)
+
+### Resolution
+All in `src/flight/bird-flight.js` (plus one constructor arg in `index.html`):
+
+1. **One floor, with clearance.** `_floorAt()` now returns
+   `sphereRadius + terrain + birdRadius` (dropping the redundant `Math.min(0,…)`
+   since the shared sampler is already clamped `<= 0`). `birdRadius` is a new
+   constructor option, wired from `FLIGHT_RECOVERY_CONFIG.birdRadius` so the
+   flight floor and `checkGroundCollision` are now the SAME surface — the bird
+   skims OVER the mesh it sees and no longer sinks in and force-grounds.
+2. **Tangential slide on penetration** (`_deflectAlongTerrain()`): when the bird
+   does penetrate the floor, it is pushed out along the local surface normal and
+   its forward heading is deflected to remove the into-slope component (re-aimed
+   via a minimal quaternion rotation), so it GLIDES over/around the rise instead
+   of snapping straight up or hard-stopping. The surface normal is recovered by
+   finite-differencing the shared terrain height along two tangents — only on a
+   penetration frame, never on the cruise hot path.
+
+### Why this does NOT reintroduce the "ratchet up gentle hills" bug
+The floor is still `sphereRadius + terrain + birdRadius` with `terrain <= 0`, i.e.
+a constant clearance, never a rise-follower. The gravity-less bird is lifted ONLY
+when it is actually below the floor (penetrating), and only by the overlap — it is
+never pushed up by ground that rises ahead. Valley/flat skimming feel is unchanged
+apart from a fixed `birdRadius` clearance that matches the visible collision body.
+
+### Key Learnings
+- Two floors over one terrain field must use the SAME formula (including the
+  body-radius clearance) or they fight at the boundary.
+- This controller has no velocity vector — movement is orientation-driven, so
+  "deflect velocity tangentially" means re-aiming the quaternion's forward, the
+  analogue of `spherical-world.js`'s reflect-with-damping ground response.
+
+---
+
 ## Historical Notes: Previous Hypotheses
 
 The following were explored before finding the vector-based solution:

@@ -32,9 +32,16 @@ export class BirdFlight {
         this.sphereCenter = options.sphereCenter ? options.sphereCenter.clone() : new Vector3(0, 0, 0);
         this.sphereRadius = options.sphereRadius ?? 100;
         // Optional terrain sampler (x,y,z) -> signed height. When provided, the
-        // minimum-altitude floor follows carved valleys DOWNWARD (Math.min(0,..)
-        // applied here) so the bird can descend into canyons. Null = flat sphere.
+        // minimum-altitude floor follows carved valleys DOWNWARD (the source
+        // sampler already clamps height <= 0) so the bird can descend into
+        // canyons. Null = flat sphere.
         this.terrainHeightAt = options.terrainHeightAt ?? null;
+        // Bird collision radius. Kept as a clearance ABOVE the carved terrain so
+        // the bird glides over the surface it sees instead of sinking its model
+        // into the mesh (the gap that let it clip into / stick inside rises —
+        // see _floorAt() and the terrain-deflection block in update()). Default 0
+        // is byte-identical to the old behaviour for callers that omit it.
+        this.birdRadius = options.birdRadius ?? 0;
         this.speed = options.speed ?? FLIGHT_DEFAULTS.speed;
         this.yawRate = options.yawRate ?? FLIGHT_DEFAULTS.yawRate;
         this.pitchRate = options.pitchRate ?? FLIGHT_DEFAULTS.pitchRate;
@@ -78,6 +85,10 @@ export class BirdFlight {
             radialOffset: new Vector3(),
             sphereNormal: new Vector3(),
             displacement: new Vector3(),
+            // Terrain-deflection scratch (only touched when penetrating a rise).
+            surfNormal: new Vector3(),
+            tanA: new Vector3(),
+            tanB: new Vector3(),
         };
 
         // Pre-allocated pose output (reused each frame)
@@ -159,12 +170,22 @@ export class BirdFlight {
         //    would ratchet the bird upward). See _floorAt().
         s.radialOffset.copy(this.position).sub(this.sphereCenter);
         const radialDistance = s.radialOffset.length();
-        const floor = (this.terrainHeightAt && radialDistance > 1e-3)
+        const floor = (radialDistance > 1e-3)
             ? this._floorAt(s.radialOffset.x / radialDistance, s.radialOffset.y / radialDistance, s.radialOffset.z / radialDistance)
-            : this.sphereRadius;
+            : this.sphereRadius + this.birdRadius;
         if (radialDistance < floor) {
+            // Bird penetrated the floor — i.e. it flew INTO a rise relative to its
+            // current altitude (the carved ground ahead is higher than where the
+            // bird was skimming). Push it back out to the clearance floor AND
+            // deflect its heading so it SLIDES over/around the rise instead of
+            // hard-stopping or snapping straight up.
             s.radialOffset.normalize().multiplyScalar(floor);
             this.position.copy(s.radialOffset).add(this.sphereCenter);
+            // Only bother deflecting when we actually have terrain to slide along
+            // and meaningful speed; flat-sphere builds keep the old snap behaviour.
+            if (this.terrainHeightAt && this.speed > 0.5 && radialDistance > 1e-3) {
+                this._deflectAlongTerrain(s.radialOffset.x / floor, s.radialOffset.y / floor, s.radialOffset.z / floor);
+            }
         }
 
         // 3. Transport Rotation (Spherical Adjustment)
@@ -260,13 +281,93 @@ export class BirdFlight {
         }
     }
 
-    // Minimum allowed radius along an outward unit direction. Carved valleys
-    // lower it (Math.min(0,...)); rises never raise it above sphereRadius, so the
-    // cruising bird is never pushed up by terrain (it has no gravity to settle
-    // back down) and never falsely grounds / pops at spawn. Zero allocations.
+    // Minimum allowed radius along an outward unit direction. The shared terrain
+    // sampler is already clamped to height <= 0 ("carve down from a baseline
+    // plateau" — see spherical-world.js), so the floor only ever DIPS below
+    // sphereRadius into carved valleys/canyons and never rises above it. That
+    // keeps the gravity-less bird from being ratcheted upward on gentle ground
+    // while still letting it descend into canyons.
+    //
+    // birdRadius is added as a CONSTANT clearance so the bird's body skims OVER
+    // the surface it sees rather than sinking into the mesh. This closes the gap
+    // that previously let the bird clip into / stick inside terrain rises: the
+    // old floor (no clearance) let the centre reach sphereRadius+terrain, i.e.
+    // birdRadius INTO the mesh, which then tripped checkGroundCollision and
+    // force-grounded the bird against the rise. The clearance is a flat offset,
+    // NOT a rise-follower, so flat ground and valley skimming feel unchanged.
+    // Matches spherical-world.js checkGroundCollision (same sampler + radius), so
+    // there is one source of truth for terrain height. Zero allocations.
     _floorAt(nx, ny, nz) {
-        if (!this.terrainHeightAt) return this.sphereRadius;
-        return this.sphereRadius + Math.min(0, this.terrainHeightAt(nx, ny, nz));
+        if (!this.terrainHeightAt) return this.sphereRadius + this.birdRadius;
+        return this.sphereRadius + this.terrainHeightAt(nx, ny, nz) + this.birdRadius;
+    }
+
+    // Deflect the bird's heading so it SLIDES along a terrain rise it just
+    // penetrated, instead of hard-stopping against it or being snapped straight
+    // up (which would launch it). Called ONLY on an actual floor penetration, so
+    // the extra height samples here never touch the normal cruise hot path.
+    //
+    // (nx,ny,nz) is the outward unit direction at the corrected position. We build
+    // a local tangent basis, finite-difference the carved-terrain height along
+    // each tangent to recover the slope gradient, and form the true surface normal
+    // (radial tilted away from uphill). The component of the bird's forward that
+    // points INTO that surface is removed and the forward re-normalized — a
+    // tangential slide along the slope. The quaternion is then re-aimed at the new
+    // forward so movement and the rendered model both follow the deflected path.
+    // This is the velocity-deflection analogue of spherical-world's reflect-with-
+    // damping ground response, expressed in this controller's orientation-driven
+    // movement model (it has no separate velocity vector). Vector math reuses
+    // scratch (no Vector3/Quaternion allocations); the only per-call allocation is
+    // the tiny `sample` closure below, which is acceptable here because this runs
+    // ONLY on a penetration frame, never on the cruise hot path.
+    _deflectAlongTerrain(nx, ny, nz) {
+        const s = this._scratch;
+
+        // Outward radial normal at the corrected position.
+        s.surfNormal.set(nx, ny, nz).normalize();
+
+        // Build two orthonormal tangents to the sphere at this point.
+        s.tanA.set(0, 1, 0);
+        if (Math.abs(s.surfNormal.y) > 0.95) s.tanA.set(1, 0, 0); // avoid degeneracy near poles
+        s.tanA.crossVectors(s.tanA, s.surfNormal).normalize();
+        s.tanB.crossVectors(s.surfNormal, s.tanA).normalize();
+
+        // Finite-difference the carved height along each tangent (small epsilon in
+        // world units; we re-normalize the offset direction before sampling, since
+        // terrainHeightAt keys off direction only). Slope = d(height)/d(tangent).
+        const eps = 0.5;
+        const sample = (tan, sign) => {
+            const px = s.surfNormal.x + sign * eps * tan.x;
+            const py = s.surfNormal.y + sign * eps * tan.y;
+            const pz = s.surfNormal.z + sign * eps * tan.z;
+            const inv = 1 / Math.sqrt(px * px + py * py + pz * pz);
+            return this.terrainHeightAt(px * inv, py * inv, pz * inv);
+        };
+        const slopeA = (sample(s.tanA, 1) - sample(s.tanA, -1)) / (2 * eps);
+        const slopeB = (sample(s.tanB, 1) - sample(s.tanB, -1)) / (2 * eps);
+
+        // Surface normal = radial minus the tangential gradient (uphill pulls the
+        // normal away from radial). Then normalize. If the ground is locally flat
+        // (no gradient), this stays radial and the slide just removes the downward
+        // dive component — still a graceful skim, never a snap.
+        s.surfNormal.addScaledVector(s.tanA, -slopeA);
+        s.surfNormal.addScaledVector(s.tanB, -slopeB);
+        s.surfNormal.normalize();
+
+        // Current forward (movement direction) in world space.
+        s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+
+        // Remove the into-surface component so the bird glides along the slope.
+        const into = s.forward.dot(s.surfNormal);
+        if (into < 0) {
+            s.vec3.copy(s.forward).addScaledVector(s.surfNormal, -into); // forward - (forward·n)n
+            if (s.vec3.lengthSq() > 1e-6) {
+                s.vec3.normalize();
+                // Re-aim orientation onto the deflected forward (minimal rotation).
+                s.quat.setFromUnitVectors(s.forward, s.vec3);
+                this.quaternion.premultiply(s.quat);
+            }
+        }
     }
 
     _constrainToSphere() {
@@ -274,9 +375,11 @@ export class BirdFlight {
             const s = this._scratch;
             s.radialOffset.copy(this.position).sub(this.sphereCenter);
             const radialDistance = s.radialOffset.length();
-            const floor = (this.terrainHeightAt && radialDistance > 1e-3)
+            // Route through _floorAt so the birdRadius clearance / null-terrain case
+            // matches update()'s floor — one floor definition for spawn and cruise.
+            const floor = (radialDistance > 1e-3)
                 ? this._floorAt(s.radialOffset.x / radialDistance, s.radialOffset.y / radialDistance, s.radialOffset.z / radialDistance)
-                : this.sphereRadius;
+                : this.sphereRadius + this.birdRadius;
             if (radialDistance < floor) {
                 s.radialOffset.normalize().multiplyScalar(floor);
                 this.position.copy(s.radialOffset).add(this.sphereCenter);
