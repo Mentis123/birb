@@ -2363,7 +2363,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     root.add(slalom.group);
     features = {
       update(birdPos, delta, timeMs) {
-        valley.update(timeMs);
+        valley.update(delta, timeMs);
         slalom.update(birdPos, delta, timeMs);
       },
     };

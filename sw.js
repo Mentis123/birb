@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v5-2026-06-06';
+const CACHE_VERSION = 'v6-2026-06-08';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
