@@ -4901,6 +4901,11 @@
     const FLIGHT_RECOVERY_CONFIG = {
       birdRadius: 0.6,
       walkSpeed: 2.1,
+      // Pull the stick back past this (y < -threshold) to walk backwards.
+      // backMult keeps the reverse shuffle a touch slower than the forward
+      // walk, the way a real bird backs up more tentatively than it strides.
+      walkBackThreshold: 0.3,
+      walkBackMult: 0.7,
       // Committed knockdown: you're going down. Slow enough (~1s fall)
       // that the tumble reads as a moment, not a teleport.
       knockbackFallSpeed: 5.0,
@@ -7945,7 +7950,17 @@
         if (!isNested && !nestingControlsBird) {
           if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Walk only when the stick is engaged — no drift when idle.
-            flight.speed = inputState.active ? FLIGHT_RECOVERY_CONFIG.walkSpeed : 0;
+            // Pull the stick back (y below the threshold) to walk backwards:
+            // the flight model moves along forward × speed, so a negative speed
+            // reverses the bird. Pushing forward (or any non-back input) strides
+            // ahead as before.
+            if (!inputState.active) {
+              flight.speed = 0;
+            } else if (inputState.y < -FLIGHT_RECOVERY_CONFIG.walkBackThreshold) {
+              flight.speed = -FLIGHT_RECOVERY_CONFIG.walkSpeed * FLIGHT_RECOVERY_CONFIG.walkBackMult;
+            } else {
+              flight.speed = FLIGHT_RECOVERY_CONFIG.walkSpeed;
+            }
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
             flight.speed = FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed;
           } else {
@@ -8044,7 +8059,7 @@
             flight.position.copy(groundResult.correctedPosition);
             applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
             if (statusMetric) {
-              statusMetric.textContent = "Grounded. Push the stick to walk — tap Fly to take off.";
+              statusMetric.textContent = "Grounded. Push to walk, pull back to reverse — tap Fly to take off.";
             }
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Keep grounded movement hugging the surface while walking/sliding.
@@ -8180,7 +8195,10 @@
       const rightFoot = birbAnchor.getObjectByName('rightFoot');
       const isWalking = isGroundedVisual && !!inputState?.active;
       if (isWalking) {
-        const walkPhase = motionState.elapsed * 9;
+        // Reverse the step cycle when shuffling backwards so the feet paddle
+        // the right way. Same threshold as the grounded walk-speed logic.
+        const walkDir = (inputState?.y ?? 0) < -FLIGHT_RECOVERY_CONFIG.walkBackThreshold ? -1 : 1;
+        const walkPhase = motionState.elapsed * 9 * walkDir;
         // Body bob at 2× step cadence so it bobs on each step.
         birbAnchor.position.y += Math.sin(walkPhase * 2) * 0.04;
         if (leftFoot) leftFoot.rotation.x = Math.sin(walkPhase) * 0.35;
