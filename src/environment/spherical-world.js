@@ -1,6 +1,7 @@
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
+import { createColliderGrid } from "./collider-grid.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -28,6 +29,20 @@ export class SphericalCollisionSystem {
     this.sphereRadius = sphereRadius;
     this.objectColliders = objectColliders;
     this._tempVec = null;
+    // Spatial-hash broad-phase: built lazily on first query, invalidated by
+    // addCollider/clearColliders. Colliders are static per environment, so a
+    // single build amortizes to nothing while queries drop from a full scan
+    // (~700 mobile / ~1,200 desktop colliders) to one 27-cell neighborhood.
+    this._grid = createColliderGrid(14);
+    this._gridDirty = true;
+  }
+
+  _rebuildGrid() {
+    this._grid.clear();
+    for (let i = 0; i < this.objectColliders.length; i++) {
+      this._grid.insert(this.objectColliders[i]);
+    }
+    this._gridDirty = false;
   }
 
   _ensureVec(THREE) {
@@ -40,11 +55,13 @@ export class SphericalCollisionSystem {
   // Add a collidable object (trees, rocks, etc.)
   addCollider(position, radius, type = 'object') {
     this.objectColliders.push({ position: position.clone(), radius, type });
+    this._gridDirty = true;
   }
 
   // Clear all object colliders
   clearColliders() {
     this.objectColliders = [];
+    this._gridDirty = true;
   }
 
   // Check collision with sphere ground - returns corrected position if collision
@@ -77,7 +94,18 @@ export class SphericalCollisionSystem {
   checkObjectCollision(THREE, position, entityRadius = 0.5) {
     const vec = this._ensureVec(THREE);
 
-    for (const collider of this.objectColliders) {
+    // Broad-phase: the grid guarantees a complete candidate set only for
+    // query radii up to its cell size (bird is 0.6 — far under). Anything
+    // larger falls back to the full scan so correctness never depends on
+    // the caller knowing grid internals.
+    let candidates = this.objectColliders;
+    if (entityRadius <= this._grid.cellSize) {
+      if (this._gridDirty) this._rebuildGrid();
+      candidates = this._grid.query(position.x, position.y, position.z);
+    }
+
+    for (let i = 0; i < candidates.length; i++) {
+      const collider = candidates[i];
       vec.copy(position).sub(collider.position);
       const minDistance = collider.radius + entityRadius;
       // Squared-distance compare avoids a per-collider sqrt; only normalize
