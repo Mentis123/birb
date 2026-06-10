@@ -30,18 +30,24 @@ export function createSkyDome(options = {}) {
   // 3-stop gradient: bottom -> horizon (warm band) -> mid -> zenith.
   // The horizon band lives around h ~= 0 with a narrow falloff, giving a
   // painterly golden-hour glow without full sunset orange.
+  // The view direction is measured from the dome center (uCenter == camera),
+  // so the gradient and sun stay anchored as the bird flies the sphere.
   const fragmentShader = `
     uniform vec3 uTopColor;
     uniform vec3 uMidColor;
     uniform vec3 uHorizonColor;
     uniform vec3 uBottomColor;
+    uniform vec3 uSunDirection;
+    uniform vec3 uSunColor;
+    uniform vec3 uCenter;
     uniform float uOffset;
+    uniform float uTime;
     uniform float uRadius;
     varying vec3 vWorldPosition;
 
     void main() {
-      float h = normalize(vWorldPosition).y;
-      h = clamp(h + uOffset, -1.0, 1.0);
+      vec3 dir = normalize(vWorldPosition - uCenter);
+      float h = clamp(dir.y + uOffset, -1.0, 1.0);
 
       vec3 color;
       if (h < 0.0) {
@@ -61,9 +67,17 @@ export function createSkyDome(options = {}) {
       float horizonBand = exp(-pow((h - 0.02) * 8.0, 2.0)) * 0.18;
       color += uHorizonColor * horizonBand;
 
-      // Subtle star-like noise for top hemisphere
+      // Sun: soft disc + two-lobe atmospheric halo. Pure shader math on the
+      // existing dome — a golden-hour anchor with zero extra draw calls.
+      float sd = clamp(dot(dir, uSunDirection), 0.0, 1.0);
+      float disc = smoothstep(0.99955, 0.99988, sd);
+      float halo = pow(sd, 160.0) * 0.45 + pow(sd, 18.0) * 0.16;
+      color += uSunColor * (disc * 1.15 + halo);
+
+      // Star-like noise for the top hemisphere, with a slow gentle twinkle.
       float starNoise = fract(sin(dot(vWorldPosition.xz * 0.1, vec2(12.9898, 78.233))) * 43758.5453);
-      float starMask = smoothstep(0.55, 0.95, h) * step(0.997, starNoise) * 0.35;
+      float twinkle = 0.7 + 0.3 * sin(uTime * 2.1 + starNoise * 41.7);
+      float starMask = smoothstep(0.55, 0.95, h) * step(0.997, starNoise) * 0.35 * twinkle;
       color += vec3(starMask);
 
       gl_FragColor = vec4(color, 1.0);
@@ -79,7 +93,13 @@ export function createSkyDome(options = {}) {
       uMidColor: { value: midColor },
       uHorizonColor: { value: horizonColor },
       uBottomColor: { value: bottomColor },
+      // Default matches the scene keyLight at (7.5, 8.2, 5.2); env switches
+      // re-aim it via setSunDirection so sky sun == lighting sun.
+      uSunDirection: { value: new THREE.Vector3(7.5, 8.2, 5.2).normalize() },
+      uSunColor: { value: new THREE.Color(1.0, 0.92, 0.74) },
+      uCenter: { value: new THREE.Vector3() },
       uOffset: { value: offset },
+      uTime: { value: 0 },
       uRadius: { value: radius },
     },
     side: THREE.BackSide,
@@ -95,6 +115,7 @@ export function createSkyDome(options = {}) {
   const _scratchBottom = new THREE.Color();
   const _scratchMid = new THREE.Color();
   const _scratchHorizon = new THREE.Color();
+  const _white = new THREE.Color(1, 1, 1);
 
   return {
     mesh,
@@ -132,6 +153,19 @@ export function createSkyDome(options = {}) {
       if (skyConfig.glow !== undefined) {
         material.uniforms.uOffset.value = (skyConfig.glow - 0.3) * 0.15;
       }
+
+      // Sun tint follows the env horizon, lifted toward white so the disc
+      // reads hot against the warm band it sits in.
+      material.uniforms.uSunColor.value.copy(_scratchHorizon).lerp(_white, 0.45);
+    },
+
+    /**
+     * Aim the shader sun. Pass the keyLight position/direction so the visible
+     * sun and the scene's directional lighting agree.
+     */
+    setSunDirection(direction) {
+      if (!direction) return;
+      material.uniforms.uSunDirection.value.copy(direction).normalize();
     },
 
     /** Expose mid color so the scene can tint fog to match the sky. */
@@ -139,9 +173,13 @@ export function createSkyDome(options = {}) {
       return material.uniforms.uMidColor.value;
     },
 
-    /** Keep dome centered on camera */
-    followCamera(cameraPosition) {
+    /** Keep dome centered on camera; optional elapsed time drives star twinkle. */
+    followCamera(cameraPosition, elapsedTime) {
       mesh.position.copy(cameraPosition);
+      material.uniforms.uCenter.value.copy(cameraPosition);
+      if (elapsedTime !== undefined) {
+        material.uniforms.uTime.value = elapsedTime;
+      }
     },
 
     dispose() {

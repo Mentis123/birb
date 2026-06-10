@@ -258,7 +258,15 @@ export function createCollectiblesSystem(THREE, scene, environmentId) {
         // Gentle rotation (cheap — just sets a Euler angle)
         ring.rotation.z += delta * 2;
 
-        if (mobile) continue; // no shimmer/glow on mobile
+        if (mobile) {
+          // Mobile rings have no glow/core overlays, so they breathe instead:
+          // opacity shimmer + slight scale pulse. Transform + uniform updates
+          // only — no extra draw calls or fill, and zero per-frame allocs.
+          const beat = Math.sin(animationTime * 2.4 + i * 0.9) * 0.5 + 0.5;
+          ring.userData.ringMat.opacity = 0.8 + beat * 0.2;
+          ring.scale.setScalar(1 + beat * 0.05);
+          continue;
+        }
 
         // Pulse glow
         const pulse = Math.sin(animationTime * 3 + i * 0.5) * 0.3 + 0.7;
