@@ -7,6 +7,13 @@
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Birb Mobile</title>
   <meta name="description" content="Mobile-first Three.js playground for experimenting with gliding birbs." />
+  <!-- Social cards: shared links render a rich preview instead of a bare URL -->
+  <meta property="og:title" content="Birb Mobile — fly a birb around a tiny planet" />
+  <meta property="og:description" content="A free mobile 3D flight game. Soar over four worlds, race rings, battle drones — right in your browser." />
+  <meta property="og:image" content="https://birbmobile.vercel.app/splash.jpg" />
+  <meta property="og:url" content="https://birbmobile.vercel.app/" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="theme-color" content="#0b0d17" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
@@ -2186,6 +2193,18 @@
       line-height: 1.4;
     }
 
+    /* Personal best line on a mode card — the "beat your best" pull */
+    .game-mode-best {
+      font-size: 0.74rem;
+      font-weight: 600;
+      color: rgba(255, 216, 74, 0.9);
+      margin-top: 0.25rem;
+    }
+
+    .game-mode-best:empty {
+      display: none;
+    }
+
     .game-mode-close {
       width: 100%;
       margin-top: 1.25rem;
@@ -2724,6 +2743,7 @@
                   Ring Rush
                 </div>
                 <div class="game-mode-description">Collect all 18 rings as fast as possible. Race against your best time.</div>
+                <div class="game-mode-best" data-mode-best="ring-rush"></div>
               </div>
             </button>
             <!-- Drone Hunter -->
@@ -2734,6 +2754,7 @@
                   Drone Hunter
                 </div>
                 <div class="game-mode-description">60 seconds of chaos. Destroy drones, chase the high score with combos.</div>
+                <div class="game-mode-best" data-mode-best="drone-hunter"></div>
               </div>
             </button>
             <!-- Turret Defense -->
@@ -2744,6 +2765,7 @@
                   Turret Defense
                 </div>
                 <div class="game-mode-description">Defend your nest from waves of attacking drones. How long can you survive?</div>
+                <div class="game-mode-best" data-mode-best="turret-defense"></div>
               </div>
             </button>
           </div>
@@ -2772,6 +2794,7 @@
         <div class="results-new-best" data-results-new-best></div>
         <div class="results-buttons">
           <button class="results-btn results-btn--primary" data-results-retry>Play Again</button>
+          <button class="results-btn" data-results-share>Share</button>
           <button class="results-btn" data-results-quit>Quit</button>
         </div>
       </div>
@@ -3230,9 +3253,27 @@
     }
 
     // Game Mode overlay handlers
+    function refreshModeBests() {
+      // Surface personal bests on the mode cards — a "beat your best" pull
+      // the player otherwise only sees after a run.
+      const bests = [
+        ['ring-rush', 'birb_best_ring_rush', (v) => `Best: ${formatTime(parseFloat(v))}`],
+        ['drone-hunter', 'birb_best_drone_hunter', (v) => `Best: ${v} pts`],
+        ['turret-defense', 'birb_best_turret_defense', (v) => `Best: Wave ${v}`],
+      ];
+      for (const [mode, key, format] of bests) {
+        const el = document.querySelector(`[data-mode-best="${mode}"]`);
+        if (!el) continue;
+        let value = null;
+        try { value = localStorage.getItem(key); } catch (e) {}
+        el.textContent = value ? `🏆 ${format(value)}` : '';
+      }
+    }
+
     function openGameMode() {
       if (gameModeState.isOpen) return;
       gameModeState.isOpen = true;
+      refreshModeBests();
       if (gameModeOverlay) {
         gameModeOverlay.classList.add('is-open');
         gameModeOverlay.setAttribute('aria-hidden', 'false');
@@ -5070,6 +5111,9 @@
     const resultsNewBest = document.querySelector('[data-results-new-best]');
     const resultsRetry = document.querySelector('[data-results-retry]');
     const resultsQuit = document.querySelector('[data-results-quit]');
+    const resultsShare = document.querySelector('[data-results-share]');
+    // Human-readable summary of the last finished run, for the Share button.
+    let lastResultSummary = '';
 
     function formatTime(seconds) {
       const mins = Math.floor(seconds / 60);
@@ -5104,7 +5148,9 @@
           }
           hudLives.textContent = '';
           hudWave.textContent = '';
-          hudInfo.textContent = '';
+          // Onboarding: the nest mechanic isn't discoverable on its own.
+          // Hint until the first kill, then get out of the way.
+          hudInfo.textContent = miniGameState.score === 0 ? 'Land on a nest to shoot drones!' : '';
           break;
 
         case GAME_MODES.TURRET_DEFENSE:
@@ -5117,7 +5163,10 @@
           hudScore.textContent = '';
           hudLives.textContent = '❤'.repeat(Math.max(0, miniGameState.lives));
           hudWave.textContent = `Wave ${miniGameState.wave}`;
-          hudInfo.textContent = '';
+          // Onboarding: hint until the first kill, then get out of the way.
+          hudInfo.textContent = (miniGameState.wave === 1 && miniGameState.waveKills === 0)
+            ? 'Land on a nest — aim & fire to defend it!'
+            : '';
           break;
       }
     }
@@ -5215,11 +5264,13 @@
       showGameHud(false);
 
       let title, stat, bestKey, bestValue, isNewBest = false;
+      // bestLabel is passed through showGameResults — writing resultsBest
+      // directly here used to get clobbered by showGameResults(best='').
+      let bestLabel = '';
 
       switch (currentGameMode) {
         case GAME_MODES.RING_RUSH:
           title = completed ? 'Ring Rush Complete!' : 'Ring Rush';
-          stat = `Time: ${formatTime(miniGameState.time)}`;
           bestKey = 'birb_best_ring_rush';
           const savedBestTime = parseFloat(localStorage.getItem(bestKey)) || Infinity;
           if (completed && miniGameState.time < savedBestTime) {
@@ -5228,7 +5279,10 @@
           }
           bestValue = localStorage.getItem(bestKey);
           stat = completed ? `Time: ${formatTime(miniGameState.time)}` : 'Quit';
-          resultsBest.textContent = bestValue ? `Best: ${formatTime(parseFloat(bestValue))}` : '';
+          bestLabel = bestValue ? `Best: ${formatTime(parseFloat(bestValue))}` : '';
+          lastResultSummary = completed
+            ? `I cleared Ring Rush in ${formatTime(miniGameState.time)} in Birb Mobile! 🐦`
+            : '';
           break;
 
         case GAME_MODES.DRONE_HUNTER:
@@ -5241,7 +5295,8 @@
             isNewBest = true;
           }
           bestValue = localStorage.getItem(bestKey);
-          resultsBest.textContent = bestValue ? `Best: ${bestValue}` : '';
+          bestLabel = bestValue ? `Best: ${bestValue}` : '';
+          lastResultSummary = `I scored ${miniGameState.score} in Drone Hunter in Birb Mobile! 🐦`;
           break;
 
         case GAME_MODES.TURRET_DEFENSE:
@@ -5254,11 +5309,12 @@
             isNewBest = true;
           }
           bestValue = localStorage.getItem(bestKey);
-          resultsBest.textContent = bestValue ? `Best: Wave ${bestValue}` : '';
+          bestLabel = bestValue ? `Best: Wave ${bestValue}` : '';
+          lastResultSummary = `I survived ${miniGameState.wave} wave${miniGameState.wave === 1 ? '' : 's'} of Turret Defense in Birb Mobile! 🐦`;
           break;
       }
 
-      showGameResults(title, stat, '', isNewBest);
+      showGameResults(title, stat, bestLabel, isNewBest);
     }
 
     function quitToMenu() {
@@ -5352,6 +5408,23 @@
     if (resultsQuit) {
       resultsQuit.addEventListener('click', () => {
         quitToMenu();
+      });
+    }
+    if (resultsShare) {
+      resultsShare.addEventListener('click', async () => {
+        const text = lastResultSummary || 'Come fly in Birb Mobile! 🐦';
+        const url = 'https://birbmobile.vercel.app';
+        if (navigator.share) {
+          // Native share sheet (iOS/Android). A rejected promise just means
+          // the user closed the sheet — nothing to handle.
+          try { await navigator.share({ title: 'Birb Mobile', text, url }); } catch (e) {}
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(`${text} ${url}`);
+          resultsShare.textContent = 'Copied!';
+          setTimeout(() => { resultsShare.textContent = 'Share'; }, 1500);
+        } catch (e) { /* clipboard unavailable — leave the button as-is */ }
       });
     }
 

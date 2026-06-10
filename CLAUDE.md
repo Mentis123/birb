@@ -39,9 +39,9 @@ Major overhaul session. Birb Mobile now ships the full **Birb Labs Artefact Trea
 - Mode-aware minimap (Zen = compass+nest, Ring Rush = rings only, etc.)
 
 **Known / pending:**
-- Minimap is too zoomed-out per playtest — tighten the radius when next on this
+- ~~Minimap is too zoomed-out per playtest~~ — **fixed** (mode-aware `visibleRadius` 65–95 shipped)
 - Task 6 playtest pass on Drone Hunter + Turret Defense tuning still open
-- Eruda debug still present in `index.html` — can strip when next touching
+- ~~Eruda debug still present in `index.html`~~ — **removed**
 
 **Sibling siblings:**
 - Rogue Mobile (`Mentis123/yagamentis`) — full treatment
@@ -49,6 +49,8 @@ Major overhaul session. Birb Mobile now ships the full **Birb Labs Artefact Trea
 - Frosty Spider (`Mentis123/FrostySpider`) — treatment alignment pending
 
 **Density / immersion pass (2026-05-31):** all four on-sphere environments densified for a fuller, more layered, exploration-feel world (terrain had been thinned for the 60fps mobile lift, which read as sparse). More trees/spires/peaks/buildings + new instanced prop layers (forest ferns + emergent snags, canyon needle-spires, mountain scree + champion-pine nests, city rooftop clutter + street pylons), taller champions/verticality, and ~2x nests across every biome. Drones are 50% bigger again (body 3.6→5.4, ring 5.4→8.1, collisionRadius 6.6→9.9) and +50% on desktop (12) / held at 8 on mobile. Forest + mountain **clouds refactored from 80/54 separate puff meshes to one InstancedMesh each** (cloud colliders preserved) — reclaims the desktop draw-call headroom that funds the pass. New props are InstancedMesh + collider-free; the remote's cruise-altitude colliders (tree/spire/peak/tower/pine canopies, solid clouds) are kept. Mobile structural counts gated to a middle tier (denser than the thinned base, lighter than desktop). Budgets hold: <100 draw calls, <80k tris, 60fps, per-env. See `src/environment/spherical-world.js` builders + `src/nesting/drone-system.js`.
+
+**Evaluation + polish pass (2026-06-10):** a four-domain multi-agent codebase evaluation shipped as `CODEBASE_EVALUATION.md` — read it before any structural work; it has the prioritized roadmap, a consolidated zero-alloc audit, and a do-NOT-fix list of deliberate trade-offs. Fixes shipped from it: `prefers-reduced-motion` no longer pauses the game (it gates decorative motion only — shake/FOV kicks/speed lines via `reducedMotionState`); Ring Rush win condition + HUD now track the real spawned ring count (was 10 vs 18); turret drone AI loop de-allocated; SW update reload deferred during active runs; Tap-to-Start shows "Loading…" on slow networks. Visual suite shipped: sky-dome sun disc + halo aimed at the env keyLight, camera-anchored sky gradient, twinkling stars, mobile ring shimmer, speed-sense FOV, cinematic vignette. Retention: share button on results (and the results "Best:" line actually displays now — it was being clobbered), personal bests on mode cards, per-mode onboarding hints, og/twitter social cards. **Doc corrections:** the legacy controller is `src/controls/simple-flight-controller.js` (`free-flight-controller.js` does not exist); the `src/performance/` directory is currently UNWIRED dead code (index.html reimplements adaptive quality inline); `src/controls/flight-controls.js` is constructed but its input-shaping methods are no-ops on `BirdFlight` — the live touch path is `src/flight/touch-input.js` → `bird-flight.js`.
 
 **Distribution follow-up (2026-05-31):** the first pass only made the clusters denser, but the world still *read* as sparse — on a radius-120 sphere the horizon is ~44u away while groves/ridges/blocks sit ~125u apart, so most views land in an empty gap (see the player screenshot that prompted this). Fix: a **global evenly-distributed scatter layer** of the primary prop in every biome (forest trees 150 mobile / 240 desktop, canyon spires 70/120, mountain pines 110/180, city buildings 120/200), each pushed into the SAME instanced arrays as the clustered props → zero new draw calls, just more instances. Clusters still give dense pockets + nests; the scatter guarantees props are always in view. Applies on mobile too (the user is mobile-first), kept under the fill-rate budget since no new transparent surfaces are added.
 
@@ -135,8 +137,9 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 |------|-------------|
 | `index.html` | Main game — scene, loop, UI, audio, all systems coordinated |
 | `src/flight/bird-flight.js` | Current flight controller (vector-based) |
-| `free-flight-controller.js` | Legacy flight controller (heading-based, has spherical bug) |
-| `src/controls/flight-controls.js` | Input handling — joystick, keyboard, smoothing, deadzones |
+| `src/controls/simple-flight-controller.js` | Legacy flight controller (kept as reference, unwired) |
+| `src/flight/touch-input.js` | **Live** touch input path (raw clamp → `bird-flight.js`) |
+| `src/controls/flight-controls.js` | Input shaping (deadzone/expo/smoothing) — wired but its shaping methods are no-ops on `BirdFlight`; see CODEBASE_EVALUATION.md |
 | `src/camera/follow-camera.js` | Third-person chase camera with damping |
 | `src/nesting/nesting-system.js` | Nest landing/takeoff state machine |
 | `src/nesting/aim-rig.js` | Turret aiming with spring-damper inertia |
@@ -144,8 +147,8 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/nesting/drone-system.js` | Enemy drone spawning and AI |
 | `src/environment/spherical-world.js` | Sphere + collision system |
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
-| `src/performance/performance-manager.js` | FPS monitoring, adaptive quality |
-| `src/performance/object-pool.js` | Reusable object pools (rockets, particles) |
+| `src/performance/` | ⚠️ Currently UNWIRED (dead code) — adaptive quality is inline in `index.html`; see CODEBASE_EVALUATION.md |
+| `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |
 | `KNOWN_ISSUES.md` | Bug tracker with detailed fix attempts |
 | `FLIGHT_CONTROLS_PLAN.md` | 4-phase flight system redesign plan |
 | `TURRET_RESEARCH.md` | Gun feel research, spring-damper physics |
@@ -156,7 +159,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 
 The spherical flight direction bug — where the bird flew in a fixed world direction regardless of facing — was the longest-running issue in this project (Dec 2025 – Jan 2026). It is now **fixed and working in production.**
 
-The active controller (`src/flight/bird-flight.js`) uses vector-based forward direction tracking with parallel transport and sphere re-projection. The legacy `free-flight-controller.js` is kept as reference only.
+The active controller (`src/flight/bird-flight.js`) uses vector-based forward direction tracking with parallel transport and sphere re-projection. The legacy `src/controls/simple-flight-controller.js` is kept as reference only.
 
 See `KNOWN_ISSUES.md` Issue 5 for the investigation history.
 
@@ -223,7 +226,7 @@ For mobile testing: use Edge DevTools device emulation, or access via local netw
 | Adjust turret feel | `src/nesting/aim-rig.js` — spring-damper constants |
 | Add a sound effect | `sound/` folder + audio system in `index.html` (~line 1198) |
 | Change game mode balancing | `index.html` game mode sections + `docs/PRD-game-modes.md` |
-| Improve mobile controls | `src/controls/flight-controls.js` — deadzone, expo, smoothing |
+| Improve mobile controls | `src/flight/touch-input.js` (live path) + `src/flight/bird-flight.js` — the shaping in `src/controls/flight-controls.js` is currently inert |
 | Add visual effect | `src/effects/particles.js` or `src/effects/screen-shake.js` |
 | Fix a camera issue | `src/camera/follow-camera.js` or `fpv-camera.js` |
 | Performance optimization | `src/performance/` — pools, LOD, culling |
@@ -240,8 +243,9 @@ For mobile testing: use Edge DevTools device emulation, or access via local netw
 ## Known Issues
 
 1. ~~Spherical flight direction bug~~ — **RESOLVED.** Fixed in `src/flight/bird-flight.js`. See `KNOWN_ISSUES.md` for history.
-2. Eruda debug console still enabled in `index.html` — can be removed now
+2. ~~Eruda debug console in `index.html`~~ — **RESOLVED.** Already removed.
 3. iOS audio full duration testing incomplete
+4. `src/performance/` is dead code (~3,200 lines, never imported) — the live adaptive quality is inline in `index.html`. The spatial-hash collision broad-phase in `optimized-collision.js` is worth wiring; see CODEBASE_EVALUATION.md roadmap.
 
 See `KNOWN_ISSUES.md` for detailed history and fix attempts.
 
