@@ -95,6 +95,19 @@
       -webkit-touch-callout: none;
     }
 
+    /* Subtle cinematic vignette over the 3D scene. Pure compositor work
+       (static gradient, pointer-events none) — zero WebGL / per-frame cost.
+       Sits above the canvas, below every HUD/overlay element (later in DOM). */
+    .cinematic-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse 120% 95% at center 45%,
+        transparent 58%,
+        rgba(8, 12, 26, 0.16) 82%,
+        rgba(8, 12, 26, 0.34) 100%);
+    }
+
     canvas {
       width: 100%;
       height: 100%;
@@ -2575,6 +2588,8 @@
     <header>Birb Flight Lab</header>
     <div class="canvas-wrapper">
       <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
+      <!-- Cinematic vignette: one static composited gradient, no per-frame cost -->
+      <div class="cinematic-vignette" aria-hidden="true"></div>
       <!-- Settings gear button (corner) -->
       <button type="button" class="settings-gear-button" data-control="settings-open" aria-label="Open settings">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -2708,7 +2723,7 @@
                 <div class="game-mode-name">
                   Ring Rush
                 </div>
-                <div class="game-mode-description">Collect all 10 rings as fast as possible. Race against your best time.</div>
+                <div class="game-mode-description">Collect all 18 rings as fast as possible. Race against your best time.</div>
               </div>
             </button>
             <!-- Drone Hunter -->
@@ -2917,6 +2932,9 @@
     let startGameLoop = null;
     let pendingGameStart = false;
     let gameLoopStarted = false;
+    // When the user taps Start before the scene finishes loading, this holds
+    // the full start sequence so the late-load path can run it seamlessly.
+    let resumePendingStart = null;
 
     // Vibe Academy splash helpers
     function showVibeSplash() {
@@ -3030,22 +3048,14 @@
     }
 
     if (titleStartBtn) {
-      const startGame = () => {
+      const beginGame = () => {
         splashDismissed = true;
-        // Unlock audio in the same user gesture as Start. This avoids starting
-        // ambient music from splash/tap interactions before gameplay begins.
-        unlockAudio();
+        titleStartBtn.disabled = false;
         // Reveal the game UI now — it was hidden until Tap-to-Start so the
         // canvas-wrapper / HUD / header couldn't peek through the splash fade.
         const mainEl = document.querySelector('[data-game-main]');
         if (mainEl) mainEl.hidden = false;
-        // Kick off the render loop now (or mark it pending if the scene
-        // isn't ready yet — the late-load path picks it up).
-        if (typeof startGameLoop === 'function') {
-          startGameLoop();
-        } else {
-          pendingGameStart = true;
-        }
+        startGameLoop();
         // Start background music only after the user has explicitly started.
         if (soundSettings.musicEnabled) {
           setAmbientMusic(true);
@@ -3055,6 +3065,22 @@
           if (typeof triggerAutoFullscreen === 'function') triggerAutoFullscreen();
           showMinigameOnboarding();
         }, 300);
+      };
+      const startGame = () => {
+        // Unlock audio in the same user gesture as Start. This avoids starting
+        // ambient music from splash/tap interactions before gameplay begins.
+        unlockAudio();
+        if (typeof startGameLoop !== 'function') {
+          // Scene still loading (slow network / fast tap): show progress on
+          // the button instead of revealing an empty canvas. The late-load
+          // path runs the full start sequence the moment the scene is ready.
+          pendingGameStart = true;
+          resumePendingStart = beginGame;
+          titleStartBtn.disabled = true;
+          titleStartBtn.textContent = 'Loading…';
+          return;
+        }
+        beginGame();
       };
       titleStartBtn.addEventListener('click', startGame);
       titleStartBtn.addEventListener('touchend', (e) => { e.preventDefault(); startGame(); }, { passive: false });
@@ -4648,6 +4674,9 @@
     let sprintFovTarget = 60;
     const BASE_FOV = 60;
     const SPRINT_FOV = 74;
+    // Reusable fallback for controllers without getAmbientOffsets — the old
+    // inline fallback allocated 2 vectors + a quaternion EVERY frame.
+    const EMPTY_AMBIENT_OFFSETS = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
 
     // Track previous combo for popup
     let prevCombo = 1;
@@ -4882,6 +4911,9 @@
 
     // motionQuery declaration
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // Reduced motion gates DECORATIVE motion only (screen shake, FOV kicks,
+    // speed lines, CSS drift) — it must never pause core gameplay.
+    const reducedMotionState = { enabled: motionQuery.matches };
 
     // Stub for invalidateRendererSize to prevent crash if called early
     let invalidateRendererSize = () => { resizeState.dirty = true; };
@@ -5004,7 +5036,8 @@
       comboTimer: 0,
       wave: 1,
       lives: 3,
-      waveSpawnCount: 4,
+      waveSpawnCount: 3, // wave N spawns 2 + N drones; startGameMode resets to 3
+
       waveSpawnedThisWave: 0,
       droneSpawnTimer: 0,
       started: false, // For Ring Rush - starts on first ring
@@ -5014,6 +5047,12 @@
       waveTimer: 0,
       waveComplete: false,
     };
+
+    // Scratch vectors for the Turret Defense drone AI — the approach loop
+    // runs per drone per frame and must not allocate (house rule #4).
+    const _turretDir = new THREE.Vector3();
+    const _turretTangent = new THREE.Vector3();
+    const _turretWork = new THREE.Vector3();
 
     // Game HUD elements
     const gameHud = document.querySelector('[data-game-hud]');
@@ -5108,6 +5147,8 @@
     function startGameMode(mode) {
       currentGameMode = mode;
       miniGameState.active = true;
+      // Bridge for the (non-module) SW update script: never reload mid-run.
+      window.__birbMiniGameActive = true;
       miniGameState.time = 0;
       miniGameState.score = 0;
       miniGameState.ringsCollected = 0;
@@ -5130,6 +5171,9 @@
       if (collectiblesSystem) {
         collectiblesSystem.reset();
         collectiblesSystem.setVisible(mode === GAME_MODES.RING_RUSH);
+        // Win condition + HUD must track the REAL spawned ring count —
+        // a hardcoded total ended the race early with rings still floating.
+        miniGameState.ringsTotal = collectiblesSystem.rings.length;
       }
 
       hideGameResults();
@@ -5167,6 +5211,7 @@
 
     function endGameMode(completed = true) {
       miniGameState.active = false;
+      window.__birbMiniGameActive = false;
       showGameHud(false);
 
       let title, stat, bestKey, bestValue, isNewBest = false;
@@ -5282,6 +5327,7 @@
       // Treat Zen like Casual structurally: no mini-game timer and no HUD.
       // Drones remain active as ambient moving hazards.
       miniGameState.active = false;
+      window.__birbMiniGameActive = false;
       showGameHud(false);
       hideGameResults();
       // Show rings in Zen for ambient chimes — no score, no win condition.
@@ -5752,6 +5798,11 @@
       // ===== IMPROVEMENT 1: Update sky dome colors =====
       if (skyDome && definition.sky) {
         skyDome.setColors(definition.sky);
+      }
+      // Aim the sky's sun at the env's key light so the visible sun disc and
+      // the scene's directional lighting always agree.
+      if (skyDome && typeof skyDome.setSunDirection === 'function' && lightingRig?.keyLight) {
+        skyDome.setSunDirection(lightingRig.keyLight.position);
       }
       // Atmospheric haze: tint fog toward the sky's mid band so far geometry
       // dissolves softly into the painterly sky instead of a flat slate color.
@@ -6355,7 +6406,7 @@
     }
 
     const motionState = {
-      animate: !motionQuery.matches,
+      animate: true,
       elapsed: 0,
     };
 
@@ -6397,7 +6448,9 @@
 
     const controlState = {
       manuallyPaused: false,
-      systemPaused: motionQuery.matches,
+      // Never coupled to prefers-reduced-motion: that preference must not
+      // make the game unplayable (see reducedMotionState).
+      systemPaused: false,
     };
 
     const fullscreenState = {
@@ -6696,8 +6749,7 @@
     }
 
     motionQuery.addEventListener("change", (event) => {
-      controlState.systemPaused = event.matches;
-      refreshAnimationState();
+      reducedMotionState.enabled = event.matches;
     });
 
     function updateRendererSize(force = false) {
@@ -7819,7 +7871,7 @@
                   drone._flankOffset = (Math.random() - 0.5) * 30;
                 }
 
-                const dirToNest = nestPos.clone().sub(drone.position);
+                const dirToNest = _turretDir.copy(nestPos).sub(drone.position);
                 const distToNest = dirToNest.length();
                 dirToNest.normalize();
                 let droneSpeed = baseSpeed;
@@ -7827,14 +7879,16 @@
                 if (drone._pattern === 'spiral' && distToNest > 10) {
                   // Spiral: orbit while closing in
                   drone._spiralAngle += delta * 1.5;
-                  const tangent = new THREE.Vector3(-dirToNest.z, 0, dirToNest.x).normalize();
-                  const spiralDir = dirToNest.clone().multiplyScalar(0.6).add(tangent.multiplyScalar(Math.sin(drone._spiralAngle) * 0.8));
+                  const tangent = _turretTangent.set(-dirToNest.z, 0, dirToNest.x).normalize();
+                  const spiralDir = _turretWork.copy(dirToNest).multiplyScalar(0.6)
+                    .addScaledVector(tangent, Math.sin(drone._spiralAngle) * 0.8);
                   spiralDir.normalize();
                   drone.position.addScaledVector(spiralDir, droneSpeed * 0.7 * delta);
                 } else if (drone._pattern === 'flank' && distToNest > 12) {
                   // Flanking: wide approach angle
-                  const side = new THREE.Vector3(-dirToNest.z, 0, dirToNest.x).normalize();
-                  const flankDir = dirToNest.clone().add(side.multiplyScalar(drone._flankOffset > 0 ? 0.5 : -0.5));
+                  const side = _turretTangent.set(-dirToNest.z, 0, dirToNest.x).normalize();
+                  const flankDir = _turretWork.copy(dirToNest)
+                    .addScaledVector(side, drone._flankOffset > 0 ? 0.5 : -0.5);
                   flankDir.normalize();
                   drone.position.addScaledVector(flankDir, droneSpeed * 0.8 * delta);
                 } else {
@@ -8108,7 +8162,7 @@
       }
 
 
-      const ambientOffsets = flightController.getAmbientOffsets ? flightController.getAmbientOffsets() : { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+      const ambientOffsets = flightController.getAmbientOffsets ? flightController.getAmbientOffsets() : EMPTY_AMBIENT_OFFSETS;
 
       birbAnchor.position.copy(pose.position);
       if (ambientOffsets.position) birbAnchor.position.add(ambientOffsets.position);
@@ -8236,8 +8290,8 @@
       const birdPos = flightController?.position;
       const birdQuat = flightController?.quaternion || (flightController && typeof flightController.getQuaternion === 'function' ? flightController.getQuaternion() : null);
 
-      // IMPROVEMENT 1: Sky dome follows camera
-      if (skyDome && cam) skyDome.followCamera(cam.position);
+      // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
+      if (skyDome && cam) skyDome.followCamera(cam.position, motionState.elapsed);
 
       // IMPROVEMENT 1b: Cloud shell — slow drift + follow camera
       if (cloudShell && cam) {
@@ -8285,16 +8339,28 @@
 
       // IMPROVEMENT 6: Apply screen shake + FOV
       if (screenShake) {
+        // Always tick the shake so its timers decay; only APPLY the offsets
+        // when reduced motion is off (comfort setting gates decoration only).
         const shakeResult = screenShake.update(delta);
-        if (cam && shakeResult.offset) {
+        if (cam && shakeResult.offset && !reducedMotionState.enabled) {
           cam.position.x += shakeResult.offset.x;
           cam.position.y += shakeResult.offset.y;
           cam.position.z += shakeResult.offset.z;
         }
-        // FOV kick from screen shake (ring collection) + sprint FOV
-        const targetFov = (sprintState.active && currentGameMode === GAME_MODES.RING_RUSH) ? SPRINT_FOV : BASE_FOV;
+        // FOV kick from screen shake (ring collection) + sprint FOV.
+        // Outside sprint, FOV breathes gently with airspeed (up to +5° at top
+        // speed) for a real sense of velocity. Comfort-gated by reduced motion.
+        let targetFov;
+        if (sprintState.active && currentGameMode === GAME_MODES.RING_RUSH) {
+          targetFov = SPRINT_FOV;
+        } else {
+          const speedNorm = Math.min(1, Math.max(0, (flightController?.speed ?? 0) / 7));
+          // No widen while nested (speed is stale there) or under reduced motion.
+          const speedFov = (reducedMotionState.enabled || isNested) ? 0 : speedNorm * speedNorm * 5;
+          targetFov = BASE_FOV + speedFov;
+        }
         if (cam && cam.fov !== undefined) {
-          const desiredFov = targetFov + shakeResult.fovOffset;
+          const desiredFov = targetFov + (reducedMotionState.enabled ? 0 : shakeResult.fovOffset);
           cam.fov = cam.fov + (desiredFov - cam.fov) * Math.min(1, delta * 8);
           cam.updateProjectionMatrix();
         }
@@ -8302,7 +8368,7 @@
 
       // IMPROVEMENT 10: Speed lines during sprint
       if (speedLines) {
-        const isSprinting = sprintState.active && currentGameMode === GAME_MODES.RING_RUSH;
+        const isSprinting = sprintState.active && currentGameMode === GAME_MODES.RING_RUSH && !reducedMotionState.enabled;
         speedLines.classList.toggle('is-active', isSprinting);
       }
 
@@ -8611,9 +8677,15 @@
       renderer.setAnimationLoop(renderFrame);
     };
     // If the user already tapped Start before the script finished loading
-    // (very fast tap), start it now.
+    // (very fast tap / slow network), run the full start sequence now — it
+    // reveals the UI, starts the loop + music, and dismisses the title page.
     if (pendingGameStart) {
-      startGameLoop();
+      pendingGameStart = false;
+      if (typeof resumePendingStart === 'function') {
+        resumePendingStart();
+      } else {
+        startGameLoop();
+      }
     }
   </script>
   <script>
@@ -8653,6 +8725,12 @@
       let refreshing = false;
       const reloadForUpdate = () => {
         if (refreshing) return;
+        // Never yank the player out of an active mini-game run — wait for it
+        // to finish, then update. (Flag is bridged from the game module.)
+        if (window.__birbMiniGameActive) {
+          setTimeout(reloadForUpdate, 5000);
+          return;
+        }
         try { if (sessionStorage.getItem(RELOAD_FLAG)) return; } catch (e) {}
         refreshing = true;
         try { sessionStorage.setItem(RELOAD_FLAG, '1'); } catch (e) {}
