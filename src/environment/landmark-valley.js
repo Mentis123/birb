@@ -215,9 +215,11 @@ export function createValleyFeature({
   const rimAng = params.radiusAng * 0.92;
   const rimDir = dirTo(rimAng, true);
   const rimTop = surfacePoint(rimDir, 0.4);
-  const poolCenter = surfacePoint(A, 1.2);
+  const poolCenter = surfacePoint(A, 2.0); // above the pond floor's detail-noise waviness
   const poolLevelR = poolCenter.length();
-  const baseDir = dirTo((params.poolRadius * 0.55) / sphereRadius, true);
+  // Base lands ON the flat pond just inside its edge (the basin carve is
+  // cliff-walled with a flat floor out to ~0.55 * radiusAng).
+  const baseDir = dirTo(params.radiusAng * 0.5, true);
   const fallBase = baseDir.clone().multiplyScalar(poolLevelR + 0.2);
   const fallSpan = rimTop.clone().sub(fallBase);
   const drop = Math.max(8, fallSpan.length());
@@ -283,7 +285,9 @@ export function createValleyFeature({
   const lCoord = new Float32Array(mistCount * 3);
   const spawnLocal = (k, initial) => {
     lCoord[k * 3] = (seedRng() - 0.5) * fallWidth * 0.9;
-    lCoord[k * 3 + 1] = initial ? seedRng() * drop : seedRng() * 2.0;
+    // Mist hugs the impact line — an uncapped 0..drop spread made a spray
+    // tower visible above the canyon rim from across the map.
+    lCoord[k * 3 + 1] = initial ? seedRng() * Math.min(drop * 0.35, 8) : seedRng() * 2.0;
     lCoord[k * 3 + 2] = (seedRng() - 0.5) * params.poolRadius * 0.5;
     mVel[k * 3] = (seedRng() - 0.5) * 1.2;
     mVel[k * 3 + 1] = 1.0 + seedRng() * 2.4;
@@ -384,8 +388,21 @@ export function createValleyFeature({
     for (let k = 0; k <= segs; k++) {
       const a = fromAng + (toAng - fromAng) * (k / segs);
       const center = dirTo(a, towardF);
-      const floorH = safeHeight(center.x, center.y, center.z);
-      const rad = sphereRadius + floorH + 0.55;
+      // Water level per segment = WORST-CASE local ground across the water's
+      // footprint and toward the next segment. The detail noise rises between
+      // single centerline samples — which left the ribbon buried with slivers
+      // poking through crests (2026-06-11 playtest).
+      const aN = fromAng + (toAng - fromAng) * (Math.min(k + 1, segs) / segs);
+      const mid = dirTo((a + aN) / 2, towardF);
+      const eLd = center.clone().multiplyScalar(Math.cos(half * 0.5)).addScaledVector(Rt, Math.sin(half * 0.5)).normalize();
+      const eRd = center.clone().multiplyScalar(Math.cos(half * 0.5)).addScaledVector(Rt, -Math.sin(half * 0.5)).normalize();
+      const floorH = Math.max(
+        safeHeight(center.x, center.y, center.z),
+        safeHeight(mid.x, mid.y, mid.z),
+        safeHeight(eLd.x, eLd.y, eLd.z),
+        safeHeight(eRd.x, eRd.y, eRd.z),
+      );
+      const rad = sphereRadius + floorH + 0.8;
       const eL = center.clone().multiplyScalar(Math.cos(half)).addScaledVector(Rt, Math.sin(half)).normalize();
       const eR = center.clone().multiplyScalar(Math.cos(half)).addScaledVector(Rt, -Math.sin(half)).normalize();
       const pL = eL.multiplyScalar(rad);
