@@ -413,7 +413,9 @@ const CONTINENT_BIAS = 0.35;
 // heightAt() probe. The slalom Run is anchored separately (SLALOM_ANCHOR).
 const VALLEY_ANCHOR = (() => { const x = 0.35, y = 0.78, z = 0.52; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
 const SLALOM_ANCHOR = (() => { const x = -0.55, y = 0.62, z = -0.58; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
-const VALLEY_PARAMS = { radiusAng: 0.16, depth: 28, riverHalfAng: 0.05, riverReachAng: 0.30, riverDepth: 4, poolRadius: 11, canyonReachAng: 0.52, canyonHalfAng: 0.062, canyonDepth: 22 };
+// riverDepth 7 (was 4): the inflow brook must out-carve the forest detail
+// noise or the water reads as buried slivers on the plateau.
+const VALLEY_PARAMS = { radiusAng: 0.16, depth: 28, riverHalfAng: 0.05, riverReachAng: 0.30, riverDepth: 7, poolRadius: 11, canyonReachAng: 0.52, canyonHalfAng: 0.062, canyonDepth: 22 };
 
 let _valleyActive = false;
 let _vaX = 0, _vaY = 0, _vaZ = 0;   // anchor unit dir
@@ -458,7 +460,13 @@ function valleyCarveAt(nx, ny, nz) {
   let carve = 0;
   if (ang < _valleyRadiusAng) {
     const t = 1 - ang / _valleyRadiusAng;
-    carve -= _valleyDepth * (t * t * (3 - 2 * t)); // smoothstep bowl
+    // Cliff-walled basin: full depth reached by t >= 0.45, giving a FLAT pond
+    // floor (~11u radius — matches the pool disc) ringed by steep headwalls.
+    // The old plain-smoothstep bowl was so gradual that the waterfall sheet
+    // sat INSIDE the slope and the pool was mostly buried (2026-06-11
+    // playtest). Still strictly carve-down (<= 0): the floor invariant holds.
+    const tc = Math.min(1, t / 0.45);
+    carve -= _valleyDepth * (tc * tc * (3 - 2 * tc));
   }
   const along = _vfX * nx + _vfY * ny + _vfZ * nz;
   if (along > 0 && ang < _riverReachAng) {
