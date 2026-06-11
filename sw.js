@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v9-2026-06-11';
+const CACHE_VERSION = 'v10-2026-06-11';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -20,9 +20,14 @@ const CORE_ASSETS = [
   './icons/apple-touch-icon.png',
   './splash.jpg',
   './info.jpg',
-  './birb.glb',
+  // NOT precached (install-weight diet, ~7.3 MB saved):
+  // - ./birb.glb (1.7 MB) — only loads behind the ?glb=1 A/B flag; the
+  //   runtime cache picks it up on demand for whoever uses that flag.
+  // - ./sound/ambient-mountain.mp3 (5.6 MB) — setAmbientMusic deliberately
+  //   pins the forest track (users asked for the original back), so the
+  //   mountain track is currently unplayed. Re-add here if track switching
+  //   ever returns.
   './sound/ambient-forest.mp3',
-  './sound/ambient-mountain.mp3',
   './sound/rocket-fire.mp3',
   './sound/explosion.mp3',
   './sound/ring-collect.wav',
