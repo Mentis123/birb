@@ -4322,6 +4322,11 @@
     const minimap = (minimapCanvas && typeof createMinimap === 'function')
       ? createMinimap({ THREE, canvas: minimapCanvas, sphereRadius: SPHERE_RADIUS })
       : null;
+    // Permanent pool of ring data entries for the minimap — grown once to ring
+    // count, reused every frame during Ring Rush. Each entry:
+    // { position: Vec3, collected: bool }. (Stays in index.html because it is
+    // populated from live collectiblesSystem state at the render-loop call site.)
+    const minimapRingScratch = [];
 
     // ===== Helper: show combo popup =====
     let comboPopupTimeout = null;
@@ -8178,30 +8183,40 @@
       const minimapModeVisible = currentGameMode === GAME_MODES.ZEN
         || currentGameMode === GAME_MODES.CASUAL
         || miniGameState.active;
-      if (minimapModeVisible && minimap && minimap.isReady() && birdPos && birdQuat) {
-        minimap.setVisible(true);
-        const drones = droneSystem ? droneSystem.getDrones() : [];
-        let ringData = null;
-        if (collectiblesSystem && collectiblesSystem.rings) {
-          const rings = collectiblesSystem.rings;
-          // Grow the scratch pool to match ring count (one-time per env change).
-          while (minimapRingScratch.length < rings.length) {
-            minimapRingScratch.push({ position: new THREE.Vector3(), collected: false });
+      // The minimap is decoration — it must NEVER take the renderer down with
+      // it. A per-frame exception here previously skipped renderer.render()
+      // entirely (black screen, audio still playing). Fail soft instead.
+      try {
+        if (minimapModeVisible && minimap && minimap.isReady() && birdPos && birdQuat) {
+          minimap.setVisible(true);
+          const drones = droneSystem ? droneSystem.getDrones() : [];
+          let ringData = null;
+          if (collectiblesSystem && collectiblesSystem.rings) {
+            const rings = collectiblesSystem.rings;
+            // Grow the scratch pool to match ring count (one-time per env change).
+            while (minimapRingScratch.length < rings.length) {
+              minimapRingScratch.push({ position: new THREE.Vector3(), collected: false });
+            }
+            for (let i = 0; i < rings.length; i++) {
+              const entry = minimapRingScratch[i];
+              rings[i].getWorldPosition(entry.position);
+              entry.collected = rings[i].userData.collected;
+            }
+            minimapRingScratch.length = rings.length;
+            ringData = minimapRingScratch;
           }
-          for (let i = 0; i < rings.length; i++) {
-            const entry = minimapRingScratch[i];
-            rings[i].getWorldPosition(entry.position);
-            entry.collected = rings[i].userData.collected;
-          }
-          minimapRingScratch.length = rings.length;
-          ringData = minimapRingScratch;
+          const nestPos = (isNested && flightController) ? flightController.position : null;
+          const nestList = (typeof nestPointsSystem !== 'undefined' && nestPointsSystem && nestPointsSystem.nests)
+            ? nestPointsSystem.nests : null;
+          minimap.update(birdPos, birdQuat, ringData, drones, nestPos, delta, currentGameMode, GAME_MODES, nestList);
+        } else if (minimap) {
+          minimap.setVisible(false);
         }
-        const nestPos = (isNested && flightController) ? flightController.position : null;
-        const nestList = (typeof nestPointsSystem !== 'undefined' && nestPointsSystem && nestPointsSystem.nests)
-          ? nestPointsSystem.nests : null;
-        minimap.update(birdPos, birdQuat, ringData, drones, nestPos, delta, currentGameMode, GAME_MODES, nestList);
-      } else if (minimap) {
-        minimap.setVisible(false);
+      } catch (err) {
+        if (!window.__birbMinimapWarned) {
+          window.__birbMinimapWarned = true;
+          console.warn('Minimap update failed; radar disabled for this session', err);
+        }
       }
 
       renderer.render(scene, cameraState.camera);
