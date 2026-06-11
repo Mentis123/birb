@@ -110,7 +110,6 @@ index.html (main game loop, scene setup, state coordination)
 ├── src/nesting/         Nest landing, turret aiming, rockets, drones
 ├── src/environment/     Spherical world, sky dome, collectibles, trails
 ├── src/effects/         Particles, screen shake
-├── src/performance/     FPS monitor, object pools, LOD, culling
 ├── sound/               Audio assets (mp3)
 ├── basic/               Minimal reference implementation
 ├── AR/                  Experimental AR branch (not integrated)
@@ -147,7 +146,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/nesting/drone-system.js` | Enemy drone spawning and AI |
 | `src/environment/spherical-world.js` | Sphere + collision system |
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
-| `src/performance/` | ⚠️ Currently UNWIRED (dead code) — adaptive quality is inline in `index.html`; see CODEBASE_EVALUATION.md |
+| `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |
 | `KNOWN_ISSUES.md` | Bug tracker with detailed fix attempts |
 | `FLIGHT_CONTROLS_PLAN.md` | 4-phase flight system redesign plan |
@@ -229,7 +228,7 @@ For mobile testing: use Edge DevTools device emulation, or access via local netw
 | Improve mobile controls | `src/flight/touch-input.js` (live path) + `src/flight/bird-flight.js` — the shaping in `src/controls/flight-controls.js` is currently inert |
 | Add visual effect | `src/effects/particles.js` or `src/effects/screen-shake.js` |
 | Fix a camera issue | `src/camera/follow-camera.js` or `fpv-camera.js` |
-| Performance optimization | `src/performance/` — pools, LOD, culling |
+| Performance optimization | Adaptive quality is inline in `index.html` (search `__birbPerfDebug`); collision broad-phase in `src/environment/collider-grid.js` |
 
 ## Code Conventions
 
@@ -245,7 +244,7 @@ For mobile testing: use Edge DevTools device emulation, or access via local netw
 1. ~~Spherical flight direction bug~~ — **RESOLVED.** Fixed in `src/flight/bird-flight.js`. See `KNOWN_ISSUES.md` for history.
 2. ~~Eruda debug console in `index.html`~~ — **RESOLVED.** Already removed.
 3. iOS audio full duration testing incomplete
-4. `src/performance/` is dead code (~3,200 lines, never imported) — the live adaptive quality is inline in `index.html`. The spatial-hash collision broad-phase in `optimized-collision.js` is worth wiring; see CODEBASE_EVALUATION.md roadmap.
+4. ~~`src/performance/` dead code~~ — **RESOLVED (2026-06-11).** The ~3,500-line never-imported directory (plus `ambient-particles.js`, `speed-trail.js`) was deleted; git history retains it. Live adaptive quality is inline in `index.html`; the collision broad-phase shipped as `src/environment/collider-grid.js` (tested), superseding `optimized-collision.js`.
 
 See `KNOWN_ISSUES.md` for detailed history and fix attempts.
 
