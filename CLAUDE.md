@@ -140,6 +140,8 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/flight/bird-flight.js` | Current flight controller (vector-based) |
 | `src/controls/simple-flight-controller.js` | Legacy flight controller (kept as reference, unwired) |
 | `src/flight/touch-input.js` | **Live** touch input path (raw clamp → `bird-flight.js`) |
+| `src/flight/flight-recovery.js` | FLYING/FALLING/GROUNDED state machine core — states enum, config, fall-ramp/launch-boost timer math + `createFlightRecovery()` factory (side effects injected as callbacks; no THREE/DOM; unit-tested) |
+| `src/game/game-modes.js` | Game-mode core — `GAME_MODES` enum, mini-game state shape/reset, win/lose conditions (Ring Rush rings, Drone Hunter 60s, Turret lives + 2+wave curve), combo/scoring + best-score math (no THREE/DOM; unit-tested) |
 | `src/controls/flight-controls.js` | Input shaping (deadzone/expo/smoothing) — wired but its shaping methods are no-ops on `BirdFlight`; see CODEBASE_EVALUATION.md |
 | `src/camera/follow-camera.js` | Third-person chase camera with damping |
 | `src/nesting/nesting-system.js` | Nest landing/takeoff state machine |

@@ -3467,6 +3467,30 @@
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
+      // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
+      // Flight-recovery state machine (FLYING/FALLING/GROUNDED core) +
+      // game-mode core (enum, mini-game state, win/lose + best-score math).
+      // Both are THREE-free / DOM-free so they unit-test under plain node.
+      var {
+        FLIGHT_RECOVERY_STATES,
+        FLIGHT_RECOVERY_CONFIG,
+        createFlightRecovery,
+      } = await import("./src/flight/flight-recovery.js");
+      var {
+        GAME_MODES,
+        formatTime,
+        createMiniGameState,
+        resetMiniGameState,
+        ringRushWon,
+        droneHunterRemaining,
+        droneHunterTimeUp,
+        turretDefenseLost,
+        nextWaveSpawnCount,
+        applyKillScore,
+        decayCombo,
+        evaluateBest,
+      } = await import("./src/game/game-modes.js");
+
       // GLTFLoader is only needed for the ?glb=1 A/B path (the shipped bird
       // is procedural) — skip the CDN module fetch on normal sessions.
       if (/[?&]glb=1/.test(window.location?.search || '')) {
@@ -4648,30 +4672,15 @@
     let rocketSystem = null;
     let droneSystem = null;
     let nestToastTimeout = null;
-    const FLIGHT_RECOVERY_STATES = {
-      FLYING: 'flying',
-      FALLING: 'falling',
-      GROUNDED: 'grounded',
-    };
-    const FLIGHT_RECOVERY_CONFIG = {
-      birdRadius: 0.6,
-      walkSpeed: 2.1,
-      // Pull the stick back past this (y < -threshold) to walk backwards.
-      // backMult keeps the reverse shuffle a touch slower than the forward
-      // walk, the way a real bird backs up more tentatively than it strides.
-      walkBackThreshold: 0.3,
-      walkBackMult: 0.7,
-      // Committed knockdown: you're going down. Slow enough (~1s fall)
-      // that the tumble reads as a moment, not a teleport.
-      knockbackFallSpeed: 5.0,
-      minFlightResumeSpeed: 3.5,
-      // Tap-to-launch impulse after walking. Outward boost for a short window
-      // so the bird pops off the ground with the same weight as a nest takeoff.
-      launchBoostSpeed: 6.0,
-      launchBoostDuration: 0.4,
-    };
+    // FLIGHT_RECOVERY_STATES / FLIGHT_RECOVERY_CONFIG / FALL_RAMP_* + the
+    // createFlightRecovery factory are imported from src/flight/flight-recovery.js
+    // (seam extraction). The factory owns the mutable state + fall/launch clocks
+    // and fires the side-effect callback below on each real transition; we mirror
+    // its `.state` into `flightRecoveryState` so the ~30 read-sites stay intact.
+    // The factory is constructed after screenShake/sounds exist (see
+    // applyFlightRecoveryState below); the callbacks are wired there.
+    let flightRecovery = null;
     let flightRecoveryState = FLIGHT_RECOVERY_STATES.FLYING;
-    let launchBoostTimer = 0;
     // Forward boost / dash — a flight-time speed surge (tap the Boost button) that
     // punches the bird forward through thickets it's snagged in and covers ground.
     // During the surge, tree brushes push the bird aside but do NOT knock it down,
@@ -4679,10 +4688,6 @@
     const BOOST_CONFIG = { speedMult: 2.4, duration: 0.6, cooldown: 1.1 };
     let boostTimer = 0;
     let boostCooldown = 0;
-    let fallTimer = 0;
-    // Fall accelerates: 1× for first frame → 3× after FALL_RAMP_DURATION seconds.
-    const FALL_RAMP_DURATION = 3.0;
-    const FALL_RAMP_MAX_MULT = 3.0;
     const flightRecoveryScratch = {
       radial: new THREE.Vector3(),
     };
@@ -4699,13 +4704,9 @@
     };
 
     // ========== GAME MODE SYSTEM ==========
-    const GAME_MODES = {
-      CASUAL: 'casual',
-      RING_RUSH: 'ring_rush',
-      DRONE_HUNTER: 'drone_hunter',
-      TURRET_DEFENSE: 'turret_defense',
-      ZEN: 'zen'
-    };
+    // GAME_MODES enum, formatTime, the miniGameState shape/reset, the win/lose
+    // + combo + best-score math are imported from src/game/game-modes.js (seam
+    // extraction). All DOM/HUD/audio/drone glue stays here in index.html.
 
     // Persistence: remember last selected mode across reloads.
     const LAST_MODE_STORAGE_KEY = 'birb.lastMode';
@@ -4748,28 +4749,7 @@
       sprintSpeed: 24,
     };
 
-    const miniGameState = {
-      active: false,
-      time: 0,
-      score: 0,
-      ringsCollected: 0,
-      ringsTotal: 10,
-      dronesDestroyed: 0,
-      combo: 1,
-      comboTimer: 0,
-      wave: 1,
-      lives: 3,
-      waveSpawnCount: 3, // wave N spawns 2 + N drones; startGameMode resets to 3
-
-      waveSpawnedThisWave: 0,
-      droneSpawnTimer: 0,
-      started: false, // For Ring Rush - starts on first ring
-      // Turret Defense specific
-      waveKills: 0,
-      dronesRemaining: 0,
-      waveTimer: 0,
-      waveComplete: false,
-    };
+    const miniGameState = createMiniGameState();
 
     // Scratch vectors for the Turret Defense drone AI — the approach loop
     // runs per drone per frame and must not allocate (house rule #4).
@@ -4797,13 +4777,6 @@
     // Human-readable summary of the last finished run, for the Share button.
     let lastResultSummary = '';
 
-    function formatTime(seconds) {
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      const ms = Math.floor((seconds % 1) * 100);
-      return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
-    }
-
     function updateGameHud() {
       if (!gameHud) return;
 
@@ -4822,7 +4795,7 @@
           break;
 
         case GAME_MODES.DRONE_HUNTER:
-          const remaining = Math.max(0, 60 - miniGameState.time);
+          const remaining = droneHunterRemaining(miniGameState.time);
           hudTime.textContent = formatTime(remaining);
           hudScore.textContent = `${miniGameState.score}`;
           if (miniGameState.combo > 1) {
@@ -4877,26 +4850,10 @@
 
     function startGameMode(mode) {
       currentGameMode = mode;
-      miniGameState.active = true;
+      // Field-by-field reset (+ active=true) lives in the extracted core.
+      resetMiniGameState(miniGameState);
       // Bridge for the (non-module) SW update script: never reload mid-run.
       window.__birbMiniGameActive = true;
-      miniGameState.time = 0;
-      miniGameState.score = 0;
-      miniGameState.ringsCollected = 0;
-      miniGameState.dronesDestroyed = 0;
-      miniGameState.combo = 1;
-      miniGameState.comboTimer = 0;
-      miniGameState.wave = 1;
-      miniGameState.lives = 3;
-      miniGameState.waveSpawnCount = 3;
-      miniGameState.waveSpawnedThisWave = 0;
-      miniGameState.droneSpawnTimer = 0;
-      miniGameState.started = false;
-      // Turret Defense fields
-      miniGameState.waveKills = 0;
-      miniGameState.dronesRemaining = 0;
-      miniGameState.waveTimer = 0;
-      miniGameState.waveComplete = false;
 
       // Reset and show/hide collectibles based on mode
       if (collectiblesSystem) {
@@ -4945,55 +4902,58 @@
       window.__birbMiniGameActive = false;
       showGameHud(false);
 
-      let title, stat, bestKey, bestValue, isNewBest = false;
+      let title, stat, bestKey, isNewBest = false;
       // bestLabel is passed through showGameResults — writing resultsBest
       // directly here used to get clobbered by showGameResults(best='').
       let bestLabel = '';
 
       switch (currentGameMode) {
-        case GAME_MODES.RING_RUSH:
+        case GAME_MODES.RING_RUSH: {
           title = completed ? 'Ring Rush Complete!' : 'Ring Rush';
           bestKey = 'birb_best_ring_rush';
-          const savedBestTime = parseFloat(localStorage.getItem(bestKey)) || Infinity;
-          if (completed && miniGameState.time < savedBestTime) {
+          // Only a completed run can set a record (Quit keeps the old best).
+          const rr = completed
+            ? evaluateBest(localStorage.getItem(bestKey), miniGameState.time, { lowerIsBetter: true, parse: parseFloat })
+            : { isNewBest: false, bestValue: (localStorage.getItem(bestKey) != null ? parseFloat(localStorage.getItem(bestKey)) : null) };
+          if (rr.isNewBest) {
             localStorage.setItem(bestKey, miniGameState.time.toString());
             isNewBest = true;
           }
-          bestValue = localStorage.getItem(bestKey);
           stat = completed ? `Time: ${formatTime(miniGameState.time)}` : 'Quit';
-          bestLabel = bestValue ? `Best: ${formatTime(parseFloat(bestValue))}` : '';
+          bestLabel = rr.bestValue != null ? `Best: ${formatTime(rr.bestValue)}` : '';
           lastResultSummary = completed
             ? `I cleared Ring Rush in ${formatTime(miniGameState.time)} in Birb Mobile! 🐦`
             : '';
           break;
+        }
 
-        case GAME_MODES.DRONE_HUNTER:
+        case GAME_MODES.DRONE_HUNTER: {
           title = 'Time Up!';
           stat = `Score: ${miniGameState.score}`;
           bestKey = 'birb_best_drone_hunter';
-          const savedBestScore = parseInt(localStorage.getItem(bestKey)) || 0;
-          if (miniGameState.score > savedBestScore) {
+          const dh = evaluateBest(localStorage.getItem(bestKey), miniGameState.score, { lowerIsBetter: false, parse: parseInt });
+          if (dh.isNewBest) {
             localStorage.setItem(bestKey, miniGameState.score.toString());
             isNewBest = true;
           }
-          bestValue = localStorage.getItem(bestKey);
-          bestLabel = bestValue ? `Best: ${bestValue}` : '';
+          bestLabel = dh.bestValue != null ? `Best: ${dh.bestValue}` : '';
           lastResultSummary = `I scored ${miniGameState.score} in Drone Hunter in Birb Mobile! 🐦`;
           break;
+        }
 
-        case GAME_MODES.TURRET_DEFENSE:
+        case GAME_MODES.TURRET_DEFENSE: {
           title = 'Nest Destroyed!';
           stat = `Survived ${miniGameState.wave} waves`;
           bestKey = 'birb_best_turret_defense';
-          const savedBestWave = parseInt(localStorage.getItem(bestKey)) || 0;
-          if (miniGameState.wave > savedBestWave) {
+          const td = evaluateBest(localStorage.getItem(bestKey), miniGameState.wave, { lowerIsBetter: false, parse: parseInt });
+          if (td.isNewBest) {
             localStorage.setItem(bestKey, miniGameState.wave.toString());
             isNewBest = true;
           }
-          bestValue = localStorage.getItem(bestKey);
-          bestLabel = bestValue ? `Best: Wave ${bestValue}` : '';
+          bestLabel = td.bestValue != null ? `Best: Wave ${td.bestValue}` : '';
           lastResultSummary = `I survived ${miniGameState.wave} wave${miniGameState.wave === 1 ? '' : 's'} of Turret Defense in Birb Mobile! 🐦`;
           break;
+        }
       }
 
       showGameResults(title, stat, bestLabel, isNewBest);
@@ -5289,17 +5249,17 @@
       flightController.position.copy(radial);
     }
 
-    function applyFlightRecoveryState(nextState) {
-      if (flightRecoveryState === nextState) return;
-      const prevState = flightRecoveryState;
-      flightRecoveryState = nextState;
-
-      if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+    // The flight-recovery side effects (shake / sounds / recovery-button UI)
+    // live here in index.html — the extracted state machine just owns the
+    // transition + clocks and calls back. fallTimer reset is handled inside
+    // the factory on entering FALLING.
+    function onFlightRecoveryEnter({ next, prev }) {
+      flightRecoveryState = next; // mirror for the read-sites across the loop
+      if (next === FLIGHT_RECOVERY_STATES.FLYING) {
         showFlightRecoveryButton(false);
-      } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
+      } else if (next === FLIGHT_RECOVERY_STATES.FALLING) {
         // Committed knockdown — no recovery button during fall.
         showFlightRecoveryButton(false);
-        fallTimer = 0;
         if (screenShake?.treeImpact) screenShake.treeImpact();
         // Impact crash uses the explosion thud, not the rocket whoosh (nestLand),
         // so hitting a tree sounds like a hit rather than a launch.
@@ -5307,16 +5267,21 @@
       } else {
         // GROUNDED — offer the launch button.
         showFlightRecoveryButton(true);
-        if (prevState === FLIGHT_RECOVERY_STATES.FALLING && screenShake?.groundLand) {
+        if (prev === FLIGHT_RECOVERY_STATES.FALLING && screenShake?.groundLand) {
           screenShake.groundLand();
         }
         // Touchdown cue — previously silent (shake only). Soft nestLand thump so
         // landing/grounding has audible feedback. Only on the fall→ground path
         // (not when re-hugging the floor while walking).
-        if (prevState === FLIGHT_RECOVERY_STATES.FALLING && preloadedSounds?.nestLand) {
+        if (prev === FLIGHT_RECOVERY_STATES.FALLING && preloadedSounds?.nestLand) {
           playFromPool(preloadedSounds.nestLand);
         }
       }
+    }
+    flightRecovery = createFlightRecovery({ onEnter: onFlightRecoveryEnter });
+
+    function applyFlightRecoveryState(nextState) {
+      flightRecovery.transitionTo(nextState);
     }
 
     function showNestToast() {
@@ -7066,7 +7031,7 @@
           _launchMatrix.makeBasis(_launchRight, _launchUp, _launchFwd.clone().negate());
           flightController.quaternion.setFromRotationMatrix(_launchMatrix);
         }
-        launchBoostTimer = FLIGHT_RECOVERY_CONFIG.launchBoostDuration;
+        flightRecovery.armLaunchBoost();
         if (preloadedSounds?.nestLand) playFromPool(preloadedSounds.nestLand);
         applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FLYING);
       };
@@ -7498,12 +7463,10 @@
                 const timeProgress = miniGameState.time / 60;
                 const isHeavy = miniGameState.time > 30 && Math.random() < 0.15;
                 const baseScore = isHeavy ? 250 : 100;
-                miniGameState.score += Math.round(baseScore * miniGameState.combo);
-                const oldComboFloor = Math.floor(miniGameState.combo);
-                miniGameState.combo = Math.min(5, miniGameState.combo + 0.25);
-                miniGameState.comboTimer = 3;
+                // Score + combo math lives in the extracted core; the heavy-drone
+                // RNG roll stays here (it's time/random dependent).
+                const { oldComboFloor, newComboFloor } = applyKillScore(miniGameState, baseScore);
                 // ===== IMPROVEMENT 3: Combo visual feedback =====
-                const newComboFloor = Math.floor(miniGameState.combo);
                 if (newComboFloor > oldComboFloor && newComboFloor >= 2) {
                   showComboPopup(newComboFloor);
                 }
@@ -7596,7 +7559,7 @@
               miniGameState.ringsCollected += collected.length;
 
               // Check win condition
-              if (miniGameState.ringsCollected >= miniGameState.ringsTotal) {
+              if (ringRushWon(miniGameState)) {
                 endGameMode(true);
               }
             }
@@ -7618,15 +7581,10 @@
           miniGameState.time += delta;
 
           // Combo decay
-          if (miniGameState.comboTimer > 0) {
-            miniGameState.comboTimer -= delta;
-            if (miniGameState.comboTimer <= 0) {
-              miniGameState.combo = 1;
-            }
-          }
+          decayCombo(miniGameState, delta);
 
           // End game at 60 seconds
-          if (miniGameState.time >= 60) {
+          if (droneHunterTimeUp(miniGameState)) {
             endGameMode(true);
           }
         }
@@ -7683,7 +7641,7 @@
                   droneSystem.destroyDrone(i);
                   miniGameState.lives--;
                   screenShake.nestHit(); // IMPROVEMENT 6: shake on nest hit
-                  if (miniGameState.lives <= 0) {
+                  if (turretDefenseLost(miniGameState)) {
                     endGameMode(false);
                   }
                 }
@@ -7705,7 +7663,7 @@
                 miniGameState.waveTimer -= delta;
                 if (miniGameState.waveTimer <= 0) {
                   miniGameState.wave++;
-                  miniGameState.waveSpawnCount = 2 + miniGameState.wave;
+                  miniGameState.waveSpawnCount = nextWaveSpawnCount(miniGameState.wave);
                   miniGameState.waveKills = 0;
                   miniGameState.waveComplete = false;
                   // ===== IMPROVEMENT 4: Wave banner =====
@@ -7828,10 +7786,8 @@
         pose = flight.tick(resolvedInput, delta);
 
         if (!nestingControlsBird && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
-          fallTimer += delta;
           // Linear ramp from 1× → 3× over FALL_RAMP_DURATION seconds, then hold.
-          const rampT = Math.min(fallTimer / FALL_RAMP_DURATION, 1);
-          const fallMult = 1 + rampT * (FALL_RAMP_MAX_MULT - 1);
+          const fallMult = flightRecovery.advanceFall(delta);
           const radial = flightRecoveryScratch.radial.copy(pose.position);
           if (radial.lengthSq() > 0.000001) {
             radial.normalize();
@@ -7841,8 +7797,7 @@
         }
 
         // Launch boost: brief outward impulse after tapping Fly from grounded.
-        if (!isNested && launchBoostTimer > 0) {
-          launchBoostTimer = Math.max(0, launchBoostTimer - delta);
+        if (!isNested && flightRecovery.advanceLaunchBoost(delta)) {
           const radial = flightRecoveryScratch.radial.copy(pose.position);
           if (radial.lengthSq() > 0.000001) {
             radial.normalize();

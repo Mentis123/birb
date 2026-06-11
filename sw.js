@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v10-2026-06-11';
+const CACHE_VERSION = 'v11-2026-06-11';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -35,6 +35,8 @@ const CORE_ASSETS = [
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',
+  './src/flight/flight-recovery.js',
+  './src/game/game-modes.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
   './src/camera/fpv-camera.js',
