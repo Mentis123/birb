@@ -224,6 +224,77 @@ function randomInRange(min, max) {
   return min + Math.random() * (max - min);
 }
 
+// ============================================================
+// WORLD BEAUTY PASS — build-time-only helpers (zero per-frame cost)
+//
+// All of the following run ONCE at environment build. They add per-instance
+// color variation, vertex-color gradients on prop geometries, and richer
+// ground vertex coloring. None of them allocate per frame, add draw calls, or
+// add transparent surfaces — they enrich existing InstancedMesh / mesh data in
+// place. instanceColor MULTIPLIES the material color, so every builder that
+// uses these rebalances its base material color toward white/the mean hue.
+// ============================================================
+
+// Apply subtle per-instance color jitter to an InstancedMesh. `setColorAt`
+// allocates the instanceColor buffer once; values multiply the base material
+// color. lumJit = ± luminance spread, hueJit = ± per-channel tint spread.
+// Build-time only. THREE.Color reused across the loop (one alloc, not per-i).
+function applyInstanceColorJitter(THREE, inst, count, baseR, baseG, baseB, lumJit, hueJit) {
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const lum = 1 + (Math.random() * 2 - 1) * lumJit;
+    const r = baseR * lum + (Math.random() * 2 - 1) * hueJit;
+    const g = baseG * lum + (Math.random() * 2 - 1) * hueJit;
+    const b = baseB * lum + (Math.random() * 2 - 1) * hueJit;
+    c.setRGB(
+      r < 0 ? 0 : r > 1 ? 1 : r,
+      g < 0 ? 0 : g > 1 ? 1 : g,
+      b < 0 ? 0 : b > 1 ? 1 : b,
+    );
+    inst.setColorAt(i, c);
+  }
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+}
+
+// Bake a vertical vertex-color gradient into a unit geometry whose local Y runs
+// 0 (base) → 1 (top). topColor/bottomColor are [r,g,b] in 0..1; these MULTIPLY
+// the material color (which should be ~white when this is used). Optional
+// `bands` paints horizontal strata (canyon sediment look) by quantizing the
+// vertical t into N steps with a small per-band luminance offset. Build-time.
+function bakeVerticalGradient(THREE, geom, bottomColor, topColor, bands = 0, bandJit = 0) {
+  const pos = geom.getAttribute('position');
+  const n = pos.count;
+  // Local Y range of this unit geom (base-at-0 geoms span ~0..1, but cones/cyl
+  // can vary) — normalize against the measured min/max so the gradient always
+  // spans the full prop regardless of the source geometry's exact extents.
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const y = pos.getY(i);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const range = (maxY - minY) || 1;
+  const colors = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    let t = (pos.getY(i) - minY) / range; // 0 base → 1 top
+    let bandMul = 1;
+    if (bands > 0) {
+      const bi = Math.min(bands - 1, Math.floor(t * bands));
+      // Deterministic per-band offset (hash on band index) so strata read as
+      // distinct sediment layers, not a smooth ramp.
+      bandMul = 1 + (Math.sin(bi * 12.9898) * 0.5) * bandJit;
+    }
+    const r = bottomColor[0] + t * (topColor[0] - bottomColor[0]);
+    const g = bottomColor[1] + t * (topColor[1] - bottomColor[1]);
+    const b = bottomColor[2] + t * (topColor[2] - bottomColor[2]);
+    colors[i * 3] = Math.min(1, r * bandMul);
+    colors[i * 3 + 1] = Math.min(1, g * bandMul);
+    colors[i * 3 + 2] = Math.min(1, b * bandMul);
+  }
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geom;
+}
+
 function angularDistance(thetaA, phiA, thetaB, phiB) {
   const sinPhiA = Math.sin(phiA);
   const cosPhiA = Math.cos(phiA);
@@ -468,43 +539,52 @@ export function sampleTerrainHeight(x, y, z) {
   return terrainFloorDir(x * inv, y * inv, z * inv);
 }
 
-// Height-based color palettes per biome (low altitude → high altitude)
+// Height-based color palettes per biome (low altitude → high altitude).
+// Beauty pass: richer, more saturated stops derived from each biome's own
+// sky/light/ground identity (world-shell.js ENVIRONMENT_VARIANTS) — same world,
+// more alive. More intermediate stops give smoother, more painterly bands.
 const TERRAIN_COLORS = {
   forest: [
-    { height: -0.3, color: [0.08, 0.22, 0.35] },  // Deep water (dark blue-green)
-    { height: -0.05, color: [0.12, 0.30, 0.42] },  // Shallow water
-    { height: 0.0,  color: [0.55, 0.50, 0.35] },   // Sand/shore
-    { height: 0.1,  color: [0.12, 0.35, 0.18] },   // Low grass
-    { height: 0.35, color: [0.18, 0.48, 0.30] },   // Rich grass
-    { height: 0.6,  color: [0.22, 0.32, 0.22] },   // Highland
-    { height: 0.85, color: [0.35, 0.30, 0.25] },   // Rock
-    { height: 1.0,  color: [0.75, 0.78, 0.82] },   // Snow
+    { height: -0.3, color: [0.06, 0.20, 0.30] },  // Deep water (dark blue-green)
+    { height: -0.05, color: [0.10, 0.30, 0.40] },  // Shallow water
+    { height: 0.0,  color: [0.50, 0.46, 0.30] },   // Sand/shore
+    { height: 0.08, color: [0.14, 0.42, 0.20] },   // Lush valley grass (vivid)
+    { height: 0.22, color: [0.20, 0.52, 0.27] },   // Rich meadow
+    { height: 0.4,  color: [0.16, 0.44, 0.22] },   // Deep forest green
+    { height: 0.58, color: [0.30, 0.40, 0.22] },   // Dry grass / clearing
+    { height: 0.74, color: [0.34, 0.30, 0.20] },   // Soil / ridge earth
+    { height: 0.9,  color: [0.40, 0.36, 0.30] },   // Exposed rock
+    { height: 1.0,  color: [0.74, 0.78, 0.82] },   // Snow dusting
   ],
   canyons: [
-    { height: -0.2, color: [0.18, 0.08, 0.04] },   // Deep canyon floor
-    { height: 0.0,  color: [0.35, 0.15, 0.08] },   // Canyon floor
-    { height: 0.2,  color: [0.50, 0.22, 0.10] },   // Red rock low
-    { height: 0.45, color: [0.62, 0.30, 0.14] },   // Red rock mid
-    { height: 0.7,  color: [0.72, 0.42, 0.22] },   // Orange rock
-    { height: 0.9,  color: [0.58, 0.35, 0.20] },   // Mesa top
-    { height: 1.0,  color: [0.45, 0.25, 0.15] },   // Peak
+    { height: -0.2, color: [0.16, 0.07, 0.03] },   // Deep canyon floor (rust shadow)
+    { height: 0.0,  color: [0.34, 0.14, 0.07] },   // Canyon floor
+    { height: 0.15, color: [0.46, 0.20, 0.09] },   // Red rock low band
+    { height: 0.3,  color: [0.58, 0.27, 0.12] },   // Sediment band — red
+    { height: 0.45, color: [0.70, 0.38, 0.18] },   // Sediment band — orange
+    { height: 0.58, color: [0.80, 0.52, 0.30] },   // Cream/buff strata
+    { height: 0.72, color: [0.66, 0.36, 0.18] },   // Orange mesa wall
+    { height: 0.88, color: [0.56, 0.32, 0.18] },   // Mesa top
+    { height: 1.0,  color: [0.44, 0.24, 0.14] },   // Peak
   ],
   mountain: [
-    { height: -0.2, color: [0.06, 0.15, 0.22] },   // Deep valley
-    { height: 0.0,  color: [0.10, 0.22, 0.18] },   // Valley floor
-    { height: 0.15, color: [0.12, 0.30, 0.20] },   // Low meadow
-    { height: 0.35, color: [0.15, 0.25, 0.18] },   // Forest line
-    { height: 0.55, color: [0.25, 0.22, 0.18] },   // Rock face
-    { height: 0.75, color: [0.40, 0.38, 0.35] },   // High rock
-    { height: 0.9,  color: [0.70, 0.72, 0.75] },   // Snow line
-    { height: 1.0,  color: [0.85, 0.88, 0.92] },   // Peak snow
+    { height: -0.2, color: [0.05, 0.14, 0.20] },   // Deep valley
+    { height: 0.0,  color: [0.09, 0.22, 0.18] },   // Valley floor
+    { height: 0.14, color: [0.13, 0.34, 0.21] },   // Low alpine meadow (vivid)
+    { height: 0.3,  color: [0.14, 0.27, 0.18] },   // Pine line
+    { height: 0.46, color: [0.22, 0.24, 0.22] },   // Grey-green slope
+    { height: 0.6,  color: [0.34, 0.34, 0.34] },   // Rock face
+    { height: 0.74, color: [0.50, 0.50, 0.52] },   // High scree
+    { height: 0.86, color: [0.74, 0.76, 0.80] },   // Snow line
+    { height: 1.0,  color: [0.90, 0.93, 0.97] },   // Peak snow
   ],
   city: [
-    { height: -0.1, color: [0.06, 0.08, 0.14] },   // Low ground
-    { height: 0.0,  color: [0.08, 0.12, 0.20] },   // Ground level
-    { height: 0.3,  color: [0.10, 0.15, 0.24] },   // Elevated
-    { height: 0.6,  color: [0.12, 0.18, 0.28] },   // High ground
-    { height: 1.0,  color: [0.15, 0.22, 0.32] },   // Peak
+    { height: -0.1, color: [0.05, 0.07, 0.12] },   // Low ground (deep asphalt)
+    { height: 0.0,  color: [0.09, 0.11, 0.17] },   // Ground level asphalt
+    { height: 0.25, color: [0.11, 0.14, 0.21] },   // Concrete block
+    { height: 0.45, color: [0.13, 0.20, 0.20] },   // Park-green patch tint
+    { height: 0.65, color: [0.12, 0.17, 0.27] },   // Elevated concrete
+    { height: 1.0,  color: [0.16, 0.23, 0.34] },   // High ground (cool slab)
   ],
 };
 
@@ -577,11 +657,34 @@ function displaceSphereGeometry(geometry, sphereRadius, variant = 'forest') {
     // low palette, so we never paint the plateau with the snow/peak top color
     // (which the old "0=low,1=high" mapping did once everything went <= 0).
     const depthN = minDisp < 0 ? (disp - minDisp) / (-minDisp) : 1; // 0 = deepest, 1 = plateau
-    const normalizedHeight = 0.1 + 0.5 * depthN;                    // valley 0.1 → plateau 0.6
+
+    // Beauty pass — break the smooth elevation ramp with painterly variation so
+    // the ground reads as patchy living terrain, not a clean banded gradient.
+    // Build-time only (one noise field eval per vertex; ~24k total). Two cheap,
+    // independent low-frequency fields:
+    //   patch  — a broad low-freq field that nudges the palette SAMPLE up/down,
+    //            so a valley floor can carry a dry-grass clearing or a ridge can
+    //            keep a lush pocket (lush/dry mottling for free).
+    //   mottle — a higher-freq field applied as a small per-vertex luminance
+    //            jitter so adjacent faces differ subtly (kills the flat-paint look).
+    const patch = fbm(nx * 2.3, ny * 2.3, nz * 2.3, 3, 2.0, 0.5);   // ~-1..1, broad
+    const mottle = fbm(nx * 9.0, ny * 9.0, nz * 9.0, 2, 2.0, 0.5);  // ~-1..1, fine
+
+    // Slope term: faces whose geometric normal tilts away from the radial "up"
+    // are steeper. We don't have computeVertexNormals yet (it runs after this
+    // loop), so approximate slope from the local displacement gradient proxy —
+    // deeper carve below the plateau tends to mean steeper walls, so bias steep
+    // spots slightly toward the higher (rockier) palette stops. Cheap & stable.
+    const slopeBias = (1 - depthN) * 0.06; // 0 on plateau → +0.06 deep in carves
+
+    let normalizedHeight = 0.1 + 0.5 * depthN + patch * 0.07 + slopeBias;
+    normalizedHeight = normalizedHeight < 0 ? 0 : normalizedHeight > 1 ? 1 : normalizedHeight;
     const col = sampleTerrainColor(palette, normalizedHeight);
-    colors[i * 3] = col[0];
-    colors[i * 3 + 1] = col[1];
-    colors[i * 3 + 2] = col[2];
+    const lum = 1 + mottle * 0.10; // ±10% per-vertex luminance for surface texture
+    let r = col[0] * lum, g = col[1] * lum, b = col[2] * lum;
+    colors[i * 3] = r < 0 ? 0 : r > 1 ? 1 : r;
+    colors[i * 3 + 1] = g < 0 ? 0 : g > 1 ? 1 : g;
+    colors[i * 3 + 2] = b < 0 ? 0 : b > 1 ? 1 : b;
   }
 
   geometry.setAttribute('color', new THREEImported.BufferAttribute(colors, 3));
@@ -603,11 +706,15 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const defaultUp = new THREE.Vector3(0, 1, 0);
 
   // --- Shared materials (flat shading for low-poly aesthetic) ---
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3a2a1a, flatShading: true });
+  // Bark base nudged ~15% brighter than the old 0x3a2a1a so the per-instance
+  // jitter (which multiplies, mean ~1.0) averages back to the original tone.
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x43301e, flatShading: true });
+  // Canopy mats carry vertexColors so the baked base→tip gradient reads; the
+  // gradient averages ~0.85 so the hues are lifted slightly to compensate.
   const canopyMats = [
-    new THREE.MeshLambertMaterial({ color: 0x1a5c30, flatShading: true }),
-    new THREE.MeshLambertMaterial({ color: 0x247040, flatShading: true }),
-    new THREE.MeshLambertMaterial({ color: 0x2d8a4a, flatShading: true }),
+    new THREE.MeshLambertMaterial({ color: 0x1f6d39, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x2a854c, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x35a258, flatShading: true, vertexColors: true }),
   ];
   const rockMat = new THREE.MeshLambertMaterial({ color: 0x2a3a3a, flatShading: true });
   const shrubMat = new THREE.MeshLambertMaterial({ color: 0x2e7a48, flatShading: true });
@@ -863,13 +970,21 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     trunkInst.instanceMatrix.needsUpdate = true;
     trunkInst.computeBoundingSphere();
+    // Per-instance bark variation: trunkMat base is near the mean bark tone, so
+    // jitter spreads each trunk a little lighter/darker (weathered grove look).
+    applyInstanceColorJitter(THREE, trunkInst, trunkPlacements.length, 1, 1, 1, 0.18, 0.03);
     root.add(trunkInst);
   }
 
   // --- Build instanced canopies, one InstancedMesh per color bucket ---
   // Unit canopy geom: cone with radius 1, height 1, base at y=0, tip at y=1.
+  // Vertex gradient bakes a darker shaded base → brighter sun-lit tip into the
+  // foliage cone (build-time, zero runtime cost). The gradient MULTIPLIES the
+  // per-bucket canopy material color, so leave the gradient near-white and let
+  // the material + per-instance jitter carry the hue.
   const canopyUnitGeom = new THREE.ConeGeometry(1, 1, 7);
   canopyUnitGeom.translate(0, 0.5, 0);
+  bakeVerticalGradient(THREE, canopyUnitGeom, [0.62, 0.62, 0.62], [1.08, 1.08, 1.08]);
   const localUp = new THREE.Vector3();
   for (let c = 0; c < canopyPlacementsByColor.length; c++) {
     const bucket = canopyPlacementsByColor[c];
@@ -901,6 +1016,9 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     canopyInst.instanceMatrix.needsUpdate = true;
     canopyInst.computeBoundingSphere();
+    // Per-instance foliage hue/luminance spread so the grove stops looking like
+    // one cloned tree repeated. Mean 1.0 keeps the bucket's average hue intact.
+    applyInstanceColorJitter(THREE, canopyInst, bucket.length, 1, 1, 1, 0.16, 0.045);
     root.add(canopyInst);
   }
 
@@ -980,6 +1098,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     shrubInst.instanceMatrix.needsUpdate = true;
     shrubInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, shrubInst, shrubPlacements.length, 1, 1, 1, 0.2, 0.04);
     root.add(shrubInst);
   }
 
@@ -1006,6 +1125,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     rockInst.instanceMatrix.needsUpdate = true;
     rockInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, rockInst, rockPoints.length, 1, 1, 1, 0.2, 0.04);
     root.add(rockInst);
   }
 
@@ -1040,6 +1160,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     fernInst.instanceMatrix.needsUpdate = true;
     fernInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, fernInst, fernPlacements.length, 1, 1, 1, 0.22, 0.05);
     root.add(fernInst);
   }
 
@@ -1101,10 +1222,12 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
 function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {
   const nestablePositions = [];
   const defaultUp = new THREE.Vector3(0, 1, 0);
-  const spireMat = new THREE.MeshLambertMaterial({ color: 0x8b4728, flatShading: true });
-  const darkSpireMat = new THREE.MeshLambertMaterial({ color: 0x6a3420, flatShading: true });
+  // Spire mats carry vertexColors so the baked sediment strata (banded base→top
+  // gradient) reads. The gradient averages ~0.9 so the hues are lifted slightly.
+  const spireMat = new THREE.MeshLambertMaterial({ color: 0x99502e, flatShading: true, vertexColors: true });
+  const darkSpireMat = new THREE.MeshLambertMaterial({ color: 0x763923, flatShading: true, vertexColors: true });
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x7a3c23, flatShading: true });
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e3520, flatShading: true });
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e3520, flatShading: true, vertexColors: true });
 
   // --- Ridge clusters (parallel lines of tall spires) ---
   // Denser corridor field (desktop 9 / mobile 8 — both > the old 7); wide
@@ -1203,8 +1326,12 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   for (let mi = 0; mi < 2; mi++) {
     const bucket = spirePlacementsByMat[mi];
     if (bucket.length === 0) continue;
-    const spireUnitGeom = new THREE.CylinderGeometry(0.3, 1.0, 1.0, 6, 1);
+    const spireUnitGeom = new THREE.CylinderGeometry(0.3, 1.0, 1.0, 6, 4);
     spireUnitGeom.translate(0, 0.5, 0); // base at y=0
+    // Sediment strata: 4 horizontal bands (darker rust base → lighter buff top)
+    // with a per-band luminance offset — the canyon "layered rock" read, baked
+    // once at build. heightSegments raised 1→4 so the bands have facets to land on.
+    bakeVerticalGradient(THREE, spireUnitGeom, [0.78, 0.66, 0.58], [1.16, 1.06, 0.92], 4, 0.16);
     const inst = new THREE.InstancedMesh(spireUnitGeom, spireMats[mi], bucket.length);
     inst.name = `canyon-spires-${mi}`;
     const dummy = new THREE.Object3D();
@@ -1230,6 +1357,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     inst.instanceMatrix.needsUpdate = true;
     inst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, inst, bucket.length, 1, 1, 1, 0.14, 0.035);
     root.add(inst);
   }
   console.log(`[Canyon] ${spireIndex} spires in ${ridgeCount} ridges (instanced), ${nestablePositions.length} nests`);
@@ -1289,8 +1417,11 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
   });
   if (wallPlacements.length > 0) {
-    // Unit box; per-instance scale gives length/height/thickness.
-    const wallGeom = new THREE.BoxGeometry(1, 1, 1);
+    // Unit box; per-instance scale gives length/height/thickness. Height
+    // segments raised so the baked cliff strata have facets; the box centres at
+    // y=0, so the gradient spans -0.5..0.5 → base (rust) to top (buff) naturally.
+    const wallGeom = new THREE.BoxGeometry(1, 1, 1, 1, 4, 1);
+    bakeVerticalGradient(THREE, wallGeom, [0.74, 0.62, 0.54], [1.12, 1.0, 0.88], 4, 0.14);
     const wallInst = new THREE.InstancedMesh(wallGeom, wallMat, wallPlacements.length);
     wallInst.name = 'canyon-corridor-walls';
     const dummy = new THREE.Object3D();
@@ -1384,6 +1515,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     boulderInst.instanceMatrix.needsUpdate = true;
     boulderInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, boulderInst, boulderPoints.length, 1, 1, 1, 0.18, 0.04);
     root.add(boulderInst);
   }
 
@@ -1415,6 +1547,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     }
     needleInst.instanceMatrix.needsUpdate = true;
     needleInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, needleInst, needleCount, 1, 1, 1, 0.16, 0.035);
     root.add(needleInst);
   }
 
@@ -1430,10 +1563,12 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
 function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {
   const nestablePositions = [];
   const defaultUp = new THREE.Vector3(0, 1, 0);
-  const stoneMat = new THREE.MeshLambertMaterial({ color: 0x5c6472, flatShading: true });
+  // Stone body carries vertexColors for a baked base→scree vertical gradient.
+  const stoneMat = new THREE.MeshLambertMaterial({ color: 0x646c7c, flatShading: true, vertexColors: true });
   const snowMat = new THREE.MeshLambertMaterial({ color: 0xe6f1ff, flatShading: true });
-  const pineTrunkMat = new THREE.MeshLambertMaterial({ color: 0x2e3b2b, flatShading: true });
-  const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x2a5535, flatShading: true });
+  const pineTrunkMat = new THREE.MeshLambertMaterial({ color: 0x33422f, flatShading: true });
+  // Pine canopy carries vertexColors for the baked base→tip gradient.
+  const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x32623e, flatShading: true, vertexColors: true });
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x4a505a, flatShading: true });
   const cliffWallMat = new THREE.MeshLambertMaterial({ color: 0x434953, flatShading: true });
   const pineCanopyCeilingMat = new THREE.MeshBasicMaterial({
@@ -1520,8 +1655,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // Build mountain body InstancedMesh. Unit cylinder: top radius 0.2, bottom 1,
   // height 1, base at y=0; per-instance scale (baseRadius, height, baseRadius) × peakScale.
   if (peakPlacements.length > 0) {
-    const bodyUnitGeom = new THREE.CylinderGeometry(0.2, 1.0, 1.0, 7, 1);
+    const bodyUnitGeom = new THREE.CylinderGeometry(0.2, 1.0, 1.0, 7, 3);
     bodyUnitGeom.translate(0, 0.5, 0);
+    // Darker shadowed rock base → lighter weathered scree near the summit, baked
+    // once. heightSegments 1→3 gives the gradient facets to read across.
+    bakeVerticalGradient(THREE, bodyUnitGeom, [0.74, 0.74, 0.78], [1.16, 1.18, 1.22]);
     const bodyInst = new THREE.InstancedMesh(bodyUnitGeom, stoneMat, peakPlacements.length);
     bodyInst.name = 'mountain-peaks-body';
     const dummy = new THREE.Object3D();
@@ -1542,6 +1680,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
     bodyInst.instanceMatrix.needsUpdate = true;
     bodyInst.computeBoundingSphere();
+    // Per-peak rock variation — some warmer, some cooler/greyer, so the range
+    // doesn't read as one cloned stone cone. Mean 1.0 preserves the base tone.
+    applyInstanceColorJitter(THREE, bodyInst, peakPlacements.length, 1, 1, 1, 0.13, 0.035);
     root.add(bodyInst);
   }
 
@@ -1797,6 +1938,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   if (pineCanopyPlacements.length > 0) {
     const canopyUnitGeom = new THREE.ConeGeometry(1, 1, 6);
     canopyUnitGeom.translate(0, 0.5, 0);
+    bakeVerticalGradient(THREE, canopyUnitGeom, [0.66, 0.66, 0.66], [1.06, 1.06, 1.06]);
     const canopyInst = new THREE.InstancedMesh(canopyUnitGeom, pineCanopyMat, pineCanopyPlacements.length);
     canopyInst.name = 'mountain-pine-canopies-mesh';
     const dummy = new THREE.Object3D();
@@ -1815,6 +1957,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
     canopyInst.instanceMatrix.needsUpdate = true;
     canopyInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, canopyInst, pineCanopyPlacements.length, 1, 1, 1, 0.17, 0.05);
     root.add(canopyInst);
   }
   // Mobile: skip the pine canopy ceiling (same fill-rate story as forest).
@@ -1872,6 +2015,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
     boulderInst.instanceMatrix.needsUpdate = true;
     boulderInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, boulderInst, boulderPoints.length, 1, 1, 1, 0.18, 0.04);
     root.add(boulderInst);
   }
 
@@ -1900,6 +2044,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
     screeInst.instanceMatrix.needsUpdate = true;
     screeInst.computeBoundingSphere();
+    applyInstanceColorJitter(THREE, screeInst, screeCount, 1, 1, 1, 0.2, 0.04);
     root.add(screeInst);
   }
 
@@ -1953,10 +2098,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
 function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {
   const nestablePositions = [];
   const defaultUp = new THREE.Vector3(0, 1, 0);
+  // Building bodies carry vertexColors for a baked dark-base → lit-top façade
+  // gradient. Per-instance jitter (added after instancing) spreads each tower's
+  // tint so the skyline reads as many distinct buildings, not three clones.
   const buildingMats = [
-    new THREE.MeshLambertMaterial({ color: 0x1e2f4c, flatShading: true }),
-    new THREE.MeshLambertMaterial({ color: 0x243854, flatShading: true }),
-    new THREE.MeshLambertMaterial({ color: 0x1a2840, flatShading: true }),
+    new THREE.MeshLambertMaterial({ color: 0x223656, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x29405f, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x1e2e49, flatShading: true, vertexColors: true }),
   ];
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x74d4ff, transparent: true, opacity: 0.15 });
   const antennaMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
@@ -2046,8 +2194,13 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
 
   // Helper to build an instanced box with per-instance yaw around local up.
   // Unit box: 1×1×1 centered; translate +0.5Y so base sits on surface.
-  const bodyUnitGeom = new THREE.BoxGeometry(1, 1, 1);
+  // heightSegments raised so the baked façade gradient (dark street base →
+  // lit upper floors) has facets to read across. The `color` attribute is
+  // ignored by the glow/rooftop materials (no vertexColors) and only read by
+  // the building bodies — so this one shared geom serves all three uses.
+  const bodyUnitGeom = new THREE.BoxGeometry(1, 1, 1, 1, 3, 1);
   bodyUnitGeom.translate(0, 0.5, 0);
+  bakeVerticalGradient(THREE, bodyUnitGeom, [0.66, 0.66, 0.72], [1.18, 1.2, 1.24]);
 
   function buildBoxInstances(name, placements, material, widthMul = 1, depthMul = 1, heightMul = 1) {
     if (placements.length === 0) return null;
@@ -2096,7 +2249,12 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
 
   for (let mi = 0; mi < bodyPlacementsByMat.length; mi++) {
     const inst = buildBoxInstances(`city-towers-${mi}`, bodyPlacementsByMat[mi], buildingMats[mi]);
-    if (inst) root.add(inst);
+    if (inst) {
+      // Per-building tint spread (warmer/cooler, lit/dim) so the skyline reads
+      // as a varied city, not three repeated slabs. Mean 1.0 keeps the palette.
+      applyInstanceColorJitter(THREE, inst, bodyPlacementsByMat[mi].length, 1, 1, 1, 0.16, 0.05);
+      root.add(inst);
+    }
   }
 
   // Glow is an offset-scale box (width*1.02 × height*0.9 × depth*1.02) with
@@ -2414,6 +2572,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       try {
         root.traverse((child) => {
           if (child.geometry) child.geometry.dispose();
+          // Beauty pass: InstancedMesh.instanceColor is a GPU buffer that
+          // material/geometry disposal does NOT release — free it explicitly
+          // (matches world-shell.js's teardown) so env swaps don't leak it.
+          if (child.instanceColor?.dispose) child.instanceColor.dispose();
           if (child.material) {
             const mats = Array.isArray(child.material) ? child.material : [child.material];
             mats.forEach((m) => {
