@@ -3463,6 +3463,7 @@
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
+      var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
@@ -4314,57 +4315,13 @@
     const countdownEl = document.querySelector('[data-countdown]');
     const speedLines = document.querySelector('[data-speed-lines]');
     const minimapCanvas = document.querySelector('[data-minimap-radar]');
-    if (minimapCanvas) {
-      // Force CSS display size - canvas intrinsic size (200) is for retina, display must be large
-      // enough to read on mobile. Bumped up so icons/chevron are legible at arm's length.
-      const mapDisplaySize = window.innerWidth >= 768 ? '152px' : '128px';
-      minimapCanvas.style.width = mapDisplaySize;
-      minimapCanvas.style.height = mapDisplaySize;
-      minimapCanvas.style.maxWidth = mapDisplaySize;
-      minimapCanvas.style.maxHeight = mapDisplaySize;
-    }
-    const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
-
-    // ===== Draggable minimap =====
-    if (minimapCanvas) {
-      let mmDragging = false, mmStartX = 0, mmStartY = 0, mmOrigLeft = 0, mmOrigBottom = 0;
-
-      const mmPointerDown = (e) => {
-        e.preventDefault(); e.stopPropagation();
-        mmDragging = true;
-        const touch = e.touches ? e.touches[0] : e;
-        mmStartX = touch.clientX; mmStartY = touch.clientY;
-        const rect = minimapCanvas.getBoundingClientRect();
-        mmOrigLeft = rect.left;
-        mmOrigBottom = window.innerHeight - rect.bottom;
-        minimapCanvas.classList.add('is-dragging');
-      };
-      const mmPointerMove = (e) => {
-        if (!mmDragging) return;
-        e.preventDefault();
-        const touch = e.touches ? e.touches[0] : e;
-        const dx = touch.clientX - mmStartX;
-        const dy = touch.clientY - mmStartY;
-        const newLeft = Math.max(0, Math.min(window.innerWidth - minimapCanvas.offsetWidth, mmOrigLeft + dx));
-        const newBottom = Math.max(0, Math.min(window.innerHeight - minimapCanvas.offsetHeight, mmOrigBottom - dy));
-        minimapCanvas.style.left = newLeft + 'px';
-        minimapCanvas.style.bottom = newBottom + 'px';
-        minimapCanvas.style.right = 'auto';
-        minimapCanvas.style.top = 'auto';
-      };
-      const mmPointerUp = () => {
-        if (!mmDragging) return;
-        mmDragging = false;
-        minimapCanvas.classList.remove('is-dragging');
-      };
-
-      minimapCanvas.addEventListener('mousedown', mmPointerDown);
-      minimapCanvas.addEventListener('touchstart', mmPointerDown, { passive: false });
-      window.addEventListener('mousemove', mmPointerMove);
-      window.addEventListener('touchmove', mmPointerMove, { passive: false });
-      window.addEventListener('mouseup', mmPointerUp);
-      window.addEventListener('touchend', mmPointerUp);
-    }
+    // Minimap extracted to src/ui/minimap.js (first monolith "seam" — see
+    // CODEBASE_EVALUATION.md). The module owns sizing, dragging (position
+    // persisted across sessions), and drawing; game state arrives per
+    // update() call so the module has no globals.
+    const minimap = (minimapCanvas && typeof createMinimap === 'function')
+      ? createMinimap({ THREE, canvas: minimapCanvas, sphereRadius: SPHERE_RADIUS })
+      : null;
 
     // ===== Helper: show combo popup =====
     let comboPopupTimeout = null;
@@ -4426,378 +4383,6 @@
       tick();
     }
 
-    // ===== Helper: minimap =====
-    let minimapPulseTime = 0;
-    // Zero-alloc scratch: tangent-plane basis at the bird's location on the sphere.
-    // The previous projection used world XZ, which only matches the bird's local
-    // tangent plane near the top pole of the sphere — anywhere else the rings,
-    // drones, and nest icon drifted relative to the actual world.
-    const _minimapFwd = new THREE.Vector3();
-    const _minimapUp = new THREE.Vector3();
-    const _minimapRight = new THREE.Vector3();
-    const _minimapDelta = new THREE.Vector3();
-    const _minimapSurf = new THREE.Vector3(); // scratch: target dropped onto the reference sphere (altitude-invariant projection)
-    const _minimapNestPos = new THREE.Vector3(); // scratch for per-nest world pos (zero-alloc)
-    const _minimapRawPoint = { x: 0, y: 0 };
-    const _minimapEdgePoint = { x: 0, y: 0, clamped: false };
-    // Permanent pool of ring data entries for minimap — grown once to ring count,
-    // reused every frame during Ring Rush. Each entry: { position: Vec3, collected: bool }.
-    const minimapRingScratch = [];
-
-    function projectMinimapPoint(worldPos, birdPos, right, forward, half, scale, out) {
-      // Map by GROUND position, not raw 3D. Drop the target onto the reference
-      // sphere first, so its ALTITUDE (a nest high on a tree, a high drone) can't
-      // push it outward: without this the tangential projection scales with the
-      // target's radius, so a lifted nest reads ~2x too far and piles on the rim.
-      // (The bird's own radius already cancels — right/forward are ⊥ to its up.)
-      _minimapSurf.copy(worldPos);
-      const len = _minimapSurf.length();
-      if (len > 1e-6) _minimapSurf.multiplyScalar(SPHERE_RADIUS / len);
-      _minimapDelta.copy(_minimapSurf).sub(birdPos);
-      const rx = _minimapDelta.dot(right);
-      const rz = _minimapDelta.dot(forward);
-      out.x = half + rx * scale;
-      out.y = half - rz * scale;
-      return out;
-    }
-
-    // Great-circle ground distance² from the bird to a world position, using the
-    // bird's ground direction (birdUp = normalized birdPos). Altitude-invariant —
-    // a tall nest's radial offset no longer dominates "nearest" / arrow gating.
-    // Zero-allocation (primitives only).
-    function minimapGroundDist2(worldPos, birdUp) {
-      const len = worldPos.length() || 1;
-      let cos = (worldPos.x * birdUp.x + worldPos.y * birdUp.y + worldPos.z * birdUp.z) / len;
-      cos = cos < -1 ? -1 : cos > 1 ? 1 : cos;
-      const arc = SPHERE_RADIUS * Math.acos(cos);
-      return arc * arc;
-    }
-
-    function clampMinimapPoint(point, half, out) {
-      const dx = point.x - half;
-      const dy = point.y - half;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const maxR = half - 10;
-      if (dist > maxR) {
-        const s = maxR / dist;
-        out.x = half + dx * s;
-        out.y = half + dy * s;
-        out.clamped = true;
-      } else {
-        out.x = point.x;
-        out.y = point.y;
-        out.clamped = false;
-      }
-      return out;
-    }
-
-    function drawMinimapEdgeArrow(ctx, point, half, fill) {
-      const adx = point.x - half;
-      const ady = point.y - half;
-      const a = Math.atan2(ady, adx);
-      ctx.save();
-      ctx.translate(point.x, point.y);
-      ctx.rotate(a);
-      ctx.beginPath();
-      ctx.moveTo(6, 0);
-      ctx.lineTo(-3, -4);
-      ctx.lineTo(-3, 4);
-      ctx.closePath();
-      ctx.fillStyle = fill;
-      ctx.fill();
-      ctx.restore();
-    }
-
-    function updateMinimap(birdPos, birdQuat, collectibles, drones, nestPos, delta) {
-      if (!minimapCtx || !minimapCanvas) return;
-      minimapPulseTime += (delta || 0.016);
-      const size = minimapCanvas.width;  // 200 (2x resolution for retina)
-      const half = size / 2;
-
-      // Mode flags — decide what to draw. Falls through to legacy "show all"
-      // if currentGameMode / GAME_MODES aren't reachable for some reason.
-      const mode = (typeof currentGameMode !== 'undefined') ? currentGameMode : null;
-      const MODES = (typeof GAME_MODES !== 'undefined') ? GAME_MODES : null;
-      let showRings = true, showDrones = true, showNest = true, showBird = true;
-      if (mode != null && MODES) {
-        if (mode === MODES.ZEN || mode === MODES.CASUAL) {
-          showRings = false; showDrones = false; showNest = true; showBird = true;
-        } else if (mode === MODES.RING_RUSH) {
-          showRings = true; showDrones = false; showNest = false; showBird = true;
-        } else if (mode === MODES.DRONE_HUNTER) {
-          showRings = false; showDrones = true; showNest = false; showBird = true;
-        } else if (mode === MODES.TURRET_DEFENSE) {
-          // Bird is stationary on nest — nest is the reference, bird arrow adds nothing.
-          showRings = false; showDrones = true; showNest = true; showBird = false;
-        }
-      }
-
-      // Tighter radii — playtest feedback was the old map showed essentially
-      // the whole hemisphere, so nearby targets sat clustered in the middle.
-      // Aim for "next 2-3 rings / incoming drones" worth of context.
-      const visibleRadius = (mode === MODES?.RING_RUSH)
-        ? 70
-        : (mode === MODES?.TURRET_DEFENSE)
-          ? 95
-          : (mode === MODES?.DRONE_HUNTER)
-            ? 80
-            : 65;
-      const scale = (half - 12) / visibleRadius;
-
-      minimapCtx.clearRect(0, 0, size, size);
-
-      // Clip to circle
-      minimapCtx.save();
-      minimapCtx.beginPath();
-      minimapCtx.arc(half, half, half - 1, 0, Math.PI * 2);
-      minimapCtx.clip();
-
-      // Background — darker for better icon contrast
-      const bgGrad = minimapCtx.createRadialGradient(half, half, 0, half, half, half);
-      bgGrad.addColorStop(0, 'rgba(10, 18, 34, 0.92)');
-      bgGrad.addColorStop(1, 'rgba(3, 7, 18, 0.96)');
-      minimapCtx.fillStyle = bgGrad;
-      minimapCtx.fillRect(0, 0, size, size);
-
-      // Subtle range rings
-      minimapCtx.strokeStyle = 'rgba(110, 170, 220, 0.14)';
-      minimapCtx.lineWidth = 1;
-      for (let r = 1; r <= 3; r++) {
-        minimapCtx.beginPath();
-        minimapCtx.arc(half, half, (half / 3.5) * r, 0, Math.PI * 2);
-        minimapCtx.stroke();
-      }
-
-      // Build a sphere-tangent basis at the bird so projection is correct
-      // anywhere on the world (not just near the +Y pole). Up = radial out
-      // from sphere center (origin); forward = bird forward projected to the
-      // tangent plane; right = forward × up.
-      _minimapUp.copy(birdPos);
-      if (_minimapUp.lengthSq() < 1e-6) {
-        _minimapUp.set(0, 1, 0);
-      } else {
-        _minimapUp.normalize();
-      }
-      _minimapFwd.set(0, 0, -1).applyQuaternion(birdQuat);
-      _minimapFwd.addScaledVector(_minimapUp, -_minimapFwd.dot(_minimapUp));
-      if (_minimapFwd.lengthSq() < 1e-6) {
-        // Bird looking straight up/down at the surface — fall back to a tangent.
-        _minimapFwd.set(1, 0, 0);
-        _minimapFwd.addScaledVector(_minimapUp, -_minimapFwd.dot(_minimapUp));
-        if (_minimapFwd.lengthSq() < 1e-6) _minimapFwd.set(0, 0, 1);
-      }
-      _minimapFwd.normalize();
-      _minimapRight.crossVectors(_minimapFwd, _minimapUp).normalize();
-
-      const pulse = 0.5 + 0.5 * Math.sin(minimapPulseTime * 4);
-
-      // ===== Rings (yellow) =====
-      if (showRings && collectibles) {
-        // Find nearest uncollected ring
-        let nearestDist = Infinity;
-        let nearestIdx = -1;
-        for (let i = 0; i < collectibles.length; i++) {
-          const ring = collectibles[i];
-          if (ring.collected) continue;
-          const dx = ring.position.x - birdPos.x;
-          const dy = ring.position.y - birdPos.y;
-          const dz = ring.position.z - birdPos.z;
-          const d = dx * dx + dy * dy + dz * dz;
-          if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
-        }
-
-        for (let i = 0; i < collectibles.length; i++) {
-          const ring = collectibles[i];
-          if (ring.collected) continue;
-          const isNearest = (i === nearestIdx);
-          const raw = projectMinimapPoint(ring.position, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
-          const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
-          const dotR = isNearest ? 7 : 6;
-
-          // Yellow glow for nearest; cyan-yellow ambient glow for all
-          if (isNearest) {
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, dotR + 6 + pulse * 3, 0, Math.PI * 2);
-            minimapCtx.fillStyle = `rgba(255, 224, 80, ${0.20 + pulse * 0.12})`;
-            minimapCtx.fill();
-          } else {
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, dotR + 2, 0, Math.PI * 2);
-            minimapCtx.fillStyle = 'rgba(255, 224, 80, 0.18)';
-            minimapCtx.fill();
-          }
-
-          if (p.clamped) {
-            drawMinimapEdgeArrow(minimapCtx, p, half, isNearest ? '#ffe866' : '#ffd84a');
-          } else {
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
-            minimapCtx.fillStyle = isNearest ? '#ffe866' : '#ffd84a';
-            minimapCtx.fill();
-            minimapCtx.strokeStyle = isNearest ? 'rgba(20,20,20,0.85)' : 'rgba(20,20,20,0.6)';
-            minimapCtx.lineWidth = 1.5;
-            minimapCtx.stroke();
-          }
-        }
-      }
-
-      // ===== Drones (red, pulsing) =====
-      if (showDrones && drones) {
-        for (const drone of drones) {
-          const raw = projectMinimapPoint(drone.position, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
-          const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
-          // Pulsing red halo
-          minimapCtx.beginPath();
-          minimapCtx.arc(p.x, p.y, 7 + pulse * 3, 0, Math.PI * 2);
-          minimapCtx.fillStyle = `rgba(255, 70, 70, ${0.22 + pulse * 0.15})`;
-          minimapCtx.fill();
-
-          if (p.clamped) {
-            drawMinimapEdgeArrow(minimapCtx, p, half, '#ff4d4d');
-          } else {
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-            minimapCtx.fillStyle = '#ff3b3b';
-            minimapCtx.fill();
-            minimapCtx.strokeStyle = 'rgba(20,0,0,0.75)';
-            minimapCtx.lineWidth = 1.5;
-            minimapCtx.stroke();
-          }
-        }
-      }
-
-      // ===== Nests (orange-red, matching the in-world nest markers) =====
-      // Show ALL nests within range, not just the nearest — players asked to
-      // see more of them. Nests inside the radius draw as orange-red dots (the
-      // nearest gets a target reticle); off-screen nests near enough to matter
-      // get a directional edge arrow (capped by distance to avoid rim clutter).
-      // Colour matches the in-world nest markers (red/orange glow).
-      const NEST_FILL = '#ff5a3c';
-      const NEST_EDGE = '#ff7a4a';
-      const NEST_GLOW = '255, 110, 70';
-      if (showNest) {
-        const nps = (typeof nestPointsSystem !== 'undefined') ? nestPointsSystem : null;
-        const nestList = (nps && nps.nests) ? nps.nests : null;
-
-        if (nestList && nestList.length) {
-          // Pass 1: find the nearest nest (gets the highlighted reticle).
-          let nearIdx = -1, nearD2 = Infinity;
-          for (let i = 0; i < nestList.length; i++) {
-            const ng = nestList[i];
-            if (!ng || ng.visible === false) continue;
-            ng.getWorldPosition(_minimapNestPos);
-            const d2 = minimapGroundDist2(_minimapNestPos, _minimapUp);
-            if (d2 < nearD2) { nearD2 = d2; nearIdx = i; }
-          }
-          // Only arrow reasonably-close off-screen nests, so the rim doesn't fill up.
-          const arrowMaxD2 = (visibleRadius * 1.7) * (visibleRadius * 1.7);
-
-          // Pass 2: draw.
-          for (let i = 0; i < nestList.length; i++) {
-            const ng = nestList[i];
-            if (!ng || ng.visible === false) continue;
-            ng.getWorldPosition(_minimapNestPos);
-            const d2 = minimapGroundDist2(_minimapNestPos, _minimapUp);
-            const isNearest = (i === nearIdx);
-            const raw = projectMinimapPoint(_minimapNestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
-            const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
-
-            if (p.clamped) {
-              if (isNearest || d2 <= arrowMaxD2) {
-                drawMinimapEdgeArrow(minimapCtx, p, half, isNearest ? NEST_EDGE : NEST_FILL);
-              }
-              continue;
-            }
-
-            // Glow halo (nearest pulses brighter and larger)
-            const haloR = isNearest ? 10 + pulse * 3 : 7;
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, haloR, 0, Math.PI * 2);
-            minimapCtx.fillStyle = `rgba(${NEST_GLOW}, ${isNearest ? 0.22 + pulse * 0.12 : 0.16})`;
-            minimapCtx.fill();
-
-            if (isNearest) {
-              // Target reticle + cross hairs in nest colour
-              minimapCtx.strokeStyle = NEST_EDGE;
-              minimapCtx.lineWidth = 2;
-              minimapCtx.beginPath();
-              minimapCtx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-              minimapCtx.stroke();
-              minimapCtx.strokeStyle = 'rgba(40, 8, 0, 0.85)';
-              minimapCtx.lineWidth = 1.5;
-              minimapCtx.beginPath();
-              minimapCtx.moveTo(p.x - 10, p.y); minimapCtx.lineTo(p.x - 3, p.y);
-              minimapCtx.moveTo(p.x + 3, p.y);  minimapCtx.lineTo(p.x + 10, p.y);
-              minimapCtx.moveTo(p.x, p.y - 10); minimapCtx.lineTo(p.x, p.y - 3);
-              minimapCtx.moveTo(p.x, p.y + 3);  minimapCtx.lineTo(p.x, p.y + 10);
-              minimapCtx.stroke();
-            }
-
-            // Solid orange-red dot
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, isNearest ? 4 : 3.5, 0, Math.PI * 2);
-            minimapCtx.fillStyle = isNearest ? NEST_EDGE : NEST_FILL;
-            minimapCtx.fill();
-            minimapCtx.strokeStyle = 'rgba(30, 6, 0, 0.7)';
-            minimapCtx.lineWidth = 1.2;
-            minimapCtx.stroke();
-          }
-        } else if (nestPos) {
-          // Fallback: legacy single nestPos (e.g. TURRET_DEFENSE passes it in).
-          const raw = projectMinimapPoint(nestPos, birdPos, _minimapRight, _minimapFwd, half, scale, _minimapRawPoint);
-          const p = clampMinimapPoint(raw, half, _minimapEdgePoint);
-          if (p.clamped) {
-            drawMinimapEdgeArrow(minimapCtx, p, half, NEST_EDGE);
-          } else {
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, 10, 0, Math.PI * 2);
-            minimapCtx.fillStyle = `rgba(${NEST_GLOW}, 0.18)`;
-            minimapCtx.fill();
-            minimapCtx.beginPath();
-            minimapCtx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
-            minimapCtx.fillStyle = NEST_EDGE;
-            minimapCtx.fill();
-            minimapCtx.strokeStyle = 'rgba(30, 6, 0, 0.7)';
-            minimapCtx.lineWidth = 1.2;
-            minimapCtx.stroke();
-          }
-        }
-      }
-
-      // ===== Bird (white chevron, ~12px across) =====
-      if (showBird) {
-        minimapCtx.save();
-        minimapCtx.translate(half, half);
-        // Chevron pointing up (forward is up on the rotated minimap)
-        minimapCtx.beginPath();
-        minimapCtx.moveTo(0, -8);     // nose
-        minimapCtx.lineTo(-6, 6);     // back-left
-        minimapCtx.lineTo(0, 3);      // notch
-        minimapCtx.lineTo(6, 6);      // back-right
-        minimapCtx.closePath();
-        // Dark outline for contrast
-        minimapCtx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
-        minimapCtx.lineWidth = 2.5;
-        minimapCtx.stroke();
-        // Bright fill
-        minimapCtx.fillStyle = '#ffffff';
-        minimapCtx.fill();
-        // Inner cyan edge for recognisability
-        minimapCtx.strokeStyle = 'rgba(120, 220, 255, 0.9)';
-        minimapCtx.lineWidth = 1;
-        minimapCtx.stroke();
-        minimapCtx.restore();
-      }
-
-      minimapCtx.restore(); // Undo clip
-
-      // Outer ring border — slightly brighter
-      minimapCtx.beginPath();
-      minimapCtx.arc(half, half, half - 2, 0, Math.PI * 2);
-      minimapCtx.strokeStyle = 'rgba(140, 200, 255, 0.55)';
-      minimapCtx.lineWidth = 2;
-      minimapCtx.stroke();
-    }
 
     // Sprint FOV state
     let sprintFovTarget = 60;
@@ -8593,8 +8178,8 @@
       const minimapModeVisible = currentGameMode === GAME_MODES.ZEN
         || currentGameMode === GAME_MODES.CASUAL
         || miniGameState.active;
-      if (minimapModeVisible && minimapCtx && birdPos && birdQuat) {
-        minimapCanvas.classList.add('is-visible');
+      if (minimapModeVisible && minimap && minimap.isReady() && birdPos && birdQuat) {
+        minimap.setVisible(true);
         const drones = droneSystem ? droneSystem.getDrones() : [];
         let ringData = null;
         if (collectiblesSystem && collectiblesSystem.rings) {
@@ -8612,9 +8197,11 @@
           ringData = minimapRingScratch;
         }
         const nestPos = (isNested && flightController) ? flightController.position : null;
-        updateMinimap(birdPos, birdQuat, ringData, drones, nestPos, delta);
-      } else if (minimapCanvas) {
-        minimapCanvas.classList.remove('is-visible');
+        const nestList = (typeof nestPointsSystem !== 'undefined' && nestPointsSystem && nestPointsSystem.nests)
+          ? nestPointsSystem.nests : null;
+        minimap.update(birdPos, birdQuat, ringData, drones, nestPos, delta, currentGameMode, GAME_MODES, nestList);
+      } else if (minimap) {
+        minimap.setVisible(false);
       }
 
       renderer.render(scene, cameraState.camera);
