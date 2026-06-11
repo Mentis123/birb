@@ -293,13 +293,16 @@ export function createRocketSystem(THREE, scene, options = {}) {
           }
         }
 
-        rocket.userData.previousPosition = rocket.position.clone();
+        // Reuse the existing previousPosition vector (set at launch) — a
+        // per-frame clone() here violated the zero-alloc loop rule.
+        rocket.userData.previousPosition.copy(rocket.position);
 
         // Orient rocket to velocity direction
         const velocity = rocket.userData.velocity;
         if (velocity.lengthSq() > 0.01) {
           const forward = _tempVec.set(0, 0, -1);
-          const direction = velocity.clone().normalize();
+          // _movementVec is free after the raycast above — reuse as scratch.
+          const direction = _movementVec.copy(velocity).normalize();
           _tempQuat.setFromUnitVectors(forward, direction);
           rocket.quaternion.slerp(_tempQuat, delta * 10);
         }
@@ -313,10 +316,15 @@ export function createRocketSystem(THREE, scene, options = {}) {
         // Update trail
         const trail = rocket.userData.trail;
         if (trail) {
-          // Add current position to trail history
-          trail.userData.positions.unshift(rocket.position.clone());
-          if (trail.userData.positions.length > trail.userData.maxPositions) {
-            trail.userData.positions.pop();
+          // Ring-buffer the trail history: once full, recycle the oldest
+          // vector instead of clone+GC every frame (zero-alloc steady state).
+          const trailPositions = trail.userData.positions;
+          if (trailPositions.length >= trail.userData.maxPositions) {
+            const recycled = trailPositions.pop();
+            recycled.copy(rocket.position);
+            trailPositions.unshift(recycled);
+          } else {
+            trailPositions.unshift(rocket.position.clone());
           }
 
           // Show trail once we have enough real tracked positions

@@ -3569,9 +3569,11 @@
     const SOUND_ASSETS = {
       rocketFire: '/sound/rocket-fire.mp3',
       explosion: '/sound/explosion.mp3',
-      // Dedicated micro-sounds are not shipped yet. Reuse existing assets so
-      // Vercel does not spend the first play session throwing 404s on effects.
-      ringCollect: '/sound/rocket-fire.mp3',
+      // Ring collect is the most-repeated action in the game — it gets a real
+      // dedicated chime (synthesized bell, .wav plays fine in iOS HTML Audio).
+      ringCollect: '/sound/ring-collect.wav',
+      // Remaining micro-sounds still alias shipped assets so Vercel does not
+      // spend the first play session throwing 404s on effects.
       speedBoost: '/sound/rocket-fire.mp3',
       droneDestroyed: '/sound/explosion.mp3',
       nestLand: '/sound/rocket-fire.mp3',
