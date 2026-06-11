@@ -149,6 +149,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/spherical-world.js` | Sphere + collision system |
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
+| `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |
 | `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |
 | `KNOWN_ISSUES.md` | Bug tracker with detailed fix attempts |
 | `FLIGHT_CONTROLS_PLAN.md` | 4-phase flight system redesign plan |
