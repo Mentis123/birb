@@ -99,20 +99,39 @@ function createDroneMesh(THREE) {
   return group;
 }
 
+// Scratch for explosion respawn randomization — never allocate per kill.
+const _explosionDir = { x: 0, y: 0, z: 0 };
+
+function _randomUnitDirection(out, yBias = 0) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  out.x = Math.sin(phi) * Math.cos(theta);
+  out.y = Math.sin(phi) * Math.sin(theta) + yBias;
+  out.z = Math.cos(phi);
+  if (yBias !== 0) {
+    const len = Math.sqrt(out.x * out.x + out.y * out.y + out.z * out.z);
+    out.x /= len; out.y /= len; out.z /= len;
+  }
+  return out;
+}
+
 /**
- * Create explosion effect components at given position
- * Returns an object containing all explosion elements that need to be updated
+ * Build a (hidden, inactive) explosion instance: all meshes, materials and
+ * vectors allocated ONCE. Explosions are pooled — each kill used to allocate
+ * ~60 meshes + 60 additive materials + ~60 vectors and dispose them a second
+ * later, which was the felt GC hitch in Drone Hunter. resetDroneExplosion()
+ * re-randomizes and reactivates an instance with zero allocations.
  */
-function createDroneExplosion(THREE, container, position) {
+function createDroneExplosion(THREE, container) {
   const explosionGroup = new THREE.Group();
-  explosionGroup.position.copy(position);
+  explosionGroup.visible = false;
   container.add(explosionGroup);
 
   const explosion = {
     group: explosionGroup,
     age: 0,
     components: [],
-    finished: false,
+    finished: true,
   };
 
   // 1. Core flash - bright center burst
@@ -145,8 +164,7 @@ function createDroneExplosion(THREE, container, position) {
     side: THREE.DoubleSide,
   });
   const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  // Orient ring to face outward from center of sphere
-  ring.lookAt(position.clone().normalize().multiplyScalar(100));
+  // Outward orientation depends on the spawn position — set in reset.
   explosionGroup.add(ring);
   explosion.components.push({
     type: 'ring',
@@ -181,34 +199,16 @@ function createDroneExplosion(THREE, container, position) {
     });
     const shard = new THREE.Mesh(shardGeometry, shardMaterial);
 
-    // Random direction (sphere distribution)
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    const direction = new THREE.Vector3(
-      Math.sin(phi) * Math.cos(theta),
-      Math.sin(phi) * Math.sin(theta),
-      Math.cos(phi)
-    );
-
-    const speed = EXPLOSION_CONFIG.shardSpeed *
-      (1 - EXPLOSION_CONFIG.shardSpeedVariance / 2 + Math.random() * EXPLOSION_CONFIG.shardSpeedVariance);
-
-    // Random rotation axis and speed
-    const rotationAxis = new THREE.Vector3(
-      Math.random() - 0.5,
-      Math.random() - 0.5,
-      Math.random() - 0.5
-    ).normalize();
-
     explosionGroup.add(shard);
+    // Velocity / spin / duration are randomized per spawn in reset.
     explosion.components.push({
       type: 'shard',
       mesh: shard,
       material: shardMaterial,
-      velocity: direction.multiplyScalar(speed),
-      rotationAxis,
-      rotationSpeed: 10 + Math.random() * 20,
-      duration: EXPLOSION_CONFIG.shardDuration * (0.7 + Math.random() * 0.3),
+      velocity: new THREE.Vector3(),
+      rotationAxis: new THREE.Vector3(0, 1, 0),
+      rotationSpeed: 0,
+      duration: EXPLOSION_CONFIG.shardDuration,
       gravity: EXPLOSION_CONFIG.shardGravity,
     });
   }
@@ -225,25 +225,13 @@ function createDroneExplosion(THREE, container, position) {
     });
     const spark = new THREE.Mesh(sparkGeometry, sparkMaterial);
 
-    // Random direction
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    const direction = new THREE.Vector3(
-      Math.sin(phi) * Math.cos(theta),
-      Math.sin(phi) * Math.sin(theta),
-      Math.cos(phi)
-    );
-
-    const speed = EXPLOSION_CONFIG.sparkSpeed *
-      (1 - EXPLOSION_CONFIG.sparkSpeedVariance / 2 + Math.random() * EXPLOSION_CONFIG.sparkSpeedVariance);
-
     explosionGroup.add(spark);
     explosion.components.push({
       type: 'spark',
       mesh: spark,
       material: sparkMaterial,
-      velocity: direction.multiplyScalar(speed),
-      duration: EXPLOSION_CONFIG.sparkDuration * (0.5 + Math.random() * 0.5),
+      velocity: new THREE.Vector3(),
+      duration: EXPLOSION_CONFIG.sparkDuration,
     });
   }
 
@@ -259,29 +247,89 @@ function createDroneExplosion(THREE, container, position) {
     });
     const ember = new THREE.Mesh(emberGeometry, emberMaterial);
 
-    // Random direction with slight upward bias
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    const direction = new THREE.Vector3(
-      Math.sin(phi) * Math.cos(theta),
-      Math.sin(phi) * Math.sin(theta) + 0.3,
-      Math.cos(phi)
-    ).normalize();
-
-    const speed = EXPLOSION_CONFIG.emberSpeed * (0.5 + Math.random());
-
     explosionGroup.add(ember);
     explosion.components.push({
       type: 'ember',
       mesh: ember,
       material: emberMaterial,
-      velocity: direction.multiplyScalar(speed),
-      duration: EXPLOSION_CONFIG.emberDuration * (0.7 + Math.random() * 0.3),
-      pulsePhase: Math.random() * Math.PI * 2,
+      velocity: new THREE.Vector3(),
+      duration: EXPLOSION_CONFIG.emberDuration,
+      pulsePhase: 0,
     });
   }
 
   return explosion;
+}
+
+/**
+ * Re-randomize and activate a pooled explosion at a new position.
+ * Zero allocations — every vector is reused via .set()/.copy().
+ */
+function resetDroneExplosion(explosion, position) {
+  explosion.age = 0;
+  explosion.finished = false;
+  explosion.group.position.copy(position);
+  explosion.group.visible = true;
+
+  let firstRing = null;
+  for (const comp of explosion.components) {
+    comp.mesh.visible = true;
+    comp.mesh.scale.setScalar(1);
+
+    switch (comp.type) {
+      case 'flash':
+        comp.material.opacity = 1.0;
+        break;
+
+      case 'ring':
+        comp.material.opacity = 0.9;
+        if (!firstRing) {
+          // Orient the shockwave to face outward from the sphere center.
+          comp.mesh.lookAt(0, 0, 0);
+          firstRing = comp.mesh;
+        } else {
+          // Secondary ring: perpendicular to the first (original behavior).
+          comp.mesh.rotation.copy(firstRing.rotation);
+          comp.mesh.rotation.x += Math.PI / 2;
+        }
+        break;
+
+      case 'shard': {
+        comp.mesh.position.set(0, 0, 0);
+        comp.material.opacity = 1.0;
+        const dir = _randomUnitDirection(_explosionDir);
+        const speed = EXPLOSION_CONFIG.shardSpeed *
+          (1 - EXPLOSION_CONFIG.shardSpeedVariance / 2 + Math.random() * EXPLOSION_CONFIG.shardSpeedVariance);
+        comp.velocity.set(dir.x * speed, dir.y * speed, dir.z * speed);
+        comp.rotationAxis.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+        comp.rotationSpeed = 10 + Math.random() * 20;
+        comp.duration = EXPLOSION_CONFIG.shardDuration * (0.7 + Math.random() * 0.3);
+        break;
+      }
+
+      case 'spark': {
+        comp.mesh.position.set(0, 0, 0);
+        comp.material.opacity = 1.0;
+        const dir = _randomUnitDirection(_explosionDir);
+        const speed = EXPLOSION_CONFIG.sparkSpeed *
+          (1 - EXPLOSION_CONFIG.sparkSpeedVariance / 2 + Math.random() * EXPLOSION_CONFIG.sparkSpeedVariance);
+        comp.velocity.set(dir.x * speed, dir.y * speed, dir.z * speed);
+        comp.duration = EXPLOSION_CONFIG.sparkDuration * (0.5 + Math.random() * 0.5);
+        break;
+      }
+
+      case 'ember': {
+        comp.mesh.position.set(0, 0, 0);
+        comp.material.opacity = 0.8;
+        const dir = _randomUnitDirection(_explosionDir, 0.3);
+        const speed = EXPLOSION_CONFIG.emberSpeed * (0.5 + Math.random());
+        comp.velocity.set(dir.x * speed, dir.y * speed, dir.z * speed);
+        comp.duration = EXPLOSION_CONFIG.emberDuration * (0.7 + Math.random() * 0.3);
+        comp.pulsePhase = Math.random() * Math.PI * 2;
+        break;
+      }
+    }
+  }
 }
 
 /**
@@ -391,6 +439,29 @@ export function createDroneSystem(THREE, scene, options = {}) {
   const drones = [];
   const pendingRespawns = [];
   const activeExplosions = [];
+  // Explosion pool: instances are built lazily (first kills) up to the cap,
+  // then recycled forever. Caps simultaneous explosions — and their ~60
+  // additive-blended draw calls each — and eliminates the per-kill GC churn.
+  const explosionPool = [];
+  const EXPLOSION_POOL_MAX = 4;
+  let explosionsBuilt = 0;
+
+  function spawnExplosion(position) {
+    let explosion = explosionPool.pop();
+    if (!explosion) {
+      if (explosionsBuilt < EXPLOSION_POOL_MAX) {
+        explosion = createDroneExplosion(THREE, container);
+        explosionsBuilt++;
+      } else {
+        // All instances busy: steal the oldest active one. Visually fine —
+        // it's near the end of its ~1s life during that kind of kill spree.
+        explosion = activeExplosions.shift();
+      }
+    }
+    resetDroneExplosion(explosion, position);
+    activeExplosions.push(explosion);
+  }
+
   const container = new THREE.Group();
   container.name = 'drone-targets';
   scene.add(container);
@@ -538,13 +609,15 @@ export function createDroneSystem(THREE, scene, options = {}) {
         }
       }
 
-      // Update active explosions
+      // Update active explosions; finished ones go back to the pool intact
+      // (disposal happens only in dispose()).
       for (let i = activeExplosions.length - 1; i >= 0; i--) {
         const explosion = activeExplosions[i];
         const stillActive = updateDroneExplosion(explosion, delta);
         if (!stillActive) {
-          disposeExplosion(explosion, container);
+          explosion.group.visible = false;
           activeExplosions.splice(i, 1);
+          explosionPool.push(explosion);
         }
       }
     },
@@ -599,9 +672,8 @@ export function createDroneSystem(THREE, scene, options = {}) {
       drone.userData.isAlive = false;
       container.remove(drone);
 
-      // Create awesome explosion effect at drone position
-      const explosion = createDroneExplosion(THREE, container, position);
-      activeExplosions.push(explosion);
+      // Awesome (pooled) explosion effect at drone position
+      spawnExplosion(position);
 
       // Dispose geometry and materials
       drone.traverse((child) => {
@@ -651,13 +723,17 @@ export function createDroneSystem(THREE, scene, options = {}) {
           if (child.material) child.material.dispose();
         });
       }
-      // Dispose active explosions
+      // Dispose all explosion instances — active AND pooled
       for (const explosion of activeExplosions) {
+        disposeExplosion(explosion, container);
+      }
+      for (const explosion of explosionPool) {
         disposeExplosion(explosion, container);
       }
       drones.length = 0;
       pendingRespawns.length = 0;
       activeExplosions.length = 0;
+      explosionPool.length = 0;
       scene.remove(container);
     },
   };
