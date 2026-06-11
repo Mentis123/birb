@@ -3467,10 +3467,14 @@
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
-      const gltfLoaderModule = await import(
-        "https://esm.sh/three@0.183.2/examples/jsm/loaders/GLTFLoader.js"
-      );
-      GLTFLoader = gltfLoaderModule.GLTFLoader;
+      // GLTFLoader is only needed for the ?glb=1 A/B path (the shipped bird
+      // is procedural) — skip the CDN module fetch on normal sessions.
+      if (/[?&]glb=1/.test(window.location?.search || '')) {
+        const gltfLoaderModule = await import(
+          "https://esm.sh/three@0.183.2/examples/jsm/loaders/GLTFLoader.js"
+        );
+        GLTFLoader = gltfLoaderModule.GLTFLoader;
+      }
       try {
         const nippleModule = await import("https://esm.sh/nipplejs@0.10.1");
         nipplejs = nippleModule?.default ?? nippleModule;
