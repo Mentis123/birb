@@ -4,6 +4,15 @@
 **Date:** January 2026
 **Status:** Design & Ideation
 
+> **⚠️ As-built note (2026-06-11):** this PRD is the original design document
+> and intentionally preserved as written — the implementation has drifted.
+> Notably: all mode logic lives inline in `index.html` (the `src/game-modes/`
+> module architecture described in §4/§10 was never built); Ring Rush ships
+> **18** rings (not 20) on an arc-ribbon layout; Turret Defense waves spawn
+> `2 + wave` drones; and Zen mode (not in this PRD) replaced Casual as the
+> default free-flight experience. Treat the code as the source of truth for
+> numbers, and this document as the design intent. See `CODEBASE_EVALUATION.md`.
+
 ---
 
 ## Table of Contents

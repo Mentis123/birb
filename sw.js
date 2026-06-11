@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v6-2026-06-08';
+const CACHE_VERSION = 'v7-2026-06-11';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -19,8 +19,10 @@ const CORE_ASSETS = [
   './info.jpg',
   './birb.glb',
   './sound/ambient-forest.mp3',
+  './sound/ambient-mountain.mp3',
   './sound/rocket-fire.mp3',
   './sound/explosion.mp3',
+  './sound/ring-collect.wav',
   './src/flight/bird-flight.js',
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
@@ -38,6 +40,7 @@ const CORE_ASSETS = [
   './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
   './src/environment/collectibles.js',
+  './src/environment/collider-grid.js',
   './src/nesting/nest-points.js',
   './src/nesting/nesting-system.js',
   './src/nesting/aim-rig.js',

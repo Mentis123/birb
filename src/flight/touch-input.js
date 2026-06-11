@@ -45,11 +45,18 @@ export function createTouchInput(containerElement, nippleLib) {
     state.active = false;
   });
 
+  // Reused output object — get() runs every frame and the old `{ ...state }`
+  // spread allocated on each call.
+  const _out = { x: 0, y: 0, active: false };
+
   // Public API
   return {
-    /** Get current input. Returns { x, y, active } */
+    /** Get current input. Returns { x, y, active } (reused object — read, don't hold) */
     get() {
-      return { ...state };
+      _out.x = state.x;
+      _out.y = state.y;
+      _out.active = state.active;
+      return _out;
     },
 
     /** Check if joystick is being touched */
@@ -98,6 +105,8 @@ export function createKeyboardInput() {
 
 // Combine multiple input sources
 export function combineInputs(...sources) {
+  // Reused output — get() runs every frame (zero-alloc loop rule).
+  const _out = { x: 0, y: 0, active: false };
   return {
     get() {
       let x = 0, y = 0, active = false;
@@ -107,14 +116,16 @@ export function combineInputs(...sources) {
         y += input.y;
         active = active || input.active;
       }
-      return {
-        x: clamp(x, -1, 1),
-        y: clamp(y, -1, 1),
-        active,
-      };
+      _out.x = clamp(x, -1, 1);
+      _out.y = clamp(y, -1, 1);
+      _out.active = active;
+      return _out;
     },
     isActive() {
-      return sources.some(s => s.isActive());
+      for (const source of sources) {
+        if (source.isActive()) return true;
+      }
+      return false;
     },
     dispose() {
       sources.forEach(s => s.dispose());
