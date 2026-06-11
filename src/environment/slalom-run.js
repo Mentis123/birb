@@ -107,17 +107,23 @@ function makeCheckerTexture(THREE) {
 }
 
 function makeSignTexture(THREE, text, glow) {
-  const W = 256, H = 128;
+  // Hi-res so the banner reads from down the course (was 256x128/72px —
+  // mushy at distance per playtest).
+  const W = 512, H = 192;
   const c = makeCanvas(W, H); if (!c) return null;
   const ctx = c.getContext('2d'); if (!ctx) return null;
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'rgba(8,4,16,0.82)';
-  roundRect(ctx, 6, 6, W - 12, H - 12, 16); ctx.fill();
+  ctx.fillStyle = 'rgba(8,4,16,0.85)';
+  roundRect(ctx, 8, 8, W - 16, H - 16, 24); ctx.fill();
+  // neon border so the sign reads as signage, not a floating word
+  ctx.strokeStyle = glow; ctx.lineWidth = 6;
+  ctx.shadowColor = glow; ctx.shadowBlur = 22;
+  roundRect(ctx, 12, 12, W - 24, H - 24, 20); ctx.stroke();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = 'bold 72px system-ui, -apple-system, sans-serif';
-  ctx.shadowColor = glow; ctx.shadowBlur = 28;
-  ctx.fillStyle = glow; ctx.fillText(text, W / 2, H / 2 + 4);
-  ctx.shadowBlur = 10; ctx.fillStyle = '#fff'; ctx.fillText(text, W / 2, H / 2 + 4);
+  ctx.font = 'bold 116px system-ui, -apple-system, sans-serif';
+  ctx.shadowBlur = 34;
+  ctx.fillStyle = glow; ctx.fillText(text, W / 2, H / 2 + 6);
+  ctx.shadowBlur = 12; ctx.fillStyle = '#fff'; ctx.fillText(text, W / 2, H / 2 + 6);
   return new THREE.CanvasTexture(c);
 }
 
@@ -155,15 +161,22 @@ export function createSlalomRun({
   const animated = [];      // travelling-pulse textures: { tex, sy }
 
   // ── Weaving path ──────────────────────────────────────────────
-  const N = isMobile ? 24 : 36;
-  const stepAng = isMobile ? 0.017 : 0.015;
-  const weaveAmp = 0.034;
-  const weaveFreq = 0.65;
+  // Longer course with SWEEPING S-turns. The old weave was per-INDEX
+  // (sin(k*0.65) → a new wiggle every ~10 samples ≈ jittery zigzag); the new
+  // one is arc-length driven: a slow primary sine (wavelength ~0.36 rad ≈ 43u,
+  // max deviation ~30°) plus a faint secondary, with an ease envelope so both
+  // arches sit on straight, readable entries.
+  const N = isMobile ? 32 : 48;
+  const stepAng = 0.015;
+  const courseAng = N * stepAng;
   const corridorHalf = 0.058;
   const samples = [];
   for (let k = 0; k <= N; k++) {
     const a = k * stepAng;
-    const weave = Math.sin(k * weaveFreq) * weaveAmp;
+    const u = a / courseAng;
+    const ease = smooth(0, 0.12, u) * smooth(1, 0.88, u);
+    const weave = (Math.sin((a * Math.PI * 2) / 0.36) * 0.034
+                 + Math.sin((a * Math.PI * 2) / 0.15 + 1.7) * 0.004) * ease;
     const c = A.clone().multiplyScalar(Math.cos(a)).addScaledVector(F0, Math.sin(a)).normalize();
     samples.push(c.clone().multiplyScalar(Math.cos(weave)).addScaledVector(R0, Math.sin(weave)).normalize());
   }
@@ -281,6 +294,47 @@ export function createSlalomRun({
   buildEdgeStrip(-1, CYAN);
   buildEdgeStrip(1, MAGENTA);
 
+  // ── Turn-direction arrow boards (signage on the OUTSIDE of each sweep) ──
+  // One InstancedMesh (single draw call); the chevron texture scrolls so each
+  // board reads as a flowing "this way" arrow pointing INTO the turn, placed
+  // at flight altitude on the outer edge — racing-game corner signage.
+  const turnTex = makeChevronTexture(THREE, AMBER);
+  if (turnTex) turnTex.repeat.set(1, 1);
+  const boardGeo = new THREE.PlaneGeometry(3.2, 4.6);
+  const boardMat = new THREE.MeshBasicMaterial({
+    map: turnTex || null, color: AMBER, transparent: true, opacity: 0.9,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const maxBoards = 10;
+  const boards = new THREE.InstancedMesh(boardGeo, boardMat, maxBoards);
+  boards.renderOrder = 4;
+  let bi = 0, lastBoard = -10;
+  for (let i = 4; i <= N - 4 && bi < maxBoards; i++) {
+    // Lateral second difference along R0 = turn curvature; sign = direction.
+    const curv = samples[i - 3].dot(R0) - 2 * samples[i].dot(R0) + samples[i + 3].dot(R0);
+    if (Math.abs(curv) < 0.008 || i - lastBoard < 5) continue;
+    lastBoard = i;
+    const acr = acrossAt(i);
+    const tan = tangentAt(i);
+    // Board stands on the OUTSIDE of the turn; chevrons point INTO it.
+    const sideSign = curv > 0 ? -1 : 1;
+    const off = corridorHalf * 1.3;
+    const dirB = samples[i].clone().multiplyScalar(Math.cos(off)).addScaledVector(acr, sideSign * Math.sin(off)).normalize();
+    const yB = acr.clone().multiplyScalar(curv > 0 ? 1 : -1).normalize();
+    const zB = tan.clone().negate();
+    const xB = new Vector3().crossVectors(yB, zB).normalize();
+    const zFixB = new Vector3().crossVectors(xB, yB).normalize();
+    dummy.position.copy(dirB.clone().multiplyScalar(groundR(dirB) + FLIGHT_ALT - 0.5));
+    dummy.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(xB, yB, zFixB));
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    boards.setMatrixAt(bi++, dummy.matrix);
+  }
+  boards.count = bi;
+  boards.instanceMatrix.needsUpdate = true;
+  group.add(boards);
+  if (turnTex) animated.push({ tex: turnTex, sy: -1.6 });
+
   // ── Boost chevrons on the floor ───────────────────────────────
   if (!isMobile) {
     const chevTex = makeChevronTexture(THREE, AMBER);
@@ -360,8 +414,8 @@ export function createSlalomRun({
     const bannerMat = bannerTex
       ? new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true, side: THREE.DoubleSide })
       : new THREE.MeshBasicMaterial({ color: glow, side: THREE.DoubleSide });
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(archHalf * 1.5, 6), bannerMat);
-    banner.position.copy(dir.clone().multiplyScalar(base + archH - 1.6));
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(archHalf * 1.8, 8), bannerMat);
+    banner.position.copy(dir.clone().multiplyScalar(base + archH - 2.0));
     banner.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(acr.clone().negate(), up, tan.clone().negate()));
     banner.renderOrder = 4;
     ag.add(banner);

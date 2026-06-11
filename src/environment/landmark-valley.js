@@ -206,29 +206,38 @@ export function createValleyFeature({
   const animated = []; // { tex, sx, sy }
   const scroll = (tex, sx, sy) => { if (tex) animated.push({ tex, sx, sy }); };
 
-  // ── Geometry frame for the falls (at the inflow rim) ──────────
+  // ── Geometry frame for the falls (planted ON the carved headwall) ──
+  // The bowl wall at the rim is a SLOPE, not a vertical cliff — a vertical
+  // sheet hanging at the rim reads as a free-floating billboard (the bug in
+  // the 2026-06-11 playtest screenshots). Instead the sheet leans down the
+  // headwall: TOP at the rim lip (where the inflow river ends), BASE at the
+  // pool surface just inside the pool's upstream edge.
   const rimAng = params.radiusAng * 0.92;
   const rimDir = dirTo(rimAng, true);
-  const rimTop = surfacePoint(rimDir, 1.0);
-  const poolCenter = surfacePoint(A, 0.6);
+  const rimTop = surfacePoint(rimDir, 0.4);
+  const poolCenter = surfacePoint(A, 1.2);
   const poolLevelR = poolCenter.length();
-  const drop = Math.max(10, rimTop.length() - poolLevelR + 3);
+  const baseDir = dirTo((params.poolRadius * 0.55) / sphereRadius, true);
+  const fallBase = baseDir.clone().multiplyScalar(poolLevelR + 0.2);
+  const fallSpan = rimTop.clone().sub(fallBase);
+  const drop = Math.max(8, fallSpan.length());
 
-  const yAxis = rimDir.clone();             // local +Y = outward radial (sheet stands up)
-  const zAxis = F.clone().negate();         // local +Z faces the approach
-  const xAxis = new Vector3().crossVectors(yAxis, zAxis).normalize();
+  const yAxis = fallSpan.clone().normalize();    // local +Y = up along the slope
+  const zRaw = F.clone().negate();               // faces the downstream approach
+  const xAxis = new Vector3().crossVectors(yAxis, zRaw).normalize();
   const zFix = new Vector3().crossVectors(xAxis, yAxis).normalize();
   const fallBasis = new Matrix4().makeBasis(xAxis, yAxis, zFix);
-  const fallCenter = rimDir.clone().multiplyScalar((rimTop.length() + poolLevelR) / 2);
-  fallCenter.addScaledVector(F, -params.poolRadius * 0.15);
+  const fallCenter = fallBase.clone().addScaledVector(fallSpan, 0.5);
 
   // ── Cascade sheets (parallax volume) ──────────────────────────
-  const fallWidth = params.poolRadius * 2.0;
-  const fallHeight = drop + 4;
+  // Sized to the channel, not the whole basin mouth — and translucent enough
+  // that the terrain reads through the back layers (no white wall).
+  const fallWidth = params.poolRadius * 1.25;
+  const fallHeight = drop + 2;
   const layerCount = isMobile ? 2 : 3;
   const layerSpeed = [0.62, 1.07, 1.63];
-  const layerOpacity = [0.96, 0.78, 0.58];
-  const layerColor = [0x1d6f86, 0x4fb8d6, 0xcdeef7];
+  const layerOpacity = [0.85, 0.6, 0.42];
+  const layerColor = [0x1d6f86, 0x3fa3c4, 0xbfe6f2];
   const cascadeTex = [makeCascadeTexture(THREE, 7), makeCascadeTexture(THREE, 23), makeCascadeTexture(THREE, 51)];
   const sheets = [];
   for (let i = 0; i < layerCount; i++) {
@@ -260,13 +269,13 @@ export function createValleyFeature({
 
   // ── Mist / splash column (additive Points) ────────────────────
   const sprite = makeSoftSprite(THREE);
-  const mistCount = isMobile ? 170 : 420;
+  const mistCount = isMobile ? 140 : 360;
   const mPos = new Float32Array(mistCount * 3);
   const mCol = new Float32Array(mistCount * 3);
   const mVel = new Float32Array(mistCount * 3);
   const mLife = new Float32Array(mistCount);
   const mMax = new Float32Array(mistCount);
-  const P0 = poolCenter.clone();              // local origin (impact basin)
+  const P0 = fallBase.clone();                // local origin (the impact line)
   const upA = A.clone(), riA = Rt.clone(), fwA = F.clone();
   const seedRng = makeRng(1337);
   // Particle state lives in a local (right,up,fwd) frame; world pos is derived
@@ -299,7 +308,7 @@ export function createValleyFeature({
   mistGeo.setAttribute('position', new THREE.BufferAttribute(mPos, 3));
   mistGeo.setAttribute('color', new THREE.BufferAttribute(mCol, 3));
   const mistMat = new THREE.PointsMaterial({
-    size: 2.6, map: sprite || null, vertexColors: true, transparent: true,
+    size: 2.2, map: sprite || null, vertexColors: true, transparent: true,
     depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
   });
   const mist = new THREE.Points(mistGeo, mistMat);
@@ -361,21 +370,35 @@ export function createValleyFeature({
   scroll(foamTex, 0.25, 0);
 
   // ── Inflow + outflow river ribbons ────────────────────────────
-  const buildRibbon = (towardF, fromAng, toAng, half, segs, tex, opacity, color) => {
+  // The old ribbons had only LEFT/RIGHT vertex columns, each sampling terrain
+  // at its OWN direction — which lands on the channel WALLS (carve tapers to
+  // zero at the channel half-angle), so the water bridged flat across the TOP
+  // of the carve instead of lying in it. The outflow was even built WIDER
+  // (riverHalfAng*1.5 = 0.075) than its canyon carve (canyonHalfAng = 0.062).
+  // Fix: three columns (L/C/R), edges tucked at 65% of the CARVE half-angle,
+  // every column riding the CENTERLINE floor height (+lift) with a slight
+  // center dip — the water now sits down inside the channel and follows it.
+  const buildRibbon = (towardF, fromAng, toAng, carveHalf, segs, tex, opacity, color) => {
+    const half = carveHalf * 0.65;
     const positions = [], uvs = [];
     for (let k = 0; k <= segs; k++) {
       const a = fromAng + (toAng - fromAng) * (k / segs);
       const center = dirTo(a, towardF);
+      const floorH = safeHeight(center.x, center.y, center.z);
+      const rad = sphereRadius + floorH + 0.55;
       const eL = center.clone().multiplyScalar(Math.cos(half)).addScaledVector(Rt, Math.sin(half)).normalize();
       const eR = center.clone().multiplyScalar(Math.cos(half)).addScaledVector(Rt, -Math.sin(half)).normalize();
-      const pL = surfacePoint(eL, 0.6), pR = surfacePoint(eR, 0.6);
-      positions.push(pL.x, pL.y, pL.z, pR.x, pR.y, pR.z);
-      const v = k / segs; uvs.push(0, v, 1, v);
+      const pL = eL.multiplyScalar(rad);
+      const pC = center.clone().multiplyScalar(rad - 0.3); // gentle U cross-section
+      const pR = eR.multiplyScalar(rad);
+      positions.push(pL.x, pL.y, pL.z, pC.x, pC.y, pC.z, pR.x, pR.y, pR.z);
+      const v = k / segs; uvs.push(0, v, 0.5, v, 1, v);
     }
     const index = [];
     for (let k = 0; k < segs; k++) {
-      const a0 = k * 2, b0 = k * 2 + 1, a1 = k * 2 + 2, b1 = k * 2 + 3;
-      index.push(a0, b0, a1, b0, b1, a1);
+      const l0 = k * 3, c0 = k * 3 + 1, r0 = k * 3 + 2;
+      const l1 = l0 + 3, c1 = c0 + 3, r1 = r0 + 3;
+      index.push(l0, c0, l1, c0, c1, l1, c0, r0, c1, r0, r1, c1);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -386,16 +409,16 @@ export function createValleyFeature({
     const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
       map: tex || null, color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide,
     }));
-    mesh.renderOrder = 2;
+    mesh.renderOrder = 1;
     group.add(mesh);
     return mesh;
   };
   const inTex = makeRippleTexture(THREE, 5);
-  buildRibbon(true, rimAng, params.riverReachAng, params.riverHalfAng, isMobile ? 10 : 16, inTex, 0.82, 0xffffff);
+  buildRibbon(true, rimAng, params.riverReachAng, params.riverHalfAng, isMobile ? 14 : 22, inTex, 0.82, 0xffffff);
   scroll(inTex, 0, -0.25);
   const outTex = makeRippleTexture(THREE, 9);
-  buildRibbon(false, (params.poolRadius / sphereRadius) * 0.5, params.canyonReachAng || 0.5,
-    params.riverHalfAng * 1.5, isMobile ? 18 : 30, outTex, 0.82, 0xffffff);
+  buildRibbon(false, (params.poolRadius / sphereRadius) * 0.85, params.canyonReachAng || 0.5,
+    params.canyonHalfAng || params.riverHalfAng, isMobile ? 24 : 38, outTex, 0.82, 0xffffff);
   scroll(outTex, 0, -0.32);
 
   // ── Per-frame ─────────────────────────────────────────────────
