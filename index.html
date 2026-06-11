@@ -17,7 +17,7 @@
   <meta name="theme-color" content="#0b0d17" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -100,6 +100,16 @@
       user-select: none;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
+    }
+
+    /* Daily streak chip on the title page */
+    .title-streak {
+      margin-top: 0.8rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: rgba(255, 216, 74, 0.95);
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+      text-align: center;
     }
 
     /* Subtle cinematic vignette over the 3D scene. Pure compositor work
@@ -2573,6 +2583,7 @@
         <button type="button" class="title-btn title-btn-primary" data-title-start>Tap to Start</button>
         <button type="button" class="title-btn title-btn-secondary" data-title-howto>How to Play</button>
       </div>
+      <div class="title-streak" data-title-streak hidden></div>
     </div>
     <div class="title-footer">
       From the Mind of <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a>
@@ -3070,10 +3081,65 @@
       setTimeout(() => { titleSettings.hidden = true; }, 180);
     }
 
+    // ===== Screen Wake Lock — keep the screen awake during play =====
+    // Supported on iOS Safari 16.4+ and Android Chrome. The lock auto-releases
+    // when the tab hides, so re-acquire on return. Failure is harmless — the
+    // device just falls back to its normal screen timeout.
+    let _wakeLock = null;
+    const acquireWakeLock = async () => {
+      try { _wakeLock = await navigator.wakeLock?.request('screen'); }
+      catch (_) { _wakeLock = null; }
+    };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && gameLoopStarted) acquireWakeLock();
+    });
+
+    // ===== Daily streak (retention) =====
+    const STREAK_KEY = 'birb_streak';
+    const STREAK_DAY_KEY = 'birb_last_play_day';
+    function _streakDayKey(d) { return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; }
+    // Streak to SHOW on the title page: alive if last play was today or
+    // yesterday (yesterday = playing now will extend it), else lapsed.
+    function getDisplayStreak() {
+      try {
+        const last = localStorage.getItem(STREAK_DAY_KEY);
+        if (!last) return 0;
+        const now = new Date();
+        const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+        if (last !== _streakDayKey(now) && last !== _streakDayKey(yesterday)) return 0;
+        return parseInt(localStorage.getItem(STREAK_KEY), 10) || 0;
+      } catch (_) { return 0; }
+    }
+    // Called once per session start: extend (consecutive day), keep (same
+    // day), or reset to 1 (gap).
+    function bumpDailyStreak() {
+      try {
+        const now = new Date();
+        const todayKey = _streakDayKey(now);
+        const last = localStorage.getItem(STREAK_DAY_KEY);
+        if (last === todayKey) return;
+        const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+        const prev = parseInt(localStorage.getItem(STREAK_KEY), 10) || 0;
+        const streak = (last === _streakDayKey(yesterday)) ? prev + 1 : 1;
+        localStorage.setItem(STREAK_KEY, String(streak));
+        localStorage.setItem(STREAK_DAY_KEY, todayKey);
+      } catch (_) { /* private mode etc. */ }
+    }
+    function refreshTitleStreak() {
+      const el = document.querySelector('[data-title-streak]');
+      if (!el) return;
+      const streak = getDisplayStreak();
+      el.hidden = streak < 2;
+      if (streak >= 2) el.textContent = `\u{1F525} ${streak}-day flight streak`;
+    }
+    refreshTitleStreak();
+
     if (titleStartBtn) {
       const beginGame = () => {
         splashDismissed = true;
         titleStartBtn.disabled = false;
+        bumpDailyStreak();
+        acquireWakeLock();
         // Reveal the game UI now — it was hidden until Tap-to-Start so the
         // canvas-wrapper / HUD / header couldn't peek through the splash fade.
         const mainEl = document.querySelector('[data-game-main]');
@@ -3505,15 +3571,35 @@
     };
 
     // ============ HAPTIC FEEDBACK (mobile only) ============
-    // navigator.vibrate is supported on Android Chrome / some mobile browsers.
-    // iOS Safari does NOT support it (silently no-ops). Toggleable, persisted.
+    // navigator.vibrate is supported on Android Chrome. iOS Safari still has
+    // no vibrate API — but since iOS 18, toggling an <input type="checkbox"
+    // switch> fires a native haptic tick, so a hidden bridge element gives
+    // iOS players real haptics too. Toggleable, persisted.
     const HAPTICS_SUPPORTED = typeof navigator !== 'undefined' && 'vibrate' in navigator;
     const hapticsState = {
       enabled: localStorage.getItem('birb.haptics') !== 'false',
     };
+    const _iosHapticSwitch = (() => {
+      if (HAPTICS_SUPPORTED || typeof document === 'undefined') return null;
+      try {
+        const el = document.createElement('input');
+        el.type = 'checkbox';
+        el.setAttribute('switch', '');
+        el.setAttribute('aria-hidden', 'true');
+        el.tabIndex = -1;
+        el.style.cssText = 'position:fixed;left:-100px;top:-100px;width:1px;height:1px;opacity:0;pointer-events:none;';
+        document.body.appendChild(el);
+        return el;
+      } catch (_) { return null; }
+    })();
     const triggerHaptic = (durationMs) => {
-      if (!HAPTICS_SUPPORTED || !hapticsState.enabled) return;
-      try { navigator.vibrate(durationMs); } catch (_) { /* no-op */ }
+      if (!hapticsState.enabled) return;
+      if (HAPTICS_SUPPORTED) {
+        try { navigator.vibrate(durationMs); } catch (_) { /* no-op */ }
+      } else if (_iosHapticSwitch) {
+        // iOS bridge: one native tick per toggle (duration not controllable).
+        try { _iosHapticSwitch.click(); } catch (_) { /* no-op */ }
+      }
     };
 
     // ============ AUDIO SYSTEM (Preloaded for instant playback) ============
@@ -5417,9 +5503,35 @@
         const text = lastResultSummary || 'Come fly in Birb Mobile! 🐦';
         const url = 'https://birbmobile.vercel.app';
         if (navigator.share) {
-          // Native share sheet (iOS/Android). A rejected promise just means
-          // the user closed the sheet — nothing to handle.
-          try { await navigator.share({ title: 'Birb Mobile', text, url }); } catch (e) {}
+          // Try to attach a screenshot of the run (Web Share Level 2, iOS 15+).
+          // The WebGL canvas runs without preserveDrawingBuffer, so render a
+          // fresh frame in the same task before snapshotting it.
+          let files = null;
+          try {
+            if (renderer && scene && cameraState?.camera) {
+              renderer.render(scene, cameraState.camera);
+              const blob = await new Promise((resolve) =>
+                renderer.domElement.toBlob(resolve, 'image/jpeg', 0.85));
+              if (blob) {
+                const file = new File([blob], 'birb-mobile-run.jpg', { type: 'image/jpeg' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                  files = [file];
+                }
+              }
+            }
+          } catch (_) { files = null; }
+          try {
+            await navigator.share(files
+              ? { title: 'Birb Mobile', text, url, files }
+              : { title: 'Birb Mobile', text, url });
+          } catch (err) {
+            // If attaching the file consumed too much of the gesture window
+            // (or the target rejects files), retry once as text-only. A plain
+            // AbortError just means the user closed the sheet.
+            if (files && err && err.name !== 'AbortError') {
+              try { await navigator.share({ title: 'Birb Mobile', text, url }); } catch (_) {}
+            }
+          }
           return;
         }
         try {
@@ -8405,8 +8517,8 @@
             particleSystem.createWhoosh(tp, birdPos, proxState._fwd, target.tint || 0xffffff);
             proxState.cooldowns[pi] = proxState.cooldownAfterTrigger;
             // Haptic — opt-in via localStorage['birb.haptics']
-            if (isHapticsEnabled() && typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-              try { navigator.vibrate(15); } catch (_) { /* ignore */ }
+            if (isHapticsEnabled()) {
+              triggerHaptic(15);
             }
           }
         }

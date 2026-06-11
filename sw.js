@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v7-2026-06-11';
+const CACHE_VERSION = 'v8-2026-06-11';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -15,6 +15,9 @@ const CORE_ASSETS = [
   './index.html',
   './manifest.webmanifest',
   './favicon.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/apple-touch-icon.png',
   './splash.jpg',
   './info.jpg',
   './birb.glb',
