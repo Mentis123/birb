@@ -2555,6 +2555,20 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     });
     root.add(valley.group);
     root.add(slalom.group);
+    // Exclude the decorative landmark subtrees (waterfall/pool/river/mist +
+    // slalom corridor tube/gates/trees/banners) from raycasting. The rocket
+    // system raycasts [root] RECURSIVELY every frame per live shot; the slalom
+    // corridor alone is a ~2.7k-tri non-instanced TubeGeometry whose bounding
+    // sphere spans the whole course, so nearly every shot fell through to a full
+    // brute-force triangle sweep — that stacked with the dense prop world froze
+    // mobile a moment after firing (the muzzle corridor arms the raycast at 28u).
+    // Rockets should never detonate on a waterfall sheet or a translucent gate
+    // anyway, so this is correct as well as fast. Matches sphereGround/cloud/
+    // canopy `raycast = () => {}`. Bird collision is unaffected — it uses the
+    // spatial-hash collisionSystem, not the Raycaster.
+    const _noRaycast = () => {};
+    valley.group.traverse((o) => { o.raycast = _noRaycast; });
+    slalom.group.traverse((o) => { o.raycast = _noRaycast; });
     features = {
       update(birdPos, delta, timeMs) {
         valley.update(delta, timeMs);
