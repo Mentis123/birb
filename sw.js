@@ -3,7 +3,7 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v11-2026-06-11';
+const CACHE_VERSION = 'v12-2026-08-01';
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -111,6 +111,17 @@ self.addEventListener('fetch', (event) => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
   const sameOrigin = url.origin === self.location.origin;
+
+  // VYOM (/vyom) is a separate, self-contained Birb Labs artefact with its own
+  // asset graph. It is deliberately excluded from this service worker.
+  //
+  // This is not tidiness — it is a correctness fix. networkFirst() below writes
+  // EVERY navigation response into the cache under the key './index.html', so
+  // a single visit to /vyom would overwrite Birb Mobile's offline shell with
+  // VYOM's HTML, and the next offline launch of the main game would boot the
+  // wrong game. Bypassing here keeps the two artefacts fully independent.
+  if (sameOrigin && url.pathname.startsWith('/vyom')) return;
+
   const cdnCacheable = RUNTIME_CACHEABLE_HOSTS.has(url.host);
   if (!sameOrigin && !cdnCacheable) return;
 

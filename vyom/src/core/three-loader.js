@@ -12,7 +12,14 @@
 
 export const THREE_VERSION = '0.183.2';
 export const THREE_CDN = `https://esm.sh/three@${THREE_VERSION}`;
-export const THREE_LOCAL = '/node_modules/three/build/three.module.js';
+
+// Installed under an ALIAS (`npm i three-real@npm:three`) on purpose.
+// `node_modules/three/index.js` is a hand-written minimal stub that this repo
+// tracks in git and that the Birb Mobile unit tests import as 'three'.
+// Installing the real package at `node_modules/three` overwrites that stub and
+// breaks `npm test`, so the real build lives beside it instead.
+export const THREE_LOCAL = '/node_modules/three-real/build/three.module.js';
+const THREE_LOCAL_FALLBACK = '/node_modules/three/build/three.module.js';
 
 /** Resolve the Three.js module URL for the current page. */
 export function threeUrl() {
@@ -24,6 +31,14 @@ export function threeUrl() {
 }
 
 /** Dynamically import Three.js. */
-export function loadThree() {
-    return import(/* webpackIgnore: true */ threeUrl());
+export async function loadThree() {
+    const url = threeUrl();
+    if (url !== THREE_LOCAL) return import(/* webpackIgnore: true */ url);
+    // Tolerate either local layout so the harness keeps working whichever way
+    // Three happens to be installed.
+    try {
+        return await import(/* webpackIgnore: true */ THREE_LOCAL);
+    } catch {
+        return import(/* webpackIgnore: true */ THREE_LOCAL_FALLBACK);
+    }
 }

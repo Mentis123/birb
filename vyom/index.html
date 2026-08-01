@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a1324">
+<!-- Unlisted artefact. Reachable by anyone with the link, but kept out of
+     search so it does not surface alongside Birb Mobile before it is ready. -->
+<meta name="robots" content="noindex, nofollow">
+<title>VYOM — Birb Labs Sky Circuit</title>
+<link rel="icon" href="/favicon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root {
+    --ink: #0f1c33;
+    --ink-soft: #24344f;
+    --gold: #ffdd44;
+    --cyan: #00d4ff;
+    --cream: #fff6dc;
+    --panel: #0a1324;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #060918;
+    color: var(--cream);
+    font-family: 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+
+  /* ====================================================================
+     Birb Labs artefact treatment — splash, Vibe Academy, title.
+     Same three-page entry flow as Birb Mobile, Rogue Mobile and Marco
+     Mobile. Nothing renders behind these; the game does not exist until
+     Tap to Start.
+     ==================================================================== */
+
+  .screen {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #060918;
+    cursor: pointer;
+    padding: max(env(safe-area-inset-top, 0px), 1rem) 1rem max(env(safe-area-inset-bottom, 0px), 1rem);
+  }
+  .screen[hidden] { display: none; }
+  .screen.is-fading {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.45s ease-out;
+  }
+
+  /* Animated conic-gradient border — the Birb Labs signature. */
+  .art-frame {
+    position: relative;
+    border-radius: 1.25rem;
+    padding: 3px;
+    overflow: hidden;
+    max-width: min(90vw, 520px);
+    width: 100%;
+  }
+  .art-frame::before {
+    content: '';
+    position: absolute;
+    inset: -50%;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg, transparent 340deg,
+      #00d4ff 350deg, #4df0ff 355deg, #ffffff 358deg, #4df0ff 360deg
+    );
+    animation: border-rotate 4.5s linear infinite;
+    filter: drop-shadow(0 0 8px rgba(77, 240, 255, 0.8)) drop-shadow(0 0 16px rgba(0, 212, 255, 0.5));
+  }
+  .art-frame::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: calc(1.25rem - 3px);
+    background: #060918;
+  }
+  .art-frame canvas {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: calc(1.25rem - 3px);
+  }
+  @keyframes border-rotate {
+    0%   { transform: rotate(0deg); }
+    33%  { transform: rotate(270deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  .tap-pill {
+    position: absolute;
+    left: 50%;
+    bottom: max(env(safe-area-inset-bottom, 0px), 2rem);
+    transform: translateX(-50%);
+    padding: 0.7rem 1.6rem;
+    font-size: clamp(1rem, 4vw, 1.15rem);
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-indent: 0.18em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--cream);
+    border: 1px solid rgba(255, 221, 68, 0.55);
+    border-radius: 999px;
+    background: rgba(20, 16, 4, 0.55);
+    box-shadow: 0 0 18px rgba(255, 215, 0, 0.35), inset 0 0 12px rgba(255, 215, 0, 0.12);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    pointer-events: none;
+    animation: pill-pulse 1.7s ease-in-out infinite;
+  }
+  @keyframes pill-pulse {
+    0%, 100% { transform: translateX(-50%) scale(1);    opacity: 0.92; }
+    50%      { transform: translateX(-50%) scale(1.06); opacity: 1; }
+  }
+
+  /* Vibe Academy attribution splash */
+  .vibe-body { max-width: 30rem; text-align: center; }
+  .vibe-title {
+    font-size: clamp(1.15rem, 5vw, 1.6rem);
+    font-weight: 700;
+    line-height: 1.4;
+    margin: 0 0 1.6rem;
+    color: var(--cream);
+  }
+  .vibe-cta {
+    display: inline-block;
+    padding: 0.85rem 1.8rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #00d4ff, #4df0ff);
+    color: #06121f;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    box-shadow: 0 8px 26px rgba(0, 212, 255, 0.35);
+  }
+  .vibe-attr {
+    margin-top: 2rem;
+    font-size: 0.9rem;
+    line-height: 1.8;
+    opacity: 0.82;
+  }
+  .vibe-attr a { color: var(--gold); }
+
+  /* Title screen */
+  .title-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+    width: 100%;
+    max-width: 520px;
+  }
+  .title-logo {
+    margin: 0.4rem 0 0;
+    font-size: clamp(3rem, 17vw, 5.5rem);
+    font-weight: 900;
+    letter-spacing: 0.22em;
+    text-indent: 0.22em;
+    line-height: 1;
+    background: linear-gradient(180deg, #ffffff 0%, var(--gold) 55%, #ff9f2e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 3px 0 rgba(15, 28, 51, 0.85)) drop-shadow(0 0 22px rgba(255, 200, 60, 0.35));
+  }
+  .title-sub {
+    margin: 0;
+    font-size: clamp(0.9rem, 3.6vw, 1.05rem);
+    letter-spacing: 0.08em;
+    opacity: 0.9;
+  }
+  .title-meta {
+    margin: 0;
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+  .title-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    width: 100%;
+    max-width: 20rem;
+    margin-top: 0.6rem;
+  }
+  .btn {
+    padding: 0.95rem 1.4rem;
+    border: 2px solid var(--ink);
+    border-radius: 1rem;
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: linear-gradient(180deg, var(--gold), #ff9f2e);
+    color: #241703;
+    box-shadow: 0 5px 0 var(--ink), 0 12px 26px rgba(0, 0, 0, 0.45);
+  }
+  .btn-secondary {
+    background: rgba(10, 19, 36, 0.85);
+    color: var(--cream);
+    box-shadow: 0 5px 0 var(--ink);
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--ink); }
+
+  .corner-btn {
+    position: absolute;
+    top: max(env(safe-area-inset-top, 0px), 0.9rem);
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 50%;
+    border: 2px solid var(--ink);
+    background: rgba(10, 19, 36, 0.85);
+    color: var(--cream);
+    font-size: 1.2rem;
+    font-weight: 800;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .corner-btn.left { left: max(env(safe-area-inset-left, 0px), 0.9rem); }
+  .corner-btn.right { right: max(env(safe-area-inset-right, 0px), 0.9rem); }
+
+  .title-footer {
+    position: absolute;
+    bottom: max(env(safe-area-inset-bottom, 0px), 0.9rem);
+    font-size: 0.78rem;
+    opacity: 0.65;
+  }
+  .title-footer a { color: var(--gold); }
+
+  /* How to play */
+  .howto-card {
+    max-width: 30rem;
+    background: rgba(10, 19, 36, 0.94);
+    border: 2px solid var(--ink);
+    border-radius: 1.25rem;
+    padding: 1.5rem 1.4rem;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  }
+  .howto-card h2 {
+    margin: 0 0 0.9rem;
+    font-size: 1.3rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .howto-card ul { margin: 0; padding-left: 1.1rem; line-height: 1.75; font-size: 0.95rem; }
+  .howto-card li { margin-bottom: 0.35rem; }
+  .howto-card b { color: var(--cyan); }
+
+  /* Loading state on the Tap to Start button, for slow networks */
+  .loading-note {
+    min-height: 1.2rem;
+    font-size: 0.82rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  /* ====================================================================
+     Game
+     ==================================================================== */
+  main { position: fixed; inset: 0; }
+  main[hidden] { display: none; }
+  #scene { display: block; width: 100%; height: 100%; touch-action: none; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+  #input-layer { position: fixed; inset: 0; z-index: 10; touch-action: none; }
+
+  .fatal {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: #060918;
+    text-align: center;
+    line-height: 1.6;
+  }
+  .fatal[hidden] { display: none; }
+</style>
+</head>
+<body>
+
+<!-- 1. Primary splash — procedurally painted key art in the animated frame -->
+<div class="screen" data-screen="splash">
+  <div class="art-frame">
+    <canvas data-keyart-splash aria-label="VYOM key art"></canvas>
+  </div>
+  <div class="tap-pill">Tap to start</div>
+</div>
+
+<!-- 2. Vibe Academy attribution -->
+<div class="screen" data-screen="vibe" hidden>
+  <div class="vibe-body">
+    <p class="vibe-title">A Birb Labs Artefact &mdash; Build Yours at the Vibe Academy</p>
+    <a class="vibe-cta" href="https://www.vibeacademy.com.au/" target="_blank" rel="noreferrer">Open Vibe Academy</a>
+    <div class="vibe-attr">
+      <p>From the Mind of <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a></p>
+      <p>Love it? Got Feedback?</p>
+      <p><a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">DMs Always Open!</a></p>
+    </div>
+  </div>
+  <div class="tap-pill">Tap to continue</div>
+</div>
+
+<!-- 3. Title -->
+<div class="screen" data-screen="title" hidden style="cursor:default">
+  <button type="button" class="corner-btn left" data-howto-open aria-label="How to play">?</button>
+  <button type="button" class="corner-btn right" data-settings-open aria-label="Settings">&#9881;</button>
+  <div class="title-body">
+    <div class="art-frame" style="max-width:min(78vw,420px)">
+      <canvas data-keyart-title aria-hidden="true"></canvas>
+    </div>
+    <h1 class="title-logo">VYOM</h1>
+    <p class="title-sub">Race the sky circuit.</p>
+    <p class="title-meta">4 birds &middot; 3 laps &middot; one planet</p>
+    <div class="title-buttons">
+      <button type="button" class="btn btn-primary" data-start>Tap to Start</button>
+      <button type="button" class="btn btn-secondary" data-howto-open>How to Play</button>
+    </div>
+    <div class="loading-note" data-loading-note></div>
+  </div>
+  <div class="title-footer">
+    From the Mind of <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a>
+  </div>
+</div>
+
+<!-- How to play overlay -->
+<div class="screen" data-screen="howto" hidden>
+  <div class="howto-card">
+    <h2>How to Play</h2>
+    <ul>
+      <li><b>Steer</b> — drag anywhere on the left of the screen. The stick appears under your thumb.</li>
+      <li><b>Boost</b> — tap the right of the screen. Dive to charge the meter, spend it on the straights.</li>
+      <li><b>Follow the ribbon</b> — the glowing line is the racing line. It dives into the canyons; so should you.</li>
+      <li><b>Fly the gates</b> — pass them in order. Miss one and the lap will not count.</li>
+      <li><b>3 laps</b>, 3 rivals. Clip a rival or the ground and you tumble, so pick your line.</li>
+      <li>Desktop: <b>WASD</b> or arrows to steer, <b>space</b> to boost.</li>
+    </ul>
+  </div>
+  <div class="tap-pill">Tap anywhere to close</div>
+</div>
+
+<main hidden data-game-main>
+  <canvas id="scene"></canvas>
+  <div id="input-layer" data-input-layer></div>
+  <div id="hud" data-hud></div>
+</main>
+
+<div class="fatal" data-fatal hidden></div>
+
+<script type="module">
+import { loadThree } from '/vyom/src/core/three-loader.js';
+import { PALETTE } from '/vyom/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/vyom/src/core/toon.js';
+import { updateOutlineProjection } from '/vyom/src/core/outline.js';
+import { PLANET_RADIUS, continentalHeight } from '/vyom/src/core/terrain.js';
+import { paintKeyArt } from '/vyom/src/ui/keyart.js';
+
+const params = new URLSearchParams(location.search);
+
+// ---------------------------------------------------------------------------
+// Splash flow. Nothing 3D exists until Tap to Start, so the entry pages cost
+// nothing and the first frame of the race is not competing with a cold GPU.
+// ---------------------------------------------------------------------------
+const screens = {};
+document.querySelectorAll('[data-screen]').forEach((el) => { screens[el.dataset.screen] = el; });
+const mainEl = document.querySelector('[data-game-main]');
+const fatalEl = document.querySelector('[data-fatal]');
+
+function showScreen(name) {
+    Object.entries(screens).forEach(([key, el]) => {
+        el.hidden = key !== name;
+        el.classList.remove('is-fading');
+    });
+}
+
+function fadeTo(from, to) {
+    const el = screens[from];
+    el.classList.add('is-fading');
+    setTimeout(() => showScreen(to), 450);
+}
+
+// Key art is painted, not loaded — zero external assets, and it is on screen
+// before Three.js has even been requested.
+function paintAll() {
+    const splash = document.querySelector('[data-keyart-splash]');
+    const title = document.querySelector('[data-keyart-title]');
+    const w = Math.min(innerWidth * 0.92, 560);
+    paintKeyArt(splash, w, Math.round(w * 0.86));
+    const tw = Math.min(innerWidth * 0.74, 430);
+    paintKeyArt(title, tw, Math.round(tw * 0.58));
+}
+paintAll();
+
+screens.splash.addEventListener('click', () => fadeTo('splash', 'vibe'));
+screens.vibe.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return; // let the Vibe Academy link through
+    fadeTo('vibe', 'title');
+});
+screens.howto.addEventListener('click', () => showScreen('title'));
+document.querySelectorAll('[data-howto-open]').forEach((b) =>
+    b.addEventListener('click', (e) => { e.stopPropagation(); showScreen('howto'); }));
+
+const loadingNote = document.querySelector('[data-loading-note]');
+let booting = false;
+document.querySelector('[data-start]').addEventListener('click', () => {
+    if (booting) return;
+    booting = true;
+    loadingNote.textContent = 'Loading…';
+    boot().catch(fatal);
+});
+
+function fatal(err) {
+    console.error(err);
+    fatalEl.hidden = false;
+    fatalEl.textContent = 'VYOM failed to start: ' + (err && err.message ? err.message : String(err));
+}
+
+// ---------------------------------------------------------------------------
+// Quality tiers. Chosen once at boot and handed to every subsystem — no module
+// branches on user-agent for itself.
+// ---------------------------------------------------------------------------
+function pickQuality() {
+    const forced = params.get('q');
+    if (forced === 'low' || forced === 'mid' || forced === 'high') return forced;
+    const coarse = matchMedia('(pointer: coarse)').matches;
+    const mem = navigator.deviceMemory || 4;
+    const cores = navigator.hardwareConcurrency || 4;
+    if (!coarse) return 'high';
+    return (mem >= 4 && cores >= 6) ? 'mid' : 'low';
+}
+
+const DPR_CAP = { low: 1.2, mid: 1.4, high: 1.8 };
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+let game = null;
+
+async function boot() {
+    const THREE = await loadThree();
+
+    // Subsystems are imported here rather than at module scope so a cold visit
+    // that never taps Start pays for none of it.
+    const [
+        { createPlanet }, { createSky },
+        { createBird }, { createBirdAnimator },
+        { VyomFlight }, { createChaseCamera },
+        { createCourse }, raceLogic, { createAIRacers },
+        { createFeatherFX }, { createScreenShake },
+        { createHUD }, { createAudio }, { createInput },
+    ] = await Promise.all([
+        import('/vyom/src/world/planet.js'),
+        import('/vyom/src/world/sky.js'),
+        import('/vyom/src/bird/bird-model.js'),
+        import('/vyom/src/bird/bird-anim.js'),
+        import('/vyom/src/bird/flight.js'),
+        import('/vyom/src/camera/chase-camera.js'),
+        import('/vyom/src/race/course.js'),
+        import('/vyom/src/race/race-logic.js'),
+        import('/vyom/src/race/ai-racer.js'),
+        import('/vyom/src/fx/feathers.js'),
+        import('/vyom/src/fx/shake.js'),
+        import('/vyom/src/ui/hud.js'),
+        import('/vyom/src/audio/audio.js'),
+        import('/vyom/src/input/touch.js'),
+    ]);
+
+    const quality = pickQuality();
+    const seed = 0x5eed;
+
+    showScreen(null);
+    Object.values(screens).forEach((el) => { el.hidden = true; });
+    mainEl.hidden = false;
+
+    // --- renderer / scene --------------------------------------------------
+    const canvas = document.getElementById('scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, DPR_CAP[quality]));
+    renderer.setClearColor(PALETTE.skyMid);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(PALETTE.fog, 180, 620);
+    const camera = new THREE.PerspectiveCamera(62, 1, 0.5, 3000);
+    createLightRig(THREE, scene);
+
+    // --- world -------------------------------------------------------------
+    const sky = createSky(THREE, { quality });
+    scene.add(sky.group);
+
+    const planet = createPlanet(THREE, { quality, seed });
+    scene.add(planet.group);
+
+    const course = createCourse(THREE, { quality, seed, gateCount: 14 });
+    scene.add(course.group);
+
+    const feathers = createFeatherFX(THREE, { quality });
+    scene.add(feathers.group);
+
+    const shake = createScreenShake({ seed });
+
+    // --- player ------------------------------------------------------------
+    const bird = createBird(THREE, {
+        bodyColor: PALETTE.birdPlayer,
+        bellyColor: PALETTE.birdPlayerBelly,
+        scale: 1,
+        quality,
+        outline: true,
+    });
+    scene.add(bird.group);
+    const animator = createBirdAnimator(THREE, bird);
+
+    const _startPos = new THREE.Vector3();
+    const _startTangent = new THREE.Vector3();
+    course.sampleAt(0, _startPos);
+    course.tangentAt(0, _startTangent);
+
+    const flight = new VyomFlight(THREE, {
+        sphereRadius: PLANET_RADIUS,
+        terrainHeightAt: continentalHeight,
+        birdRadius: 1.6,
+        position: _startPos,
+    });
+    flight.faceAlong ? flight.faceAlong(_startTangent) : null;
+
+    const chase = createChaseCamera(THREE, camera, { quality });
+    chase.snapToTarget(flight.position, flight.quaternion);
+
+    // --- rivals ------------------------------------------------------------
+    const rivalColors = [PALETTE.birdRival1, PALETTE.birdRival2, PALETTE.birdRival3];
+    const ai = createAIRacers(THREE, {
+        course, count: 3, quality, seed,
+        createBirdFn: (i) => {
+            const b = createBird(THREE, {
+                bodyColor: rivalColors[i % rivalColors.length],
+                bellyColor: PALETTE.birdPlayerBelly,
+                scale: 1, quality, outline: true,
+            });
+            scene.add(b.group);
+            return b;
+        },
+    });
+
+    // --- race state --------------------------------------------------------
+    const race = raceLogic.createRaceState({
+        laps: raceLogic.RACE_CONFIG.laps,
+        gateCount: course.gateCount,
+        racerCount: 4,
+    });
+
+    // --- ui / audio / input -------------------------------------------------
+    const hud = createHUD(document.querySelector('[data-hud]'), { quality });
+    const audio = createAudio();
+    audio.unlock();
+    const input = createInput(document.querySelector('[data-input-layer]'), {
+        onBoost: () => audio.boost(),
+    });
+
+    // --- scratch (zero-allocation loop) ------------------------------------
+    const _tmpVec = new THREE.Vector3();
+    const _up = new THREE.Vector3();
+    const _racerPositions = new Float32Array(4 * 3);
+    const animState = {
+        speed01: 0, turn: 0, pitch: 0, boosting: false, flapImpulse: 0,
+        tumbling: false, grounded: false, celebrating: false, phase: 0,
+    };
+
+    // --- resize -------------------------------------------------------------
+    function resize() {
+        const w = innerWidth, h = innerHeight;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+        hud.resize && hud.resize();
+    }
+    addEventListener('resize', resize);
+    resize();
+
+    // --- wake lock (keep the screen alive mid-race) ------------------------
+    let wakeLock = null;
+    async function acquireWakeLock() {
+        try {
+            if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+        } catch { /* denied or unsupported — not worth surfacing */ }
+    }
+    acquireWakeLock();
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && !wakeLock) acquireWakeLock();
+    });
+
+    // --- loop ---------------------------------------------------------------
+    let last = performance.now();
+    let elapsed = 0;
+    let phase = 'countdown';     // countdown -> racing -> finished
+    let countdown = raceLogic.RACE_CONFIG.countdownMs;
+    let lastCountdownNumber = -1;
+    let frames = 0, fpsAccum = 0, fps = 60;
+
+    function frame(now) {
+        const rawDt = (now - last) / 1000;
+        last = now;
+        // Clamp so a backgrounded tab does not teleport the bird on return.
+        const dt = Math.min(Math.max(rawDt, 0), 0.05);
+        elapsed += dt;
+
+        fpsAccum += rawDt; frames++;
+        if (fpsAccum >= 0.5) { fps = frames / fpsAccum; frames = 0; fpsAccum = 0; }
+
+        input.update(dt);
+
+        if (phase === 'countdown') {
+            countdown -= dt * 1000;
+            const n = Math.max(0, Math.ceil(countdown / 1000));
+            if (n !== lastCountdownNumber) {
+                lastCountdownNumber = n;
+                hud.showCountdown(n);
+                if (n > 0) audio.countdownBeep(); else audio.horn();
+            }
+            if (countdown <= 0) {
+                phase = 'racing';
+                hud.hideCountdown();
+                raceLogic.startRace && raceLogic.startRace(race, now);
+            }
+            chase.setMode('orbit');
+        } else {
+            chase.setMode('chase');
+        }
+
+        // Player physics only runs once the countdown clears; the bird holds
+        // its grid pose under the cinematic orbit until then.
+        const controlling = phase === 'racing';
+        const pose = flight.tick(
+            controlling ? input.value : ZERO_INPUT,
+            controlling ? dt : 0
+        );
+
+        bird.group.position.copy(pose.position);
+        bird.group.quaternion.copy(pose.quaternion);
+
+        animState.speed01 = flight.speed01 !== undefined ? flight.speed01 : 0.5;
+        animState.turn = input.value.x;
+        animState.pitch = input.value.y;
+        animState.boosting = Boolean(flight.isBoosting);
+        animState.flapImpulse = Math.max(0, -input.value.y);
+        animState.celebrating = phase === 'finished';
+        animator.update(dt, animState);
+
+        ai.update(dt, raceLogic.racerProgress(race, 0), race);
+
+        // --- gates ----------------------------------------------------------
+        if (phase === 'racing') {
+            checkGates(0, pose.position);
+            for (let i = 0; i < ai.racers.length; i++) {
+                checkGates(i + 1, ai.racers[i].group.position);
+            }
+        }
+
+        // --- fx ---------------------------------------------------------------
+        _up.copy(pose.position).normalize();
+        feathers.emitTrail(
+            pose.position.x, pose.position.y, pose.position.z,
+            _up.x, _up.y, _up.z,
+            PALETTE.featherPlayer
+        );
+        feathers.update(dt);
+        shake.update(dt);
+
+        sky.update(dt, camera);
+        planet.update(dt, _up.x, _up.y, _up.z);
+        course.update(dt);
+
+        chase.update(dt, pose.position, pose.quaternion, animState.speed01, shake.value);
+        audio.setFlightSpeed(animState.speed01);
+
+        // --- hud --------------------------------------------------------------
+        const me = race.racers[0];
+        hud.setLap(Math.min(me.lap + 1, race.laps), race.laps);
+        hud.setPosition(race.order.indexOf(0) + 1, 4);
+        hud.setSpeed(Math.round(flight.speed * 12), animState.speed01);
+        hud.setBoost(flight.boost01 || 0);
+        hud.setGate(me.nextGate, course.gateCount);
+        hud.showWrongWay(phase === 'racing' && raceLogic.isWrongWay(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z)));
+
+        _racerPositions[0] = pose.position.x; _racerPositions[1] = pose.position.y; _racerPositions[2] = pose.position.z;
+        for (let i = 0; i < ai.racers.length; i++) {
+            const p = ai.racers[i].group.position;
+            _racerPositions[(i + 1) * 3] = p.x;
+            _racerPositions[(i + 1) * 3 + 1] = p.y;
+            _racerPositions[(i + 1) * 3 + 2] = p.z;
+        }
+        hud.minimap.update(course, _racerPositions, 0);
+
+        renderer.render(scene, camera);
+        requestAnimationFrame(frame);
+    }
+
+    const ZERO_INPUT = { x: 0, y: 0, boost: false };
+
+    function checkGates(racerIndex, position) {
+        const r = race.racers[racerIndex];
+        const g = r.nextGate;
+        const gx = course.gatePositions[g * 3];
+        const gy = course.gatePositions[g * 3 + 1];
+        const gz = course.gatePositions[g * 3 + 2];
+        const dx = position.x - gx, dy = position.y - gy, dz = position.z - gz;
+        const radius = raceLogic.RACE_CONFIG.gateRadius;
+        if (dx * dx + dy * dy + dz * dz > radius * radius) return;
+
+        if (!raceLogic.recordGate(race, racerIndex, g, performance.now())) return;
+
+        if (racerIndex === 0) {
+            audio.gate(race.racers[0].streak || 1);
+            feathers.burst(gx, gy, gz, 14, PALETTE.sparkCyan);
+            course.setNextGate(race.racers[0].nextGate);
+        }
+        raceLogic.updateStandings(race);
+
+        if (raceLogic.isFinished(race, racerIndex) && racerIndex === 0 && phase === 'racing') {
+            phase = 'finished';
+            chase.setMode('results');
+            audio.finish(race.order.indexOf(0) + 1);
+            hud.showResults(raceLogic.buildResults ? raceLogic.buildResults(race) : []);
+        }
+    }
+
+    requestAnimationFrame(frame);
+
+    // --- harness hooks ------------------------------------------------------
+    game = { THREE, renderer, scene, camera, flight, course, race, ai, hud, quality };
+    window.__vyom = game;
+    window.__VYOM_STATS = () => ({
+        drawCalls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles,
+        fps: Math.round(fps),
+        quality,
+    });
+    window.__VYOM_READY = true;
+}
+
+// The harness (and anyone with ?autostart=1) skips straight past the entry
+// pages so a gameplay frame can be captured without simulating three taps.
+if (params.get('autostart') === '1') {
+    booting = true;
+    boot().catch(fatal);
+} else {
+    // Signal readiness for the entry pages so the harness can shoot them too.
+    window.__VYOM_READY = true;
+}
+</script>
+</body>
+</html>
