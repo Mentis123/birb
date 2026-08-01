@@ -112,15 +112,15 @@ self.addEventListener('fetch', (event) => {
 
   const sameOrigin = url.origin === self.location.origin;
 
-  // VYOM (/vyom) is a separate, self-contained Birb Labs artefact with its own
+  // Birb Gauntlet (/gauntlet) is a separate, self-contained Birb Labs artefact with its own
   // asset graph. It is deliberately excluded from this service worker.
   //
   // This is not tidiness — it is a correctness fix. networkFirst() below writes
   // EVERY navigation response into the cache under the key './index.html', so
-  // a single visit to /vyom would overwrite Birb Mobile's offline shell with
-  // VYOM's HTML, and the next offline launch of the main game would boot the
+  // a single visit to /gauntlet would overwrite Birb Mobile's offline shell with
+  // Birb Gauntlet's HTML, and the next offline launch of the main game would boot the
   // wrong game. Bypassing here keeps the two artefacts fully independent.
-  if (sameOrigin && url.pathname.startsWith('/vyom')) return;
+  if (sameOrigin && url.pathname.startsWith('/gauntlet')) return;
 
   const cdnCacheable = RUNTIME_CACHEABLE_HOSTS.has(url.host);
   if (!sameOrigin && !cdnCacheable) return;

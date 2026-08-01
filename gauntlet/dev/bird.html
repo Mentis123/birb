@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · bird (model + animator)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #labels { position: fixed; inset: 0; pointer-events: none;
+            font: 600 13px/1.2 ui-rounded, "Trebuchet MS", system-ui, sans-serif;
+            letter-spacing: .08em; text-transform: uppercase; }
+  #labels div { position: absolute; transform: translate(-50%, 0);
+                color: #fff6dc; text-shadow: 0 1px 0 #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { position: fixed; left: 10px; bottom: 8px; color: #fff6dc;
+           font: 600 12px/1.4 ui-monospace, monospace; text-shadow: 0 1px 2px #0f1c33; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+<div id="stats"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { createBird } from '/gauntlet/src/bird/bird-model.js';
+import { createBirdAnimator } from '/gauntlet/src/bird/bird-anim.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 0, 13.2);
+camera.lookAt(0, 0, 0);
+createLightRig(THREE, scene);
+
+// --- backdrop: a flat gradient card so silhouettes are judged against the
+// --- game's own sky values rather than a flat clear colour.
+{
+  const g = new THREE.PlaneGeometry(60, 60, 1, 4);
+  const pos = g.getAttribute('position');
+  const cols = new Float32Array(pos.count * 3);
+  const top = new THREE.Color(PALETTE.skyZenith);
+  const mid = new THREE.Color(PALETTE.skyMid);
+  const low = new THREE.Color(PALETTE.skyHorizon);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) / 60) + 0.5;              // 0 bottom .. 1 top
+    if (t < 0.55) tmp.copy(low).lerp(mid, t / 0.55);
+    else tmp.copy(mid).lerp(top, (t - 0.55) / 0.45);
+    cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, depthWrite: false }));
+  m.position.set(0, 0, -16);
+  m.renderOrder = -100;
+  scene.add(m);
+}
+
+// ---------------------------------------------------------------------------
+// Four birds, four moments of the same animator. Side by side is the only way
+// to tell whether the stroke actually has follow-through: a single frame of a
+// flapping wing looks identical whether the tip lags or not.
+// ---------------------------------------------------------------------------
+// Rivals get a belly derived from their own plumage rather than the player's
+// pale cyan, otherwise all four birds share one washed-out underside.
+const _c = new THREE.Color();
+const bellyFor = (hex) => _c.setHex(hex).lerp(new THREE.Color(0xffffff), 0.62).getHex();
+
+const POSES = [
+  {
+    label: 'power downstroke',
+    color: PALETTE.birdPlayer, belly: PALETTE.birdPlayerBelly,
+    x: -1.95, y: 2.30, yaw: Math.PI - 0.42, tilt: -0.26,
+    state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.22,
+  },
+  {
+    label: 'recovery upstroke',
+    color: PALETTE.birdRival1, belly: bellyFor(PALETTE.birdRival1),
+    x: 1.95, y: 2.30, yaw: Math.PI - 0.42, tilt: -0.26,
+    state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.70,
+  },
+  {
+    label: 'banked right turn',
+    color: PALETTE.birdRival2, belly: bellyFor(PALETTE.birdRival2),
+    x: -1.95, y: 0, yaw: Math.PI - 0.78, tilt: -0.30,
+    state: { speed01: 0.85, turn: 0.9, pitch: 0.05, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.48,
+  },
+  {
+    // The view the game actually renders for 99% of a race: chase cam, from
+    // behind and slightly above. If the bird does not read from here, nothing
+    // else matters.
+    label: 'chase cam · boost dive',
+    color: PALETTE.birdRival3, belly: bellyFor(PALETTE.birdRival3),
+    x: 1.95, y: 0, yaw: 0.58, tilt: -0.40,
+    state: { speed01: 1, turn: -0.35, pitch: -0.55, boosting: true, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.40,
+  },
+  {
+    label: 'glide · mid blink',
+    color: PALETTE.birdPlayer, belly: PALETTE.birdPlayerBelly,
+    x: -1.95, y: -2.30, yaw: Math.PI - 0.42, tilt: -0.22,
+    state: { speed01: 0.95, turn: 0.05, pitch: 0.0, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.55, blink: true,
+  },
+  {
+    label: 'celebration',
+    color: PALETTE.birdRival3, belly: bellyFor(PALETTE.birdRival3),
+    x: 1.95, y: -2.30, yaw: Math.PI - 0.18, tilt: -0.10,
+    state: { speed01: 0.2, turn: 0, pitch: 0.3, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: true, phase: 0 },
+    target: 0.30,
+  },
+];
+
+const birds = [];
+const labelRoot = document.getElementById('labels');
+
+for (let i = 0; i < POSES.length; i++) {
+  const P = POSES[i];
+  const bird = createBird(THREE, {
+    bodyColor: P.color, bellyColor: P.belly, scale: 1, quality: 'high', outline: true,
+  });
+  bird.group.position.set(P.x, P.y, 0);
+  bird.group.rotation.order = 'YXZ';
+  bird.group.rotation.y = P.yaw;
+  bird.group.rotation.x = P.tilt;
+  scene.add(bird.group);
+
+  const anim = createBirdAnimator(THREE, bird);
+
+  // Settle, then step to the requested point in the flap cycle. Fixed dt and
+  // seeded rng make this bit-identical on every capture.
+  const dt = 1 / 60;
+  for (let s = 0; s < 260; s++) anim.update(dt, P.state);
+  for (let s = 0; s < 400; s++) {
+    const before = anim.flap01;
+    anim.update(dt, P.state);
+    const after = anim.flap01;
+    if (before < P.target && after >= P.target) break;
+  }
+  // Freeze a blink open at its widest so the capture can actually show one.
+  if (P.blink) bird.uniforms.blink.value = 1;
+
+  birds.push(bird);
+
+  const el = document.createElement('div');
+  el.textContent = P.label;
+  labelRoot.appendChild(el);
+  P.el = el;
+}
+
+function placeLabels() {
+  const v = new THREE.Vector3();
+  for (let i = 0; i < POSES.length; i++) {
+    const P = POSES[i];
+    v.set(P.x, P.y - 0.98, 0).project(camera);
+    P.el.style.left = ((v.x * 0.5 + 0.5) * innerWidth) + 'px';
+    P.el.style.top = ((-v.y * 0.5 + 0.5) * innerHeight) + 'px';
+  }
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  // Portrait phone capture: pull back so the 2x2 grid still fits.
+  camera.position.z = 13.2 * Math.max(1, 0.92 / Math.max(0.35, camera.aspect));
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  placeLabels();
+}
+addEventListener('resize', resize);
+resize();
+
+renderer.render(scene, camera);
+
+const perBird = {
+  drawCalls: birds[0].drawCallCount,
+  triangles: birds[0].triangleCount,
+};
+document.getElementById('stats').textContent =
+  `per bird: ${perBird.drawCalls} draws / ${perBird.triangles} tris   ` +
+  `frame: ${renderer.info.render.calls} draws / ${renderer.info.render.triangles} tris`;
+
+window.__GAUNTLET_STATS = () => ({
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  perBirdDrawCalls: perBird.drawCalls,
+  perBirdTriangles: perBird.triangles,
+});
+// Self-test hook: proves the outline-free tier and dispose() both work.
+// The harness fails the run if this throws.
+window.__birdSelfTest = () => {
+  const lean = createBird(THREE, { quality: 'low', outline: false });
+  if (lean.drawCallCount !== 4) throw new Error('outline:false expected 4 draws, got ' + lean.drawCallCount);
+  const a = createBirdAnimator(THREE, lean);
+  const st = { speed01: 0.5, turn: 0.3, pitch: -0.2, boosting: true, flapImpulse: 1,
+               tumbling: true, grounded: false, celebrating: false, phase: 0.2 };
+  for (let i = 0; i < 120; i++) a.update(1 / 60, st);
+  st.tumbling = false; st.grounded = true; st.celebrating = true;
+  for (let i = 0; i < 120; i++) a.update(1 / 60, st);
+  a.update(0, st); a.update(-1, st); a.update(5, {});
+  a.dispose(); lean.dispose();
+  return 'ok';
+};
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

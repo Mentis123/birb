@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · core (toon + outline + terrain)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
+import { attachOutline, updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { surfaceRadius, continentalHeight, PLANET_RADIUS } from '/gauntlet/src/core/terrain.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 2000);
+// Framed on the hero objects, close to the surface — the view the game
+// actually renders. A whole-planet shot flatters terrain that reads as noise
+// up close, so the probe deliberately shoots from bird altitude.
+camera.position.set(-30, 132, 152);
+camera.lookAt(6, 116, 52);
+createLightRig(THREE, scene);
+
+// --- terrain-displaced planet (proves the sampler + toon ramp together) ---
+const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 40);
+const pos = geo.getAttribute('position');
+const colors = new Float32Array(pos.count * 3);
+const cLit = new THREE.Color(PALETTE.meadowLit);
+const cDeep = new THREE.Color(PALETTE.canyonDeep);
+const tmp = new THREE.Color();
+for (let i = 0; i < pos.count; i++) {
+  const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+  const inv = 1 / Math.hypot(x, y, z);
+  const nx = x * inv, ny = y * inv, nz = z * inv;
+  const r = surfaceRadius(nx, ny, nz);
+  pos.setXYZ(i, nx * r, ny * r, nz * r);
+  const depth = Math.min(1, -continentalHeight(nx, ny, nz) / 30);
+  tmp.copy(cLit).lerp(cDeep, depth);
+  colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+}
+geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+geo.computeVertexNormals();
+const planet = new THREE.Mesh(geo, createToonMaterial(THREE, { ramp: 'terrain', vertexColors: true }));
+scene.add(planet);
+
+// --- hero object with an outline (proves smoothed normals + hull push) ---
+const heroGroup = new THREE.Group();
+heroGroup.position.set(0, 118, 60);
+scene.add(heroGroup);
+
+const body = new THREE.Mesh(
+  new THREE.SphereGeometry(9, 24, 18),
+  createToonMaterial(THREE, { color: PALETTE.birdPlayer, ramp: 'hero' })
+);
+heroGroup.add(body);
+attachOutline(THREE, body, { color: PALETTE.ink, pixels: 3 });
+
+const beak = new THREE.Mesh(
+  new THREE.ConeGeometry(3.4, 9, 6),
+  createToonMaterial(THREE, { color: PALETTE.beak, ramp: 'hero', flatShading: true })
+);
+beak.position.set(0, 0, 10);
+beak.rotation.x = Math.PI / 2;
+heroGroup.add(beak);
+attachOutline(THREE, beak, { color: PALETTE.ink, pixels: 3 });
+
+// A hard-edged box: the case that tears open without smoothed normals.
+const box = new THREE.Mesh(
+  new THREE.BoxGeometry(11, 11, 11),
+  createToonMaterial(THREE, { color: PALETTE.gateIdle, ramp: 'graphic', flatShading: true })
+);
+box.position.set(34, 118, 40);
+scene.add(box);
+attachOutline(THREE, box, { color: PALETTE.ink, pixels: 3 });
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+}
+addEventListener('resize', resize);
+resize();
+
+renderer.render(scene, camera);
+window.__GAUNTLET_STATS = () => ({
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+});
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

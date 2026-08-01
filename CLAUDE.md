@@ -60,27 +60,27 @@ Major overhaul session. Birb Mobile now ships the full **Birb Labs Artefact Trea
 
 **Rolling-world restore (2026-06-02):** a perceived regression — "the nice tree distribution and canyons are gone." Investigation: NOT a git revert; all terrain/scatter code was present and tree counts had even gone *up*. The real cause was a *feel* regression from two later commits. `fa16a15` ("solid ground, no fly-through") added the outer `Math.min(0, cont + detail)` clamp — correct and load-bearing (mesh == floor, floor ≤ baseline), but it turned the base radius into a hard CEILING, flattening the symmetric detail noise that used to read as rolling relief into a dead-flat plateau. `57a2f15` ("cliff-face shaping") then steepened the remaining carves via `tanh` (FACE_STEEPNESS 2.7) into sharp, isolated mesas, so the world read as a flat plain with rare pits, and — because most of the surface now sat at the flat plateau (`depth ≈ 0`) — the scatter's elevation zoning dwarfed/thinned trees almost everywhere (lush full-size trees survived only in the rare deep canyons). **Fix (keeps the ≤0 floor invariant, no fly-through/ratchet regression):** since we *cannot* raise terrain above baseline, rolling is faked by carving DOWN across most of the surface — new `CONTINENT_BIAS` (0.35) shifts the continental field negative so the average ground sinks into rolling lowlands and only the highest peaks reach the baseline ceiling; this also re-exposes the detail roughness (only visible where carved below baseline) across the whole map. `FACE_STEEPNESS` softened 2.7 → 1.4 (rolling faces, not cliffs), carve clamped to `[-1,0]` so the bias overshoot can't exceed amplitude. Scatter tree-lines widened to span the deeper range (forest exposure /12 → /24, thin >0.75 → >0.82; pine /16 → /30, thin >0.7 → >0.78) so trees stay lush across the rolling terrain and only true ridge crests thin. **Do NOT "fix" `CONTINENT_BIAS` away** thinking it's a bug — it's the deliberate trade that restores the rolling look within the gravity-less-floor constraint.
 
-### VYOM — unlisted sibling at `/vyom` (2026-08-01)
+### Birb Gauntlet — unlisted sibling at `/gauntlet` (2026-08-01)
 
-**VYOM** (व्योम, "sky") is a stylised arcade bird-*racing* game living in this
-repo at `vyom/`, deployed with the main site to **birbmobile.vercel.app/vyom**.
+**Birb Gauntlet** is a stylised arcade bird-*racing* game living in this
+repo at `gauntlet/`, deployed with the main site to **birbmobile.vercel.app/gauntlet**.
 It is unlisted: `noindex`, linked from nowhere. Four birds, three laps, one
 glowing ribbon circling a miniature planet.
 
-It is deliberately **airtight against Birb Mobile**: nothing in `vyom/` imports
+It is deliberately **airtight against Birb Mobile**: nothing in `gauntlet/` imports
 from the parent `src/`, nothing outside imports from inside it, and `sw.js` now
-explicitly bypasses `/vyom`. That last one is a correctness fix, not tidiness —
+explicitly bypasses `/gauntlet`. That last one is a correctness fix, not tidiness —
 the SW's `networkFirst` caches every navigation response under the key
-`./index.html`, so a single visit to `/vyom` would have overwritten Birb
+`./index.html`, so a single visit to `/gauntlet` would have overwritten Birb
 Mobile's offline shell and booted the wrong game on the next offline launch.
 
 Own stack, own rules: vanilla ES modules + pinned CDN Three, **zero external
 assets** (every mesh, texture, sound and even the splash art is generated in
 code), own virtual joystick (no nipplejs), seeded RNG throughout. Read
-`vyom/ARCHITECTURE.md` before touching it.
+`gauntlet/ARCHITECTURE.md` before touching it.
 
 Two constraints worth knowing:
-- **Terrain carves downward only** (`vyom/src/core/terrain.js` guarantees
+- **Terrain carves downward only** (`gauntlet/src/core/terrain.js` guarantees
   `surfaceHeight <= continentalHeight <= 0`). Same gravity-less-floor problem
   Birb Mobile hit: a floor that could rise above baseline ratchets a cruising
   bird upward forever. Height above baseline is expressed with collider-free
@@ -92,9 +92,9 @@ Two constraints worth knowing:
   normal-varying fill paints a smooth gradient straight over the hard bands and
   the whole cel look silently dies.
 
-Verify visual work with `node tools/vyom-shot.mjs` — it exits non-zero on any
+Verify visual work with `node tools/gauntlet-shot.mjs` — it exits non-zero on any
 page or console error, so a captured PNG proves the code ran. Isolation probes
-live in `vyom/dev/`. Note: the harness needs
+live in `gauntlet/dev/`. Note: the harness needs
 `npm install --no-save playwright three-real@npm:three@0.183.2` followed by
 `git checkout -- node_modules/three/index.js`, because any npm install prunes
 the hand-written Three test stub this repo tracks there and silently breaks
