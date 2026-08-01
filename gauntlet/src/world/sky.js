@@ -17,8 +17,7 @@
  *      overlapping lobes with a flat base — the classic drawn cumulus — carrying
  *      three baked layers in one geometry (warm top rim, cool underside, lit
  *      body) via vertex colours, so the hard two-tone edge costs no extra draw
- *      call. Drift happens in the vertex shader from a per-instance angular
- *      speed, giving real parallax with zero CPU work per frame.
+ *      call. Each card drifts on its own angular speed, giving real parallax.
  *   4. Stars as one Points cloud with a procedural four-point sparkle and a
  *      quantised (4-step) twinkle, faded in toward the zenith so they only
  *      appear in the deep blue.
@@ -30,6 +29,11 @@
  * KEY_LIGHT_DIR says it is. A sky re-oriented to the local radial up would have
  * to drag the sun around with it and the lighting would stop agreeing with the
  * art.
+ *
+ * The ONE exception is the roll of the cloud cards, which is view-relative
+ * because a billboard's roll always is: a card's drawn flat base has to sit on
+ * the LOCAL horizon, and on a planet you fly all the way around, world +Y is
+ * sideways on screen for most of a lap. See layoutClouds().
  *
  * DEPTH. Everything here is depthTest:false / depthWrite:false with a very low
  * renderOrder, so the sky is painted first, in the order listed, and every
@@ -76,6 +80,7 @@ uniform vec3  uHorizon;
 uniform vec3  uGlow;
 uniform vec3  uSunTint;
 uniform vec3  uSunDir;
+uniform vec3  uUp;
 varying vec3  vDir;
 
 vec3 ramp( float h ) {
@@ -89,7 +94,17 @@ vec3 ramp( float h ) {
 
 void main() {
     vec3 d = normalize( vDir );
-    float h = d.y;
+    // Height ABOVE THE LOCAL HORIZON, not above world Y=0. On a planet you fly
+    // all the way around, a gradient banded on world Y puts the horizon glow
+    // diagonally across the screen for most of a lap, and the sky reads as
+    // tipped over. Banding on the player's own up keeps the horizon where the
+    // horizon actually is.
+    //
+    // The SUN is untouched by this: it is still drawn at uSunDir in world
+    // space, which is what keeps it agreeing with KEY_LIGHT_DIR. The only
+    // change is that it now genuinely rises and sets through the gradient as
+    // you circle the planet, instead of being pinned at one height in it.
+    float h = dot( d, uUp );
 
     // Smooth ramp, then the same ramp evaluated on a quantised height. Mixing
     // the two gives painted-looking steps that still read as a gradient — a
@@ -382,6 +397,8 @@ export function createSky(THREE, opts = {}) {
             uGlow: { value: new THREE.Color(PALETTE.skyGlow) },
             uSunTint: { value: new THREE.Color(PALETTE.sunHalo) },
             uSunDir: { value: sunDir.clone() },
+            // The player's radial up, refreshed every frame by update().
+            uUp: { value: new THREE.Vector3(0, 1, 0) },
         },
         side: THREE.BackSide,
         depthWrite: false,
@@ -512,9 +529,6 @@ export function createSky(THREE, opts = {}) {
     const cloudCount = tier.clouds;
     const cloudTris = cloudGeo.getAttribute('position').count / 3;
 
-    // Per-sky drift clock, shared into the patched cloud shader.
-    const cloudTimeUniform = { value: 0 };
-
     const cloudMat = new THREE.MeshBasicMaterial({
         vertexColors: true,
         transparent: true,
@@ -527,40 +541,25 @@ export function createSky(THREE, opts = {}) {
         fog: false,
         toneMapped: false,
     });
-    // Per-instance angular drift about world +Y, applied in the vertex shader.
-    // Rotating every vertex of a card by the same angle about the origin is a
-    // rigid motion, so the card keeps facing the camera for free.
+    // Per-instance silhouette warp only. The angular drift that used to live
+    // here moved to layoutClouds() on the CPU — see the note there; it cannot
+    // be a post-instance rotation any more without un-levelling the card.
     cloudMat.onBeforeCompile = (shader) => {
-        shader.uniforms.uTime = cloudTimeUniform;
-        shader.vertexShader = 'attribute float aDrift;\nattribute vec2 aShape;\n' + shader.vertexShader.replace(
-            '#include <project_vertex>',
+        shader.vertexShader = 'attribute vec2 aShape;\n' + shader.vertexShader.replace(
+            '#include <begin_vertex>',
             /* glsl */`
-            // Per-instance silhouette warp. One shared cloud geometry repeated
-            // 34 times reads as wallpaper, so each instance gets a shear and a
-            // sinusoidal re-profiling of its TOPS only (the flat base has to
-            // stay flat or the cloud stops reading as a drawn cloud).
+            #include <begin_vertex>
+            // One shared cloud geometry repeated 34 times reads as wallpaper,
+            // so each instance gets a shear and a sinusoidal re-profiling of
+            // its TOPS only (the flat base has to stay flat or the cloud stops
+            // reading as a drawn cloud).
             transformed.y += transformed.x * aShape.x;
             transformed.y += max( 0.0, transformed.y ) * aShape.y
                            * sin( transformed.x * 2.6 + aShape.x * 9.0 );
-
-            vec4 mvPosition = vec4( transformed, 1.0 );
-            #ifdef USE_INSTANCING
-                mvPosition = instanceMatrix * mvPosition;
-            #endif
-            float vyA = uTime * aDrift;
-            float vyC = cos( vyA );
-            float vyS = sin( vyA );
-            mvPosition.xyz = vec3(
-                vyC * mvPosition.x + vyS * mvPosition.z,
-                mvPosition.y,
-                -vyS * mvPosition.x + vyC * mvPosition.z
-            );
-            mvPosition = modelViewMatrix * mvPosition;
-            gl_Position = projectionMatrix * mvPosition;
             `
-        ).replace('void main() {', 'uniform float uTime;\nvoid main() {');
+        );
     };
-    cloudMat.customProgramCacheKey = () => 'gauntlet-cloud-v1';
+    cloudMat.customProgramCacheKey = () => 'gauntlet-cloud-v2';
 
     const clouds = new THREE.InstancedMesh(cloudGeo, cloudMat, cloudCount);
     clouds.frustumCulled = false;
@@ -569,6 +568,13 @@ export function createSky(THREE, opts = {}) {
 
     const drift = new Float32Array(cloudCount);
     const shape = new Float32Array(cloudCount * 2);
+    // Placement is stored rather than baked straight into the instance matrix,
+    // because the card ORIENTATION has to be rebuilt every frame — see
+    // layoutClouds().
+    const cloudDir = new Float32Array(cloudCount * 3);
+    const cloudDist = new Float32Array(cloudCount);
+    const cloudScale = new Float32Array(cloudCount * 2);
+    const cloudRoll = new Float32Array(cloudCount);
     for (let i = 0; i < cloudCount; i++) {
         // STRATIFIED, not random. Two reasons. (1) The budget is 34 cards for
         // a whole sphere; scattered at random they clump and leave holes the
@@ -583,11 +589,10 @@ export function createSky(THREE, opts = {}) {
         const horiz = Math.sqrt(Math.max(0, 1 - elev * elev));
         const dist = rngRange(rng, CLOUD_NEAR, CLOUD_FAR);
         tmpDir.set(Math.cos(az) * horiz, elev, Math.sin(az) * horiz);
-
-        orient.position.copy(tmpDir).multiplyScalar(dist);
-        orient.up.set(0, 1, 0);
-        if (Math.abs(tmpDir.y) > 0.9) orient.up.set(1, 0, 0);
-        orient.lookAt(0, 0, 0);
+        cloudDir[i * 3] = tmpDir.x;
+        cloudDir[i * 3 + 1] = tmpDir.y;
+        cloudDir[i * 3 + 2] = tmpDir.z;
+        cloudDist[i] = dist;
 
         // Size is expressed as a fraction of the distance, i.e. as an ANGULAR
         // size — otherwise a distant cloud and a near one of the same world
@@ -597,11 +602,9 @@ export function createSky(THREE, opts = {}) {
         const ang = rngRange(rng, 0.075, 0.185) * (0.90 - 0.22 * flat);
         const sx = dist * ang * rngRange(rng, 1.0, 1.35 + flat * 0.45);
         const sy = dist * ang * rngRange(rng, 0.40, 0.66) * (1 - flat * 0.22);
-        orient.scale.set(sx, sy, 1);
-        orient.rotateZ(rngRange(rng, -0.08, 0.08));
-        orient.updateMatrix();
-        tmpMat.copy(orient.matrix);
-        clouds.setMatrixAt(i, tmpMat);
+        cloudScale[i * 2] = sx;
+        cloudScale[i * 2 + 1] = sy;
+        cloudRoll[i] = rngRange(rng, -0.08, 0.08);
 
         // Aerial perspective, done as a tint rather than a fog term: distant
         // clouds sink toward the sky value, and clouds sitting in the low warm
@@ -620,9 +623,71 @@ export function createSky(THREE, opts = {}) {
         shape[i * 2] = rngRange(rng, -0.15, 0.15);
         shape[i * 2 + 1] = rngRange(rng, -0.34, 0.42);
     }
-    clouds.instanceMatrix.needsUpdate = true;
+    /**
+     * Orient every cloud card so its flat base is level with the LOCAL horizon.
+     *
+     * This is the one thing about the sky that cannot be world-fixed. A cloud
+     * card is a flat billboard with a drawn flat bottom along its local -Y, and
+     * the cards used to be built once with `up = world +Y`. That is correct on
+     * a flat world and wrong on a planet you fly all the way around: a quarter
+     * of the way from the pole, world +Y points sideways on screen, so the flat
+     * base points sideways with it and the clouds read as VERTICAL.
+     *
+     * `up` here is the radial direction at the camera — the player's actual
+     * "up" — so the cards stay level everywhere on the sphere. Positions are
+     * untouched and stay world-fixed, so clouds still rise and set as you fly,
+     * and the sun still sits exactly where KEY_LIGHT_DIR put it. Only the roll
+     * of the cards is view-relative, which is what a billboard's roll always is.
+     *
+     * Cost: `cloudCount` (<= 34) matrix composes per frame, zero allocation.
+     * That buys back the "no CPU work per frame" the baked matrices had, and it
+     * is a rounding error next to one draw call.
+     */
+    function layoutClouds(upX, upY, upZ, t) {
+        for (let i = 0; i < cloudCount; i++) {
+            // Drift: a slow spin of the cloud's bearing about world +Y. This
+            // used to live in the vertex shader, where it was free — but there
+            // it rotated the card's ORIENTATION as well as its position, by an
+            // angle that grows without bound. Against a level card that was
+            // invisible (a card facing the anchor still faces it after a rigid
+            // spin about the anchor); against a horizon-levelled card it would
+            // wind the base right back off level, which is the bug this whole
+            // function exists to fix. So the drift comes to the CPU with it.
+            const a = t * drift[i];
+            const ca = Math.cos(a), sa = Math.sin(a);
+            const bx = cloudDir[i * 3];
+            const dy = cloudDir[i * 3 + 1];
+            const bz = cloudDir[i * 3 + 2];
+            const dx = ca * bx + sa * bz;
+            const dz = -sa * bx + ca * bz;
+
+            tmpDir.set(dx, dy, dz);
+            orient.position.copy(tmpDir).multiplyScalar(cloudDist[i]);
+            // A card directly overhead or underfoot has no meaningful roll —
+            // its normal IS the up axis — so fall back to any perpendicular
+            // rather than letting lookAt build a degenerate basis.
+            const align = dx * upX + dy * upY + dz * upZ;
+            if (Math.abs(align) > 0.995) orient.up.set(-upY, upZ, upX);
+            else orient.up.set(upX, upY, upZ);
+            orient.lookAt(0, 0, 0);
+
+            // Collapse anything below the local horizon. Cloud bearings are
+            // world-fixed while the horizon is now local, so a card can end up
+            // under your feet — and the sky draws with depthTest off, so it
+            // would paint straight over the ground. Pre-existing, but a level
+            // cloud sitting on a hillside is a lot more obviously wrong than a
+            // vertical sliver was. `align` IS the sine of its elevation.
+            const vis = align > 0.02 ? 1 : 0;
+            orient.scale.set(cloudScale[i * 2] * vis, cloudScale[i * 2 + 1] * vis, 1);
+            orient.rotateZ(cloudRoll[i]);
+            orient.updateMatrix();
+            tmpMat.copy(orient.matrix);
+            clouds.setMatrixAt(i, tmpMat);
+        }
+        clouds.instanceMatrix.needsUpdate = true;
+    }
+    layoutClouds(0, 1, 0, 0);
     if (clouds.instanceColor) clouds.instanceColor.needsUpdate = true;
-    cloudGeo.setAttribute('aDrift', new THREE.InstancedBufferAttribute(drift, 1));
     cloudGeo.setAttribute('aShape', new THREE.InstancedBufferAttribute(shape, 2));
 
     group.add(clouds);
@@ -639,13 +704,23 @@ export function createSky(THREE, opts = {}) {
      */
     function update(dt, camera) {
         time += dt;
-        cloudTimeUniform.value = time;
         haloMat.uniforms.uTime.value = time;
         if (starMat) starMat.uniforms.uTime.value = time;
         if (camera) {
             group.position.x = camera.position.x;
             group.position.y = camera.position.y;
             group.position.z = camera.position.z;
+
+            // The camera's radial direction from the planet centre IS the
+            // player's up, and the group carries no rotation of its own, so
+            // this is already in the group's local frame.
+            const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+            const len = Math.sqrt(cx * cx + cy * cy + cz * cz);
+            const ux = len > 1e-4 ? cx / len : 0;
+            const uy = len > 1e-4 ? cy / len : 1;
+            const uz = len > 1e-4 ? cz / len : 0;
+            layoutClouds(ux, uy, uz, time);
+            domeMat.uniforms.uUp.value.set(ux, uy, uz);
         }
     }
 
