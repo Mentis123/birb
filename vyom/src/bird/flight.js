@@ -84,6 +84,11 @@ export const FLIGHT_CONFIG = {
     turnTighten: 0.5,
     autoLevelStrength: 1.0, // pitch settle toward the horizon
     rollLevelStrength: 3.2, // keep local up on the radial, camera-safe
+    // Soft altitude ceiling above the baseline radius. Without one the bird can
+    // simply leave: there is no gravity to bring it back, and a player who
+    // holds up for ten seconds ends up in orbit looking at a marble.
+    maxAltitude: 40,
+    ceilingSoftness: 9,     // world units over which the climb rate fades out
 
     // --- boost -------------------------------------------------------------
     boostAccel: 95,         // u/s^2 toward boostMaxSpeed while boosting
@@ -487,12 +492,40 @@ export class VyomFlight {
             if (this._launchTimer === 0) this.state = FLIGHT_STATE.FLYING;
         }
 
-        // 4. Move, then re-project. Order matters: integrate freely first, fix
-        //    the constraint after, exactly as the solved controller does.
+        // 4. Move. Displacement is SPLIT into a tangential part and a radial
+        //    part, and the radius is then set explicitly.
+        //
+        //    Why not just `position += forward * speed * dt` like the parent
+        //    controller? Because a straight step along the tangent of a sphere
+        //    is a chord: it lands OUTSIDE the sphere by d^2/2r every frame. At
+        //    34 u/s on a radius-100 planet that is +1.6cm per frame, which is
+        //    +5.7 units per minute of level flight — a bird that slowly
+        //    balloons off the planet with the stick centred. On Birb Mobile's
+        //    much larger world with a much shorter session that drift never
+        //    showed up; on a 100-unit planet raced for three laps it absolutely
+        //    does. Setting the radius explicitly removes the drift exactly and
+        //    makes the climb rate literally `speed * sin(pitch)`, which is what
+        //    the energy trade already assumes.
         s.oldNormal.copy(this.position).normalize();
-        s.displacement.copy(s.forward).multiplyScalar(this.speed * dt);
-        if (radialVel !== 0) s.displacement.addScaledVector(s.oldNormal, radialVel * dt);
-        this.position.add(s.displacement);
+        const rOld = this.position.length();
+
+        // Tangential heading = forward with the radial component removed. Its
+        // length is cos(pitch), so it also carries the speed projection.
+        s.slide.copy(s.forward).addScaledVector(s.oldNormal, -this.sinPitch);
+        const cosPitch = s.slide.length();
+        if (cosPitch > 1e-5) {
+            s.slide.multiplyScalar(1 / cosPitch);
+            this.position.addScaledVector(s.slide, this.speed * cosPitch * dt);
+        }
+
+        let climb = this.speed * this.sinPitch + radialVel;
+        if (climb > 0) {
+            // Fade the climb out approaching the ceiling instead of hitting a
+            // wall, so the limit reads as thin air rather than as a bug.
+            const ceiling = this.sphereRadius + cfg.maxAltitude;
+            climb *= clamp((ceiling - rOld) / cfg.ceilingSoftness, 0, 1);
+        }
+        this.position.setLength(rOld + climb * dt);
 
         this._applyFloor(true);
         this._transport(s.oldNormal);
@@ -519,9 +552,16 @@ export class VyomFlight {
         s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
         this.speed = Math.max(cfg.minSpeed * 0.5, this.speed - cfg.pitchEnergy * dt);
 
-        s.displacement.copy(s.forward).multiplyScalar(this.speed * cfg.knockDrift * dt);
-        s.displacement.addScaledVector(s.oldNormal, -fall * dt);
-        this.position.add(s.displacement);
+        // Same split integration as level flight (see _tickFlight): tangential
+        // drift plus an explicit radius, so a long tumble cannot drift off the
+        // sphere either.
+        const rOld = this.position.length();
+        s.slide.copy(s.forward).addScaledVector(s.oldNormal, -s.forward.dot(s.oldNormal));
+        if (s.slide.lengthSq() > 1e-10) {
+            s.slide.normalize();
+            this.position.addScaledVector(s.slide, this.speed * cfg.knockDrift * dt);
+        }
+        this.position.setLength(Math.max(1, rOld - fall * dt));
 
         // Tumble spin, around local X and Z so it reads as an uncontrolled
         // cartwheel rather than a tidy pirouette.
