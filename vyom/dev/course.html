@@ -36,10 +36,11 @@ const P = new URLSearchParams(location.search);
 // t=<0..1>    -> where on the lap the flying camera sits
 const view = P.get('view') || 'fly';
 const quality = P.get('quality') || 'high';
-// Default sits just past the start gantry on the ridge straight, so the frame
-// shows the gantry receding is NOT what we want — we want the line ahead. t is
-// the bird's position; the camera trails it.
-const tCam = parseFloat(P.get('t') ?? '0.028');
+// `t` places the CAMERA on the racing line (not the bird), so the framing is
+// unambiguous. Gates sit at k/12, so the default is deliberately HALFWAY
+// between two of them: every earlier framing put the lens a few units short of
+// a 10-unit torus and the whole frame was the inside of one ring.
+const tCam = parseFloat(P.get('t') ?? '0.125');
 const showHud = P.get('hud') !== '0';
 
 const canvas = document.getElementById('c');
@@ -135,11 +136,16 @@ function placeCamera() {
   course.sampleAt(tCam, _p);
   course.tangentAt(tCam, _tan);
   _up.copy(_p).normalize();
-  camera.position.copy(_p).addScaledVector(_tan, -22).addScaledVector(_up, 7.5 + 2.5 * portrait);
+  // Portrait needs a lot more height and stand-off: at 390px wide the same
+  // chase pose puts the near ribbon across the whole lower half as one flat
+  // slab and clips the gate at both edges.
+  camera.position.copy(_p)
+    .addScaledVector(_tan, -16 * portrait)
+    .addScaledVector(_up, 15 + 13 * portrait);
   camera.up.copy(_up);
   // Aim well down the line so the horizon sits high and the ribbon leads the
   // eye into the frame — the composition a racing game actually ships.
-  course.sampleAt(tCam + (portrait > 0.5 ? 0.10 : 0.075), _pAhead);
+  course.sampleAt(tCam + 0.045 + 0.035 * portrait, _pAhead);
   camera.lookAt(_pAhead);
   scene.fog.near = 70; scene.fog.far = 400;
 }

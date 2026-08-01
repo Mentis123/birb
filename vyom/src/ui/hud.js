@@ -110,11 +110,13 @@ function styleText() {
   padding: 6px 12px 7px;
   position: relative;
 }
+/* Gloss sits BEHIND the type — an overlay here ghosts the numerals. */
 .vh-card::after {
-  content: ''; position: absolute; inset: 3px 3px auto; height: 34%;
+  content: ''; position: absolute; inset: 3px 3px auto; height: 38%; z-index: 0;
   border-radius: 10px 10px 40% 40%;
-  background: rgba(255, 255, 255, 0.55); pointer-events: none;
+  background: rgba(255, 255, 255, 0.6); pointer-events: none;
 }
+.vh-card > * { position: relative; z-index: 1; }
 .vh-lab {
   display: block; font-size: 10px; font-weight: 800; line-height: 1;
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink);
@@ -132,8 +134,8 @@ function styleText() {
          flex-direction: column; align-items: flex-start; }
 .vh-tr { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
          flex-direction: column; align-items: flex-end; }
-.vh-bl { bottom: calc(14px + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); }
-.vh-br { bottom: calc(14px + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right));
+.vh-bl { bottom: calc(18px + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); }
+.vh-br { bottom: calc(18px + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right));
          flex-direction: column; align-items: flex-end; }
 
 .vh-pos .vh-val { color: var(--ink); }
@@ -202,11 +204,14 @@ function styleText() {
   position: absolute; inset: 0;
   background: repeating-linear-gradient(90deg, transparent 0 calc(25% - 2px), rgba(15, 28, 51, 0.85) calc(25% - 2px) 25%);
 }
-.vh-boost-lab {
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 900; letter-spacing: 0.3em; color: var(--ink);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+/* The label lives ABOVE the bar: inside it, the notch lines cut the letters. */
+.vh-boost-cap {
+  width: 132px; display: flex; justify-content: space-between; align-items: baseline;
+  margin: 6px 0 3px; font-size: 10px; font-weight: 900; letter-spacing: 0.26em;
+  text-transform: uppercase; color: var(--cream);
+  text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink);
 }
+.vh-boost-cap .pct { letter-spacing: 0.06em; color: var(--gold); font-variant-numeric: tabular-nums; }
 .vh-boost.is-full { animation: vh-boostpulse 0.62s ease-in-out infinite; }
 @keyframes vh-boostpulse {
   0%, 100% { box-shadow: 0 4px 0 0 var(--ink), 0 0 0 0 rgba(255, 221, 68, 0.0); }
@@ -219,15 +224,34 @@ function styleText() {
   pointer-events: none;
 }
 .vh-count[hidden] { display: none; }
+/* Flat, edgeless darkening. A radial scrim leaves a visible soft ellipse over
+   a clean sky and reads as a rendering artefact. */
+.vh-count-scrim { position: absolute; inset: 0; background: rgba(10, 19, 36, 0.34); }
+/* Two stacked layers, not a text-shadow ring: an 8-way shadow reads as
+   misregistered printing at this size. A stroked under-layer is a clean hull,
+   and it echoes the inverted-hull outlines in the 3D. */
 .vh-count-num {
-  font-size: clamp(112px, 34vw, 190px); font-weight: 900; line-height: 0.9;
-  color: var(--cream); letter-spacing: -0.03em;
-  text-shadow:
-     6px 0 0 var(--ink), -6px 0 0 var(--ink), 0 6px 0 var(--ink), 0 -6px 0 var(--ink),
-     4px 4px 0 var(--ink), -4px 4px 0 var(--ink), 4px -4px 0 var(--ink), -4px -4px 0 var(--ink),
-     0 14px 0 rgba(15, 28, 51, 0.55), 0 0 46px rgba(255, 221, 68, 0.5);
+  position: relative; display: grid; place-items: center;
+  font-size: clamp(120px, 36vw, 200px); font-weight: 900; line-height: 0.92;
+  letter-spacing: -0.03em;
+  filter: drop-shadow(0 12px 0 rgba(10, 19, 36, 0.45)) drop-shadow(0 0 40px rgba(255, 221, 68, 0.55));
 }
-.vh-count-num.go { color: var(--gold); font-size: clamp(84px, 25vw, 150px); letter-spacing: 0.02em; }
+.vh-count-num > span { grid-area: 1 / 1; }
+.vh-count-num .s { -webkit-text-stroke: 12px var(--ink); color: var(--ink); }
+.vh-count-num .f { color: var(--cream); }
+.vh-count-num.go { font-size: clamp(88px, 27vw, 158px); letter-spacing: 0.01em; }
+.vh-count-num.go .f { color: var(--gold); }
+/* A pill, not bare text: the caption has to survive landing on a bird. */
+.vh-count-cap {
+  position: absolute; top: calc(50% + clamp(80px, 24vw, 132px)); left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px; font-weight: 900; letter-spacing: 0.4em; text-transform: uppercase;
+  color: var(--cream); background: var(--ink);
+  border: 3px solid var(--ink); border-radius: 999px;
+  padding: 6px 20px 7px 24px; white-space: nowrap;
+  box-shadow: 0 4px 0 0 rgba(4, 10, 22, 0.6);
+}
+.vh-count-cap:empty { display: none; }
 .vh-count-num.punch { animation: vh-punch 0.5s cubic-bezier(0.16, 1.2, 0.3, 1) both; }
 @keyframes vh-punch {
   0%   { transform: scale(2.1) rotate(-7deg); opacity: 0; }
@@ -236,8 +260,8 @@ function styleText() {
   100% { transform: scale(1) rotate(0deg); }
 }
 .vh-count-ring {
-  position: absolute; width: min(64vw, 300px); aspect-ratio: 1; border-radius: 50%;
-  border: 5px solid rgba(255, 246, 220, 0.35);
+  position: absolute; width: min(66vw, 320px); aspect-ratio: 1; border-radius: 50%;
+  border: 7px solid rgba(255, 221, 68, 0.5);
 }
 .vh-count-ring.spin { animation: vh-ring 1s ease-out infinite; }
 @keyframes vh-ring {
@@ -249,7 +273,9 @@ function styleText() {
 .vh-wrong {
   position: absolute; left: 50%; top: 26%; transform: translate(-50%, -50%) rotate(-2.5deg);
   display: flex; align-items: center; gap: 10px;
-  background: ${CSS.birdRival1};
+  background:
+    repeating-linear-gradient(-45deg, rgba(15, 28, 51, 0.22) 0 9px, rgba(15, 28, 51, 0) 9px 20px),
+    ${CSS.birdRival1};
   border: 4px solid var(--ink); border-radius: 14px;
   padding: 7px 16px 9px;
   box-shadow: 0 5px 0 0 var(--ink), 0 14px 26px rgba(4, 10, 22, 0.5);
@@ -283,11 +309,28 @@ function styleText() {
 }
 .vh-res-card.pop { animation: vh-pop 0.42s cubic-bezier(0.16, 1.15, 0.3, 1) both; }
 @keyframes vh-pop { 0% { transform: scale(0.82) translateY(18px); opacity: 0; } 100% { transform: none; opacity: 1; } }
-.vh-res-kicker { font-size: 10px; font-weight: 800; letter-spacing: 0.32em; opacity: 0.6; text-transform: uppercase; }
-.vh-res-place { font-size: 62px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; margin-top: 2px; }
-.vh-res-place small { font-size: 0.38em; letter-spacing: 0.05em; opacity: 0.6; }
+/* A tab hung off the card's top edge — block-level, or it shares a line with
+   the placement badge and the two collide. */
+.vh-res-kicker {
+  display: block; width: max-content; margin: -20px auto 10px; padding: 5px 18px 6px;
+  background: var(--ink); color: var(--cream); border-radius: 0 0 12px 12px;
+  font-size: 10px; font-weight: 900; letter-spacing: 0.32em; text-transform: uppercase;
+}
+.vh-res-place {
+  font-size: 62px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; margin-top: 2px;
+  display: inline-block; padding: 4px 22px 6px; border-radius: 18px;
+  border: 4px solid var(--ink); background: var(--cyan); color: var(--ink);
+  box-shadow: 0 5px 0 0 var(--ink);
+}
+.vh-res-place.p1 { background: var(--gold); }
+.vh-res-place.p3 { background: ${CSS.birdRival2}; }
+.vh-res-place.p4 { background: ${CSS.birdRival1}; color: var(--cream); }
+.vh-res-place small { font-size: 0.38em; letter-spacing: 0.05em; opacity: 0.75; }
+.vh-res-head { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.vh-res-tot { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.vh-res-tot-lab { font-size: 9px; font-weight: 900; letter-spacing: 0.28em; text-transform: uppercase; opacity: 0.55; }
 .vh-res-total {
-  display: inline-block; margin-top: 8px; padding: 4px 14px 5px;
+  display: inline-block; padding: 4px 14px 5px;
   background: var(--ink); color: var(--cream); border-radius: 10px;
   font-size: 19px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
 }
@@ -307,6 +350,11 @@ function styleText() {
 .vh-res-field .vh-res-row:last-child { border-bottom: none; }
 .vh-res-field .p { display: flex; align-items: center; gap: 8px; }
 .vh-res-field .dot { width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--ink); }
+.vh-res-field .vh-res-row.mine {
+  background: rgba(0, 212, 255, 0.22); border-radius: 9px;
+  box-shadow: inset 0 0 0 2.5px var(--ink);
+  padding-left: 6px; padding-right: 6px;
+}
 .vh-res-field .me { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 3px; }
 .vh-share {
   margin-top: 14px; width: 100%; cursor: pointer; pointer-events: auto;
@@ -324,6 +372,17 @@ function styleText() {
 .vyom-hud.vh-reduce .vh-wrong.anim,
 .vyom-hud.vh-reduce .vh-boost.is-full,
 .vyom-hud.vh-reduce .vh-res-card.pop { animation: none !important; }
+
+/* --- desktop: the same design, scaled up from each corner ---------------
+   Fixed px sizing tuned for a 390pt phone reads as undersized furniture on a
+   900px window, so the corner clusters scale as units rather than being
+   re-laid-out. */
+@media (min-width: 700px) and (min-height: 560px) {
+  .vh-tl { transform: scale(1.3); transform-origin: top left; }
+  .vh-tr { transform: scale(1.3); transform-origin: top right; }
+  .vh-bl { transform: scale(1.3); transform-origin: bottom left; }
+  .vh-br { transform: scale(1.3); transform-origin: bottom right; }
+}
 
 /* --- narrow phones: shrink the furniture, never the numbers ------------- */
 @media (max-width: 400px) {
@@ -412,20 +471,28 @@ export function createHUD(rootEl, options = {}) {
     speedNum.textContent = '0';
     el('div', 'vh-speed-unit', speedWrap).textContent = 'KM/H';
 
+    const boostCap = el('div', 'vh-boost-cap', br, '<span>Boost</span><span class="pct">0%</span>');
+    const boostPct = boostCap.querySelector('.pct');
     const boostBar = el('div', 'vh-boost', br);
     const boostFill = el('div', 'vh-boost-fill', boostBar);
     el('div', 'vh-boost-notch', boostBar);
-    el('div', 'vh-boost-lab', boostBar).textContent = 'Boost';
 
     // ---- countdown --------------------------------------------------------
-    const countWrap = el('div', 'vh-count', rootEl);
+    // Inserted BEFORE the corner furniture so the countdown scrim dims the
+    // game, not the HUD — greyed-out cream cards read as a disabled UI.
+    const countWrap = el('div', 'vh-count', null);
+    rootEl.insertBefore(countWrap, rootEl.firstChild);
     countWrap.hidden = true;
+    el('div', 'vh-count-scrim', countWrap);
     const countRing = el('div', 'vh-count-ring', countWrap);
-    const countNum = el('div', 'vh-count-num', countWrap);
+    const countNum = el('div', 'vh-count-num', countWrap, '<span class="s"></span><span class="f"></span>');
+    const countStroke = countNum.querySelector('.s');
+    const countFace = countNum.querySelector('.f');
+    const countCap = el('div', 'vh-count-cap', countWrap);
 
     // ---- wrong way --------------------------------------------------------
     const wrong = el('div', 'vh-wrong', rootEl,
-        '<span class="ch">&#9666;&#9666;</span><span>Wrong way</span><span class="ch">&#9666;&#9666;</span>');
+        '<span class="ch">&#9666;&#9666;</span><span>Wrong way</span><span class="ch">&#9656;&#9656;</span>');
     wrong.hidden = true;
 
     // ---- results ----------------------------------------------------------
@@ -437,7 +504,11 @@ export function createHUD(rootEl, options = {}) {
     resPlace.innerHTML = '1<small>ST</small>';
     const resPlaceNum = resPlace.firstChild;
     const resPlaceSuffix = resPlace.querySelector('small');
-    const resTotal = el('div', 'vh-res-total', resCard);
+    const resHead = el('div', 'vh-res-head', resCard);
+    resHead.appendChild(resPlace);
+    const totWrap = el('div', 'vh-res-tot', resHead);
+    el('div', 'vh-res-tot-lab', totWrap).textContent = 'Total';
+    const resTotal = el('div', 'vh-res-total', totWrap);
     resTotal.textContent = '--:--.--';
     const resLaps = el('div', 'vh-res-laps', resCard);
     const resField = el('div', 'vh-res-field', resCard);
@@ -607,7 +678,7 @@ export function createHUD(rootEl, options = {}) {
     }
 
     function drawMap(source, racerPositions, playerIndex) {
-        if (!mapCtx) return;
+        if (!mapCtx || !racerPositions || racerPositions.length < 3) return;
         resample(source);
 
         const pi = (playerIndex | 0) * 3;
@@ -670,8 +741,61 @@ export function createHUD(rootEl, options = {}) {
 
         mapCtx.restore();
 
-        // Player: always dead centre, always pointing up.
-        const s = 7 * dpr;
+        // Rim ticks — give the dish a scale reference so empty space still
+        // reads as an instrument rather than a hole.
+        mapCtx.strokeStyle = 'rgba(255,246,220,0.24)';
+        mapCtx.lineWidth = 1.8 * dpr;
+        for (let k = 0; k < 8; k++) {
+            const a = (k * Math.PI) / 4;
+            const r0 = mapHalf - 3 * dpr;
+            const r1 = mapHalf - (k % 2 ? 6 : 11) * dpr;
+            mapCtx.beginPath();
+            mapCtx.moveTo(mapHalf + Math.sin(a) * r0, mapHalf - Math.cos(a) * r0);
+            mapCtx.lineTo(mapHalf + Math.sin(a) * r1, mapHalf - Math.cos(a) * r1);
+            mapCtx.stroke();
+        }
+
+        // Bearing chevron on the rim for the next gate — the one thing the
+        // player actually needs when the line runs off the dish.
+        if (_gateCount > 0) {
+            const gi = (_nextGate % _gateCount) * 3;
+            project(_gatePos[gi], _gatePos[gi + 1], _gatePos[gi + 2], px, py, pz);
+            const dx = _projX - mapHalf, dy = _projY - mapHalf;
+            const m = Math.hypot(dx, dy);
+            if (m > 1e-3) {
+                const ux = dx / m, uy = dy / m;
+                const rr = mapHalf - 8 * dpr;
+                const cx = mapHalf + ux * rr, cy = mapHalf + uy * rr;
+                const t = 6.5 * dpr;
+                mapCtx.beginPath();
+                mapCtx.moveTo(cx + ux * t, cy + uy * t);
+                mapCtx.lineTo(cx - uy * t - ux * t * 0.7, cy + ux * t - uy * t * 0.7);
+                mapCtx.lineTo(cx + uy * t - ux * t * 0.7, cy - ux * t - uy * t * 0.7);
+                mapCtx.closePath();
+                mapCtx.fillStyle = CSS.uiGold;
+                mapCtx.fill();
+                mapCtx.lineWidth = 2 * dpr;
+                mapCtx.strokeStyle = CSS.ink;
+                mapCtx.stroke();
+            }
+        }
+
+        // Player: always dead centre, always pointing up. A soft view cone
+        // first, so the marker reads as "me, facing there" at a glance.
+        mapCtx.save();
+        mapCtx.beginPath();
+        mapCtx.arc(mapHalf, mapHalf, mapHalf - 1, 0, Math.PI * 2);
+        mapCtx.clip();
+        mapCtx.beginPath();
+        mapCtx.moveTo(mapHalf, mapHalf);
+        mapCtx.lineTo(mapHalf - mapHalf * 0.62, 0);
+        mapCtx.lineTo(mapHalf + mapHalf * 0.62, 0);
+        mapCtx.closePath();
+        mapCtx.fillStyle = 'rgba(78,201,245,0.16)';
+        mapCtx.fill();
+        mapCtx.restore();
+
+        const s = 9.5 * dpr;
         mapCtx.beginPath();
         mapCtx.moveTo(mapHalf, mapHalf - s * 1.25);
         mapCtx.lineTo(mapHalf + s * 0.85, mapHalf + s * 0.95);
@@ -732,8 +856,11 @@ export function createHUD(rootEl, options = {}) {
         const b = boost01 < 0 ? 0 : boost01 > 1 ? 1 : boost01;
         const q = Math.round(b * 100) / 100;
         if (q !== _boost) {
+            const prevPct = Math.round(_boost * 100);
             _boost = q;
             boostFill.style.transform = 'scaleX(' + q + ')';
+            const pct = Math.round(q * 100);
+            if (pct !== prevPct) boostPct.textContent = pct + '%';
         }
         const full = q >= 0.999;
         if (full !== _boostFull) {
@@ -780,7 +907,10 @@ export function createHUD(rootEl, options = {}) {
         if (!_countShown) { countWrap.hidden = false; _countShown = true; }
         if (v === _countN) return;
         _countN = v;
-        countNum.textContent = v > 0 ? String(v) : 'GO!';
+        const txt = v > 0 ? String(v) : 'GO!';
+        countStroke.textContent = txt;
+        countFace.textContent = txt;
+        countCap.textContent = v > 0 ? 'Get ready' : '';
         countNum.classList.toggle('go', v <= 0);
         // Punch is decoration: restart the animation only when motion is allowed.
         countNum.classList.remove('punch');
@@ -842,6 +972,7 @@ export function createHUD(rootEl, options = {}) {
                 : (list.indexOf(me) + 1) || 1;
         resPlaceNum.textContent = place;
         resPlaceSuffix.textContent = ordinalSuffix(place);
+        resPlace.className = 'vh-res-place p' + (place >= 1 && place <= 4 ? place : 4);
         const total = rowTime(me);
         resTotal.textContent = fmt(total);
 
@@ -872,7 +1003,7 @@ export function createHUD(rootEl, options = {}) {
             const p = Number.isFinite(r.place) ? r.place : Number.isFinite(r.position) ? r.position : i + 1;
             const isMe = r === me;
             const colour = r.color || RACER_COLORS[(Number.isFinite(r.index) ? r.index : i) % RACER_COLORS.length];
-            field += `<div class="vh-res-row"><span class="p">`
+            field += `<div class="vh-res-row${isMe ? ' mine' : ''}"><span class="p">`
                 + `<span class="dot" style="background:${colour}"></span>`
                 + `<span class="n">${p}${ordinalSuffix(p).toLowerCase()}</span>`
                 + `<span class="${isMe ? 'me' : ''}">${r.name || (isMe ? 'You' : 'Rival ' + (i + 1))}</span>`

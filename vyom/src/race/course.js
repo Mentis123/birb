@@ -23,13 +23,20 @@
  *
  * The authored character, in order round the lap:
  *
- *   1. RIDGE STRAIGHT   a 0..54    b flat, alt high     — flat out, no input
- *   2. WIDE SWEEPER     a 74..152  b arcs out to 0.30   — one long committed arc
- *   3. HAIRPIN          a 166..191 b +0.33 then -0.08   — ~150 deg of direction
- *   4. CANYON DIVE      a 205..252 alt drops to 4       — the line goes BELOW
- *                                                          the baseline radius
- *   5. CLIMBING CHICANE a 266..308 b flicks +/-, alt 8->18
- *   6. RUN-IN           a 324..342 back onto the line
+ *   1. RIDGE STRAIGHT   a   0..58   flat, alt 15   0.67 deg/u (a geodesic on a
+ *                                                  radius-100 planet is 0.57 —
+ *                                                  this is as straight as the
+ *                                                  planet allows)
+ *   2. WIDE SWEEPER     a  78..155  b out to 0.36  0.74 deg/u, one long arc
+ *   3. HAIRPIN          a 169..189  b to -0.245    2.37 deg/u — a real 20-unit
+ *                                                  radius, 130 degrees of it
+ *   4. CANYON DIVE      a 194..248  alt 9 -> 6     0.94 deg/u, radius 83..91,
+ *                                                  i.e. 17 units BELOW baseline
+ *   5. CLIMBING CHICANE a 262..326  b +/-0.08      1.28 deg/u, climbs 9 -> 17
+ *   6. RUN-IN           a 340..352  back on line
+ *
+ * Those numbers are not aspirations — they are what `characterReport` measures
+ * off the built spline, and the probe page prints them.
  *
  * ---------------------------------------------------------------------------
  * WHERE ON THE PLANET IT LANDS
@@ -75,57 +82,78 @@ const DEG = Math.PI / 180;
  * Control points: `a` degrees round the frame, `b` lateral push out of the
  * frame plane, `alt` world units above the LOCAL FLOOR.
  *
- * Corner tightness is the ratio of the `b` swing to the `a` advance: the
- * sweeper moves b by 0.30 over 78 degrees of a (gentle), the hairpin moves it
- * by 0.41 over 25 degrees (savage). Change one number and re-read the measured
- * curvature in the probe — do not eyeball it.
+ * Corner tightness is set by the `b` swing over the `a` advance, and it goes as
+ * the SQUARE of the spacing — halve the `a` gap and you quadruple the corner.
+ * Change one number and re-read the measured curvature in the probe; every
+ * attempt to eyeball this produced a corner 3-5x tighter than intended.
  */
 const CONTROL = [
     // 1. ridge straight -------------------------------------------------- 0-3
-    { a: 0, b: 0.00, alt: 14 },
-    { a: 18, b: 0.01, alt: 14 },
-    { a: 36, b: 0.02, alt: 14 },
-    { a: 54, b: 0.03, alt: 13 },
+    { a: 0, b: 0.00, alt: 15 },
+    { a: 20, b: 0.00, alt: 15 },
+    { a: 40, b: 0.01, alt: 14 },
+    { a: 58, b: 0.03, alt: 13 },
     // 2. wide sweeper ---------------------------------------------------- 4-8
-    { a: 74, b: 0.12, alt: 12 },
-    { a: 94, b: 0.24, alt: 11 },
-    { a: 114, b: 0.30, alt: 11 },
-    { a: 134, b: 0.28, alt: 11 },
-    { a: 152, b: 0.16, alt: 11 },
-    // 3. hairpin -------------------------------------------------------- 9-13
-    { a: 166, b: 0.06, alt: 10 },
-    { a: 174, b: 0.24, alt: 10 },
-    { a: 180, b: 0.33, alt: 10 },
-    { a: 187, b: 0.16, alt: 10 },
-    { a: 191, b: -0.08, alt: 9 },
-    // 4. canyon dive ---------------------------------------------------- 14-17
-    { a: 205, b: -0.20, alt: 7 },
-    { a: 220, b: -0.26, alt: 5 },
-    { a: 236, b: -0.24, alt: 4 },
-    { a: 252, b: -0.16, alt: 5 },
-    // 5. climbing chicane ----------------------------------------------- 18-22
-    { a: 266, b: -0.04, alt: 8 },
-    { a: 276, b: 0.10, alt: 11 },
-    { a: 286, b: -0.04, alt: 14 },
-    { a: 296, b: 0.10, alt: 17 },
-    { a: 308, b: 0.02, alt: 18 },
-    // 6. run-in --------------------------------------------------------- 23-24
-    { a: 324, b: 0.00, alt: 16 },
-    { a: 342, b: 0.00, alt: 15 },
+    // One long committed arc pushing 36 units off the frame plane and back.
+    { a: 78, b: 0.13, alt: 12 },
+    { a: 98, b: 0.28, alt: 11 },
+    { a: 118, b: 0.36, alt: 11 },
+    { a: 138, b: 0.32, alt: 11 },
+    { a: 155, b: 0.18, alt: 10 },
+    // 3. hairpin -------------------------------------------------------- 9-14
+    // Six points sampled off a REAL 20-unit-radius arc sweeping 130 degrees.
+    // Two things were learned the hard way here and are measured in
+    // `characterReport`, so do not "simplify" them away:
+    //   - a hand-placed apex point makes a V, not a corner (measured 13 deg/u,
+    //     a 4-unit turn radius that nothing can fly);
+    //   - the arc's ENTRY HEADING has to match the heading the sweeper hands
+    //     over at control 8 (-50 vs -56 degrees here). When it did not, the
+    //     spline snapped between them across one link and put a 6.5 deg/u
+    //     spike on the corner entry.
+    { a: 168.7, b: -0.174, alt: 10 },
+    { a: 172.8, b: -0.228, alt: 10 },
+    { a: 177.9, b: -0.245, alt: 10 },
+    { a: 182.9, b: -0.222, alt: 10 },
+    { a: 186.8, b: -0.163, alt: 10 },
+    { a: 188.8, b: -0.080, alt: 10 },
+    // 4. canyon dive ---------------------------------------------------- 15-19
+    // The hairpin spits you out at +80 degrees, so the dive opens as a 40-unit
+    // right-hander continuing that exact tangent, then straightens and drops.
+    // The drama here is vertical: altitude falls 10 -> 6 while the ground
+    // falls faster, so the line ends up BELOW the baseline radius.
+    { a: 193.8, b: 0.108, alt: 9 },
+    { a: 203.5, b: 0.227, alt: 7 },
+    { a: 215.4, b: 0.245, alt: 6 },
+    { a: 232.0, b: 0.200, alt: 6 },
+    { a: 248.0, b: 0.060, alt: 7 },
+    // 5. climbing chicane ----------------------------------------------- 20-24
+    // A chicane is a sinusoid, and its curvature is amplitude * omega^2 — so
+    // it is dominated by the SPACING, squared. The first cut used a 12-degree
+    // (21-unit) half-period with 0.12 of lateral swing and measured 7.1 deg/u,
+    // sharper than the hairpin. 16 degrees and 0.08 predicts 2.9 and measures
+    // it. Halve the spacing here and you quadruple the corner.
+    { a: 262, b: -0.02, alt: 9 },
+    { a: 278, b: -0.10, alt: 11 },
+    { a: 294, b: -0.02, alt: 13 },
+    { a: 310, b: -0.10, alt: 15 },
+    { a: 326, b: -0.02, alt: 17 },
+    // 6. run-in --------------------------------------------------------- 25-26
+    { a: 340, b: 0.02, alt: 17 },
+    { a: 352, b: 0.00, alt: 16 },
 ];
 
 /** Named spans over CONTROL, used for scoring and for the measured report. */
 const SEGMENTS = [
     { name: 'ridge straight', from: 0, to: 3 },
     { name: 'wide sweeper', from: 4, to: 8 },
-    { name: 'hairpin', from: 9, to: 13 },
-    { name: 'canyon dive', from: 14, to: 17 },
-    { name: 'climb chicane', from: 18, to: 22 },
-    { name: 'run-in', from: 23, to: 24 },
+    { name: 'hairpin', from: 9, to: 14 },
+    { name: 'canyon dive', from: 15, to: 19 },
+    { name: 'climb chicane', from: 20, to: 24 },
+    { name: 'run-in', from: 25, to: 26 },
 ];
 
-const RIDGE_IDX = [0, 1, 2, 3, 24];
-const DIVE_IDX = [14, 15, 16, 17];
+const RIDGE_IDX = [0, 1, 2, 3, 26];
+const DIVE_IDX = [15, 16, 17, 18, 19];
 
 const TIER = {
     low: { ribbonSegments: 220, sampleCount: 512, ringRadial: 5, ringTubular: 14, pillars: false },
@@ -134,10 +162,12 @@ const TIER = {
 };
 
 /** Ribbon cross-section. Half-width and half-thickness, world units. */
-const RIBBON_HALF_W = 4.6;
-const RIBBON_HALF_H = 0.8;
-const GLOW_SPREAD = 2.4;      // glow skirt half-width, as a multiple of the beam
-const GATE_RADIUS = 10.0;
+const RIBBON_HALF_W = 5.2;
+const RIBBON_HALF_H = 0.75;
+const RIBBON_DECK = 0.80;     // fraction of the half-width the flat deck spans
+const GLOW_SPREAD = 1.8;      // glow skirt half-width, as a multiple of the beam
+const GLOW_DROP = 2.2;        // how far below the deck the skirt hangs
+const GATE_RADIUS = 9.0;
 const GATE_TUBE = 0.85;
 
 /**
@@ -161,22 +191,52 @@ const MIN_CLEARANCE = 5.5;
  * invariant, and a few iterations converge on a smooth envelope that still
  * dives into the canyons (which are 50+ units wide and survive the filter).
  */
-const RADIUS_SMOOTH_PASSES = 5;
-const RADIUS_SMOOTH_HALFWIDTH = 7;
+const RADIUS_SMOOTH_PASSES = 4;
+/**
+ * Filter half-width in WORLD UNITS, not sample indices. Dense samples are
+ * packed much closer through a tight corner than along a straight, so an
+ * index-window filter barely touches the hairpin — which is exactly where the
+ * measured curvature was still spiking to 6 deg/unit against a 3 deg/unit
+ * design target.
+ */
+const RADIUS_SMOOTH_RANGE = 13;
 
 // ---------------------------------------------------------------------------
 // Build-time helpers (allocation is fine here — none of this runs in update)
 // ---------------------------------------------------------------------------
 
-/** Uniform Catmull-Rom through 4 scalars. */
-function cr(p0, p1, p2, p3, t) {
-    const t2 = t * t, t3 = t2 * t;
-    return 0.5 * (
-        (2 * p1) +
-        (-p0 + p2) * t +
-        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
-    );
+/**
+ * Non-uniform (Barry-Goldman) Catmull-Rom through 4 scalars with explicit
+ * knots. `u` runs in [k1, k2].
+ *
+ * The uniform form is not good enough here. The authored control points are
+ * NOT evenly spaced — the hairpin packs five points into 25 degrees while the
+ * straight spreads four over 54 — and a uniform Catmull-Rom through unevenly
+ * spaced points overshoots at every spacing change. Measured on the second
+ * build that showed up as a 7.3 deg/unit curvature SPIKE in the middle of the
+ * "wide sweeper", whose mean was 0.87: a kink, not a corner. Centripetal knots
+ * remove it.
+ */
+function crNU(p0, p1, p2, p3, k0, k1, k2, k3, u) {
+    const a1 = ((k1 - u) * p0 + (u - k0) * p1) / (k1 - k0);
+    const a2 = ((k2 - u) * p1 + (u - k1) * p2) / (k2 - k1);
+    const a3 = ((k3 - u) * p2 + (u - k2) * p3) / (k3 - k2);
+    const b1 = ((k2 - u) * a1 + (u - k0) * a2) / (k2 - k0);
+    const b2 = ((k3 - u) * a2 + (u - k1) * a3) / (k3 - k1);
+    return ((k2 - u) * b1 + (u - k1) * b2) / (k2 - k1);
+}
+
+/**
+ * Approximate world-space distance between two authored control points.
+ * One degree of `a` is ~1.745 units on a radius-100 planet; one unit of `b` is
+ * a full planet radius. Getting this ratio right is what makes the centripetal
+ * knots behave like real arc length.
+ */
+const A_TO_UNITS = PLANET_RADIUS * DEG;
+function controlChord(a0, b0, a1, b1) {
+    const da = (a1 - a0) * A_TO_UNITS;
+    const db = (b1 - b0) * PLANET_RADIUS;
+    return Math.hypot(da, db);
 }
 
 /**
@@ -362,8 +422,28 @@ export function createCourse(THREE, opts = {}) {
         hVal[i + 1] = CONTROL[j].alt;
     }
 
-    const SUB = 22;                       // dense samples per authored segment
-    const nD = nC * SUB;
+    // Centripetal knots over the padded control array.
+    const knot = new Float64Array(nC + 3);
+    knot[0] = 0;
+    for (let i = 1; i < nC + 3; i++) {
+        const d = controlChord(aVal[i - 1], bVal[i - 1], aVal[i], bVal[i]);
+        knot[i] = knot[i - 1] + Math.sqrt(Math.max(1e-4, d));
+    }
+
+    // Dense sample count per authored segment is proportional to its length, so
+    // the samples are ~evenly spaced round the lap. A fixed count per segment
+    // packs 22 samples into an 11-unit hairpin link and spreads the same 22
+    // over a 34-unit straight, which makes every downstream filter behave
+    // differently in different parts of the circuit.
+    const DENSE_SPACING = 1.6;
+    const subCount = new Int32Array(nC);
+    let nD = 0;
+    for (let i = 0; i < nC; i++) {
+        const chord = controlChord(aVal[i + 1], bVal[i + 1], aVal[i + 2], bVal[i + 2]);
+        subCount[i] = Math.max(4, Math.round(chord / DENSE_SPACING));
+        nD += subCount[i];
+    }
+
     const dirX = new Float64Array(nD), dirY = new Float64Array(nD), dirZ = new Float64Array(nD);
     const floorR = new Float64Array(nD);
     const radius = new Float64Array(nD);
@@ -372,11 +452,13 @@ export function createCourse(THREE, opts = {}) {
 
     for (let i = 0, d = 0; i < nC; i++) {
         denseIndexOfControl[i] = d;
-        for (let k = 0; k < SUB; k++, d++) {
-            const t = k / SUB;
-            const a = cr(aVal[i], aVal[i + 1], aVal[i + 2], aVal[i + 3], t) * DEG;
-            const b = cr(bVal[i], bVal[i + 1], bVal[i + 2], bVal[i + 3], t);
-            const alt = cr(hVal[i], hVal[i + 1], hVal[i + 2], hVal[i + 3], t);
+        const sub = subCount[i];
+        for (let k = 0; k < sub; k++, d++) {
+            const k0 = knot[i], k1 = knot[i + 1], k2 = knot[i + 2], k3 = knot[i + 3];
+            const u = k1 + (k2 - k1) * (k / sub);
+            const a = crNU(aVal[i], aVal[i + 1], aVal[i + 2], aVal[i + 3], k0, k1, k2, k3, u) * DEG;
+            const b = crNU(bVal[i], bVal[i + 1], bVal[i + 2], bVal[i + 3], k0, k1, k2, k3, u);
+            const alt = crNU(hVal[i], hVal[i + 1], hVal[i + 2], hVal[i + 3], k0, k1, k2, k3, u);
             const ca = Math.cos(a), sa = Math.sin(a);
             let x = F[0] * ca + F[3] * sa + F[6] * b;
             let y = F[1] * ca + F[4] * sa + F[7] * b;
@@ -390,13 +472,35 @@ export function createCourse(THREE, opts = {}) {
         }
     }
 
-    // De-corrugate the radial profile (see RADIUS_SMOOTH_PASSES).
+    // Great-circle arc length between consecutive dense samples, used to build
+    // the world-distance filter window below.
+    const step = new Float64Array(nD);
+    for (let i = 0; i < nD; i++) {
+        const j = (i + 1) % nD;
+        let dot = dirX[i] * dirX[j] + dirY[i] * dirY[j] + dirZ[i] * dirZ[j];
+        if (dot > 1) dot = 1; else if (dot < -1) dot = -1;
+        step[i] = Math.acos(dot) * PLANET_RADIUS;
+    }
+
+    // De-corrugate the radial profile (see RADIUS_SMOOTH_PASSES). Triangular
+    // weights over a fixed world-distance window, then clamp back above the
+    // floor so the terrain invariant survives every pass.
     for (let pass = 0; pass < RADIUS_SMOOTH_PASSES; pass++) {
-        const h = RADIUS_SMOOTH_HALFWIDTH;
         for (let i = 0; i < nD; i++) {
-            let sum = 0;
-            for (let k = -h; k <= h; k++) sum += radius[((i + k) % nD + nD) % nD];
-            radiusTmp[i] = sum / (2 * h + 1);
+            let sum = radius[i], wsum = 1;
+            for (let dir = -1; dir <= 1; dir += 2) {
+                let dist = 0, j = i;
+                while (dist < RADIUS_SMOOTH_RANGE) {
+                    const prev = j;
+                    j = ((j + dir) % nD + nD) % nD;
+                    dist += dir > 0 ? step[prev] : step[j];
+                    if (dist >= RADIUS_SMOOTH_RANGE || j === i) break;
+                    const w = 1 - dist / RADIUS_SMOOTH_RANGE;
+                    sum += radius[j] * w;
+                    wsum += w;
+                }
+            }
+            radiusTmp[i] = sum / wsum;
         }
         for (let i = 0; i < nD; i++) {
             const floorMin = floorR[i] + MIN_CLEARANCE;
@@ -502,9 +606,10 @@ export function createCourse(THREE, opts = {}) {
     // angle. Stripes are baked into vertex colour, so speed reads without a
     // texture and without a second draw call.
     const RS = tier.ribbonSegments;
-    const ribbonPos = new Float32Array(RS * 4 * 6 * 3);
-    const ribbonNrm = new Float32Array(RS * 4 * 6 * 3);
-    const ribbonCol = new Float32Array(RS * 4 * 6 * 3);
+    const SECT = 6;                       // cross-section vertex count
+    const ribbonPos = new Float32Array(RS * SECT * 6 * 3);
+    const ribbonNrm = new Float32Array(RS * SECT * 6 * 3);
+    const ribbonCol = new Float32Array(RS * SECT * 6 * 3);
     const glowPos = new Float32Array(RS * 4 * 3 * 3);
     const glowCol = new Float32Array(RS * 4 * 3 * 4);
 
@@ -514,13 +619,17 @@ export function createCourse(THREE, opts = {}) {
         const e1a = new THREE.Vector3(), e2a = new THREE.Vector3();
         const e1b = new THREE.Vector3(), e2b = new THREE.Vector3();
         const up = new THREE.Vector3();
-        const A = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
-        const B = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+        const A = [], B = [];
+        for (let k = 0; k < SECT; k++) { A.push(new THREE.Vector3()); B.push(new THREE.Vector3()); }
         const nrm = new THREE.Vector3(), ab = new THREE.Vector3(), ad = new THREE.Vector3();
 
-        const colBase = new THREE.Color(PALETTE.ribbon);
-        const colStripe = new THREE.Color(PALETTE.ribbonEdge);
-        const colEdgeDim = new THREE.Color(PALETTE.ribbon).multiplyScalar(0.55);
+        // Two glowing rails either side of a darker deck. A single flat colour
+        // reads as a painted stripe; the rails give the track an edge you can
+        // aim at, which is the whole job of a racing line.
+        const colRail = new THREE.Color(PALETTE.ribbonEdge);
+        const colDeckLit = new THREE.Color(PALETTE.ribbon);
+        const colDeckDim = new THREE.Color(PALETTE.ribbon).multiplyScalar(0.30);
+        const colUnder = new THREE.Color(PALETTE.ribbon).multiplyScalar(0.3);
         const glowC = new THREE.Color(PALETTE.ribbon);
 
         const frameAt = (t, e1, e2, p, tan) => {
@@ -529,12 +638,20 @@ export function createCourse(THREE, opts = {}) {
             e1.copy(up).cross(tan).normalize();
             e2.copy(tan).cross(e1).normalize();
         };
+        // Hexagonal section, running CCW about +tangent:
+        //   0 right rail tip, 1 deck right, 2 deck left, 3 left rail tip,
+        //   4 underside left, 5 underside right.
+        const W = RIBBON_HALF_W, D = RIBBON_HALF_W * RIBBON_DECK, H = RIBBON_HALF_H;
         const sectionInto = (out, p, e1, e2) => {
-            out[0].copy(p).addScaledVector(e1, RIBBON_HALF_W).addScaledVector(e2, -RIBBON_HALF_H * 0.35);
-            out[1].copy(p).addScaledVector(e2, RIBBON_HALF_H);
-            out[2].copy(p).addScaledVector(e1, -RIBBON_HALF_W).addScaledVector(e2, -RIBBON_HALF_H * 0.35);
-            out[3].copy(p).addScaledVector(e2, -RIBBON_HALF_H);
+            out[0].copy(p).addScaledVector(e1, W);
+            out[1].copy(p).addScaledVector(e1, D).addScaledVector(e2, H);
+            out[2].copy(p).addScaledVector(e1, -D).addScaledVector(e2, H);
+            out[3].copy(p).addScaledVector(e1, -W);
+            out[4].copy(p).addScaledVector(e1, -D).addScaledVector(e2, -H);
+            out[5].copy(p).addScaledVector(e1, D).addScaledVector(e2, -H);
         };
+        // Which colour each of the six longitudinal faces gets.
+        const faceColor = [colRail, null, colRail, colUnder, colUnder, colUnder];
 
         let vp = 0, gp = 0, gc = 0;
         for (let j = 0; j < RS; j++) {
@@ -544,23 +661,23 @@ export function createCourse(THREE, opts = {}) {
             sectionInto(A, p0, e1a, e2a);
             sectionInto(B, p1, e1b, e2b);
 
-            // Longitudinal stripes: 5 lit, 3 dim. Reads as motion at speed and
-            // as a dashed line at distance.
-            const lit = (j % 8) < 5;
-            const top = lit ? colStripe : colBase;
-            const side = lit ? colBase : colEdgeDim;
+            // Deck chevrons: 6 lit, 4 dim. At ~2 units per segment that is a
+            // 20-unit rhythm, which still reads as motion at racing speed
+            // instead of strobing into a flat average.
+            const lit = (j % 10) < 6;
+            const deck = lit ? colDeckLit : colDeckDim;
 
             // Quad winding: (a0, a1, b1) then (a0, b1, b0). With the section
             // running CCW about +tangent, that order faces OUT of the beam,
             // which is what the explicit normal below also says.
             const quad = [0, 1, 3, 0, 3, 2]; // indices into [a0, a1, b0, b1]
-            for (let k = 0; k < 4; k++) {
-                const k2 = (k + 1) & 3;
+            for (let k = 0; k < SECT; k++) {
+                const k2 = (k + 1) % SECT;
                 const corners = [A[k], A[k2], B[k], B[k2]];
                 ab.copy(corners[2]).sub(corners[0]);   // along the line
                 ad.copy(corners[1]).sub(corners[0]);   // around the section
                 nrm.copy(ad).cross(ab).normalize();    // outward
-                const c = k === 1 ? top : side;
+                const c = faceColor[k] || deck;
                 const cr_ = c.r, cg_ = c.g, cb_ = c.b;
                 for (let q = 0; q < 6; q++) {
                     const v = corners[quad[q]];
@@ -588,7 +705,7 @@ export function createCourse(THREE, opts = {}) {
             // Additive over a bright golden-hour sky blows out fast: the first
             // captured frame at 0.55 was a solid white wedge that swallowed the
             // beam it was supposed to be haloing.
-            const alpha = [0, lit ? 0.26 : 0.14, 0];
+            const alpha = [0, lit ? 0.16 : 0.09, 0];
             for (let h = 0; h < 2; h++) {
                 const srcs = [gA, gA, gB, gA, gB, gB];
                 const cols = [h, h + 1, h + 1, h, h + 1, h];
@@ -613,7 +730,7 @@ export function createCourse(THREE, opts = {}) {
         ramp: 'emissive',
         vertexColors: true,
         emissive: PALETTE.ribbon,
-        emissiveIntensity: 0.35,
+        emissiveIntensity: 0.22,
         rimColor: PALETTE.ribbonEdge,
         rimStrength: 0.85,
         rimThreshold: 0.35,
@@ -688,7 +805,7 @@ export function createCourse(THREE, opts = {}) {
     // as a solid white slab clipped off at the top and bottom, which is what
     // the first captured frame showed.
     let pillars = null;
-    const pillarGeo = buildLightShaft(THREE, 7, [0, 0.34, 0.62, 1], [0, 0.30, 0.16, 0], [1.35, 1.0, 0.72, 0.35]);
+    const pillarGeo = buildLightShaft(THREE, 7, [0, 0.34, 0.62, 1], [0, 0.17, 0.09, 0], [1.35, 0.85, 0.55, 0.22]);
     const pillarMat = new THREE.MeshBasicMaterial({
         vertexColors: true, transparent: true, depthWrite: false,
         blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
@@ -735,7 +852,7 @@ export function createCourse(THREE, opts = {}) {
                 pez.copy(pex).cross(up).normalize();
                 pm.makeBasis(pex, up, pez);
                 pm.setPosition(up.x * groundR, up.y * groundR, up.z * groundR);
-                sc.makeScale(3.0 * s, topR - groundR, 3.0 * s);
+                sc.makeScale(1.9 * s, topR - groundR, 1.9 * s);
                 pm.multiply(sc);
                 pillars.setMatrixAt(i, pm);
                 pillars.setColorAt(i, c);
@@ -760,13 +877,13 @@ export function createCourse(THREE, opts = {}) {
         const ink = new THREE.Color(PALETTE.inkSoft);
         const gold = new THREE.Color(PALETTE.uiGold);
 
-        // The gate-0 ring is 1.34x scale, so the gantry has to clear r=13.4 in
+        // The gate-0 ring is 1.34x scale, so the gantry has to clear r=12 in
         // both axes or it reads as a fence in front of the gate rather than an
-        // arch over it. Local Y is radial, so -13 puts the post feet on the
-        // ground (gate 0 sits ~14 above the local floor).
-        const postX = GATE_RADIUS * 1.34 + 3.4;
+        // arch over it. Local Y is radial, so -14 puts the post feet on the
+        // ground (gate 0 sits ~15 above the local floor).
+        const postX = GATE_RADIUS * 1.34 + 2.8;
         const footY = -14;
-        const beamY = 20;
+        const beamY = 17;
         const postHalf = (beamY - footY) * 0.5;
         pushBox(P, Nn, C, -postX, footY + postHalf, 0, 1.15, postHalf, 1.15, gold.r, gold.g, gold.b);
         pushBox(P, Nn, C, postX, footY + postHalf, 0, 1.15, postHalf, 1.15, gold.r, gold.g, gold.b);
@@ -835,7 +952,7 @@ export function createCourse(THREE, opts = {}) {
     for (let s = 0; s < SEGMENTS.length; s++) {
         const seg = SEGMENTS[s];
         const tFrom = nearestT(dense[denseIndexOfControl[seg.from]].x, dense[denseIndexOfControl[seg.from]].y, dense[denseIndexOfControl[seg.from]].z);
-        const dEnd = dense[(denseIndexOfControl[seg.to] + SUB) % dense.length];
+        const dEnd = dense[(denseIndexOfControl[seg.to] + subCount[seg.to]) % dense.length];
         const tTo = nearestT(dEnd.x, dEnd.y, dEnd.z);
         let sum = 0, peak = 0, count = 0;
         let lo = Infinity, hi = -Infinity;
@@ -925,7 +1042,7 @@ export function createCourse(THREE, opts = {}) {
     setNextGate(1);
 
     const triangleCount =
-        RS * 8 +                                          // ribbon beam
+        RS * SECT * 2 +                                   // ribbon beam
         RS * 4 +                                          // glow skirt
         tier.ringRadial * tier.ringTubular * 2 * gateCount * 2 + // rings + hulls
         (tier.pillars ? 42 * gateCount : 0) +                    // 7 sides x 3 bands x 2

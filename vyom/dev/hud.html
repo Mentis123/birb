@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYOM dev · hud</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1324; }
+  #bg { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="hud"></div>
+<script type="module">
+// The HUD needs no THREE. The background is a hand-painted "plausible game
+// frame" on a 2D canvas so the HUD is judged against a real scene, not a void.
+import { createHUD } from '/vyom/src/ui/hud.js';
+import { CSS, PALETTE } from '/vyom/src/core/palette.js';
+import { makeRng, rngRange } from '/vyom/src/core/rng.js';
+
+const params = new URLSearchParams(location.search);
+const state = params.get('state') || 'racing';
+
+// ---------------------------------------------------------------------------
+// Background: stand-in for a captured race frame.
+// ---------------------------------------------------------------------------
+const bg = document.getElementById('bg');
+const ctx = bg.getContext('2d');
+
+function ink(w) { ctx.strokeStyle = CSS.ink; ctx.lineWidth = w; ctx.lineJoin = 'round'; }
+
+function paint() {
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+    bg.width = W; bg.height = H;
+    const S = Math.min(W, H) / 390;           // scale reference
+    const rng = makeRng(7717);
+
+    // --- sky ---------------------------------------------------------------
+    const sky = ctx.createLinearGradient(0, 0, 0, H * 0.78);
+    sky.addColorStop(0, CSS.skyZenith);
+    sky.addColorStop(0.48, CSS.skyMid);
+    sky.addColorStop(1, CSS.skyHorizon);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // sun + halo, up and to the right (matches KEY_LIGHT_DIR)
+    const sx = W * 0.76, sy = H * 0.16;
+    const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, 150 * S);
+    halo.addColorStop(0, 'rgba(255,212,105,0.85)');
+    halo.addColorStop(1, 'rgba(255,212,105,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(sx, sy, 150 * S, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = CSS.sunCore;
+    ctx.beginPath(); ctx.arc(sx, sy, 30 * S, 0, Math.PI * 2); ctx.fill();
+
+    // --- cel clouds --------------------------------------------------------
+    for (let i = 0; i < 7; i++) {
+        const cx = rngRange(rng, 0.02, 0.98) * W;
+        const cy = rngRange(rng, 0.06, 0.46) * H;
+        const s = rngRange(rng, 0.6, 1.5) * S;
+        ctx.beginPath();
+        for (let p = 0; p < 5; p++) {
+            const px = cx + (p - 2) * 24 * s;
+            const py = cy + Math.sin(p * 1.7 + i) * 6 * s;
+            ctx.moveTo(px + 26 * s, py);
+            ctx.arc(px, py, 26 * s - Math.abs(p - 2) * 6 * s, 0, Math.PI * 2);
+        }
+        ctx.fillStyle = 'rgba(255,253,246,0.95)';
+        ctx.fill();
+    }
+
+    // --- planet horizon ----------------------------------------------------
+    const R = Math.max(W, H) * 1.55;
+    const cy = H * 0.72 + R;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(W * 0.5, cy, R, 0, Math.PI * 2); ctx.clip();
+    const gnd = ctx.createLinearGradient(0, H * 0.6, 0, H);
+    gnd.addColorStop(0, CSS.meadowLit);
+    gnd.addColorStop(0.55, CSS.meadowMid);
+    gnd.addColorStop(1, CSS.meadowDeep);
+    ctx.fillStyle = gnd;
+    ctx.fillRect(0, 0, W, H);
+
+    // carved valley bands
+    ctx.fillStyle = 'rgba(125,75,44,0.55)';
+    for (let i = 0; i < 4; i++) {
+        const y = H * (0.79 + i * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(-10, y);
+        for (let x = 0; x <= W; x += 24 * S) {
+            ctx.lineTo(x, y + Math.sin(x * 0.004 + i * 2.1) * 9 * S);
+        }
+        ctx.lineTo(W + 10, y + 22 * S);
+        for (let x = W; x >= 0; x -= 24 * S) {
+            ctx.lineTo(x, y + 22 * S + Math.sin(x * 0.004 + i * 2.1) * 9 * S);
+        }
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+
+    // horizon ink line
+    ctx.beginPath();
+    ctx.arc(W * 0.5, cy, R, Math.PI * 1.18, Math.PI * 1.82);
+    ink(4 * S); ctx.stroke();
+
+    // --- trees along the ground -------------------------------------------
+    for (let i = 0; i < 34; i++) {
+        const x = rngRange(rng, -0.05, 1.05) * W;
+        const depth = rng();
+        const y = H * (0.7 + depth * 0.33);
+        const s = (0.35 + depth * 1.0) * S;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 40 * s);
+        ctx.lineTo(x + 17 * s, y + 4 * s);
+        ctx.lineTo(x - 17 * s, y + 4 * s);
+        ctx.closePath();
+        ctx.fillStyle = depth > 0.5 ? CSS.foliageMid : CSS.foliageDeep;
+        ctx.fill();
+        ink(2.6 * s); ctx.stroke();
+    }
+
+    // --- the racing ribbon + gates ----------------------------------------
+    function ribbonY(x) {
+        return H * 0.63 + Math.sin(x / W * 3.1 + 0.6) * H * 0.055 - Math.pow(x / W - 0.5, 2) * H * 0.1;
+    }
+    ctx.beginPath();
+    ctx.moveTo(-20, ribbonY(-20));
+    for (let x = 0; x <= W + 20; x += 12) ctx.lineTo(x, ribbonY(x));
+    ink(15 * S); ctx.stroke();
+    ctx.strokeStyle = CSS.ribbon; ctx.lineWidth = 9 * S; ctx.stroke();
+    ctx.strokeStyle = CSS.ribbonEdge; ctx.lineWidth = 3 * S; ctx.stroke();
+
+    for (let i = 0; i < 4; i++) {
+        const x = W * (0.14 + i * 0.26);
+        const y = ribbonY(x);
+        const rr = (46 - i * 6) * S;
+        ctx.beginPath();
+        ctx.ellipse(x, y, rr * 0.62, rr, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = i === 0 ? CSS.gateNext : CSS.gateIdle;
+        ctx.lineWidth = 11 * S; ctx.stroke();
+        ink(3 * S); ctx.stroke();
+    }
+
+    // --- birds -------------------------------------------------------------
+    function bird(x, y, s, colour) {
+        ctx.save();
+        ctx.translate(x, y);
+        // wings
+        ctx.beginPath();
+        ctx.moveTo(-6 * s, 0); ctx.quadraticCurveTo(-40 * s, -26 * s, -52 * s, -4 * s);
+        ctx.quadraticCurveTo(-34 * s, 2 * s, -6 * s, 6 * s);
+        ctx.closePath();
+        ctx.fillStyle = colour; ctx.fill(); ink(3 * s); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(6 * s, 0); ctx.quadraticCurveTo(40 * s, -26 * s, 52 * s, -4 * s);
+        ctx.quadraticCurveTo(34 * s, 2 * s, 6 * s, 6 * s);
+        ctx.closePath();
+        ctx.fillStyle = colour; ctx.fill(); ink(3 * s); ctx.stroke();
+        // body
+        ctx.beginPath(); ctx.ellipse(0, 2 * s, 15 * s, 17 * s, 0, 0, Math.PI * 2);
+        ctx.fillStyle = colour; ctx.fill(); ink(3.4 * s); ctx.stroke();
+        // belly
+        ctx.beginPath(); ctx.ellipse(0, 8 * s, 9 * s, 9 * s, 0, 0, Math.PI * 2);
+        ctx.fillStyle = CSS.birdPlayerBelly; ctx.fill();
+        // beak
+        ctx.beginPath();
+        ctx.moveTo(-6 * s, 12 * s); ctx.lineTo(6 * s, 12 * s); ctx.lineTo(0, 24 * s);
+        ctx.closePath(); ctx.fillStyle = CSS.beak; ctx.fill(); ink(2.6 * s); ctx.stroke();
+        // eyes
+        for (const ex of [-7, 7]) {
+            ctx.beginPath(); ctx.arc(ex * s, 0, 5.2 * s, 0, Math.PI * 2);
+            ctx.fillStyle = CSS.eyeWhite; ctx.fill(); ink(2 * s); ctx.stroke();
+            ctx.beginPath(); ctx.arc(ex * s, 1 * s, 2.4 * s, 0, Math.PI * 2);
+            ctx.fillStyle = CSS.eyeDark; ctx.fill();
+        }
+        ctx.restore();
+    }
+    bird(W * 0.30, H * 0.50, 0.55 * S, CSS.birdRival1);
+    bird(W * 0.68, H * 0.44, 0.42 * S, CSS.birdRival3);
+    bird(W * 0.50, H * 0.60, 1.05 * S, CSS.birdPlayer);
+
+    // vignette so HUD edges have something to sit against
+    const vig = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.35, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+    vig.addColorStop(0, 'rgba(15,28,51,0)');
+    vig.addColorStop(1, 'rgba(15,28,51,0.5)');
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+}
+
+// ---------------------------------------------------------------------------
+// A fake course + racers so the minimap has real geometry to draw.
+// ---------------------------------------------------------------------------
+const PR = 112;
+const fakeCourse = {
+    gateCount: 12,
+    gatePositions: new Float32Array(12 * 3),
+    sampleAt(t, out) {
+        const a = t * Math.PI * 2;
+        // A closed loop with real character: a long sweeper, a hairpin lobe and
+        // a dive, wrapped onto the sphere.
+        const lat = Math.sin(a * 2 + 0.6) * 0.34 + Math.sin(a * 3) * 0.12;
+        const lon = a + Math.sin(a * 2) * 0.22;
+        const cl = Math.cos(lat);
+        out.set(
+            Math.cos(lon) * cl * PR,
+            Math.sin(lat) * PR,
+            Math.sin(lon) * cl * PR
+        );
+        return out;
+    },
+};
+const _o = { x: 0, y: 0, z: 0, set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; } };
+for (let g = 0; g < 12; g++) {
+    fakeCourse.sampleAt(g / 12, _o);
+    fakeCourse.gatePositions[g * 3] = _o.x;
+    fakeCourse.gatePositions[g * 3 + 1] = _o.y;
+    fakeCourse.gatePositions[g * 3 + 2] = _o.z;
+}
+
+const racers = new Float32Array(4 * 3);
+function placeRacers(baseT) {
+    const offs = [0, 0.02, -0.03, 0.05];
+    for (let i = 0; i < 4; i++) {
+        fakeCourse.sampleAt((baseT + offs[i] + 1) % 1, _o);
+        const lift = 1 + (i === 0 ? 0.03 : 0.02);
+        racers[i * 3] = _o.x * lift;
+        racers[i * 3 + 1] = _o.y * lift;
+        racers[i * 3 + 2] = _o.z * lift;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+const hud = createHUD(document.getElementById('hud'), { quality: params.get('q') || 'high' });
+
+hud.setLap(2, 3);
+hud.setPosition(state === 'results' ? 2 : 2, 4);
+hud.setSpeed(184, 0.71);
+hud.setBoost(0.66);
+hud.setGate(4, 12);
+hud.setSplit('1:12.44', -310);
+
+// Two frames so the minimap's smoothed heading is established from real motion.
+placeRacers(0.30); hud.minimap.update(fakeCourse, racers, 0);
+placeRacers(0.33); hud.minimap.update(fakeCourse, racers, 0);
+placeRacers(0.36); hud.minimap.update(fakeCourse, racers, 0);
+
+if (state === 'countdown') {
+    hud.showCountdown(Number(params.get('n') || 2));
+} else if (state === 'wrongway') {
+    hud.showWrongWay(true);
+    hud.setSpeed(96, 0.32);
+    hud.setSplit('1:12.44', 880);
+} else if (state === 'results') {
+    hud.showResults([
+        { place: 1, name: 'Talon', index: 1, totalMs: 214860, laps: [72110, 71240, 71510] },
+        { place: 2, name: 'You', index: 0, isPlayer: true, totalMs: 216430, laps: [73980, 71120, 71330] },
+        { place: 3, name: 'Zephyr', index: 2, totalMs: 219940, laps: [74010, 72860, 73070] },
+        { place: 4, name: 'Pip', index: 3, totalMs: 226310, laps: [76220, 74980, 75110] },
+    ]);
+}
+
+paint();
+addEventListener('resize', () => { paint(); hud.resize(); });
+
+window.__VYOM_STATS = () => ({ drawCalls: 0, triangles: 0 });
+window.__VYOM_READY = true;
+</script>
+</body>
+</html>
