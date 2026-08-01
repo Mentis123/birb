@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYOM dev · sky</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+import { loadThree } from '/vyom/src/core/three-loader.js';
+import { PALETTE } from '/vyom/src/core/palette.js';
+import { createSky } from '/vyom/src/world/sky.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(66, innerWidth / innerHeight, 0.1, 2000);
+
+// Sit at bird cruise altitude on the planet so the sky is framed the way the
+// game frames it: horizon low, key light high and to the right.
+camera.position.set(0, 118, 0);
+// Aim along the key-light azimuth at 27 degrees of elevation. With a 66 degree
+// vertical FOV that puts the horizon band near the bottom edge, the mid
+// gradient through the middle and the whole sun + halo inside the top third —
+// the one framing that lets every part of the sky be judged at once.
+{
+  const az = Math.atan2(0.46, 0.42);
+  const el = 27 * Math.PI / 180;
+  camera.lookAt(
+    camera.position.x + Math.cos(el) * Math.cos(az) * 100,
+    camera.position.y + Math.sin(el) * 100,
+    camera.position.z + Math.cos(el) * Math.sin(az) * 100
+  );
+}
+
+const sky = createSky(THREE, { quality: 'high', seed: 90210 });
+scene.add(sky.group);
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// Deterministic capture: step the sky with a FIXED dt up to a fixed clock, then
+// hold. Wall-clock animation would drift the clouds by however long the harness
+// happened to take, and two captures of the same code would not be comparable.
+const FIXED_DT = 1 / 60;
+const HOLD_AT = 6.5;
+let simTime = 0;
+while (simTime < HOLD_AT) { sky.update(FIXED_DT, camera); simTime += FIXED_DT; }
+renderer.render(scene, camera);
+
+function frame() {
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+window.__VYOM_STATS = () => ({
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  reportedDrawCalls: sky.drawCallCount,
+  reportedTriangles: sky.triangleCount,
+});
+window.__VYOM_READY = true;
+</script>
+</body>
+</html>
