@@ -143,8 +143,11 @@ const CFG = {
     packGain: 1.1,
     packMax: 0.045,
 
-    /** Angular rate that maps to animator `turn` = 1. */
-    turnNorm: 2.4,
+    /** Angular rate that maps to animator `turn` = 1. Deliberately BELOW the
+     *  personalities' max turn rate: a bird that only reaches full bank at its
+     *  physical steering limit spends the whole lap looking bolt upright, and
+     *  an arcade racer wants the lean to read on an ordinary sweeper. */
+    turnNorm: 1.6,
 };
 
 /**
@@ -169,7 +172,7 @@ const PERSONALITIES = [
         steerGain: 6.4, turnRate: 2.85,
         accel: 27, brake: 33,
         wanderAmp: 0.45, wanderRate: 0.31,
-        flapHz: 0.92, flapAmp: 0.95, flapBeat: 8,
+        flapHz: 1.00, flapAmp: 0.95, flapBeat: 5,
         avoid: 0.30,            // yields to nobody
         bully: 1.0,
         mistakeEvery: [12, 20], mistakeDur: [0.55, 0.95],
@@ -192,7 +195,7 @@ const PERSONALITIES = [
         steerGain: 5.2, turnRate: 2.6,
         accel: 21, brake: 30,
         wanderAmp: 0.10, wanderRate: 0.17,
-        flapHz: 0.62, flapAmp: 0.70, flapBeat: 4,
+        flapHz: 0.68, flapAmp: 0.72, flapBeat: 3,
         avoid: 1.0,
         bully: 0,
         mistakeEvery: [26, 42], mistakeDur: [0.4, 0.7],
@@ -215,7 +218,7 @@ const PERSONALITIES = [
         steerGain: 8.6, turnRate: 2.95,
         accel: 30, brake: 25,
         wanderAmp: 4.0, wanderRate: 0.32,
-        flapHz: 0.78, flapAmp: 0.85, flapBeat: 12,
+        flapHz: 0.84, flapAmp: 0.88, flapBeat: 7,
         avoid: 0.85,
         bully: 0.2,
         mistakeEvery: [8, 14], mistakeDur: [0.8, 1.5],

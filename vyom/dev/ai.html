@@ -257,8 +257,6 @@ let simT = 0;
 // =============================================================================
 const trailGroup = new THREE.Group();
 scene.add(trailGroup);
-course.setNextGate(race.nextGate[ai.racers[0].raceIndex]);
-course.update(0.31);
 {
   const up = new THREE.Vector3(), fwd = new THREE.Vector3(), side = new THREE.Vector3();
   const c = new THREE.Color();
@@ -281,7 +279,7 @@ course.update(0.31);
       side.crossVectors(fwd, up).normalize().multiplyScalar(W);
       // Older samples fade toward the fog so the trail reads as history.
       const age = k / (n - 1);
-      c.copy(base).lerp(fogCol, 0.45 * (1 - age));
+      c.copy(base).lerp(fogCol, 0.30 * (1 - age));
       const ax = a.x, ay = a.y, az = a.z, bx = b.x, by = b.y, bz = b.z;
       const q = [
         ax - side.x, ay - side.y, az - side.z,
@@ -301,7 +299,7 @@ course.update(0.31);
     g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
     g.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
     trailGroup.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.92,
+      vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 1,
       depthWrite: false, fog: true,
     })));
   }
@@ -339,7 +337,7 @@ function placeCamera() {
     course.tangentAt(hairpinT, _t);
     _u.copy(_p).normalize();
     camera.position.copy(_p)
-      .addScaledVector(_u, 96 + 34 * portrait)
+      .addScaledVector(_u, 80 + 40 * portrait)
       .addScaledVector(_t, -6);
     camera.up.copy(_t);
     camera.lookAt(_p);
