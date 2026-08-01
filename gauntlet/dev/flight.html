@@ -362,10 +362,21 @@ const knockdown = (() => {
 // giant foreground ramp. Trimming the last two seconds leaves the trail
 // starting behind the camera, where it reads as history.
 const TRAIL_TRIM = Math.round(2.0 / (DT * SAMPLE_EVERY));
-const trailPts = path.slice(0, Math.max(2, path.length - TRAIL_TRIM));
+const rawTrail = path.slice(0, Math.max(2, path.length - TRAIL_TRIM));
+
+// Drop consecutive samples that sit on top of each other. CatmullRomCurve3
+// takes the tangent from the difference of neighbouring points, so a repeated
+// point yields a zero-length tangent, and computeFrenetFrames then normalises
+// it into NaN and TubeGeometry throws. The bird sits still on the grid during
+// the countdown and can stall to near-zero radial motion in a hard climb, so
+// duplicates are normal input, not a bug to assert against.
+const trailPts = rawTrail.filter((p, i) =>
+  i === 0 || p.distanceToSquared(rawTrail[i - 1]) > 1e-6);
+if (trailPts.length < 2) trailPts.push(rawTrail[rawTrail.length - 1].clone().addScalar(0.01));
+
 const curve = new THREE.CatmullRomCurve3(trailPts, false, 'catmullrom', 0.5);
 const trail = new THREE.Mesh(
-  new THREE.TubeGeometry(curve, Math.min(1400, trailPts.length * 2), 0.22, 5, false),
+  new THREE.TubeGeometry(curve, Math.min(1400, Math.max(4, trailPts.length * 2)), 0.22, 5, false),
   createToonMaterial(THREE, {
     color: PALETTE.ribbon, ramp: 'emissive',
     emissive: PALETTE.ribbon, emissiveIntensity: 0.55, fog: true,

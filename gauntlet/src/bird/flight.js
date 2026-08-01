@@ -68,7 +68,7 @@ export const FLIGHT_CONFIG = {
     // the bird outran the player's ability to read the next gate. Turn RATES
     // were deliberately left alone, so the same angular rate at a lower speed
     // gives a tighter turning radius — that is most of the "easier to control".
-    // The accelerations (pitchEnergy, boostAccel) scale with it so the time
+    // The accelerations (diveEnergy, climbEnergy, boostAccel) scale with it so the time
     // constants of the energy trade and the boost feel unchanged.
     cruiseSpeed: 27,        // what drag pulls you back toward
     minSpeed: 15,           // stall floor: a hard climb can never park you
@@ -76,10 +76,17 @@ export const FLIGHT_CONFIG = {
     boostMaxSpeed: 61,      // HARD ceiling while boosting
 
     // --- energy trade ------------------------------------------------------
-    // dv/dt = -sinPitch * pitchEnergy. sinPitch is forward-dot-radial-up, so
+    // dv/dt = -sinPitch * (dive|climb)Energy. sinPitch is forward-dot-radial-up, so
     // nose-up (climb) is positive and bleeds speed; nose-down gains it.
-    pitchEnergy: 24,
-    dragCoef: 0.55,         // exponential pull back toward cruise, per second
+    // Diving gains speed SLOWER than climbing sheds it. This asymmetry is
+    // deliberate and is the fix for "the dive runs away from me": with a
+    // single symmetric constant the bird reached its ceiling in 1.2s but took
+    // 4.1s to shed it wings-level, so one flick of the stick pinned you at top
+    // speed for four seconds with the ground coming up. Now the dive builds
+    // over ~2.5s and any pull-up actively kills the excess.
+    diveEnergy: 20,         // gained per second at a full-angle dive
+    climbEnergy: 27,        // bled per second at a full-angle climb
+    dragCoef: 1.0,          // exponential pull back toward cruise, per second
 
     // --- handling ----------------------------------------------------------
     yawRate: Math.PI * 0.55,
@@ -170,8 +177,10 @@ export function fallRampMultiplier(fallTimer, duration = FALL_RAMP_DURATION, max
  * @returns {number} the new airspeed
  */
 export function stepAirSpeed(speed, sinPitch, throttle, dt, ceiling, cfg = FLIGHT_CONFIG) {
-    // Trade height for speed: diving accelerates, climbing bleeds.
-    let s = speed - sinPitch * cfg.pitchEnergy * dt;
+    // Trade height for speed: diving accelerates, climbing bleeds. sinPitch is
+    // forward-dot-radial-up, so it is NEGATIVE nose-down.
+    const energy = sinPitch < 0 ? cfg.diveEnergy : cfg.climbEnergy;
+    let s = speed - sinPitch * energy * dt;
     // Drag hauls it back toward the cruise target. Exponential, so it is
     // frame-rate independent and never overshoots into oscillation.
     const target = cfg.cruiseSpeed * throttle;
@@ -472,15 +481,18 @@ export class GauntletFlight {
         //
         //    Pitch stays around LOCAL x with `multiply` (local space, applied
         //    after), because pitch genuinely is relative to the bird's frame.
+        //    Both axes scale with speed. Pitch used to be left at a flat rate,
+        //    which meant the faster you went the LESS able you were to pull out
+        //    of a dive — the exact moment you need the authority most.
         s.up.copy(this.position).normalize();
+        const scale = turnRateScale(this.speed01, cfg);
         if (ix !== 0) {
-            const scale = turnRateScale(this.speed01, cfg);
             s.quat.setFromAxisAngle(s.up, -ix * this.yawRate * scale * dt);
             this.quaternion.premultiply(s.quat);
         }
         if (iy !== 0) {
             s.axis.set(1, 0, 0);
-            s.quat.setFromAxisAngle(s.axis, iy * this.pitchRate * dt);
+            s.quat.setFromAxisAngle(s.axis, iy * this.pitchRate * scale * dt);
             this.quaternion.multiply(s.quat);
         }
 
@@ -505,7 +517,7 @@ export class GauntletFlight {
         // Coming off a boost the speed is above maxSpeed; bleed it rather than
         // snapping, so the burst has a satisfying run-out.
         if (!this.isBoosting && this.speed > cfg.maxSpeed) {
-            this.speed = Math.max(cfg.maxSpeed, this.speed - cfg.pitchEnergy * dt);
+            this.speed = Math.max(cfg.maxSpeed, this.speed - cfg.climbEnergy * dt);
         }
 
         // 3. Launch impulse (post-tumble): a radial pop that decays out.
@@ -575,7 +587,7 @@ export class GauntletFlight {
 
         s.oldNormal.copy(this.position).normalize();
         s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
-        this.speed = Math.max(cfg.minSpeed * 0.5, this.speed - cfg.pitchEnergy * dt);
+        this.speed = Math.max(cfg.minSpeed * 0.5, this.speed - cfg.climbEnergy * dt);
 
         // Same split integration as level flight (see _tickFlight): tangential
         // drift plus an explicit radius, so a long tumble cannot drift off the

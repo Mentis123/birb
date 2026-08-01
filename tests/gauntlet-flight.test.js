@@ -7,6 +7,7 @@
  * nothing, which is exactly what makes its exported math testable from here.
  */
 
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -124,8 +125,34 @@ test('diving builds speed, climbing bleeds it', () => {
     const climb = stepAirSpeed(c.cruiseSpeed, 0.4, 1, DT, c.maxSpeed);
     assert.ok(dive > c.cruiseSpeed, 'dive must accelerate');
     assert.ok(climb < c.cruiseSpeed, 'climb must decelerate');
-    // Symmetric about cruise, to within the drag term.
-    assert.ok(Math.abs((dive - c.cruiseSpeed) - (c.cruiseSpeed - climb)) < 0.02);
+
+    // DELIBERATELY ASYMMETRIC: a climb must shed more than the mirror-image
+    // dive gains. With a symmetric constant the bird reached its ceiling in
+    // 1.2s and needed 4.1s to shed it wings-level, so a single flick of the
+    // stick pinned the player at top speed with the ground coming up. The
+    // asymmetry is what makes a dive self-correcting, so guard it.
+    const gained = dive - c.cruiseSpeed;
+    const shed = c.cruiseSpeed - climb;
+    assert.ok(shed > gained, 'a pull-up must kill speed faster than a dive builds it');
+    assert.ok(c.climbEnergy > c.diveEnergy, 'climbEnergy must exceed diveEnergy');
+});
+
+test('a full dive settles below the ceiling, and gets there gradually', () => {
+    const c = FLIGHT_CONFIG;
+    const sin = -Math.sin(c.maxPitch);
+    // Terminal speed is where the energy gain balances drag. It must sit under
+    // the hard ceiling — if drag cannot hold it, the clamp is the only thing
+    // stopping the dive and the speed pins instantly.
+    const terminal = c.cruiseSpeed + (c.diveEnergy * Math.abs(sin)) / c.dragCoef;
+    assert.ok(terminal < c.maxSpeed, 'drag, not the clamp, must limit a dive');
+    assert.ok(terminal > c.cruiseSpeed * 1.4, 'a dive must still be worth doing');
+
+    // ...and it must take a beat to build, not one frame.
+    let s = c.cruiseSpeed;
+    let t = 0;
+    const target = c.cruiseSpeed + 0.9 * (terminal - c.cruiseSpeed);
+    while (s < target && t < 30) { s = stepAirSpeed(s, sin, 1, DT, c.maxSpeed); t += DT; }
+    assert.ok(t > 1.6, 'reaching dive speed must take longer than a stick flick');
 });
 
 test('a sustained dive is clamped by the ceiling, not unbounded', () => {
@@ -352,5 +379,31 @@ test('both normalisations are monotonic', () => {
         const na = airSpeed01(v), nb = speed01(v);
         assert.ok(na >= a && nb >= b, `non-monotonic at v=${v}`);
         a = na; b = nb;
+    }
+});
+
+// ---------------------------------------------------------------------------
+// config integrity
+// ---------------------------------------------------------------------------
+
+test('every cfg.* the flight model reads actually exists in FLIGHT_CONFIG', () => {
+    // Renaming a tuning constant and missing a call site yields `undefined`,
+    // which turns speed into NaN, which turns the bird's POSITION into NaN —
+    // and nothing throws. It renders as a bird that silently vanishes. That is
+    // exactly what happened when pitchEnergy was split into diveEnergy and
+    // climbEnergy: the unit tests still passed because they only exercise
+    // stepAirSpeed, and only the visual probe caught it.
+    const src = readFileSync(
+        new URL('../gauntlet/src/bird/flight.js', import.meta.url), 'utf8');
+
+    const referenced = new Set();
+    for (const m of src.matchAll(/\bcfg\.([A-Za-z_$][\w$]*)/g)) referenced.add(m[1]);
+    assert.ok(referenced.size > 8, 'expected to find the config reads');
+
+    const missing = [...referenced].filter((k) => !(k in FLIGHT_CONFIG));
+    assert.deepEqual(missing, [], 'flight.js reads config keys that do not exist');
+
+    for (const [k, v] of Object.entries(FLIGHT_CONFIG)) {
+        assert.ok(Number.isFinite(v), `FLIGHT_CONFIG.${k} must be a finite number`);
     }
 });
