@@ -697,7 +697,7 @@ async function boot() {
     // --- ui / audio / input -------------------------------------------------
     // The on-screen stick and boost pill own the bottom corners, so the HUD's
     // minimap and speed cluster lift above them.
-    const hud = createHUD(document.querySelector('[data-hud]'), { quality, bottomInset: 132 });
+    const hud = createHUD(document.querySelector('[data-hud]'), { quality, bottomInset: 92 });
     const audio = createAudio();
     audio.unlock();
     audio.setEnabled(settings.music, settings.sfx);

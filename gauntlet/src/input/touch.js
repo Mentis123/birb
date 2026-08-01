@@ -35,7 +35,7 @@ export const INPUT_TUNING = {
     deadzone: 0.14,
     expo: 0.3,
     smoothing: 0.28,     // per 60Hz frame; made framerate-independent in update()
-    radius: 54,          // px of thumb travel for full deflection
+    radius: 48,          // px of thumb travel for full deflection
     edgeMargin: 74,      // keeps the base fully on-screen
 };
 
@@ -72,7 +72,7 @@ function ensureStyle() {
 
 .vi-knob {
   position: absolute; left: 50%; top: 50%;
-  width: 54px; height: 54px; margin-left: -27px; margin-top: -27px;
+  width: 46px; height: 46px; margin-left: -23px; margin-top: -23px;
   will-change: transform;
 }
 .vi-knob svg { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -92,11 +92,11 @@ function ensureStyle() {
 /* --- boost ------------------------------------------------------------- */
 .vi-boost {
   position: absolute; right: 22px; bottom: 34px;
-  padding: 12px 20px 14px;
+  padding: 9px 16px 11px;
   border: 3px solid ${CSS.ink}; border-radius: 999px;
   background: ${CSS.uiCream};
   box-shadow: 0 5px 0 0 ${CSS.ink}, 0 12px 22px rgba(4, 10, 22, 0.4);
-  color: ${CSS.ink}; font-weight: 900; letter-spacing: 0.14em; font-size: 15px;
+  color: ${CSS.ink}; font-weight: 900; letter-spacing: 0.12em; font-size: 13px;
   display: flex; align-items: center; gap: 8px;
   transition: transform 70ms ease-out, background-color 70ms ease-out, box-shadow 70ms ease-out;
 }

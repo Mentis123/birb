@@ -30,55 +30,15 @@ const STYLE_ID = 'gauntlet-hud-style';
 /** Sample counts for the minimap course polyline, per quality tier. */
 const MAP_SAMPLES = { low: 72, mid: 96, high: 128 };
 /** Minimap CSS size in px, per tier. */
-const MAP_SIZE = { low: 112, mid: 124, high: 132 };
+// Deliberately small. On a real phone the 132px map plus a 132px speed dial
+// ate the lower third of the screen and left nowhere to rest a thumb.
+const MAP_SIZE = { low: 74, mid: 82, high: 88 };
 
 const ORDINALS = ['TH', 'ST', 'ND', 'RD'];
 function ordinalSuffix(n) {
     const v = n % 100;
     if (v >= 11 && v <= 13) return 'TH';
     return ORDINALS[n % 10] || 'TH';
-}
-
-/** Gauge geometry (SVG user units, viewBox 0 0 120 120). */
-const G_CX = 60, G_CY = 60, G_R = 44;
-const G_START = 135, G_SWEEP = 270;
-const G_LEN = 2 * Math.PI * G_R * (G_SWEEP / 360);
-const DEG = Math.PI / 180;
-
-function polar(cx, cy, r, deg) {
-    return [cx + r * Math.cos(deg * DEG), cy + r * Math.sin(deg * DEG)];
-}
-
-function buildGaugeSvg() {
-    const [x1, y1] = polar(G_CX, G_CY, G_R, G_START);
-    const [x2, y2] = polar(G_CX, G_CY, G_R, G_START + G_SWEEP);
-    const arc = `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${G_R} ${G_R} 0 1 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
-
-    let ticks = '';
-    for (let i = 0; i <= 10; i++) {
-        const a = G_START + (G_SWEEP * i) / 10;
-        const major = i % 5 === 0;
-        const [ix, iy] = polar(G_CX, G_CY, major ? 29 : 32, a);
-        const [ox, oy] = polar(G_CX, G_CY, 36, a);
-        ticks += `<line x1="${ix.toFixed(2)}" y1="${iy.toFixed(2)}" x2="${ox.toFixed(2)}" y2="${oy.toFixed(2)}" `
-            + `stroke="${CSS.ink}" stroke-width="${major ? 3 : 1.8}" stroke-linecap="round" opacity="${major ? 1 : 0.45}"/>`;
-    }
-
-    return `<svg class="vh-gauge" viewBox="0 0 120 120" aria-hidden="true">
-  <defs>
-    <linearGradient id="vhSpeedGrad" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="${CSS.uiCyan}"/>
-      <stop offset="0.62" stop-color="${CSS.ribbon}"/>
-      <stop offset="1" stop-color="${CSS.uiGold}"/>
-    </linearGradient>
-  </defs>
-  <circle cx="60" cy="60" r="55" fill="${CSS.uiCream}" stroke="${CSS.ink}" stroke-width="5"/>
-  <circle cx="60" cy="60" r="47" fill="none" stroke="${CSS.ink}" stroke-width="1.5" opacity="0.18"/>
-  <path d="${arc}" fill="none" stroke="${CSS.ink}" stroke-opacity="0.16" stroke-width="11" stroke-linecap="round"/>
-  <path class="vh-gauge-fill" d="${arc}" fill="none" stroke="url(#vhSpeedGrad)" stroke-width="9" stroke-linecap="round"
-        stroke-dasharray="${G_LEN.toFixed(2)}" stroke-dashoffset="${G_LEN.toFixed(2)}"/>
-  ${ticks}
-</svg>`;
 }
 
 function styleText() {
@@ -105,9 +65,9 @@ function styleText() {
 .vh-card {
   background: var(--cream);
   border: 3px solid var(--ink);
-  border-radius: 16px;
-  box-shadow: 0 4px 0 0 var(--ink), 0 10px 20px rgba(4, 10, 22, 0.42);
-  padding: 6px 12px 7px;
+  border-radius: 12px;
+  box-shadow: 0 3px 0 0 var(--ink), 0 7px 14px rgba(4, 10, 22, 0.40);
+  padding: 3px 8px 4px;
   position: relative;
 }
 /* Gloss sits BEHIND the type — an overlay here ghosts the numerals. */
@@ -118,18 +78,18 @@ function styleText() {
 }
 .vh-card > * { position: relative; z-index: 1; }
 .vh-lab {
-  display: block; font-size: 10px; font-weight: 800; line-height: 1;
-  letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink);
+  display: block; font-size: 8px; font-weight: 800; line-height: 1;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink);
   opacity: 0.62;
 }
 .vh-val {
-  display: block; font-size: 30px; font-weight: 900; line-height: 1.02;
+  display: block; font-size: 20px; font-weight: 900; line-height: 1.02;
   letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
 }
 .vh-val small { font-size: 0.52em; letter-spacing: 0.04em; opacity: 0.66; }
 
 /* --- corners ------------------------------------------------------------- */
-.vh-tl, .vh-tr, .vh-bl, .vh-br { position: absolute; display: flex; gap: 8px; }
+.vh-tl, .vh-tr, .vh-br { position: absolute; display: flex; gap: 6px; }
 .vh-tl { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left));
          flex-direction: column; align-items: flex-start; }
 .vh-tr { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
@@ -139,7 +99,7 @@ function styleText() {
    an on-screen stick the HUD's bottom clusters have to lift clear of them or
    the minimap and the joystick base occupy the same pixels. Both modules are
    correct in isolation; only integration can see the collision. */
-.vh-bl { bottom: calc(var(--vh-bottom, 18px) + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); }
+
 .vh-br { bottom: calc(var(--vh-bottom, 18px) + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right));
          flex-direction: column; align-items: flex-end; }
 
@@ -149,11 +109,11 @@ function styleText() {
 
 /* --- chips (secondary readouts sit on ink, not cream) -------------------- */
 .vh-chip {
-  display: flex; align-items: baseline; gap: 7px;
+  display: flex; align-items: baseline; gap: 5px;
   background: rgba(10, 19, 36, 0.86);
-  border: 2.5px solid var(--ink);
-  border-radius: 11px;
-  padding: 4px 10px 5px;
+  border: 2px solid var(--ink);
+  border-radius: 9px;
+  padding: 2px 7px 3px;
   color: var(--cream);
   box-shadow: 0 3px 0 0 rgba(4, 10, 22, 0.75);
 }
@@ -167,7 +127,7 @@ function styleText() {
 .vh-split[hidden] { display: none; }
 
 /* --- minimap ------------------------------------------------------------- */
-.vh-map { position: relative; padding: 7px; border-radius: 50%; }
+.vh-map { position: relative; padding: 4px; border-radius: 50%; }
 .vh-map::after { display: none; }
 .vh-map canvas { display: block; border-radius: 50%; background: rgba(10, 19, 36, 0.92); }
 .vh-map .vh-nose {
@@ -182,10 +142,12 @@ function styleText() {
 }
 
 /* --- speed + boost ------------------------------------------------------- */
-.vh-speed { position: relative; width: 132px; height: 132px; }
-.vh-gauge { position: absolute; inset: 0; width: 100%; height: 100%;
-            filter: drop-shadow(0 4px 0 var(--ink)) drop-shadow(0 9px 16px rgba(4, 10, 22, 0.45)); }
-.vh-gauge-fill { transition: none; }
+.vh-speed { position: relative; align-self: flex-end; overflow: hidden; }
+.vh-speed .v { font-size: 17px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.vh-speed .k { font-size: 8px; font-weight: 800; letter-spacing: 0.14em;
+               text-transform: uppercase; opacity: 0.7; }
+.vh-speed-bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 0%;
+                background: var(--cyan); transition: width 0.12s linear; }
 .vh-speed-num {
   position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-56%);
   text-align: center; font-size: 34px; font-weight: 900; line-height: 1;
@@ -197,8 +159,8 @@ function styleText() {
   color: var(--ink); opacity: 0.55;
 }
 .vh-boost {
-  position: relative; width: 132px; height: 22px; border-radius: 11px;
-  border: 3px solid var(--ink); background: var(--cream); overflow: hidden;
+  position: relative; width: 108px; height: 14px; border-radius: 8px;
+  border: 2px solid var(--ink); background: var(--cream); overflow: hidden;
   box-shadow: 0 4px 0 0 var(--ink), 0 9px 16px rgba(4, 10, 22, 0.42);
 }
 .vh-boost-fill {
@@ -211,8 +173,8 @@ function styleText() {
 }
 /* The label lives ABOVE the bar: inside it, the notch lines cut the letters. */
 .vh-boost-cap {
-  width: 132px; display: flex; justify-content: space-between; align-items: baseline;
-  margin: 6px 0 3px; font-size: 10px; font-weight: 900; letter-spacing: 0.26em;
+  width: 108px; display: flex; justify-content: space-between; align-items: baseline;
+  margin: 0 0 2px; font-size: 8px; font-weight: 900; letter-spacing: 0.26em;
   text-transform: uppercase; color: var(--cream);
   text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink);
 }
@@ -385,16 +347,13 @@ function styleText() {
 @media (min-width: 700px) and (min-height: 560px) {
   .vh-tl { transform: scale(1.3); transform-origin: top left; }
   .vh-tr { transform: scale(1.3); transform-origin: top right; }
-  .vh-bl { transform: scale(1.3); transform-origin: bottom left; }
   .vh-br { transform: scale(1.3); transform-origin: bottom right; }
 }
 
 /* --- narrow phones: shrink the furniture, never the numbers ------------- */
 @media (max-width: 400px) {
-  .vh-val { font-size: 26px; }
-  .vh-speed { width: 118px; height: 118px; }
-  .vh-boost { width: 118px; height: 20px; }
-  .vh-speed-num { font-size: 30px; }
+  .vh-val { font-size: 18px; }
+  .vh-boost { width: 96px; height: 13px; }
 }
 `;
 }
@@ -462,9 +421,9 @@ export function createHUD(rootEl, options = {}) {
     const posNum = posVal.firstChild;
     const posSuffix = posVal.querySelector('small');
 
-    // ---- bottom-left: minimap --------------------------------------------
-    const bl = el('div', 'vh-bl', rootEl);
-    const mapCard = el('div', 'vh-card vh-map', bl);
+    // ---- minimap: top-right, under the position card ---------------------
+    // The bottom corners belong to the player's thumbs, not to readouts.
+    const mapCard = el('div', 'vh-card vh-map', tr);
     el('div', 'vh-nose', mapCard);
     const mapCanvas = el('canvas', null, mapCard);
     const mapCss = MAP_SIZE[quality];
@@ -472,14 +431,16 @@ export function createHUD(rootEl, options = {}) {
     mapCanvas.style.height = mapCss + 'px';
     const mapCtx = mapCanvas.getContext('2d');
 
-    // ---- bottom-right: speed + boost -------------------------------------
-    const br = el('div', 'vh-br', rootEl);
-    const speedWrap = el('div', 'vh-speed', br, buildGaugeSvg());
-    const gaugeFill = speedWrap.querySelector('.vh-gauge-fill');
-    const speedNum = el('div', 'vh-speed-num', speedWrap);
-    speedNum.textContent = '0';
-    el('div', 'vh-speed-unit', speedWrap).textContent = 'KM/H';
+    // ---- speed: a chip under the map, not a 132px dial --------------------
+    // The dial was handsome and cost a third of the playfield. Speed is felt
+    // more than read; the thin fill bar keeps the at-a-glance feedback.
+    const speedWrap = el('div', 'vh-chip vh-speed', tr,
+        '<span class="v">0</span><span class="k">km/h</span><i class="vh-speed-bar"></i>');
+    const speedNum = speedWrap.querySelector('.v');
+    const gaugeFill = speedWrap.querySelector('.vh-speed-bar');
 
+    // ---- bottom-right: boost only, sitting just above the boost button ----
+    const br = el('div', 'vh-br', rootEl);
     const boostCap = el('div', 'vh-boost-cap', br, '<span>Boost</span><span class="pct">0%</span>');
     const boostPct = boostCap.querySelector('.pct');
     const boostBar = el('div', 'vh-boost', br);
@@ -857,7 +818,7 @@ export function createHUD(rootEl, options = {}) {
         const q = Math.round(s * 200) / 200;
         if (q !== _speed01) {
             _speed01 = q;
-            gaugeFill.setAttribute('stroke-dashoffset', (G_LEN * (1 - q)).toFixed(2));
+            gaugeFill.style.width = (q * 100).toFixed(1) + '%';
         }
     }
 
@@ -1063,7 +1024,7 @@ export function createHUD(rootEl, options = {}) {
             if (motionMq.removeEventListener) motionMq.removeEventListener('change', applyMotion);
             else if (motionMq.removeListener) motionMq.removeListener(applyMotion);
         }
-        [tl, tr, bl, br, countWrap, wrong, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
+        [tl, tr, br, countWrap, wrong, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
         rootEl.classList.remove('gauntlet-hud', 'vh-reduce');
         if (ownsStyle && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
         _srcRef = null;
