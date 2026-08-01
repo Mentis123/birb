@@ -58,24 +58,6 @@ function xform(THREE, geo, tx, ty, tz, rx, ry, rz, sx, sy, sz) {
     return geo;
 }
 
-/**
- * A "feather": a cone rotated to point along +X with its base at the origin,
- * then flattened in Y. Every wing and tail surface in the bird is one of these,
- * which is what gives the silhouette its consistent layered-cone language.
- */
-function feather(THREE, len, rad, seg, flatY, flatZ) {
-    const g = new THREE.ConeGeometry(rad, len, seg, 1, false);
-    // Cone points +Y with its base at -len/2. Rotate -90deg about Z so the tip
-    // points +X, then slide the base onto the origin. Because Matrix4.compose
-    // is T*R*S, the scale runs in the cone's OWN frame: local X becomes world
-    // -Y after the rotation, so `flatY` has to be applied to X, not Y. (Scaling
-    // Y here would shorten the feather instead of flattening it.)
-    return xform(
-        THREE, g, len * 0.5, 0, 0, 0, 0, -Math.PI / 2,
-        flatY === undefined ? 1 : flatY, 1, flatZ === undefined ? 1 : flatZ
-    );
-}
-
 /** Build a non-indexed geometry from a flat xyz triangle-soup array. */
 function makeGeo(THREE, tris) {
     const g = new THREE.BufferGeometry();

@@ -180,7 +180,7 @@ function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
   // Portrait phone capture: pull back so the 2x2 grid still fits.
-  camera.position.z = camera.aspect < 0.7 ? 19.0 : 13.2;
+  camera.position.z = 13.2 * Math.max(1, 0.92 / Math.max(0.35, camera.aspect));
   camera.updateProjectionMatrix();
   updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
   placeLabels();
@@ -204,6 +204,21 @@ window.__VYOM_STATS = () => ({
   perBirdDrawCalls: perBird.drawCalls,
   perBirdTriangles: perBird.triangles,
 });
+// Self-test hook: proves the outline-free tier and dispose() both work.
+// The harness fails the run if this throws.
+window.__birdSelfTest = () => {
+  const lean = createBird(THREE, { quality: 'low', outline: false });
+  if (lean.drawCallCount !== 4) throw new Error('outline:false expected 4 draws, got ' + lean.drawCallCount);
+  const a = createBirdAnimator(THREE, lean);
+  const st = { speed01: 0.5, turn: 0.3, pitch: -0.2, boosting: true, flapImpulse: 1,
+               tumbling: true, grounded: false, celebrating: false, phase: 0.2 };
+  for (let i = 0; i < 120; i++) a.update(1 / 60, st);
+  st.tumbling = false; st.grounded = true; st.celebrating = true;
+  for (let i = 0; i < 120; i++) a.update(1 / 60, st);
+  a.update(0, st); a.update(-1, st); a.update(5, {});
+  a.dispose(); lean.dispose();
+  return 'ok';
+};
 window.__VYOM_READY = true;
 </script>
 </body>
