@@ -396,3 +396,152 @@ When you finish, report: files written, verified draw calls / triangles, what
 you captured, and **an honest percentage against the quality bar with the
 specific reason for any gap**. "The flap is at 70% — the downstroke has no
 follow-through on the primaries" is useful. "Done" is not.
+
+---
+
+# Port addendum — Birb Mobile feature parity (2026-08-01)
+
+Birb Gauntlet started as a racer. This addendum covers porting the rest of Birb
+Mobile: free flight, nesting, the turret, rockets, drones, and the mini-games.
+
+## The rules for porting
+
+1. **Re-implement, never import.** `gauntlet/` stays airtight against the parent
+   `src/`. Read the original for reference — read it closely — but every file
+   here is new. The parent game must remain impossible to break from here.
+2. **The feel constants port VERBATIM.** The aim-rig spring-damper, its
+   hold-to-sweep ramp, the deadzones, the drone orbit speeds, the combo curve:
+   those numbers were tuned over weeks against real hands. Copy them. Do not
+   re-derive them, do not "improve" them, and do not round them off.
+3. **Zero external assets still holds.** The original ships mp3s for rockets,
+   explosions, ring collection and ambient music. All of it gets synthesised.
+4. **Everything else follows the existing contract** above: zero-allocation
+   `update()`, seeded RNG, toon pipeline, instancing, outlines on hero objects
+   only, `-Z` forward, radial up.
+
+## Modes are capability flags, not name checks
+
+`gauntlet/src/game/modes.js` is done and unit-tested. It is PURE — no THREE, no
+DOM. Read it first.
+
+The original branched on the mode string at every call site
+(`if (mode === 'ring_rush' || ...)`), so adding a mode meant hunting those
+down across 5,600 lines and missing one was silent. Here each mode is a
+descriptor of what it turns on:
+
+```js
+import { MODES, modeDef } from '/gauntlet/src/game/modes.js';
+const def = modeDef(run.mode);
+if (def.drones !== 'off') droneSystem.update(dt, def.drones);
+if (def.nesting) nesting.update(dt);
+```
+
+**Never compare mode ids in a subsystem.** Ask the descriptor. If you need a
+capability the table does not express, add a flag to the table — that is the
+extension point.
+
+`drones` is `'off' | 'ambient' | 'hunt' | 'waves'`:
+- **ambient** (Casual) — a few drones drifting on their orbits, dodgeable
+  scenery. Colliding still triggers the existing knockdown.
+- **hunt** (Drone Hunter) — dense, they come to you, ramming them is the scoring
+  verb.
+- **waves** (Turret Defense) — spawned in waves of `2 + wave`, they attack the
+  nest, and rockets are how you stop them.
+
+Casual is the DEFAULT mode and merges the original's Casual and Zen, which
+differed only by tuning multipliers. It keeps ambient drones deliberately: the
+world reads dead without something moving in it.
+
+## Module APIs to build
+
+### `world/nests.js`
+
+```js
+createNests(THREE, { quality, seed, planet }) -> {
+  group, count,
+  positions,               // Float32Array(count*3), world space
+  nearest(x, y, z, maxDist)-> index | -1     // zero-alloc
+  positionOf(i, outVec3),
+  normalOf(i, outVec3),    // radial up at that nest
+  setActive(i),            // highlight the nest being defended
+  update(dt), dispose()
+}
+```
+Nests sit on top of champion trees, placed with `fibonacciDirection` + seeded
+jitter and `surfaceRadius`. Budget: 2 draw calls (instanced bowl + instanced
+twig ring). Outlined — they are hero objects the player aims at.
+
+### `nesting/nesting-system.js` — PURE state machine half + THREE half
+
+The original's states, ported exactly:
+`FLYING -> APPROACHING -> LANDING -> NESTED -> TAKING_OFF -> FLYING`.
+
+```js
+createNesting(THREE, { flight, nests, onStateChange }) -> {
+  state,                   // one of NESTING_STATES
+  update(dt, birdPos),
+  requestLand(index),      // begins the auto-land glide
+  takeOff(),
+  activeNest,              // index | -1
+  dispose()
+}
+```
+The auto-land glide must drive the REAL flight controller toward the nest, not
+lerp the bird's transform. Birb Mobile lerped, and the bird visibly detached
+from its own physics on approach.
+
+### `nesting/aim-rig.js`
+
+Port `src/nesting/aim-rig.js` faithfully — this is the single best-tuned thing
+in the original. Keep: `yawRate` π*1.08, `pitchRate` π*0.864, the 1.0s
+quadratic hold-to-sweep ramp to 1.6x, `maxPitch/minPitch` ±85°, `smoothing` 15,
+`lookSensitivity` 0.00225, and the spring-damper (C0 8.0 stiffness, C1 6.0
+damping). Heavy, inertial, momentum carries through on release.
+
+```js
+createAimRig(THREE, { camera }) -> {
+  update(dt, input),       // input: { x, y } stick, or pointer deltas
+  aimQuaternion, aimForward,
+  reset(upVec, forwardVec),
+  dispose()
+}
+```
+
+### `nesting/rockets.js`
+
+```js
+createRockets(THREE, { quality, capacity }) -> {
+  group,
+  fire(x,y,z, dirX,dirY,dirZ),
+  update(dt, drones),      // returns kills this frame
+  onHit,                   // callback(x,y,z)
+  dispose()
+}
+```
+ONE InstancedMesh for rockets, ONE for the explosion particles — the original
+used three separate mesh pools for shards/sparks/embers. Arc trajectory.
+Budget: 2 draw calls total.
+
+### `nesting/drones.js`
+
+```js
+createDrones(THREE, { quality, seed, planet, nests }) -> {
+  group, alive,
+  setBehaviour('off'|'ambient'|'hunt'|'waves'),
+  spawnWave(count, targetNestIndex),
+  update(dt, birdPos, birdRadius),   // -> { hitBird, nestHits }
+  killAt(index), dispose()
+}
+```
+Instanced body + instanced ring. Orbit speed 0.150 rad/s ±40% (verbatim),
+collision radius 9.9. Cel-shaded with rim light so they read against terrain.
+
+## Verification
+
+Same protocol as the rest of the project — a `dev/<name>.html` probe per module,
+captured with `tools/gauntlet-shot.mjs`, read back and judged. `--query
+"three=local"` is still required in this sandbox.
+
+For the turret specifically: the probe must let you SEE the inertia. Capture the
+aim reticle's path across a hard stick flick and release, and check the
+overshoot-and-settle actually reads as weight rather than as lag.
