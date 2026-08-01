@@ -131,12 +131,23 @@ document.getElementById('hud').textContent =
   `built: draws=${planet.drawCallCount} tris=${planet.triangleCount}\n` +
   `R=${PLANET_RADIUS} alt=${alt}\n` + JSON.stringify(planet.layerCounts);
 
-window.__GAUNTLET_STATS = () => ({
-  drawCalls: renderer.info.render.calls,
-  triangles: renderer.info.render.triangles,
-  builtDrawCalls: planet.drawCallCount,
-  builtTriangles: planet.triangleCount,
-});
+window.__planet = planet;
+const triCount = (g) => (g.getIndex() ? g.getIndex().count : g.getAttribute('position').count) / 3;
+window.__GAUNTLET_STATS = () => {
+  const layers = {};
+  planet.propLayers.forEach((m) => {
+    const per = triCount(m.geometry);
+    layers[m.name.replace('gauntlet-prop-', '')] = { per, count: m.count, tris: per * m.count };
+  });
+  return {
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    builtDrawCalls: planet.drawCallCount,
+    builtTriangles: planet.triangleCount,
+    terrainTris: triCount(planet.terrain.geometry),
+    layers,
+  };
+};
 window.__GAUNTLET_READY = true;
 </script>
 </body>

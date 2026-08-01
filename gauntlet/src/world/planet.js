@@ -303,8 +303,8 @@ const PROP_VERT_BODY = /* glsl */`
 const LAYERS = [
     {
         name: 'broadleaf',
-        cap: 730,
-        scatter: 4200,     // global even spread — the anti-sparseness layer
+        cap: 520,
+        scatter: 3400,     // global even spread — the anti-sparseness layer
         clusters: 46,
         perCluster: 30,
         clusterSpread: 0.055,
@@ -336,8 +336,8 @@ const LAYERS = [
     },
     {
         name: 'pine',
-        cap: 600,
-        scatter: 3200,
+        cap: 450,
+        scatter: 2600,
         clusters: 36,
         perCluster: 24,
         clusterSpread: 0.048,
@@ -359,10 +359,10 @@ const LAYERS = [
     },
     {
         name: 'spire',
-        cap: 220,
-        scatter: 4200,
-        clusters: 26,
-        perCluster: 14,
+        cap: 700,
+        scatter: 11000,
+        clusters: 24,
+        perCluster: 11,
         clusterSpread: 0.040,
         sway: 0,
         sink: 2.2,
@@ -370,8 +370,15 @@ const LAYERS = [
         xVar: 0.30,
         yVar: 0.45,
         zone(d, w, nx, ny, nz) {
-            return w[1] * w[1] * smoothstep(0.24, 0.70, d)
-                * (0.25 + 0.9 * patchMask(nx, ny, nz, 4.6, 0.42, 0.66));
+            // Squaring the canyon weight made this so selective that the layer
+            // never reached its cap — canyon land covers ~44% of the planet but
+            // was carrying a tenth of the meadow's prop count, so a canyon
+            // low-shot read as bare paint. Softened to a mostly-linear
+            // affinity, the depth ramp widened onto the mid-slopes, and the
+            // between-cluster floor raised, so the badlands actually furnish.
+            const affinity = w[1] * (0.55 + 0.45 * w[1]);
+            return affinity * smoothstep(0.10, 0.55, d)
+                * (0.40 + 0.75 * patchMask(nx, ny, nz, 4.6, 0.42, 0.66));
         },
         scale(d, w, rng) {
             return (0.66 + 0.44 * d) * rngRange(rng, 0.70, 1.15);
@@ -379,10 +386,10 @@ const LAYERS = [
     },
     {
         name: 'boulder',
-        cap: 320,
-        scatter: 1800,
-        clusters: 22,
-        perCluster: 14,
+        cap: 700,
+        scatter: 7000,
+        clusters: 30,
+        perCluster: 12,
         clusterSpread: 0.05,
         sway: 0,
         sink: 0.5,
@@ -390,7 +397,12 @@ const LAYERS = [
         xVar: 0.30,
         yVar: 0.30,
         zone(d, w) {
-            return 0.05 + w[1] * 0.60 + w[2] * 0.45;
+            // At 8 triangles a boulder is the cheapest coverage in the game,
+            // and a bare canyon SLOPE was the worst frame the planet produced.
+            // Weighted hard toward canyon and toward mid depths, which is
+            // exactly where the spire clusters do not reach.
+            const slope = 0.45 + 0.55 * (1 - Math.abs(d - 0.5) * 2);
+            return (0.05 + w[1] * 1.25 + w[2] * 0.45) * slope;
         },
         scale(d, w, rng) {
             return rngRange(rng, 0.45, 1.15);
@@ -420,8 +432,8 @@ const LAYERS = [
     },
     {
         name: 'shrub',
-        cap: 460,
-        scatter: 2600,
+        cap: 330,
+        scatter: 2200,
         clusters: 24,
         perCluster: 18,
         clusterSpread: 0.045,
