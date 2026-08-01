@@ -210,13 +210,15 @@ let bestSpread = 0;
     t += DT;
     if (t > 0.5) sampleDiag();
     if (t < 20) continue;
-    let lo = Infinity, hi = -Infinity;
+    // Score the LEAD BATTLE, not the whole field: a three-way tie never
+    // happens in a real race, and framing for it just pushes the camera so far
+    // back that nothing reads. Two birds nose to tail is the shot.
+    let p1 = -Infinity, p2 = -Infinity;
     for (let i = 0; i < ai.racers.length; i++) {
       const g = ai.racers[i].progress;
-      if (g < lo) lo = g;
-      if (g > hi) hi = g;
+      if (g > p1) { p2 = p1; p1 = g; } else if (g > p2) { p2 = g; }
     }
-    const spreadU = (hi - lo) * course.length;
+    const spreadU = (p1 - p2) * course.length;
     const ki = Math.floor((ai.racers[0].t - Math.floor(ai.racers[0].t)) * ai.kappa.length);
     const corner = Math.abs(ai.kappa[ki] || 0);
     const score = spreadU - corner * 22;
@@ -255,6 +257,8 @@ let simT = 0;
 // =============================================================================
 const trailGroup = new THREE.Group();
 scene.add(trailGroup);
+course.setNextGate(race.nextGate[ai.racers[0].raceIndex]);
+course.update(0.31);
 {
   const up = new THREE.Vector3(), fwd = new THREE.Vector3(), side = new THREE.Vector3();
   const c = new THREE.Color();
@@ -344,28 +348,32 @@ function placeCamera() {
   }
 
   // race: behind and above the pack, aimed down the road at the corner ahead.
-  // Anchor behind the LAST bird and stand off far enough that the whole pack
-  // fits. A fixed stand-off frames whoever happens to be nearest and crops the
-  // actual race out of the shot.
-  let last = 0, lead = 0;
+  // Behind the RUNNER-UP, aimed at the leader: the two-bird battle is the shot
+  // a racing game puts on its store page, and the stand-off scales with the
+  // gap so the pair always fills the same amount of frame.
+  let lead = 0, second = 0;
   for (let i = 1; i < ai.racers.length; i++) {
-    if (ai.racers[i].progress < ai.racers[last].progress) last = i;
     if (ai.racers[i].progress > ai.racers[lead].progress) lead = i;
   }
-  const packU = (ai.racers[lead].progress - ai.racers[last].progress) * course.length;
-  const stand = Math.min(72, 26 + packU * 0.55) * (1 + 0.22 * portrait);
-  _mid.copy(ai.racers[last].position);
-  const tLead = ai.racers[last].t;
+  second = lead === 0 ? 1 : 0;
+  for (let i = 0; i < ai.racers.length; i++) {
+    if (i === lead) continue;
+    if (ai.racers[i].progress > ai.racers[second].progress) second = i;
+  }
+  const packU = (ai.racers[lead].progress - ai.racers[second].progress) * course.length;
+  const stand = Math.min(46, 19 + packU * 0.6) * (1 + 0.24 * portrait);
+  _mid.copy(ai.racers[second].position);
+  const tLead = ai.racers[second].t;
   course.tangentAt(tLead, _t);
   _u.copy(_mid).normalize();
   _sd.crossVectors(_t, _u).normalize();
   camera.position.copy(_mid)
     .addScaledVector(_t, -stand)
-    .addScaledVector(_u, 10 + stand * 0.18 + 8 * portrait)
-    .addScaledVector(_sd, 7);
+    .addScaledVector(_u, 5.5 + stand * 0.16 + 6 * portrait)
+    .addScaledVector(_sd, 5);
   camera.up.copy(_u);
   // Aim at the middle of the pack, not at the road, so the birds own the frame.
-  _q.copy(ai.racers[lead].position).add(ai.racers[last].position).multiplyScalar(0.5);
+  _q.copy(ai.racers[lead].position).add(ai.racers[second].position).multiplyScalar(0.5);
   camera.lookAt(_q);
   scene.fog.near = 80; scene.fog.far = 430;
 }
