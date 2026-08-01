@@ -732,8 +732,10 @@ export function createCourse(THREE, opts = {}) {
         emissive: PALETTE.ribbon,
         emissiveIntensity: 0.22,
         rimColor: PALETTE.ribbonEdge,
-        rimStrength: 0.85,
-        rimThreshold: 0.35,
+        // Kept low on purpose. At 0.85 the grazing-angle rail bevel bloomed
+        // into a wide white wedge that made the near track read lopsided.
+        rimStrength: 0.40,
+        rimThreshold: 0.42,
         specStrength: 0,
         side: THREE.DoubleSide,
     });
