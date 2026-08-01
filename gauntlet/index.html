@@ -776,6 +776,7 @@ async function boot() {
     let countdown = raceLogic.RACE_CONFIG.countdownMs;
     let lastCountdownNumber = -1;
     let frames = 0, fpsAccum = 0, fps = 60;
+    let debugCamFrozen = false;
 
     function frame(now) {
         const rawDt = (now - last) / 1000;
@@ -856,7 +857,9 @@ async function boot() {
         planet.update(dt, _up.x, _up.y, _up.z);
         course.update(dt);
 
-        chase.update(dt, pose.position, pose.quaternion, animState.speed01, shake.value);
+        if (!debugCamFrozen) {
+            chase.update(dt, pose.position, pose.quaternion, animState.speed01, shake.value);
+        }
         audio.setFlightSpeed(animState.speed01);
 
         // --- hud --------------------------------------------------------------
@@ -982,6 +985,23 @@ async function boot() {
             chase.snapToTarget(flight.position, flight.quaternion);
         },
         get phase() { return phase; },
+        /**
+         * Park the camera ON the racing line at spline parameter t, looking
+         * down the track. The only way to capture what the player sees when
+         * they fly inside the ribbon — the chase rig otherwise reclaims the
+         * camera on the very next frame.
+         */
+        debugCameraOnRibbon(t, lift) {
+            const P = new THREE.Vector3();
+            const T = new THREE.Vector3();
+            course.sampleAt(t, P);
+            course.tangentAt(t, T);
+            const up = P.clone().normalize();
+            camera.position.copy(P).addScaledVector(up, lift === undefined ? 0 : lift);
+            camera.up.copy(up);
+            camera.lookAt(P.clone().addScaledVector(T, 40));
+            debugCamFrozen = true;
+        },
     };
     window.__gauntlet = game;
     window.__GAUNTLET_STATS = () => ({

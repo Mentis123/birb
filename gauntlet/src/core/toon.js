@@ -47,6 +47,22 @@ uniform float uSpecStrength;
 uniform float uSpecPower;
 uniform float uSpecThreshold;
 uniform vec3  uKeyLightWorld;
+uniform float uNearFadeOn;
+uniform float uNearFadeNear;
+uniform float uNearFadeFar;
+
+/**
+ * 4x4 ordered dither. Used to dissolve geometry that gets between the camera
+ * and the player rather than fading it with alpha: a dithered discard keeps
+ * depthWrite on and needs no transparency sorting, and at cel-shading's
+ * chunky scale the pattern reads as intentional stipple rather than as a bug.
+ */
+float gauntletDither( vec2 p ) {
+    vec2 f = mod( floor( p ), 4.0 );
+    float b = mod( f.x, 2.0 ) * 8.0 + mod( f.y, 2.0 ) * 4.0
+            + mod( floor( f.x * 0.5 ), 2.0 ) * 2.0 + mod( floor( f.y * 0.5 ), 2.0 );
+    return ( b + 0.5 ) / 16.0;
+}
 `;
 
 /**
@@ -57,6 +73,18 @@ uniform vec3  uKeyLightWorld;
  * but antialiases cleanly. This is the one place we deliberately soften.
  */
 const FRAG_BODY = /* glsl */`
+    // --- near-camera dissolve -------------------------------------------
+    // The course ribbon is a solid band the bird can fly under and through.
+    // Without this it fills the screen and the player is flying blind inside
+    // their own navigation aid. Geometry within uNearFadeNear of the eye is
+    // fully gone; past uNearFadeFar it is untouched, so the ribbon still does
+    // its job everywhere it is actually useful.
+    if ( uNearFadeOn > 0.5 ) {
+        float vyDepth = vGauntletViewPos.z;
+        float vyGone = 1.0 - smoothstep( uNearFadeNear, uNearFadeFar, vyDepth );
+        if ( vyGone > 0.001 && gauntletDither( gl_FragCoord.xy ) < vyGone ) discard;
+    }
+
     {
         vec3 vyN = normalize( normal );
         vec3 vyV = normalize( vGauntletViewPos );
@@ -156,6 +184,12 @@ export function patchToon(THREE, material, opts = {}) {
         uSpecPower: { value: o.specPower },
         uSpecThreshold: { value: o.specThreshold },
         uKeyLightWorld: { value: new THREE.Vector3(KEY_LIGHT_DIR.x, KEY_LIGHT_DIR.y, KEY_LIGHT_DIR.z).normalize() },
+        // Driven by a uniform rather than a #define on purpose: every patched
+        // material shares one program cache key, so a define here would let a
+        // fading material and a solid one collide on the same program.
+        uNearFadeOn: { value: o.nearFade ? 1 : 0 },
+        uNearFadeNear: { value: o.nearFade ? o.nearFade[0] : 0 },
+        uNearFadeFar: { value: o.nearFade ? o.nearFade[1] : 1 },
     };
     material.userData.gauntlet = uniforms;
 
@@ -193,6 +227,15 @@ export function setRimStrength(material, value) {
 export function setSpecStrength(material, value) {
     const u = material.userData && material.userData.gauntlet;
     if (u) u.uSpecStrength.value = value;
+}
+
+/** Retune the near-camera dissolve at runtime. Safe every frame. */
+export function setNearFade(material, near, far) {
+    const u = material.userData && material.userData.gauntlet;
+    if (!u) return;
+    u.uNearFadeOn.value = 1;
+    u.uNearFadeNear.value = near;
+    u.uNearFadeFar.value = far;
 }
 
 export function setRimColor(material, hex) {

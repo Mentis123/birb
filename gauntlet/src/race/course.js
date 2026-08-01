@@ -729,6 +729,12 @@ export function createCourse(THREE, opts = {}) {
     const ribbonMat = createToonMaterial(THREE, {
         ramp: 'emissive',
         vertexColors: true,
+        // The bird can fly under the deck and straight through it. Solid, that
+        // fills the whole screen and you are flying blind inside your own
+        // navigation aid. Dissolve it out of the near field: gone within 5
+        // units of the eye, untouched past 17, so it still reads as a road
+        // everywhere it is actually guiding you.
+        nearFade: [5, 17],
         emissive: PALETTE.ribbon,
         emissiveIntensity: 0.22,
         rimColor: PALETTE.ribbonEdge,
@@ -757,6 +763,29 @@ export function createCourse(THREE, opts = {}) {
         side: THREE.DoubleSide,
         fog: false,
     });
+    // The glow skirt is additive, so it does not OCCLUDE when the camera is
+    // inside it — it washes the whole frame toward white instead, which is
+    // just as blinding. It is a MeshBasicMaterial and so never went through
+    // the cel pipeline's nearFade, so fade its alpha directly: with additive
+    // blending the source contribution is colour * alpha, so alpha 0 is a
+    // clean no-op.
+    glowMat.onBeforeCompile = (sh) => {
+        sh.uniforms.uGlowNear = { value: 5 };
+        sh.uniforms.uGlowFar = { value: 17 };
+        sh.vertexShader = 'varying float vGlowDepth;\n' + sh.vertexShader.replace(
+            '#include <project_vertex>',
+            '#include <project_vertex>\n\tvGlowDepth = -mvPosition.z;'
+        );
+        sh.fragmentShader =
+            'varying float vGlowDepth;\nuniform float uGlowNear;\nuniform float uGlowFar;\n'
+            + sh.fragmentShader.replace(
+                '#include <opaque_fragment>',
+                '\tdiffuseColor.a *= smoothstep( uGlowNear, uGlowFar, vGlowDepth );\n'
+                + '#include <opaque_fragment>'
+            );
+    };
+    glowMat.customProgramCacheKey = () => 'gauntlet-glow-fade-v1';
+
     const glow = new THREE.Mesh(glowGeo, glowMat);
     glow.name = 'course-ribbon-glow';
     glow.renderOrder = 0;
@@ -906,6 +935,8 @@ export function createCourse(THREE, opts = {}) {
         gGeo.computeBoundingSphere();
         const gMat = createToonMaterial(THREE, {
             ramp: 'graphic', vertexColors: true, rimStrength: 0.45, specStrength: 0.25,
+            // Same reason as the ribbon: you fly through these.
+            nearFade: [4, 13],
         });
         gantry = new THREE.Mesh(gGeo, gMat);
         gantry.name = 'course-gantry';
