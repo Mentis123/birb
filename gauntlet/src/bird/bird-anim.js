@@ -42,8 +42,28 @@ const CFG = {
     flapRateSpeed: 0.55,
     flapAmpBase: 0.30,      // rad, half-amplitude at rest
     flapAmpImpulse: 0.62,
-    glideAmp: 0.055,
-    glideRate: 0.42,
+    // --- glide band --------------------------------------------------------
+    // A hands-off bird above `glideEnter` stops beating and starts riding.
+    //
+    // These used to be one threshold at 0.45, which cruise never reached:
+    // measured, level flight sits at speed01 0.286, so the bird beat its wings
+    // at ~1.4 Hz permanently and read as WORKING — which is what made cruising
+    // feel fast even though the velocity was unchanged. 0.22 puts cruise
+    // comfortably inside the band; the exit is lower so a speed wobble through
+    // a turn cannot flicker the whole flap state on and off.
+    glideEnter: 0.22,
+    glideExit: 0.17,
+
+    // The glide is not one pose. At the BOTTOM of the band (cruise) the bird
+    // still beats, just slowly and shallowly — a lazy cruise stroke. At the top
+    // (a dive or a boost) the wings lock out almost rigid, which is what a real
+    // bird does at speed and what this originally shipped as. Interpolating
+    // between the two keeps the fast look exactly as it was and only changes
+    // how cruising reads.
+    cruiseAmp: 0.17,        // rad, half-amplitude at the bottom of the band
+    cruiseRate: 0.62,       // Hz at the bottom of the band
+    glideAmp: 0.055,        // rad, wings locked out at full speed
+    glideRate: 0.42,        // Hz at full speed
     restDihedral: 0.20,     // wings sit slightly above level when gliding
     restSweep: 0.15,        // wings trail back at rest — straight-out wings
                             // read as a paper plane and, in a 3/4 view, the far
@@ -97,6 +117,7 @@ export function createBirdAnimator(THREE, bird) {
     let flapPhase = rng();
     let impulse = 0;
     let glide = 0;
+    let gliding = false;    // latched, for the glide band's hysteresis
     let bank = 0;
     let pitchS = 0;
     let turnS = 0;
@@ -153,11 +174,21 @@ export function createBirdAnimator(THREE, bird) {
         // --- flap cycle ------------------------------------------------------
         // Gliding is what the bird does at speed with no input; it is a state,
         // not an absence of one, so it gets its own blend.
-        const wantGlide = (speed01 > 0.45 && impulse < 0.16 && !sIn.grounded && !sIn.celebrating) ? 1 : 0;
+        // Hysteresis: once gliding, it takes a real slowdown to start beating
+        // again, not a wobble across a single number.
+        const fast = gliding ? speed01 > CFG.glideExit : speed01 > CFG.glideEnter;
+        const wantGlide = (fast && impulse < 0.16 && !sIn.grounded && !sIn.celebrating) ? 1 : 0;
+        gliding = wantGlide === 1;
         glide = damp(glide, wantGlide, wantGlide ? 1.8 : 6.0, dt);
 
+        // How far INTO the glide band we are: 0 at cruise, 1 flat out. Drives
+        // the lazy-cruise-stroke to locked-wings blend.
+        const lock = clamp((speed01 - CFG.glideEnter) / (1 - CFG.glideEnter), 0, 1);
+        const glideRate = CFG.cruiseRate + (CFG.glideRate - CFG.cruiseRate) * lock;
+        const glideAmp = CFG.cruiseAmp + (CFG.glideAmp - CFG.cruiseAmp) * lock;
+
         let rate = CFG.flapRateBase + impulse * CFG.flapRateImpulse + speed01 * CFG.flapRateSpeed;
-        rate = rate * (1 - glide) + CFG.glideRate * glide;
+        rate = rate * (1 - glide) + glideRate * glide;
         if (celebrate > 0.01) rate = rate * (1 - celebrate) + 2.9 * celebrate;
         if (tumble > 0.01) rate = rate * (1 - tumble) + 4.6 * tumble;
 
@@ -176,7 +207,7 @@ export function createBirdAnimator(THREE, bird) {
         const stroke = Math.cos(warp * TAU);        // +1 top, -1 bottom
 
         let amp = CFG.flapAmpBase + impulse * CFG.flapAmpImpulse;
-        amp = amp * (1 - glide) + CFG.glideAmp * glide;
+        amp = amp * (1 - glide) + glideAmp * glide;
         amp *= 1 - 0.45 * groundT;
 
         // Rest angle: wings sit high in a glide, low and folded when grounded,

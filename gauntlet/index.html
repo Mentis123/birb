@@ -1766,7 +1766,7 @@ async function boot(requestedMode) {
         mode, modeDef: def,
         // Mini-game systems, for the probes. Null when the mode did not build
         // them — which is itself the thing a capability-flag probe checks.
-        run, rings, drones, nests, nesting, rockets, aim,
+        run, rings, drones, nests, nesting, rockets, aim, animator, animState,
         get turretView() { return turretView; },
         /** Force the run to its end condition, so a probe can shoot results. */
         debugFinish() { if (!run.finished) finishRun(); },
@@ -1823,6 +1823,9 @@ async function boot(requestedMode) {
         // what the MODE did, not just of what rendered.
         mode, phase,
         elapsed: Math.round(elapsed * 10) / 10,
+        speed: Math.round(flight.speed * 10) / 10,
+        speed01: Math.round(animState.speed01 * 1000) / 1000,
+        flap01: Math.round(animator.flap01 * 100) / 100,
         nestState: nesting ? nesting.state : null,
         turretView,
         dronesAlive: drones ? drones.alive : 0,
