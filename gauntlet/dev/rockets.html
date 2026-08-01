@@ -15,6 +15,7 @@
   #legend { left: 10px; top: 10px; }
   #lblBoom { right: 12px; text-align: right; }
   #lblRock { left: 12px; }
+  @media (max-aspect-ratio: 85/100) { #tag { top: 62px; } }
 </style>
 </head>
 <body>
@@ -82,7 +83,7 @@ createLightRig(THREE, scene);
 // once every two seconds, and it also proves several instances coexist.
 // ---------------------------------------------------------------------------
 const TURRET_ANGLE = -0.30;      // radians from +Y, in the XY plane
-const TARGET_ANGLE = 1.02;
+const TARGET_ANGLE = 0.66;
 
 function dirAt(angle, z) {
   return new THREE.Vector3(Math.sin(angle), Math.cos(angle), z).normalize();
@@ -100,7 +101,7 @@ for (let i = 0; i < 4; i++) {
 // four arcs apart vertically on screen instead of stacking them.
 const TARGETS = [];
 {
-  const RADII = [116, 128, 141, 154];
+  const RADII = [112, 123, 134, 146];
   for (let a = 0; a < RADII.length; a++) {
     for (let k = 0; k < 2; k++) {
       const zo = (k === 0 ? -0.075 : 0.075);
@@ -139,7 +140,7 @@ const TARGETS = [];
 
 // A stubby nest post per turret so the launch point is legible.
 {
-  const geo = new THREE.CylinderGeometry(2.6, 3.6, 12, 8);
+  const geo = new THREE.CylinderGeometry(1.9, 2.7, 9, 8);
   const mat = createToonMaterial(THREE, {
     ramp: 'graphic', color: PALETTE.trunk, flatShading: true, specStrength: 0.1,
   });
@@ -168,15 +169,25 @@ const DT = 1 / 60;
 /**
  * Ballistic aim, solved numerically by shooting.
  *
- * The closed-form `T - P + up * 0.5*g*t^2` lead is WRONG on a sphere and the
- * first capture proved it — every shot sailed past. Gravity here is radial, and
- * this shot crosses 53 degrees of planet, so the "down" the rocket is falling
- * toward has rotated most of a right angle by the time it arrives. A lead built
- * on the up vector at the muzzle is solving a different problem.
+ * Two solvers died getting here, and both failures are worth recording:
  *
- * So: integrate the real trajectory with the SAME euler step `update()` uses,
- * find the closest approach, and push a virtual aim point by the miss vector.
- * Converges in a handful of passes and is exact by construction.
+ *  1. The closed-form `T - P + up * 0.5*g*t^2` lead is WRONG on a sphere.
+ *     Gravity is radial and these shots cross most of a right angle of planet,
+ *     so the "down" the rocket falls toward has rotated ~70 degrees by the time
+ *     it arrives. A lead built on the up vector at the muzzle solves a
+ *     different problem, and the first capture showed every shot sailing past.
+ *
+ *  2. Iterating a virtual aim point by the miss vector converged at short range
+ *     and diverged at long range: once a guess buries itself in terrain, the
+ *     "closest approach" is wherever it happened to stop, the gradient it
+ *     implies is nonsense, and the iteration walks away.
+ *
+ * What works is a scan over LAUNCH ELEVATION. Gravity is radial and the target
+ * lies in the plane through the origin containing P and T, so the whole problem
+ * is two-dimensional and one angle parameterises it completely. Scan that angle,
+ * take the local minima, and deliberately pick the HIGHEST one — the lofted
+ * solution rather than the flat one — because the lofted arc is the thing this
+ * probe exists to show.
  */
 const _simP = new THREE.Vector3();
 const _simV = new THREE.Vector3();
@@ -205,18 +216,54 @@ function simulateShot(P, dir, T) {
   return { miss: Math.sqrt(best), time: bestStep * DT, point: _simBest.clone() };
 }
 
-const _virt = new THREE.Vector3();
+const _east = new THREE.Vector3();
+const _upP = new THREE.Vector3();
 const _guess = new THREE.Vector3();
+function aimAt(P, theta, out) {
+  return out.copy(_east).multiplyScalar(Math.cos(theta)).addScaledVector(_upP, Math.sin(theta));
+}
 function solveAim(P, T, out) {
-  _virt.copy(T);
-  let r = null;
-  for (let it = 0; it < 40; it++) {
-    _guess.copy(_virt).sub(P).normalize();
-    r = simulateShot(P, _guess, T);
-    if (r.miss < 0.4) break;
-    _virt.add(T).sub(r.point);
+  _upP.copy(P).normalize();
+  _east.copy(T).sub(P);
+  _east.addScaledVector(_upP, -_east.dot(_upP));
+  if (_east.lengthSq() < 1e-9) _east.set(1, 0, 0);
+  _east.normalize();
+
+  // Coarse scan.
+  const N = 260, LO = -0.12, HI = 1.42;
+  const miss = new Float64Array(N + 1);
+  for (let i = 0; i <= N; i++) {
+    aimAt(P, LO + (HI - LO) * (i / N), _guess);
+    miss[i] = simulateShot(P, _guess, T).miss;
   }
+  // Highest-elevation local minimum that is ACTUALLY a solution. Taking the
+  // highest local minimum unconditionally was the third failure here: a grazing
+  // minimum 10u wide is still a local minimum, and it misses the drone.
+  let pick = -1;
+  for (let i = 1; i < N; i++) {
+    if (miss[i] <= miss[i - 1] && miss[i] <= miss[i + 1] && miss[i] < 4) pick = i;
+  }
+  if (pick < 0) {                                // out of range — take the best
+    pick = 0;
+    for (let i = 0; i <= N; i++) if (miss[i] < miss[pick]) pick = i;
+  }
+
+  // Golden-section refine inside the bracketing pair.
+  let a = LO + (HI - LO) * (Math.max(0, pick - 1) / N);
+  let b = LO + (HI - LO) * (Math.min(N, pick + 1) / N);
+  const G = 0.6180339887;
+  let c = b - (b - a) * G, d = a + (b - a) * G;
+  let fc = simulateShot(P, aimAt(P, c, _guess), T).miss;
+  let fd = simulateShot(P, aimAt(P, d, _guess), T).miss;
+  for (let k = 0; k < 60; k++) {
+    if (fc < fd) { b = d; d = c; fd = fc; c = b - (b - a) * G; fc = simulateShot(P, aimAt(P, c, _guess), T).miss; }
+    else { a = c; c = d; fc = fd; d = a + (b - a) * G; fd = simulateShot(P, aimAt(P, d, _guess), T).miss; }
+  }
+  const theta = (a + b) * 0.5;
+  aimAt(P, theta, _guess).normalize();
+  const r = simulateShot(P, _guess, T);
   out.copy(_guess);
+  r.theta = theta;
   return r;
 }
 
@@ -280,11 +327,15 @@ for (let s = 0; s < STEPS; s++) {
 // Side-elevation camera: the arc is the thing being judged, and an arc only
 // reads from the side.
 // ---------------------------------------------------------------------------
-{
-  const mid = TURRETS[0].pos.clone().add(TARGETS[4].pos).multiplyScalar(0.5);
-  camera.position.copy(mid).add(new THREE.Vector3(4, 30, 330));
-  camera.up.copy(mid).normalize();
-  camera.lookAt(mid.x, mid.y + 6, mid.z);
+const camMid = TURRETS[0].pos.clone().add(TARGETS[6].pos).multiplyScalar(0.5);
+function placeCamera() {
+  // Portrait needs to stand further back because the widened fov is VERTICAL:
+  // a 0.5 aspect turns a generous vertical frame into a narrow horizontal one,
+  // and this composition is horizontal.
+  const portrait = camera.aspect < 0.9;
+  camera.position.copy(camMid).add(new THREE.Vector3(4, portrait ? 6 : 10, portrait ? 262 : 215));
+  camera.up.copy(camMid).normalize();
+  camera.lookAt(camMid.x - 4, camMid.y - 2, camMid.z);
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +343,7 @@ for (let s = 0; s < STEPS; s++) {
 // silhouette: nose, flared body, three ink fins, hard two-tone flame.
 // ---------------------------------------------------------------------------
 const rockScene = new THREE.Scene();
-const rockCam = new THREE.PerspectiveCamera(34, 1, 0.1, 200);
+const rockCam = new THREE.PerspectiveCamera(26, 1, 0.1, 200);
 createLightRig(THREE, rockScene);
 {
   const card = new THREE.Mesh(new THREE.PlaneGeometry(120, 120),
@@ -302,10 +353,10 @@ createLightRig(THREE, rockScene);
 }
 const rockFx = createRockets(THREE, { quality: 'high', capacity: 2, particleCapacity: 60, seed: 42 });
 rockScene.add(rockFx.group);
-rockFx.fire(0, 0, 0, -0.34, 0.10, -0.935);
+rockFx.fire(0, 0, 0, -0.985, 0.13, -0.11);   // across frame, NOT away from the camera
 rockFx.update(1 / 240, null);
-rockCam.position.set(2.0, 2.2, 12.0);
-rockCam.lookAt(-0.5, 0.1, 0);
+rockCam.position.set(0.4, 1.5, 11.5);
+rockCam.lookAt(-0.15, 0.05, 0);
 
 // ---------------------------------------------------------------------------
 // Inset B — a detonation on its own, held at step 1 (the widest flash), so the
@@ -317,7 +368,10 @@ createLightRig(THREE, boomScene);
 {
   const card = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
     new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith }));
-  card.position.z = -110;
+  // The blast is at y=900 (far from the planet so the ground rest never fires
+  // here). The card has to follow it, or the inset renders against the clear
+  // colour — which is exactly what the first phone capture showed.
+  card.position.set(0, 900, -110);
   boomScene.add(card);
 }
 const boomFx = createRockets(THREE, { quality: 'high', seed: 7 });
@@ -376,6 +430,7 @@ function resize() {
   // Portrait phone: a 42deg VERTICAL fov on a 0.46 aspect leaves a keyhole and
   // crops the arc. Widen so the phone capture judges the same composition.
   camera.fov = camera.aspect >= 0.9 ? 42 : 42 + (0.9 - camera.aspect) * 52;
+  placeCamera();
   camera.updateProjectionMatrix();
   updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
   draw();

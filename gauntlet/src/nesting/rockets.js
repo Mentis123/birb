@@ -134,9 +134,9 @@ const KIND_COUNT = 6;
  * of the starburst.
  * Local +Z is the alignment axis for the kinds that align to a direction.
  */
-const KIND_SX = [1.00, 0.40, 0.86, 0.24, 0.80, 0.72];
-const KIND_SY = [0.92, 0.40, 0.62, 0.24, 0.80, 0.72];
-const KIND_SZ = [1.00, 2.60, 2.00, 3.60, 0.88, 0.86];
+const KIND_SX = [1.05, 0.40, 0.86, 0.24, 0.80, 0.58];
+const KIND_SY = [0.95, 0.40, 0.62, 0.24, 0.80, 0.58];
+const KIND_SZ = [1.00, 1.85, 2.00, 3.60, 0.88, 1.20];
 
 /**
  * Base size range per kind, in world units.
@@ -145,8 +145,8 @@ const KIND_SZ = [1.00, 2.60, 2.00, 3.60, 0.88, 0.86];
  * collision radius, so a blast has to span roughly 22u to read as having
  * consumed it. The first pass was a third of that and looked like confetti.
  */
-const KIND_SIZE_MIN = [5.2, 3.6, 1.70, 1.10, 1.00, 0.85];
-const KIND_SIZE_MAX = [6.4, 5.0, 2.90, 1.80, 1.70, 1.45];
+const KIND_SIZE_MIN = [3.9, 2.2, 1.70, 1.10, 1.00, 0.34];
+const KIND_SIZE_MAX = [4.9, 5.0, 2.90, 1.80, 1.70, 0.62];
 
 /**
  * Base colour per kind.
@@ -168,7 +168,7 @@ const KIND_COLOR = [
 ];
 
 /** Seconds of life per kind. SHARD carries the original's 0.6s fireball. */
-const KIND_LIFE = [0.22, 0.20, EXPLOSION_LIFETIME, 0.34, 0.95, 0.58];
+const KIND_LIFE = [0.22, 0.20, EXPLOSION_LIFETIME, 0.34, 0.95, 0.44];
 
 /** True if the kind aligns its long axis to a direction (vs. tumbling). */
 const KIND_ALIGNED = [0, 1, 1, 1, 0, 1];
@@ -324,17 +324,27 @@ function buildRocketGeometry(THREE) {
         shade: (x, y, z) => 0.88 + 0.30 * Math.max(0, Math.min(1, (z + 1.0) / 2.1)),
     });
 
-    // --- three ink fins at the tail -----------------------------------------
-    // Smaller than the first pass. At 30px on screen a fat ink fin is just a
-    // black blob at the back and the rocket loses its direction entirely; these
-    // are sized to read as a swept tail, not as a counterweight.
+    // --- three swept ink fins at the tail ------------------------------------
+    // Boxes were the third capture's worst read: two rectangular slabs stuck on
+    // the top and bottom of the tube, like tape rather than a tail. A swept
+    // delta with a raked leading edge is the shape that says "this end goes
+    // last" at 30px, and it costs 8 extra triangles.
+    const finShape = new THREE.Shape();
+    finShape.moveTo(-0.10, 0.00);
+    finShape.lineTo(0.98, 0.00);
+    finShape.lineTo(0.98, 0.66);
+    finShape.lineTo(0.50, 0.66);
+    finShape.closePath();
     for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2;
-        e.set(0, 0, a);
+        const fin = new THREE.ExtrudeGeometry(finShape, { depth: 0.09, bevelEnabled: false });
+        fin.translate(0, 0, -0.045);   // centre the thickness
+        fin.rotateY(-Math.PI / 2);     // chord onto +Z (tailward), span onto +Y
+        fin.translate(0, 0.40, 0.36);  // out to the body wall, back to the tail
+        e.set(0, 0, (i / 3) * Math.PI * 2);
         q.setFromEuler(e);
-        v.set(Math.cos(a + Math.PI / 2) * 0.60, Math.sin(a + Math.PI / 2) * 0.60, 0.72);
+        v.set(0, 0, 0);
         m.compose(v, q, s);
-        parts.push({ geo: new THREE.BoxGeometry(0.09, 0.46, 0.80), matrix: m.clone(), color: PALETTE.inkSoft });
+        parts.push({ geo: fin, matrix: m.clone(), color: PALETTE.inkSoft });
     }
 
     // --- flame: base at z = +1.10, apex at z = +2.15 -------------------------
@@ -701,8 +711,12 @@ export function createRockets(THREE, opts = {}) {
 
         const spikes = burst[1];
         for (let n = 0; n < spikes; n++) {
-            fibonacciDirection(n, spikes, _fib, rng, 0.42);
-            const off = SPIKE_OFFSET * power;
+            // Heavy jitter on BOTH the direction and the stand-off. Perfectly
+            // even fibonacci spikes of equal length read as a sun-sticker
+            // icon, not as a blast — the second capture proved it. Irregular
+            // spike lengths are what make it read as an explosion.
+            fibonacciDirection(n, spikes, _fib, rng, 0.78);
+            const off = SPIKE_OFFSET * power * (0.45 + rng() * 0.85);
             spawnParticle(K_FLASH,
                 x + _fib.x * off, y + _fib.y * off, z + _fib.z * off,
                 _fib.x, _fib.y, _fib.z, power);
@@ -844,7 +858,7 @@ export function createRockets(THREE, opts = {}) {
                 const dx = d.x - nx, dy = d.y - ny, dz = d.z - nz;
                 const r = (d.radius || 0) + ROCKET_RADIUS;
                 if (dx * dx + dy * dy + dz * dz <= r * r) {
-                    explodeAt(nx, ny, nz, 1);
+                    explodeAt(nx, ny, nz, 1.15);   // a kill is the loud one
                     if (api.onHit) api.onHit(nx, ny, nz, t);
                     hits++;
                     killRocket(i);
@@ -868,7 +882,7 @@ export function createRockets(THREE, opts = {}) {
                 if (nlen <= PLANET_RADIUS + GROUND_EPS && nlen > 1e-3) {
                     const gx = nx / nlen, gy = ny / nlen, gz = nz / nlen;
                     if (nlen < surfaceRadius(gx, gy, gz) + GROUND_EPS) {
-                        explodeAt(nx, ny, nz, 1);
+                        explodeAt(nx, ny, nz, 0.8);    // a dud into the dirt is not
                         if (api.onHit) api.onHit(nx, ny, nz, -1);
                         killRocket(i);
                         rTouched = true;
@@ -896,9 +910,9 @@ export function createRockets(THREE, opts = {}) {
                     // dissipating plume.
                     const bx = -_dir.x, by = -_dir.y, bz = -_dir.z;
                     spawnParticle(K_TRAIL,
-                        nx + bx * 2.9 + s1() * 0.85,
-                        ny + by * 2.9 + s1() * 0.85,
-                        nz + bz * 2.9 + s1() * 0.85,
+                        nx + bx * 2.9 + s1() * 0.45,
+                        ny + by * 2.9 + s1() * 0.45,
+                        nz + bz * 2.9 + s1() * 0.45,
                         bx, by, bz, 1);
                 }
             }
