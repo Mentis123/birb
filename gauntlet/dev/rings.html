@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · rings</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hud {
+    position: fixed; left: 10px; bottom: 10px; z-index: 5;
+    font: 12px/1.5 ui-monospace, Menlo, monospace; color: #fff6dc;
+    text-shadow: 0 1px 0 #0f1c33; white-space: pre; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { PLANET_RADIUS } from '/gauntlet/src/core/terrain.js';
+import { createPlanet } from '/gauntlet/src/world/planet.js';
+import { createSky } from '/gauntlet/src/world/sky.js';
+import { createCourse } from '/gauntlet/src/race/course.js';
+import { createRings, RING_COLLECT_RADIUS } from '/gauntlet/src/world/rings.js';
+
+const THREE = await loadThree();
+const P = new URLSearchParams(location.search);
+const quality = P.get('quality') || 'high';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 45, 200);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 3000);
+createLightRig(THREE, scene);
+
+const sky = createSky(THREE, { quality });
+scene.add(sky.group);
+const planet = createPlanet(THREE, { quality, seed: 0x5eed });
+scene.add(planet.group);
+const course = createCourse(THREE, { quality, seed: 0x5eed, gateCount: 14 });
+course.group.visible = false;              // Ring Rush hides the ribbon
+scene.add(course.group);
+
+const rings = createRings(THREE, { quality, seed: 0x5eed, course });
+scene.add(rings.group);
+
+// --- fly the course and collect, so the weave and the collection radius are
+// --- both exercised rather than asserted -----------------------------------
+const _p = new THREE.Vector3();
+const _tan = new THREE.Vector3();
+const _up = new THREE.Vector3();
+const trail = [];
+let collectedOrder = [];
+
+const STEP = 1 / 60;
+const LAP_SECONDS = 26;
+for (let t = 0; t < 1; t += STEP / LAP_SECONDS) {
+  course.sampleAt(t, _p);
+  _up.copy(_p).normalize();
+  _p.addScaledVector(_up, 4.5);            // a plausible cruise offset
+  const hit = rings.collect(_p.x, _p.y, _p.z);
+  if (hit >= 0) collectedOrder.push(hit);
+  if (trail.length < 4000) trail.push(_p.clone());
+}
+
+// Draw the flown path so you can see WHICH rings the line actually passes.
+const trailGeo = new THREE.BufferGeometry().setFromPoints(trail);
+scene.add(new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
+  color: PALETTE.ribbon, transparent: true, opacity: 0.5,
+})));
+
+// Restore for the beauty shot: the probe is about placement, not the sweep.
+rings.reset();
+
+// Frame a stretch of the weave from bird altitude.
+course.sampleAt(0.30, _p);
+course.tangentAt(0.30, _tan);
+_up.copy(_p).normalize();
+camera.position.copy(_p).addScaledVector(_up, 11).addScaledVector(_tan, -26);
+camera.up.copy(_up);
+camera.lookAt(_p.clone().addScaledVector(_tan, 34));
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+}
+addEventListener('resize', resize);
+resize();
+
+rings.update(0.4);
+planet.update(0, _up.x, _up.y, _up.z);
+sky.update(0, camera);
+renderer.render(scene, camera);
+
+const stats = {
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  ringCount: rings.count,
+  ringDrawCalls: rings.drawCallCount,
+  ringTriangles: rings.triangleCount,
+  collectRadius: RING_COLLECT_RADIUS,
+  // The property that matters: a lap on the racing line must be able to reach
+  // every ring. If this is short of ringCount the weave is too wide to fly.
+  reachableInOneLap: collectedOrder.length,
+  allReachable: collectedOrder.length === rings.count,
+};
+document.getElementById('hud').textContent =
+  `rings ${stats.ringCount} · ${stats.ringDrawCalls} draw / ${stats.ringTriangles} tris\n`
+  + `frame ${stats.drawCalls} draws / ${stats.triangles} tris\n`
+  + `reachable on the racing line: ${stats.reachableInOneLap}/${stats.ringCount}`
+  + ` ${stats.allReachable ? '· PASS' : '· TOO WIDE'}`;
+
+window.__rings = rings;
+window.__GAUNTLET_STATS = () => stats;
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

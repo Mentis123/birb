@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · rockets</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+  .panel { position: fixed; color: #fff6dc; pointer-events: none;
+           font: 600 11px/1.45 ui-monospace, SFMono-Regular, monospace;
+           letter-spacing: .04em; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { left: 10px; bottom: 8px; }
+  #tag { right: 10px; top: 10px; text-align: right; }
+  #legend { left: 10px; top: 10px; }
+  #lblBoom { right: 12px; text-align: right; }
+  #lblRock { left: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="legend">rocket probe · 4 turrets, staggered volley<br>arc trajectory · radial gravity 8.0 · 50 u/s</div>
+<div class="panel" id="tag">detonation on the target wall ↗<br>mid-arc + fresh launches below it</div>
+<div class="panel" id="lblRock">rocket silhouette ↓</div>
+<div class="panel" id="lblBoom">detonation, step 1 ↓</div>
+<div class="panel" id="stats"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
+import { attachOutline, updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { surfaceRadius, continentalHeight, PLANET_RADIUS } from '/gauntlet/src/core/terrain.js';
+import { createRockets, ROCKET_SPEED, ROCKET_GRAVITY, ROCKET_COOLDOWN, MUZZLE_CLEAR_RADIUS }
+  from '/gauntlet/src/nesting/rockets.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+// ---------------------------------------------------------------------------
+// A real slice of planet. A rocket judged against a black void is a rocket that
+// has not been judged: the whole question is whether an orange shot and a warm
+// explosion still read against green terrain and a pale sky.
+// ---------------------------------------------------------------------------
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 220, 900);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.5, 3000);
+createLightRig(THREE, scene);
+
+{
+  const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 34);
+  const pos = geo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const cLit = new THREE.Color(PALETTE.meadowLit);
+  const cDeep = new THREE.Color(PALETTE.canyonDeep);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    const r = surfaceRadius(nx, ny, nz);
+    pos.setXYZ(i, nx * r, ny * r, nz * r);
+    const depth = Math.min(1, -continentalHeight(nx, ny, nz) / 26);
+    tmp.copy(cLit).lerp(cDeep, depth);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  scene.add(new THREE.Mesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+  })));
+}
+
+// ---------------------------------------------------------------------------
+// Four turrets on the surface and a wall of drone-sized targets across the
+// valley. Each turret runs its OWN rocket system so each has its own 2.0s
+// cooldown — that is the honest way to get a volley out of a weapon that fires
+// once every two seconds, and it also proves several instances coexist.
+// ---------------------------------------------------------------------------
+const TURRET_ANGLE = -0.30;      // radians from +Y, in the XY plane
+const TARGET_ANGLE = 1.02;
+
+function dirAt(angle, z) {
+  return new THREE.Vector3(Math.sin(angle), Math.cos(angle), z).normalize();
+}
+
+const TURRETS = [];
+for (let i = 0; i < 4; i++) {
+  const zo = (i - 1.5) * 0.10;
+  const d = dirAt(TURRET_ANGLE + (i - 1.5) * 0.028, zo);
+  const p = d.clone().multiplyScalar(surfaceRadius(d.x, d.y, d.z) + 14);
+  TURRETS.push({ dir: d, pos: p });
+}
+
+// Target wall: four altitudes x two depths. Altitude spread is what fans the
+// four arcs apart vertically on screen instead of stacking them.
+const TARGETS = [];
+{
+  const RADII = [116, 128, 141, 154];
+  for (let a = 0; a < RADII.length; a++) {
+    for (let k = 0; k < 2; k++) {
+      const zo = (k === 0 ? -0.075 : 0.075);
+      const d = dirAt(TARGET_ANGLE + (k === 0 ? -0.012 : 0.012), zo);
+      const p = d.clone().multiplyScalar(RADII[a]);
+      TARGETS.push({ x: p.x, y: p.y, z: p.z, radius: 6.5, pos: p });
+    }
+  }
+}
+
+// Drone-ish target bodies. Outlined — they are hero objects the player aims at,
+// and outlining them here also proves the rockets read WITHOUT outlines beside
+// something that has them.
+{
+  const geo = new THREE.IcosahedronGeometry(5.0, 1);
+  const mat = createToonMaterial(THREE, {
+    ramp: 'graphic', color: PALETTE.uiCyan, flatShading: true,
+    rimColor: PALETTE.sparkCyan, rimStrength: 0.7,
+  });
+  const ring = new THREE.TorusGeometry(7.4, 0.55, 6, 18);
+  const ringMat = createToonMaterial(THREE, {
+    ramp: 'graphic', color: PALETTE.inkSoft, flatShading: true, specStrength: 0.2,
+  });
+  for (const t of TARGETS) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(t.pos);
+    attachOutline(THREE, m, { color: PALETTE.ink, pixels: 2.6 });
+    scene.add(m);
+    const r = new THREE.Mesh(ring, ringMat);
+    r.position.copy(t.pos);
+    r.lookAt(0, 0, 0);
+    attachOutline(THREE, r, { color: PALETTE.ink, pixels: 2.0 });
+    scene.add(r);
+  }
+}
+
+// A stubby nest post per turret so the launch point is legible.
+{
+  const geo = new THREE.CylinderGeometry(2.6, 3.6, 12, 8);
+  const mat = createToonMaterial(THREE, {
+    ramp: 'graphic', color: PALETTE.trunk, flatShading: true, specStrength: 0.1,
+  });
+  for (const t of TURRETS) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(t.dir).multiplyScalar(surfaceRadius(t.dir.x, t.dir.y, t.dir.z) + 4);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), t.dir);
+    attachOutline(THREE, m, { color: PALETTE.ink, pixels: 2.4 });
+    scene.add(m);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The systems under test.
+// ---------------------------------------------------------------------------
+let totalHits = 0;
+const SYSTEMS = TURRETS.map((t, i) => {
+  const rk = createRockets(THREE, { quality: 'high', seed: 1000 + i });
+  rk.onHit = () => { totalHits++; };
+  scene.add(rk.group);
+  return rk;
+});
+
+const DT = 1 / 60;
+
+/**
+ * Ballistic aim, solved numerically by shooting.
+ *
+ * The closed-form `T - P + up * 0.5*g*t^2` lead is WRONG on a sphere and the
+ * first capture proved it — every shot sailed past. Gravity here is radial, and
+ * this shot crosses 53 degrees of planet, so the "down" the rocket is falling
+ * toward has rotated most of a right angle by the time it arrives. A lead built
+ * on the up vector at the muzzle is solving a different problem.
+ *
+ * So: integrate the real trajectory with the SAME euler step `update()` uses,
+ * find the closest approach, and push a virtual aim point by the miss vector.
+ * Converges in a handful of passes and is exact by construction.
+ */
+const _simP = new THREE.Vector3();
+const _simV = new THREE.Vector3();
+const _simU = new THREE.Vector3();
+const _simBest = new THREE.Vector3();
+function simulateShot(P, dir, T) {
+  _simP.copy(P);
+  _simV.copy(dir).multiplyScalar(ROCKET_SPEED);
+  let best = Infinity, bestStep = 0;
+  const MAX = Math.round(8.0 / DT);
+  for (let s = 1; s <= MAX; s++) {
+    _simU.copy(_simP).normalize();
+    _simV.addScaledVector(_simU, -ROCKET_GRAVITY * DT);
+    _simP.addScaledVector(_simV, DT);
+    const d = _simP.distanceToSquared(T);
+    if (d < best) { best = d; bestStep = s; _simBest.copy(_simP); }
+    // Mirror update()'s ground rule exactly, including the muzzle corridor.
+    // Testing against PLANET_RADIUS instead of the real surface was the first
+    // bug here: these turrets stand in a valley, ~84u from the centre, so a
+    // naive `length() < PLANET_RADIUS` break killed every trajectory on step 1.
+    if (_simP.distanceTo(P) > MUZZLE_CLEAR_RADIUS) {
+      const len = _simP.length();
+      if (len < surfaceRadius(_simP.x / len, _simP.y / len, _simP.z / len)) break;
+    }
+  }
+  return { miss: Math.sqrt(best), time: bestStep * DT, point: _simBest.clone() };
+}
+
+const _virt = new THREE.Vector3();
+const _guess = new THREE.Vector3();
+function solveAim(P, T, out) {
+  _virt.copy(T);
+  let r = null;
+  for (let it = 0; it < 40; it++) {
+    _guess.copy(_virt).sub(P).normalize();
+    r = simulateShot(P, _guess, T);
+    if (r.miss < 0.4) break;
+    _virt.add(T).sub(r.point);
+  }
+  out.copy(_guess);
+  return r;
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic simulation. Fixed dt, seeded rng, staggered fire times chosen
+// so the captured frame shows, simultaneously:
+//   - a detonation ~0.12s old on the target wall (flash at its widest step)
+//   - a rocket at the apex of its arc
+//   - a rocket 0.45s off the rail with a developed exhaust trail
+//   - a rocket mid-descent
+// ---------------------------------------------------------------------------
+const TOTAL = 5.00;
+const STEPS = Math.round(TOTAL / DT);
+
+// Solve every shot first, then schedule each one BACKWARD from the moment of
+// capture, so the composition does not depend on my guess at the flight time.
+// `phase` is how far through its own flight the shot should be at capture:
+// 1.04 = just detonated, 0.5 = apex, 0.12 = fresh off the rail.
+const SHOTS = [
+  { sys: 0, target: 7, phase: 1.045 },   // detonating on the wall
+  { sys: 1, target: 4, phase: 0.50 },    // apex
+  { sys: 3, target: 2, phase: 0.78 },    // descending
+  { sys: 2, target: 1, phase: 0.17 },    // fresh off the rail, trail developing
+];
+const _dir = new THREE.Vector3();
+let fired = 0, refused = 0, worstMiss = 0;
+
+for (const sh of SHOTS) {
+  const P = TURRETS[sh.sys].pos, T = TARGETS[sh.target].pos;
+  sh.dir = new THREE.Vector3();
+  const r = solveAim(P, T, sh.dir);
+  sh.flight = r.time;
+  sh.miss = r.miss;
+  worstMiss = Math.max(worstMiss, r.miss);
+  sh.fireAt = TOTAL - r.time * sh.phase;
+}
+window.__shotPlan = SHOTS.map((s) => ({ flight: s.flight, miss: s.miss, fireAt: s.fireAt }));
+// The same turret's follow-up shot, exactly cooldown-legal (+1 frame of slack
+// so a float comparison cannot refuse it). This proves the 2.0s gate is real
+// AND puts a second rocket in the frame.
+SHOTS.push({
+  sys: 0, target: 5, dir: new THREE.Vector3(),
+  fireAt: SHOTS[0].fireAt + ROCKET_COOLDOWN + DT,
+});
+solveAim(TURRETS[0].pos, TARGETS[5].pos, SHOTS[4].dir);
+
+for (let s = 0; s < STEPS; s++) {
+  const t = s * DT;
+  for (let k = 0; k < SHOTS.length; k++) {
+    const sh = SHOTS[k];
+    if (t >= sh.fireAt && t - DT < sh.fireAt) {
+      const P = TURRETS[sh.sys].pos;
+      const ok = SYSTEMS[sh.sys].fire(P.x, P.y, P.z, sh.dir.x, sh.dir.y, sh.dir.z);
+      if (ok) fired++; else refused++;
+    }
+  }
+  for (const sys of SYSTEMS) sys.update(DT, TARGETS);
+}
+
+// ---------------------------------------------------------------------------
+// Side-elevation camera: the arc is the thing being judged, and an arc only
+// reads from the side.
+// ---------------------------------------------------------------------------
+{
+  const mid = TURRETS[0].pos.clone().add(TARGETS[4].pos).multiplyScalar(0.5);
+  camera.position.copy(mid).add(new THREE.Vector3(4, 30, 330));
+  camera.up.copy(mid).normalize();
+  camera.lookAt(mid.x, mid.y + 6, mid.z);
+}
+
+// ---------------------------------------------------------------------------
+// Inset A — the rocket model alone, side on, big enough to judge the
+// silhouette: nose, flared body, three ink fins, hard two-tone flame.
+// ---------------------------------------------------------------------------
+const rockScene = new THREE.Scene();
+const rockCam = new THREE.PerspectiveCamera(34, 1, 0.1, 200);
+createLightRig(THREE, rockScene);
+{
+  const card = new THREE.Mesh(new THREE.PlaneGeometry(120, 120),
+    new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith }));
+  card.position.z = -40;
+  rockScene.add(card);
+}
+const rockFx = createRockets(THREE, { quality: 'high', capacity: 2, particleCapacity: 60, seed: 42 });
+rockScene.add(rockFx.group);
+rockFx.fire(0, 0, 0, -0.34, 0.10, -0.935);
+rockFx.update(1 / 240, null);
+rockCam.position.set(2.0, 2.2, 12.0);
+rockCam.lookAt(-0.5, 0.1, 0);
+
+// ---------------------------------------------------------------------------
+// Inset B — a detonation on its own, held at step 1 (the widest flash), so the
+// explosion silhouette can be judged without the arc in the way.
+// ---------------------------------------------------------------------------
+const boomScene = new THREE.Scene();
+const boomCam = new THREE.PerspectiveCamera(38, 1, 0.1, 400);
+createLightRig(THREE, boomScene);
+{
+  const card = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
+    new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith }));
+  card.position.z = -110;
+  boomScene.add(card);
+}
+const boomFx = createRockets(THREE, { quality: 'high', seed: 7 });
+boomScene.add(boomFx.group);
+{
+  // Far from the planet so the ground rest never fires here — this inset is
+  // about the blast shape, nothing else.
+  boomFx.explodeAt(0, 900, 0, 1);
+  for (let i = 0; i < 5; i++) boomFx.update(DT, null);   // ~0.083s → flash step 1
+}
+boomCam.position.set(0, 900, 62);
+boomCam.up.set(0, 0, -1);
+boomCam.lookAt(0, 900, 0);
+
+// ---------------------------------------------------------------------------
+let mainStats = { drawCalls: 0, triangles: 0 };
+
+function draw() {
+  const W = renderer.domElement.width, H = renderer.domElement.height;
+  const cw = innerWidth, ch = innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, cw, ch);
+  renderer.render(scene, camera);
+  mainStats = {
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+  };
+
+  const iw = Math.round(Math.min(300, cw * 0.42));
+  const ih = Math.round(iw * 0.72);
+
+  // rocket close-up, bottom-left
+  rockCam.aspect = iw / ih;
+  rockCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setViewport(8, 26, iw, ih);
+  renderer.setScissor(8, 26, iw, ih);
+  renderer.render(rockScene, rockCam);
+
+  // detonation close-up, bottom-right
+  boomCam.aspect = iw / ih;
+  boomCam.updateProjectionMatrix();
+  const bx = cw - iw - 8;
+  renderer.setViewport(bx, 26, iw, ih);
+  renderer.setScissor(bx, 26, iw, ih);
+  renderer.render(boomScene, boomCam);
+
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, cw, ch);
+  void W; void H;
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  // Portrait phone: a 42deg VERTICAL fov on a 0.46 aspect leaves a keyhole and
+  // crops the arc. Widen so the phone capture judges the same composition.
+  camera.fov = camera.aspect >= 0.9 ? 42 : 42 + (0.9 - camera.aspect) * 52;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  draw();
+
+  const iw = Math.round(Math.min(300, innerWidth * 0.42));
+  const ih = Math.round(iw * 0.72);
+  document.getElementById('lblRock').style.bottom = (26 + ih + 4) + 'px';
+  document.getElementById('lblBoom').style.bottom = (26 + ih + 4) + 'px';
+
+  let live = 0, parts = 0;
+  for (const s of SYSTEMS) { live += s.liveRockets; parts += s.liveParticles; }
+  document.getElementById('stats').textContent =
+    `fired ${fired} (refused ${refused})  hits ${totalHits}  ` +
+    `live rockets ${live}  particles ${parts}  ` +
+    `system draws 2  frame ${mainStats.drawCalls} draws / ${mainStats.triangles} tris`;
+}
+addEventListener('resize', resize);
+resize();
+
+window.__GAUNTLET_STATS = () => {
+  let live = 0, parts = 0;
+  for (const s of SYSTEMS) { live += s.liveRockets; parts += s.liveParticles; }
+  return {
+    drawCalls: mainStats.drawCalls,
+    triangles: mainStats.triangles,
+    systemDrawCalls: SYSTEMS[0].drawCallCount,
+    systemMaxTriangles: SYSTEMS[0].triangleCount,
+    rocketTriangles: SYSTEMS[0].rocketTriangles,
+    particleTriangles: SYSTEMS[0].particleTriangles,
+    rocketCapacity: SYSTEMS[0].capacity,
+    particleCapacity: SYSTEMS[0].particleCapacity,
+    fired, refused, hits: totalHits, worstMiss: +worstMiss.toFixed(2),
+    plan: window.__shotPlan,
+    liveRockets: live, liveParticles: parts,
+    cooldown01: SYSTEMS[0].cooldown01,
+  };
+};
+
+// Self-test: the paths a still frame cannot show — cooldown gating, ring-buffer
+// overflow, collision maths, dt spikes, clear/reset and dispose.
+window.__rocketSelfTest = () => {
+  const r = createRockets(THREE, { quality: 'low', seed: 5 });
+  if (r.drawCallCount !== 2) throw new Error('draw calls ' + r.drawCallCount);
+  if (r.capacity !== 8) throw new Error('low tier rockets ' + r.capacity);
+
+  // Cooldown gating is verbatim 2.0s.
+  if (!r.canFire()) throw new Error('cold system refused to fire');
+  if (!r.fire(0, 300, 0, 0, 0, -1)) throw new Error('first shot refused');
+  if (r.fire(0, 300, 0, 0, 0, -1)) throw new Error('cooldown did not gate');
+  if (!(r.cooldown01 > 0.99)) throw new Error('cooldown01 ' + r.cooldown01);
+  // update() clamps dt to 0.1 on purpose (a tab-return spike must not teleport
+  // a rocket through a drone), so the cooldown has to be run down in real steps.
+  for (let i = 0; i < 30; i++) r.update(0.1, null);
+  if (!r.canFire()) throw new Error('cooldown never expired');
+
+  // A zero-length direction must not produce a NaN rocket.
+  if (r.fire(0, 300, 0, 0, 0, 0)) throw new Error('zero direction accepted');
+
+  // Collision: a target dead ahead is hit, and exactly once.
+  r.clear(); r.reset();
+  r.fire(0, 300, 0, 0, 0, -1);
+  const targets = [{ x: 0, y: 300, z: -20, radius: 6 }];
+  let hits = 0, cbHits = 0;
+  r.onHit = () => { cbHits++; };
+  for (let i = 0; i < 40; i++) hits += r.update(DT, targets);
+  if (hits !== 1) throw new Error('expected 1 hit, got ' + hits);
+  if (cbHits !== 1) throw new Error('onHit fired ' + cbHits + ' times');
+  if (r.liveRockets !== 0) throw new Error('rocket survived its own detonation');
+  if (r.liveParticles === 0) throw new Error('detonation emitted nothing');
+
+  // A target BEHIND the rocket must never be hit.
+  r.reset();
+  r.fire(0, 300, 0, 0, 0, -1);
+  let behind = 0;
+  for (let i = 0; i < 30; i++) behind += r.update(DT, [{ x: 0, y: 300, z: 40, radius: 6 }]);
+  if (behind !== 0) throw new Error('hit a target behind the muzzle');
+
+  // Ring buffers must never overflow, and dt spikes must not NaN anything.
+  r.reset();
+  for (let i = 0; i < 200; i++) { r.explodeAt(0, 900, 0, 1); r.update(0.001, null); }
+  if (r.liveParticles > r.particleCapacity) throw new Error('particle overflow');
+  r.update(0); r.update(-1); r.update(10, null);
+  if (!Number.isFinite(r.liveParticles)) throw new Error('NaN live count');
+
+  // Everything must eventually die — no immortal debris.
+  for (let i = 0; i < 400; i++) r.update(DT, null);
+  if (r.liveParticles !== 0) throw new Error('particles outlived ttl: ' + r.liveParticles);
+  if (r.liveRockets !== 0) throw new Error('rockets outlived ttl: ' + r.liveRockets);
+
+  // clear() and dispose() must be safe and idempotent.
+  r.explodeAt(0, 900, 0, 1);
+  r.clear();
+  if (r.liveParticles !== 0) throw new Error('clear left ' + r.liveParticles);
+  r.dispose(); r.dispose();
+  r.update(DT, null); r.fire(0, 0, 0, 0, 0, -1); r.explodeAt(0, 0, 0, 1);
+
+  // ROCKET_LIFETIME must expire a rocket fired into empty space.
+  const q = createRockets(THREE, { quality: 'mid', seed: 6 });
+  q.fire(0, 4000, 0, 0, 1, 0);            // straight up, away from the planet
+  for (let i = 0; i < 60 * 9; i++) q.update(DT, null);
+  if (q.liveRockets !== 0) throw new Error('rocket outlived ROCKET_LIFETIME');
+  q.dispose();
+
+  if (Math.abs(ROCKET_SPEED - 50) > 1e-9) throw new Error('ROCKET_SPEED drifted');
+  if (Math.abs(ROCKET_GRAVITY - 8) > 1e-9) throw new Error('ROCKET_GRAVITY drifted');
+  return 'ok';
+};
+if (window.__rocketSelfTest() !== 'ok') throw new Error('rocket self-test failed');
+
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

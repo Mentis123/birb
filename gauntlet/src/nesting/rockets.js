@@ -88,7 +88,7 @@
 
 import { PALETTE } from '../core/palette.js';
 import { createToonMaterial } from '../core/toon.js';
-import { makeRng } from '../core/rng.js';
+import { makeRng, fibonacciDirection } from '../core/rng.js';
 import { PLANET_RADIUS, surfaceRadius } from '../core/terrain.js';
 
 // --- ported feel constants ---------------------------------------------------
@@ -109,52 +109,82 @@ const ROCKET_RADIUS = 1.2;
 const GROUND_EPS = 0.35;
 
 // --- particle kinds ----------------------------------------------------------
-const K_FLASH = 0;
-const K_SHARD = 1;
-const K_SPARK = 2;
-const K_EMBER = 3;
-const K_TRAIL = 4;
-const KIND_COUNT = 5;
+//
+// The first captured frame killed the original two-kind flash: a pile of large,
+// near-white, randomly-tumbling chunks at one point does not read as an
+// explosion, it reads as CRUMPLED PAPER. The silhouette is the whole problem —
+// overlapping blobs have no shape, and a cel explosion is a SHAPE.
+//
+// So the flash is now built the way an animator draws one: a hot CORE, plus a
+// ring of SPIKES radiating on evenly-spaced directions. That gives a starburst
+// outline that survives being 90px tall on a phone.
+const K_CORE = 0;    // the hot centre — one or two big chunks, stationary
+const K_FLASH = 1;   // radial spikes, aligned outward, stationary
+const K_SHARD = 2;   // the fireball broken into flying chunks
+const K_SPARK = 3;   // thin fast slivers
+const K_EMBER = 4;   // slow heavy debris that sinks and cools
+const K_TRAIL = 5;   // exhaust, shed by a rocket in flight
+const KIND_COUNT = 6;
 
 /**
  * Per-kind scale profile applied to the shared chunk geometry. This is the
- * whole trick that gets five particle types out of one vertex buffer: a chunk
- * squashed to (0.26, 0.26, 3.6) is a spark streak, the same chunk at
- * (0.82, 0.82, 1.9) is a tumbling shard.
- * Local +Z is the alignment axis for the kinds that align to velocity.
+ * whole trick that gets six particle types out of one vertex buffer: a chunk
+ * squashed to (0.24, 0.24, 3.6) is a spark streak, the same chunk at
+ * (0.86, 0.62, 2.0) is a tumbling shard, and at (0.40, 0.40, 2.6) it is a spike
+ * of the starburst.
+ * Local +Z is the alignment axis for the kinds that align to a direction.
  */
-const KIND_SX = [1.00, 0.82, 0.26, 0.78, 0.62];
-const KIND_SY = [1.00, 0.66, 0.26, 0.78, 0.62];
-const KIND_SZ = [1.00, 1.90, 3.60, 0.86, 0.78];
+const KIND_SX = [1.00, 0.40, 0.86, 0.24, 0.80, 0.72];
+const KIND_SY = [0.92, 0.40, 0.62, 0.24, 0.80, 0.72];
+const KIND_SZ = [1.00, 2.60, 2.00, 3.60, 0.88, 0.86];
 
-/** Base size range per kind, in world units. */
-const KIND_SIZE_MIN = [3.1, 0.85, 0.62, 0.55, 0.42];
-const KIND_SIZE_MAX = [4.4, 1.55, 1.05, 0.95, 0.80];
+/**
+ * Base size range per kind, in world units.
+ *
+ * Sized against the thing being shot: a drone body is ~5u across with a ~9.9u
+ * collision radius, so a blast has to span roughly 22u to read as having
+ * consumed it. The first pass was a third of that and looked like confetti.
+ */
+const KIND_SIZE_MIN = [5.2, 3.6, 1.70, 1.10, 1.00, 0.85];
+const KIND_SIZE_MAX = [6.4, 5.0, 2.90, 1.80, 1.70, 1.45];
 
-/** Base colour per kind. Palette-only; see the report on the missing fire ramp. */
+/**
+ * Base colour per kind.
+ *
+ * NOTE FOR THE INTEGRATOR: `palette.js` has no fire ramp — there is no hex in it
+ * that means "flame". These are the closest warm set the palette offers, and
+ * `birdRival1` is doing double duty as hot orange while also being Talon's
+ * plumage. See the report; a dedicated `flameCore`/`flameMid`/`ember` trio
+ * belongs in the palette.
+ */
 const KIND_COLOR = [
-    PALETTE.sunCore,      // FLASH — near-white cream
+    PALETTE.sunCore,      // CORE  — cream-white centre
+    PALETTE.uiGold,       // FLASH — gold spikes
     PALETTE.birdRival1,   // SHARD — hot orange
     PALETTE.uiGold,       // SPARK — bright gold
-    PALETTE.sunHalo,      // EMBER — deep gold
-    PALETTE.impactPuff,   // TRAIL — pale warm smoke
+    PALETTE.sunHalo,      // EMBER — deep gold, cooling
+    PALETTE.canyonLit,    // TRAIL — warm tan smoke. Pale cream vanished against
+                          //         the sky; tan reads over sky AND meadow.
 ];
 
 /** Seconds of life per kind. SHARD carries the original's 0.6s fireball. */
-const KIND_LIFE = [0.20, EXPLOSION_LIFETIME, 0.34, 0.95, 0.40];
+const KIND_LIFE = [0.22, 0.20, EXPLOSION_LIFETIME, 0.34, 0.95, 0.58];
 
-/** True if the kind aligns its long axis to its velocity (vs. tumbling). */
-const KIND_ALIGNED = [0, 1, 1, 0, 0];
+/** True if the kind aligns its long axis to a direction (vs. tumbling). */
+const KIND_ALIGNED = [0, 1, 1, 1, 0, 1];
+
+/** True if the kind is pinned in place (the flash holds; debris flies). */
+const KIND_STATIC = [1, 1, 0, 0, 0, 0];
 
 /** Launch speed range per kind, before the `power` multiplier. */
-const KIND_SPEED_MIN = [0.0, 11.0, 26.0, 5.0, 0.0];
-const KIND_SPEED_MAX = [0.0, 22.0, 44.0, 13.0, 1.4];
+const KIND_SPEED_MIN = [0.0, 0.0, 11.0, 26.0, 5.0, 0.0];
+const KIND_SPEED_MAX = [0.0, 0.0, 22.0, 44.0, 13.0, 1.4];
 
 /** Linear drag per kind. Sparks brake hard so they read as short streaks. */
-const KIND_DRAG = [0.0, 1.5, 5.2, 0.9, 2.6];
+const KIND_DRAG = [0.0, 0.0, 1.5, 5.2, 0.9, 2.2];
 
 /** Radial sink per kind (u/s^2 toward the planet centre). */
-const KIND_SINK = [0.0, 7.5, 2.0, 11.0, -1.6];   // trail rises slightly
+const KIND_SINK = [0.0, 0.0, 7.5, 2.0, 11.0, -1.6];   // trail drifts up slightly
 
 /**
  * The quantised death ramps — four hard steps, then gone. Index 0 is freshest.
@@ -163,30 +193,36 @@ const KIND_SINK = [0.0, 7.5, 2.0, 11.0, -1.6];   // trail rises slightly
  * shed debris into the same world, and two different dissolve rules read as two
  * different games.
  *
- * FLASH inverts the rule on purpose: it steps UP through the original's 1.6x
- * growth while its tone steps down, so it blooms and cools rather than shrinks.
+ * CORE and FLASH invert the rule on purpose: they step UP through the original's
+ * 1.6x growth while their tone steps DOWN, so the flash blooms and cools in
+ * bands rather than shrinking. Everything ends on a hard cut — never a fade.
  */
 const KIND_FADE_SCALE = [
-    [0.62, 1.00, 1.00 + EXPLOSION_GROWTH * 0.55, 1.00 + EXPLOSION_GROWTH * 0.90],
+    [0.70, 1.10, 1.00 + EXPLOSION_GROWTH * 0.34, 1.00 + EXPLOSION_GROWTH * 0.53],
+    [0.55, 1.00, 1.42, 1.72],
     [1.00, 0.86, 0.60, 0.30],
     [1.00, 0.78, 0.46, 0.20],
     [1.00, 0.80, 0.52, 0.24],
     [1.00, 0.80, 0.52, 0.24],
 ];
 const KIND_FADE_TONE = [
-    [1.32, 1.12, 0.84, 0.52],
+    [1.45, 1.20, 0.86, 0.48],
+    [1.40, 1.14, 0.80, 0.42],
     [1.24, 1.00, 0.72, 0.44],
     [1.38, 1.14, 0.78, 0.40],
     [1.12, 0.88, 0.60, 0.32],
-    [1.00, 0.80, 0.56, 0.30],
+    [1.15, 0.92, 0.62, 0.34],
 ];
 const FADE_STEPS = 4;
 
-/** Per-tier budgets and burst composition. */
+/** How far out the starburst spikes sit from the blast centre. */
+const SPIKE_OFFSET = 3.6;
+
+/** Per-tier budgets and burst composition: [core, spike, shard, spark, ember]. */
 const TIERS = {
-    low: { rockets: 8, particles: 150, trailStride: 3, burst: [3, 6, 5, 4] },
-    mid: { rockets: 10, particles: 300, trailStride: 2, burst: [4, 10, 8, 6] },
-    high: { rockets: 12, particles: 470, trailStride: 1, burst: [6, 14, 12, 8] },
+    low: { rockets: 8, particles: 170, trailStride: 3, burst: [1, 4, 6, 5, 4] },
+    mid: { rockets: 10, particles: 320, trailStride: 2, burst: [1, 6, 10, 8, 6] },
+    high: { rockets: 12, particles: 480, trailStride: 1, burst: [2, 8, 14, 12, 8] },
 };
 
 // ---------------------------------------------------------------------------
@@ -266,12 +302,15 @@ function buildRocketGeometry(THREE) {
     const e = new THREE.Euler();
     const parts = [];
 
-    // --- nose cone: apex at z = -2.10, base at z = -1.00 ---------------------
+    // --- nose cone: apex at z = -2.35, base at z = -1.00 ---------------------
+    // Longer and PALE. The first capture read as an orange dash with a white
+    // blob at the wrong end: the flame was bigger than the nose, so the rocket
+    // looked like it was flying backwards. A long cream nose fixes the read.
     e.set(-Math.PI / 2, 0, 0);
     q.setFromEuler(e);
-    v.set(0, 0, -1.55);
+    v.set(0, 0, -1.675);
     m.compose(v, q, s);
-    parts.push({ geo: new THREE.ConeGeometry(0.42, 1.10, 10), matrix: m.clone(), color: PALETTE.uiGold });
+    parts.push({ geo: new THREE.ConeGeometry(0.44, 1.35, 10), matrix: m.clone(), color: PALETTE.uiCream });
 
     // --- body: z from -1.00 to +1.10, flaring slightly toward the tail -------
     v.set(0, 0, 0.05);
@@ -286,27 +325,33 @@ function buildRocketGeometry(THREE) {
     });
 
     // --- three ink fins at the tail -----------------------------------------
+    // Smaller than the first pass. At 30px on screen a fat ink fin is just a
+    // black blob at the back and the rocket loses its direction entirely; these
+    // are sized to read as a swept tail, not as a counterweight.
     for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI * 2;
         e.set(0, 0, a);
         q.setFromEuler(e);
-        v.set(Math.cos(a + Math.PI / 2) * 0.72, Math.sin(a + Math.PI / 2) * 0.72, 0.66);
+        v.set(Math.cos(a + Math.PI / 2) * 0.60, Math.sin(a + Math.PI / 2) * 0.60, 0.72);
         m.compose(v, q, s);
-        parts.push({ geo: new THREE.BoxGeometry(0.10, 0.62, 0.92), matrix: m.clone(), color: PALETTE.inkSoft });
+        parts.push({ geo: new THREE.BoxGeometry(0.09, 0.46, 0.80), matrix: m.clone(), color: PALETTE.inkSoft });
     }
 
-    // --- flame: base at z = +1.10, apex at z = +2.60 -------------------------
+    // --- flame: base at z = +1.10, apex at z = +2.15 -------------------------
+    // Shorter and GOLD, not white. A white cone longer than the nose is the
+    // brightest thing on the model and the eye reads brightest-thing-first as
+    // the front. Gold keeps it obviously the hot end without stealing the read.
     e.set(Math.PI / 2, 0, 0);
     q.setFromEuler(e);
-    v.set(0, 0, 1.85);
+    v.set(0, 0, 1.625);
     m.compose(v, q, s);
     parts.push({
-        geo: new THREE.ConeGeometry(0.54, 1.50, 8),
+        geo: new THREE.ConeGeometry(0.46, 1.05, 8),
         matrix: m.clone(),
-        color: PALETTE.sunCore,
-        // Hard two-tone down the flame: white at the throat, gold at the tip.
+        color: PALETTE.uiGold,
+        // Hard two-tone down the flame: hot at the throat, cooling at the tip.
         // A smooth gradient here is exactly the soft haze the brief rules out.
-        shade: (x, y, z) => (z > 1.85 ? 0.68 : 1.18),
+        shade: (x, y, z) => (z > 1.62 ? 0.66 : 1.22),
     });
 
     const geo = mergeParts(THREE, parts);
@@ -516,6 +561,8 @@ export function createRockets(THREE, opts = {}) {
     const _ident = new THREE.Quaternion();
     const _fwd = new THREE.Vector3(0, 0, -1);
     const _unitZ = new THREE.Vector3(0, 0, 1);
+    // fibonacciDirection writes into a plain {x,y,z} — allocated once, here.
+    const _fib = { x: 0, y: 0, z: 0 };
 
     // Per-kind base colours, decoded once so the loop never touches Color.
     const KCR = new Float32Array(KIND_COUNT);
@@ -582,7 +629,7 @@ export function createRockets(THREE, opts = {}) {
         const t = KIND_LIFE[kind] * (0.82 + rng() * 0.36);
         plife[i] = t; pttl[i] = t;
         psize[i] = (KIND_SIZE_MIN[kind] + rng() * (KIND_SIZE_MAX[kind] - KIND_SIZE_MIN[kind]))
-            * (kind === K_FLASH ? power : 1);
+            * (KIND_STATIC[kind] ? power : 1);
         return i;
     }
 
@@ -628,9 +675,12 @@ export function createRockets(THREE, opts = {}) {
     }
 
     /**
-     * A detonation. Four kinds fired from one point:
-     *   FLASH  — stationary, blooms through the original's 1.6x growth in hard
-     *            steps, gone in 200ms. This is the punch.
+     * A detonation. Five kinds fired from one point:
+     *   CORE   — the hot centre, stationary, blooms through the original's 1.6x
+     *            growth in hard steps and is gone in 220ms.
+     *   FLASH  — spikes on evenly-spaced directions, forming the starburst
+     *            SILHOUETTE. Fibonacci-distributed rather than random: random
+     *            directions clump, and a clumped starburst is a blob.
      *   SHARD  — the fireball, broken into hard-edged chunks flying outward.
      *   SPARK  — thin fast slivers, braked hard so they read as short streaks.
      *   EMBER  — slow, heavy, sinks radially and cools through four tones.
@@ -638,33 +688,39 @@ export function createRockets(THREE, opts = {}) {
     function explodeAt(x, y, z, power = 1) {
         if (disposed) return;
 
-        // Radial up at the blast, so embers sink the right way and the flash
-        // sits slightly proud of whatever it hit.
+        // Radial up at the blast, so embers sink the right way and the debris
+        // blooms away from the ground rather than half of it burying itself.
         const plen = Math.hypot(x, y, z) || 1;
         const ux = x / plen, uy = y / plen, uz = z / plen;
 
         for (let n = 0; n < burst[0]; n++) {
-            // Flash chunks cluster tightly at the centre — a spread flash reads
-            // as four separate small explosions.
-            spawnParticle(K_FLASH,
-                x + s1() * 0.9, y + s1() * 0.9, z + s1() * 0.9,
+            spawnParticle(K_CORE,
+                x + s1() * 0.7, y + s1() * 0.7, z + s1() * 0.7,
                 0, 1, 0, power);
         }
-        for (let pass = 1; pass <= 3; pass++) {
-            const kind = pass === 1 ? K_SHARD : (pass === 2 ? K_SPARK : K_EMBER);
+
+        const spikes = burst[1];
+        for (let n = 0; n < spikes; n++) {
+            fibonacciDirection(n, spikes, _fib, rng, 0.42);
+            const off = SPIKE_OFFSET * power;
+            spawnParticle(K_FLASH,
+                x + _fib.x * off, y + _fib.y * off, z + _fib.z * off,
+                _fib.x, _fib.y, _fib.z, power);
+        }
+
+        for (let pass = 2; pass <= 4; pass++) {
+            const kind = pass === 2 ? K_SHARD : (pass === 3 ? K_SPARK : K_EMBER);
             const count = burst[pass];
             for (let n = 0; n < count; n++) {
                 let ax = s1(), ay = s1(), az = s1();
                 const alen = Math.hypot(ax, ay, az) || 1;
                 ax /= alen; ay /= alen; az /= alen;
-                // Bias outward from the planet so the blast blooms up and away
-                // rather than half of it burying itself in the ground.
                 ax = ax * 0.82 + ux * 0.34;
                 ay = ay * 0.82 + uy * 0.34;
                 az = az * 0.82 + uz * 0.34;
                 const l2 = Math.hypot(ax, ay, az) || 1;
                 ax /= l2; ay /= l2; az /= l2;
-                spawnParticle(kind, x + ax * 0.6, y + ay * 0.6, z + az * 0.6, ax, ay, az, power);
+                spawnParticle(kind, x + ax * 1.4, y + ay * 1.4, z + az * 1.4, ax, ay, az, power);
             }
         }
     }
@@ -840,9 +896,9 @@ export function createRockets(THREE, opts = {}) {
                     // dissipating plume.
                     const bx = -_dir.x, by = -_dir.y, bz = -_dir.z;
                     spawnParticle(K_TRAIL,
-                        nx + bx * 2.6 + s1() * 0.35,
-                        ny + by * 2.6 + s1() * 0.35,
-                        nz + bz * 2.6 + s1() * 0.35,
+                        nx + bx * 2.9 + s1() * 0.85,
+                        ny + by * 2.9 + s1() * 0.85,
+                        nz + bz * 2.9 + s1() * 0.85,
                         bx, by, bz, 1);
                 }
             }
@@ -864,7 +920,7 @@ export function createRockets(THREE, opts = {}) {
                 const k = pkind[i];
                 const x = px[i], y = py[i], z = pz[i];
 
-                if (k !== K_FLASH) {
+                if (!KIND_STATIC[k]) {
                     const plen = Math.hypot(x, y, z) || 1;
                     const ux = x / plen, uy = y / plen, uz = z / plen;
                     const sink = KIND_SINK[k] * dt;
