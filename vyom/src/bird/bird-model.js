@@ -86,6 +86,39 @@ function gradient(THREE, hexA, hexB, fn) {
 }
 
 /**
+ * Mirror a merged (non-indexed) geometry across X, in place.
+ *
+ * Mirroring with a negative scale in the transform looks like it works and does
+ * not: a reflection reverses triangle winding, so every face becomes a back
+ * face, gets culled, and the inverted-hull outline — which draws back faces —
+ * renders the outer shell in solid ink instead. (This is exactly what the first
+ * captured frame showed: a black blade where the left wing should be.) So the
+ * winding is reversed explicitly here to match.
+ */
+function mirrorX(geo) {
+    const attrs = [geo.getAttribute('position'), geo.getAttribute('normal'), geo.getAttribute('color')];
+    const pos = attrs[0].array;
+    const nrm = attrs[1].array;
+    for (let i = 0; i < pos.length; i += 3) { pos[i] = -pos[i]; nrm[i] = -nrm[i]; }
+    // Reverse winding: swap the 2nd and 3rd vertex of every triangle, carrying
+    // each vertex's whole attribute set with it.
+    const count = attrs[0].count;
+    for (let t = 0; t < count; t += 3) {
+        for (let a = 0; a < attrs.length; a++) {
+            const arr = attrs[a].array;
+            const n = attrs[a].itemSize;
+            const i1 = (t + 1) * n, i2 = (t + 2) * n;
+            for (let k = 0; k < n; k++) {
+                const tmp = arr[i1 + k]; arr[i1 + k] = arr[i2 + k]; arr[i2 + k] = tmp;
+            }
+        }
+    }
+    for (let a = 0; a < attrs.length; a++) attrs[a].needsUpdate = true;
+    geo.computeBoundingSphere();
+    return geo;
+}
+
+/**
  * Merge a list of `{ geo, color, mask }` entries into one BufferGeometry with
  * position / normal / color (and optionally aEyeMask) attributes.
  *
@@ -363,9 +396,16 @@ function toonWithDeform(THREE, baseOpts, uniformsGlsl, deform, uniforms, cacheKe
 // once, cheaper, for the outline hull.
 // ---------------------------------------------------------------------------
 
+// Eye placement, shared by the geometry builder and the anchor nodes so they
+// can never drift apart. Set forward rather than sideways: a chibi bird needs
+// both eyes readable from behind, and eyes far out on the sides break the head
+// silhouette into lumps.
+const EYE_DIR_X = 0.44, EYE_DIR_Y = 0.40, EYE_DIR_Z = -0.80;
+const EYE_SET = 0.310;
+
 const TAIL_Z = 0.54;
-const TAIL_LEN = 0.62;
-const WING_SPAN = 0.98;
+const TAIL_LEN = 0.80;
+const WING_SPAN = 1.06;
 
 function bodyEntries(THREE, S, col, hullOnly) {
     const e = [];
@@ -373,14 +413,21 @@ function bodyEntries(THREE, S, col, hullOnly) {
 
     // Egg torso. Belly colour is painted by height so the underside reads pale
     // from below (which is the only angle a trailing racer ever sees).
+    const bellyPaint = gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.30) / 0.24; });
     const torso = xform(
         THREE,
-        new THREE.SphereGeometry(0.44, S(15), S(11)),
-        0, 0, 0.02, 0, 0, 0, 0.96, 1.02, 1.32
+        new THREE.SphereGeometry(0.42, S(14), S(10)),
+        0, -0.01, 0.05, 0, 0, 0, 0.91, 0.96, 1.26
     );
+    e.push({ geo: torso, color: bellyPaint });
+
+    // Neck. Without it the head and the torso read as two tangent balls — a
+    // snowman, not a bird. An open-ended truncated cone buried at both ends
+    // welds the two masses into one silhouette for 16 triangles.
     e.push({
-        geo: torso,
-        color: gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.21) / 0.19; }),
+        geo: xform(THREE, new THREE.CylinderGeometry(0.25, 0.33, 0.40, S(8), 1, true),
+            0, 0.20, -0.24, 0.42, 0, 0, 1, 1, 1),
+        color: bellyPaint,
     });
 
     // Tucked feet: two stubby toes each, folded back along the belly. They live
@@ -388,13 +435,13 @@ function bodyEntries(THREE, S, col, hullOnly) {
     // them down; `parts.leftFoot`/`rightFoot` are anchors at their positions.
     for (let s = -1; s <= 1; s += 2) {
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.058, 0.20, S(6), 1, false),
-                s * 0.130, -0.285, 0.02, 2.00, 0, 0, 1, 1, 1),
+            geo: xform(THREE, new THREE.ConeGeometry(0.050, 0.16, S(6), 1, false),
+                s * 0.112, -0.240, 0.10, 2.45, 0, 0, 1, 1, 1),
             color: hullOnly ? bodyCol : PALETTE.foot,
         });
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.032, 0.15, S(5), 1, false),
-                s * 0.130, -0.345, -0.03, 2.35, 0, 0, 1, 1, 1),
+            geo: xform(THREE, new THREE.ConeGeometry(0.027, 0.12, S(5), 1, false),
+                s * 0.112, -0.278, 0.045, 2.70, 0, 0, 1, 1, 1),
             color: hullOnly ? bodyCol : PALETTE.foot,
         });
     }
@@ -402,17 +449,17 @@ function bodyEntries(THREE, S, col, hullOnly) {
     // Tail fan: five flattened feathers splayed in the XZ plane from TAIL_Z.
     // Deformed by the tail uniforms in the vertex shader.
     const tailPaint = gradient(THREE, bodyCol, PALETTE.inkSoft, function (x, y, z) {
-        return ((z - TAIL_Z - 0.08) / 0.44) * 0.74;
+        return ((z - TAIL_Z - 0.10) / 0.50) * 0.40;
     });
     const fanCount = 5;
     for (let i = 0; i < fanCount; i++) {
         const t = (i / (fanCount - 1)) * 2 - 1;              // -1 .. 1
-        const len = TAIL_LEN * (1 - Math.abs(t) * 0.20);
-        const g = feather(THREE, len, 0.110, S(5), 0.34, 1);
+        const len = TAIL_LEN * (1 - Math.abs(t) * 0.18);
+        const g = feather(THREE, len, 0.160, S(5), 0.28, 1);
         // Feathers point +X by default; rotate them to point +Z (backwards)
         // and splay by t.
-        xform(THREE, g, 0, 0.03 - Math.abs(t) * 0.012, TAIL_Z,
-            0, -Math.PI / 2 + t * 0.38, 0, 1, 1, 1);
+        xform(THREE, g, 0, 0.08 - Math.abs(t) * 0.016, TAIL_Z,
+            0, -Math.PI / 2 + t * 0.44, 0, 1, 1, 1);
         e.push({ geo: g, color: hullOnly ? bodyCol : tailPaint });
     }
     return e;
@@ -425,12 +472,12 @@ function headEntries(THREE, S, col, hullOnly) {
     // Skull: oversized relative to the torso — the whole chibi read depends on
     // this ratio. Centre sits forward and up of the neck pivot.
     const skull = xform(
-        THREE, new THREE.SphereGeometry(0.40, S(15), S(11)),
+        THREE, new THREE.SphereGeometry(0.43, S(14), S(10)),
         0, 0.05, -0.10, 0, 0, 0, 1.00, 0.98, 0.97
     );
     e.push({
         geo: skull,
-        color: gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.14) / 0.17; }),
+        color: gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.10) / 0.16; }),
     });
 
     // Beak: two flattened cones, upper long and hooked slightly down, lower
@@ -438,13 +485,13 @@ function headEntries(THREE, S, col, hullOnly) {
     // The cone's local Z becomes vertical after the -90deg X rotation, so the
     // vertical flatten is applied there.
     e.push({
-        geo: xform(THREE, new THREE.ConeGeometry(0.170, 0.46, S(7), 1, false),
-            0, 0.015, -0.52, -Math.PI / 2 - 0.07, 0, 0, 1, 1, 0.72),
+        geo: xform(THREE, new THREE.ConeGeometry(0.175, 0.48, S(7), 1, false),
+            0, 0.010, -0.55, -Math.PI / 2 - 0.07, 0, 0, 1, 1, 0.70),
         color: hullOnly ? bodyCol : PALETTE.beak,
     });
     e.push({
-        geo: xform(THREE, new THREE.ConeGeometry(0.128, 0.30, S(6), 1, false),
-            0, -0.080, -0.42, -Math.PI / 2 + 0.11, 0, 0, 1, 1, 0.55),
+        geo: xform(THREE, new THREE.ConeGeometry(0.132, 0.31, S(6), 1, false),
+            0, -0.085, -0.44, -Math.PI / 2 + 0.11, 0, 0, 1, 1, 0.55),
         color: hullOnly ? bodyCol : PALETTE.beak,
     });
 
@@ -464,25 +511,24 @@ function headEntries(THREE, S, col, hullOnly) {
 
     // Eyes. Big, forward-set, with a domed pupil and a specular dot. Masked so
     // the blink deformer can squash exactly this geometry and nothing else.
-    const dirX = 0.62, dirY = 0.30, dirZ = -0.72;
-    const dl = Math.hypot(dirX, dirY, dirZ);
+    const dl = Math.hypot(EYE_DIR_X, EYE_DIR_Y, EYE_DIR_Z);
     for (let s = -1; s <= 1; s += 2) {
-        const nx = (s * dirX) / dl, ny = dirY / dl, nz = dirZ / dl;
-        const ex = 0 + nx * 0.33, ey = 0.05 + ny * 0.33, ez = -0.10 + nz * 0.33;
+        const nx = (s * EYE_DIR_X) / dl, ny = EYE_DIR_Y / dl, nz = EYE_DIR_Z / dl;
+        const ex = nx * EYE_SET, ey = 0.05 + ny * EYE_SET, ez = -0.10 + nz * EYE_SET;
         e.push({
-            geo: xform(THREE, new THREE.SphereGeometry(0.158, S(11), S(8)), ex, ey, ez),
+            geo: xform(THREE, new THREE.SphereGeometry(0.146, S(10), S(7)), ex, ey, ez),
             color: PALETTE.eyeWhite,
             mask: 1.0,
         });
         e.push({
-            geo: xform(THREE, new THREE.SphereGeometry(0.098, S(9), S(7)),
-                ex + nx * 0.082, ey + ny * 0.082, ez + nz * 0.082),
+            geo: xform(THREE, new THREE.SphereGeometry(0.097, S(8), S(6)),
+                ex + nx * 0.078, ey + ny * 0.078, ez + nz * 0.078),
             color: PALETTE.eyeDark,
             mask: 0.6,
         });
         e.push({
-            geo: xform(THREE, new THREE.SphereGeometry(0.040, S(6), S(4)),
-                ex + nx * 0.115 + s * 0.038, ey + ny * 0.115 + 0.052, ez + nz * 0.115),
+            geo: xform(THREE, new THREE.SphereGeometry(0.031, S(5), S(3)),
+                ex + nx * 0.128 + s * 0.030, ey + ny * 0.128 + 0.044, ez + nz * 0.128),
             color: PALETTE.eyeWhite,
             mask: 1.0,
         });
@@ -490,43 +536,46 @@ function headEntries(THREE, S, col, hullOnly) {
     return e;
 }
 
-function wingEntries(THREE, S, col, side, hullOnly) {
-    // side: +1 builds the right wing (span along +X), -1 mirrors it for the
-    // left. Mirroring in the builder rather than with scale.x = -1 on the group
-    // keeps triangle winding and normals correct.
+function wingEntries(THREE, S, col, hullOnly) {
+    // Always built along +X (the bird's right). The left wing is the same
+    // geometry run through mirrorX() after the merge, which flips winding too.
     const e = [];
     const bodyCol = col.body;
+    // Only a light darkening toward the tip. The first pass pushed 66% toward
+    // ink and the wing rendered as a black blade whenever it faced away from
+    // the key light — the cel ramp's dark band multiplies whatever the vertex
+    // colour already is, so vertex-painted shading has to stay subtle.
     const paint = hullOnly ? bodyCol : gradient(THREE, bodyCol, PALETTE.inkSoft, function (x) {
-        return ((Math.abs(x) - 0.40) / 0.55) * 0.66;
+        return ((Math.abs(x) - 0.44) / 0.58) * 0.34;
     });
 
     // Shoulder mass — hides the join with the torso from every angle.
     e.push({
-        geo: xform(THREE, new THREE.SphereGeometry(0.175, S(8), S(6)), 0.03 * side, 0, 0.02,
-            0, 0, 0, 1, 0.82, 1.15),
+        geo: xform(THREE, new THREE.SphereGeometry(0.185, S(8), S(6)), 0.03, 0, 0.02,
+            0, 0, 0, 1, 0.80, 1.20),
         color: paint,
     });
 
     // Three layered coverts/secondaries/primaries, each longer, thinner and
     // swept a little further back than the last.
     const layers = [
-        { len: 0.50, rad: 0.235, flat: 0.44, y: 0.045, z: -0.020, sweep: 0.02 },
-        { len: 0.72, rad: 0.205, flat: 0.32, y: 0.010, z: 0.055, sweep: 0.13 },
-        { len: 0.92, rad: 0.165, flat: 0.25, y: -0.020, z: 0.105, sweep: 0.22 },
+        { len: 0.56, rad: 0.255, flat: 0.42, y: 0.050, z: -0.040, sweep: 0.00 },
+        { len: 0.80, rad: 0.220, flat: 0.30, y: 0.014, z: 0.030, sweep: 0.07 },
+        { len: 1.02, rad: 0.180, flat: 0.24, y: -0.020, z: 0.070, sweep: 0.13 },
     ];
     for (let i = 0; i < layers.length; i++) {
         const L = layers[i];
         const g = feather(THREE, L.len, L.rad, S(7), L.flat, 1);
-        xform(THREE, g, 0, L.y, L.z, 0, side > 0 ? -L.sweep : L.sweep, 0, side, 1, 1);
+        xform(THREE, g, 0, L.y, L.z, 0, -L.sweep, 0, 1, 1, 1);
         e.push({ geo: g, color: paint });
     }
 
     // Splayed primary "fingers" at the tip — the detail that stops the wing
     // ending in a blunt cone and reads as feathers even in a 40px silhouette.
     for (let i = 0; i < 3; i++) {
-        const g = feather(THREE, 0.30 - i * 0.03, 0.058, S(5), 0.42, 1);
-        xform(THREE, g, side * 0.80, -0.015 - i * 0.012, 0.10 + i * 0.055,
-            0, side > 0 ? -(0.30 + i * 0.20) : (0.30 + i * 0.20), 0, side, 1, 1);
+        const g = feather(THREE, 0.34 - i * 0.035, 0.064, S(5), 0.40, 1);
+        xform(THREE, g, 0.88, -0.014 - i * 0.013, 0.07 + i * 0.048,
+            0, -(0.14 + i * 0.13), 0, 1, 1, 1);
         e.push({ geo: g, color: paint });
     }
     return e;
@@ -585,7 +634,7 @@ export function createBird(THREE, opts = {}) {
     const bodyGeo = mergeGeos(THREE, bodyEntries(THREE, S, col, false), false);
     const bodyMat = toonWithDeform(
         THREE,
-        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.34, specThreshold: 0.6 },
+        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.10, specThreshold: 0.74 },
         TAIL_UNIFORMS_GLSL, tailDef, tailUniforms, 'vyom-bird-body-v1'
     );
     const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
@@ -607,18 +656,18 @@ export function createBird(THREE, opts = {}) {
     const head = new THREE.Group();
     head.name = 'head';
     head.rotation.order = 'YXZ';
-    head.position.set(0, 0.30, -0.42);
+    head.position.set(0, 0.30, -0.32);
     body.add(head);
 
     const headUniforms = {
         uBlink: { value: 0 },
-        uEyeY: { value: 0.05 + (0.30 / Math.hypot(0.62, 0.30, 0.72)) * 0.33 },
+        uEyeY: { value: 0.05 + (EYE_DIR_Y / Math.hypot(EYE_DIR_X, EYE_DIR_Y, EYE_DIR_Z)) * EYE_SET },
         uLidColor: { value: new THREE.Color(bodyColor) },
     };
     const headGeo = mergeGeos(THREE, headEntries(THREE, S, col, false), true);
     const headMat = toonWithDeform(
         THREE,
-        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.62, specThreshold: 0.52 },
+        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.18, specThreshold: 0.70 },
         BLINK_UNIFORMS_GLSL, null, headUniforms, 'vyom-bird-head-v1',
         {
             vertBody: BLINK_POSITION_GLSL,
@@ -650,7 +699,7 @@ export function createBird(THREE, opts = {}) {
         const g = new THREE.Group();
         g.name = name;
         g.rotation.order = 'YXZ';
-        g.position.set(side * 0.30, 0.14, -0.04);
+        g.position.set(side * 0.26, 0.16, -0.12);
         body.add(g);
 
         const u = {
@@ -661,10 +710,11 @@ export function createBird(THREE, opts = {}) {
         const def = wingDeform('objectNormal');
         const defHull = wingDeform('objNormal');
 
-        const geo = mergeGeos(THREE, wingEntries(THREE, S, col, side, false), false);
+        const geo = mergeGeos(THREE, wingEntries(THREE, S, col, false), false);
+        if (side < 0) mirrorX(geo);
         const mat = toonWithDeform(
             THREE,
-            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.62, specStrength: 0.30, specThreshold: 0.62 },
+            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.62, specStrength: 0.14, specThreshold: 0.70 },
             WING_UNIFORMS_GLSL, def, u, 'vyom-bird-wing-v1'
         );
         const mesh = new THREE.Mesh(geo, mat);
@@ -674,7 +724,8 @@ export function createBird(THREE, opts = {}) {
         materials.push(mat);
 
         if (wantOutline) {
-            const hullGeo = mergeGeos(THREE, wingEntries(THREE, S, col, side, true), false);
+            const hullGeo = mergeGeos(THREE, wingEntries(THREE, S, col, true), false);
+            if (side < 0) mirrorX(hullGeo);
             makeHull(THREE, hullGeo, mesh, {
                 pixels: outlinePixels, maxPush: 0.12,
                 deform: defHull, uniformsGlsl: WING_UNIFORMS_GLSL, uniforms: u,
@@ -698,21 +749,21 @@ export function createBird(THREE, opts = {}) {
         parent.add(a);
         return a;
     }
-    const dl = Math.hypot(0.62, 0.30, 0.72);
+    const dl = Math.hypot(EYE_DIR_X, EYE_DIR_Y, EYE_DIR_Z);
     const eyeAnchors = [];
     const pupilAnchors = [];
     for (let s = -1; s <= 1; s += 2) {
-        const nx = (s * 0.62) / dl, ny = 0.30 / dl, nz = -0.72 / dl;
+        const nx = (s * EYE_DIR_X) / dl, ny = EYE_DIR_Y / dl, nz = EYE_DIR_Z / dl;
         eyeAnchors.push(anchor(head, s < 0 ? 'leftEye' : 'rightEye',
-            nx * 0.33, 0.05 + ny * 0.33, -0.10 + nz * 0.33));
+            nx * EYE_SET, 0.05 + ny * EYE_SET, -0.10 + nz * EYE_SET));
         pupilAnchors.push(anchor(head, s < 0 ? 'leftPupil' : 'rightPupil',
-            nx * 0.412, 0.05 + ny * 0.412, -0.10 + nz * 0.412));
+            nx * (EYE_SET + 0.08), 0.05 + ny * (EYE_SET + 0.08), -0.10 + nz * (EYE_SET + 0.08)));
     }
 
     const parts = {
         body: body,
         head: head,
-        beak: anchor(head, 'beak', 0, -0.02, -0.72),
+        beak: anchor(head, 'beak', 0, -0.02, -0.80),
         leftWing: wings[0],
         rightWing: wings[1],
         leftFoot: anchor(body, 'leftFoot', -0.135, -0.40, 0.03),

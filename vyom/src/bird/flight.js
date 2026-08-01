@@ -90,7 +90,12 @@ export const FLIGHT_CONFIG = {
     // Soft altitude ceiling above the baseline radius. Without one the bird can
     // simply leave: there is no gravity to bring it back, and a player who
     // holds up for ten seconds ends up in orbit looking at a marble.
-    maxAltitude: 40,
+    // 26 units, which mirrors terrain.js's 26-unit maximum carve: the bird's
+    // usable band is symmetric about the baseline. The first captured orbit
+    // frame had this at 40 and the trajectory ribbon visibly ballooned off the
+    // limb of the planet — at that height the terrain reads as a distant map
+    // rather than as something you are racing through.
+    maxAltitude: 26,
     ceilingSoftness: 9,     // world units over which the climb rate fades out
 
     // --- boost -------------------------------------------------------------

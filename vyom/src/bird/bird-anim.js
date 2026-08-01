@@ -44,7 +44,10 @@ const CFG = {
     flapAmpImpulse: 0.62,
     glideAmp: 0.055,
     glideRate: 0.42,
-    restDihedral: 0.14,     // wings sit slightly above level when gliding
+    restDihedral: 0.20,     // wings sit slightly above level when gliding
+    restSweep: 0.15,        // wings trail back at rest — straight-out wings
+                            // read as a paper plane and, in a 3/4 view, the far
+                            // wing spears through the head
     tipStiffness: 190,      // spring the wing tip chases the shoulder with
     tipDamping: 11,
     curlGain: 0.62,
@@ -295,7 +298,7 @@ export function createBirdAnimator(THREE, bird) {
         w.rotation.z = side < 0 ? -a : a;
         // Sweeping back means the tip travels toward +Z, which is a positive
         // Y-rotation for the left wing and a negative one for the right.
-        const sb = sweepBack + fold * 0.55;
+        const sb = CFG.restSweep + sweepBack + fold * 0.55;
         w.rotation.y = side < 0 ? sb : -sb;
         w.rotation.x = side * angle * 0.10;   // a little twist through the stroke
         const sc = spanScale * (1 - fold * 0.18);

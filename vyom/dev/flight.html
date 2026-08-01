@@ -40,7 +40,7 @@
 import { loadThree } from '/vyom/src/core/three-loader.js';
 import { PALETTE } from '/vyom/src/core/palette.js';
 import { createToonMaterial, createLightRig } from '/vyom/src/core/toon.js';
-import { attachOutlineTree, updateOutlineProjection } from '/vyom/src/core/outline.js';
+import { attachOutlineTree, updateOutlineProjection, outlineShared } from '/vyom/src/core/outline.js';
 import { PLANET_RADIUS, continentalHeight, floorRadius } from '/vyom/src/core/terrain.js';
 import { createPlanet } from '/vyom/src/world/planet.js';
 import { VyomFlight, FLIGHT_CONFIG, FLIGHT_STATE, floorRadiusAt } from '/vyom/src/bird/flight.js';
@@ -123,12 +123,13 @@ function makeStandInBird() {
   g.add(beak);
 
   for (const side of [-1, 1]) {
-    const wing = new THREE.Mesh(new THREE.ConeGeometry(0.62, 2.5, 5), skin);
-    wing.position.set(side * 1.0, 0.16, 0.05);
-    wing.rotation.z = side * Math.PI * 0.56;
-    wing.rotation.y = side * -0.55;   // sweep back, so it is not a flat bowtie
-    wing.rotation.x = 0.18;
-    wing.scale.set(1, 1, 0.38);
+    const wing = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.6, 5), skin);
+    wing.position.set(side * 0.85, 0.10, 0.15);
+    // Near-horizontal with a slight upward dihedral and a backward sweep —
+    // a gliding delta. Tilted down at the tip the cones read as mandibles;
+    // flat in plane they read as a bowtie. This is the readable middle.
+    wing.rotation.set(0.0, side * -0.62, side * (Math.PI * 0.5 - 0.14));
+    wing.scale.set(1, 1, 0.3);
     g.add(wing);
   }
 
@@ -162,7 +163,11 @@ function newFlight() {
 }
 const flight = newFlight();
 
-const chase = createChaseCamera(THREE, camera, { quality, renderer });
+const chase = createChaseCamera(THREE, camera, {
+  quality, renderer,
+  terrainHeightAt: continentalHeight,
+  sphereRadius: PLANET_RADIUS,
+});
 chase.setMode(view === 'orbit' ? 'chase' : 'chase');
 
 // ---------------------------------------------------------------------------
@@ -192,8 +197,10 @@ const dirB = new THREE.Vector3();
 const localUp = new THREE.Vector3();
 const radial = new THREE.Vector3();
 const fwd = new THREE.Vector3();
+const camDir = new THREE.Vector3();
 
 let minClearance = Infinity;
+let minCamClearance = Infinity;
 let minRadius = Infinity;
 let maxRadius = -Infinity;
 let angleTravelled = 0;
@@ -254,6 +261,10 @@ for (let i = 0; i < steps; i++) {
   if (t <= STOP) {
     shakeAmt *= Math.exp(-6 * DT);
     chase.update(DT, pose.position, pose.quaternion, flight.speed01, shakeAmt);
+    const cr = camera.position.length();
+    camDir.copy(camera.position).multiplyScalar(1 / cr);
+    minCamClearance = Math.min(minCamClearance,
+      cr - (PLANET_RADIUS + Math.min(0, continentalHeight(camDir.x, camDir.y, camDir.z))));
     if (i % SAMPLE_EVERY === 0) path.push(pose.position.clone());
     bird.position.copy(pose.position);
     bird.quaternion.copy(pose.quaternion);
@@ -345,10 +356,13 @@ const knockdown = (() => {
 // ---------------------------------------------------------------------------
 // trajectory ribbon — the past positions, drawn so the sphere behaviour reads
 // ---------------------------------------------------------------------------
-// Stop the ribbon a few samples short of the bird. Drawn all the way to the
-// current position it runs straight through the model and out of the lens,
-// which reads as a ramp the bird is sitting on rather than as a trail.
-const trailPts = path.slice(0, Math.max(2, path.length - 7));
+// Stop the ribbon ~2 seconds short of the bird. The chase camera sits ON the
+// path (11.5 units behind the bird), so a trail drawn all the way to the
+// current position runs through the model, past the lens and out of frame as a
+// giant foreground ramp. Trimming the last two seconds leaves the trail
+// starting behind the camera, where it reads as history.
+const TRAIL_TRIM = Math.round(2.0 / (DT * SAMPLE_EVERY));
+const trailPts = path.slice(0, Math.max(2, path.length - TRAIL_TRIM));
 const curve = new THREE.CatmullRomCurve3(trailPts, false, 'catmullrom', 0.5);
 const trail = new THREE.Mesh(
   new THREE.TubeGeometry(curve, Math.min(1400, trailPts.length * 2), 0.22, 5, false),
@@ -410,6 +424,14 @@ renderer.render(scene, activeCam);
 // ---------------------------------------------------------------------------
 // verdicts
 // ---------------------------------------------------------------------------
+// Outline widths are derived from tan(fov/2). The chase camera kicks the FOV
+// with speed, so if it ever forgets to call updateOutlineProjection every ink
+// line in the game silently fattens during a boost. Check the shared uniform
+// actually agrees with the FOV the camera ended on.
+const expectedUnitPerPixel =
+  (2 * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.height) * renderer.getPixelRatio();
+const outlineDrift = Math.abs(outlineShared.uUnitPerPixel.value - expectedUnitPerPixel) / expectedUnitPerPixel;
+
 const checks = [
   ['no floor clip', minClearance >= -1e-4, minClearance.toFixed(4)],
   ['descends below baseline', minRadius < PLANET_RADIUS, minRadius.toFixed(1)],
@@ -424,6 +446,8 @@ const checks = [
   ['knockdown falls', knockdown.fell > 4, knockdown.fell.toFixed(1)],
   ['heading realigned', knockdown.align > 0.9, knockdown.align.toFixed(3)],
   ['launch impulse outward', knockdown.launchGain > 0.5, knockdown.launchGain.toFixed(2)],
+  ['camera never underground', minCamClearance > 0, minCamClearance.toFixed(3)],
+  ['outline width tracks fov kick', outlineDrift < 0.005, (outlineDrift * 100).toFixed(3) + '%'],
   ['boost charged by diving', maxBoostSeen > 0.2, maxBoostSeen.toFixed(2)],
   ['boost beat the dive ceiling', maxSpeedSeen > FLIGHT_CONFIG.maxSpeed, maxSpeedSeen.toFixed(1)],
   ['speed never stalled (tumble floor)', minSpeedSeen >= FLIGHT_CONFIG.minSpeed * 0.5 - 1e-6, minSpeedSeen.toFixed(1)],

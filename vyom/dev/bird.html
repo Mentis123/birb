@@ -38,7 +38,7 @@ renderer.setClearColor(PALETTE.skyMid);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
-camera.position.set(0, 0.15, 11);
+camera.position.set(0, 0.15, 10.6);
 camera.lookAt(0, 0.05, 0);
 createLightRig(THREE, scene);
 
@@ -70,6 +70,11 @@ createLightRig(THREE, scene);
 // to tell whether the stroke actually has follow-through: a single frame of a
 // flapping wing looks identical whether the tip lags or not.
 // ---------------------------------------------------------------------------
+// Rivals get a belly derived from their own plumage rather than the player's
+// pale cyan, otherwise all four birds share one washed-out underside.
+const _c = new THREE.Color();
+const bellyFor = (hex) => _c.setHex(hex).lerp(new THREE.Color(0xffffff), 0.62).getHex();
+
 const POSES = [
   {
     label: 'power downstroke',
@@ -81,7 +86,7 @@ const POSES = [
   },
   {
     label: 'recovery upstroke',
-    color: PALETTE.birdRival1, belly: PALETTE.birdPlayerBelly,
+    color: PALETTE.birdRival1, belly: bellyFor(PALETTE.birdRival1),
     x: 1.85, y: 1.62, yaw: Math.PI - 0.72,
     state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
@@ -89,7 +94,7 @@ const POSES = [
   },
   {
     label: 'banked right turn',
-    color: PALETTE.birdRival2, belly: PALETTE.birdPlayerBelly,
+    color: PALETTE.birdRival2, belly: bellyFor(PALETTE.birdRival2),
     x: -1.85, y: -1.62, yaw: Math.PI - 0.55,
     state: { speed01: 0.85, turn: 0.9, pitch: 0.05, boosting: false, flapImpulse: 0,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
@@ -97,7 +102,7 @@ const POSES = [
   },
   {
     label: 'boost dive tuck',
-    color: PALETTE.birdRival3, belly: PALETTE.birdPlayerBelly,
+    color: PALETTE.birdRival3, belly: bellyFor(PALETTE.birdRival3),
     x: 1.85, y: -1.62, yaw: Math.PI - 0.90,
     state: { speed01: 1, turn: -0.15, pitch: -0.9, boosting: true, flapImpulse: 0,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
@@ -153,7 +158,7 @@ function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
   // Portrait phone capture: pull back so the 2x2 grid still fits.
-  camera.position.z = camera.aspect < 0.7 ? 15.5 : 11;
+  camera.position.z = camera.aspect < 0.7 ? 15.0 : 10.6;
   camera.updateProjectionMatrix();
   updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
   placeLabels();
