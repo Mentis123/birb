@@ -216,6 +216,81 @@
     text-transform: uppercase;
     opacity: 0.6;
   }
+  /* --- mode select --------------------------------------------------- */
+  .mode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 22rem;
+    margin-top: 0.5rem;
+  }
+  .mode-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.15rem 0.7rem;
+    width: 100%;
+    padding: 0.62rem 0.9rem;
+    border: 2px solid var(--ink);
+    border-radius: 0.85rem;
+    background: rgba(10, 19, 36, 0.88);
+    box-shadow: 0 4px 0 var(--ink);
+    color: var(--cream);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .mode-card:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
+  /* The default mode leads, in the primary treatment. */
+  .mode-card.is-default {
+    background: linear-gradient(180deg, var(--gold), #ff9f2e);
+    color: #241703;
+    box-shadow: 0 5px 0 var(--ink), 0 12px 26px rgba(0, 0, 0, 0.45);
+  }
+  .mode-card__label {
+    grid-column: 1;
+    font-size: 1rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .mode-card__blurb {
+    grid-column: 1;
+    font-size: 0.74rem;
+    opacity: 0.72;
+    letter-spacing: 0.02em;
+  }
+  .mode-card__best {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-align: right;
+    white-space: nowrap;
+    opacity: 0.85;
+  }
+  .mode-card__best b {
+    display: block;
+    font-size: 0.92rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .mode-card.is-default .mode-card__best { opacity: 0.7; }
+
+  .title-streak {
+    padding: 0.28rem 0.8rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 221, 68, 0.5);
+    background: rgba(20, 16, 4, 0.5);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .title-streak[hidden] { display: none; }
+
   .title-buttons {
     display: flex;
     flex-direction: column;
@@ -400,10 +475,11 @@
       <canvas data-keyart-title aria-hidden="true"></canvas>
     </div>
     <h1 class="title-logo"><span class="title-logo-top">Birb</span>Gauntlet</h1>
-    <p class="title-sub">Race the sky circuit.</p>
-    <p class="title-meta">4 birds &middot; 3 laps &middot; one planet</p>
+    <div class="title-streak" data-streak hidden></div>
+    <!-- Mode cards are generated from MODE_DEFS so a new mode is a new row in
+         one table, never a new block of markup here. -->
+    <div class="mode-list" data-mode-list></div>
     <div class="title-buttons">
-      <button type="button" class="btn btn-primary" data-start>Tap to Start</button>
       <button type="button" class="btn btn-secondary" data-howto-open>How to Play</button>
     </div>
     <div class="loading-note" data-loading-note></div>
@@ -455,6 +531,10 @@ import { PALETTE } from '/gauntlet/src/core/palette.js';
 import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
 import { PLANET_RADIUS, continentalHeight } from '/gauntlet/src/core/terrain.js';
 import { paintKeyArt } from '/gauntlet/src/ui/keyart.js';
+import {
+    MODES, MODE_ORDER, DEFAULT_MODE, modeDef, isMode,
+    bestKey, formatBest, advanceStreak, STREAK_KEY,
+} from '/gauntlet/src/game/modes.js';
 
 const params = new URLSearchParams(location.search);
 
@@ -561,12 +641,81 @@ screens.settings.addEventListener('click', (e) => {
 
 const loadingNote = document.querySelector('[data-loading-note]');
 let booting = false;
-document.querySelector('[data-start]').addEventListener('click', () => {
-    if (booting) return;
-    booting = true;
-    loadingNote.textContent = 'Loading…';
-    boot().catch(fatal);
-});
+
+// ---------------------------------------------------------------------------
+// Mode select. Cards are GENERATED from MODE_DEFS rather than written out in
+// markup, so adding a mode is a row in one table and can never desync from the
+// descriptor the game loop actually reads.
+// ---------------------------------------------------------------------------
+
+function readBest(mode) {
+    try {
+        const raw = localStorage.getItem(bestKey(mode));
+        return raw == null ? null : Number(raw);
+    } catch { return null; }
+}
+
+function buildModeList() {
+    const list = document.querySelector('[data-mode-list]');
+    list.textContent = '';
+    for (const id of MODE_ORDER) {
+        const def = modeDef(id);
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'mode-card' + (id === DEFAULT_MODE ? ' is-default' : '');
+        card.dataset.mode = id;
+
+        const label = document.createElement('span');
+        label.className = 'mode-card__label';
+        label.textContent = def.label;
+
+        const blurb = document.createElement('span');
+        blurb.className = 'mode-card__blurb';
+        blurb.textContent = def.blurb;
+
+        card.append(label, blurb);
+
+        // Personal best rides on the card, which is where it motivates a
+        // replay — a stat buried on a results screen you already dismissed
+        // does not.
+        const shown = formatBest(id, readBest(id));
+        if (shown) {
+            const best = document.createElement('span');
+            best.className = 'mode-card__best';
+            best.innerHTML = 'Best<b></b>';
+            best.querySelector('b').textContent = shown;
+            card.appendChild(best);
+        }
+        list.appendChild(card);
+    }
+    list.addEventListener('click', (e) => {
+        const card = e.target.closest('[data-mode]');
+        if (!card || booting) return;
+        booting = true;
+        loadingNote.textContent = 'Loading…';
+        boot(card.dataset.mode).catch(fatal);
+    });
+}
+buildModeList();
+
+// Daily play streak. Extends on consecutive days, resets on a gap.
+function paintStreak() {
+    const el = document.querySelector('[data-streak]');
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem(STREAK_KEY) || 'null'); } catch { /* ignore */ }
+    if (!prev || !prev.count) { el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = prev.count === 1 ? 'Day 1' : prev.count + ' day streak';
+}
+function bumpStreak() {
+    const today = new Date().toISOString().slice(0, 10);
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem(STREAK_KEY) || 'null'); } catch { /* ignore */ }
+    const next = advanceStreak(prev, today);
+    try { localStorage.setItem(STREAK_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+}
+paintStreak();
 
 function fatal(err) {
     console.error(err);
@@ -604,7 +753,10 @@ const BIRD_SCALE = 2.0;
 // ---------------------------------------------------------------------------
 let game = null;
 
-async function boot() {
+async function boot(requestedMode) {
+    const mode = isMode(requestedMode) ? requestedMode : DEFAULT_MODE;
+    const def = modeDef(mode);
+    bumpStreak();
     const THREE = await loadThree();
 
     // Subsystems are imported here rather than at module scope so a cold visit
@@ -661,7 +813,12 @@ async function boot() {
     const planet = createPlanet(THREE, { quality, seed });
     scene.add(planet.group);
 
+    // Every mode shares one world and one bird; a mode is a set of systems
+    // switched on over the top, not a separate scene. The course is built
+    // regardless because the racing line doubles as the spawn reference for
+    // every other mode, but only the race SHOWS it.
     const course = createCourse(THREE, { quality, seed, gateCount: 14 });
+    course.group.visible = def.course;
     scene.add(course.group);
 
     const feathers = createFeatherFX(THREE, { quality });
@@ -694,6 +851,12 @@ async function boot() {
     // Point the bird down the racing line, or lap 1 starts with a 180.
     flight.setHeading(_startTangent.x, _startTangent.y, _startTangent.z);
 
+    // Casual absorbs the original's Zen: softer rates on the same flight model.
+    if (def.gentle) {
+        flight.yawRate *= 0.9;
+        flight.pitchRate *= 0.9;
+    }
+
     const chase = createChaseCamera(THREE, camera, { quality });
     chase.snapToTarget(flight.position, flight.quaternion);
 
@@ -705,7 +868,7 @@ async function boot() {
     // way — in particular it must NOT also call checkGates or updateRacerT for
     // these racers, which would double-advance their progress.
     const ai = createAIRacers(THREE, {
-        course, count: 3, quality, seed,
+        course, count: def.rivals ? 3 : 0, quality, seed,
         birdScale: BIRD_SCALE,
         firstRacerIndex: 1,
         createBirdFn: createBird,
@@ -723,6 +886,9 @@ async function boot() {
     // The on-screen stick and boost pill own the bottom corners, so the HUD's
     // minimap and speed cluster lift above them.
     const hud = createHUD(document.querySelector('[data-hud]'), { quality, bottomInset: 92 });
+    // The HUD shows exactly what this mode switched on, and never learns which
+    // modes exist — it reads the descriptor.
+    hud.setModeChrome(def);
     const audio = createAudio();
     audio.unlock();
     audio.setEnabled(settings.music, settings.sfx);
@@ -772,8 +938,9 @@ async function boot() {
     // --- loop ---------------------------------------------------------------
     let last = performance.now();
     let elapsed = 0;
-    let phase = 'countdown';     // countdown -> racing -> finished
-    let countdown = raceLogic.RACE_CONFIG.countdownMs;
+    // Only the race has a grid to line up on. Everything else starts flying.
+    let phase = def.rivals ? 'countdown' : 'racing';
+    let countdown = def.rivals ? raceLogic.RACE_CONFIG.countdownMs : 0;
     let lastCountdownNumber = -1;
     let frames = 0, fpsAccum = 0, fps = 60;
     let debugCamFrozen = false;
@@ -837,11 +1004,13 @@ async function boot() {
         // Player only — ai.update() already does this for the rivals, and
         // running it twice would double-advance their sub-gate progress and
         // corrupt the wrong-way accumulator.
-        if (phase !== 'countdown') {
-            raceLogic.updateRacerT(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z));
+        if (def.rivals) {
+            if (phase !== 'countdown') {
+                raceLogic.updateRacerT(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z));
+            }
+            if (phase === 'racing') checkGates(0, pose.position);
+            raceLogic.updateStandings(race);
         }
-        if (phase === 'racing') checkGates(0, pose.position);
-        raceLogic.updateStandings(race);
 
         // --- fx ---------------------------------------------------------------
         _up.copy(pose.position).normalize();
@@ -864,17 +1033,19 @@ async function boot() {
 
         // --- hud --------------------------------------------------------------
         // Race state lives in typed arrays keyed by racer index, not in
-        // per-racer objects.
-        hud.setLap(race.lap[0], race.laps);
-        hud.setPosition(raceLogic.placeOf(race, 0), race.racerCount);
+        // per-racer objects. Only the race has any of it.
+        if (def.rivals) {
+            hud.setLap(race.lap[0], race.laps);
+            hud.setPosition(raceLogic.placeOf(race, 0), race.racerCount);
+        }
         hud.setSpeed(Math.round(flight.speed * SPEED_TO_KMH), animState.speed01);
         // Boost charge lives on the button itself now, so it travels with it
         // when the player drags the control to the other side of the screen.
         input.setBoost01(flight.boost01 || 0);
-        hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
-        hud.showWrongWay(phase === 'racing' && race.wrongWay[0] === 1);
+        if (def.course) hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
+        hud.showWrongWay(def.course && phase === 'racing' && race.wrongWay[0] === 1);
 
-        if (phase === 'racing') {
+        if (def.rivals && phase === 'racing') {
             const lapMs = now - race.lapStartMs[0];
             const leader = race.order[0];
             hud.setSplit(
@@ -962,6 +1133,7 @@ async function boot() {
     // --- harness hooks ------------------------------------------------------
     game = {
         THREE, renderer, scene, camera, flight, course, race, ai, hud, audio, input, quality,
+        mode, modeDef: def,
         /**
          * Drop the green light immediately. The screenshot harness runs on
          * software GL at a few frames a second, and the loop clamps dt to 50ms
@@ -1017,7 +1189,7 @@ async function boot() {
 // pages so a gameplay frame can be captured without simulating three taps.
 if (params.get('autostart') === '1') {
     booting = true;
-    boot().catch(fatal);
+    boot(params.get('mode') || DEFAULT_MODE).catch(fatal);
 } else {
     // Signal readiness for the entry pages so the harness can shoot them too.
     window.__GAUNTLET_READY = true;

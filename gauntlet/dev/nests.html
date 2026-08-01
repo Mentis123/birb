@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · nests</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+  .panel { position: fixed; color: #fff6dc; pointer-events: none;
+           font: 600 11px/1.45 ui-monospace, SFMono-Regular, monospace;
+           letter-spacing: .04em; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { left: 10px; bottom: 8px; }
+  #tag { right: 10px; top: 10px; text-align: right; }
+  #closelabel { right: 12px; bottom: 10px; text-align: right; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="tag">nest probe · champion trees<br>bird altitude · active nest pulsing</div>
+<div class="panel" id="closelabel">silhouette close-up ↓</div>
+<div class="panel" id="stats"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { surfaceRadius, continentalHeight, depthAt, biomeAt, BIOME, PLANET_RADIUS }
+  from '/gauntlet/src/core/terrain.js';
+import { makeRng, rngRange, fibonacciDirection } from '/gauntlet/src/core/rng.js';
+import { createNests, NEST_LAND_RANGE } from '/gauntlet/src/world/nests.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 120, 460);
+const camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 3000);
+createLightRig(THREE, scene);
+
+// ---------------------------------------------------------------------------
+// A real slice of planet. Judging a nest against a void is not judging it: the
+// whole question is whether a straw bowl reads as a landing pad over green
+// terrain and a canopy of other trees.
+// ---------------------------------------------------------------------------
+{
+  const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 42);
+  const pos = geo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const cMeadow = new THREE.Color(PALETTE.meadowLit);
+  const cMeadowDeep = new THREE.Color(PALETTE.meadowDeep);
+  const cCanyon = new THREE.Color(PALETTE.canyonMid);
+  const cAlpine = new THREE.Color(PALETTE.alpineMid);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    pos.setXYZ(i, nx * surfaceRadius(nx, ny, nz), ny * surfaceRadius(nx, ny, nz),
+               nz * surfaceRadius(nx, ny, nz));
+    const b = biomeAt(nx, ny, nz);
+    tmp.copy(b === BIOME.CANYON ? cCanyon : (b === BIOME.ALPINE ? cAlpine : cMeadow));
+    tmp.lerp(cMeadowDeep, Math.min(1, depthAt(nx, ny, nz)) * 0.45);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  scene.add(new THREE.Mesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+  })));
+}
+
+// ---------------------------------------------------------------------------
+// The system under test.
+// ---------------------------------------------------------------------------
+const nests = createNests(THREE, { quality: 'high', seed: 90210 });
+scene.add(nests.group);
+
+// ---------------------------------------------------------------------------
+// Context canopy — ordinary broadleaf trees, probe-only, so the champion the
+// nest sits in can be judged against the normal tree line. This is NOT part of
+// the nests module's budget and is reported separately.
+// ---------------------------------------------------------------------------
+const contextTrees = (() => {
+  const trunk = new THREE.CylinderGeometry(0.24, 0.42, 2.2, 3, 1, true);
+  trunk.translate(0, 1.1, 0);
+  const canopy = new THREE.IcosahedronGeometry(1.85, 0);
+  canopy.scale(1.12, 0.92, 1.12);
+  canopy.translate(0, 3.15, 0);
+  // Merge by hand (probe-local, allocation is free at build time).
+  const parts = [[trunk, new THREE.Color(PALETTE.trunk)],
+                 [canopy, new THREE.Color(PALETTE.foliageMid)]];
+  let total = 0;
+  const prepped = parts.map(([g, c]) => {
+    const n = g.index ? g.toNonIndexed() : g;
+    total += n.getAttribute('position').count;
+    return [n, c];
+  });
+  const P = new Float32Array(total * 3), N = new Float32Array(total * 3), C = new Float32Array(total * 3);
+  let o = 0;
+  for (const [g, c] of prepped) {
+    const p = g.getAttribute('position'), nn = g.getAttribute('normal');
+    for (let v = 0; v < p.count; v++) {
+      const w = (o + v) * 3;
+      P[w] = p.getX(v); P[w + 1] = p.getY(v); P[w + 2] = p.getZ(v);
+      N[w] = nn.getX(v); N[w + 1] = nn.getY(v); N[w + 2] = nn.getZ(v);
+      C[w] = c.r; C[w + 1] = c.g; C[w + 2] = c.b;
+    }
+    o += p.count;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(C, 3));
+
+  const COUNT = 2600;
+  const mesh = new THREE.InstancedMesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.18,
+    side: THREE.DoubleSide,
+  }), COUNT);
+  mesh.frustumCulled = false;
+
+  const rng = makeRng(4242);
+  const dir = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+  const q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3();
+  const m = new THREE.Matrix4();
+  let placed = 0;
+  for (let i = 0; i < 26000 && placed < COUNT; i++) {
+    fibonacciDirection(i, 26000, dir, rng, 0.02);
+    const d = depthAt(dir.x, dir.y, dir.z);
+    const b = biomeAt(dir.x, dir.y, dir.z);
+    const w = (b === BIOME.MEADOW ? 1 : b === BIOME.CANYON ? 0.3 : 0.12)
+      * (0.15 + 0.85 * Math.min(1, Math.max(0, (d - 0.05) / 0.5)));
+    if (rng() > w) continue;
+    q.setFromUnitVectors(up, dir);
+    pos.copy(dir).multiplyScalar(surfaceRadius(dir.x, dir.y, dir.z) - 0.6);
+    const s = rngRange(rng, 0.75, 1.5);
+    scl.set(s, s * rngRange(rng, 0.85, 1.3), s);
+    m.compose(pos, q, scl);
+    mesh.setMatrixAt(placed++, m);
+  }
+  mesh.count = placed;
+  mesh.instanceMatrix.needsUpdate = true;
+  scene.add(mesh);
+  return { mesh, placed };
+})();
+
+// ---------------------------------------------------------------------------
+// Deterministic animation: run the active-nest pulse to a fixed phase so the
+// capture shows the highlight at its brightest, not at a random point.
+// ---------------------------------------------------------------------------
+const DT = 1 / 60;
+let activeIdx = 0;
+{
+  // Pick the nest with the closest neighbour, so both fit in one frame.
+  let bestI = 0, bestJ = 1, bestSq = Infinity;
+  for (let i = 0; i < nests.count; i++) {
+    for (let j = i + 1; j < nests.count; j++) {
+      const dx = nests.positions[i * 3] - nests.positions[j * 3];
+      const dy = nests.positions[i * 3 + 1] - nests.positions[j * 3 + 1];
+      const dz = nests.positions[i * 3 + 2] - nests.positions[j * 3 + 2];
+      const sq = dx * dx + dy * dy + dz * dz;
+      if (sq < bestSq) { bestSq = sq; bestI = i; bestJ = j; }
+    }
+  }
+  activeIdx = bestI;
+  nests.setActive(bestI);
+  for (let s = 0; s < 29; s++) nests.update(DT);   // land near the pulse peak
+
+  // Camera: behind nest A along the A->B axis, at bird cruise altitude, so the
+  // frame holds two champion trees, the canopy between them and the horizon.
+  const A = new THREE.Vector3(), B = new THREE.Vector3();
+  nests.positionOf(bestI, A);
+  nests.positionOf(bestJ, B);
+  const up = A.clone().normalize();
+  const along = B.clone().sub(A);
+  along.addScaledVector(up, -along.dot(up)).normalize();
+  const mid = A.clone().add(B).multiplyScalar(0.5);
+  camera.position.copy(A).addScaledVector(along, -46).addScaledVector(up, 15);
+  camera.up.copy(up);
+  camera.lookAt(mid.addScaledVector(up, -4));
+}
+
+// ---------------------------------------------------------------------------
+// Close-up scene — one nest, framed so the woven bowl, the rim twigs and the
+// branch crown can all be judged. A nest that reads as a brown disc fails here
+// first.
+// ---------------------------------------------------------------------------
+const closeScene = new THREE.Scene();
+const closeCam = new THREE.PerspectiveCamera(34, 1, 0.1, 400);
+createLightRig(THREE, closeScene);
+const closeNests = createNests(THREE, { quality: 'high', seed: 7, count: 1 });
+closeScene.add(closeNests.group);
+{
+  const g = new THREE.PlaneGeometry(600, 600);
+  const card = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith }));
+  const p = new THREE.Vector3();
+  closeNests.positionOf(0, p);
+  const up = p.clone().normalize();
+  const side = new THREE.Vector3(0, 1, 0).cross(up).normalize();
+  const fwd = new THREE.Vector3().crossVectors(up, side).normalize();
+  card.position.copy(p).addScaledVector(fwd, -120).addScaledVector(up, -6);
+  card.lookAt(p);
+  closeScene.add(card);
+
+  // Slightly above the rim and off to one side: the angle that shows the bowl
+  // is a container and the twigs break the outline.
+  closeCam.position.copy(p)
+    .addScaledVector(fwd, 12.5)
+    .addScaledVector(side, 5.2)
+    .addScaledVector(up, 5.0);
+  closeCam.up.copy(up);
+  closeCam.lookAt(p.clone().addScaledVector(up, -1.4));
+}
+
+// ---------------------------------------------------------------------------
+let mainStats = { drawCalls: 0, triangles: 0 };
+
+function draw() {
+  const W = innerWidth, H = innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.render(scene, camera);
+  mainStats = {
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+  };
+
+  const iw = Math.round(Math.min(320, W * 0.44));
+  const ih = Math.round(iw * 0.78);
+  const ix = W - iw - 8, iy = 26;
+  closeCam.aspect = iw / ih;
+  closeCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setViewport(ix, iy, iw, ih);
+  renderer.setScissor(ix, iy, iw, ih);
+  renderer.render(closeScene, closeCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.fov = camera.aspect >= 0.85 ? 52 : 52 + (0.85 - camera.aspect) * 46;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  draw();
+  const insetTop = 26 + Math.round(Math.min(320, innerWidth * 0.44) * 0.78) + 4;
+  document.getElementById('closelabel').style.bottom = insetTop + 'px';
+  document.getElementById('stats').textContent =
+    `nests ${nests.count} · ${nests.drawCallCount} draws / ${Math.round(nests.triangleCount)} tris   ` +
+    `| context trees ${contextTrees.placed} (probe only)   ` +
+    `| frame ${mainStats.drawCalls} draws / ${mainStats.triangles} tris`;
+}
+addEventListener('resize', resize);
+resize();
+
+window.__GAUNTLET_STATS = () => ({
+  drawCalls: mainStats.drawCalls,
+  triangles: mainStats.triangles,
+  nestCount: nests.count,
+  nestDrawCalls: nests.drawCallCount,
+  nestTriangles: nests.triangleCount,
+  nestTrianglesEach: nests.triangleCount / nests.count,
+  activeIndex: nests.activeIndex,
+});
+
+// Self-test: the paths a still frame cannot show.
+window.__nestSelfTest = () => {
+  const p = new THREE.Vector3();
+  const n = new THREE.Vector3();
+
+  // Determinism.
+  const a = createNests(THREE, { quality: 'mid', seed: 55 });
+  const b = createNests(THREE, { quality: 'mid', seed: 55 });
+  if (a.count !== b.count) throw new Error('count differs across identical seeds');
+  for (let i = 0; i < a.positions.length; i++) {
+    if (a.positions[i] !== b.positions[i]) throw new Error('placement is not deterministic');
+  }
+
+  // Tier counts.
+  if (createNests(THREE, { quality: 'low', seed: 1 }).count !== 6) throw new Error('low tier count');
+  if (a.count !== 9) throw new Error('mid tier count ' + a.count);
+
+  // Every nest sits on the surface at exactly the canopy height, and its
+  // normal is the radial up at that point.
+  for (let i = 0; i < a.count; i++) {
+    a.positionOf(i, p); a.normalOf(i, n);
+    if (Math.abs(n.length() - 1) > 1e-5) throw new Error('normal not unit');
+    const want = surfaceRadius(n.x, n.y, n.z) + a.canopyHeight;
+    if (Math.abs(p.length() - want) > 1e-3) throw new Error('nest is not on its treetop');
+    if (p.clone().normalize().dot(n) < 0.999999) throw new Error('normal is not radial');
+  }
+
+  // Separation: no two nests inside the land range of each other, or the land
+  // prompt would be ambiguous.
+  for (let i = 0; i < a.count; i++) {
+    for (let j = i + 1; j < a.count; j++) {
+      const dx = a.positions[i * 3] - a.positions[j * 3];
+      const dy = a.positions[i * 3 + 1] - a.positions[j * 3 + 1];
+      const dz = a.positions[i * 3 + 2] - a.positions[j * 3 + 2];
+      if (Math.hypot(dx, dy, dz) < NEST_LAND_RANGE) throw new Error('nests overlap');
+    }
+  }
+
+  // Zoning: nests favour lush lowland. Mean depth must beat the planet mean.
+  let nestDepth = 0;
+  for (let i = 0; i < a.count; i++) {
+    a.normalOf(i, n);
+    nestDepth += depthAt(n.x, n.y, n.z);
+  }
+  nestDepth /= a.count;
+  let worldDepth = 0;
+  const d = new THREE.Vector3();
+  for (let i = 0; i < 2000; i++) {
+    fibonacciDirection(i, 2000, d);
+    worldDepth += depthAt(d.x, d.y, d.z);
+  }
+  worldDepth /= 2000;
+  if (!(nestDepth > worldDepth)) {
+    throw new Error(`zoning failed: nest depth ${nestDepth.toFixed(3)} <= world ${worldDepth.toFixed(3)}`);
+  }
+
+  // nearest(): exact hit, miss beyond range, and the -1 contract.
+  a.positionOf(0, p);
+  if (a.nearest(p.x, p.y, p.z, 1) !== 0) throw new Error('nearest missed an exact hit');
+  if (a.nearest(0, 0, 0, 10) !== -1) throw new Error('nearest should reject the planet core');
+  if (a.nearest(p.x, p.y, p.z + 1e6, 5) !== -1) throw new Error('nearest ignored maxDist');
+
+  // nearestGround(): forgiving in altitude, exactly as the original intended.
+  a.normalOf(0, n);
+  const high = n.clone().multiplyScalar(PLANET_RADIUS + 400);
+  if (a.nearestGround(high.x, high.y, high.z, NEST_LAND_RANGE) !== 0) {
+    throw new Error('ground distance should ignore altitude');
+  }
+  if (a.nearest(high.x, high.y, high.z, NEST_LAND_RANGE) !== -1) {
+    throw new Error('3D nearest should NOT ignore altitude');
+  }
+
+  // Zero-allocation contract on the hot paths: nothing here may allocate.
+  // (Checked by construction; exercised here so a regression throws loudly.)
+  for (let i = 0; i < 500; i++) { a.nearest(1, 2, 3, 40); a.update(1 / 60); }
+
+  // setActive round-trip, out-of-range guard, idempotence.
+  a.setActive(2); if (a.activeIndex !== 2) throw new Error('setActive');
+  a.setActive(2); a.update(0.016);
+  a.setActive(999); if (a.activeIndex !== -1) throw new Error('setActive out of range');
+  a.setActive(-1); a.update(0); a.update(-1);
+
+  // Odd inputs.
+  a.positionOf(-1, p); a.normalOf(9999, n);
+  a.dispose(); a.update(1 / 60); a.setActive(0);
+  b.dispose();
+  return 'ok';
+};
+if (window.__nestSelfTest() !== 'ok') throw new Error('nest self-test failed');
+
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

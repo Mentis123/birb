@@ -90,6 +90,12 @@ function styleText() {
 
 /* --- corners ------------------------------------------------------------- */
 .vh-tl, .vh-tr { position: absolute; display: flex; gap: 6px; }
+/* The hidden attribute is a UA rule of display:none, which loses to any class
+   rule that sets display. Every chip and card here sets display, so without
+   this the attribute silently does nothing — which is exactly what happened:
+   Casual booted showing six empty chips and a gate counter it does not use.
+   (No backticks in this comment: the whole stylesheet is a template literal.) */
+.gauntlet-hud [hidden] { display: none !important; }
 .vh-tl { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left));
          flex-direction: column; align-items: flex-start; }
 .vh-tr { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
@@ -156,6 +162,9 @@ function styleText() {
   text-align: center; font-size: 9px; font-weight: 800; letter-spacing: 0.24em;
   color: var(--ink); opacity: 0.55;
 }
+
+.vh-combo.is-hot .v { color: var(--gold); }
+.vh-lives.is-critical .v { color: #ff7a7a; }
 
 /* --- countdown ----------------------------------------------------------- */
 .vh-count {
@@ -380,6 +389,23 @@ export function createHUD(rootEl, options = {}) {
     const splitVal = splitChip.querySelector('.v');
     const splitDelta = splitChip.querySelector('.d');
     splitChip.hidden = true;
+
+    // --- mode chips -------------------------------------------------------
+    // One chip per readout the ported Birb Mobile modes need. They all live in
+    // the same stack and are shown/hidden by setModeChrome, so the HUD never
+    // has to know WHICH mode is running — only what that mode switched on.
+    function chip(cls, key) {
+        const c = el('div', 'vh-chip ' + cls, tl,
+            '<span class="k">' + key + '</span><span class="v"></span>');
+        c.hidden = true;
+        return { el: c, v: c.querySelector('.v') };
+    }
+    const ringsChip = chip('vh-rings', 'Rings');
+    const clockChip = chip('vh-clock', 'Time');
+    const scoreChip = chip('vh-score', 'Score');
+    const comboChip = chip('vh-combo', 'Combo');
+    const waveChip = chip('vh-wave', 'Wave');
+    const livesChip = chip('vh-lives', 'Lives');
 
     // ---- top-right: position ---------------------------------------------
     const tr = el('div', 'vh-tr', rootEl);
@@ -783,6 +809,68 @@ export function createHUD(rootEl, options = {}) {
         }
     }
 
+    let _rings = -1, _ringsTot = -1, _clock = null, _score = -1;
+    let _combo = -1, _wave = -1, _lives = -1;
+
+    function setRings(n, total) {
+        if (n === _rings && total === _ringsTot) return;
+        _rings = n; _ringsTot = total;
+        ringsChip.v.textContent = n + '/' + total;
+    }
+    function setClock(text) {
+        if (text === _clock) return;
+        _clock = text;
+        clockChip.v.textContent = text;
+    }
+    function setScore(n) {
+        const v = Math.round(n) | 0;
+        if (v === _score) return;
+        _score = v;
+        scoreChip.v.textContent = v;
+    }
+    function setCombo(mult) {
+        // Quantised to the display precision so an unchanged readout is a
+        // no-op rather than a per-frame textContent write.
+        const q = Math.round(mult * 100) / 100;
+        if (q === _combo) return;
+        _combo = q;
+        comboChip.v.textContent = 'x' + q.toFixed(2).replace(/0$/, '');
+        comboChip.el.classList.toggle('is-hot', q >= 2);
+    }
+    function setWave(n) {
+        if (n === _wave) return;
+        _wave = n;
+        waveChip.v.textContent = n;
+    }
+    function setLives(n) {
+        if (n === _lives) return;
+        _lives = n;
+        // Hearts read faster than a number at a glance under pressure.
+        livesChip.v.textContent = n > 0 ? '\u2665'.repeat(Math.min(n, 5)) : '\u2014';
+        livesChip.el.classList.toggle('is-critical', n <= 1);
+    }
+
+    /**
+     * Show exactly the readouts this mode uses.
+     *
+     * Takes the mode DESCRIPTOR, not a mode id — the HUD stays ignorant of
+     * which modes exist, so adding one never means editing this function.
+     */
+    function setModeChrome(def) {
+        const race = Boolean(def.rivals);
+        lapCard.hidden = !def.laps;
+        posCard.hidden = !race;
+        gateChip.hidden = !def.course;
+        if (!race) splitChip.hidden = true;
+
+        ringsChip.el.hidden = !def.rings;
+        clockChip.el.hidden = !def.timed || race;
+        scoreChip.el.hidden = def.scoreKind !== 'score';
+        comboChip.el.hidden = def.drones !== 'hunt';
+        waveChip.el.hidden = def.drones !== 'waves';
+        livesChip.el.hidden = !def.canFail;
+    }
+
     function setGate(index, total) {
         const i = (index | 0);
         if (i === _gateIdx && total === _gateTotal) return;
@@ -978,6 +1066,13 @@ export function createHUD(rootEl, options = {}) {
     return {
         setLap,
         setPosition,
+        setRings,
+        setClock,
+        setScore,
+        setCombo,
+        setWave,
+        setLives,
+        setModeChrome,
         setSpeed,
         setSplit,
         setGate,
