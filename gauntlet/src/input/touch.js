@@ -93,8 +93,25 @@ function ensureStyle() {
   background: linear-gradient(90deg, ${CSS.uiCyan}, ${CSS.ribbon});
   opacity: 0.55; pointer-events: none; transition: width 0.12s linear;
 }
-.vi-boost.is-cold .vi-boost-chargeed { opacity: 0.3; }
 .vi-boost.is-cold { filter: saturate(0.45) brightness(0.92); }
+
+/* Quarter dividers. Boost is spent in four discrete taps, so the meter is
+   drawn in four segments — you can see one go rather than watching a bar
+   slide. */
+.vi-boost-ticks {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0.32;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 calc(25% - 2px),
+    ${CSS.ink} calc(25% - 2px) 25%
+  );
+}
+/* The flash on a fired tap. Brief, so four in a row read as four events. */
+.vi-boost.is-pulse { animation: vi-boost-pulse 0.28s ease-out; }
+@keyframes vi-boost-pulse {
+  0%   { filter: brightness(1.6); }
+  100% { filter: brightness(1); }
+}
 .vi-stick svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 
 .vi-knob {
@@ -231,6 +248,7 @@ export function createInput(rootEl, opts = {}) {
     boostPill.className = 'vi-boost';
     boostPill.innerHTML =
         '<i class="vi-boost-charge"></i>'
+        + '<i class="vi-boost-ticks"></i>'
         + '<span class="vi-chev">\u00bb</span><span>BOOST</span>'
         + '<i class="vi-boost-grip" aria-label="Drag to move the boost button"></i>';
     const boostCharge = boostPill.querySelector('.vi-boost-charge');
@@ -591,11 +609,19 @@ export function createInput(rootEl, opts = {}) {
         get boostPointerId() { return boostId; },
         get boostSide() { return boostSide; },
 
+        /** Flash the button on a fired tap, so a spend is legible as an event. */
+        pulseBoost() {
+            boostPill.classList.remove('is-pulse');
+            void boostPill.offsetWidth;          // restart the animation
+            boostPill.classList.add('is-pulse');
+        },
+
         /** Charge meter, drawn inside the button so it travels with it. */
         setBoost01(v) {
             const q = v > 1 ? 1 : (v > 0 ? v : 0);
             boostCharge.style.width = (q * 100).toFixed(1) + '%';
-            boostPill.classList.toggle('is-cold', q < 0.15);
+            // Dim when a tap is unaffordable — one quarter of the meter.
+            boostPill.classList.toggle('is-cold', q < 0.25);
         },
 
         /** Put the boost button back where it started. */

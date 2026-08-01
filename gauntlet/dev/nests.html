@@ -181,9 +181,13 @@ let activeIdx = 0;
   const along = B.clone().sub(A);
   along.addScaledVector(up, -along.dot(up)).normalize();
   const mid = A.clone().add(B).multiplyScalar(0.5);
-  camera.position.copy(A).addScaledVector(along, -46).addScaledVector(up, 15);
+  // Altitude matters more than distance here: the planet is radius 100, so the
+  // horizon from 15 units up is only ~55 units away and the second nest (60+)
+  // was hidden behind the curve in the first capture. 30 units puts the horizon
+  // at ~78 and both champions in frame.
+  camera.position.copy(A).addScaledVector(along, -42).addScaledVector(up, 24);
   camera.up.copy(up);
-  camera.lookAt(mid.addScaledVector(up, -4));
+  camera.lookAt(mid.addScaledVector(up, -2));
 }
 
 // ---------------------------------------------------------------------------

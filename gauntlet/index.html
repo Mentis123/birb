@@ -894,7 +894,10 @@ async function boot(requestedMode) {
     audio.setEnabled(settings.music, settings.sfx);
     if (audio.setHapticsEnabled) audio.setHapticsEnabled(settings.haptics);
     const input = createInput(document.querySelector('[data-input-layer]'), {
-        onBoost: () => audio.boost(),
+        // Deliberately silent here: the press is not the event, the fired
+        // PULSE is. A press on an empty meter or inside the re-arm gap must
+        // not make a boost noise, or the sound lies about what happened.
+        onBoost: null,
     });
 
     // --- scratch (zero-allocation loop) ------------------------------------
@@ -1042,6 +1045,7 @@ async function boot(requestedMode) {
         // Boost charge lives on the button itself now, so it travels with it
         // when the player drags the control to the other side of the screen.
         input.setBoost01(flight.boost01 || 0);
+        if (flight.boostStarted) { input.pulseBoost(); audio.boost(); }
         if (def.course) hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
         hud.showWrongWay(def.course && phase === 'racing' && race.wrongWay[0] === 1);
 

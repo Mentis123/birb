@@ -248,58 +248,87 @@ test('an empty meter cannot start a burst', () => {
     assert.equal(st.boosting, false);
 });
 
-test('a charged meter starts a burst, drains, then locks out for a cooldown', () => {
+test('a tap spends exactly one quarter of the meter and starts a pulse', () => {
+    const c = FLIGHT_CONFIG;
     const st = createBoostState();
     addBoostCharge(st, 1);
 
-    assert.equal(stepBoostState(st, true, 0, DT), true, 'burst starts');
+    assert.equal(stepBoostState(st, true, 0, DT), true, 'the press fires a pulse');
     assert.equal(st.boosting, true);
-
-    let ticks = 1;
-    while (st.boosting && ticks < 1000) { stepBoostState(st, true, 0, DT); ticks++; }
-    assert.ok(ticks < 1000, 'burst must end');
-    assert.equal(st.meter, 0);
-    assert.ok(st.cooldown > 0, 'cooldown must be armed on burnout');
-
-    // Immediately re-tapping with a fresh meter must be refused.
-    addBoostCharge(st, 1);
-    assert.equal(stepBoostState(st, true, 0, DT), false, 'cooldown blocks a re-tap');
-
-    // ... and allowed again once it expires.
-    for (let i = 0; i < 200 && st.cooldown > 0; i++) stepBoostState(st, false, 0, DT);
-    assert.equal(st.cooldown, 0);
-    assert.equal(stepBoostState(st, true, 0, DT), true);
+    assert.ok(Math.abs(st.meter - (1 - c.boostTapCost)) < 1e-6,
+        `a tap costs boostTapCost, meter is ${st.meter}`);
 });
 
-test('burst duration matches the drain rate', () => {
+test('HOLDING the button is worth exactly one tap', () => {
+    // This is the whole point of the change. Holding used to drain the meter
+    // continuously and pin the bird at its ceiling for ~2 seconds.
+    const st = createBoostState();
+    addBoostCharge(st, 1);
+
+    let fired = 0;
+    for (let i = 0; i < 600; i++) {          // ten seconds of holding it down
+        if (stepBoostState(st, true, 0, DT)) fired++;
+    }
+    assert.equal(fired, 1, 'a held button fires once, on the press');
+    assert.ok(Math.abs(st.meter - 0.75) < 1e-6, 'and spends one tap of meter');
+    assert.equal(st.boosting, false, 'the pulse ends on its own');
+});
+
+test('a full meter is exactly four taps, and the fifth is refused', () => {
+    const st = createBoostState();
+    addBoostCharge(st, 1);
+
+    let fired = 0;
+    for (let tap = 0; tap < 6; tap++) {
+        if (stepBoostState(st, true, 0, DT)) fired++;   // press
+        stepBoostState(st, false, 0, DT);               // release
+        // wait out the re-arm gap without charging (level flight)
+        for (let i = 0; i < 30; i++) stepBoostState(st, false, 0, DT);
+    }
+    assert.equal(fired, 4, 'four discrete surges from a full meter');
+    assert.ok(st.meter < FLIGHT_CONFIG.boostTapCost, 'and then nothing left to spend');
+});
+
+test('a pulse lasts boostPulseDuration and then releases the bird', () => {
+    const c = FLIGHT_CONFIG;
     const st = createBoostState();
     addBoostCharge(st, 1);
     stepBoostState(st, true, 0, DT);
+
     let t = 0;
-    while (st.boosting && t < 20) { stepBoostState(st, true, 0, DT); t += DT; }
-    const expected = 1 / FLIGHT_CONFIG.boostDrain;
-    assert.ok(Math.abs(t - expected) < 0.1, `burst ran ${t}s, expected ~${expected}s`);
+    while (st.boosting && t < 10) { stepBoostState(st, false, 0, DT); t += DT; }
+    assert.ok(Math.abs(t - c.boostPulseDuration) < 0.05,
+        `pulse ran ${t}s, expected ~${c.boostPulseDuration}s`);
 });
 
-test('releasing early stops the burst and still pays the cooldown', () => {
+test('the re-arm gap stops one jittery press from double-firing', () => {
     const st = createBoostState();
     addBoostCharge(st, 1);
-    stepBoostState(st, true, 0, DT);
-    for (let i = 0; i < 10; i++) stepBoostState(st, true, 0, DT);
-    assert.ok(st.meter > 0.5);
+    assert.equal(stepBoostState(st, true, 0, DT), true);
     stepBoostState(st, false, 0, DT);
-    assert.equal(st.boosting, false);
-    assert.ok(st.meter > 0.5, 'unspent meter is kept');
-    assert.equal(st.cooldown, FLIGHT_CONFIG.boostCooldown, 'feathering is not free');
+    // A bounced press arriving immediately must not buy a second pulse.
+    assert.equal(stepBoostState(st, true, 0, DT), false, 'blocked by the re-arm gap');
 });
 
-test('a boosting bird cannot also be charging', () => {
+test('diving mid-pulse does not refill the meter', () => {
+    // Otherwise dive-and-boost charges faster than it spends and the meter
+    // never comes down — which is hold-to-burn by another route.
     const st = createBoostState();
     addBoostCharge(st, 1);
     stepBoostState(st, true, 0, DT);
-    const before = st.meter;
-    stepBoostState(st, true, -1, DT); // diving hard while boosting
-    assert.ok(st.meter < before, 'meter must only fall while boosting');
+    const during = st.meter;
+    for (let i = 0; i < 10; i++) stepBoostState(st, false, -1, DT);  // hard dive
+    assert.equal(st.meter, during, 'no charge accrues while a pulse is live');
+
+    // ...and charging resumes once the pulse has run out.
+    for (let i = 0; i < 60; i++) stepBoostState(st, false, -1, DT);
+    assert.ok(st.meter > during, 'diving banks meter again after the pulse');
+});
+
+test('a knockdown kills the pulse and locks boost out', () => {
+    const c = FLIGHT_CONFIG;
+    assert.ok(c.boostKnockLockout > c.boostTapCooldown,
+        'a knockdown must cost more than an ordinary re-arm');
 });
 
 test('addBoostCharge clamps both ends', () => {

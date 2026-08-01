@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · aim-rig (nest turret)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+  .panel { position: fixed; color: #fff6dc; pointer-events: none;
+           font: 600 11px/1.5 ui-monospace, SFMono-Regular, monospace;
+           letter-spacing: .03em; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c3399; }
+  #graphbox { left: 10px; top: 10px; }
+  #graphbox canvas { display: block; background: #0a1324cc; border: 1px solid #24344f;
+                     border-radius: 5px; margin-top: 4px; }
+  #stats { left: 10px; bottom: 8px; white-space: pre; }
+  #tag { right: 10px; top: 10px; text-align: right; }
+  #closelabel { right: 12px; bottom: 10px; text-align: right; }
+  @media (max-aspect-ratio: 85/100) {
+    #graphbox canvas { width: 300px; height: auto; }
+    #tag { top: 176px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="graphbox">aim trace · <span style="color:#ffdd44">held</span> / <span style="color:#00d4ff">coasting</span><canvas id="g" width="380" height="168"></canvas></div>
+<div class="panel" id="tag">nest turret probe<br>hold → release → hold → hard reversal</div>
+<div class="panel" id="closelabel">turret close-up ↓</div>
+<div class="panel" id="stats"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE, CSS } from '/gauntlet/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { PLANET_RADIUS, surfaceRadius, continentalHeight } from '/gauntlet/src/core/terrain.js';
+import { makeRng, rngRange } from '/gauntlet/src/core/rng.js';
+import { createAimRig, AIM_RIG_DEFAULTS, AIM_RIG_VISUAL } from '/gauntlet/src/nesting/aim-rig.js';
+
+const THREE = await loadThree();
+const DEG = 180 / Math.PI;
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 120, 420);
+const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 2000);
+createLightRig(THREE, scene);
+
+// ---------------------------------------------------------------------------
+// A real slice of planet. A turret judged against a black void is a turret that
+// has not been judged: the gunmetal has to hold up against green terrain and
+// pale sky, which is where it will actually live.
+// ---------------------------------------------------------------------------
+{
+  const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 34);
+  const pos = geo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const cLit = new THREE.Color(PALETTE.meadowLit);
+  const cDeep = new THREE.Color(PALETTE.meadowDeep);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    const r = surfaceRadius(nx, ny, nz);
+    pos.setXYZ(i, nx * r, ny * r, nz * r);
+    const depth = Math.min(1, -continentalHeight(nx, ny, nz) / 26);
+    tmp.copy(cLit).lerp(cDeep, depth);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  scene.add(new THREE.Mesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+  })));
+}
+
+// ---------------------------------------------------------------------------
+// The nest. Not world/nests.js (that belongs to another agent) — just enough
+// perch to prove the turret sits on something and reads at nest scale.
+// ---------------------------------------------------------------------------
+const NEST_DIR = new THREE.Vector3(0.20, 0.46, 0.86).normalize();
+const GROUND_R = surfaceRadius(NEST_DIR.x, NEST_DIR.y, NEST_DIR.z);
+const TREE_H = 20;
+const NEST_POS = NEST_DIR.clone().multiplyScalar(GROUND_R + TREE_H);
+const UP = NEST_DIR.clone();
+
+// A tangent heading for the bird's landing direction.
+const FWD = new THREE.Vector3(0, 1, 0);
+FWD.sub(UP.clone().multiplyScalar(FWD.dot(UP))).normalize();
+const SIDE = new THREE.Vector3().crossVectors(UP, FWD).normalize();
+
+{
+  const perch = new THREE.Group();
+  perch.position.copy(NEST_DIR).multiplyScalar(GROUND_R);
+  perch.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), UP);
+  scene.add(perch);
+
+  const trunkMat = createToonMaterial(THREE, { color: PALETTE.trunk, ramp: 'graphic', specStrength: 0.1 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 2.1, TREE_H, 9), trunkMat);
+  trunk.position.y = TREE_H / 2;
+  perch.add(trunk);
+
+  const foliageMat = createToonMaterial(THREE, { color: PALETTE.foliageMid, ramp: 'graphic', specStrength: 0.12 });
+  for (let i = 0; i < 3; i++) {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(6.2 - i * 1.5, 6.5, 8), foliageMat);
+    c.position.y = TREE_H * 0.42 + i * 4.1;
+    perch.add(c);
+  }
+
+  const bowlMat = createToonMaterial(THREE, { color: 0x8a6a44, ramp: 'graphic', specStrength: 0.08 });
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(3.0, 2.1, 1.35, 12), bowlMat);
+  bowl.position.y = TREE_H - 0.4;
+  perch.add(bowl);
+
+  // Twig rim, seeded so the capture repeats exactly.
+  const rng = makeRng(7181);
+  const twigMat = createToonMaterial(THREE, { color: 0x6b4a32, ramp: 'graphic', specStrength: 0.05 });
+  // Short and fine, tucked along the rim. Round 2 had them 2.6 long and 0.13
+  // thick radiating outward, which read as a sea urchin and stole the frame
+  // from the gun.
+  const twigGeo = new THREE.CylinderGeometry(0.095, 0.095, 1.9, 5);
+  const twigs = new THREE.InstancedMesh(twigGeo, twigMat, 30);
+  const m4 = new THREE.Matrix4();
+  const eul = new THREE.Euler();
+  const qq = new THREE.Quaternion();
+  const vv = new THREE.Vector3();
+  const one = new THREE.Vector3(1, 1, 1);
+  for (let i = 0; i < 30; i++) {
+    const a = (i / 30) * Math.PI * 2 + rngRange(rng, -0.12, 0.12);
+    // ON the rim, not inside it: round 3 put these at y = TREE_H + 0.2, which
+    // is below the bowl's lip, so every twig was swallowed by the bowl.
+    vv.set(Math.cos(a) * 2.95, TREE_H + 0.5 + rngRange(rng, -0.12, 0.12), Math.sin(a) * 2.95);
+    // Laid ROUND the rim (yaw only) rather than sticking out radially.
+    eul.set(rngRange(rng, 0.1, 0.42), -a + Math.PI / 2, Math.PI / 2 + rngRange(rng, -0.2, 0.2), 'YXZ');
+    qq.setFromEuler(eul);
+    m4.compose(vv, qq, one);
+    twigs.setMatrixAt(i, m4);
+  }
+  twigs.instanceMatrix.needsUpdate = true;
+  perch.add(twigs);
+}
+
+// ---------------------------------------------------------------------------
+// THE SYSTEM UNDER TEST
+// ---------------------------------------------------------------------------
+const TRACE_R = 26;
+const rig = createAimRig(THREE, { camera, quality: 'high', scale: 1.3, reticleDistance: TRACE_R });
+rig.group.position.copy(NEST_POS);
+scene.add(rig.group);
+rig.reset(UP, FWD);
+
+// ---------------------------------------------------------------------------
+// SCRIPTED INPUT — a static screenshot cannot prove a second-order system, so
+// the probe drives the rig at a fixed timestep and records every step.
+//
+//   P1 hold right          ramp climbs off the gentle base
+//   P2 release             the coast: this is the whole feel
+//   P3 hold right again
+//   P4 HARD reversal       proves a deliberate reversal is responsive (stiffness
+//                          25) even though release glides (stiffness 4)
+//   P5 release             settle
+// ---------------------------------------------------------------------------
+const DT = 1 / 120;
+const PHASES = [
+  { until: 0.35, x: 1, y: 0.25, label: 'hold' },
+  { until: 2.10, x: 0, y: 0, label: 'release' },
+  { until: 2.50, x: 1, y: 0, label: 'hold' },
+  { until: 3.00, x: -1, y: 0, label: 'reversal' },
+  { until: 4.80, x: 0, y: 0, label: 'release' },
+];
+const T_END = PHASES[PHASES.length - 1].until;
+const STEPS = Math.round(T_END / DT);
+
+function phaseAt(t) {
+  for (let i = 0; i < PHASES.length; i++) if (t < PHASES[i].until) return PHASES[i];
+  return PHASES[PHASES.length - 1];
+}
+
+const trace = {
+  t: new Float32Array(STEPS + 1),
+  yaw: new Float32Array(STEPS + 1),
+  yawVel: new Float32Array(STEPS + 1),
+  pitch: new Float32Array(STEPS + 1),
+  flex: new Float32Array(STEPS + 1),
+  held: new Uint8Array(STEPS + 1),
+  pts: new Float32Array((STEPS + 1) * 3),
+  col: new Float32Array((STEPS + 1) * 3),
+};
+
+// Unwrapped yaw, so the [-PI,PI] normalisation inside the rig does not turn the
+// measured sweep into a sawtooth.
+let unwrapped = 0;
+let prevYaw = rig.yaw;
+
+const input = { x: 0, y: 0 };          // reused — the game loop never allocates one
+const _dir = new THREE.Vector3();
+const cHeld = new THREE.Color(PALETTE.uiGold);
+const cCoast = new THREE.Color(PALETTE.uiCyan);
+
+let fireStep = STEPS - 3;
+
+for (let s = 0; s <= STEPS; s++) {
+  const t = s * DT;
+  const ph = phaseAt(t);
+  input.x = ph.x;
+  input.y = ph.y;
+  if (s > 0) rig.update(DT, input);
+  if (s === fireStep) rig.fire();
+
+  let d = rig.yaw - prevYaw;
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  unwrapped += d;
+  prevYaw = rig.yaw;
+
+  trace.t[s] = t;
+  trace.yaw[s] = unwrapped;
+  trace.yawVel[s] = rig.yawVelocity;
+  trace.pitch[s] = rig.pitch;
+  trace.flex[s] = rig.flex;
+  trace.held[s] = (ph.x !== 0 || ph.y !== 0) ? 1 : 0;
+
+  _dir.copy(rig.aimForward).multiplyScalar(TRACE_R).add(NEST_POS);
+  trace.pts[s * 3] = _dir.x; trace.pts[s * 3 + 1] = _dir.y; trace.pts[s * 3 + 2] = _dir.z;
+  const c = trace.held[s] ? cHeld : cCoast;
+  trace.col[s * 3] = c.r; trace.col[s * 3 + 1] = c.g; trace.col[s * 3 + 2] = c.b;
+}
+
+// ---------------------------------------------------------------------------
+// MEASUREMENTS — the evidence.
+// ---------------------------------------------------------------------------
+function idxAt(t) { return Math.min(STEPS, Math.max(0, Math.round(t / DT))); }
+
+const peakVel = (() => { let m = 0; for (let i = 0; i <= STEPS; i++) m = Math.max(m, Math.abs(trace.yawVel[i])); return m; })();
+const rampMultObserved = peakVel / AIM_RIG_DEFAULTS.yawRate;
+
+// Coast: from the P1 release to the frame the velocity is finally zeroed.
+const iRelease = idxAt(0.35);
+let iStop = iRelease;
+while (iStop < STEPS && trace.yawVel[iStop] !== 0) iStop++;
+const coastDeg = Math.abs(trace.yaw[iStop] - trace.yaw[iRelease]) * DEG;
+const coastSettleMs = (trace.t[iStop] - trace.t[iRelease]) * 1000;
+const velAtRelease = Math.abs(trace.yawVel[iRelease]);
+
+// Reversal overshoot: how far the mount keeps travelling the OLD way after the
+// stick is slammed the other way. This is the number that separates "heavy" from
+// "laggy" — it must be small while the release coast is large.
+const iRev = idxAt(2.50);
+const dirBefore = Math.sign(trace.yawVel[iRev]);
+let iCross = iRev;
+while (iCross < STEPS && Math.sign(trace.yawVel[iCross]) === dirBefore) iCross++;
+const reversalOvershootDeg = Math.abs(trace.yaw[iCross] - trace.yaw[iRev]) * DEG;
+const reversalMs = (trace.t[iCross] - trace.t[iRev]) * 1000;
+
+// Mount flex (the C0=8 / C1=6 second-order layer): peak lean, overshoot past
+// zero on the way back, and settle time. C1 > 2*sqrt(C0) by design, so the
+// expected overshoot is ~0 — it converges without ringing, which is what the
+// research asked for. Measured, not assumed.
+let flexPeak = 0, flexOvershoot = 0, flexSign = 0;
+for (let i = 0; i <= STEPS; i++) {
+  if (Math.abs(trace.flex[i]) > flexPeak) { flexPeak = Math.abs(trace.flex[i]); flexSign = Math.sign(trace.flex[i]); }
+}
+for (let i = idxAt(0.35); i <= STEPS; i++) {
+  const v = trace.flex[i] * flexSign;
+  if (v < 0) flexOvershoot = Math.max(flexOvershoot, -v);
+}
+// Settle is measured from the LAST input (t=3.00), not from the first release —
+// otherwise later phases keep re-exciting the spring and the number becomes
+// "length of the trace", which is not a measurement of anything.
+const iLastInput = idxAt(3.00);
+let iFlexSettle = iLastInput;
+for (let i = iLastInput; i <= STEPS; i++) if (Math.abs(trace.flex[i]) > 0.002) iFlexSettle = i;
+const flexSettleMs = (trace.t[iFlexSettle] - trace.t[iLastInput]) * 1000;
+
+// What the ramp is worth at FULL hold. The scripted phases are deliberately
+// short (a 1.6x sweep eats 300 deg/s and would put the trace off frame), so the
+// cap is measured on a throwaway rig rather than claimed.
+const rampMultFullHold = (() => {
+  const probe = createAimRig(THREE, { visual: false });
+  probe.reset(UP, FWD);
+  const inp = { x: 1, y: 0 };
+  let m = 0;
+  for (let i = 0; i < Math.round(1.6 / DT); i++) { probe.update(DT, inp); m = Math.max(m, Math.abs(probe.yawVelocity)); }
+  probe.dispose();
+  return m / AIM_RIG_DEFAULTS.yawRate;
+})();
+
+// Monotonic-convergence check: after the last input, the coast must decay to
+// zero without ever gaining speed again.
+let convergent = true;
+for (let i = idxAt(3.02); i < STEPS; i++) {
+  if (Math.abs(trace.yawVel[i + 1]) > Math.abs(trace.yawVel[i]) + 1e-6) convergent = false;
+}
+
+// ---------------------------------------------------------------------------
+// Draw the trace into the world: a polyline of the aim direction plus a dot
+// every 50ms. The dots are the proof — evenly spaced under a held stick, then
+// crowding tighter and tighter as the mount spins down.
+// ---------------------------------------------------------------------------
+{
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(trace.pts, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(trace.col, 3));
+  const line = new THREE.Line(g, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.95, fog: false, depthTest: false,
+  }));
+  line.renderOrder = 800;
+  scene.add(line);
+
+  const every = Math.round(0.05 / DT);
+  const n = Math.floor(STEPS / every) + 1;
+  const dp = new Float32Array(n * 3);
+  const dc = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const s = i * every;
+    dp[i * 3] = trace.pts[s * 3]; dp[i * 3 + 1] = trace.pts[s * 3 + 1]; dp[i * 3 + 2] = trace.pts[s * 3 + 2];
+    dc[i * 3] = trace.col[s * 3]; dc[i * 3 + 1] = trace.col[s * 3 + 1]; dc[i * 3 + 2] = trace.col[s * 3 + 2];
+  }
+  const pg = new THREE.BufferGeometry();
+  pg.setAttribute('position', new THREE.BufferAttribute(dp, 3));
+  pg.setAttribute('color', new THREE.BufferAttribute(dc, 3));
+  const dots = new THREE.Points(pg, new THREE.PointsMaterial({
+    size: 5.5, sizeAttenuation: false, vertexColors: true, fog: false, depthTest: false,
+  }));
+  dots.renderOrder = 801;
+  scene.add(dots);
+
+  // Spoke fan: a faint line from the muzzle to the trace every 250ms. Without
+  // it the arc is a ribbon floating in the sky with no stated relationship to
+  // the gun; with it, it reads as where the barrel was pointing.
+  const spokeEvery = Math.round(0.25 / DT);
+  const nSpokes = Math.floor(STEPS / spokeEvery) + 1;
+  const sp = new Float32Array(nSpokes * 6);
+  const sc = new Float32Array(nSpokes * 6);
+  for (let i = 0; i < nSpokes; i++) {
+    const s = i * spokeEvery;
+    const o = i * 6;
+    // start a little way out of the muzzle so the fan does not bury the turret
+    const fx = (trace.pts[s * 3] - NEST_POS.x) / TRACE_R;
+    const fy = (trace.pts[s * 3 + 1] - NEST_POS.y) / TRACE_R;
+    const fz = (trace.pts[s * 3 + 2] - NEST_POS.z) / TRACE_R;
+    sp[o] = NEST_POS.x + fx * 7; sp[o + 1] = NEST_POS.y + fy * 7; sp[o + 2] = NEST_POS.z + fz * 7;
+    sp[o + 3] = trace.pts[s * 3]; sp[o + 4] = trace.pts[s * 3 + 1]; sp[o + 5] = trace.pts[s * 3 + 2];
+    for (let k = 0; k < 6; k++) sc[o + k] = trace.col[s * 3 + (k % 3)];
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
+  const spokes = new THREE.LineSegments(sg, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.17, fog: false, depthTest: false,
+  }));
+  spokes.renderOrder = 799;
+  scene.add(spokes);
+}
+
+// ---------------------------------------------------------------------------
+// Camera — high three-quarter over the nest, so the yaw sweep reads as an arc
+// on the ground plane rather than a line vanishing into the horizon.
+// ---------------------------------------------------------------------------
+{
+  // Placed relative to the FINAL AIM, not to the world frame. Rounds 1 and 2
+  // both shot the barrel down its own axis because the camera was pinned to
+  // FWD while the aim had swept 200 degrees away from it. Broadside to the
+  // final aim is the only view that shows the barrel's length.
+  const aim = rig.aimForward.clone();
+  const across = new THREE.Vector3().crossVectors(UP, aim).normalize();
+  camera.position.copy(NEST_POS)
+    .addScaledVector(across, 34)
+    .addScaledVector(UP, 13)
+    .addScaledVector(aim, -8);
+  camera.up.copy(UP);
+  // Aim point pushed forward and down so the gun sits left-of-centre with the
+  // ground and the tree in frame for scale, instead of floating in empty sky.
+  camera.lookAt(NEST_POS.clone().addScaledVector(UP, -1.5).addScaledVector(aim, 11));
+}
+
+// ---------------------------------------------------------------------------
+// Close-up scene — a second rig posed by hand, lit the same way, so the
+// silhouette, the outline hull and the cel bands can be judged at gun scale.
+// ---------------------------------------------------------------------------
+const closeScene = new THREE.Scene();
+const closeCam = new THREE.PerspectiveCamera(34, 1, 0.1, 200);
+createLightRig(THREE, closeScene);
+{
+  const card = new THREE.Mesh(new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith }));
+  card.position.z = -60;
+  closeScene.add(card);
+}
+const closeRig = createAimRig(THREE, { quality: 'high', reticleDistance: 22 });
+closeScene.add(closeRig.group);
+closeRig.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+closeRig.reticle.visible = false;   // the inset is for judging the gun, not the HUD
+{
+  // Pose it with the real solver rather than by writing angles: a pose the
+  // solver cannot reach is a pose worth not photographing.
+  const inp = { x: -0.62, y: 0.55 };
+  for (let i = 0; i < 46; i++) closeRig.update(DT, inp);
+  inp.x = 0; inp.y = 0;
+  for (let i = 0; i < 30; i++) closeRig.update(DT, inp);
+  closeRig.fire();
+  for (let i = 0; i < 3; i++) closeRig.update(DT, inp);
+  // Same rule as the main camera: broadside to where the gun actually ended up.
+  const a = closeRig.aimForward.clone();
+  const ax = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), a).normalize();
+  closeCam.position.set(0, 2.0, 0)
+    .addScaledVector(ax, 12.5).addScaledVector(a, -3.2);
+  closeCam.position.y += 3.0;
+  closeCam.lookAt(0, 1.5, 0);
+}
+
+// ---------------------------------------------------------------------------
+// The 2D trace graph. Yaw angle and angular velocity against time, with the
+// held phases shaded. Overshoot-and-settle is a shape, and a shape needs a plot.
+// ---------------------------------------------------------------------------
+{
+  const gc = document.getElementById('g');
+  const x2 = gc.getContext('2d');
+  const W = gc.width, H = gc.height;
+  const PAD = 4, TOP = 14;
+  const px = (t) => PAD + (t / T_END) * (W - PAD * 2);
+
+  x2.clearRect(0, 0, W, H);
+
+  // shaded held phases
+  x2.fillStyle = 'rgba(255,221,68,0.13)';
+  let start = -1;
+  for (let i = 0; i <= STEPS; i++) {
+    if (trace.held[i] && start < 0) start = i;
+    if ((!trace.held[i] || i === STEPS) && start >= 0) {
+      x2.fillRect(px(trace.t[start]), TOP, px(trace.t[i]) - px(trace.t[start]), H - TOP - 12);
+      start = -1;
+    }
+  }
+
+  // velocity band (upper half), zero line in the middle of that band
+  const vTop = TOP + 2, vBot = TOP + 66, vMid = (vTop + vBot) / 2;
+  const vScale = (vBot - vTop) / 2 / AIM_RIG_DEFAULTS.maxYawVelocity;
+  x2.strokeStyle = 'rgba(255,246,220,0.32)';
+  x2.lineWidth = 1;
+  x2.beginPath(); x2.moveTo(PAD, vMid); x2.lineTo(W - PAD, vMid); x2.stroke();
+  x2.strokeStyle = CSS.sparkCyan;
+  x2.lineWidth = 1.6;
+  x2.beginPath();
+  for (let i = 0; i <= STEPS; i++) {
+    const X = px(trace.t[i]), Y = vMid - trace.yawVel[i] * vScale;
+    if (i === 0) x2.moveTo(X, Y); else x2.lineTo(X, Y);
+  }
+  x2.stroke();
+
+  // angle band (lower half)
+  const aTop = vBot + 12, aBot = H - 12;
+  let amin = Infinity, amax = -Infinity;
+  for (let i = 0; i <= STEPS; i++) { amin = Math.min(amin, trace.yaw[i]); amax = Math.max(amax, trace.yaw[i]); }
+  const aScale = (aBot - aTop) / Math.max(1e-6, amax - amin);
+  x2.strokeStyle = CSS.uiGold;
+  x2.lineWidth = 1.6;
+  x2.beginPath();
+  for (let i = 0; i <= STEPS; i++) {
+    const X = px(trace.t[i]), Y = aBot - (trace.yaw[i] - amin) * aScale;
+    if (i === 0) x2.moveTo(X, Y); else x2.lineTo(X, Y);
+  }
+  x2.stroke();
+
+  // release + reversal markers
+  x2.setLineDash([3, 3]);
+  x2.strokeStyle = 'rgba(255,246,220,0.55)';
+  x2.lineWidth = 1;
+  for (const t of [0.35, 2.50]) {
+    x2.beginPath(); x2.moveTo(px(t), TOP); x2.lineTo(px(t), H - 12); x2.stroke();
+  }
+  x2.setLineDash([]);
+
+  x2.fillStyle = '#fff6dc';
+  x2.font = '600 9px ui-monospace, monospace';
+  x2.fillText('yaw velocity (rad/s)', PAD + 2, TOP + 9);
+  x2.fillText('yaw angle (unwrapped)', PAD + 2, aTop + 8);
+  x2.fillText('release', px(0.35) + 3, H - 3);
+  x2.fillText('reversal', px(2.50) + 3, H - 3);
+}
+
+// ---------------------------------------------------------------------------
+let mainStats = { drawCalls: 0, triangles: 0 };
+
+function draw() {
+  const W = innerWidth, H = innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.render(scene, camera);
+  mainStats = { drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
+
+  const iw = Math.round(Math.min(300, W * 0.44));
+  const ih = Math.round(iw * 0.74);
+  const ix = W - iw - 8, iy = 26;
+  closeCam.aspect = iw / ih;
+  closeCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setViewport(ix, iy, iw, ih);
+  renderer.setScissor(ix, iy, iw, ih);
+  renderer.render(closeScene, closeCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  return ih;
+}
+
+function fmt(n, d) { return Number(n).toFixed(d === undefined ? 1 : d); }
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  // Portrait: a 46 deg VERTICAL fov on a phone aspect crops the sweep out of
+  // frame, so widen until the same composition is judged on both captures.
+  camera.fov = camera.aspect >= 0.85 ? 46 : 46 + (0.85 - camera.aspect) * 44;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  const ih = draw();
+  document.getElementById('closelabel').style.bottom = (26 + ih + 4) + 'px';
+  document.getElementById('stats').textContent =
+    `hold peak ${fmt(peakVel, 2)} rad/s = ${fmt(rampMultObserved, 2)}x base  ·  full 1s hold = ${fmt(rampMultFullHold, 2)}x (cap ${AIM_RIG_DEFAULTS.rampMaxMult}x)\n` +
+    `release coast ${fmt(coastDeg)}deg over ${fmt(coastSettleMs, 0)}ms from ${fmt(velAtRelease, 2)} rad/s\n` +
+    `reversal overshoot ${fmt(reversalOvershootDeg, 2)}deg in ${fmt(reversalMs, 0)}ms  ·  converges ${convergent ? 'yes' : 'NO'}\n` +
+    `mount flex peak ${fmt(flexPeak * DEG, 2)}deg  overshoot ${fmt(flexOvershoot * DEG, 3)}deg  settle ${fmt(flexSettleMs, 0)}ms\n` +
+    `turret ${rig.drawCallCount} draws / ${rig.triangleCount} tris  ·  frame ${mainStats.drawCalls} draws / ${mainStats.triangles} tris`;
+}
+addEventListener('resize', resize);
+resize();
+
+window.__GAUNTLET_STATS = () => ({
+  drawCalls: mainStats.drawCalls,
+  triangles: mainStats.triangles,
+  turretDrawCalls: rig.drawCallCount,
+  turretTriangles: rig.triangleCount,
+  peakYawVel: peakVel,
+  rampMultObserved,
+  rampMultFullHold,
+  coastDeg,
+  coastSettleMs,
+  velAtRelease,
+  reversalOvershootDeg,
+  reversalMs,
+  flexPeakDeg: flexPeak * DEG,
+  flexOvershootDeg: flexOvershoot * DEG,
+  flexSettleMs,
+  convergent,
+});
+
+// ---------------------------------------------------------------------------
+// Self-test — the paths a still frame cannot show. Throws, so the harness fails.
+// ---------------------------------------------------------------------------
+window.__aimSelfTest = () => {
+  const r = createAimRig(THREE, { visual: false });
+  const inp = { x: 0, y: 0 };
+
+  // deadzone: below 0.08 must produce absolutely nothing
+  r.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  inp.x = 0.05;
+  for (let i = 0; i < 120; i++) r.update(DT, inp);
+  if (r.yaw !== 0 || r.yawVelocity !== 0) throw new Error('deadzone leaked: ' + r.yaw);
+
+  // pitch clamp, both ends, with velocity dumped at the stop
+  r.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  inp.x = 0; inp.y = 1;
+  for (let i = 0; i < 600; i++) r.update(DT, inp);
+  if (Math.abs(r.pitch - AIM_RIG_DEFAULTS.maxPitch) > 1e-6) throw new Error('maxPitch not held: ' + r.pitch);
+  if (r.pitchVelocity !== 0) throw new Error('velocity survived the stop: ' + r.pitchVelocity);
+  inp.y = -1;
+  for (let i = 0; i < 600; i++) r.update(DT, inp);
+  if (Math.abs(r.pitch - AIM_RIG_DEFAULTS.minPitch) > 1e-6) throw new Error('minPitch not held: ' + r.pitch);
+
+  // aimForward stays unit length and agrees with aimQuaternion at extreme pitch
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(r.aimQuaternion);
+  if (Math.abs(f.length() - 1) > 1e-5) throw new Error('aimQuaternion not unit');
+  if (f.distanceTo(r.aimForward) > 1e-5) throw new Error('quaternion/forward disagree near the pole');
+
+  // ramp reaches its cap and no further
+  r.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  inp.x = 1; inp.y = 0;
+  let peak = 0;
+  for (let i = 0; i < 600; i++) { r.update(DT, inp); peak = Math.max(peak, Math.abs(r.yawVelocity)); }
+  const cap = AIM_RIG_DEFAULTS.yawRate * AIM_RIG_DEFAULTS.rampMaxMult;
+  if (peak > cap + 1e-6) throw new Error('ramp exceeded cap: ' + peak);
+  if (peak < cap * 0.985) throw new Error('ramp never reached cap: ' + peak);
+
+  // ...and the ramp RESETS on reversal, so a correction is fine even mid-sweep.
+  // 0.15s after slamming the stick the other way the rate must be back near the
+  // gentle base, not still at the 1.6x sweep rate.
+  inp.x = -1;
+  for (let i = 0; i < 18; i++) r.update(DT, inp);
+  const revRate = Math.abs(r.yawVelocity);
+  if (revRate > AIM_RIG_DEFAULTS.yawRate * 1.1) {
+    throw new Error('ramp did not reset on reversal: ' + revRate);
+  }
+
+  // release coasts, then stops dead (no endless micro-drift)
+  inp.x = 0;
+  for (let i = 0; i < 900; i++) r.update(DT, inp);
+  if (r.yawVelocity !== 0) throw new Error('coast never settled: ' + r.yawVelocity);
+
+  // inactive rig ignores input entirely
+  r.setActive(false);
+  const yBefore = r.yaw;
+  inp.x = 1;
+  for (let i = 0; i < 120; i++) r.update(DT, inp);
+  if (r.yaw !== yBefore) throw new Error('inactive rig moved');
+  r.setActive(true);
+
+  // pointer channel drives the same solver
+  r.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  const pinp = { x: 0, y: 0, deltaX: 30, deltaY: 0 };
+  for (let i = 0; i < 60; i++) r.update(DT, pinp);
+  if (Math.abs(r.yaw) < 1e-3) throw new Error('pointer channel dead: ' + r.yaw);
+  // ...and its deadzone rejects sub-pixel jitter
+  r.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  pinp.deltaX = 0.05;
+  for (let i = 0; i < 60; i++) r.update(DT, pinp);
+  if (r.yaw !== 0) throw new Error('pointer deadzone leaked: ' + r.yaw);
+
+  // radial up: reset on an arbitrary sphere normal must give a level horizon,
+  // i.e. the aim at pitch 0 stays perpendicular to that up
+  const up = new THREE.Vector3(0.3, 0.7, -0.65).normalize();
+  r.reset(up, new THREE.Vector3(0, 0, -1));
+  inp.x = 1;
+  for (let i = 0; i < 60; i++) r.update(DT, inp);
+  if (Math.abs(r.aimForward.dot(up)) > 1e-5) throw new Error('horizon tilted: ' + r.aimForward.dot(up));
+
+  // degenerate reset: forward parallel to up must not produce NaN
+  r.reset(up, up.clone());
+  if (!Number.isFinite(r.aimForward.x) || Math.abs(r.aimForward.length() - 1) > 1e-5) {
+    throw new Error('degenerate reset produced ' + r.aimForward.toArray());
+  }
+
+  // dt hygiene: zero, negative and a huge hitch must all be survivable
+  r.update(0, inp); r.update(-1, inp); r.update(10, inp); r.update(DT, null); r.update(DT);
+  if (!Number.isFinite(r.yaw)) throw new Error('dt hygiene produced NaN');
+
+  // fire + dispose
+  const v = createAimRig(THREE, { quality: 'high' });
+  v.reset(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  v.fire();
+  v.update(DT, inp);
+  if (v.recoilSlide <= 0) throw new Error('recoil did not move the barrel');
+  const muzzle = v.getMuzzlePosition(new THREE.Vector3());
+  if (!Number.isFinite(muzzle.x)) throw new Error('muzzle position NaN');
+  let settled = 0;
+  for (let i = 0; i < 240; i++) { v.update(DT, { x: 0, y: 0 }); settled = Math.abs(v.recoilSlide); }
+  if (settled > 1e-3) throw new Error('recoil never settled: ' + settled);
+  v.dispose();
+  v.update(DT, inp);
+  v.fire();
+
+  r.dispose();
+  return 'ok';
+};
+if (window.__aimSelfTest() !== 'ok') throw new Error('aim self-test failed');
+if (!convergent) throw new Error('coast did not converge monotonically');
+
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

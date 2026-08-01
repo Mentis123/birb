@@ -168,38 +168,64 @@ function paintRangeByHeight(THREE, geo, range, y0, y1, low, high) {
  * individual strands from close up and as a warm textured band from far away,
  * which is exactly the range a landing pad has to work across.
  */
+/**
+ * Displace a bowl wall's radius so the silhouette is lumpy rather than
+ * machined, and the flat-shaded facets catch the key light at slightly
+ * different angles.
+ *
+ * Two frequencies. The fast one IS the weave, and its phase flips per height
+ * ring so the bumps stagger like courses of basketry instead of running as
+ * vertical flutes. The first captured frame used 0.045 and the weave simply did
+ * not survive the toon ramp — an amplitude has to move a facet into the next
+ * band to exist at all under stepped lighting.
+ *
+ * `flat` keeps every ring in phase. The outline proxy uses it: its silhouette
+ * must track the real wall's outer ring, and a proxy that misses the ripple
+ * shows up as a fat black donut where the smooth hull escapes the lumpy mesh —
+ * which is exactly what the third captured frame showed.
+ */
+function rippleWall(geo, SEG, flat) {
+    const pos = geo.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        const a = Math.atan2(z, x);
+        const r = Math.hypot(x, z);
+        const band = flat ? 1 : (y > 0.6 ? 1 : (y > 0.2 ? 0 : 1));
+        const k = 1
+            + Math.cos(a * SEG + band * Math.PI) * 0.105
+            + Math.cos(a * 3 + 0.7) * 0.060;
+        pos.setXYZ(i, Math.cos(a) * r * k, y, Math.sin(a) * r * k);
+    }
+    geo.computeVertexNormals();
+    return geo;
+}
+
 function buildBowl(THREE) {
     const SEG = 12;
     const wall = new THREE.CylinderGeometry(
-        BOWL_RADIUS, BOWL_RADIUS * 0.62, 1.30, SEG, 2, true
+        BOWL_RADIUS, BOWL_RADIUS * 0.74, 1.30, SEG, 2, true
     );
     wall.translate(0, 0.42, 0);
 
-    // Ripple the wall so the silhouette is lumpy rather than machined, and so
-    // the flat-shaded facets catch the key light at slightly different angles.
-    {
-        const pos = wall.getAttribute('position');
-        for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-            const a = Math.atan2(z, x);
-            const r = Math.hypot(x, z);
-            const band = y > 0.6 ? 1 : (y > 0.2 ? 0 : 1);
-            // Two-frequency ripple: the fast one is the weave, the slow one
-            // stops the bowl reading as a perfect circle from above.
-            const k = 1
-                + Math.cos(a * SEG + band * Math.PI) * 0.045
-                + Math.cos(a * 3 + 0.7) * 0.055;
-            pos.setXYZ(i, Math.cos(a) * r * k, y, Math.sin(a) * r * k);
-        }
-        wall.computeVertexNormals();
-    }
+    rippleWall(wall, SEG, false);
 
-    // Interior floor, sunk below the rim so the bowl reads as a container.
-    const floor = new THREE.CircleGeometry(BOWL_RADIUS * 0.80, SEG);
-    floor.rotateX(-Math.PI / 2);
-    floor.translate(0, 0.02, 0);
+    /**
+     * The interior, as an inward-facing cone rather than a flat disc.
+     *
+     * Two problems solved by one 12-triangle part. First, a two-sided bowl
+     * showed you the far wall's INSIDE lit by the key light — three flips
+     * backface normals, so the cup's interior came back cream instead of
+     * shadowed, and a bowl whose inside is as bright as its outside is a
+     * saucer. Second, a flat floor plus an open wall left the bowl's underside
+     * see-through. A cone that tapers to a point closes the bottom for free.
+     */
+    const inner = new THREE.ConeGeometry(BOWL_RADIUS * 0.90, 1.20, SEG, 1, true);
+    inner.rotateX(Math.PI);             // apex down: a cup, not a hat
+    inner.scale(-1, 1, 1);              // flip winding so it faces inward
+    inner.translate(0, 0.30, 0);
+    inner.computeVertexNormals();
 
-    return { wall, floor, SEG };
+    return { wall, inner, SEG };
 }
 
 /**
@@ -213,16 +239,26 @@ function buildTwigs(THREE, rng) {
     const parts = [];
     const N = 8;
     for (let i = 0; i < N; i++) {
-        const a = (i / N) * Math.PI * 2 + rngRange(rng, -0.16, 0.16);
-        const len = rngRange(rng, 1.5, 2.5);
-        const twig = new THREE.CylinderGeometry(0.075, 0.115, len, 3, 1, true);
-        // Lay the stick down (local +Y -> +X) then splay it out and up.
+        const a = (i / N) * Math.PI * 2 + rngRange(rng, -0.22, 0.22);
+        // Shorter and fatter than the previous pass, which grew 1.85-unit
+        // needles off a 2.25-unit bowl and read as a spider, not a nest.
+        const len = rngRange(rng, 0.85, 1.45);
+        const twig = new THREE.CylinderGeometry(0.10, 0.17, len, 3, 1, true);
+        // Lay the stick down (local +Y -> +X), then SKEW it off the radius
+        // before splaying. Purely radial sticks read as a sun symbol — a rim of
+        // spikes, not a nest. Yawing each one 40-75 degrees off radial makes
+        // them lie ACROSS the rim and cross each other, which is what a woven
+        // pile actually looks like.
         twig.rotateZ(-Math.PI / 2);
         twig.translate(len * 0.5, 0, 0);
-        twig.rotateZ(rngRange(rng, 0.12, 0.62));      // tilt up off the rim
+        twig.rotateZ(rngRange(rng, 0.02, 0.48));      // lifted off the rim
+        twig.rotateY(rngRange(rng, 0.55, 1.05) * (i % 2 ? 1 : -1));
         twig.rotateY(-a);
-        const r = BOWL_RADIUS * 0.80;
-        twig.translate(Math.cos(a) * r, rngRange(rng, 0.55, 0.95), Math.sin(a) * r);
+        // Anchored out at the rim, not inboard: the previous pass had them
+        // crossing the bowl's dark interior, where a lit straw stick reads as a
+        // scrap of paper dropped in the nest rather than as part of its wall.
+        const r = BOWL_RADIUS * 0.92;
+        twig.translate(Math.cos(a) * r, rngRange(rng, 0.62, 1.02), Math.sin(a) * r);
         parts.push(twig);
     }
     return parts;
@@ -230,36 +266,57 @@ function buildTwigs(THREE, rng) {
 
 /** The champion tree the bowl sits in: tapered trunk plus two canopy masses. */
 function buildTree(THREE, rng) {
-    const trunk = new THREE.CylinderGeometry(0.95, 1.85, CANOPY_HEIGHT + 2.4, 6, 1, true);
+    // Slim. The first captured frame had a 1.85-radius base on a 13-unit trunk,
+    // which reads as a fence post with a shrub on it. A champion broadleaf is
+    // tall and comparatively thin, and thin is also what lets you see the
+    // canopy behind the trunk.
+    const trunk = new THREE.CylinderGeometry(0.62, 1.28, CANOPY_HEIGHT + 2.4, 6, 1, true);
     trunk.translate(0, -(CANOPY_HEIGHT + 2.4) * 0.5 - 0.35, 0);
 
-    // Two masses rather than one: an offset pair breaks the "green ball on a
-    // stick" read and gives the bowl something to nestle against.
-    const big = new THREE.IcosahedronGeometry(3.9, 0);
-    big.scale(1.14, 0.80, 1.14);
+    // Three masses rather than one: the offset pile breaks the "green ball on a
+    // stick" read and gives the bowl something to nestle into. The lowest one
+    // is wide and flat so the crown has a base instead of tapering to nothing.
+    // The masses MUST overlap. The previous pass squashed them to 0.74/0.58 and
+    // spread them 2.5 units apart, and the captured frame showed three
+    // disconnected green plates floating around a pole — a stack of pancakes,
+    // not a crown. Every blob now intersects at least one other.
+    const big = new THREE.IcosahedronGeometry(3.55, 0);
+    big.scale(1.16, 0.90, 1.16);
     big.rotateY(0.6);
-    big.translate(0.35, -2.35, -0.25);
+    big.translate(0.20, -2.95, -0.30);
 
-    const small = new THREE.IcosahedronGeometry(2.7, 0);
-    small.scale(1.10, 0.78, 1.10);
+    // Pushed well outboard. At the previous offsets both secondary masses sat
+    // inside the big one's silhouette, so the captured crown read as a single
+    // icosahedron with one large flat lit face — a green ball with a highlight
+    // blob, which is the exact "lollipop tree" the three-mass crown exists to
+    // avoid. They now break the outline on both sides.
+    const small = new THREE.IcosahedronGeometry(2.95, 0);
+    small.scale(1.12, 0.88, 1.12);
     small.rotateY(-1.1);
-    small.translate(-1.85, -3.55, 1.35);
+    small.translate(-3.60, -4.35, 2.10);
 
-    // Branch stubs cradling the bowl, so it is visibly SUPPORTED rather than
-    // balanced on a point.
+    const low = new THREE.IcosahedronGeometry(3.15, 0);
+    low.scale(1.20, 0.80, 1.20);
+    low.rotateY(2.2);
+    low.translate(2.65, -5.45, 1.75);
+
+    // Branch stubs cradling the bowl from BELOW. The first pass angled these
+    // upward and they speared straight through the bowl's interior — brown
+    // shards across the straw in the captured frame. They now hang under the
+    // rim, where they do the one job they have: make the bowl look supported.
     const branches = [];
     for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI * 2 + 0.4;
-        const b = new THREE.CylinderGeometry(0.16, 0.30, 3.1, 3, 1, true);
+        const b = new THREE.CylinderGeometry(0.14, 0.26, 2.5, 3, 1, true);
         b.rotateZ(-Math.PI / 2);
-        b.translate(1.55, 0, 0);
-        b.rotateZ(rngRange(rng, 0.55, 0.85));
+        b.translate(1.25, 0, 0);
+        b.rotateZ(rngRange(rng, -0.62, -0.34));   // splay DOWN and out
         b.rotateY(-a);
-        b.translate(0, -0.85, 0);
+        b.translate(0, -0.35, 0);
         branches.push(b);
     }
 
-    return { trunk, big, small, branches };
+    return { trunk, big, small, low, branches };
 }
 
 /**
@@ -271,9 +328,17 @@ function buildTree(THREE, rng) {
  * thinner than the line itself. Bowl and trunk are the two shapes that define
  * the silhouette against sky and terrain, so they are the two that get ink.
  */
-function buildOutlineProxy(THREE, wall) {
-    const proxyWall = wall.clone();
-    const trunk = new THREE.CylinderGeometry(0.95, 1.85, CANOPY_HEIGHT + 2.4, 6, 1, true);
+function buildOutlineProxy(THREE) {
+    // A cheaper wall than the real one: one height ring instead of two. The
+    // silhouette of a 1.3-unit-tall bowl does not change measurably, and the
+    // hull is a second full draw of whatever it is given, so half of it is
+    // half the ink budget.
+    const proxyWall = new THREE.CylinderGeometry(
+        BOWL_RADIUS, BOWL_RADIUS * 0.74, 1.30, 12, 1, true
+    );
+    proxyWall.translate(0, 0.42, 0);
+    rippleWall(proxyWall, 12, true);
+    const trunk = new THREE.CylinderGeometry(0.62, 1.28, CANOPY_HEIGHT + 2.4, 6, 1, true);
     trunk.translate(0, -(CANOPY_HEIGHT + 2.4) * 0.5 - 0.35, 0);
     const parts = [
         { geo: proxyWall, color: { r: 1, g: 1, b: 1 } },
@@ -287,14 +352,20 @@ function buildOutlineProxy(THREE, wall) {
 
 /** Build the one merged nest geometry shared by every instance. */
 function buildNestGeometry(THREE, rng) {
-    const { wall, floor } = buildBowl(THREE);
+    const { wall, inner } = buildBowl(THREE);
     const twigs = buildTwigs(THREE, rng);
     const tree = buildTree(THREE, rng);
 
     const cTrunk = new THREE.Color(PALETTE.trunk);
-    const cStraw = new THREE.Color(PALETTE.canyonLit);
-    const cStrawDeep = new THREE.Color(PALETTE.canyonMid);
-    const cShade = new THREE.Color(PALETTE.canyonDeep);
+    // Straw, mixed from the palette rather than inlined as a new hex. Raw
+    // canyonLit came back from the first capture reading as traffic-cone orange
+    // against the meadow — a marker, not a material. Creaming it down keeps it
+    // warm and readable without shouting.
+    const cStraw = new THREE.Color(PALETTE.canyonLit).lerp(new THREE.Color(PALETTE.uiCream), 0.18);
+    const cStrawDeep = new THREE.Color(PALETTE.canyonMid).lerp(new THREE.Color(PALETTE.canyonDeep), 0.62);
+    // The bowl interior. Deep enough to read as shadow under a toon ramp that
+    // otherwise lifts an up-facing disc straight into the lit band.
+    const cShade = new THREE.Color(PALETTE.canyonDeep).lerp(new THREE.Color(PALETTE.ink), 0.32);
     const cFoliage = new THREE.Color(PALETTE.foliageMid);
     const cFoliageDeep = new THREE.Color(PALETTE.foliageDeep);
     const cFoliageLit = new THREE.Color(PALETTE.foliageLit);
@@ -303,13 +374,14 @@ function buildNestGeometry(THREE, rng) {
         { geo: tree.trunk, color: cTrunk },      // 0
         { geo: tree.big, color: cFoliage },      // 1
         { geo: tree.small, color: cFoliage },    // 2
+        { geo: tree.low, color: cFoliage },      // 3
     ];
     for (let i = 0; i < tree.branches.length; i++) {
         parts.push({ geo: tree.branches[i], color: cTrunk });
     }
     const wallIndex = parts.length;
     parts.push({ geo: wall, color: cStraw });
-    parts.push({ geo: floor, color: cShade });
+    parts.push({ geo: inner, color: cShade });
     for (let i = 0; i < twigs.length; i++) {
         parts.push({ geo: twigs[i], color: i % 2 ? cStrawDeep : cStraw });
     }
@@ -319,32 +391,44 @@ function buildNestGeometry(THREE, rng) {
 
     // Canopy: lit tops, deep undersides.
     paintRangeByHeight(THREE, geo, ranges[1], -5.4, -0.4, cFoliageDeep, cFoliageLit);
-    paintRangeByHeight(THREE, geo, ranges[2], -6.2, -1.6, cFoliageDeep, cFoliage);
+    paintRangeByHeight(THREE, geo, ranges[2], -6.8, -2.2, cFoliageDeep, cFoliage);
+    paintRangeByHeight(THREE, geo, ranges[3], -7.8, -3.6, cFoliageDeep, cFoliage);
     // Trunk: darken toward the roots so it does not read as a flat pole.
     paintRangeByHeight(THREE, geo, ranges[0], -(CANOPY_HEIGHT + 2), -2.0,
         cShade, cTrunk);
 
-    // Bowl wall: alternate the straw tone per weave column. mergeParts painted
-    // it one flat colour; this is what makes it read as woven strands rather
-    // than a moulded pot.
+    // Bowl wall: alternate the straw tone per weave column — PER TRIANGLE, not
+    // per vertex.
+    //
+    // Per-vertex was the obvious way and it produced nothing. Vertex colours
+    // interpolate across the face, and the toon ramp quantises the LIGHTING,
+    // not the base colour, so a light strand blended into a dark one over the
+    // width of a facet and the fourth captured frame came back with a smooth
+    // wooden salad bowl. The geometry is non-indexed after the merge, so every
+    // triangle owns its three vertices and can be painted flat — which is what
+    // gives the hard-edged basketry stripe the cel look needs.
     {
         const pos = geo.getAttribute('position');
         const col = geo.getAttribute('color');
         const r = ranges[wallIndex];
-        for (let i = r.start; i < r.start + r.count; i++) {
-            const a = Math.atan2(pos.getZ(i), pos.getX(i));
-            const strand = Math.cos(a * 12) > 0 ? 1 : 0;
-            const c = strand ? cStraw : cStrawDeep;
-            col.setXYZ(i, c.r, c.g, c.b);
+        for (let t = r.start; t < r.start + r.count; t += 3) {
+            let ax = 0, az = 0;
+            for (let v = 0; v < 3; v++) { ax += pos.getX(t + v); az += pos.getZ(t + v); }
+            const a = Math.atan2(az, ax);
+            // 6 light + 6 dark columns around a 12-segment wall, offset a half
+            // step so the stripe lands on the facet rather than on its edge.
+            const c = Math.cos(a * 6 + 0.26) > 0 ? cStraw : cStrawDeep;
+            for (let v = 0; v < 3; v++) col.setXYZ(t + v, c.r, c.g, c.b);
         }
         col.needsUpdate = true;
     }
 
     wall.dispose();
-    floor.dispose();
+    inner.dispose();
     tree.trunk.dispose();
     tree.big.dispose();
     tree.small.dispose();
+    tree.low.dispose();
     for (let i = 0; i < tree.branches.length; i++) tree.branches[i].dispose();
     for (let i = 0; i < twigs.length; i++) twigs[i].dispose();
 
@@ -432,23 +516,20 @@ export function createNests(THREE, opts = {}) {
 
     // --- geometry + materials --------------------------------------------
     const geometry = buildNestGeometry(THREE, rng);
-    const proxySrc = buildBowl(THREE);           // fresh copy for the proxy
-    const outlineGeometry = buildOutlineProxy(THREE, proxySrc.wall);
-    proxySrc.wall.dispose();
-    proxySrc.floor.dispose();
+    const outlineGeometry = buildOutlineProxy(THREE);
     ensureSmoothNormals(THREE, outlineGeometry);
 
     const material = createToonMaterial(THREE, {
         ramp: 'hero',
         vertexColors: true,
         flatShading: true,
-        // DoubleSide, deliberately. Every part here is an open shell (tapered
-        // tubes for trunk, branches and twigs; a rimless bowl wall) because
-        // caps are triangles nobody sees from outside. But you DO look into the
-        // bowl when you land in it, and a single-sided bowl shows you the ink
-        // hull's far wall through the opening — a black hole where the straw
-        // should be. Two-sided costs no draw calls and no triangles, only fill.
-        side: THREE.DoubleSide,
+        // FrontSide. Every part is an open shell (tapered tubes for trunk,
+        // branches and twigs; a rimless bowl wall) because caps are triangles
+        // nobody sees — a convex tube's near half already covers its own
+        // silhouette, so it reads solid with the far half culled. The bowl's
+        // interior is a separate inward-facing cone rather than a two-sided
+        // wall, because three flips backface normals and the cup's inside came
+        // back lit cream instead of shadowed.
         // A nest is warm straw against green canopy; the default rim would put
         // a cold halo on every twig. Warm and restrained instead.
         rimColor: PALETTE.uiCream,

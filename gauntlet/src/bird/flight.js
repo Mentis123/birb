@@ -73,7 +73,7 @@ export const FLIGHT_CONFIG = {
     cruiseSpeed: 27,        // what drag pulls you back toward
     minSpeed: 15,           // stall floor: a hard climb can never park you
     maxSpeed: 46,           // ceiling without boost
-    boostMaxSpeed: 61,      // HARD ceiling while boosting
+    boostMaxSpeed: 54,      // HARD ceiling during a boost pulse
 
     // --- energy trade ------------------------------------------------------
     // dv/dt = -sinPitch * (dive|climb)Energy. sinPitch is forward-dot-radial-up, so
@@ -112,12 +112,22 @@ export const FLIGHT_CONFIG = {
     ceilingSoftness: 9,     // world units over which the climb rate fades out
 
     // --- boost -------------------------------------------------------------
-    boostAccel: 76,         // u/s^2 toward boostMaxSpeed while boosting
-    boostDrain: 0.55,       // meter units per second while boosting
-    boostDiveCharge: 0.30,  // meter per second at a full-angle dive
-    boostGateCharge: 0.22,  // added by course code on a clean gate line
-    boostMinToStart: 0.15,  // can't tap a nearly-empty meter
-    boostCooldown: 1.1,     // seconds after a burst empties
+    // BOOST IS TAP-TO-PULSE, NOT HOLD-TO-BURN.
+    //
+    // It used to drain continuously while held, so a full meter bought about
+    // two unbroken seconds pinned at the ceiling and the bird outran the
+    // player. The old model even punished tapping on purpose ("tap-tap-tap is
+    // never better than one committed burst") — precisely backwards. Each tap
+    // now spends a quarter of the meter for one short shove, so a full meter
+    // is FOUR discrete surges you place deliberately, and the meter visibly
+    // steps down as you spend it.
+    boostAccel: 55,          // u/s^2 toward boostMaxSpeed during a pulse
+    boostTapCost: 0.25,      // meter per tap -> exactly four taps from full
+    boostPulseDuration: 0.5, // seconds of surge per tap
+    boostTapCooldown: 0.22,  // re-arm gap, so one press cannot double-fire
+    boostKnockLockout: 1.1,  // boost is dead this long after a knockdown
+    boostDiveCharge: 0.30,   // meter per second at a full-angle dive
+    boostGateCharge: 0.22,   // added by course code on a clean gate line
 
     // --- knockdown ---------------------------------------------------------
     knockFallSpeed: 13,     // base radial fall, ramped by fallRampMultiplier
@@ -199,7 +209,9 @@ export function turnRateScale(speed01, cfg = FLIGHT_CONFIG) {
 
 /** A fresh, plain boost-meter state. Allocated once by the caller, never per frame. */
 export function createBoostState() {
-    return { meter: 0, boosting: false, cooldown: 0 };
+    // `held` is the edge detector: boost fires on the PRESS, so holding the
+    // button down does nothing after the first frame.
+    return { meter: 0, boosting: false, cooldown: 0, pulse: 0, held: false };
 }
 
 /**
@@ -217,26 +229,41 @@ export function createBoostState() {
  * @param {object} cfg
  * @returns {boolean} whether a NEW burst started this step (for audio/FX)
  */
+/**
+ * Advance the boost meter. Returns true on the frame a new pulse fires.
+ *
+ * Fires on the RISING EDGE of `wantBoost`: one press buys one pulse, and a
+ * held button is worth exactly the same as a tap. The whole speed gain is
+ * therefore something the player doles out in four measured shoves rather
+ * than a throttle they can pin open.
+ */
 export function stepBoostState(st, wantBoost, sinPitch, dt, cfg = FLIGHT_CONFIG) {
-    let started = false;
     if (st.cooldown > 0) st.cooldown = Math.max(0, st.cooldown - dt);
 
-    if (st.boosting) {
-        st.meter -= cfg.boostDrain * dt;
-        if (st.meter <= 0 || !wantBoost) {
-            // Releasing early keeps what is left but still pays the cooldown,
-            // so tap-tap-tap is never better than one committed burst.
-            st.meter = Math.max(0, st.meter);
-            st.boosting = false;
-            st.cooldown = cfg.boostCooldown;
-        }
-    } else {
-        if (sinPitch < 0) st.meter += -sinPitch * cfg.boostDiveCharge * dt;
+    // Diving banks meter — but not mid-pulse, or a dive-and-boost would refill
+    // itself faster than it spends and the meter would never come down.
+    if (st.pulse <= 0 && sinPitch < 0) {
+        st.meter += -sinPitch * cfg.boostDiveCharge * dt;
         if (st.meter > 1) st.meter = 1;
-        if (wantBoost && st.cooldown <= 0 && st.meter >= cfg.boostMinToStart) {
-            st.boosting = true;
-            started = true;
-        }
+    }
+
+    const pressed = Boolean(wantBoost);
+    const rising = pressed && !st.held;
+    st.held = pressed;
+
+    let started = false;
+    if (rising && st.cooldown <= 0 && st.meter >= cfg.boostTapCost) {
+        st.meter = Math.max(0, st.meter - cfg.boostTapCost);
+        st.pulse = cfg.boostPulseDuration;
+        st.cooldown = cfg.boostTapCooldown;
+        started = true;
+    }
+
+    if (st.pulse > 0) {
+        st.pulse = Math.max(0, st.pulse - dt);
+        st.boosting = st.pulse > 0;
+    } else {
+        st.boosting = false;
     }
     return started;
 }
@@ -409,7 +436,8 @@ export class GauntletFlight {
         this._fallTimer = 0;
         this._tumbleTimer = 0;
         this.boost.boosting = false;
-        this.boost.cooldown = this.cfg.boostCooldown;
+        this.boost.pulse = 0;
+        this.boost.cooldown = this.cfg.boostKnockLockout;
         this.isBoosting = false;
     }
 

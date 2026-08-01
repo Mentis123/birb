@@ -118,8 +118,8 @@ export const AIM_RIG_DEFAULTS = {
 export const AIM_RIG_VISUAL = {
     flexC0: 8.0,          // spring stiffness   (TURRET_RESEARCH.md)
     flexC1: 6.0,          // damping, > 2*sqrt(C0) so it converges without ring
-    flexGain: 0.0092,     // rad of lean per rad/s of mount velocity (~2.9 deg peak)
-    flexMax: 0.06,
+    flexGain: 0.020,      // rad of lean per rad/s of mount velocity
+    flexMax: 0.075,       // hard cap, ~4.3 deg — beyond this it reads as broken
 
     kickC0: 150,          // fire kick: elevation punch, springs back
     kickC1: 15,           // zeta ~0.61 -> one visible settle, then still
@@ -349,14 +349,24 @@ export function createAimRig(THREE, opts = {}) {
             { geo: new THREE.CylinderGeometry(0.3, 0.3, 0.24, seg), matrix: xform(THREE, 1.03, TRUNNION, 0, 0, 0, Math.PI / 2) },
             // Traverse handle sweeping back from the turntable.
             { geo: new THREE.CylinderGeometry(0.1, 0.1, 1.15, 6), matrix: xform(THREE, 0.62, 0.95, 0.86, -0.5, 0, -0.35) },
+            // Splinter shield. Sits BELOW the trunnion so the barrel clears it —
+            // no intersecting geometry, and it gives the mount a broad, readable
+            // silhouette from the front instead of a bare post.
+            { geo: new THREE.BoxGeometry(2.1, 0.98, 0.16), matrix: xform(THREE, 0, 0.74, -1.3, 0.22, 0, 0) },
+            { geo: new THREE.BoxGeometry(0.52, 0.72, 0.15), matrix: xform(THREE, -1.2, 0.68, -1.18, 0.22, 0.55, 0) },
+            { geo: new THREE.BoxGeometry(0.52, 0.72, 0.15), matrix: xform(THREE, 1.2, 0.68, -1.18, 0.22, -0.55, 0) },
         ]);
 
-        // --- barrel assembly: cradle, tube, breech, counterweight ------------
+        // --- barrel assembly: cradle, tube, recoil rams, breech, counterweight
+        // The two rams flanking the tube are what make it read as ARTILLERY at a
+        // glance. A bare cylinder on a pivot reads as a telescope.
         const barrelGeo = mergeParts(THREE, [
-            { geo: new THREE.BoxGeometry(0.92, 0.56, 1.5), matrix: xform(THREE, 0, 0, 0.2) },
-            { geo: new THREE.CylinderGeometry(0.31, 0.37, 4.5, seg), matrix: xform(THREE, 0, 0, -2.35, -Math.PI / 2, 0, 0) },
-            { geo: new THREE.CylinderGeometry(0.46, 0.46, 0.42, seg), matrix: xform(THREE, 0, 0, -0.32, -Math.PI / 2, 0, 0) },
-            { geo: new THREE.CylinderGeometry(0.5, 0.42, 0.8, seg), matrix: xform(THREE, 0, 0, 1.24, -Math.PI / 2, 0, 0) },
+            { geo: new THREE.BoxGeometry(1.04, 0.62, 1.62), matrix: xform(THREE, 0, 0, 0.22) },
+            { geo: new THREE.CylinderGeometry(0.34, 0.4, 4.3, seg), matrix: xform(THREE, 0, 0, -2.3, -Math.PI / 2, 0, 0) },
+            { geo: new THREE.CylinderGeometry(0.17, 0.17, 2.3, 6), matrix: xform(THREE, -0.48, 0.1, -1.5, -Math.PI / 2, 0, 0) },
+            { geo: new THREE.CylinderGeometry(0.17, 0.17, 2.3, 6), matrix: xform(THREE, 0.48, 0.1, -1.5, -Math.PI / 2, 0, 0) },
+            { geo: new THREE.CylinderGeometry(0.5, 0.5, 0.46, seg), matrix: xform(THREE, 0, 0, -0.3, -Math.PI / 2, 0, 0) },
+            { geo: new THREE.CylinderGeometry(0.58, 0.46, 0.95, seg), matrix: xform(THREE, 0, 0, 1.3, -Math.PI / 2, 0, 0) },
         ]);
 
         // --- brass: muzzle brake, breech ring, sight blade -------------------
@@ -396,12 +406,17 @@ export function createAimRig(THREE, opts = {}) {
         }
 
         // --- muzzle flash ----------------------------------------------------
-        const flashGeo = starGeometry(THREE, 1.55, 0.5, 5);
+        // Warm, wide and short-lived. A cool white star reads as a sparkle;
+        // muzzle blast is gold, and it is gone before you can look at it.
+        const flashGeo = starGeometry(THREE, 1.05, 0.62, 8);
         const flashMat = new THREE.MeshBasicMaterial({
-            color: PALETTE.skyGlow,
+            color: PALETTE.sunHalo,
             transparent: true,
-            opacity: 0.95,
-            blending: THREE.AdditiveBlending,
+            opacity: 0.8,
+            // NOT additive. Gold added to a bright sky is white, and a white
+            // star reads as a sparkle, not as burning propellant. Straight
+            // alpha keeps the blast gold against the sky it will live in.
+            blending: THREE.NormalBlending,
             depthWrite: false,
             fog: false,
         });
@@ -762,7 +777,7 @@ export function createAimRig(THREE, opts = {}) {
             const k = Math.max(0, _flashTimer / V.muzzleFlashTime);
             flash.rotation.z += 2.7;
             flash.scale.setScalar(0.55 + k * 0.75);
-            flash.material.opacity = 0.95 * k;
+            flash.material.opacity = 0.8 * k;
         }
 
         if (driveCamera) {
@@ -787,7 +802,7 @@ export function createAimRig(THREE, opts = {}) {
         if (flash) {
             _flashTimer = V.muzzleFlashTime;
             flash.visible = true;
-            flash.material.opacity = 0.95;
+            flash.material.opacity = 0.8;
         }
         return api;
     }
