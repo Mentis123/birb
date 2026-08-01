@@ -134,8 +134,13 @@ function styleText() {
          flex-direction: column; align-items: flex-start; }
 .vh-tr { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
          flex-direction: column; align-items: flex-end; }
-.vh-bl { bottom: calc(18px + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); }
-.vh-br { bottom: calc(18px + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right));
+/* --vh-bottom is set by the integrator. The touch controls own the bottom
+   corners of a phone screen — that is where thumbs rest — so on a build with
+   an on-screen stick the HUD's bottom clusters have to lift clear of them or
+   the minimap and the joystick base occupy the same pixels. Both modules are
+   correct in isolation; only integration can see the collision. */
+.vh-bl { bottom: calc(var(--vh-bottom, 18px) + env(safe-area-inset-bottom)); left: calc(12px + env(safe-area-inset-left)); }
+.vh-br { bottom: calc(var(--vh-bottom, 18px) + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right));
          flex-direction: column; align-items: flex-end; }
 
 .vh-pos .vh-val { color: var(--ink); }
@@ -417,6 +422,10 @@ export function createHUD(rootEl, options = {}) {
     }
 
     rootEl.classList.add('vyom-hud');
+    // Lift the bottom clusters clear of on-screen controls. See --vh-bottom.
+    if (Number.isFinite(options.bottomInset)) {
+        rootEl.style.setProperty('--vh-bottom', options.bottomInset + 'px');
+    }
 
     function el(tag, cls, parent, html) {
         const node = doc.createElement(tag);

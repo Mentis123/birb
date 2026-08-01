@@ -207,11 +207,26 @@ export function setRimColor(material, hex) {
  * buys back the whole shadow pass on mobile.
  */
 export function createLightRig(THREE, scene) {
-    const key = new THREE.DirectionalLight(0xfff4d6, 2.15);
+    const key = new THREE.DirectionalLight(0xfff4d6, 2.6);
     key.position.set(KEY_LIGHT_DIR.x, KEY_LIGHT_DIR.y, KEY_LIGHT_DIR.z).normalize().multiplyScalar(600);
     scene.add(key);
 
-    const fill = new THREE.HemisphereLight(PALETTE.skyMid, PALETTE.meadowDeep, 0.85);
+    // AmbientLight, NOT HemisphereLight, and this is the whole ballgame for the
+    // cel look.
+    //
+    // MeshToonMaterial quantises only the DIRECT term — it runs N·L through the
+    // NearestFilter ramp. Indirect light is added afterwards, unquantised. A
+    // HemisphereLight's contribution varies smoothly with the surface normal,
+    // so it paints a soft vertical gradient straight over the top of the hard
+    // bands: the ramp is still working, you just cannot see it any more. That
+    // is exactly what made the bird read as smooth-shaded in the first
+    // captured frames while the hard specular shape proved the material was
+    // applied correctly.
+    //
+    // AmbientLight is constant regardless of normal, so it lifts the shadow
+    // band without smearing the terminator. Keep it low: every unit of ambient
+    // compresses the ramp's contrast.
+    const fill = new THREE.AmbientLight(PALETTE.skyMid, 0.55);
     scene.add(fill);
 
     return { key, fill };

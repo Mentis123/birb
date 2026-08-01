@@ -271,6 +271,36 @@
   .howto-card li { margin-bottom: 0.35rem; }
   .howto-card b { color: var(--cyan); }
 
+  .set-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 0;
+    font-size: 1rem;
+  }
+  .set-toggle {
+    width: 3.4rem;
+    height: 1.9rem;
+    border-radius: 999px;
+    border: 2px solid var(--ink);
+    background: #2b3b56;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .set-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 1.35rem; height: 1.35rem;
+    border-radius: 50%;
+    background: var(--cream);
+    transition: transform 0.15s ease;
+  }
+  .set-toggle[aria-pressed="true"] { background: var(--gold); }
+  .set-toggle[aria-pressed="true"]::after { transform: translateX(1.5rem); }
+
   /* Loading state on the Tap to Start button, for slow networks */
   .loading-note {
     min-height: 1.2rem;
@@ -350,6 +380,17 @@
   </div>
 </div>
 
+<!-- Settings -->
+<div class="screen" data-screen="settings" hidden>
+  <div class="howto-card">
+    <h2>Sound</h2>
+    <div class="set-row"><span>Music</span><button type="button" class="set-toggle" data-set="music"></button></div>
+    <div class="set-row"><span>Sound Effects</span><button type="button" class="set-toggle" data-set="sfx"></button></div>
+    <div class="set-row" data-haptics-row hidden><span>Haptics</span><button type="button" class="set-toggle" data-set="haptics"></button></div>
+  </div>
+  <div class="tap-pill">Tap anywhere to close</div>
+</div>
+
 <!-- How to play overlay -->
 <div class="screen" data-screen="howto" hidden>
   <div class="howto-card">
@@ -426,6 +467,52 @@ screens.howto.addEventListener('click', () => showScreen('title'));
 document.querySelectorAll('[data-howto-open]').forEach((b) =>
     b.addEventListener('click', (e) => { e.stopPropagation(); showScreen('howto'); }));
 
+// ---------------------------------------------------------------------------
+// Settings. Persisted before the audio engine exists (it is only built on Tap
+// to Start), so the panel writes to localStorage and boot() reads it back.
+// ---------------------------------------------------------------------------
+const SETTINGS_KEY = 'vyom.settings.v1';
+const settings = (() => {
+    const fallback = { music: true, sfx: true, haptics: true };
+    try {
+        const raw = localStorage.getItem(SETTINGS_KEY);
+        return raw ? Object.assign(fallback, JSON.parse(raw)) : fallback;
+    } catch { return fallback; }
+})();
+
+function saveSettings() {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ }
+}
+
+function paintSettings() {
+    document.querySelectorAll('[data-set]').forEach((btn) => {
+        btn.setAttribute('aria-pressed', String(Boolean(settings[btn.dataset.set])));
+    });
+}
+
+// Haptics only exist on hardware that can actually buzz; hiding the row beats
+// offering a switch that does nothing.
+if (matchMedia('(pointer: coarse)').matches) {
+    const row = document.querySelector('[data-haptics-row]');
+    if (row) row.hidden = false;
+}
+paintSettings();
+
+document.querySelector('[data-settings-open]').addEventListener('click', (e) => {
+    e.stopPropagation();
+    paintSettings();
+    showScreen('settings');
+});
+screens.settings.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-set]');
+    if (!btn) { showScreen('title'); return; }
+    const key = btn.dataset.set;
+    settings[key] = !settings[key];
+    saveSettings();
+    paintSettings();
+    if (game && game.audio) game.audio.setEnabled(settings.music, settings.sfx);
+});
+
 const loadingNote = document.querySelector('[data-loading-note]');
 let booting = false;
 document.querySelector('[data-start]').addEventListener('click', () => {
@@ -461,6 +548,10 @@ const DPR_CAP = { low: 1.2, mid: 1.4, high: 1.8 };
 // planet is 100 units in radius, so real units/sec would read as single
 // digits and feel slow no matter how fast the bird actually moves.
 const SPEED_TO_KMH = 4.2;
+
+// Shared by the player and the rivals. They must match, or the rivals fly as
+// giants next to you.
+const BIRD_SCALE = 2.0;
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -533,7 +624,7 @@ async function boot() {
     const bird = createBird(THREE, {
         bodyColor: PALETTE.birdPlayer,
         bellyColor: PALETTE.birdPlayerBelly,
-        scale: 1,
+        scale: BIRD_SCALE,
         quality,
         outline: true,
     });
@@ -558,19 +649,19 @@ async function boot() {
     chase.snapToTarget(flight.position, flight.quaternion);
 
     // --- rivals ------------------------------------------------------------
-    const rivalColors = [PALETTE.birdRival1, PALETTE.birdRival2, PALETTE.birdRival3];
+    // The AI module owns its racers completely: it picks the personality
+    // colours, parents each bird into its own group, drives their animators,
+    // files their gate crossings and feeds their spline position to race-logic.
+    // So index.html hands it the bird factory and otherwise stays out of the
+    // way — in particular it must NOT also call checkGates or updateRacerT for
+    // these racers, which would double-advance their progress.
     const ai = createAIRacers(THREE, {
         course, count: 3, quality, seed,
-        createBirdFn: (i) => {
-            const b = createBird(THREE, {
-                bodyColor: rivalColors[i % rivalColors.length],
-                bellyColor: PALETTE.birdPlayerBelly,
-                scale: 1, quality, outline: true,
-            });
-            scene.add(b.group);
-            return b;
-        },
+        birdScale: BIRD_SCALE,
+        firstRacerIndex: 1,
+        createBirdFn: createBird,
     });
+    scene.add(ai.group);
 
     // --- race state --------------------------------------------------------
     const race = raceLogic.createRaceState({
@@ -580,9 +671,13 @@ async function boot() {
     });
 
     // --- ui / audio / input -------------------------------------------------
-    const hud = createHUD(document.querySelector('[data-hud]'), { quality });
+    // The on-screen stick and boost pill own the bottom corners, so the HUD's
+    // minimap and speed cluster lift above them.
+    const hud = createHUD(document.querySelector('[data-hud]'), { quality, bottomInset: 132 });
     const audio = createAudio();
     audio.unlock();
+    audio.setEnabled(settings.music, settings.sfx);
+    if (audio.setHapticsEnabled) audio.setHapticsEnabled(settings.haptics);
     const input = createInput(document.querySelector('[data-input-layer]'), {
         onBoost: () => audio.boost(),
     });
@@ -689,20 +784,13 @@ async function boot() {
         // racer's sub-gate progress, which is what standings are sorted on. It
         // has to run every frame for EVERY racer or the order freezes between
         // gates and the position readout only moves 12 times a lap.
+        // Player only — ai.update() already does this for the rivals, and
+        // running it twice would double-advance their sub-gate progress and
+        // corrupt the wrong-way accumulator.
         if (phase !== 'countdown') {
             raceLogic.updateRacerT(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z));
-            for (let i = 0; i < ai.racers.length; i++) {
-                const p = ai.racers[i].group.position;
-                raceLogic.updateRacerT(race, i + 1, course.nearestT(p.x, p.y, p.z));
-            }
         }
-
-        if (phase === 'racing') {
-            checkGates(0, pose.position);
-            for (let i = 0; i < ai.racers.length; i++) {
-                checkGates(i + 1, ai.racers[i].group.position);
-            }
-        }
+        if (phase === 'racing') checkGates(0, pose.position);
         raceLogic.updateStandings(race);
 
         // --- fx ---------------------------------------------------------------
@@ -818,7 +906,32 @@ async function boot() {
     requestAnimationFrame(frame);
 
     // --- harness hooks ------------------------------------------------------
-    game = { THREE, renderer, scene, camera, flight, course, race, ai, hud, quality };
+    game = {
+        THREE, renderer, scene, camera, flight, course, race, ai, hud, audio, quality,
+        /**
+         * Drop the green light immediately. The screenshot harness runs on
+         * software GL at a few frames a second, and the loop clamps dt to 50ms
+         * so a stalled tab cannot teleport the bird — which together mean real
+         * time advances far faster than game time and a capture would never
+         * reach racing state on its own.
+         */
+        debugStartRace() {
+            countdown = 0;
+        },
+        /**
+         * Fly the player forward along the course for `seconds` of game time.
+         * Snaps the rig afterwards: this is a teleport as far as the camera is
+         * concerned, and letting it smooth across that distance leaves it
+         * somewhere in front of the bird looking back.
+         */
+        debugAdvance(seconds, input) {
+            const step = 1 / 60;
+            const held = input || ZERO_INPUT;
+            for (let t = 0; t < seconds; t += step) flight.tick(held, step);
+            chase.snapToTarget(flight.position, flight.quaternion);
+        },
+        get phase() { return phase; },
+    };
     window.__vyom = game;
     window.__VYOM_STATS = () => ({
         drawCalls: renderer.info.render.calls,
