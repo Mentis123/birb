@@ -32,9 +32,9 @@ const P = new URLSearchParams(location.search);
 // view=space -> whole planet, to check biome distribution only
 const view = P.get('view') || 'low';
 const quality = P.get('quality') || 'high';
-const th = parseFloat(P.get("th") ?? "5.890");
-const ph = parseFloat(P.get("ph") ?? "0.601");
-const alt = parseFloat(P.get("alt") ?? "11.0");
+const th = parseFloat(P.get("th") ?? "4.40");
+const ph = parseFloat(P.get("ph") ?? "0.35");
+const alt = parseFloat(P.get("alt") ?? "9.0");
 
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -44,7 +44,7 @@ renderer.setSize(innerWidth, innerHeight, false);
 const scene = new THREE.Scene();
 // Aerial perspective. Without it the far side of a 100-unit planet has the
 // same contrast as the foreground and the frame reads flat.
-scene.fog = new THREE.Fog(PALETTE.fog, 55, 210);
+scene.fog = new THREE.Fog(PALETTE.fog, 45, 200);
 
 const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.5, 3000);
 createLightRig(THREE, scene);
@@ -97,10 +97,13 @@ function placeCamera() {
   fwd.copy(up).cross(dir).normalize();
 
   camera.position.copy(dir).multiplyScalar(floorRadius(dir.x, dir.y, dir.z) + alt);
-  // Aim a little way along the surface: the horizon should sit in the upper
-  // third of the frame, which is what the chase camera actually renders.
-  ahead.copy(dir).addScaledVector(fwd, 0.42).normalize();
-  lookAt.copy(ahead).multiplyScalar(floorRadius(ahead.x, ahead.y, ahead.z) + 6);
+  // Aim along the surface so the horizon sits in the upper third. A tall
+  // portrait frame at the same pitch is over half empty sky, so aim lower as
+  // the aspect narrows — the same correction the chase camera will need.
+  const portrait = Math.min(1, Math.max(0, (1.0 - innerWidth / innerHeight) / 0.5));
+  const reach = 0.24 - 0.055 * portrait;
+  ahead.copy(dir).addScaledVector(fwd, reach).normalize();
+  lookAt.copy(ahead).multiplyScalar(floorRadius(ahead.x, ahead.y, ahead.z) + 1.5 - 1.2 * portrait);
   camera.up.copy(dir);
   camera.lookAt(lookAt);
 }
@@ -126,7 +129,7 @@ document.getElementById('hud').textContent =
   `view=${view} quality=${quality}\n` +
   `draws=${stats.drawCalls}  tris=${stats.triangles}\n` +
   `built: draws=${planet.drawCallCount} tris=${planet.triangleCount}\n` +
-  `R=${PLANET_RADIUS} alt=${alt}`;
+  `R=${PLANET_RADIUS} alt=${alt}\n` + JSON.stringify(planet.layerCounts);
 
 window.__VYOM_STATS = () => ({
   drawCalls: renderer.info.render.calls,

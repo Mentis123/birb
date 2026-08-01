@@ -44,7 +44,10 @@ camera.position.set(0, 118, 0);
   );
 }
 
-const sky = createSky(THREE, { quality: 'high', seed: 90210 });
+// ?q=low|mid|high — lets the harness prove every tier boots, including `low`
+// where the star Points are never created at all.
+const quality = new URLSearchParams(location.search).get('q') || 'high';
+const sky = createSky(THREE, { quality, seed: 90210 });
 scene.add(sky.group);
 
 function resize() {

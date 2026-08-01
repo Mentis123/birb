@@ -80,7 +80,11 @@ varying vec3  vDir;
 
 vec3 ramp( float h ) {
     vec3 c = mix( uHorizon, uMid, smoothstep( -0.05, 0.26, h ) );
-    return mix( c, uZenith, smoothstep( 0.20, 0.80, h ) );
+    // Reach full zenith blue EARLY (by h=0.55) so that the deepening below
+    // starts from a saturated blue. Overlapping the two transitions drags the
+    // midsky through a desaturated grey-mauve — the single ugliest thing a
+    // gradient sky can do.
+    return mix( c, uZenith, smoothstep( 0.16, 0.55, h ) );
 }
 
 void main() {
@@ -95,7 +99,7 @@ void main() {
     vec3 banded = ramp( floor( clamp( h, -0.2, 1.0 ) * steps ) / steps );
     // Bands are strongest low in the sky where painted skies actually band,
     // and fade out toward the zenith so the top stays a clean field.
-    col = mix( col, banded, 0.48 * ( 1.0 - smoothstep( 0.30, 0.72, h ) ) );
+    col = mix( col, banded, 0.38 * ( 1.0 - smoothstep( 0.22, 0.62, h ) ) );
 
     // Below the true horizon the dome keeps going (the planet does not fill it
     // when you look down past the limb), so sink it into a cooler underlight
@@ -115,14 +119,27 @@ void main() {
     // Darken by pulling red and green down far harder than blue — a flat
     // multiply desaturates into grey-mauve and the whole zenith goes muddy.
     vec3 deep = uZenith * vec3( 0.34, 0.52, 0.98 );
-    col = mix( col, deep, smoothstep( 0.40, 1.0, h ) * 0.88 );
+    col = mix( col, deep, smoothstep( 0.55, 1.0, h ) * 0.90 );
 
     // Golden-hour wash around the key light. Applied LAST, on top of the zenith
     // deepening — do it before and the deep-blue mix dilutes it back to grey,
     // which is what leaves a mauve smudge instead of a warm sun pocket.
+    // QUANTISED: three hard concentric plateaus of warm air around the sun,
+    // not a smooth bloom. This is the term that decides whether the sun reads
+    // as painted or as a lens flare, so it gets the same step() treatment as
+    // everything else in the cel pipeline.
+    // ADD warmth rather than mixing toward cream: over a deep blue zenith a
+    // mix-to-cream desaturates straight to grey, which put a dead grey disc
+    // the size of the frame around the sun. Adding keeps the hue.
     float sd = max( dot( d, uSunDir ), 0.0 );
-    col = mix( col, uGlow, pow( sd, 4.5 ) * 0.55 );
-    col += uSunTint * pow( sd, 34.0 ) * 0.42;
+    // Mix toward the SATURATED gold, not toward cream, and keep it tight. Warm
+    // light added on top of blue always desaturates toward lavender; replacing
+    // the blue with gold is what makes the pocket read as sunlit air.
+    float halo = smoothstep( 0.9885, 0.99965, sd );   // ~8.7 degrees of arc
+    halo = floor( halo * 2.0 + 0.001 ) / 2.0;
+    col = mix( col, uSunTint, halo * 0.42 );
+    col = mix( col, uGlow, pow( sd, 140.0 ) * 0.70 );
+    col += uSunTint * pow( sd, 420.0 ) * 0.35;
 
     gl_FragColor = vec4( col, 1.0 );
     #include <colorspace_fragment>
@@ -165,7 +182,9 @@ void main() {
     // part of the flare has edges.
     float g = 1.0 - smoothstep( 0.06, 0.86, r );
     g = floor( g * 3.0 ) / 3.0;
-    float a = g * 0.16;
+    // Kept low: the dome shader already supplies a warm, stepped air pocket.
+    // Doubling up put a soft grey-white ring around the gold.
+    float a = g * 0.07;
 
     // Hard concentric rings.
     a += ring( r, 0.300, 0.026 ) * 0.40;
@@ -186,10 +205,10 @@ void main() {
     a += ray8 * 0.62;
 
     float wedge16 = abs( sin( ang * 8.0 + spin + 0.19 ) );
-    float t16 = smoothstep( 0.20, 0.52, r );
-    float thr16 = 0.965 + t16 * 0.03;
-    float ray16 = smoothstep( thr16, thr16 + 0.004, wedge16 )
-                * ( 1.0 - smoothstep( 0.50, 0.515, r ) ) * smoothstep( 0.205, 0.215, r );
+    float t16 = smoothstep( 0.21, 0.40, r );
+    float thr16 = 0.900 + t16 * 0.085;
+    float ray16 = smoothstep( thr16, thr16 + 0.006, wedge16 )
+                * ( 1.0 - smoothstep( 0.385, 0.40, r ) ) * smoothstep( 0.215, 0.228, r );
     a += ray16 * 0.44;
 
     a = clamp( a, 0.0, 1.0 );
@@ -256,14 +275,17 @@ function buildCloudGeometry(THREE, segs) {
     const col = [];
 
     const warm = new THREE.Color(PALETTE.skyGlow);
-    const shade = new THREE.Color(PALETTE.cloudShade);
+    // The underside needs to sit a clear step below the lit body or the edge
+    // reads as a sticker outline instead of shadow — pull it toward the sky's
+    // own mid blue rather than inventing a colour.
+    const shade = new THREE.Color(PALETTE.cloudShade).lerp(new THREE.Color(PALETTE.skyMid), 0.30);
     const lit = new THREE.Color(PALETTE.cloudLit);
 
     // Draw order inside the buffer IS the layer order (depthTest is off), so:
     // warm rim first (peeks out along the top), cool shade second (peeks out
     // along the bottom and sides), lit body last on top of both.
     pushCloudLayer(pos, col, segs, 0, 0.055, 1.0, warm.r, warm.g, warm.b);
-    pushCloudLayer(pos, col, segs, 0, -0.075, 1.02, shade.r, shade.g, shade.b);
+    pushCloudLayer(pos, col, segs, 0, -0.095, 1.028, shade.r, shade.g, shade.b);
     pushCloudLayer(pos, col, segs, 0, 0, 1.0, lit.r, lit.g, lit.b);
 
     const geo = new THREE.BufferGeometry();
@@ -434,7 +456,7 @@ export function createSky(THREE, opts = {}) {
         const sBase = new Float32Array(n);
         for (let i = 0; i < n; i++) {
             // Upper sky only — stars in the warm horizon band look like dirt.
-            const y = rngRange(rng, 0.16, 0.99);
+            const y = rngRange(rng, 0.45, 0.995);
             const r = Math.sqrt(Math.max(0, 1 - y * y));
             const a = rngRange(rng, 0, Math.PI * 2);
             sPos[i * 3] = Math.cos(a) * r * R_STARS;
@@ -444,9 +466,12 @@ export function createSky(THREE, opts = {}) {
             sSize[i] = rngRange(rng, 2.2, 6.2);
             // Fade in toward the zenith; kill anything close to the sun.
             const dot = (sPos[i * 3] * sunDir.x + sPos[i * 3 + 1] * sunDir.y + sPos[i * 3 + 2] * sunDir.z) / R_STARS;
-            const zen = Math.min(1, Math.max(0, (y - 0.30) / 0.45));
-            const away = Math.min(1, Math.max(0, (0.86 - dot) / 0.35));
-            sBase[i] = zen * zen * away * rngRange(rng, 0.72, 1.0);
+            // `away` only has to clear the sun's own glow pocket (~16 degrees).
+            // A wide gate silently deletes every star in the half of the sky
+            // the camera is actually pointed at.
+            const zen = Math.min(1, Math.max(0, (y - 0.44) / 0.34));
+            const away = Math.min(1, Math.max(0, (0.962 - dot) / 0.055));
+            sBase[i] = Math.pow(zen, 1.5) * away * rngRange(rng, 0.80, 1.0);
         }
         const starGeo = new THREE.BufferGeometry();
         starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
@@ -458,11 +483,18 @@ export function createSky(THREE, opts = {}) {
             fragmentShader: STAR_FRAG,
             uniforms: {
                 uTime: { value: 0 },
-                uScale: { value: 3.2 },
+                uScale: { value: 6.0 },
                 uTint: { value: new THREE.Color(PALETTE.starTint) },
             },
             transparent: true,
-            blending: THREE.AdditiveBlending,
+            // NOT AdditiveBlending. Three's additive preset is (SrcAlpha, One),
+            // which multiplies an already premultiplied colour by alpha a
+            // SECOND time — a star at alpha 0.3 contributes 0.09 and vanishes.
+            // (One, One) with premultiplied output is linear in alpha.
+            blending: THREE.CustomBlending,
+            blendSrc: THREE.OneFactor,
+            blendDst: THREE.OneFactor,
+            blendEquation: THREE.AddEquation,
             depthWrite: false,
             depthTest: false,
             fog: false,
@@ -538,13 +570,16 @@ export function createSky(THREE, opts = {}) {
     const drift = new Float32Array(cloudCount);
     const shape = new Float32Array(cloudCount * 2);
     for (let i = 0; i < cloudCount; i++) {
-        // Concentrated into the band the player actually looks at. A uniform
-        // sphere distribution puts ~90% of a 34-cloud budget outside any given
-        // view and the sky reads as empty; a -6 to +48 degree band puts a
-        // useful handful in frame at all times. Overhead clouds would be
-        // edge-on cards anyway.
-        const elev = Math.sin(rngRange(rng, -0.11, 0.84));
-        const az = rngRange(rng, 0, Math.PI * 2);
+        // STRATIFIED, not random. Two reasons. (1) The budget is 34 cards for
+        // a whole sphere; scattered at random they clump and leave holes the
+        // size of the viewport, which is what makes a sky read as empty.
+        // (2) They are concentrated into the -6 to +52 degree band the player
+        // actually looks at — overhead cards are edge-on slivers anyway.
+        // Elevation walks the band in even steps while azimuth advances by the
+        // golden angle, so any view gets its fair share.
+        const u = (i + 0.5) / cloudCount;
+        const elev = Math.sin(-0.11 + (0.92 + 0.11) * u + rngRange(rng, -0.05, 0.05));
+        const az = (i * 2.399963) % (Math.PI * 2) + rngRange(rng, -0.28, 0.28);
         const horiz = Math.sqrt(Math.max(0, 1 - elev * elev));
         const dist = rngRange(rng, CLOUD_NEAR, CLOUD_FAR);
         tmpDir.set(Math.cos(az) * horiz, elev, Math.sin(az) * horiz);
@@ -559,8 +594,8 @@ export function createSky(THREE, opts = {}) {
         // size read as wildly different and the far band swallows the frame.
         // A cloud's half-width lands between ~3.5 and ~11 degrees of arc.
         const flat = Math.min(1, Math.max(0, 1 - elev * 2.2));
-        const ang = rngRange(rng, 0.075, 0.185) * (0.78 + 0.40 * flat);
-        const sx = dist * ang * rngRange(rng, 1.0, 1.35 + flat * 0.9);
+        const ang = rngRange(rng, 0.075, 0.185) * (0.90 - 0.22 * flat);
+        const sx = dist * ang * rngRange(rng, 1.0, 1.35 + flat * 0.45);
         const sy = dist * ang * rngRange(rng, 0.40, 0.66) * (1 - flat * 0.22);
         orient.scale.set(sx, sy, 1);
         orient.rotateZ(rngRange(rng, -0.08, 0.08));
@@ -582,8 +617,8 @@ export function createSky(THREE, opts = {}) {
         clouds.setColorAt(i, tmpColor);
 
         drift[i] = rngRange(rng, 0.0045, 0.0165) * (rng() < 0.5 ? -1 : 1);
-        shape[i * 2] = rngRange(rng, -0.22, 0.22);
-        shape[i * 2 + 1] = rngRange(rng, -0.30, 0.34);
+        shape[i * 2] = rngRange(rng, -0.15, 0.15);
+        shape[i * 2 + 1] = rngRange(rng, -0.34, 0.42);
     }
     clouds.instanceMatrix.needsUpdate = true;
     if (clouds.instanceColor) clouds.instanceColor.needsUpdate = true;

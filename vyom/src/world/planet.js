@@ -63,17 +63,17 @@ import { makeRng, rngRange, fibonacciDirection } from '../core/rng.js';
  * 48/72/110". Those cannot be Three's icosahedron `detail` parameter — that
  * yields 20*detail^2 triangles, i.e. 242,000 at 110, five times the WHOLE
  * frame budget. They are read here as a subdivision index scaled to the actual
- * triangle budget (roughly detail = subdivision / 4), which keeps the terrain
- * mesh at ~15.7k triangles at `high` and leaves ~28k for the props that
- * actually make the world feel inhabited. Edge length at detail 28 is ~4 world
- * units, and the finest terrain detail octave has a ~54-unit wavelength, so the
- * mesh is comfortably oversampled relative to the height field — spending more
- * triangles here would buy literally nothing visible.
+ * triangle budget, which keeps the terrain mesh at ~11.5k triangles at `high`
+ * and leaves ~32k for the props that actually make the world feel inhabited.
+ * Edge length at detail 24 is ~4.6 world units and the finest terrain detail
+ * octave has a ~54-unit wavelength, so the mesh is already oversampled relative
+ * to the height field — every triangle moved from the sphere into the prop
+ * layers is a triangle you can actually see.
  */
 const TIER = {
-    low: { detail: 16, props: 0.40 },
-    mid: { detail: 21, props: 0.65 },
-    high: { detail: 26, props: 1.00 },
+    low: { detail: 14, props: 0.40 },
+    mid: { detail: 18, props: 0.65 },
+    high: { detail: 22, props: 1.00 },
 };
 
 // ---------------------------------------------------------------------------
@@ -94,8 +94,12 @@ function smoothstep(edge0, edge1, x) {
  */
 function biomeWeights(nx, ny, nz, out) {
     const n = biomeNoise(nx, ny, nz);
-    const meadow = 1 - smoothstep(0.33, 0.51, n);
-    const alpine = smoothstep(0.58, 0.77, n);
+    // Narrow-ish overlap. The first tuning blended over 0.18 of the noise
+    // range and the whole meadow/canyon border went khaki — a 50/50 mix of
+    // saturated green and saturated ochre is mud, and it covered more of the
+    // planet than either pure land did.
+    const meadow = 1 - smoothstep(0.37, 0.47, n);
+    const alpine = smoothstep(0.63, 0.73, n);
     let canyon = 1 - meadow - alpine;
     if (canyon < 0) canyon = 0;
     const sum = meadow + canyon + alpine || 1;
@@ -189,6 +193,53 @@ function mergeParts(THREE, parts) {
     return merged;
 }
 
+/**
+ * Scale everything below y=0 toward the equator plane. Cheap way to turn a
+ * symmetric solid into something that sits on the ground, without adding a
+ * single triangle.
+ */
+function squashUnderside(geometry, factor) {
+    const p = geometry.getAttribute('position');
+    for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i);
+        if (y < 0) p.setY(i, y * factor);
+    }
+    p.needsUpdate = true;
+    geometry.computeVertexNormals();
+    return geometry;
+}
+
+/** Flat-repaint every vertex below `y` — used to restore a trunk after a
+ * whole-tree height gradient has washed over it. */
+function paintBelow(THREE, geometry, y, color) {
+    const p = geometry.getAttribute('position');
+    const c = geometry.getAttribute('color');
+    for (let i = 0; i < p.count; i++) {
+        if (p.getY(i) < y) c.setXYZ(i, color.r, color.g, color.b);
+    }
+    c.needsUpdate = true;
+    return geometry;
+}
+
+/**
+ * Repaint an already-merged geometry's vertex colours as a vertical gradient
+ * between two colours. Used where a prop is big enough that one flat colour
+ * reads as a silhouette hole (the pine crown, the boulder mass).
+ */
+function tintByHeight(THREE, geometry, y0, y1, lowColor, highColor, gamma = 1) {
+    const p = geometry.getAttribute('position');
+    const c = geometry.getAttribute('color');
+    const tmp = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+        let t = clamp01((p.getY(i) - y0) / Math.max(1e-6, y1 - y0));
+        t = Math.pow(t, gamma);
+        tmp.copy(lowColor).lerp(highColor, t);
+        c.setXYZ(i, tmp.r, tmp.g, tmp.b);
+    }
+    c.needsUpdate = true;
+    return geometry;
+}
+
 // ---------------------------------------------------------------------------
 // Prop shader patch — wind sway + horizon collapse
 // ---------------------------------------------------------------------------
@@ -252,10 +303,10 @@ const PROP_VERT_BODY = /* glsl */`
 const LAYERS = [
     {
         name: 'broadleaf',
-        cap: 460,
-        scatter: 2200,     // global even spread — the anti-sparseness layer
-        clusters: 34,
-        perCluster: 26,
+        cap: 730,
+        scatter: 4200,     // global even spread — the anti-sparseness layer
+        clusters: 46,
+        perCluster: 30,
         clusterSpread: 0.055,
         sway: 1.0,
         sink: 1.0,
@@ -264,9 +315,17 @@ const LAYERS = [
             // Meadow's signature prop. A little spill into canyon rims and the
             // alpine treeline so the borders don't read as a stencil.
             const affinity = w[0] * 1.0 + w[1] * 0.22 + w[2] * 0.14;
-            const treeLine = smoothstep(0.08, 0.42, d);
+            // Widened after a captured frame: the original 0.08->0.42 ramp put
+            // so little on the mid slopes that any view from a crest had a bare
+            // foreground. Crests still thin out; the shoulders now fill in.
+            // The floor of 0.14 is deliberate. A pure ramp put literally
+            // nothing on the high shoulders, and a portrait phone frame — which
+            // is mostly near ground — landed on bare paint. Crests still thin
+            // out hard and the survivors are dwarfed by `scale()`, but the
+            // world is never empty.
+            const treeLine = 0.14 + 0.86 * smoothstep(0.02, 0.26, d);
             // Groves and glades, not a carpet.
-            const grove = 0.18 + 0.95 * patchMask(nx, ny, nz, 3.1, 0.38, 0.62);
+            const grove = 0.34 + 0.85 * patchMask(nx, ny, nz, 3.1, 0.38, 0.62);
             return affinity * treeLine * grove;
         },
         scale(d, w, rng) {
@@ -277,10 +336,10 @@ const LAYERS = [
     },
     {
         name: 'pine',
-        cap: 350,
-        scatter: 1600,
-        clusters: 26,
-        perCluster: 20,
+        cap: 600,
+        scatter: 3200,
+        clusters: 36,
+        perCluster: 24,
         clusterSpread: 0.048,
         sway: 0.45,
         sink: 0.9,
@@ -289,8 +348,8 @@ const LAYERS = [
             // Pines climb higher than broadleaf — their tree line starts lower
             // in depth (i.e. nearer the crest) and thins less aggressively.
             const affinity = w[2] * 0.95 + w[0] * 0.42 + w[1] * 0.20;
-            const treeLine = smoothstep(0.02, 0.30, d);
-            const stand = 0.22 + 0.9 * patchMask(nx, ny, nz, 3.9, 0.40, 0.63);
+            const treeLine = 0.12 + 0.88 * smoothstep(0.02, 0.30, d);
+            const stand = 0.38 + 0.8 * patchMask(nx, ny, nz, 3.9, 0.40, 0.63);
             return affinity * treeLine * stand;
         },
         scale(d, w, rng) {
@@ -300,44 +359,52 @@ const LAYERS = [
     },
     {
         name: 'spire',
-        cap: 130,
-        scatter: 700,
-        clusters: 16,
+        cap: 220,
+        scatter: 4200,
+        clusters: 26,
         perCluster: 14,
         clusterSpread: 0.040,
         sway: 0,
         sink: 2.2,
-        tilt: 0.04,
+        tilt: 0.055,
+        xVar: 0.30,
+        yVar: 0.45,
         zone(d, w, nx, ny, nz) {
-            return w[1] * smoothstep(0.24, 0.70, d)
+            return w[1] * w[1] * smoothstep(0.24, 0.70, d)
                 * (0.25 + 0.9 * patchMask(nx, ny, nz, 4.6, 0.42, 0.66));
         },
         scale(d, w, rng) {
-            return (0.72 + 0.58 * d) * rngRange(rng, 0.70, 1.5);
+            return (0.66 + 0.44 * d) * rngRange(rng, 0.70, 1.15);
         },
     },
     {
         name: 'boulder',
-        cap: 280,
-        scatter: 1200,
-        clusters: 18,
-        perCluster: 12,
+        cap: 320,
+        scatter: 1800,
+        clusters: 22,
+        perCluster: 14,
         clusterSpread: 0.05,
         sway: 0,
         sink: 0.5,
         tilt: 0.32,        // boulders sit at any angle
+        xVar: 0.30,
+        yVar: 0.30,
         zone(d, w) {
-            return 0.16 + w[1] * 0.55 + w[2] * 0.40;
+            return 0.05 + w[1] * 0.60 + w[2] * 0.45;
         },
         scale(d, w, rng) {
-            return rngRange(rng, 0.5, 1.5);
+            return rngRange(rng, 0.45, 1.15);
         },
     },
     {
         name: 'snowcap',
-        cap: 120,
-        scatter: 1100,
-        clusters: 12,
+        // Alpine crest is only ~1.4% of the planet's directions, so this layer
+        // needs an order of magnitude more candidates than the others just to
+        // fill its cap. Candidates are free (build-time noise lookups); empty
+        // sky where a snowfield should be is not.
+        cap: 160,
+        scatter: 9000,
+        clusters: 40,
         perCluster: 12,
         clusterSpread: 0.045,
         sway: 0,
@@ -345,7 +412,7 @@ const LAYERS = [
         tilt: 0.06,
         zone(d, w) {
             // Only the highest ground, and only where the land is alpine.
-            return w[2] * (1 - smoothstep(0.03, 0.26, d));
+            return w[2] * w[2] * (1 - smoothstep(0.10, 0.52, d));
         },
         scale(d, w, rng) {
             return rngRange(rng, 0.7, 1.9);
@@ -353,17 +420,17 @@ const LAYERS = [
     },
     {
         name: 'shrub',
-        cap: 380,
-        scatter: 2000,
-        clusters: 20,
-        perCluster: 16,
+        cap: 460,
+        scatter: 2600,
+        clusters: 24,
+        perCluster: 18,
         clusterSpread: 0.045,
         sway: 1.6,
         sink: 0.3,
         tilt: 0.14,
         zone(d, w, nx, ny, nz) {
-            return (w[0] * 0.9 + w[1] * 0.35) * smoothstep(0.14, 0.62, d)
-                * (0.3 + 0.9 * patchMask(nx, ny, nz, 5.4, 0.36, 0.60));
+            return (w[0] * 0.9 + w[1] * 0.35) * (0.22 + 0.78 * smoothstep(0.14, 0.62, d))
+                * (0.42 + 0.8 * patchMask(nx, ny, nz, 5.4, 0.36, 0.60));
         },
         scale(d, w, rng) {
             return (0.6 + 0.7 * d) * rngRange(rng, 0.7, 1.4);
@@ -378,72 +445,114 @@ const LAYERS = [
 function buildPropGeometry(THREE, name) {
     switch (name) {
         case 'broadleaf': {
-            // 36 tris: open 4-sided trunk (8) + main canopy (20) + a cheap
-            // octahedral secondary lobe (8). The lobe is what stops a stand of
-            // these reading as a bag of identical balls at close range; an
-            // icosahedron there would have cost 20 more triangles per tree,
-            // i.e. ~9k across the layer, for a difference nobody would see.
-            const trunk = new THREE.CylinderGeometry(0.20, 0.34, 1.8, 4, 1, true);
-            trunk.translate(0, 0.9, 0);
-            const canopy = new THREE.IcosahedronGeometry(1.20, 0);
-            canopy.scale(1.14, 0.90, 1.14);
-            canopy.translate(0, 2.30, 0);
-            const lobe = new THREE.OctahedronGeometry(0.86, 0);
-            lobe.scale(1.15, 0.95, 1.15);
-            lobe.translate(0.62, 3.05, -0.30);
-            return mergeParts(THREE, [
+            // 26 tris: 3-sided open trunk (6) + icosahedral canopy (20).
+            //
+            // The canopy went octahedron -> icosahedron after a captured frame
+            // showed the 8-triangle version reading as a sharp gem, which at a
+            // glance was indistinguishable from the pines standing next to it.
+            // Broadleaf has to be ROUND for the two layers to separate, and 20
+            // triangles is the cheapest round thing there is. The extra 12
+            // triangles per tree are paid for by dropping the layer from 1000
+            // instances to 760 — a silhouette you can name beats 240 more
+            // shapes you cannot.
+            const trunk = new THREE.CylinderGeometry(0.24, 0.42, 2.2, 3, 1, true);
+            trunk.translate(0, 1.1, 0);
+            const canopy = new THREE.IcosahedronGeometry(1.85, 0);
+            canopy.scale(1.12, 0.92, 1.12);
+            squashUnderside(canopy, 0.72);
+            canopy.translate(0, 3.15, 0);
+            const geo = mergeParts(THREE, [
                 { geo: trunk, color: new THREE.Color(PALETTE.trunk) },
                 { geo: canopy, color: new THREE.Color(PALETTE.foliageMid) },
-                { geo: lobe, color: new THREE.Color(PALETTE.foliageLit) },
             ]);
+            // Sun-side crown lighter than the underside of the mass.
+            tintByHeight(THREE, geo, 2.3, 4.9,
+                new THREE.Color(PALETTE.foliageDeep),
+                new THREE.Color(PALETTE.foliageLit), 0.85);
+            // ...but the trunk must stay wood, so repaint it back.
+            paintBelow(THREE, geo, 2.25, new THREE.Color(PALETTE.trunk));
+            return geo;
         }
         case 'pine': {
-            // 20 tris: trunk (8) + two open cone skirts (6 + 6).
-            const trunk = new THREE.CylinderGeometry(0.14, 0.24, 1.0, 4, 1, true);
-            trunk.translate(0, 0.5, 0);
-            const lower = new THREE.ConeGeometry(1.10, 2.4, 6, 1, true);
-            lower.translate(0, 1.7, 0);
-            const upper = new THREE.ConeGeometry(0.74, 2.0, 6, 1, true);
-            upper.translate(0, 3.2, 0);
-            return mergeParts(THREE, [
+            // 11 tris: 3-sided trunk (6) + one 5-sided open cone (5). The
+            // silhouette does all the work at this scale.
+            const trunk = new THREE.CylinderGeometry(0.16, 0.28, 1.2, 3, 1, true);
+            trunk.translate(0, 0.6, 0);
+            const crown = new THREE.ConeGeometry(1.45, 5.4, 5, 1, true);
+            crown.translate(0, 3.5, 0);
+            const geo = mergeParts(THREE, [
                 { geo: trunk, color: new THREE.Color(PALETTE.trunk) },
-                { geo: lower, color: new THREE.Color(PALETTE.pineDeep) },
-                { geo: upper, color: new THREE.Color(PALETTE.pineLit) },
+                { geo: crown, color: new THREE.Color(PALETTE.pineDeep) },
             ]);
+            // Sunlit tip -> shadowed skirt down the length of the cone. A
+            // single-colour pine at this size read as a black-green wedge.
+            tintByHeight(THREE, geo, 1.3, 6.2,
+                new THREE.Color(PALETTE.pineDeep),
+                new THREE.Color(PALETTE.pineLit), 1.2);
+            return geo;
         }
         case 'spire': {
-            // 10 tris: a stepped ochre needle. Buried base, so no cap needed.
-            const base = new THREE.ConeGeometry(2.5, 9.0, 5, 1, true);
-            base.translate(0, 4.5, 0);
-            const tip = new THREE.ConeGeometry(1.2, 4.4, 5, 1, true);
-            tip.translate(0, 10.2, 0);
-            return mergeParts(THREE, [
-                { geo: base, color: new THREE.Color(PALETTE.canyonMid) },
-                { geo: tip, color: new THREE.Color(PALETTE.canyonLit) },
-            ]);
+            // 10 tris: one 5-sided tapered column. The previous version stacked
+            // a wide cone on top of a narrow one and the captured frame showed
+            // exactly what that is — a mushroom. A single taper reads as a
+            // hoodoo, which is what a canyon wants, and it is the tallest thing
+            // on the planet: terrain can only carve DOWN, so every bit of
+            // verticality in this world has to come from a prop.
+            const g = new THREE.CylinderGeometry(0.85, 2.6, 10.5, 5, 1, true);
+            g.translate(0, 5.25, 0);
+            const geo = mergeParts(THREE, [{ geo: g, color: new THREE.Color(PALETTE.canyonMid) }]);
+            tintByHeight(THREE, geo, 0.5, 10.5,
+                new THREE.Color(PALETTE.canyonDeep),
+                new THREE.Color(PALETTE.canyonLit), 0.75);
+            return geo;
         }
         case 'boulder': {
-            // 8 tris. Squashed so it reads as a rock rather than a crystal.
-            const g = new THREE.OctahedronGeometry(0.95, 0);
-            g.scale(1.28, 0.70, 1.0);
-            g.translate(0, 0.42, 0);
-            return mergeParts(THREE, [{ geo: g, color: new THREE.Color(PALETTE.rock) }]);
+            // 8 tris. Two-tone by height: the upper faces catch the sky, the
+            // lower ones keep the rock's own value, so it reads as a solid
+            // instead of the flat grey paper cut-out a single-colour
+            // octahedron turned out to be in the captured frame.
+            const g = new THREE.OctahedronGeometry(1.25, 0);
+            g.scale(1.3, 0.85, 1.0);
+            squashUnderside(g, 0.5);
+            g.translate(0, 0.6, 0);
+            const geo = mergeParts(THREE, [{ geo: g, color: new THREE.Color(PALETTE.rock) }]);
+            const cAttr = geo.getAttribute('color');
+            const pAttr = geo.getAttribute('position');
+            const top = new THREE.Color(PALETTE.rock).lerp(new THREE.Color(PALETTE.alpineLit), 0.22);
+            const bot = new THREE.Color(PALETTE.rock).lerp(new THREE.Color(PALETTE.canyonDeep), 0.45);
+            for (let i = 0; i < pAttr.count; i++) {
+                const c = pAttr.getY(i) > 0.5 ? top : bot;
+                cAttr.setXYZ(i, c.r, c.g, c.b);
+            }
+            cAttr.needsUpdate = true;
+            return geo;
         }
         case 'snowcap': {
-            // 20 tris. Wide and flat: a patch of snow lying on the crest, not
-            // a white ball sitting on it.
-            const g = new THREE.IcosahedronGeometry(2.6, 0);
-            g.scale(1.45, 0.26, 1.45);
-            g.translate(0, 0.24, 0);
+            // 8 tris. Wide and flat: a patch of snow lying on the crest, not a
+            // white ball sitting on top of it.
+            const g = new THREE.OctahedronGeometry(2.6, 0);
+            g.scale(1.45, 0.34, 1.45);
+            squashUnderside(g, 0.25);
+            g.translate(0, 0.12, 0);
             return mergeParts(THREE, [{ geo: g, color: new THREE.Color(PALETTE.snow) }]);
         }
         case 'shrub':
         default: {
-            // 4 tris. Ground clutter that fills the near field cheaply.
-            const g = new THREE.TetrahedronGeometry(0.80, 0);
-            g.scale(1.2, 0.90, 1.2);
-            g.translate(0, 0.46, 0);
-            return mergeParts(THREE, [{ geo: g, color: new THREE.Color(PALETTE.foliageLit) }]);
+            // 8 tris. Near-field ground clutter — the layer that keeps the
+            // first few metres in front of the bird from being bare paint.
+            // Small, dark and low. Earlier passes made these bright
+            // foliageLit gems the size of a boulder and a captured frame had
+            // them reading as emeralds scattered over the canyon floor. Ground
+            // clutter must sit UNDER the eye and never compete with the trees.
+            const g = new THREE.OctahedronGeometry(0.66, 0);
+            g.scale(1.35, 1.15, 1.35);
+            squashUnderside(g, 0.35);
+            g.translate(0, 0.34, 0);
+            const geo = mergeParts(THREE, [{ geo: g, color: new THREE.Color(PALETTE.foliageMid) }]);
+            tintByHeight(THREE, geo, 0.0, 1.1,
+                new THREE.Color(PALETTE.foliageDeep),
+                new THREE.Color(PALETTE.foliageMid), 0.9);
+            return geo;
         }
     }
 }
@@ -478,8 +587,8 @@ function tintFor(name, rng, out) {
             return out;
         }
         default: {
-            const v = rngRange(rng, 0.72, 1.25);
-            out.setRGB(v * rngRange(rng, 0.9, 1.1), v, v * 0.9);
+            const v = rngRange(rng, 0.78, 1.10);
+            out.setRGB(v * rngRange(rng, 0.92, 1.06), v, v * 0.92);
             return out;
         }
     }
@@ -522,16 +631,16 @@ export function createPlanet(THREE, opts = {}) {
     // cream-coloured cracks scratched across the hills rather than as sunlit
     // high ground.
     const meadowRamp = [
-        [0.00, mixHex(THREE, PALETTE.meadowLit, PALETTE.alpineLit, 0.20)],
-        [0.16, new THREE.Color(PALETTE.meadowLit)],
-        [0.46, mixHex(THREE, PALETTE.meadowLit, PALETTE.meadowMid, 0.55)],
-        [0.78, new THREE.Color(PALETTE.meadowMid)],
+        [0.00, mixHex(THREE, PALETTE.meadowLit, PALETTE.alpineLit, 0.14)],
+        [0.04, mixHex(THREE, PALETTE.meadowLit, PALETTE.meadowMid, 0.34)],
+        [0.26, new THREE.Color(PALETTE.meadowMid)],
+        [0.68, mixHex(THREE, PALETTE.meadowMid, PALETTE.meadowDeep, 0.62)],
         [1.00, new THREE.Color(PALETTE.meadowDeep)],
     ];
     const canyonRamp = [
-        [0.00, mixHex(THREE, PALETTE.canyonLit, PALETTE.alpineLit, 0.20)],
-        [0.22, new THREE.Color(PALETTE.canyonLit)],
-        [0.58, new THREE.Color(PALETTE.canyonMid)],
+        [0.00, mixHex(THREE, PALETTE.canyonLit, PALETTE.alpineLit, 0.16)],
+        [0.16, new THREE.Color(PALETTE.canyonLit)],
+        [0.50, new THREE.Color(PALETTE.canyonMid)],
         [0.86, new THREE.Color(PALETTE.canyonDeep)],
         [1.00, mixHex(THREE, PALETTE.canyonDeep, PALETTE.ink, 0.22)],
     ];
@@ -561,9 +670,13 @@ export function createPlanet(THREE, opts = {}) {
 
         // Canyon reads as sedimentary strata: half the depth axis is quantised
         // into bands, half stays continuous so the bands still follow the form.
-        const bands = 9;
+        // Sedimentary banding, but only lightly. At a 0.55 weight the terraces
+        // followed the depth contours so exactly that the whole canyon read as
+        // a pixel-stepped stair pattern from orbit; at 0.28 they read as strata
+        // in the cut faces and vanish on open ground, which is what rock does.
+        const bands = 12;
         const strata = Math.floor(d * bands) / (bands - 1);
-        const dCanyon = clamp01(d * 0.45 + strata * 0.55);
+        const dCanyon = clamp01(d * 0.72 + strata * 0.28);
 
         sampleRamp(meadowRamp, d, cM);
         sampleRamp(canyonRamp, dCanyon, cC);
@@ -573,7 +686,7 @@ export function createPlanet(THREE, opts = {}) {
         // as COLOUR only — perturbing normals at this frequency is exactly the
         // band-noise trap the contract warns about.
         const m = fbm(nx * 7.3 + 4.1, ny * 7.3 + 9.6, nz * 7.3 + 2.2, 3);
-        const mott = 0.90 + 0.20 * m;
+        const mott = 0.93 + 0.15 * m;
 
         const o = i * 3;
         colors[o] = (cM.r * w3[0] + cC.r * w3[1] + cA.r * w3[2]) * mott;
@@ -583,6 +696,37 @@ export function createPlanet(THREE, opts = {}) {
 
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.computeVertexNormals();
+
+    // --- slope shading pass -------------------------------------------------
+    // The single biggest legibility problem in the captured frames: a sphere
+    // lit by one high key light puts almost every visible ground vertex in the
+    // TOP band of the toon ramp, so a whole valley system rendered as one flat
+    // wash of colour and the terrain read as painted-on rather than shaped.
+    //
+    // The fix has to be view-independent (it is baked once) and light-
+    // independent (it must survive the terminator sweeping past). So: darken
+    // and slightly desaturate by how far the surface normal has tilted away
+    // from radial. Flat ground keeps its colour; valley walls and gully sides
+    // get a grounded, richer version of it. It is free at runtime and it is
+    // what makes the rolling terrain visible AS terrain.
+    //
+    // Must run AFTER computeVertexNormals — it reads the normals it shades by.
+    const nrmAttr = geo.getAttribute('normal');
+    const colAttr = geo.getAttribute('color');
+    for (let i = 0; i < vcount; i++) {
+        const px = pos.getX(i), py = pos.getY(i), pz = pos.getZ(i);
+        const pinv = 1 / Math.hypot(px, py, pz);
+        const dot = nrmAttr.getX(i) * px * pinv
+            + nrmAttr.getY(i) * py * pinv
+            + nrmAttr.getZ(i) * pz * pinv;
+        // 0 on flat ground, 1 on a wall.
+        const steep = clamp01((1 - dot) * 3.4);
+        const shade = 1 - 0.40 * steep;
+        const o = i * 3;
+        colAttr.setXYZ(i, colors[o] * shade, colors[o + 1] * shade, colors[o + 2] * shade);
+    }
+    colAttr.needsUpdate = true;
+
     geo.computeBoundingSphere();
 
     const terrainMat = createToonMaterial(THREE, {
@@ -619,6 +763,7 @@ export function createPlanet(THREE, opts = {}) {
     };
 
     const layerMeshes = [];
+    const layerCounts = {};
     const dir = { x: 0, y: 1, z: 0 };
     const cDir = { x: 0, y: 1, z: 0 };
     const bw = [0, 0, 0];
@@ -666,40 +811,47 @@ export function createPlanet(THREE, opts = {}) {
             placed++;
         }
 
-        // (a) GLOBAL EVEN SCATTER. This is the layer that stops the world
-        //     reading as empty: fibonacci points are maximally spread, so a
-        //     view in any direction lands on some of them.
-        for (let i = 0; i < scatterN && placed < cap; i++) {
-            fibonacciDirection(i, scatterN, dir, rng, 0.55 / Math.cbrt(scatterN));
-            tryPlace(dir.x, dir.y, dir.z, 1.0);
-        }
-
-        // (b) CLUSTER POCKETS. Groves and rock fields on top of the even
-        //     spread, in the SAME instanced array — zero extra draw calls.
+        // (a) CLUSTER POCKETS FIRST, against a reserved slice of the cap.
+        //     Order matters and this was a real bug: with the scatter pass
+        //     first, `scatter` (thousands of candidates) always exhausted the
+        //     cap before a single cluster was placed, so the world had a
+        //     perfectly even spread and not one grove in it. Groves are what
+        //     make a view read as somewhere rather than as noise.
+        const clusterCap = Math.round(cap * 0.55);
         const clusters = Math.max(3, Math.round(layer.clusters * tier.props));
-        for (let c = 0; c < clusters && placed < cap; c++) {
+        for (let c = 0; c < clusters && placed < clusterCap; c++) {
             fibonacciDirection(c, clusters, cDir, rng, 0.8);
             const cd = clamp01(depthAt(cDir.x, cDir.y, cDir.z));
             biomeWeights(cDir.x, cDir.y, cDir.z, bw);
             if (layer.zone(cd, bw, cDir.x, cDir.y, cDir.z) < 0.22) continue;
-            for (let k = 0; k < layer.perCluster && placed < cap; k++) {
-                // Concentrated toward the centre: cubing the radius pulls the
-                // population inward, so a grove has a dense core and a ragged
-                // edge instead of a uniform disc.
+            // Tangent frame around the cluster centre.
+            _n.set(cDir.x, cDir.y, cDir.z);
+            _axis.set(0, 1, 0);
+            if (Math.abs(_n.y) > 0.94) _axis.set(1, 0, 0);
+            _p.copy(_axis).cross(_n).normalize();
+            _axis.copy(_n).cross(_p).normalize();
+            for (let k = 0; k < layer.perCluster && placed < clusterCap; k++) {
+                // pow(rng, 0.55) pulls the population inward, so a grove has a
+                // dense core and a ragged edge rather than a uniform disc.
                 const rr = layer.clusterSpread * Math.pow(rng(), 0.55);
                 const th = rng() * Math.PI * 2;
-                // Build a tangent frame around the cluster centre.
-                _n.set(cDir.x, cDir.y, cDir.z);
-                _axis.set(0, 1, 0);
-                if (Math.abs(_n.y) > 0.94) _axis.set(1, 0, 0);
-                _p.copy(_axis).cross(_n).normalize();
-                _axis.copy(_n).cross(_p).normalize();
-                const ox = _n.x + (_p.x * Math.cos(th) + _axis.x * Math.sin(th)) * rr;
-                const oy = _n.y + (_p.y * Math.cos(th) + _axis.y * Math.sin(th)) * rr;
-                const oz = _n.z + (_p.z * Math.cos(th) + _axis.z * Math.sin(th)) * rr;
+                const ct = Math.cos(th) * rr, st = Math.sin(th) * rr;
+                const ox = _n.x + _p.x * ct + _axis.x * st;
+                const oy = _n.y + _p.y * ct + _axis.y * st;
+                const oz = _n.z + _p.z * ct + _axis.z * st;
                 const linv = 1 / Math.hypot(ox, oy, oz);
-                tryPlace(ox * linv, oy * linv, oz * linv, 1.6);
+                tryPlace(ox * linv, oy * linv, oz * linv, 1.8);
             }
+        }
+
+        // (b) GLOBAL EVEN SCATTER fills whatever is left. This is the layer
+        //     that stops the world reading as empty: fibonacci points are
+        //     maximally spread, so a view in any direction lands on some of
+        //     them, and it costs nothing extra because it goes into the SAME
+        //     instanced array as the groves above.
+        for (let i = 0; i < scatterN && placed < cap; i++) {
+            fibonacciDirection(i, scatterN, dir, rng, 0.55 / Math.cbrt(scatterN));
+            tryPlace(dir.x, dir.y, dir.z, 1.0);
         }
 
         const count = place.length / STRIDE;
@@ -714,9 +866,13 @@ export function createPlanet(THREE, opts = {}) {
             vertexColors: true,
             flatShading: true,
             specStrength: 0,
-            rimStrength: 0.34,
+            // Props are small and numerous, so a strong rim turns every one of
+            // them into a white-edged sticker — the captured frame had tree
+            // undersides reading as snow. Just enough to lift them off the
+            // ground behind, no more.
+            rimStrength: 0.10,
             rimColor: PALETTE.skyGlow,
-            rimThreshold: 0.46,
+            rimThreshold: 0.68,
         });
 
         // Layer the sway/cull injection ON TOP of the toon patch rather than
@@ -764,9 +920,12 @@ export function createPlanet(THREE, opts = {}) {
             _qTilt.setFromAxisAngle(_axis, tB);
             _q.multiply(_qTilt);
 
-            // Slight horizontal/vertical scale decorrelation: same asset,
-            // different plant.
-            _s.set(sc * rngRange(rng, 0.88, 1.14), sc * rngRange(rng, 0.86, 1.22), sc);
+            // Horizontal/vertical scale decorrelation: same asset, different
+            // plant. Spires carry a much wider range than the rest — a canyon
+            // full of identically proportioned needles reads as a fence.
+            const xv = layer.xVar || 0.13;
+            const yv = layer.yVar || 0.18;
+            _s.set(sc * rngRange(rng, 1 - xv, 1 + xv), sc * rngRange(rng, 1 - yv, 1 + yv), sc);
             _s.z = _s.x;
 
             _m.compose(_p, _q, _s);
@@ -778,6 +937,7 @@ export function createPlanet(THREE, opts = {}) {
 
         group.add(mesh);
         layerMeshes.push(mesh);
+        layerCounts[layer.name] = count;
         disposables.push(pgeo, pmat);
         triangleCount += triPerInstance * count;
         drawCallCount += 1;
@@ -821,6 +981,7 @@ export function createPlanet(THREE, opts = {}) {
         group,
         terrain,
         propLayers: layerMeshes,
+        layerCounts,
         update,
         triangleCount: Math.round(triangleCount),
         drawCallCount,
