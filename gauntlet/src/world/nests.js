@@ -169,6 +169,28 @@ function paintRangeByHeight(THREE, geo, range, y0, y1, low, high) {
  * which is exactly the range a landing pad has to work across.
  */
 /**
+ * Paint a vertex range in alternating radial columns, PER TRIANGLE.
+ *
+ * Per-vertex was the obvious way and it produced nothing: vertex colours
+ * interpolate across a face, and the toon ramp quantises the LIGHTING, not the
+ * base colour, so a light strand blended into a dark one over the width of a
+ * facet and the frame came back with a smooth wooden salad bowl. The geometry
+ * is non-indexed after the merge, so every triangle owns its three vertices and
+ * can be painted flat — which is what gives basketry its hard-edged stripe.
+ */
+function stripe(pos, col, range, colorA, colorB, phase) {
+    for (let t = range.start; t < range.start + range.count; t += 3) {
+        let ax = 0, az = 0;
+        for (let v = 0; v < 3; v++) { ax += pos.getX(t + v); az += pos.getZ(t + v); }
+        const a = Math.atan2(az, ax);
+        // 6 light + 6 dark columns around a 12-segment wall, offset a half step
+        // so the stripe lands on the facet rather than on its edge.
+        const c = Math.cos(a * 6 + phase) > 0 ? colorA : colorB;
+        for (let v = 0; v < 3; v++) col.setXYZ(t + v, c.r, c.g, c.b);
+    }
+}
+
+/**
  * Displace a bowl wall's radius so the silhouette is lumpy rather than
  * machined, and the flat-shaded facets catch the key light at slightly
  * different angles.
@@ -282,7 +304,13 @@ function buildTree(THREE, rng) {
     // not a crown. Every blob now intersects at least one other.
     const big = new THREE.IcosahedronGeometry(3.55, 0);
     big.scale(1.16, 0.90, 1.16);
+    // Tilted, not just yawed. An icosahedron's top face is enormous relative to
+    // its silhouette, and with all three masses upright their top faces align
+    // and the crown reads as one big flat lit sticker under the toon ramp.
+    // Tumbling each blob on a different axis breaks that up for free.
     big.rotateY(0.6);
+    big.rotateX(0.34);
+    big.rotateZ(-0.22);
     big.translate(0.20, -2.95, -0.30);
 
     // Pushed well outboard. At the previous offsets both secondary masses sat
@@ -293,11 +321,15 @@ function buildTree(THREE, rng) {
     const small = new THREE.IcosahedronGeometry(2.95, 0);
     small.scale(1.12, 0.88, 1.12);
     small.rotateY(-1.1);
+    small.rotateX(-0.46);
+    small.rotateZ(0.30);
     small.translate(-3.60, -4.35, 2.10);
 
     const low = new THREE.IcosahedronGeometry(3.15, 0);
     low.scale(1.20, 0.80, 1.20);
     low.rotateY(2.2);
+    low.rotateX(0.28);
+    low.rotateZ(0.44);
     low.translate(2.65, -5.45, 1.75);
 
     // Branch stubs cradling the bowl from BELOW. The first pass angled these
@@ -365,7 +397,8 @@ function buildNestGeometry(THREE, rng) {
     const cStrawDeep = new THREE.Color(PALETTE.canyonMid).lerp(new THREE.Color(PALETTE.canyonDeep), 0.62);
     // The bowl interior. Deep enough to read as shadow under a toon ramp that
     // otherwise lifts an up-facing disc straight into the lit band.
-    const cShade = new THREE.Color(PALETTE.canyonDeep).lerp(new THREE.Color(PALETTE.ink), 0.32);
+    const cShade = new THREE.Color(PALETTE.canyonDeep).lerp(new THREE.Color(PALETTE.ink), 0.18);
+    const cShadeLit = new THREE.Color(PALETTE.canyonDeep).lerp(new THREE.Color(PALETTE.canyonMid), 0.45);
     const cFoliage = new THREE.Color(PALETTE.foliageMid);
     const cFoliageDeep = new THREE.Color(PALETTE.foliageDeep);
     const cFoliageLit = new THREE.Color(PALETTE.foliageLit);
@@ -381,6 +414,7 @@ function buildNestGeometry(THREE, rng) {
     }
     const wallIndex = parts.length;
     parts.push({ geo: wall, color: cStraw });
+    const innerIndex = parts.length;
     parts.push({ geo: inner, color: cShade });
     for (let i = 0; i < twigs.length; i++) {
         parts.push({ geo: twigs[i], color: i % 2 ? cStrawDeep : cStraw });
@@ -410,16 +444,11 @@ function buildNestGeometry(THREE, rng) {
     {
         const pos = geo.getAttribute('position');
         const col = geo.getAttribute('color');
-        const r = ranges[wallIndex];
-        for (let t = r.start; t < r.start + r.count; t += 3) {
-            let ax = 0, az = 0;
-            for (let v = 0; v < 3; v++) { ax += pos.getX(t + v); az += pos.getZ(t + v); }
-            const a = Math.atan2(az, ax);
-            // 6 light + 6 dark columns around a 12-segment wall, offset a half
-            // step so the stripe lands on the facet rather than on its edge.
-            const c = Math.cos(a * 6 + 0.26) > 0 ? cStraw : cStrawDeep;
-            for (let v = 0; v < 3; v++) col.setXYZ(t + v, c.r, c.g, c.b);
-        }
+        stripe(pos, col, ranges[wallIndex], cStraw, cStrawDeep, 0.26);
+        // The lining gets the same treatment at half contrast. Flat, it read as
+        // a black hole punched in the treetop from cruise altitude — which is
+        // the angle the player actually approaches a nest from.
+        stripe(pos, col, ranges[innerIndex], cShade, cShadeLit, 0.0);
         col.needsUpdate = true;
     }
 

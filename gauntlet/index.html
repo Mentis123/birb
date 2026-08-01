@@ -539,6 +539,35 @@ import {
 const params = new URLSearchParams(location.search);
 
 // ---------------------------------------------------------------------------
+// Service-worker skew guard.
+//
+// Birb Mobile's service worker at the site root serves every same-origin .js
+// stale-while-revalidate. Versions before v12 had no /gauntlet bypass, so this
+// page could boot as FRESH html against STALE cached modules. The APIs skew,
+// something throws inside the render loop, and the game dies with the HUD
+// still painted — which is what "it hangs, then works after a hard reset"
+// actually was.
+//
+// v12 excludes /gauntlet entirely, but a browser still running an older worker
+// keeps control of THIS load. So: ask for an update, and if a new worker takes
+// over, reload once to get a clean, uncontrolled fetch. The sessionStorage
+// guard means a misbehaving worker can never put us in a reload loop.
+// ---------------------------------------------------------------------------
+if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    const RELOAD_GUARD = 'gauntlet.swReloaded';
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        let already = null;
+        try { already = sessionStorage.getItem(RELOAD_GUARD); } catch { /* ignore */ }
+        if (already) return;
+        try { sessionStorage.setItem(RELOAD_GUARD, '1'); } catch { /* ignore */ }
+        location.reload();
+    });
+    navigator.serviceWorker.getRegistration()
+        .then((reg) => reg && reg.update())
+        .catch(() => { /* nothing to do; the bypass lands on a later visit */ });
+}
+
+// ---------------------------------------------------------------------------
 // Splash flow. Nothing 3D exists until Tap to Start, so the entry pages cost
 // nothing and the first frame of the race is not competing with a cold GPU.
 // ---------------------------------------------------------------------------
@@ -717,10 +746,36 @@ function bumpStreak() {
 }
 paintStreak();
 
-function fatal(err) {
+let fatalShown = false;
+function fatal(err, what) {
     console.error(err);
+    if (fatalShown) return;
+    fatalShown = true;
+    const msg = err && err.message ? err.message : String(err);
     fatalEl.hidden = false;
-    fatalEl.textContent = 'Birb Gauntlet failed to start: ' + (err && err.message ? err.message : String(err));
+    fatalEl.innerHTML = '';
+    const box = document.createElement('div');
+    box.innerHTML =
+        '<p style="font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)">'
+        + (what || 'Birb Gauntlet stopped') + '</p>'
+        + '<p style="opacity:.75;font-size:.85rem;margin:.6rem 0 1.2rem">' + msg + '</p>';
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary';
+    btn.textContent = 'Reload';
+    // Clearing caches first is the actual remedy for the failure this most
+    // often is: a stale service-worker cache serving old modules to new HTML.
+    btn.addEventListener('click', async () => {
+        btn.textContent = 'Reloading…';
+        try {
+            if (self.caches) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+            }
+        } catch { /* best effort */ }
+        location.reload();
+    });
+    box.appendChild(btn);
+    fatalEl.appendChild(box);
 }
 
 // ---------------------------------------------------------------------------
@@ -926,6 +981,14 @@ async function boot(requestedMode) {
     addEventListener('resize', resize);
     resize();
 
+    // A lost GPU context renders everything black while the loop keeps
+    // running, which reads as a hang. Say so, and offer the way out.
+    canvas.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        fatal(new Error('The graphics context was lost, usually from memory pressure.'),
+            'Birb Gauntlet lost the GPU');
+    });
+
     // --- wake lock (keep the screen alive mid-race) ------------------------
     let wakeLock = null;
     async function acquireWakeLock() {
@@ -948,7 +1011,22 @@ async function boot(requestedMode) {
     let frames = 0, fpsAccum = 0, fps = 60;
     let debugCamFrozen = false;
 
+    // A throw inside a requestAnimationFrame callback does NOT propagate
+    // anywhere useful: the frame simply never reschedules and the game dies
+    // with the last painted HUD still on screen and the canvas black. That is
+    // indistinguishable from a hang, and it is what a player sees when stale
+    // cached modules skew against fresh HTML. Surface it instead.
     function frame(now) {
+        try {
+            frameBody(now);
+        } catch (err) {
+            fatal(err, 'Birb Gauntlet hit an error mid-flight');
+            return;                       // stop rescheduling; the overlay owns it
+        }
+        requestAnimationFrame(frame);
+    }
+
+    function frameBody(now) {
         const rawDt = (now - last) / 1000;
         last = now;
         // Clamp so a backgrounded tab does not teleport the bird on return.
@@ -1070,7 +1148,6 @@ async function boot(requestedMode) {
         hud.minimap.update(course, _racerPositions, 0);
 
         renderer.render(scene, camera);
-        requestAnimationFrame(frame);
     }
 
     const ZERO_INPUT = { x: 0, y: 0, boost: false };

@@ -16,16 +16,20 @@
   #stats { left: 10px; bottom: 8px; white-space: pre; }
   #tag { right: 10px; top: 10px; text-align: right; }
   #closelabel { right: 12px; bottom: 10px; text-align: right; }
+  /* Portrait: the stats block is 78 monospace columns wide and at 11px it
+     overran a 390px viewport and sat on top of the inset. Shrink it to fit
+     and push the inset clear of it. */
   @media (max-aspect-ratio: 85/100) {
     #graphbox canvas { width: 300px; height: auto; }
     #tag { top: 176px; }
+    #stats { font-size: 8px; line-height: 1.65; }
   }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div class="panel" id="graphbox">aim trace · <span style="color:#ffdd44">held</span> / <span style="color:#00d4ff">coasting</span><canvas id="g" width="380" height="168"></canvas></div>
-<div class="panel" id="tag">nest turret probe<br>hold → release → hold → hard reversal</div>
+<div class="panel" id="tag">nest turret probe<br>hold → release → hold → hard reversal<br><span style="color:#ffdd44">captured 25ms after fire:</span><br>barrel kicked off the reticle,<br>reticle stays on the true aim</div>
 <div class="panel" id="closelabel">turret close-up ↓</div>
 <div class="panel" id="stats"></div>
 <script type="module">
@@ -371,13 +375,18 @@ for (let i = idxAt(3.02); i < STEPS; i++) {
   const aim = rig.aimForward.clone();
   const across = new THREE.Vector3().crossVectors(UP, aim).normalize();
   camera.position.copy(NEST_POS)
-    .addScaledVector(across, 34)
-    .addScaledVector(UP, 13)
-    .addScaledVector(aim, -8);
+    .addScaledVector(across, 26)
+    .addScaledVector(UP, 14)
+    .addScaledVector(aim, -20);
   camera.up.copy(UP);
-  // Aim point pushed forward and down so the gun sits left-of-centre with the
-  // ground and the tree in frame for scale, instead of floating in empty sky.
-  camera.lookAt(NEST_POS.clone().addScaledVector(UP, -1.5).addScaledVector(aim, 11));
+  // Round 4 pushed the look-target 11 units along the aim, which shoved the gun
+  // into the bottom-right corner under the inset. Targeting the nest itself
+  // puts it left of centre with the tree and ground in frame for scale.
+  // Swung round to a 3/4 rear quarter (50 deg off the aim, not 90) so the
+  // RETICLE is in frame on the same ray as the barrel. Broadside reads the
+  // barrel best but puts the aim ray exactly on the frame edge, where the
+  // reticle can never appear.
+  camera.lookAt(NEST_POS.clone().addScaledVector(UP, 3).addScaledVector(aim, 5));
 }
 
 // ---------------------------------------------------------------------------
@@ -495,9 +504,11 @@ function draw() {
   renderer.render(scene, camera);
   mainStats = { drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
 
-  const iw = Math.round(Math.min(300, W * 0.44));
+  const portrait = H > W * 1.15;
+  const iw = Math.round(Math.min(300, W * (portrait ? 0.5 : 0.44)));
   const ih = Math.round(iw * 0.74);
-  const ix = W - iw - 8, iy = 26;
+  const ix = W - iw - 8;
+  const iy = portrait ? Math.round(H * 0.145) : 26;
   closeCam.aspect = iw / ih;
   closeCam.updateProjectionMatrix();
   renderer.setScissorTest(true);
@@ -506,7 +517,7 @@ function draw() {
   renderer.render(closeScene, closeCam);
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, W, H);
-  return ih;
+  return iy + ih;
 }
 
 function fmt(n, d) { return Number(n).toFixed(d === undefined ? 1 : d); }
@@ -519,13 +530,14 @@ function resize() {
   camera.fov = camera.aspect >= 0.85 ? 46 : 46 + (0.85 - camera.aspect) * 44;
   camera.updateProjectionMatrix();
   updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
-  const ih = draw();
-  document.getElementById('closelabel').style.bottom = (26 + ih + 4) + 'px';
+  const insetTop = draw();
+  document.getElementById('closelabel').style.bottom = (insetTop + 4) + 'px';
   document.getElementById('stats').textContent =
     `hold peak ${fmt(peakVel, 2)} rad/s = ${fmt(rampMultObserved, 2)}x base  ·  full 1s hold = ${fmt(rampMultFullHold, 2)}x (cap ${AIM_RIG_DEFAULTS.rampMaxMult}x)\n` +
     `release coast ${fmt(coastDeg)}deg over ${fmt(coastSettleMs, 0)}ms from ${fmt(velAtRelease, 2)} rad/s\n` +
     `reversal overshoot ${fmt(reversalOvershootDeg, 2)}deg in ${fmt(reversalMs, 0)}ms  ·  converges ${convergent ? 'yes' : 'NO'}\n` +
     `mount flex peak ${fmt(flexPeak * DEG, 2)}deg  overshoot ${fmt(flexOvershoot * DEG, 3)}deg  settle ${fmt(flexSettleMs, 0)}ms\n` +
+    `recoil kick ${fmt(rig.recoilKick * DEG, 1)}deg / slide ${fmt(rig.recoilSlide, 2)}u at capture (visual only — aim unmoved)\n` +
     `turret ${rig.drawCallCount} draws / ${rig.triangleCount} tris  ·  frame ${mainStats.drawCalls} draws / ${mainStats.triangles} tris`;
 }
 addEventListener('resize', resize);
@@ -548,6 +560,8 @@ window.__GAUNTLET_STATS = () => ({
   flexOvershootDeg: flexOvershoot * DEG,
   flexSettleMs,
   convergent,
+  recoilKickDeg: rig.recoilKick * DEG,
+  recoilSlide: rig.recoilSlide,
 });
 
 // ---------------------------------------------------------------------------

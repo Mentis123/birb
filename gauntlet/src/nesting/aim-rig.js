@@ -344,9 +344,6 @@ export function createAimRig(THREE, opts = {}) {
             { geo: new THREE.CylinderGeometry(1.22, 1.46, 0.52, seg), matrix: xform(THREE, 0, 0.58, 0) },
             { geo: new THREE.BoxGeometry(0.34, 1.06, 0.86), matrix: xform(THREE, -0.86, TRUNNION - 0.42, 0.06) },
             { geo: new THREE.BoxGeometry(0.34, 1.06, 0.86), matrix: xform(THREE, 0.86, TRUNNION - 0.42, 0.06) },
-            // Trunnion caps, so the pitch axis reads as a real bearing.
-            { geo: new THREE.CylinderGeometry(0.3, 0.3, 0.24, seg), matrix: xform(THREE, -1.03, TRUNNION, 0, 0, 0, Math.PI / 2) },
-            { geo: new THREE.CylinderGeometry(0.3, 0.3, 0.24, seg), matrix: xform(THREE, 1.03, TRUNNION, 0, 0, 0, Math.PI / 2) },
             // Traverse handle sweeping back from the turntable.
             { geo: new THREE.CylinderGeometry(0.1, 0.1, 1.15, 6), matrix: xform(THREE, 0.62, 0.95, 0.86, -0.5, 0, -0.35) },
             // Splinter shield. Sits BELOW the trunnion so the barrel clears it —
@@ -376,6 +373,20 @@ export function createAimRig(THREE, opts = {}) {
             { geo: new THREE.BoxGeometry(0.09, 0.34, 0.12), matrix: xform(THREE, 0, 0.44, -2.9) },
         ]);
 
+        // --- mount brass: turntable ring + trunnion collars ------------------
+        // These live on the MOUNT, not the barrel. Putting the turntable ring in
+        // the barrel's brass group made it inherit pitch AND recoil, so it rode
+        // around the breech as a giant hoop. Rotating parts and static parts do
+        // not share a mesh.
+        //
+        // The ring is what says "this part traverses": without it the wooden
+        // bedplate and the wooden shield merge into one brown lump at gun scale.
+        const mountTrimGeo = mergeParts(THREE, [
+            { geo: new THREE.TorusGeometry(1.46, 0.1, 6, 20), matrix: xform(THREE, 0, 0.36, 0, Math.PI / 2, 0, 0) },
+            { geo: new THREE.CylinderGeometry(0.26, 0.26, 0.26, seg), matrix: xform(THREE, -1.03, TRUNNION, 0, 0, 0, Math.PI / 2) },
+            { geo: new THREE.CylinderGeometry(0.26, 0.26, 0.26, seg), matrix: xform(THREE, 1.03, TRUNNION, 0, 0, 0, Math.PI / 2) },
+        ]);
+
         const mountMat = createToonMaterial(THREE, {
             color: PALETTE.trunk, ramp: 'graphic', specStrength: 0.32, rimStrength: 0.5,
         });
@@ -396,6 +407,13 @@ export function createAimRig(THREE, opts = {}) {
         brassMesh.name = 'turret-brass';
         slideGroup.add(barrelMesh);
         slideGroup.add(brassMesh);
+
+        // Trim shares the brass material, so it costs one draw call and no
+        // outline hull — it is interior detail, not silhouette.
+        const mountTrim = new THREE.Mesh(mountTrimGeo, brassMat);
+        mountTrim.name = 'turret-mount-trim';
+        mountTrim.userData.noOutline = true;
+        yawGroup.add(mountTrim);
 
         pitchGroup.position.y = TRUNNION;
 
@@ -452,12 +470,12 @@ export function createAimRig(THREE, opts = {}) {
         aimPitchGroup.add(reticle);
         disposables.push(reticleGeo, reticleMat);
 
-        disposables.push(mountGeo, barrelGeo, brassGeo, mountMat, barrelMat, brassMat);
+        disposables.push(mountGeo, barrelGeo, brassGeo, mountTrimGeo, mountMat, barrelMat, brassMat);
 
         // Reported once at build time; the caller's renderer.info is the truth
         // for the whole frame.
-        const hulls = wantOutline ? 3 : 0;
-        drawCallCount = 3 + hulls + 1 /* reticle */;
+        const hulls = wantOutline ? 3 : 0;   // mount, barrel, barrel brass
+        drawCallCount = 4 + hulls + 1 /* reticle */;
         triangleCount = 0;
         group.traverse((o) => {
             if (o.isMesh && o.geometry) {
