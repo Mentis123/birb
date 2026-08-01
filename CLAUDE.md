@@ -67,6 +67,40 @@ repo at `gauntlet/`, deployed with the main site to **birbmobile.vercel.app/gaun
 It is unlisted: `noindex`, linked from nowhere. Four birds, three laps, one
 glowing ribbon circling a miniature planet.
 
+**Full Birb Mobile port shipped (2026-08-01).** Five modes now, all built from
+one world and one bird: Casual (the default — free flight with ambient drones
+AND nesting, and it cannot fail), Gauntlet Race, Ring Rush, Drone Hunter and
+Turret Defense. The spine is `gauntlet/src/game/modes.js` — a **capability-flag
+descriptor table** (`course/laps/rivals/drones/nesting/rings/timed/canFail/
+gentle/scoreKind`). Nothing in the loop branches on a mode ID; a new mode is a
+table entry, not a sweep through `index.html`. Things worth knowing before you
+change any of it:
+
+- **Ring Rush's win condition reads the spawner**, never a constant.
+  `run.ringsTotal = rings.count`. Birb Mobile shipped 18 rings checked against
+  a hardcoded 10 and the mode could not be completed.
+- **A time is only a record if the run completed** (`completed` guard in
+  `finishRun`). Lower-is-better plus an early exit is a two-second best that
+  nothing can ever beat.
+- **Turret Defense's wave one waits for the player to be on the gun**, and
+  `WAVE_SPEED_MUL` is solved for, not chosen: at the ported 1.25 a wave crossed
+  its stand-off in 3.2s against a 2.0s rocket cooldown, so the first capture of
+  the mode lost all three lives without a shot fired. 0.45 + a 1.15 rad
+  stand-off gives ~15s and seven or eight shots.
+- **Drone Hunter's ram only counts above `HUNT_STRIKE_SPEED01` (0.5).** Hunt
+  drones close on you, so without the gate a player who never touches the stick
+  scores — measured: 3 kills / 450 points in 8 seconds of doing nothing.
+- **The turret reuses the boost pill as FIRE** and the stick as aim, so the
+  player keeps the button they already dragged to their thumb. The aim rig
+  needs `driveCamera: true` or `viewQuaternion` is never written and the FPV
+  camera stares at the terrain.
+- `nesting.update()` runs BEFORE `flight.tick()` and `drivesFlight` gates it —
+  two systems writing one position is a bird that vibrates between the nest and
+  the sky.
+
+`window.__GAUNTLET_STATS()` now returns run state alongside the frame stats, so
+a harness capture is evidence of what the MODE did, not just what rendered.
+
 It is deliberately **airtight against Birb Mobile**: nothing in `gauntlet/` imports
 from the parent `src/`, nothing outside imports from inside it, and `sw.js` now
 explicitly bypasses `/gauntlet`. That last one is a correctness fix, not tidiness —

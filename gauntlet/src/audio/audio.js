@@ -49,6 +49,11 @@ const MIX = {
     beep: 0.3,
     horn: 0.34,
     finish: 0.3,
+    ring: 0.36,        // ring pickup — sits with the gate chime, not above it
+    rocket: 0.4,
+    explode: 0.5,
+    kill: 0.42,
+    alarm: 0.34,
 };
 
 /** Major pentatonic in semitones. Gate chimes walk up this, forever. */
@@ -482,6 +487,76 @@ export function createAudio(opts = {}) {
         triggerHaptic(p <= 3 ? 40 : 18);
     }
 
+    // --- mini-game voices --------------------------------------------------
+
+    /**
+     * Ring pickup. A rising two-note sparkle that climbs with `collected`, so
+     * a clean run through the weave sounds like an ascending phrase rather
+     * than the same ding eighteen times.
+     *
+     * It walks the same pentatonic as the gate chime deliberately: Ring Rush
+     * and the race are the same instrument, played at different tempos.
+     */
+    function ring(collected = 0) {
+        if (!ready || disposed) return;
+        const t = now();
+        const n = collected | 0;
+        const f = GATE_ROOT * semitone(PENTATONIC[n % PENTATONIC.length] + 12 * Math.min(1, (n / PENTATONIC.length) | 0));
+        toneVoice(t, 'sine', f, f, MIX.ring, 0.004, 0.26);
+        toneVoice(t + 0.05, 'sine', f * 1.5, f * 1.5, MIX.ring * 0.7, 0.004, 0.3);
+        noiseVoice(t, 'highpass', 6000, 11000, 0.9, 0.06, 0.002, 0.13, 1, 1);
+        triggerHaptic(16);
+    }
+
+    /** Rocket launch: a downward-filtered noise whoosh with a body thump. */
+    function rocketFire() {
+        if (!ready || disposed) return;
+        const t = now();
+        noiseVoice(t, 'bandpass', 380, 2600, 0.8, MIX.rocket, 0.012, 0.42, 0.7, 1.8);
+        toneVoice(t, 'triangle', 210, 70, MIX.rocket * 0.55, 0.005, 0.2);
+        triggerHaptic(30);
+    }
+
+    /**
+     * Explosion. Low body + broadband crack; `size` 0..1 scales both the level
+     * and the decay so a distant kill is not the same event as one on your
+     * canopy.
+     */
+    function explode(size = 1) {
+        if (!ready || disposed) return;
+        const t = now();
+        let s = size;
+        if (!(s >= 0.2)) s = 0.2; else if (s > 1) s = 1;
+        toneVoice(t, 'sine', 150 * s, 34, MIX.explode * s, 0.003, 0.36 * s + 0.14);
+        noiseVoice(t, 'lowpass', 2400, 180, 0.7, MIX.explode * 0.8 * s, 0.002, 0.34 * s + 0.1, 1, 0.55);
+        noiseVoice(t, 'highpass', 3200, 6000, 0.6, MIX.explode * 0.28 * s, 0.001, 0.09, 1, 1);
+        triggerHaptic(Math.round(24 + 30 * s));
+    }
+
+    /**
+     * Kill confirm, pitched by combo. Separate from `explode` on purpose: the
+     * explosion says something died, the confirm says YOU did it and how good
+     * your chain is. Fusing them costs the player the combo feedback.
+     */
+    function kill(combo = 1) {
+        if (!ready || disposed) return;
+        const t = now();
+        const step = Math.min(8, Math.max(0, Math.round((combo - 1) * 2)));
+        const f = 659.25 * semitone(step);
+        toneVoice(t, 'square', f * 0.5, f, MIX.kill, 0.004, 0.16, 0.02);
+        toneVoice(t + 0.06, 'square', f, f * 1.5, MIX.kill * 0.6, 0.004, 0.2);
+        triggerHaptic(20);
+    }
+
+    /** Nest under attack. Two-tone alarm — deliberately unpleasant. */
+    function alarm() {
+        if (!ready || disposed) return;
+        const t = now();
+        toneVoice(t, 'sawtooth', 440, 440, MIX.alarm, 0.006, 0.14, 0.04);
+        toneVoice(t + 0.16, 'sawtooth', 330, 330, MIX.alarm, 0.006, 0.2, 0.04);
+        triggerHaptic(44);
+    }
+
     /** Music (wind bed) and SFX buses, independently muteable. */
     function setEnabled(music, sfx) {
         musicOn = music !== false;
@@ -528,6 +603,11 @@ export function createAudio(opts = {}) {
         countdownBeep,
         horn,
         finish,
+        ring,
+        rocketFire,
+        explode,
+        kill,
+        alarm,
         triggerHaptic,
         dispose,
         // --- inspection hooks (dev probe / HUD debug; never used in the loop) ---

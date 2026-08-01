@@ -137,8 +137,23 @@ const MAX_ALT_OFFSET = 26;
  * choose to disengage.
  */
 const HUNT_SPEED_MUL = 1.6;
-/** Waves commit to the nest rather than to a chase; less overspeed needed. */
-const WAVE_SPEED_MUL = 1.25;
+/**
+ * Waves commit to the nest rather than to a chase, and the ARRIVAL TIME is the
+ * whole difficulty curve of Turret Defense — so this is solved for, not chosen.
+ *
+ * The approach is a great-circle sweep at `spd * WAVE_SPEED_MUL` rad/s, ending
+ * when the drone is inside NEST_ATTACK_RANGE (0.12 rad at PLANET_RADIUS). At
+ * the ported 1.25 the crossing took (0.72 - 0.12) / 0.1875 = 3.2 SECONDS, and
+ * with a 2.0s rocket cooldown that is one shot for the entire wave — the
+ * first capture of the mode lost all three lives to wave one without the
+ * player ever getting to fire. That is not a difficulty setting, it is a
+ * broken mode.
+ *
+ * At 0.45 the same crossing from the wider stand-off below takes
+ * (1.15 - 0.12) / 0.0675 = 15.3s: seven or eight shots per wave, and a swarm
+ * that fades in out of the fog rather than materialising on the canopy.
+ */
+const WAVE_SPEED_MUL = 0.45;
 
 /** How fast the orbit axis slews onto the intercept axis, per second. */
 const HUNT_AXIS_SLEW = 1.4;
@@ -884,14 +899,21 @@ export function createDrones(THREE, opts = {}) {
         const fy = nz * ex - nx * ez;
         const fz = nx * ey - ny * ex;
 
-        // ~0.72 rad of arc: 72 world units at PLANET_RADIUS, comfortably beyond
-        // the turret's useful range so the approach is the interesting part.
-        const STANDOFF = 0.72;
+        // 1.15 rad of arc: 115 world units at PLANET_RADIUS, out past the fog's
+        // far plane so a wave FADES IN rather than appearing. See
+        // WAVE_SPEED_MUL for why the distance and the speed are one decision.
+        const STANDOFF = 1.15;
+        // Extra arc spread across the wave, so drones arrive in a stream
+        // instead of a simultaneous wall. A wall is a coin flip — you cannot
+        // reload fast enough for it, so it either all lands or it does not.
+        // Strung out, each drone is a shot you either take or miss.
+        const STAGGER = 0.34;
 
         let spawned = 0;
         for (let n = 0; n < count; n++) {
             const a = (n / Math.max(1, count)) * Math.PI * 2 + rngRange(rng, -0.34, 0.34);
-            const arc = STANDOFF * rngRange(rng, 0.86, 1.14);
+            const arc = STANDOFF * rngRange(rng, 0.94, 1.06)
+                + (n / Math.max(1, count)) * STAGGER;
             const ca = Math.cos(arc), sa = Math.sin(arc);
             const dx = ex * Math.cos(a) + fx * Math.sin(a);
             const dy = ey * Math.cos(a) + fy * Math.sin(a);

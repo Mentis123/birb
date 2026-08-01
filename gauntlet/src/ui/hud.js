@@ -239,6 +239,23 @@ function styleText() {
   50%      { transform: translate(-50%, -50%) rotate(1.8deg) scale(1.05); }
 }
 
+/* --- action prompt (Land / Take off) ------------------------------------
+   Bottom-CENTRE, between the two thumbs rather than under either. The stick
+   owns the left half and the boost pill roams the right, so a button parked in
+   either corner is a button someone lands on by accident mid-turn. */
+.vh-action {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--vh-bottom, 92px) + 12px);
+  pointer-events: auto; cursor: pointer;
+  font-family: var(--font); font-size: 13px; font-weight: 900;
+  letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
+  background: var(--gold); border: 4px solid var(--ink); border-radius: 999px;
+  padding: 9px 20px 10px; box-shadow: 0 5px 0 0 var(--ink);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.vh-action:active { transform: translateX(-50%) translateY(4px); box-shadow: 0 1px 0 0 var(--ink); }
+.vh-action.calm { background: var(--cream); }
+
 /* --- results ------------------------------------------------------------- */
 .vh-results {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -313,6 +330,27 @@ function styleText() {
   transition: transform 0.08s ease, box-shadow 0.08s ease;
 }
 .vh-share:active { transform: translateY(4px); box-shadow: 0 1px 0 0 var(--ink); }
+/* Retry / Menu sit BELOW share as equal halves. A finished mini-game has to
+   offer the next run without making the player find the pause button, which
+   the results overlay is sitting on top of. */
+.vh-res-actions { display: flex; gap: 9px; margin-top: 9px; }
+.vh-res-actions button {
+  flex: 1 1 0; cursor: pointer; pointer-events: auto;
+  font-family: var(--font); font-size: 13px; font-weight: 900; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink);
+  background: var(--cream); border: 4px solid var(--ink); border-radius: 13px;
+  padding: 9px 8px 10px; box-shadow: 0 5px 0 0 var(--ink);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.vh-res-actions button.primary { background: var(--cyan); }
+.vh-res-actions button:active { transform: translateY(4px); box-shadow: 0 1px 0 0 var(--ink); }
+/* A best-time / new-record banner under the headline. */
+.vh-res-best {
+  margin-top: 9px; padding: 6px 10px 7px; border-radius: 11px;
+  border: 3px solid var(--ink); background: rgba(255, 221, 68, 0.45);
+  font-size: 11px; font-weight: 900; letter-spacing: 0.16em; text-transform: uppercase;
+}
+.vh-res-best[hidden] { display: none; }
 
 /* --- reduced motion: decoration only. Numbers keep updating. ------------- */
 .gauntlet-hud.vh-reduce .vh-count-num.punch,
@@ -453,11 +491,23 @@ export function createHUD(rootEl, options = {}) {
         '<span class="ch">&#9666;&#9666;</span><span>Wrong way</span><span class="ch">&#9656;&#9656;</span>');
     wrong.hidden = true;
 
+    // ---- action prompt ----------------------------------------------------
+    const actionBtn = el('button', 'vh-action', rootEl);
+    actionBtn.type = 'button';
+    actionBtn.hidden = true;
+    let _onAction = null;
+    let _actionLabel = null;
+    actionBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (_onAction) _onAction();
+    });
+
     // ---- results ----------------------------------------------------------
     const results = el('div', 'vh-results', rootEl);
     results.hidden = true;
     const resCard = el('div', 'vh-res-card', results);
-    el('div', 'vh-res-kicker', resCard).textContent = 'Race complete';
+    const resKicker = el('div', 'vh-res-kicker', resCard);
+    resKicker.textContent = 'Race complete';
     const resPlace = el('div', 'vh-res-place', resCard);
     resPlace.innerHTML = '1<small>ST</small>';
     const resPlaceNum = resPlace.firstChild;
@@ -465,14 +515,29 @@ export function createHUD(rootEl, options = {}) {
     const resHead = el('div', 'vh-res-head', resCard);
     resHead.appendChild(resPlace);
     const totWrap = el('div', 'vh-res-tot', resHead);
-    el('div', 'vh-res-tot-lab', totWrap).textContent = 'Total';
+    const resTotLab = el('div', 'vh-res-tot-lab', totWrap);
+    resTotLab.textContent = 'Total';
     const resTotal = el('div', 'vh-res-total', totWrap);
     resTotal.textContent = '--:--.--';
+    const resBest = el('div', 'vh-res-best', resCard);
+    resBest.hidden = true;
     const resLaps = el('div', 'vh-res-laps', resCard);
     const resField = el('div', 'vh-res-field', resCard);
     const shareBtn = el('button', 'vh-share', resCard);
     shareBtn.type = 'button';
     shareBtn.textContent = 'Share result';
+    const resActions = el('div', 'vh-res-actions', resCard);
+    resActions.hidden = true;             // until the integrator wires them
+    const retryBtn = el('button', 'primary', resActions);
+    retryBtn.type = 'button';
+    retryBtn.textContent = 'Retry';
+    const menuBtn = el('button', '', resActions);
+    menuBtn.type = 'button';
+    menuBtn.textContent = 'Menu';
+    let _onRetry = null;
+    let _onMenu = null;
+    retryBtn.addEventListener('click', () => { if (_onRetry) _onRetry(); });
+    menuBtn.addEventListener('click', () => { if (_onMenu) _onMenu(); });
 
     // ---- reduced motion (decoration only) --------------------------------
     let motionMq = null;
@@ -942,6 +1007,13 @@ export function createHUD(rootEl, options = {}) {
     }
 
     // ---- results ----------------------------------------------------------
+    /** Row labels/values are built from mode state, but they still land in
+     *  innerHTML, so they get escaped rather than trusted. */
+    function esc(v) {
+        return String(v == null ? '' : v)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     function rowTime(row) {
         if (!row) return null;
         if (Number.isFinite(row.totalMs)) return row.totalMs;
@@ -968,6 +1040,12 @@ export function createHUD(rootEl, options = {}) {
             if (list[i] && (list[i].isPlayer || list[i].player || list[i].index === 0)) { me = list[i]; break; }
         }
         if (!me && list.length) me = list[0];
+
+        // The card is shared with showModeResults, so the race path restores
+        // everything the mini-game path repurposes.
+        resKicker.textContent = 'Race complete';
+        resTotLab.textContent = 'Total';
+        resBest.hidden = true;
 
         const place = me && Number.isFinite(me.place) ? me.place
             : me && Number.isFinite(me.position) ? me.position
@@ -1023,6 +1101,98 @@ export function createHUD(rootEl, options = {}) {
         if (!reduced()) { void resCard.offsetWidth; resCard.classList.add('pop'); }
     }
 
+    /**
+     * Results for a mode that has no field and no lap splits.
+     *
+     * Same card, different contents — a mini-game reports ONE headline number
+     * and a couple of stat rows, and forcing that through the race's
+     * place/field/lap-split shape is how you end up with "1st" printed over a
+     * solo Ring Rush run and an empty rival table underneath it.
+     *
+     * @param {object} o
+     * @param {string} o.kicker        tab text, e.g. 'Ring Rush complete'
+     * @param {string} o.badge         the big number/word in the badge
+     * @param {string} [o.badgeSmall]  superscript inside the badge
+     * @param {number} [o.badgeTone]   1..4, picks the badge colour
+     * @param {string} o.totalLabel    label beside the headline value
+     * @param {string} o.totalText     the headline value, pre-formatted
+     * @param {boolean} [o.isNewBest]
+     * @param {string} [o.bestText]    e.g. 'Best 0:42.10'
+     * @param {Array<{label,value}>} [o.rows]
+     * @param {string} [o.shareText]
+     */
+    function showModeResults(o) {
+        const opts = o || {};
+        resKicker.textContent = opts.kicker || 'Run complete';
+
+        resPlaceNum.textContent = opts.badge == null ? '' : String(opts.badge);
+        resPlaceSuffix.textContent = opts.badgeSmall || '';
+        const tone = Number.isFinite(opts.badgeTone) ? opts.badgeTone : 1;
+        resPlace.className = 'vh-res-place p' + (tone >= 1 && tone <= 4 ? tone : 1);
+
+        resTotLab.textContent = opts.totalLabel || 'Result';
+        resTotal.textContent = opts.totalText == null ? '--' : String(opts.totalText);
+
+        if (opts.isNewBest || opts.bestText) {
+            resBest.hidden = false;
+            resBest.textContent = opts.isNewBest
+                ? ('New best' + (opts.bestText ? ' — ' + opts.bestText : '') + ' ★')
+                : opts.bestText;
+        } else {
+            resBest.hidden = true;
+        }
+
+        const rows = Array.isArray(opts.rows) ? opts.rows : [];
+        let html = '';
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i] || {};
+            html += '<div class="vh-res-row"><span class="n">' + esc(r.label)
+                + '</span><span class="t">' + esc(r.value) + '</span></div>';
+        }
+        resLaps.innerHTML = html;
+        resField.innerHTML = '';
+
+        _shareText = opts.shareText
+            || ('Birb Gauntlet — ' + (opts.kicker || 'run') + ': ' + (opts.totalText || ''));
+        shareBtn.textContent = 'Share result';
+
+        results.hidden = false;
+        _resultsOn = true;
+        resCard.classList.remove('pop');
+        if (!reduced()) { void resCard.offsetWidth; resCard.classList.add('pop'); }
+    }
+
+    /**
+     * The single contextual action. `label` of null hides the button.
+     *
+     * Called every frame from the loop, so it early-outs on an unchanged label
+     * — reassigning textContent on a live DOM node 60 times a second is a
+     * layout invalidation the phone does not need.
+     */
+    function setAction(label, tone) {
+        if (label === _actionLabel) return;
+        _actionLabel = label;
+        if (label == null) { actionBtn.hidden = true; return; }
+        actionBtn.textContent = label;
+        actionBtn.classList.toggle('calm', tone === 'calm');
+        actionBtn.hidden = false;
+    }
+
+    /** Who to call when the action button is tapped. */
+    function onAction(fn) {
+        _onAction = typeof fn === 'function' ? fn : null;
+    }
+
+    /** Wire the Retry / Menu buttons. Passing null hides that button. */
+    function setResultsActions(handlers) {
+        const h = handlers || {};
+        _onRetry = typeof h.onRetry === 'function' ? h.onRetry : null;
+        _onMenu = typeof h.onMenu === 'function' ? h.onMenu : null;
+        retryBtn.hidden = !_onRetry;
+        menuBtn.hidden = !_onMenu;
+        resActions.hidden = !_onRetry && !_onMenu;
+    }
+
     function hideResults() {
         if (!_resultsOn) return;
         _resultsOn = false;
@@ -1056,7 +1226,7 @@ export function createHUD(rootEl, options = {}) {
             if (motionMq.removeEventListener) motionMq.removeEventListener('change', applyMotion);
             else if (motionMq.removeListener) motionMq.removeListener(applyMotion);
         }
-        [tl, tr, countWrap, wrong, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
+        [tl, tr, countWrap, wrong, actionBtn, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
         rootEl.classList.remove('gauntlet-hud', 'vh-reduce');
         if (ownsStyle && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
         _srcRef = null;
@@ -1079,7 +1249,11 @@ export function createHUD(rootEl, options = {}) {
         showCountdown,
         hideCountdown,
         showWrongWay,
+        setAction,
+        onAction,
         showResults,
+        showModeResults,
+        setResultsActions,
         hideResults,
         minimap: { update: drawMap, resize },
         resize,

@@ -598,6 +598,9 @@ import { paintKeyArt } from '/gauntlet/src/ui/keyart.js';
 import {
     MODES, MODE_ORDER, DEFAULT_MODE, modeDef, isMode,
     bestKey, formatBest, advanceStreak, STREAK_KEY,
+    createRunState, resetRunState, runIsOver, runResult,
+    applyKillScore, decayCombo, nextWaveSpawnCount,
+    droneHunterRemaining, formatTime, evaluateBest,
 } from '/gauntlet/src/game/modes.js';
 
 const params = new URLSearchParams(location.search);
@@ -887,6 +890,8 @@ async function boot(requestedMode) {
         { createCourse }, raceLogic, { createAIRacers },
         { createFeatherFX }, { createScreenShake },
         { createHUD }, { createAudio }, { createInput },
+        { createNests }, { createRings }, { createDrones },
+        { createNesting }, { createAimRig }, { createRockets },
     ] = await Promise.all([
         import('/gauntlet/src/world/planet.js'),
         import('/gauntlet/src/world/sky.js'),
@@ -902,6 +907,12 @@ async function boot(requestedMode) {
         import('/gauntlet/src/ui/hud.js'),
         import('/gauntlet/src/audio/audio.js'),
         import('/gauntlet/src/input/touch.js'),
+        import('/gauntlet/src/world/nests.js'),
+        import('/gauntlet/src/world/rings.js'),
+        import('/gauntlet/src/nesting/drones.js'),
+        import('/gauntlet/src/nesting/nesting-system.js'),
+        import('/gauntlet/src/nesting/aim-rig.js'),
+        import('/gauntlet/src/nesting/rockets.js'),
     ]);
 
     const quality = pickQuality();
@@ -945,6 +956,41 @@ async function boot(requestedMode) {
 
     const shake = createScreenShake({ seed });
 
+    // Mini-game scratch. Declared here rather than with the loop's scratch
+    // block because the Turret Defense spawn below needs them at build time.
+    const _nestPos = new THREE.Vector3();
+    const _nestNormal = new THREE.Vector3();
+    const _muzzle = new THREE.Vector3();
+    const _fwdScratch = new THREE.Vector3();
+
+    // ---------------------------------------------------------------------
+    // Mode systems. Every one of these is gated on a CAPABILITY FLAG, never on
+    // a mode id — that is the whole point of the descriptor table. A mode that
+    // does not use a system never pays to build it.
+    // ---------------------------------------------------------------------
+    const nests = def.nesting ? createNests(THREE, { quality, seed }) : null;
+    if (nests) scene.add(nests.group);
+
+    const rings = def.rings ? createRings(THREE, { quality, seed, course }) : null;
+    if (rings) scene.add(rings.group);
+
+    const drones = def.drones !== 'off'
+        ? createDrones(THREE, { quality, seed, nests }) : null;
+    if (drones) {
+        scene.add(drones.group);
+        drones.setBehaviour(def.drones);
+    }
+
+    const rockets = def.nesting ? createRockets(THREE, { quality }) : null;
+    if (rockets) scene.add(rockets.group);
+
+    // `driveCamera` is what populates `viewQuaternion` — without it the rig
+    // computes the aim but never the KICKED view orientation, and a camera
+    // copying it gets an identity rotation and stares off into the terrain.
+    const aim = def.nesting ? createAimRig(THREE, { camera, driveCamera: true, quality }) : null;
+    if (aim) { scene.add(aim.group); aim.group.visible = false; }
+
+
     // --- player ------------------------------------------------------------
     const bird = createBird(THREE, {
         bodyColor: PALETTE.birdPlayer,
@@ -981,6 +1027,25 @@ async function boot(requestedMode) {
         flight.setSpeedScale(0.8);
     }
 
+    const nesting = (nests && def.nesting)
+        ? createNesting(THREE, { flight, nests, sphereRadius: PLANET_RADIUS })
+        : null;
+
+    // Turret Defense opens ON the nest you are defending. Spawning on the
+    // racing line instead means wave one converges on a tree somewhere over
+    // the horizon and the mode is lost before the player finds it — the fight
+    // has to be where the player is standing, and the mode is called Defense.
+    if (nests && def.drones === 'waves') {
+        nests.positionOf(0, _nestPos);
+        nests.normalOf(0, _nestNormal);
+        // Just outside land range and above, so the opening is a short glide
+        // down onto the bowl rather than an instant snap into the seat.
+        flight.position.copy(_nestPos).addScaledVector(_nestNormal, 18);
+        _fwdScratch.set(0, 1, 0).cross(_nestNormal);
+        if (_fwdScratch.lengthSq() < 1e-6) _fwdScratch.set(1, 0, 0).cross(_nestNormal);
+        flight.setHeading(_fwdScratch.x, _fwdScratch.y, _fwdScratch.z);
+    }
+
     const chase = createChaseCamera(THREE, camera, { quality });
     chase.snapToTarget(flight.position, flight.quaternion);
 
@@ -1005,6 +1070,15 @@ async function boot(requestedMode) {
         gateCount: course.gateCount,
         racerCount: 4,
     });
+
+    // --- mini-game run state ------------------------------------------------
+    // One state object for every mode. `ringsTotal` is synced from the number
+    // of rings that ACTUALLY spawned, never from a constant — Birb Mobile
+    // shipped a Ring Rush that checked 18 collected rings against a hardcoded
+    // 10 and could therefore never be completed.
+    const run = createRunState();
+    resetRunState(run, mode);
+    if (rings) run.ringsTotal = rings.count;
 
     // --- ui / audio / input -------------------------------------------------
     // The on-screen stick and boost pill own the bottom corners, so the HUD's
@@ -1134,9 +1208,18 @@ async function boot(requestedMode) {
             chase.setMode('chase');
         }
 
+        // The nesting state machine moves the bird itself during the landing
+        // glide, while seated, and through the launch. It has to step BEFORE
+        // the flight model so `drivesFlight` describes this frame, and the
+        // flight model must not also integrate on those frames — two systems
+        // writing one position is how a bird ends up vibrating between a nest
+        // and the sky.
+        if (nesting) nesting.update(dt, flight.position);
+        const nestingDrives = Boolean(nesting && nesting.drivesFlight);
+
         // Player physics only runs once the countdown clears; the bird holds
         // its grid pose under the cinematic orbit until then.
-        const controlling = phase === 'racing';
+        const controlling = phase === 'racing' && !nestingDrives;
         const pose = flight.tick(
             controlling ? input.value : ZERO_INPUT,
             controlling ? dt : 0
@@ -1178,6 +1261,10 @@ async function boot(requestedMode) {
             _up.x, _up.y, _up.z,
             PALETTE.featherPlayer
         );
+        // Everything a mode switched on, in one place. Runs before the camera
+        // so a knockdown shake or a turret takeover lands on THIS frame.
+        updateModeSystems(dt, pose);
+
         feathers.update(dt);
         shake.update(dt);
 
@@ -1186,9 +1273,27 @@ async function boot(requestedMode) {
         course.update(dt);
 
         if (!debugCamFrozen) {
-            chase.update(dt, pose.position, pose.quaternion, animState.speed01, shake.value);
+            if (turretView) {
+                // Manning the turret is a FIRST-PERSON job. A chase camera
+                // behind a seated bird would put the bird's own body between
+                // the player and everything they are trying to shoot, and the
+                // rig's rate control is unreadable unless the view turns with
+                // the barrel.
+                // Behind and slightly above the mount, pulled back along the
+                // barrel — the gun stays in frame. A true eye-at-the-muzzle
+                // view sounds right and reads as a floating reticle: you lose
+                // the recoil punch and the mount's lean, which are most of
+                // what makes the turret feel like a machine.
+                camera.position.copy(aim.group.position)
+                    .addScaledVector(_nestNormal, 6.5)
+                    .addScaledVector(aim.aimForward, -14);
+                camera.quaternion.copy(aim.viewQuaternion);
+            } else {
+                chase.update(dt, pose.position, pose.quaternion, animState.speed01, shake.value);
+            }
         }
-        audio.setFlightSpeed(animState.speed01);
+        // The wind bed follows the bird, and a seated bird is not moving.
+        audio.setFlightSpeed(turretView ? 0 : animState.speed01);
 
         // --- hud --------------------------------------------------------------
         // Race state lives in typed arrays keyed by racer index, not in
@@ -1202,6 +1307,7 @@ async function boot(requestedMode) {
         // when the player drags the control to the other side of the screen.
         input.setBoost01(flight.boost01 || 0);
         if (flight.boostStarted) { input.pulseBoost(); audio.boost(); }
+        updateModeHUD();
         if (def.course) hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
         hud.showWrongWay(def.course && phase === 'racing' && race.wrongWay[0] === 1);
 
@@ -1229,6 +1335,312 @@ async function boot(requestedMode) {
     }
 
     const ZERO_INPUT = { x: 0, y: 0, boost: false };
+
+    // =======================================================================
+    // Mini-game systems
+    //
+    // Every branch below is gated on a CAPABILITY FLAG from the mode
+    // descriptor, never on a mode id. That is what lets Casual carry ambient
+    // drones and nesting without being a special case, and it is why adding a
+    // mode is a table entry rather than a sweep through this file.
+    // =======================================================================
+    /** Normalised speed a ram must carry to destroy a drone rather than bounce. */
+    const HUNT_STRIKE_SPEED01 = 0.5;
+
+    let turretView = false;          // camera is on the gun, not behind the bird
+    let wasNested = false;
+    let boostWasDown = false;
+    let knockTimer = 0;              // post-collision control lockout, seconds
+    let waveBreak = 0;               // countdown between Turret Defense waves
+    let ringHintTimer = 0;
+
+    // Rocket detonations report through the module rather than being inferred
+    // from the return count, so the sound and the score land at the blast,
+    // not on the frame the loop happens to notice it.
+    if (rockets) {
+        rockets.onHit = (x, y, z, targetIndex) => {
+            audio.explode(targetIndex >= 0 ? 1 : 0.55);
+            if (targetIndex < 0) return;                  // dirt, not a kill
+            if (!drones || !drones.isAlive(targetIndex)) return;
+            drones.killAt(targetIndex);
+            const gained = applyKillScore(run, 100);
+            run.waveKills++;
+            audio.kill(run.combo);
+            if (gained.after > gained.before) shake.add(0.22);
+            feathers.burst(x, y, z, 16, PALETTE.sparkCyan);
+        };
+    }
+
+    /** Seat the aim rig on nest `index` and point it down the bird's heading. */
+    function mountTurret(index) {
+        nests.positionOf(index, _nestPos);
+        nests.normalOf(index, _nestNormal);
+        // The gun sits on the rim of the bowl, at the bird's eye height.
+        aim.group.position.copy(_nestPos).addScaledVector(_nestNormal, 1.4);
+        _fwdScratch.set(0, 0, -1).applyQuaternion(flight.quaternion);
+        aim.reset(_nestNormal, _fwdScratch);
+        aim.setActive(true);
+        turretView = true;
+        // The player IS the bird, and the turret view sits where the bird is
+        // sitting. Leaving it visible puts a large opaque bird between the
+        // camera and everything worth shooting.
+        bird.group.visible = false;
+        aim.group.visible = true;
+        input.setBoostLabel('FIRE');
+    }
+
+    function dismountTurret() {
+        if (aim) { aim.setActive(false); aim.group.visible = false; }
+        turretView = false;
+        bird.group.visible = true;
+        input.setBoostLabel('BOOST');
+    }
+
+    function updateModeSystems(dt, pose) {
+        if (phase !== 'racing') return;
+
+        if (knockTimer > 0) knockTimer -= dt;
+
+        // --- nesting: mount / dismount transitions --------------------------
+        if (nesting) {
+            const nested = nesting.isNested();
+            if (nested && !wasNested) mountTurret(nesting.activeNest);
+            else if (!nested && wasNested) dismountTurret();
+            wasNested = nested;
+        }
+
+        // --- turret: aim with the stick, fire with the pill -----------------
+        if (turretView && aim) {
+            aim.update(dt, input.value);
+            const down = Boolean(input.value.boost);
+            if (down && !boostWasDown && rockets && rockets.canFire()) {
+                aim.getMuzzlePosition(_muzzle);
+                const f = aim.aimForward;
+                if (rockets.fire(_muzzle.x, _muzzle.y, _muzzle.z, f.x, f.y, f.z)) {
+                    aim.fire();
+                    audio.rocketFire();
+                    shake.add(0.3);
+                }
+            }
+            boostWasDown = down;
+        } else {
+            boostWasDown = Boolean(input.value.boost);
+        }
+        if (rockets) rockets.update(dt, drones ? drones.targets : null);
+
+        // --- rings ----------------------------------------------------------
+        if (rings) {
+            rings.update(dt);
+            const hit = rings.collect(pose.position.x, pose.position.y, pose.position.z);
+            if (hit >= 0) {
+                // The clock starts on the FIRST ring, not on the countdown:
+                // the rings are scattered along a circuit you have to reach
+                // first, and timing the flight out to it would score the spawn
+                // point rather than the run.
+                run.started = true;
+                run.ringsCollected++;
+                rings.positionOf(hit, _tmpVec);
+                feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 18, PALETTE.sparkCyan);
+                audio.ring(run.ringsCollected - 1);
+                flight.chargeBoost();
+                shake.add(0.12);
+                ringHintTimer = 1.2;
+            }
+            if (run.started && !run.finished) run.time += dt;
+            if (ringHintTimer > 0) ringHintTimer -= dt;
+        }
+
+        // --- drones ---------------------------------------------------------
+        if (drones) {
+            const d = drones.update(dt, pose.position, 1.6);
+
+            if (d.hitBird >= 0 && knockTimer <= 0) {
+                drones.positionOf(d.hitBird, _tmpVec);
+                // A ram only counts as a strike if you were actually MOVING.
+                // Hunt drones close on the bird, so without this a player who
+                // never touches the stick still scores — the drones fly into
+                // them. Cruise sits at 0.39, so the gate means you have to
+                // dive or boost into the kill, which is the whole mode.
+                const strike = animState.speed01 >= HUNT_STRIKE_SPEED01;
+                if (def.drones === 'hunt' && strike) {
+                    // Drone Hunter: the ram IS the weapon.
+                    drones.killAt(d.hitBird);
+                    const gained = applyKillScore(run, 120);
+                    audio.kill(run.combo);
+                    audio.explode(0.9);
+                    if (rockets) rockets.explodeAt(_tmpVec.x, _tmpVec.y, _tmpVec.z, 1);
+                    feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 20, PALETTE.sparkCyan);
+                    shake.add(gained.after > gained.before ? 0.42 : 0.3);
+                    knockTimer = 0.12;
+                } else {
+                    // Everywhere else a drone is an obstacle: a shove and a
+                    // scare, never a death. Casual explicitly cannot fail.
+                    audio.impact();
+                    feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 14, PALETTE.featherPlayer);
+                    shake.add(0.5);
+                    flight.speed = Math.max(flight.cfg.minSpeed, flight.speed * 0.55);
+                    knockTimer = 1.0;
+                }
+            }
+
+            // Wave drones that reached the nest cost a life.
+            if (d.nestHits > 0 && def.canFail) {
+                run.lives -= d.nestHits;
+                audio.alarm();
+                shake.add(0.7);
+                if (rockets) rockets.explodeAt(d.nestHitX, d.nestHitY, d.nestHitZ, 0.9);
+            }
+        }
+
+        // --- turret defense: waves ------------------------------------------
+        if (def.drones === 'waves' && drones && nests && run.lives > 0) {
+            // The wave targets the nest the player is actually holding, so
+            // landing somewhere else relocates the fight rather than leaving
+            // the player defending an empty tree.
+            const held = nesting && nesting.activeNest >= 0 ? nesting.activeNest : 0;
+            const manned = Boolean(nesting && nesting.isNested());
+
+            if (run.waveSpawnedThisWave === 0) {
+                if (waveBreak > 0) {
+                    waveBreak -= dt;
+                } else if (manned || run.wave > 1) {
+                    // WAVE ONE WAITS FOR THE GUN. The mode opens mid-air above
+                    // the nest, and the approach takes a couple of seconds; a
+                    // wave launched at t=0 spends that whole time closing on an
+                    // undefended nest, so the player's first act is watching
+                    // lives disappear for something they could not have
+                    // prevented. Later waves do not wait — leaving the gun
+                    // mid-fight is a choice, and it should cost.
+                    run.waveSpawnCount = nextWaveSpawnCount(run.wave);
+                    run.waveSpawnedThisWave = drones.spawnWave(run.waveSpawnCount, held);
+                    run.waveKills = 0;
+                }
+            } else if (drones.alive === 0) {
+                // Wave cleared — whether by rockets or by drones reaching the
+                // nest. Either way the next one is coming.
+                run.wave++;
+                run.waveSpawnedThisWave = 0;
+                waveBreak = 3;
+                audio.horn();
+            }
+        }
+
+        // --- timed modes -----------------------------------------------------
+        if (def.timed && !def.rivals && !def.rings && !run.finished) run.time += dt;
+        if (def.drones === 'hunt') decayCombo(run, dt);
+
+        if (!run.finished && runIsOver(run)) finishRun();
+    }
+
+    /**
+     * Paint whatever chrome this mode switched on. The chips themselves were
+     * shown or hidden once by `setModeChrome`; this only writes values, and
+     * only for the ones that exist.
+     */
+    function updateModeHUD() {
+        if (def.rings) {
+            hud.setRings(run.ringsCollected, run.ringsTotal);
+            hud.setClock(formatTime(run.time));
+        } else if (def.timed && !def.rivals) {
+            hud.setClock(formatTime(droneHunterRemaining(run.time)));
+        }
+        if (def.scoreKind === 'score') hud.setScore(run.score);
+        if (def.drones === 'hunt') hud.setCombo(run.combo);
+        if (def.drones === 'waves') hud.setWave(run.wave);
+        if (def.canFail) hud.setLives(run.lives);
+
+        // One contextual action, driven off nesting state rather than a mode
+        // id — which is why Casual gets the turret for free.
+        if (!nesting || phase !== 'racing') {
+            hud.setAction(null);
+        } else if (nesting.isNested()) {
+            hud.setAction('Take off', 'calm');
+        } else if (nesting.state === 'landing') {
+            // Deliberately inert: the glide is a committed manoeuvre, and both
+            // state-machine entry points refuse from here anyway. The label is
+            // there so the button does not vanish for the two seconds the
+            // approach takes and leave the player thinking they missed it.
+            hud.setAction('Landing…', 'calm');
+        } else if (nesting.nearNest >= 0) {
+            hud.setAction('Land');
+        } else {
+            hud.setAction(null);
+        }
+    }
+
+    /**
+     * Land the run: freeze the systems, work out whether it beat the saved
+     * best, and put the card up. Persisting happens here and only here, so a
+     * mid-run reload can never write a partial score.
+     */
+    function finishRun() {
+        run.finished = true;
+        run.active = false;
+        phase = 'finished';
+        dismountTurret();
+        input.setVisible(false);
+        if (drones) drones.clear();
+
+        // A time is only a record if the run it timed was actually COMPLETED.
+        // Ring Rush scores lower-is-better, so an abandoned run with two rings
+        // and a two-second clock would otherwise take the top of the board and
+        // never be beaten. Score/wave modes have no such hole — you cannot end
+        // early with a high number.
+        const completed = !def.rings || run.ringsCollected >= run.ringsTotal;
+        const value = completed ? runResult(run) : NaN;
+        const key = bestKey(mode);
+        let saved = null;
+        try { saved = localStorage.getItem(key); } catch { /* private mode */ }
+        const verdict = evaluateBest(saved, value, mode);
+        if (verdict.isNewBest) {
+            try { localStorage.setItem(key, String(verdict.bestValue)); } catch { /* ignore */ }
+        }
+
+        const lost = def.canFail && run.lives <= 0;
+        audio.finish(lost ? 4 : 1);
+        chase.setMode('results');
+
+        const rows = [];
+        let badge = '', badgeSmall = '', totalLabel = 'Result', totalText = '--';
+        if (def.rings) {
+            badge = String(run.ringsCollected);
+            badgeSmall = '/' + run.ringsTotal;
+            totalLabel = 'Time';
+            totalText = formatTime(run.time);
+            rows.push({ label: 'Rings', value: run.ringsCollected + ' / ' + run.ringsTotal });
+        } else if (def.scoreKind === 'score') {
+            badge = String(run.score);
+            totalLabel = 'Drones';
+            totalText = String(run.dronesDestroyed);
+            rows.push({ label: 'Score', value: run.score });
+            rows.push({ label: 'Best combo', value: '×' + Math.floor(run.combo) });
+        } else if (def.scoreKind === 'wave') {
+            badge = String(run.wave);
+            badgeSmall = 'WAVE';
+            totalLabel = 'Kills';
+            totalText = String(run.dronesDestroyed);
+            rows.push({ label: 'Wave reached', value: run.wave });
+            rows.push({ label: 'Score', value: run.score });
+        }
+
+        // An unscored run still deserves to see the standing record.
+        let bestForDisplay = verdict.bestValue;
+        if (bestForDisplay == null && Number.isFinite(Number(saved))) bestForDisplay = Number(saved);
+        const bestText = formatBest(mode, bestForDisplay);
+
+        hud.showModeResults({
+            kicker: lost ? 'Nest overrun'
+                : (completed ? def.label + ' complete' : 'Run ended'),
+            badge, badgeSmall,
+            badgeTone: lost ? 4 : 1,
+            totalLabel, totalText,
+            isNewBest: verdict.isNewBest,
+            bestText: bestText ? 'Best ' + bestText : null,
+            rows,
+            shareText: 'Birb Gauntlet — ' + def.label + ': ' + totalText
+                + (badge ? ' (' + badge + badgeSmall + ')' : '') + ' birbmobile.vercel.app/gauntlet',
+        });
+    }
 
     function checkGates(racerIndex, position) {
         const g = race.nextGate[racerIndex];
@@ -1287,6 +1699,19 @@ async function boot(requestedMode) {
         return rows;
     }
 
+    // The one contextual button. Both calls are guarded by the state machine,
+    // so a stale tap during a transition is a no-op rather than a bug.
+    hud.onAction(() => {
+        if (!nesting) return;
+        if (nesting.isNested()) nesting.takeOff();
+        else nesting.requestLand();
+    });
+
+    hud.setResultsActions({
+        onRetry() { location.href = '?autostart=1&mode=' + encodeURIComponent(mode); },
+        onMenu() { location.href = location.pathname + '?menu=1'; },
+    });
+
     requestAnimationFrame(frame);
 
     // ---------------------------------------------------------------------
@@ -1339,6 +1764,14 @@ async function boot(requestedMode) {
     game = {
         THREE, renderer, scene, camera, flight, course, race, ai, hud, audio, input, quality,
         mode, modeDef: def,
+        // Mini-game systems, for the probes. Null when the mode did not build
+        // them — which is itself the thing a capability-flag probe checks.
+        run, rings, drones, nests, nesting, rockets, aim,
+        get turretView() { return turretView; },
+        /** Force the run to its end condition, so a probe can shoot results. */
+        debugFinish() { if (!run.finished) finishRun(); },
+        /** Land on the nearest nest, for capturing the turret view. */
+        debugLand() { return nesting ? nesting.requestLand() : false; },
         /**
          * Drop the green light immediately. The screenshot harness runs on
          * software GL at a few frames a second, and the loop clamps dt to 50ms
@@ -1386,6 +1819,21 @@ async function boot(requestedMode) {
         triangles: renderer.info.render.triangles,
         fps: Math.round(fps),
         quality,
+        // Run state travels with the frame stats so a capture is evidence of
+        // what the MODE did, not just of what rendered.
+        mode, phase,
+        elapsed: Math.round(elapsed * 10) / 10,
+        nestState: nesting ? nesting.state : null,
+        turretView,
+        dronesAlive: drones ? drones.alive : 0,
+        run: {
+            time: Math.round(run.time * 10) / 10,
+            score: run.score, combo: run.combo,
+            rings: run.ringsCollected + '/' + run.ringsTotal,
+            kills: run.dronesDestroyed,
+            wave: run.wave, lives: run.lives,
+            finished: run.finished,
+        },
     });
     window.__GAUNTLET_READY = true;
 }

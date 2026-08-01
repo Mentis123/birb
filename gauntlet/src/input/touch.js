@@ -249,9 +249,10 @@ export function createInput(rootEl, opts = {}) {
     boostPill.innerHTML =
         '<i class="vi-boost-charge"></i>'
         + '<i class="vi-boost-ticks"></i>'
-        + '<span class="vi-chev">\u00bb</span><span>BOOST</span>'
+        + '<span class="vi-chev">\u00bb</span><span class="vi-boost-label">BOOST</span>'
         + '<i class="vi-boost-grip" aria-label="Drag to move the boost button"></i>';
     const boostCharge = boostPill.querySelector('.vi-boost-charge');
+    const boostLabel = boostPill.querySelector('.vi-boost-label');
 
     const ripple = document.createElement('div');
     ripple.className = 'vi-ripple';
@@ -622,6 +623,16 @@ export function createInput(rootEl, opts = {}) {
             boostCharge.style.width = (q * 100).toFixed(1) + '%';
             // Dim when a tap is unaffordable — one quarter of the meter.
             boostPill.classList.toggle('is-cold', q < 0.25);
+        },
+
+        /**
+         * Re-label the pill. Manning the turret reuses this button as FIRE:
+         * the player has already dragged it to where their thumb lives, and
+         * spawning a second button somewhere else would throw that away — plus
+         * boost means nothing while you are sitting in a nest.
+         */
+        setBoostLabel(text) {
+            boostLabel.textContent = text || 'BOOST';
         },
 
         /** Put the boost button back where it started. */
