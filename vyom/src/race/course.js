@@ -134,11 +134,35 @@ const TIER = {
 };
 
 /** Ribbon cross-section. Half-width and half-thickness, world units. */
-const RIBBON_HALF_W = 4.0;
-const RIBBON_HALF_H = 0.55;
-const GLOW_SPREAD = 3.2;      // glow strip half-width, as a multiple of the beam
+const RIBBON_HALF_W = 4.6;
+const RIBBON_HALF_H = 0.8;
+const GLOW_SPREAD = 2.4;      // glow skirt half-width, as a multiple of the beam
 const GATE_RADIUS = 10.0;
 const GATE_TUBE = 0.85;
+
+/**
+ * Minimum clearance between the racing line and the flight floor.
+ * terrain.js guarantees `surfaceHeight >= continentalHeight - detailAmplitude`
+ * (3.4), so anything above ~4 cannot clip the rendered mesh. 5.5 leaves a
+ * visible gap so the ribbon reads as flying over the ground, not painted on.
+ */
+const MIN_CLEARANCE = 5.5;
+
+/**
+ * Radial low-pass passes applied to the racing line.
+ *
+ * Following `floorRadius` literally is wrong: the continental field's finest
+ * octave has an ~11-unit wavelength, so a line pinned at a constant altitude
+ * above it acquires vertical kinks with a radius of curvature of a few units.
+ * Measured on the first build, that put PEAK CURVATURE OF 11 deg/unit ON THE
+ * "STRAIGHT" — i.e. the straight was not straight, it was corrugated. So the
+ * radius profile is box-smoothed and then clamped back up above the floor,
+ * repeatedly: smoothing removes the corrugation, the clamp restores the
+ * invariant, and a few iterations converge on a smooth envelope that still
+ * dives into the canyons (which are 50+ units wide and survive the filter).
+ */
+const RADIUS_SMOOTH_PASSES = 5;
+const RADIUS_SMOOTH_HALFWIDTH = 7;
 
 // ---------------------------------------------------------------------------
 // Build-time helpers (allocation is fine here — none of this runs in update)
@@ -269,6 +293,42 @@ function pushBox(P, N, C, cx, cy, cz, hx, hy, hz, r, g, b) {
     }
 }
 
+/**
+ * A tapered, alpha-faded light shaft on the unit Y axis (y in [0,1], radius 1
+ * at the widest ring). Colour comes from `instanceColor`; the vertex colour
+ * carries only the alpha envelope, so one geometry serves every gate.
+ */
+function buildLightShaft(THREE, sides, ys, alphas, radii) {
+    const rings = ys.length;
+    const pos = [], col = [];
+    for (let s = 0; s < sides; s++) {
+        const a0 = (s / sides) * Math.PI * 2;
+        const a1 = ((s + 1) / sides) * Math.PI * 2;
+        const c0 = Math.cos(a0), s0 = Math.sin(a0);
+        const c1 = Math.cos(a1), s1 = Math.sin(a1);
+        for (let r = 0; r < rings - 1; r++) {
+            const yA = ys[r], yB = ys[r + 1];
+            const rA = radii[r], rB = radii[r + 1];
+            const aA = alphas[r], aB = alphas[r + 1];
+            const v = [
+                [c0 * rA, yA, s0 * rA, aA], [c1 * rA, yA, s1 * rA, aA],
+                [c1 * rB, yB, s1 * rB, aB], [c0 * rB, yB, s0 * rB, aB],
+            ];
+            const order = [0, 1, 2, 0, 2, 3];
+            for (let k = 0; k < 6; k++) {
+                const p = v[order[k]];
+                pos.push(p[0], p[1], p[2]);
+                col.push(1, 1, 1, p[3]);
+            }
+        }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    geo.computeBoundingSphere();
+    return geo;
+}
+
 // ---------------------------------------------------------------------------
 // createCourse
 // ---------------------------------------------------------------------------
@@ -303,11 +363,16 @@ export function createCourse(THREE, opts = {}) {
     }
 
     const SUB = 22;                       // dense samples per authored segment
-    const dense = [];
+    const nD = nC * SUB;
+    const dirX = new Float64Array(nD), dirY = new Float64Array(nD), dirZ = new Float64Array(nD);
+    const floorR = new Float64Array(nD);
+    const radius = new Float64Array(nD);
+    const radiusTmp = new Float64Array(nD);
     const denseIndexOfControl = new Int32Array(nC);
-    for (let i = 0; i < nC; i++) {
-        denseIndexOfControl[i] = dense.length;
-        for (let k = 0; k < SUB; k++) {
+
+    for (let i = 0, d = 0; i < nC; i++) {
+        denseIndexOfControl[i] = d;
+        for (let k = 0; k < SUB; k++, d++) {
             const t = k / SUB;
             const a = cr(aVal[i], aVal[i + 1], aVal[i + 2], aVal[i + 3], t) * DEG;
             const b = cr(bVal[i], bVal[i + 1], bVal[i + 2], bVal[i + 3], t);
@@ -318,10 +383,30 @@ export function createCourse(THREE, opts = {}) {
             let z = F[2] * ca + F[5] * sa + F[8] * b;
             const inv = 1 / Math.hypot(x, y, z);
             x *= inv; y *= inv; z *= inv;
+            dirX[d] = x; dirY[d] = y; dirZ[d] = z;
             // THE terrain-following line: local floor + authored altitude.
-            const r = floorRadius(x, y, z) + Math.max(4, alt);
-            dense.push(new THREE.Vector3(x * r, y * r, z * r));
+            floorR[d] = floorRadius(x, y, z);
+            radius[d] = floorR[d] + Math.max(MIN_CLEARANCE, alt);
         }
+    }
+
+    // De-corrugate the radial profile (see RADIUS_SMOOTH_PASSES).
+    for (let pass = 0; pass < RADIUS_SMOOTH_PASSES; pass++) {
+        const h = RADIUS_SMOOTH_HALFWIDTH;
+        for (let i = 0; i < nD; i++) {
+            let sum = 0;
+            for (let k = -h; k <= h; k++) sum += radius[((i + k) % nD + nD) % nD];
+            radiusTmp[i] = sum / (2 * h + 1);
+        }
+        for (let i = 0; i < nD; i++) {
+            const floorMin = floorR[i] + MIN_CLEARANCE;
+            radius[i] = radiusTmp[i] > floorMin ? radiusTmp[i] : floorMin;
+        }
+    }
+
+    const dense = new Array(nD);
+    for (let i = 0; i < nD; i++) {
+        dense[i] = new THREE.Vector3(dirX[i] * radius[i], dirY[i] * radius[i], dirZ[i] * radius[i]);
     }
 
     const curve = new THREE.CatmullRomCurve3(dense, true, 'centripetal', 0.5);
@@ -465,17 +550,20 @@ export function createCourse(THREE, opts = {}) {
             const top = lit ? colStripe : colBase;
             const side = lit ? colBase : colEdgeDim;
 
+            // Quad winding: (a0, a1, b1) then (a0, b1, b0). With the section
+            // running CCW about +tangent, that order faces OUT of the beam,
+            // which is what the explicit normal below also says.
+            const quad = [0, 1, 3, 0, 3, 2]; // indices into [a0, a1, b0, b1]
             for (let k = 0; k < 4; k++) {
                 const k2 = (k + 1) & 3;
-                const a0 = A[k], a1 = A[k2], b0 = B[k], b1 = B[k2];
-                // Face normal from the quad (all four corners are near-planar).
-                ab.copy(b0).sub(a0); ad.copy(a1).sub(a0);
-                nrm.copy(ad).cross(ab).normalize();
-                const c = (k === 0 || k === 3) ? side : (k === 1 ? top : side);
+                const corners = [A[k], A[k2], B[k], B[k2]];
+                ab.copy(corners[2]).sub(corners[0]);   // along the line
+                ad.copy(corners[1]).sub(corners[0]);   // around the section
+                nrm.copy(ad).cross(ab).normalize();    // outward
+                const c = k === 1 ? top : side;
                 const cr_ = c.r, cg_ = c.g, cb_ = c.b;
-                const quad = [a0, b0, b1, a0, b1, a1];
                 for (let q = 0; q < 6; q++) {
-                    const v = quad[q];
+                    const v = corners[quad[q]];
                     ribbonPos[vp] = v.x; ribbonPos[vp + 1] = v.y; ribbonPos[vp + 2] = v.z;
                     ribbonNrm[vp] = nrm.x; ribbonNrm[vp + 1] = nrm.y; ribbonNrm[vp + 2] = nrm.z;
                     ribbonCol[vp] = cr_; ribbonCol[vp + 1] = cg_; ribbonCol[vp + 2] = cb_;
@@ -483,30 +571,29 @@ export function createCourse(THREE, opts = {}) {
                 }
             }
 
-            // Glow strip: a wide additive skirt at the ribbon's own altitude,
-            // alpha 0 at the edges. This is what makes the line legible from
-            // bird altitude half a planet away.
+            // Glow skirt: a wide additive strip at the ribbon's own altitude,
+            // alpha 0 at both edges. This is what keeps the line legible from
+            // bird altitude a long way out, where the beam is sub-pixel.
             const w = RIBBON_HALF_W * GLOW_SPREAD;
             const gA = [
-                p0.x + e1a.x * -w, p0.y + e1a.y * -w, p0.z + e1a.z * -w,
+                p0.x - e1a.x * w, p0.y - e1a.y * w, p0.z - e1a.z * w,
                 p0.x, p0.y, p0.z,
                 p0.x + e1a.x * w, p0.y + e1a.y * w, p0.z + e1a.z * w,
             ];
             const gB = [
-                p1.x + e1b.x * -w, p1.y + e1b.y * -w, p1.z + e1b.z * -w,
+                p1.x - e1b.x * w, p1.y - e1b.y * w, p1.z - e1b.z * w,
                 p1.x, p1.y, p1.z,
                 p1.x + e1b.x * w, p1.y + e1b.y * w, p1.z + e1b.z * w,
             ];
-            const alpha = [0, lit ? 0.5 : 0.3, 0];
+            // Additive over a bright golden-hour sky blows out fast: the first
+            // captured frame at 0.55 was a solid white wedge that swallowed the
+            // beam it was supposed to be haloing.
+            const alpha = [0, lit ? 0.26 : 0.14, 0];
             for (let h = 0; h < 2; h++) {
-                const idx = [[h, h + 1, h + 1, h, h + 1, h], null];
-                const order = [
-                    [gA, h], [gB, h], [gB, h + 1],
-                    [gA, h], [gB, h + 1], [gA, h + 1],
-                ];
-                void idx;
+                const srcs = [gA, gA, gB, gA, gB, gB];
+                const cols = [h, h + 1, h + 1, h, h + 1, h];
                 for (let q = 0; q < 6; q++) {
-                    const src = order[q][0], ci = order[q][1];
+                    const src = srcs[q], ci = cols[q];
                     glowPos[gp] = src[ci * 3]; glowPos[gp + 1] = src[ci * 3 + 1]; glowPos[gp + 2] = src[ci * 3 + 2];
                     gp += 3;
                     glowCol[gc] = glowC.r; glowCol[gc + 1] = glowC.g; glowCol[gc + 2] = glowC.b;
@@ -526,7 +613,7 @@ export function createCourse(THREE, opts = {}) {
         ramp: 'emissive',
         vertexColors: true,
         emissive: PALETTE.ribbon,
-        emissiveIntensity: 0.55,
+        emissiveIntensity: 0.35,
         rimColor: PALETTE.ribbonEdge,
         rimStrength: 0.85,
         rimThreshold: 0.35,
@@ -564,12 +651,17 @@ export function createCourse(THREE, opts = {}) {
 
     const ringGeo = new THREE.TorusGeometry(GATE_RADIUS, GATE_TUBE, tier.ringRadial, tier.ringTubular);
     ensureSmoothNormals(THREE, ringGeo);
+    // No `emissive` here: it is per-material, and gate colour has to be
+    // per-instance (idle / next / passed), so a constant emissive would just
+    // wash a fixed tint over all three states. The glow comes from a strong
+    // rim instead, which also gives the ring a hard cel silhouette.
     const ringMat = createToonMaterial(THREE, {
         ramp: 'graphic',
-        emissive: 0x0d3a33,
-        emissiveIntensity: 0.9,
-        rimStrength: 0.7,
-        specStrength: 0.35,
+        rimColor: PALETTE.ribbonEdge,
+        rimStrength: 0.95,
+        rimPower: 1.9,
+        rimThreshold: 0.34,
+        specStrength: 0.45,
         specThreshold: 0.5,
     });
     const rings = new THREE.InstancedMesh(ringGeo, ringMat, gateCount);
@@ -588,12 +680,17 @@ export function createCourse(THREE, opts = {}) {
     group.add(ringOutlines);
     disposables.push(ringOutlineMat);
 
-    // Light pillars: a beam of light from the ground up through each gate, so a
-    // gate that is over the horizon still tells you where it is.
+    // Light pillars: a shaft of light through each gate, so a gate that is
+    // still over the horizon tells you where it is.
+    //
+    // Built by hand rather than from CylinderGeometry because the alpha has to
+    // fade to nothing at both ends — a constant-alpha additive cylinder reads
+    // as a solid white slab clipped off at the top and bottom, which is what
+    // the first captured frame showed.
     let pillars = null;
-    const pillarGeo = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
+    const pillarGeo = buildLightShaft(THREE, 7, [0, 0.34, 0.62, 1], [0, 0.30, 0.16, 0], [1.35, 1.0, 0.72, 0.35]);
     const pillarMat = new THREE.MeshBasicMaterial({
-        transparent: true, opacity: 0.34, depthWrite: false,
+        vertexColors: true, transparent: true, depthWrite: false,
         blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
     });
     if (tier.pillars) {
@@ -608,6 +705,7 @@ export function createCourse(THREE, opts = {}) {
     {
         const p = new THREE.Vector3(), tan = new THREE.Vector3();
         const up = new THREE.Vector3(), ex = new THREE.Vector3(), ey = new THREE.Vector3();
+        const pex = new THREE.Vector3(), pez = new THREE.Vector3();
         const m = new THREE.Matrix4(), sc = new THREE.Matrix4();
         const pm = new THREE.Matrix4();
         const c = new THREE.Color(PALETTE.gateIdle);
@@ -629,16 +727,15 @@ export function createCourse(THREE, opts = {}) {
             rings.setColorAt(i, c);
 
             if (pillars) {
-                const groundR = floorRadius(up.x, up.y, up.z) - 6;
-                const topR = p.length() + 26;
-                const h = topR - groundR;
-                const midR = (topR + groundR) * 0.5;
-                ex.copy(up).cross(tan).normalize();
-                ey.copy(up);
-                const ez = new THREE.Vector3().copy(ex).cross(ey).normalize();
-                pm.makeBasis(ex, ey, ez);
-                pm.setPosition(up.x * midR, up.y * midR, up.z * midR);
-                sc.makeScale(1.5 * s, h, 1.5 * s);
+                // The shaft geometry runs y = 0..1 from its base, so the
+                // instance sits ON the ground and scales up through the gate.
+                const groundR = floorRadius(up.x, up.y, up.z) - 4;
+                const topR = p.length() + 30;
+                pex.copy(up).cross(tan).normalize();
+                pez.copy(pex).cross(up).normalize();
+                pm.makeBasis(pex, up, pez);
+                pm.setPosition(up.x * groundR, up.y * groundR, up.z * groundR);
+                sc.makeScale(3.0 * s, topR - groundR, 3.0 * s);
                 pm.multiply(sc);
                 pillars.setMatrixAt(i, pm);
                 pillars.setColorAt(i, c);
@@ -663,21 +760,24 @@ export function createCourse(THREE, opts = {}) {
         const ink = new THREE.Color(PALETTE.inkSoft);
         const gold = new THREE.Color(PALETTE.uiGold);
 
-        const postX = GATE_RADIUS * 1.34 + 3.2;
-        const postH = 15;
-        const postY = -3;
-        pushBox(P, Nn, C, -postX, postY + postH * 0.5 - 7, 0, 1.1, postH * 0.5, 1.1, gold.r, gold.g, gold.b);
-        pushBox(P, Nn, C, postX, postY + postH * 0.5 - 7, 0, 1.1, postH * 0.5, 1.1, gold.r, gold.g, gold.b);
-        // Cross beam + checker banner hanging under it.
-        const beamY = postY + postH - 7;
-        pushBox(P, Nn, C, 0, beamY + 1.4, 0, postX + 1.1, 1.4, 1.2, gold.r, gold.g, gold.b);
+        // The gate-0 ring is 1.34x scale, so the gantry has to clear r=13.4 in
+        // both axes or it reads as a fence in front of the gate rather than an
+        // arch over it. Local Y is radial, so -13 puts the post feet on the
+        // ground (gate 0 sits ~14 above the local floor).
+        const postX = GATE_RADIUS * 1.34 + 3.4;
+        const footY = -14;
+        const beamY = 20;
+        const postHalf = (beamY - footY) * 0.5;
+        pushBox(P, Nn, C, -postX, footY + postHalf, 0, 1.15, postHalf, 1.15, gold.r, gold.g, gold.b);
+        pushBox(P, Nn, C, postX, footY + postHalf, 0, 1.15, postHalf, 1.15, gold.r, gold.g, gold.b);
+        // Cross beam + checkered banner hanging under it.
+        pushBox(P, Nn, C, 0, beamY + 1.5, 0, postX + 1.15, 1.5, 1.3, gold.r, gold.g, gold.b);
         const cells = 10;
         const cw = postX / cells;
         for (let i = 0; i < cells * 2; i++) {
             const cx = -postX + cw * (i + 0.5);
-            const on = (i & 1) === 0;
-            const col = on ? cream : ink;
-            pushBox(P, Nn, C, cx, beamY - 1.4, 0, cw * 0.5, 1.4, 0.6, col.r, col.g, col.b);
+            const col = (i & 1) === 0 ? cream : ink;
+            pushBox(P, Nn, C, cx, beamY - 1.8, 0, cw * 0.5, 1.8, 0.65, col.r, col.g, col.b);
         }
 
         const gGeo = new THREE.BufferGeometry();
@@ -828,7 +928,7 @@ export function createCourse(THREE, opts = {}) {
         RS * 8 +                                          // ribbon beam
         RS * 4 +                                          // glow skirt
         tier.ringRadial * tier.ringTubular * 2 * gateCount * 2 + // rings + hulls
-        (tier.pillars ? 12 * gateCount : 0) +
+        (tier.pillars ? 42 * gateCount : 0) +                    // 7 sides x 3 bands x 2
         (gantry ? (3 + 20) * 12 * 2 : 0);                 // gantry + hull
     const drawCallCount = 5 + (tier.pillars ? 1 : 0) + (gantry ? 1 : 0);
 

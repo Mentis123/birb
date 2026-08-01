@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYOM dev · course</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hud {
+    position: fixed; left: 8px; top: 8px; z-index: 2;
+    font: 11px/1.45 ui-monospace, Menlo, monospace;
+    color: #fff6dc; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c33;
+    pointer-events: none; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script type="module">
+import { loadThree } from '/vyom/src/core/three-loader.js';
+import { PALETTE } from '/vyom/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/vyom/src/core/toon.js';
+import { updateOutlineProjection } from '/vyom/src/core/outline.js';
+import {
+  PLANET_RADIUS, surfaceRadius, floorRadius, continentalHeight, biomeNoise, depthAt,
+} from '/vyom/src/core/terrain.js';
+import { createCourse } from '/vyom/src/race/course.js';
+
+const THREE = await loadThree();
+const P = new URLSearchParams(location.search);
+
+// view=fly    -> bird altitude behind the line (THE view to judge)
+// view=space  -> whole planet, to read the circuit shape
+// t=<0..1>    -> where on the lap the flying camera sits
+const view = P.get('view') || 'fly';
+const quality = P.get('quality') || 'high';
+// Default sits just past the start gantry on the ridge straight, so the frame
+// shows the gantry receding is NOT what we want — we want the line ahead. t is
+// the bird's position; the camera trails it.
+const tCam = parseFloat(P.get('t') ?? '0.028');
+const showHud = P.get('hud') !== '0';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight, false);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 60, 320);
+const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, 0.5, 4000);
+createLightRig(THREE, scene);
+
+// --- stand-in sky (sky.js belongs to another agent) -------------------------
+const skyGeo = new THREE.SphereGeometry(1600, 24, 16);
+{
+  const p = skyGeo.getAttribute('position');
+  const col = new Float32Array(p.count * 3);
+  const zen = new THREE.Color(PALETTE.skyZenith);
+  const mid = new THREE.Color(PALETTE.skyMid);
+  const hor = new THREE.Color(PALETTE.skyHorizon);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const t = THREE.MathUtils.clamp(p.getY(i) / 1600 * 0.5 + 0.5, 0, 1);
+    if (t < 0.5) tmp.copy(hor).lerp(mid, t / 0.5); else tmp.copy(mid).lerp(zen, (t - 0.5) / 0.5);
+    col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
+  }
+  skyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+}
+const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({
+  vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false,
+}));
+sky.renderOrder = -10;
+scene.add(sky);
+
+// --- stand-in terrain (planet.js belongs to another agent; this probe only
+//     needs enough ground to prove the ribbon rides it into the canyons) -----
+const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 34);
+{
+  const pos = geo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const meadow = new THREE.Color(PALETTE.meadowLit);
+  const meadowD = new THREE.Color(PALETTE.meadowDeep);
+  const canyon = new THREE.Color(PALETTE.canyonLit);
+  const canyonD = new THREE.Color(PALETTE.canyonDeep);
+  const alpine = new THREE.Color(PALETTE.alpineLit);
+  const alpineD = new THREE.Color(PALETTE.alpineDeep);
+  const a = new THREE.Color(), b = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    pos.setXYZ(i, nx * surfaceRadius(nx, ny, nz), ny * surfaceRadius(nx, ny, nz), nz * surfaceRadius(nx, ny, nz));
+    const bn = biomeNoise(nx, ny, nz);
+    const d = depthAt(nx, ny, nz);
+    if (bn < 0.5) { a.copy(meadow); b.copy(meadowD); }
+    else if (bn < 0.72) { a.copy(canyon); b.copy(canyonD); }
+    else { a.copy(alpine); b.copy(alpineD); }
+    a.lerp(b, Math.min(1, d * 1.15));
+    colors[i * 3] = a.r; colors[i * 3 + 1] = a.g; colors[i * 3 + 2] = a.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+}
+const planet = new THREE.Mesh(geo, createToonMaterial(THREE, {
+  ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+}));
+scene.add(planet);
+
+// --- the subsystem under test ----------------------------------------------
+const course = createCourse(THREE, { quality, seed: 20260801, gateCount: 12 });
+scene.add(course.group);
+course.setNextGate(1);
+course.update(0.31); // deterministic pulse phase
+
+// --- camera -----------------------------------------------------------------
+const _p = new THREE.Vector3();
+const _pAhead = new THREE.Vector3();
+const _tan = new THREE.Vector3();
+const _up = new THREE.Vector3();
+
+function placeCamera() {
+  if (view === 'space') {
+    course.sampleAt(tCam, _p);
+    _up.copy(_p).normalize();
+    camera.position.copy(_up).multiplyScalar(330);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+    scene.fog.near = 240; scene.fog.far = 700;
+    return;
+  }
+  // Chase view: behind and above the racing line, aimed down it.
+  const portrait = Math.min(1, Math.max(0, (1.0 - innerWidth / innerHeight) / 0.5));
+  course.sampleAt(tCam, _p);
+  course.tangentAt(tCam, _tan);
+  _up.copy(_p).normalize();
+  camera.position.copy(_p).addScaledVector(_tan, -22).addScaledVector(_up, 7.5 + 2.5 * portrait);
+  camera.up.copy(_up);
+  // Aim well down the line so the horizon sits high and the ribbon leads the
+  // eye into the frame — the composition a racing game actually ships.
+  course.sampleAt(tCam + (portrait > 0.5 ? 0.10 : 0.075), _pAhead);
+  camera.lookAt(_pAhead);
+  scene.fog.near = 70; scene.fog.far = 400;
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  placeCamera();
+}
+addEventListener('resize', resize);
+resize();
+
+renderer.render(scene, camera);
+
+const stats = { drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
+
+// Sample the racing line so the character claims are MEASURED, not asserted.
+let curvLine = '';
+{
+  let peakI = 0;
+  for (let i = 0; i < course.curvature.length; i++) {
+    if (course.curvature[i] > course.curvature[peakI]) peakI = i;
+  }
+  curvLine = `peak curvature ${course.curvature[peakI].toFixed(2)} deg/u at t=${(peakI / course.curvature.length).toFixed(3)}\n`;
+}
+
+const hud = document.getElementById('hud');
+hud.textContent = showHud
+  ? `view=${view} q=${quality} t=${tCam}\n` +
+    `frame draws=${stats.drawCalls} tris=${stats.triangles}\n` +
+    `course built draws=${course.drawCallCount} tris=${course.triangleCount}\n` +
+    curvLine + course.characterReport
+  : '';
+
+window.__VYOM_COURSE = course;
+window.__VYOM_STATS = () => ({
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  courseDrawCalls: course.drawCallCount,
+  courseTriangles: course.triangleCount,
+  report: course.characterReport,
+});
+window.__VYOM_READY = true;
+</script>
+</body>
+</html>
