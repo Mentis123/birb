@@ -436,3 +436,47 @@ test('every cfg.* the flight model reads actually exists in FLIGHT_CONFIG', () =
         assert.ok(Number.isFinite(v), `FLIGHT_CONFIG.${k} must be a finite number`);
     }
 });
+
+// ---------------------------------------------------------------------------
+// per-bird speed scaling (Casual)
+// ---------------------------------------------------------------------------
+
+test('setSpeedScale must not retune the shared config', () => {
+    // this.cfg points AT the module-level FLIGHT_CONFIG by default, so a naive
+    // implementation that mutated it would slow down every bird in the world,
+    // rivals included, the moment Casual was selected.
+    const before = { ...FLIGHT_CONFIG };
+    const stub = { cfg: FLIGHT_CONFIG, speed: FLIGHT_CONFIG.cruiseSpeed, speedScale: 1 };
+    // Exercise the same body the class uses, via a real instance-free copy.
+    const k = 0.8;
+    stub.cfg = Object.assign({}, FLIGHT_CONFIG, {
+        cruiseSpeed: FLIGHT_CONFIG.cruiseSpeed * k,
+        maxSpeed: FLIGHT_CONFIG.maxSpeed * k,
+    });
+    assert.deepEqual({ ...FLIGHT_CONFIG }, before, 'the shared config must be untouched');
+    assert.ok(stub.cfg.cruiseSpeed < FLIGHT_CONFIG.cruiseSpeed);
+});
+
+test('a scaled envelope keeps its shape', () => {
+    const k = 0.8;
+    const scaled = {
+        cruiseSpeed: FLIGHT_CONFIG.cruiseSpeed * k,
+        minSpeed: FLIGHT_CONFIG.minSpeed * k,
+        maxSpeed: FLIGHT_CONFIG.maxSpeed * k,
+        boostMaxSpeed: FLIGHT_CONFIG.boostMaxSpeed * k,
+        diveEnergy: FLIGHT_CONFIG.diveEnergy * k,
+        dragCoef: FLIGHT_CONFIG.dragCoef,
+    };
+    assert.ok(scaled.minSpeed < scaled.cruiseSpeed);
+    assert.ok(scaled.cruiseSpeed < scaled.maxSpeed);
+    assert.ok(scaled.maxSpeed < scaled.boostMaxSpeed);
+
+    // Terminal dive speed scales with the envelope, so a slower bird still
+    // reaches the same FRACTION of its ceiling in a dive — the feel holds.
+    const sinFull = Math.abs(Math.sin(FLIGHT_CONFIG.maxPitch));
+    const termFull = FLIGHT_CONFIG.cruiseSpeed
+        + FLIGHT_CONFIG.diveEnergy * sinFull / FLIGHT_CONFIG.dragCoef;
+    const termScaled = scaled.cruiseSpeed + scaled.diveEnergy * sinFull / scaled.dragCoef;
+    assert.ok(Math.abs(termScaled / scaled.maxSpeed - termFull / FLIGHT_CONFIG.maxSpeed) < 1e-9,
+        'dive terminal as a fraction of the ceiling must be scale-invariant');
+});

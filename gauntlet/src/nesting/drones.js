@@ -183,7 +183,12 @@ function mergeParts(THREE, parts) {
         const src = parts[i].geo;
         const g = src.index ? src.toNonIndexed() : src.clone();
         g.computeVertexNormals();
-        prepped.push({ g, color: parts[i].color, shade: parts[i].shade || null });
+        prepped.push({
+            g,
+            color: parts[i].color,
+            shade: parts[i].shade || null,
+            triShade: parts[i].triShade || null,
+        });
         total += g.getAttribute('position').count;
         src.dispose();
     }
@@ -206,6 +211,29 @@ function mergeParts(THREE, parts) {
             normals[d] = gn.getX(i); normals[d + 1] = gn.getY(i); normals[d + 2] = gn.getZ(i);
             const m = shade ? shade(x, y, z) : 1;
             colors[d] = col.r * m; colors[d + 1] = col.g * m; colors[d + 2] = col.b * m;
+        }
+
+        // Optional PER-TRIANGLE pass. The geometry is non-indexed, so every
+        // triangle owns its three vertices and can be painted flat — the only
+        // way to get a hard-edged panel line, because per-vertex colour
+        // interpolates across a face and the toon ramp quantises the LIGHTING,
+        // not the base colour. (Same lesson `world/nests.js` learned on its
+        // basketry weave, and it cost that author a capture round too.)
+        if (prepped[k].triShade) {
+            const f = prepped[k].triShade;
+            const tris = gp.count / 3;
+            for (let t = 0; t < tris; t++) {
+                const b = (o + t * 3) * 3;
+                const cx = (positions[b] + positions[b + 3] + positions[b + 6]) / 3;
+                const cy = (positions[b + 1] + positions[b + 4] + positions[b + 7]) / 3;
+                const cz = (positions[b + 2] + positions[b + 5] + positions[b + 8]) / 3;
+                const m = f(cx, cy, cz, t);
+                for (let v = 0; v < 3; v++) {
+                    colors[b + v * 3] *= m;
+                    colors[b + v * 3 + 1] *= m;
+                    colors[b + v * 3 + 2] *= m;
+                }
+            }
         }
         o += gp.count;
         g.dispose();
@@ -245,70 +273,182 @@ function mergeParts(THREE, parts) {
 function buildBodyGeometry(THREE) {
     const parts = [];
 
-    const shell = new THREE.Color(PALETTE.boostPad);
-    const shellDeep = new THREE.Color(PALETTE.boostPad).lerp(new THREE.Color(PALETTE.ink), 0.58);
+    /**
+     * THE SHELL IS DARK, AND THAT IS THE WHOLE ART DIRECTION.
+     *
+     * The first captured frame painted the hull in raw `boostPad` and it came
+     * back as BUBBLEGUM: a bright pink pyramid in a bright pink swim ring,
+     * which is a party favour, not a thing that is trying to kill you. Two
+     * causes, both structural rather than cosmetic. The `graphic` ramp's lit
+     * band is 1.0 across, so a saturated mid-tone base is pushed to near-white
+     * over most of its surface; and a 0.78 cyan rim on top of that bleached
+     * whatever survived.
+     *
+     * So the hull is now a deep plum — `boostPad` dragged 66% toward ink — and
+     * the hot magenta appears ONLY as the ring, the spine edges and the rim.
+     * Dark mass, hot accents. That is how every readable hostile object in
+     * stylised games is built, and it is also what makes the cyan eye the
+     * brightest thing on the model, which is where you want the player looking.
+     */
+    // 0.80, not 0.66. The SECOND captured frame was still bubblegum, and the
+    // reason is in `toon.js`'s light rig, not in the mix: the key directional
+    // runs at intensity 2.6, so the `graphic` ramp's 1.0 lit band multiplies
+    // the base colour by 2.6 before tone mapping. Anything but a genuinely
+    // dark base saturates to pastel. A hostile object has to be authored
+    // against the rig it will actually be lit by.
+    const SHELL = new THREE.Color(PALETTE.boostPad)
+        .lerp(new THREE.Color(PALETTE.ink), 0.80).getHex();
+    const SHELL_HOT = new THREE.Color(PALETTE.boostPad)
+        .lerp(new THREE.Color(PALETTE.ink), 0.52).getHex();
 
     // --- core ---------------------------------------------------------------
-    const core = new THREE.OctahedronGeometry(BODY_RADIUS, 0);
-    core.scale(0.94, 0.84, 1.22);
+    /**
+     * A HEXAGONAL TWO-FRUSTUM HULL, not the original's octahedron.
+     *
+     * Three captures in a row came back with the same defect and paint could
+     * not fix it: an octahedron's upper half is four large triangles meeting at
+     * a point, so from any normal viewing angle you see one or two enormous
+     * co-planar faces. Under a two-band ramp they land in the SAME band and the
+     * whole top renders as one flat lit triangle — a party hat. Per-triangle
+     * plating (which does work; it is what saves the lower cone) only splits a
+     * mass you can already see more than one facet of.
+     *
+     * So the shape changed. A six-sided upper frustum truncated to a small flat
+     * DECK gives seven distinct faces where there was one: six narrow slanted
+     * panels around the sides, each catching the key light at a different
+     * angle, plus a small bright deck on top that reads as a sensor plate. The
+     * silhouette is still the original's wide-middle diamond — that read is
+     * what players recognise — but it is now manufactured rather than mineral,
+     * which is the whole point of a drone.
+     *
+     * Rotated PI/6 so a FLAT FACE points down -Z. A vertex-forward hexagon puts
+     * a seam straight down the nose, and the eye then sits in a crease.
+     */
+    const HEX = Math.PI / 6;
+
+    const upper = new THREE.CylinderGeometry(
+        BODY_RADIUS * 0.30, BODY_RADIUS * 0.96, BODY_RADIUS * 0.62, 6, 1, true
+    );
+    upper.rotateY(HEX);
+    upper.translate(0, BODY_RADIUS * 0.31, 0);
+    upper.scale(1, 1, 1.22);
     parts.push({
-        geo: core,
-        color: PALETTE.boostPad,
-        // Hard-ish top/bottom split baked into the base colour so the underside
-        // stays dark even when the key light is behind the drone. Under a
-        // 2-band ramp the LIGHTING cannot do this on its own.
-        shade: (x, y) => (y > 0.2 ? 1.18 : (y < -0.6 ? 0.42 : 0.78)),
+        geo: upper,
+        color: SHELL,
+        shade: (x, y) => (y > BODY_RADIUS * 0.3 ? 1.16 : 0.86),
+        // Alternating panels. Six sides, twelve triangles, three tones — so no
+        // two adjacent panels share a value and the hull reads as plated even
+        // when the lighting flattens.
+        triShade: (cx, cy, cz, t) => {
+            const panel = (t / 2) | 0;
+            return panel % 3 === 0 ? 1.06 : (panel % 3 === 1 ? 0.78 : 0.54);
+        },
+    });
+
+    // The deck. Small, flat, and the brightest piece of hull on the model — a
+    // hard bright hexagon on top of a dark body is a machine's read.
+    const deck = new THREE.CircleGeometry(BODY_RADIUS * 0.30, 6);
+    deck.rotateX(-Math.PI / 2);
+    deck.rotateY(HEX);
+    deck.translate(0, BODY_RADIUS * 0.62, 0);
+    deck.scale(1, 1, 1.22);
+    // Hull colour lifted, NOT the hot mix. At SHELL_HOT the fifth and sixth
+    // captures put a pale pink hexagon on top of every drone that read as a
+    // BERET — the brightest thing on the model, sitting exactly where a hat
+    // sits, on a body that is otherwise dark. Same family as the panels, one
+    // step lighter: it reads as a facet catching the sun, which is what it is.
+    parts.push({ geo: deck, color: SHELL, shade: () => 1.30 });
+
+    // The lower hull: a hexagonal cone to a point. Dark, so the drone always
+    // has a heavy shadowed underside no matter where the key light is.
+    const lower = new THREE.ConeGeometry(BODY_RADIUS * 0.96, BODY_RADIUS * 0.94, 6, 1, true);
+    lower.rotateX(Math.PI);          // apex DOWN
+    lower.rotateY(HEX);
+    lower.translate(0, -BODY_RADIUS * 0.47, 0);
+    lower.scale(1, 1, 1.22);
+    parts.push({
+        geo: lower,
+        color: SHELL,
+        shade: () => 0.44,
+        triShade: (cx, cy, cz, t) => (t % 2 === 0 ? 1.0 : 0.66),
     });
 
     // --- collar -------------------------------------------------------------
-    // Open-ended: it is a band, not a tube, and nobody ever sees a cap.
+    // A flared vane, not a belt. The first pass used a straight cylinder at
+    // 0.86 R, which is INSIDE the core's 0.92 R equator, so it only showed
+    // through the octahedron's gaps as random black shards. It now flares out
+    // past the hull (1.14 R at its widest) so it genuinely cuts the silhouette
+    // — a hard dark disc through the middle of a bright shape, which survives
+    // at any distance and at any lighting angle.
     const collar = new THREE.CylinderGeometry(
-        BODY_RADIUS * 0.86, BODY_RADIUS * 0.86, BODY_RADIUS * 0.40, 8, 1, true
+        BODY_RADIUS * 0.74, BODY_RADIUS * 1.16, BODY_RADIUS * 0.26, 12, 1, true
     );
+    collar.translate(0, -BODY_RADIUS * 0.02, 0);
+    collar.scale(1, 1, 1.20);
     parts.push({ geo: collar, color: PALETTE.ink, shade: () => 1 });
 
     // --- eye ----------------------------------------------------------------
-    // Apex forward (-Z). ConeGeometry points +Y, so rotate onto -Z.
-    const eye = new THREE.ConeGeometry(BODY_RADIUS * 0.34, BODY_RADIUS * 0.62, 6, 1, true);
+    // Apex forward (-Z). ConeGeometry points +Y, so rotate onto -Z. CLOSED,
+    // and pushed out past the nose: the first pass buried an open cone inside
+    // the hull, so all you saw was cyan slivers leaking through the core's
+    // edges — the captured frame's random turquoise shards.
+    // 0.30 R. The third capture over-corrected to 0.46 R and the eye became a
+    // HEADLIGHT — a cyan lump as wide as the hull, which reads as a lamp bolted
+    // to a rock rather than as a sensor set into a machine. An eye has to be
+    // small enough that the hull around it is still the shape you recognise.
+    // Truncated rather than pointed
+    // rather than a point, so the front of it is a flat hexagonal LENS facing
+    // dead ahead. A cone tip catches one specular pixel; a flat facet normal to
+    // the approach catches the whole face, and that is what makes the eye the
+    // brightest thing on the model from the one angle that matters — the angle
+    // it is coming at you from.
+    const eye = new THREE.CylinderGeometry(
+        BODY_RADIUS * 0.34, BODY_RADIUS * 0.24, BODY_RADIUS * 0.36, 6, 1, false
+    );
     eye.rotateX(-Math.PI / 2);
-    eye.translate(0, 0, -BODY_RADIUS * 1.14);
+    eye.translate(0, 0, -BODY_RADIUS * 1.36);
     parts.push({
         geo: eye,
         color: PALETTE.uiCyan,
-        // Hot at the tip, cooling toward the socket. A flat cyan cone reads as
-        // a plastic nose; the step reads as something switched on.
-        shade: (x, y, z) => (z < -BODY_RADIUS * 1.30 ? 1.55 : 0.72),
+        // Hot on the lens face, cooling down the barrel. A flat cyan cylinder
+        // reads as a plastic nose; the step reads as something switched on.
+        shade: (x, y, z) => (z < -BODY_RADIUS * 1.50 ? 1.85 : 0.66),
     });
 
-    // A dark socket ring so the eye is set INTO the hull rather than glued on.
+    // A dark socket collar so the eye is set INTO the hull rather than glued
+    // on, and so there is always ink between the cyan and the plum. Wider than
+    // the lens, so it reads as a shroud around it from every angle.
     const socket = new THREE.CylinderGeometry(
-        BODY_RADIUS * 0.40, BODY_RADIUS * 0.40, BODY_RADIUS * 0.16, 6, 1, true
+        BODY_RADIUS * 0.40, BODY_RADIUS * 0.50, BODY_RADIUS * 0.38, 6, 1, true
     );
     socket.rotateX(Math.PI / 2);
-    socket.translate(0, 0, -BODY_RADIUS * 0.86);
+    socket.translate(0, 0, -BODY_RADIUS * 1.08);
     parts.push({ geo: socket, color: PALETTE.ink, shade: () => 1 });
 
     // --- spines -------------------------------------------------------------
+    // Four raked blades at the equator. The first pass put the apex at 0.74 R,
+    // which is INSIDE the 0.92 R hull, so they contributed nothing at all.
+    // They now reach 1.33 R and are the thing that stops a distant drone
+    // reading as a ball.
     for (let i = 0; i < 4; i++) {
         const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-        const spine = new THREE.ConeGeometry(BODY_RADIUS * 0.20, BODY_RADIUS * 0.74, 4, 1, true);
+        const spine = new THREE.ConeGeometry(BODY_RADIUS * 0.22, BODY_RADIUS * 0.95, 4, 1, true);
         spine.rotateZ(-Math.PI / 2);              // point along +X
-        spine.translate(BODY_RADIUS * 0.37, 0, 0);
-        spine.rotateY(0.42);                      // rake them backward
+        spine.translate(BODY_RADIUS * 0.85, 0, 0);
+        spine.rotateY(0.46);                      // rake them backward
         spine.rotateY(-a);
-        spine.translate(0, 0, BODY_RADIUS * 0.30);
+        spine.translate(0, 0, BODY_RADIUS * 0.26);
         parts.push({
             geo: spine,
-            color: PALETTE.boostPad,
-            shade: () => 0.66,
+            color: SHELL_HOT,
+            // Blade edges brighter than the hull, so the four points read as
+            // points rather than as lumps of the same dark mass.
+            shade: (x, y) => (y > 0 ? 1.16 : 0.58),
         });
     }
 
     const geo = mergeParts(THREE, parts);
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), BODY_RADIUS * 1.6);
-    // Colours were mixed above for readability; keep the two THREE.Color
-    // instances referenced so a future edit does not silently drop them.
-    void shell; void shellDeep;
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), BODY_RADIUS * 1.8);
     return geo;
 }
 
@@ -328,14 +468,29 @@ function buildBodyGeometry(THREE) {
  * against the 9.9 hit sphere.
  */
 function buildRingGeometry(THREE) {
-    const torus = new THREE.TorusGeometry(RING_RADIUS, 0.92, 4, 20);
+    // 0.62, not the first pass's 0.92: at 0.92 the hoop is 11% of its own
+    // radius and the captured close-up read as a life ring, a fat smooth
+    // inflatable that swallowed the body inside it. Thin enough to read as
+    // machined, fat enough that its four facets each catch a distinct tone.
+    const torus = new THREE.TorusGeometry(RING_RADIUS, 0.62, 4, 20);
     torus.rotateX(Math.PI / 2);
+    torus.rotateY(Math.PI / 20);   // land a facet edge-on, not a facet centre
     const parts = [{
         geo: torus,
         color: PALETTE.boostPad,
-        // Two-tone across the tube's own thickness: the outer face catches, the
-        // inner face stays dark, so the hoop has a visible edge from any angle.
-        shade: (x, y, z) => (Math.hypot(x, z) > RING_RADIUS ? 1.42 : 0.58),
+        // Three tones across the tube's own thickness. Outer face hot, top face
+        // mid, inner face near-ink — so the hoop always shows an edge, and the
+        // far side of the ring reads DARKER than the near side, which is what
+        // gives it depth instead of looking like a flat drawn circle.
+        shade: (x, y, z) => {
+            const r = Math.hypot(x, z);
+            if (r > RING_RADIUS + 0.2) return 1.34;
+            if (r < RING_RADIUS - 0.2) return 0.30;
+            // 1.05 blew the top facet out to near-white in the fifth capture,
+            // so the hoop grew pale chrome patches that fought the deck for
+            // attention. The ring is a hot accent, not a light source.
+            return y > 0 ? 0.86 : 0.54;
+        },
     }];
     const geo = mergeParts(THREE, parts);
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), RING_RADIUS + 1.2);
@@ -387,14 +542,18 @@ export function createDrones(THREE, opts = {}) {
         vertexColors: true,
         flatShading: true,
         rimColor: PALETTE.uiCyan,
-        rimStrength: 0.78,
+        // 0.78 in the first pass bleached the hull to white-pink from every
+        // angle — a rim that strong stops being a rim and becomes the base
+        // colour. 0.50 against a dark plum hull still separates hard from
+        // green terrain, which is the only job it has.
+        rimStrength: 0.50,
         rimPower: 1.7,
-        rimThreshold: 0.44,
+        rimThreshold: 0.46,
         rimSoftness: 0.05,
         specColor: PALETTE.uiCream,
-        specStrength: 0.42,
-        specPower: 30,
-        specThreshold: 0.54,
+        specStrength: 0.30,
+        specPower: 34,
+        specThreshold: 0.58,
     });
 
     const ringMat = createToonMaterial(THREE, {
@@ -402,7 +561,10 @@ export function createDrones(THREE, opts = {}) {
         vertexColors: true,
         flatShading: true,
         rimColor: PALETTE.uiCyan,
-        rimStrength: 0.62,
+        // Lower than the body's. A cyan rim riding a magenta hoop turned its
+        // upper facets pale lavender, which fought the eye for the only cold
+        // accent on the model — and the eye has to win that fight.
+        rimStrength: 0.38,
         rimPower: 1.8,
         rimThreshold: 0.46,
         rimSoftness: 0.05,
@@ -635,6 +797,7 @@ export function createDrones(THREE, opts = {}) {
     // -----------------------------------------------------------------------
 
     function killAt(i) {
+        if (disposed) return false;
         if (i < 0 || i >= CAP || !alive[i]) return false;
         const x = px[i], y = py[i], z = pz[i];
         alive[i] = 0;
@@ -649,6 +812,7 @@ export function createDrones(THREE, opts = {}) {
     }
 
     function clear() {
+        if (disposed) return;
         for (let i = 0; i < CAP; i++) {
             if (alive[i]) { alive[i] = 0; liveCount--; }
             respawn[i] = 0;
@@ -665,6 +829,10 @@ export function createDrones(THREE, opts = {}) {
     // -----------------------------------------------------------------------
 
     function setBehaviour(next) {
+        // Guarded, not just update(): a disposed system whose geometry is gone
+        // must not repopulate itself because a mode change arrived late in a
+        // teardown frame. Every mutator checks this for the same reason.
+        if (disposed) return;
         const b = (next === 'ambient' || next === 'hunt' || next === 'waves') ? next : 'off';
         if (b === behaviour) return;
         behaviour = b;

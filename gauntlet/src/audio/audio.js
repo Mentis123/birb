@@ -7,7 +7,6 @@
  *
  *     [wind noise] -> lowpass -> gain -\
  *     [whistle]    -> bandpass -> gain -+-> musicBus -\
- *     [airframe]   -> lowpass -> gain -/               \
  *                                                       -> master -> destination
  *     [one-shot voices: flap/gate/boost/impact/...] -> sfxBus -/
  *
@@ -41,9 +40,8 @@ import { makeRng } from '/gauntlet/src/core/rng.js';
  */
 const MIX = {
     master: 0.85,
-    wind: 0.2,         // peak wind gain at speed01 = 1 — see the note below
-    whistle: 0.085,    // high-speed edge tone, only above ~0.6
-    airframe: 0.055,   // low body tone so speed has weight, not just hiss
+    wind: 0.26,        // peak wind gain at speed01 = 1 — carries speed alone now
+    whistle: 0.10,     // high-speed edge tone, only above ~0.6
     flap: 0.5,
     gate: 0.34,
     boost: 0.42,
@@ -88,7 +86,6 @@ export function createAudio(opts = {}) {
     let master = null, musicBus = null, sfxBus = null;
     let windSrc = null, windFilter = null, windGain = null;
     let whistleSrc = null, whistleFilter = null, whistleGain = null;
-    let airOsc = null, airFilter = null, airGain = null;
     let noiseBuffer = null;
 
     let musicOn = true, sfxOn = true;
@@ -216,22 +213,15 @@ export function createAudio(opts = {}) {
         whistleGain.gain.value = 0.0;
         whistleSrc.connect(whistleFilter).connect(whistleGain).connect(musicBus);
 
-        // --- airframe: low sawtooth body so speed has weight ---------------
-        airOsc = ctx.createOscillator();
-        airOsc.type = 'sawtooth';
-        airOsc.frequency.value = 46;
-        airFilter = ctx.createBiquadFilter();
-        airFilter.type = 'lowpass';
-        airFilter.frequency.value = 220;
-        airFilter.Q.value = 1.1;
-        airGain = ctx.createGain();
-        airGain.gain.value = 0.0;
-        airOsc.connect(airFilter).connect(airGain).connect(musicBus);
+        // There is deliberately NO low-frequency body voice here. A 46Hz
+        // sawtooth under the wind was meant to give speed "weight"; on a phone
+        // speaker it just reads as a rough engine growl, which is wrong for a
+        // bird and was the single worst thing in the mix. Speed is carried by
+        // the wind bed opening up and the whistle arriving on top of it.
 
         const t0 = ctx.currentTime;
         try { windSrc.start(t0); } catch (_) { /* already started */ }
         try { whistleSrc.start(t0); } catch (_) { /* already started */ }
-        try { airOsc.start(t0); } catch (_) { /* already started */ }
 
         ready = true;
         lastSpeed = -1;
@@ -337,7 +327,7 @@ export function createAudio(opts = {}) {
     // --- public voices -----------------------------------------------------
 
     /**
-     * Wind rush + airframe tone. Called every frame; writes AudioParams only.
+     * Wind rush. Called every frame; writes AudioParams only.
      * @param {number} speed01 0..1
      */
     function setFlightSpeed(speed01) {
@@ -349,13 +339,12 @@ export function createAudio(opts = {}) {
         const t = now();
         const k = 0.12;   // smoothing time constant — no zipper noise
         const s2 = s * s;
-        windFilter.frequency.setTargetAtTime(240 + 3200 * s2, t, k);
+        // Sweeps further than before: with no body voice underneath, the
+        // filter opening IS the sensation of speed.
+        windFilter.frequency.setTargetAtTime(300 + 4200 * s2, t, k);
         windGain.gain.setTargetAtTime(0.015 + MIX.wind * s * s, t, k);
         whistleFilter.frequency.setTargetAtTime(1100 + 1900 * s, t, k);
         whistleGain.gain.setTargetAtTime(MIX.whistle * s2 * s, t, k);
-        airOsc.frequency.setTargetAtTime(44 + 58 * s, t, k);
-        airFilter.frequency.setTargetAtTime(180 + 520 * s, t, k);
-        airGain.gain.setTargetAtTime(MIX.airframe * (0.25 + 0.75 * s), t, k);
     }
 
     /** Wing flap: a filtered noise whoosh with a downward pitch sweep. */
@@ -511,7 +500,6 @@ export function createAudio(opts = {}) {
         try {
             if (windSrc) windSrc.stop();
             if (whistleSrc) whistleSrc.stop();
-            if (airOsc) airOsc.stop();
         } catch (_) { /* already stopped */ }
         try { if (master) master.disconnect(); } catch (_) { /* ignore */ }
         if (ctx && !injected && typeof ctx.close === 'function') {

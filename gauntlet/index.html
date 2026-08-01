@@ -427,6 +427,59 @@
   #hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
   #input-layer { position: fixed; inset: 0; z-index: 10; touch-action: none; }
 
+  .pause-btn {
+    position: fixed;
+    top: max(env(safe-area-inset-top, 0px), 0.7rem);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 0.7rem;
+    border: 2px solid var(--ink);
+    background: rgba(10, 19, 36, 0.88);
+    color: var(--cream);
+    font-size: 0.85rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    box-shadow: 0 3px 0 var(--ink);
+    cursor: pointer;
+  }
+  .pause-btn:active { transform: translateX(-50%) translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+  main[hidden] ~ .pause-btn { display: none; }
+
+  .pause-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(6, 9, 24, 0.78);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+  .pause-sheet[hidden] { display: none; }
+  .pause-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    width: min(20rem, 80vw);
+    padding: 1.3rem;
+    border: 2px solid var(--ink);
+    border-radius: 1.1rem;
+    background: rgba(10, 19, 36, 0.96);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  }
+  .pause-card h2 {
+    margin: 0 0 0.3rem;
+    font-size: 1.1rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-align: center;
+    color: var(--gold);
+  }
+
   .fatal {
     position: fixed;
     inset: 0;
@@ -519,6 +572,17 @@
 
 <main hidden data-game-main>
   <canvas id="scene"></canvas>
+  <!-- Top-centre, between the two HUD corners, so it never sits under a thumb
+       and never collides with a readout. -->
+  <button type="button" class="pause-btn" data-pause aria-label="Pause">II</button>
+  <div class="pause-sheet" data-pause-sheet hidden>
+    <div class="pause-card">
+      <h2 data-pause-title>Paused</h2>
+      <button type="button" class="btn btn-primary" data-resume>Resume</button>
+      <button type="button" class="btn btn-secondary" data-restart>Restart</button>
+      <button type="button" class="btn btn-secondary" data-quit>Exit to Menu</button>
+    </div>
+  </div>
   <div id="input-layer" data-input-layer></div>
   <div id="hud" data-hud></div>
 </main>
@@ -906,10 +970,15 @@ async function boot(requestedMode) {
     // Point the bird down the racing line, or lap 1 starts with a 180.
     flight.setHeading(_startTangent.x, _startTangent.y, _startTangent.z);
 
-    // Casual absorbs the original's Zen: softer rates on the same flight model.
+    // Casual absorbs the original's Zen: softer rates AND a slower envelope on
+    // the same flight model. Rates come down only 10% while speed comes down
+    // 20%, so the turning radius actually tightens — the point of Casual is
+    // that you can look around without the world arriving faster than you can
+    // read it.
     if (def.gentle) {
         flight.yawRate *= 0.9;
         flight.pitchRate *= 0.9;
+        flight.setSpeedScale(0.8);
     }
 
     const chase = createChaseCamera(THREE, camera, { quality });
@@ -1010,6 +1079,7 @@ async function boot(requestedMode) {
     let lastCountdownNumber = -1;
     let frames = 0, fpsAccum = 0, fps = 60;
     let debugCamFrozen = false;
+    let paused = false;
 
     // A throw inside a requestAnimationFrame callback does NOT propagate
     // anywhere useful: the frame simply never reschedules and the game dies
@@ -1027,6 +1097,14 @@ async function boot(requestedMode) {
     }
 
     function frameBody(now) {
+        if (paused) {
+            // Keep presenting the last frame so the sheet has something behind
+            // it, but advance nothing — and reset the clock so the first frame
+            // after resume is not a 30-second dt.
+            last = now;
+            renderer.render(scene, camera);
+            return;
+        }
         const rawDt = (now - last) / 1000;
         last = now;
         // Clamp so a backgrounded tab does not teleport the bird on return.
@@ -1211,6 +1289,52 @@ async function boot(requestedMode) {
 
     requestAnimationFrame(frame);
 
+    // ---------------------------------------------------------------------
+    // Pause, restart, and the way back to the menu.
+    //
+    // Quitting REBUILDS rather than tearing down: every subsystem holds GPU
+    // resources, and disposing them correctly from a live frame is a much
+    // larger surface than a reload. A reload back to the title is instant here
+    // because the entry pages cost nothing and nothing 3D is imported until a
+    // mode is chosen.
+    // ---------------------------------------------------------------------
+    const pauseSheet = document.querySelector('[data-pause-sheet]');
+    const pauseTitle = document.querySelector('[data-pause-title]');
+
+    function setPaused(on) {
+        if (paused === on) return;
+        paused = on;
+        pauseSheet.hidden = !on;
+        input.setVisible(!on);
+        // Silence the wind while paused, or it howls under the menu.
+        audio.setFlightSpeed(on ? 0 : animState.speed01);
+        if (!on) last = performance.now();   // do not bank the paused seconds
+    }
+
+    document.querySelector('[data-pause]').addEventListener('click', () => {
+        pauseTitle.textContent = def.label;
+        setPaused(true);
+    });
+    document.querySelector('[data-resume]').addEventListener('click', () => setPaused(false));
+    document.querySelector('[data-restart]').addEventListener('click', () => {
+        location.href = '?autostart=1&mode=' + encodeURIComponent(mode);
+    });
+    document.querySelector('[data-quit]').addEventListener('click', () => {
+        // ?menu=1 lands on the mode select, not the splash. Sitting through
+        // the Birb Labs entry pages again every time you back out of a run
+        // would make exiting feel like a punishment.
+        location.href = location.pathname + '?menu=1';
+    });
+
+    // Backgrounding the tab is a pause too — coming back to a bird that flew
+    // on without you is worse than coming back to a menu.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden' && !paused) {
+            pauseTitle.textContent = def.label;
+            setPaused(true);
+        }
+    });
+
     // --- harness hooks ------------------------------------------------------
     game = {
         THREE, renderer, scene, camera, flight, course, race, ai, hud, audio, input, quality,
@@ -1264,6 +1388,12 @@ async function boot(requestedMode) {
         quality,
     });
     window.__GAUNTLET_READY = true;
+}
+
+// ?menu=1 comes back from a run: straight to the mode select, since the entry
+// pages have already been seen this session.
+if (params.get('menu') === '1') {
+    showScreen('title');
 }
 
 // The harness (and anyone with ?autostart=1) skips straight past the entry

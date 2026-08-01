@@ -137,16 +137,80 @@ export const NESTING_CONFIG = Object.freeze({
      */
     aimLift: 0.30,
     aimLiftMax: 8.0,
-    /** Inside this, steering stops chasing a direction that is going singular. */
-    aimDeadRadius: 1.0,
+    /**
+     * How far above `nests.positionOf(i)` the bird actually perches.
+     *
+     * That position is the bowl's interior FLOOR, and a bird is ~2.4 units long
+     * in a 2.25-unit bowl: seated exactly on it the bird is swallowed to the
+     * eyes, which the captured frames showed as an empty-looking nest with a
+     * smear of cyan in it. Lifting the perch to rim height keeps the
+     * silhouette — the thing the whole nest model exists to give you — while
+     * the anchor stays the nest module's own landing point. Set 0 for a bird
+     * that sits down IN the bowl.
+     */
+    seatLift: 1.6,
+    /**
+     * Inside this, steering stops chasing a direction that is going singular.
+     *
+     * It has to be SMALLER than `arrivalThreshold`, and that is not a detail:
+     * with a dead radius of 1.0 the probe measured the glide bottoming out at
+     * 0.45 units and then sailing straight past — inside the dead zone the bird
+     * coasts on its heading, so whatever lateral offset it still had at 1.0 is
+     * the closest it will ever get, and 0.45 > 0.3 meant it never arrived. It
+     * then re-acquired, orbited, and sat in a limit cycle until the safety
+     * valve seated it. Steering must stay live until arrival fires.
+     */
+    aimDeadRadius: 0.2,
 
     // --- the flare ---------------------------------------------------------
     /** Distance at which the external brake starts. */
     flareRadius: 13.0,
-    /** Braked speed is `distance * flareRate`, so it decays smoothly to nothing. */
-    flareRate: 2.1,
-    /** ...but never below this, or arrival becomes an asymptote. */
-    flareMinSpeed: 1.1,
+    /**
+     * Braked speed is `distance * flareRate`, so it decays smoothly to nothing.
+     *
+     * This one is also derived. A steering bird's turn radius is `v / yawRate`,
+     * so a commanded speed of `d * flareRate` gives a radius of
+     * `d * flareRate / 1.73`. If that exceeds `d` the bird is flying a circle
+     * bigger than its distance to the target: it physically cannot spiral in,
+     * and it orbits. The probe measured exactly that at 2.1 — the glide settled
+     * into a stable 9-unit orbit and only escaped 15 seconds later when the
+     * terrain nudged it. Anything below 1.73 converges; 1.2 leaves margin and
+     * still closes 13 units in about 3 seconds, which reads as a flare.
+     */
+    flareRate: 1.2,
+    /**
+     * ...but never below this, or arrival becomes an asymptote.
+     *
+     * The value is derived, not picked. A bird still steering as it closes
+     * flies an arc of radius `v / yawRate`, so if that radius exceeds the
+     * arrival threshold it can physically never touch the target — it curves
+     * around it and misses. `GauntletFlight`'s yaw rate at low speed is
+     * PI*0.55 = 1.73 rad/s, so the radius stays inside the 0.3-unit threshold
+     * only while v < 0.52. The probe measured exactly this failure at 1.1: the
+     * glide bottomed out at 0.50 units — 1.1/1.73 = 0.42 of miss plus the
+     * approach's own offset — and then orbited.
+     */
+    flareMinSpeed: 0.5,
+
+    /**
+     * The touchdown. Inside this radius the braked step is blended from the
+     * controller's own heading onto the straight line into the bowl, with a
+     * weight that reaches 1 at the centre.
+     *
+     * This IS a small piece of the thing this module exists to avoid, so it is
+     * bounded on purpose and worth being precise about. What Birb Mobile did
+     * was move the bird along the line to the nest at 16 u/s for the whole
+     * approach, which at a typical entry angle is ~35 degrees of pure sideslip
+     * sustained for 80 units — the bird visibly crabs through the air. What
+     * happens here is a blend over the last 1.2 units at under 1.5 u/s: about
+     * half a body length, at walking pace, taking a handful of frames. The
+     * alternative is worse in every way — the controller's yaw rate at that
+     * speed gives a turn radius comparable to the 0.3-unit arrival threshold,
+     * so without a capture the bird grazes past the bowl and spends three
+     * seconds circling half a unit away from a nest it cannot touch. Measured,
+     * both times, in the probe.
+     */
+    captureRadius: 1.2,
 
     // --- safety ------------------------------------------------------------
     /**
@@ -436,6 +500,7 @@ export function createNesting(THREE, opts = {}) {
     function readTarget(index) {
         nests.positionOf(index, _nestPos);
         nests.normalOf(index, _nestUp);
+        if (cfg.seatLift) _nestPos.addScaledVector(_nestUp, cfg.seatLift);
     }
 
     /** Distance from the bird to the bowl. */
@@ -488,7 +553,37 @@ export function createNesting(THREE, opts = {}) {
         const moved = _step.length();
         const maxStep = glideSpeedCap(distance, dt, cfg) * dt;
         if (moved > maxStep && moved > 1e-9) {
-            flight.position.copy(_oldPos).addScaledVector(_step, maxStep / moved);
+            const ratio = maxStep / moved;
+            flight.position.copy(_oldPos).addScaledVector(_step, ratio);
+            // Tell the truth about how fast the bird is now going. Without this
+            // the model still reports its un-braked airspeed, so the animator
+            // holds a fast glide pose and the HUD reads 27 u/s while the bird
+            // visibly creeps into the bowl. The normalised values are scaled by
+            // the same ratio rather than recomputed, so this module stays
+            // duck-typed against the controller instead of importing its
+            // tuning table.
+            flight.speed = dt > 0 ? maxStep / dt : 0;
+            if (typeof flight.airSpeed01 === 'number') flight.airSpeed01 *= ratio;
+            if (typeof flight.speed01 === 'number') flight.speed01 *= ratio;
+        }
+
+        // The touchdown blend. See NESTING_CONFIG.captureRadius for why this is
+        // here and why it is this small.
+        if (distance < cfg.captureRadius) {
+            _step.copy(flight.position).sub(_oldPos);
+            const len = _step.length();
+            if (len > 1e-9) {
+                const w = clamp(1 - distance / cfg.captureRadius, 0, 1);
+                _to.copy(_nestPos).sub(_oldPos);
+                if (_to.lengthSq() > 1e-12) {
+                    _to.normalize();
+                    _step.multiplyScalar(1 / len).lerp(_to, w);
+                    if (_step.lengthSq() > 1e-12) {
+                        _step.normalize().multiplyScalar(len);
+                        flight.position.copy(_oldPos).add(_step);
+                    }
+                }
+            }
         }
 
         // Diagnostic the probe reads: the angle between where the bird went and

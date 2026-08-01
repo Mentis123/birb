@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · drones</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+  .panel { position: fixed; color: #fff6dc; pointer-events: none;
+           font: 600 11px/1.45 ui-monospace, SFMono-Regular, monospace;
+           letter-spacing: .04em; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { left: 10px; bottom: 8px; }
+  #tag { left: 10px; top: 10px; max-width: 62vw; }
+  /* Portrait: the silhouette inset owns the top-right corner, so the header
+     has to get out of its way rather than print on top of it. */
+  @media (max-aspect-ratio: 85/100) {
+    /* Drop into the empty sky band below the inset: the corner is taken and
+       the bottom is where the two behaviour panes live. */
+    #tag { top: 152px; max-width: 94vw; }
+    #stats { background: #0a1324cc; padding: 3px 6px; border-radius: 3px; }
+  }
+  #closelabel { right: 12px; }
+  .lbl { text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="tag">drone probe · <b style="color:#ff7ad9">HUNT</b> — pack slews its orbit plane onto the bird<br>
+traces: magenta = drone paths · cyan = bird path</div>
+<div class="panel" id="closelabel">silhouette</div>
+<div class="panel lbl" id="lblA"></div>
+<div class="panel lbl" id="lblB"></div>
+<div class="panel" id="stats"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { surfaceRadius, continentalHeight, PLANET_RADIUS } from '/gauntlet/src/core/terrain.js';
+import { createNests } from '/gauntlet/src/world/nests.js';
+import { createDrones, COLLISION_RADIUS, ORBIT_SPEED } from '/gauntlet/src/nesting/drones.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+// ---------------------------------------------------------------------------
+// Shared planet. One geometry + one material, four Meshes — a drone judged
+// against a black void is a drone that has not been judged. The whole question
+// is whether a magenta machine separates from green meadow and ochre canyon.
+// ---------------------------------------------------------------------------
+const planetGeo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 34);
+{
+  const pos = planetGeo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const cLit = new THREE.Color(PALETTE.meadowLit);
+  const cDeep = new THREE.Color(PALETTE.canyonDeep);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    const r = surfaceRadius(nx, ny, nz);
+    pos.setXYZ(i, nx * r, ny * r, nz * r);
+    const depth = Math.min(1, -continentalHeight(nx, ny, nz) / 26);
+    tmp.copy(cLit).lerp(cDeep, depth);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  planetGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  planetGeo.computeVertexNormals();
+}
+const planetMat = createToonMaterial(THREE, {
+  ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+});
+
+function makeScene(withPlanet = true) {
+  const s = new THREE.Scene();
+  s.fog = new THREE.Fog(PALETTE.fog, 120, 460);
+  createLightRig(THREE, s);
+  if (withPlanet) s.add(new THREE.Mesh(planetGeo, planetMat));
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// Path tracing. The brief: make the behaviour difference VISIBLE, not asserted.
+// A still frame of three drones tells you nothing about whether they chase; the
+// swept path does. Probe-only geometry, reported separately from the module.
+// ---------------------------------------------------------------------------
+function makeTracer(capacity) {
+  const last = new Array(capacity).fill(null);
+  const verts = [];
+  const cols = [];
+  const c = new THREE.Color();
+  return {
+    sample(drones, tint, age01) {
+      for (let i = 0; i < drones.capacity; i++) {
+        if (!drones.isAlive(i)) { last[i] = null; continue; }
+        drones.positionOf(i, _tp);
+        const p = last[i];
+        if (p) {
+          // Fade the trail in over its life so the DIRECTION of travel reads:
+          // dark where the drone came from, bright where it is now.
+          c.setHex(tint).multiplyScalar(0.26 + 0.94 * age01);
+          verts.push(p.x, p.y, p.z, _tp.x, _tp.y, _tp.z);
+          cols.push(c.r, c.g, c.b, c.r, c.g, c.b);
+          p.set(_tp.x, _tp.y, _tp.z);
+        } else {
+          last[i] = _tp.clone();
+        }
+      }
+    },
+    point(x, y, z, slot, tint, age01) {
+      const p = last[slot];
+      if (p) {
+        c.setHex(tint).multiplyScalar(0.26 + 0.94 * age01);
+        verts.push(p.x, p.y, p.z, x, y, z);
+        cols.push(c.r, c.g, c.b, c.r, c.g, c.b);
+        p.set(x, y, z);
+      } else last[slot] = new THREE.Vector3(x, y, z);
+    },
+    /**
+     * Lines PLUS breadcrumbs.
+     *
+     * WebGL ignores `LineBasicMaterial.linewidth` — every line is one device
+     * pixel, which at dpr 2 is a hairline scratch. The second captured frame
+     * had traces you had to hunt for, so the behaviour claim was being made in
+     * a caption rather than in the picture. Breadcrumb markers every Nth sample
+     * give the path real mass, and because they inherit the same brightness
+     * ramp they also carry the direction of travel.
+     */
+    build(crumbSize = 0.9, crumbStride = 4) {
+      const out = new THREE.Group();
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
+      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3));
+      out.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+        vertexColors: true, fog: false, transparent: true, opacity: 0.95,
+      })));
+
+      const n = Math.floor((verts.length / 6) / crumbStride);
+      if (n > 0) {
+        const crumbs = new THREE.InstancedMesh(
+          new THREE.OctahedronGeometry(crumbSize, 0),
+          // NOT vertexColors: the octahedron has no `color` attribute, and
+          // asking for one that does not exist rendered every crumb BLACK in
+          // the third capture. instanceColor multiplies material.color, which
+          // is all this needs.
+          new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
+          n
+        );
+        crumbs.instanceColor =
+          new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+        const m = new THREE.Matrix4();
+        const p = new THREE.Vector3();
+        const q = new THREE.Quaternion();
+        const s = new THREE.Vector3(1, 1, 1);
+        for (let i = 0; i < n; i++) {
+          const b = i * crumbStride * 6;
+          p.set(verts[b + 3], verts[b + 4], verts[b + 5]);
+          m.compose(p, q, s);
+          crumbs.setMatrixAt(i, m);
+          const c = i * crumbStride * 6;
+          crumbs.instanceColor.setXYZ(i, cols[c + 3], cols[c + 4], cols[c + 5]);
+        }
+        crumbs.instanceMatrix.needsUpdate = true;
+        crumbs.instanceColor.needsUpdate = true;
+        out.add(crumbs);
+      }
+      return out;
+    },
+    get segments() { return verts.length / 6; },
+  };
+}
+const _tp = new THREE.Vector3();
+
+const DT = 1 / 60;
+
+// ===========================================================================
+// SCENE 1 — HUNT. A pack, a bird flying a great circle, and the traces that
+// prove the pack bends onto it rather than orbiting past it.
+// ===========================================================================
+const huntScene = makeScene();
+const huntCam = new THREE.PerspectiveCamera(50, 1, 0.5, 3000);
+
+const huntDrones = createDrones(THREE, { quality: 'high', seed: 4242 });
+huntScene.add(huntDrones.group);
+huntDrones.setBehaviour('hunt');
+
+const birdPos = new THREE.Vector3();
+const BIRD_R = PLANET_RADIUS + 18;
+// Great-circle basis for the bird.
+const b1 = new THREE.Vector3(1, 0, 0);
+const b2 = new THREE.Vector3(0, 0.42, 0.91).normalize();
+b2.sub(b1.clone().multiplyScalar(b2.dot(b1))).normalize();
+function birdAt(a, out) {
+  return out.copy(b1).multiplyScalar(Math.cos(a)).addScaledVector(b2, Math.sin(a))
+    .normalize().multiplyScalar(BIRD_R);
+}
+
+// A stand-in for the bird: the real model is another agent's module and this
+// probe is about the drones. Cyan so it reads as the thing being hunted.
+const birdMarker = new THREE.Mesh(
+  new THREE.OctahedronGeometry(3.6, 1),
+  new THREE.MeshBasicMaterial({ color: PALETTE.uiCyan })
+);
+huntScene.add(birdMarker);
+
+{
+  const tracer = makeTracer(huntDrones.capacity + 1);
+  // 3.1s, NOT the first pass's 7.7s. At HUNT_SPEED_MUL the pack completes the
+  // intercept and then sits ON the bird; the first captured frame put the
+  // camera inside two 16-unit drones and nothing at all could be judged. The
+  // interesting moment is mid-approach, with the pack strung out behind its
+  // own curving traces.
+  const STEPS = 152;
+  let a = 0.0;
+  let hits = 0;
+  for (let s = 0; s < STEPS; s++) {
+    a += 0.235 * DT;                 // ~27 u/s at r=118: Birb Gauntlet cruise
+    birdAt(a, birdPos);
+    const r = huntDrones.update(DT, birdPos, 1.5);
+    if (r.hitBird >= 0) hits++;      // counted, not killed: see the module doc
+    if (s % 2 === 0) {
+      tracer.sample(huntDrones, PALETTE.boostPad, s / STEPS);
+      tracer.point(birdPos.x, birdPos.y, birdPos.z, huntDrones.capacity,
+                   PALETTE.uiCyan, s / STEPS);
+    }
+  }
+  birdMarker.position.copy(birdPos);
+  huntScene.add(tracer.build(0.62, 4));
+  window.__huntHits = hits;
+  window.__huntSegments = tracer.segments;
+
+  // A director's view over the limb rather than a chase cam: the claim under
+  // test is "the pack bends its orbit plane onto the bird", and you cannot see
+  // a curve from inside it. Far enough out that a 16-unit drone is a legible
+  // object rather than a wall, close enough that it is not a dot.
+  const up = birdPos.clone().normalize();
+  const fwd = birdAt(a, new THREE.Vector3()).sub(birdAt(a - 0.01, new THREE.Vector3())).normalize();
+  const side = new THREE.Vector3().crossVectors(up, fwd).normalize();
+  huntCam.position.copy(birdPos)
+    .addScaledVector(fwd, -92).addScaledVector(up, 66).addScaledVector(side, 42);
+  huntCam.up.copy(up);
+  huntCam.lookAt(birdPos.clone().addScaledVector(fwd, -14).addScaledVector(up, -14).addScaledVector(side, -10));
+}
+
+// ===========================================================================
+// SCENE 2 — AMBIENT. The same module, no target. Traces must be clean,
+// non-converging great circles: that IS the difference from hunt.
+// ===========================================================================
+const ambScene = makeScene();
+const ambCam = new THREE.PerspectiveCamera(46, 1, 0.5, 3000);
+const ambDrones = createDrones(THREE, { quality: 'high', seed: 909 });
+ambScene.add(ambDrones.group);
+ambDrones.setBehaviour('ambient');
+{
+  const tracer = makeTracer(ambDrones.capacity);
+  const STEPS = 1500;                // 25s: a quarter of an orbit each
+  for (let s = 0; s < STEPS; s++) {
+    ambDrones.update(DT, null, 1.5);
+    if (s % 8 === 0) tracer.sample(ambDrones, PALETTE.boostPad, s / STEPS);
+  }
+  ambScene.add(tracer.build(0.95, 3));
+  window.__ambSegments = tracer.segments;
+  ambCam.position.set(0, 96, 262);
+  ambCam.up.set(0, 1, 0);
+  ambCam.lookAt(0, 0, 0);
+}
+
+// ===========================================================================
+// SCENE 3 — WAVES. Six drones spawned on a stand-off ring around ONE nest.
+// Traces must converge to a point, and the wave must consume itself doing it.
+// ===========================================================================
+const waveScene = makeScene();
+const waveCam = new THREE.PerspectiveCamera(44, 1, 0.5, 3000);
+const waveNests = createNests(THREE, { count: 3, seed: 5150 });
+waveScene.add(waveNests.group);
+const waveDrones = createDrones(THREE, { quality: 'high', seed: 77, nests: waveNests });
+waveScene.add(waveDrones.group);
+waveDrones.setBehaviour('waves');
+let waveNestHits = 0;
+{
+  const NEST = 0;
+  waveNests.setActive(NEST);
+  const spawned = waveDrones.spawnWave(6, NEST);
+  window.__waveSpawned = spawned;
+
+  const tracer = makeTracer(waveDrones.capacity);
+  // Stop with a couple still inbound so the frame shows BOTH the converging
+  // traces and live drones mid-approach. A finished wave is an empty picture.
+  const STEPS = 900;
+  for (let s = 0; s < STEPS; s++) {
+    const r = waveDrones.update(DT, null, 1.5);
+    waveNestHits += r.nestHits;
+    if (s % 4 === 0) tracer.sample(waveDrones, PALETTE.boostPad, s / STEPS);
+    if (waveDrones.alive <= 2) break;
+  }
+  waveScene.add(tracer.build(0.62, 4));
+  window.__waveSegments = tracer.segments;
+
+  const np = waveNests.positionOf(NEST, new THREE.Vector3());
+  const up = np.clone().normalize();
+  const side = new THREE.Vector3(0, 1, 0).cross(up);
+  if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+  side.normalize();
+  waveCam.position.copy(np).addScaledVector(up, 46).addScaledVector(side, 86);
+  waveCam.up.copy(up);
+  waveCam.lookAt(np);
+}
+
+// ===========================================================================
+// SCENE 4 — SILHOUETTE. One drone, close, against a flat sky card. This is
+// where the collar / eye / spines get judged: does it read as a machine?
+// ===========================================================================
+const closeScene = makeScene(false);
+const closeCam = new THREE.PerspectiveCamera(34, 1, 0.1, 400);
+const closeDrones = createDrones(THREE, { quality: 'high', seed: 3, capacity: 1 });
+closeScene.add(closeDrones.group);
+closeDrones.setBehaviour('ambient');
+{
+  const g = new THREE.PlaneGeometry(600, 600);
+  const card = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith }));
+  closeScene.add(card);
+  for (let s = 0; s < 40; s++) closeDrones.update(DT, null, 1.5);
+  const p = closeDrones.positionOf(0, new THREE.Vector3());
+  const up = p.clone().normalize();
+  const side = new THREE.Vector3(0, 1, 0).cross(up).normalize();
+  const fwd = new THREE.Vector3().crossVectors(up, side).normalize();
+  // Three-quarter view from slightly above and ahead: the angle a player sees
+  // an incoming drone from, so the eye and the collar both have to work.
+  closeCam.position.copy(p)
+    .addScaledVector(fwd, -22).addScaledVector(side, 15).addScaledVector(up, 9);
+  closeCam.up.copy(up);
+  closeCam.lookAt(p);
+  card.position.copy(p).addScaledVector(fwd, 190).addScaledVector(up, 0);
+  card.lookAt(closeCam.position);
+}
+
+// ===========================================================================
+// Layout + render
+// ===========================================================================
+let mainStats = { drawCalls: 0, triangles: 0 };
+let systemStats = { drawCalls: 0, triangles: 0 };
+
+function pane(scene, cam, x, y, w, h) {
+  cam.aspect = w / h;
+  cam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setViewport(x, y, w, h);
+  renderer.setScissor(x, y, w, h);
+  renderer.render(scene, cam);
+  renderer.setScissorTest(false);
+}
+
+let layout = { insetH: 0, insetW: 0, closeW: 0, closeH: 0 };
+
+function draw() {
+  const W = innerWidth, H = innerHeight;
+
+  renderer.setViewport(0, 0, W, H);
+  renderer.render(huntScene, huntCam);
+  mainStats = {
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+  };
+
+  // The module's OWN cost, measured not claimed: render the drone group alone.
+  {
+    const probe = new THREE.Scene();
+    probe.add(huntDrones.group);
+    renderer.render(probe, huntCam);
+    systemStats = {
+      drawCalls: renderer.info.render.calls,
+      triangles: renderer.info.render.triangles,
+    };
+    huntScene.add(huntDrones.group);
+    renderer.setViewport(0, 0, W, H);
+    renderer.render(huntScene, huntCam);
+  }
+
+  // NOTE: renderer viewport y counts from the BOTTOM of the drawing buffer,
+  // while the DOM labels below count from the top. The first capture had the
+  // "silhouette" pane pinned to the top-right while its label sat at the
+  // bottom, because this file mixed the two conventions. Both are now written
+  // in GL space here and converted once for the DOM.
+  const iw = layout.insetW, ih = layout.insetH;
+  pane(ambScene, ambCam, 6, 22, iw, ih);                 // bottom-left
+  pane(waveScene, waveCam, 12 + iw, 22, iw, ih);         // bottom, next to it
+  pane(closeScene, closeCam, W - layout.closeW - 6, H - layout.closeH - 6,
+       layout.closeW, layout.closeH);                    // top-right
+
+  renderer.setViewport(0, 0, W, H);
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  const W = innerWidth, H = innerHeight;
+  huntCam.aspect = W / H;
+  // Portrait: a 50deg VERTICAL fov on a 0.46 aspect is a keyhole and crops the
+  // pack out of frame. Widen so the phone capture judges the same composition.
+  huntCam.fov = huntCam.aspect >= 0.85 ? 50 : 50 + (0.85 - huntCam.aspect) * 46;
+  huntCam.updateProjectionMatrix();
+  updateOutlineProjection(huntCam, renderer.domElement.height, renderer.getPixelRatio());
+
+  layout.insetW = Math.round(Math.min(300, (W - 18) / 2));
+  layout.insetH = Math.round(layout.insetW * 0.80);
+  layout.closeW = Math.round(Math.min(280, W * 0.40));
+  layout.closeH = Math.round(layout.closeW * 0.74);
+
+  draw();
+
+  // GL bottom edge 22px -> DOM bottom edge 22px; the label sits above the pane.
+  const lblBottom = (22 + layout.insetH + 4) + 'px';
+  document.getElementById('lblA').style.cssText =
+    `left:6px;bottom:${lblBottom};width:${layout.insetW}px;`;
+  document.getElementById('lblA').innerHTML =
+    'AMBIENT · 25s — parallel great circles, no convergence';
+  document.getElementById('lblB').style.cssText =
+    `left:${12 + layout.insetW}px;bottom:${lblBottom};width:${layout.insetW}px;`;
+  document.getElementById('lblB').innerHTML =
+    `WAVES · 6 → nest · ${waveNestHits} arrived, ${waveDrones.alive} inbound`;
+  document.getElementById('closelabel').style.cssText =
+    `right:12px;top:${layout.closeH + 10}px;`;
+
+  document.getElementById('stats').textContent =
+    `drones ${huntDrones.alive}/${huntDrones.capacity} live · system ` +
+    `${systemStats.drawCalls} draws / ${systemStats.triangles} tris · ` +
+    `frame ${mainStats.drawCalls} draws / ${mainStats.triangles} tris · ` +
+    `orbit ${ORBIT_SPEED} rad/s · hit r ${COLLISION_RADIUS} · rams ${window.__huntHits}`;
+}
+addEventListener('resize', resize);
+resize();
+
+window.__GAUNTLET_STATS = () => ({
+  drawCalls: mainStats.drawCalls,
+  triangles: mainStats.triangles,
+  systemDrawCalls: systemStats.drawCalls,
+  systemTriangles: systemStats.triangles,
+  droneDrawCalls: huntDrones.drawCallCount,
+  droneCapacity: huntDrones.capacity,
+  droneAlive: huntDrones.alive,
+  bodyTriangles: huntDrones.bodyTriangles,
+  ringTriangles: huntDrones.ringTriangles,
+  maxTriangles: huntDrones.triangleCount,
+  huntRams: window.__huntHits,
+  waveSpawned: window.__waveSpawned,
+  waveNestHits,
+  traceSegments: window.__huntSegments + window.__ambSegments + window.__waveSegments,
+});
+
+// ---------------------------------------------------------------------------
+// Self-test — the paths a still frame cannot show. Runs BEFORE ready, throws on
+// any contract violation, so a zero exit from the harness covers all of it.
+// ---------------------------------------------------------------------------
+window.__droneSelfTest = () => {
+  const A = (c, m) => { if (!c) throw new Error(m); };
+
+  // --- determinism ---------------------------------------------------
+  const mk = () => {
+    const d = createDrones(THREE, { quality: 'mid', seed: 1234 });
+    d.setBehaviour('hunt');
+    const b = { x: 0, y: 118, z: 0 };
+    for (let i = 0; i < 120; i++) d.update(DT, b, 1.5);
+    const v = new THREE.Vector3();
+    const out = [];
+    for (let i = 0; i < d.capacity; i++) { d.positionOf(i, v); out.push(v.x, v.y, v.z); }
+    return { d, out };
+  };
+  const r1 = mk(), r2 = mk();
+  for (let i = 0; i < r1.out.length; i++) {
+    A(r1.out[i] === r2.out[i], 'not deterministic at ' + i);
+  }
+  r1.d.dispose(); r2.d.dispose();
+
+  // --- behaviour populations -----------------------------------------
+  const d = createDrones(THREE, { quality: 'high', seed: 5 });
+  A(d.alive === 0, 'alive before setBehaviour: ' + d.alive);
+  d.setBehaviour('off');
+  A(d.alive === 0, 'off spawned drones');
+  d.setBehaviour('ambient');
+  A(d.alive === 7, 'high ambient population ' + d.alive);
+  d.setBehaviour('hunt');
+  A(d.alive === 18, 'high hunt population ' + d.alive);
+  d.setBehaviour('nonsense');
+  A(d.alive === 0, 'unknown behaviour did not fall back to off');
+
+  // --- altitude band + orbit rate ------------------------------------
+  d.setBehaviour('ambient');
+  const v = new THREE.Vector3();
+  for (let i = 0; i < d.capacity; i++) {
+    if (!d.isAlive(i)) continue;
+    d.positionOf(i, v);
+    const r = v.length();
+    A(r >= PLANET_RADIUS + 8 - 2 && r <= PLANET_RADIUS + 26 + 2,
+      'drone outside the ported altitude band: ' + r);
+  }
+  // Ambient must not converge: measure angular travel over 1s and check it
+  // lands inside the verbatim 0.8x .. 1.2x variance window.
+  {
+    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3();
+    d.positionOf(0, p0);
+    for (let i = 0; i < 60; i++) d.update(DT, null, 1.5);
+    d.positionOf(0, p1);
+    const c = Math.min(1, Math.max(-1, p0.normalize().dot(p1.normalize())));
+    const rate = Math.acos(c);
+    A(rate > ORBIT_SPEED * 0.75 && rate < ORBIT_SPEED * 1.25,
+      'orbit rate outside variance: ' + rate);
+  }
+
+  // --- rocket target contract ----------------------------------------
+  A(d.targets.length === d.capacity, 'targets length must be fixed at capacity');
+  let live = 0;
+  for (let i = 0; i < d.capacity; i++) {
+    const t = d.targets[i];
+    if (d.isAlive(i)) {
+      A(t && t.radius === COLLISION_RADIUS, 'live slot has no target at ' + i);
+      live++;
+    } else A(t === null, 'dead slot leaked a target at ' + i);
+  }
+  A(live === d.alive, 'target count disagrees with alive');
+
+  // --- ram detection + respawn ---------------------------------------
+  {
+    const p = new THREE.Vector3();
+    let idx = -1;
+    for (let i = 0; i < d.capacity; i++) if (d.isAlive(i)) { idx = i; break; }
+    d.positionOf(idx, p);
+    const res = d.update(DT, p, 1.5);
+    A(res.hitBird >= 0, 'a bird sitting on a drone was not detected');
+    // Just outside the hit sphere: 9.9 + 1.5 = 11.4.
+    d.positionOf(res.hitBird, p);
+    const far = p.clone().setLength(p.length() + 12.0);
+    A(d.update(DT, far, 1.5).hitBird < 0, 'hit at 12u > radius 11.4');
+    // ...and just inside.
+    const near = p.clone().setLength(p.length() + 10.5);
+    A(d.update(DT, near, 1.5).hitBird >= 0, 'no hit at 10.5u < radius 11.4');
+  }
+  {
+    const before = d.alive;
+    let idx = -1;
+    for (let i = 0; i < d.capacity; i++) if (d.isAlive(i)) { idx = i; break; }
+    A(d.killAt(idx) === true, 'killAt returned false on a live drone');
+    A(d.killAt(idx) === false, 'killAt was not idempotent');
+    A(d.alive === before - 1, 'kill did not decrement alive');
+    A(d.targets[idx] === null, 'killed slot kept its rocket target');
+    for (let i = 0; i < 130; i++) d.update(DT, null, 1.5);   // > 2.0s
+    A(d.alive === before, 'ambient did not respawn after RESPAWN_DELAY: ' + d.alive);
+  }
+
+  // --- dt guards -----------------------------------------------------
+  d.update(0, null, 1.5); d.update(-1, null, 1.5); d.update(NaN, null, 1.5);
+  d.update(10, null, 1.5);
+  A(d.alive > 0, 'a dt spike emptied the swarm');
+  d.dispose();
+  d.update(DT, null, 1.5); d.killAt(0); d.setBehaviour('hunt');
+  A(d.alive === 0, 'disposed system still reports drones');
+
+  // --- waves ---------------------------------------------------------
+  {
+    const nests = createNests(THREE, { count: 4, seed: 31337 });
+    const w = createDrones(THREE, { quality: 'high', seed: 8, nests });
+    w.setBehaviour('waves');
+    A(w.alive === 0, 'waves auto-spawned');
+    A(w.spawnWave(5, -1) === 0, 'spawnWave accepted a bad nest index');
+    A(w.spawnWave(5, 99) === 0, 'spawnWave accepted an out-of-range nest');
+    A(w.spawnWave(5, 1) === 5, 'spawnWave under-delivered');
+    A(w.alive === 5, 'wave population wrong: ' + w.alive);
+    for (let i = 0; i < w.capacity; i++) {
+      if (w.isAlive(i)) A(w.nestTargetOf(i) === 1, 'wave drone targets the wrong nest');
+    }
+    // They must actually arrive, and the wave must consume itself doing it.
+    let hits = 0;
+    for (let i = 0; i < 4000 && w.alive > 0; i++) hits += w.update(DT, null, 1.5).nestHits;
+    A(hits === 5, 'wave did not converge on the nest: ' + hits + ' hits');
+    A(w.alive === 0, 'wave refilled itself — Turret Defense would never end');
+    // Overflow must be capacity-limited, not an exception.
+    A(w.spawnWave(999, 0) === w.capacity, 'spawnWave ignored capacity');
+    w.clear();
+    A(w.alive === 0, 'clear() left drones');
+    w.dispose(); nests.dispose();
+  }
+  return 'ok';
+};
+if (window.__droneSelfTest() !== 'ok') throw new Error('drone self-test failed');
+
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

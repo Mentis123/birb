@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · nesting (auto-land glide)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+  .panel { position: fixed; color: #fff6dc; pointer-events: none;
+           font: 600 11px/1.45 ui-monospace, SFMono-Regular, monospace;
+           letter-spacing: .04em; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { left: 10px; bottom: 8px; }
+  #graphs { left: 10px; top: 10px; }
+  #graphs canvas { display: block; background: #0a132488; border: 1px solid #24344f;
+                   border-radius: 4px; margin-top: 4px; }
+  #tag { right: 10px; top: 10px; text-align: right; }
+  #timeline { left: 10px; bottom: 26px; }
+  @media (max-aspect-ratio: 85/100) {
+    #tag { top: 178px; }
+    #timeline { bottom: 46px; max-width: 62vw; }
+    #stats { max-width: 62vw; }
+  }
+  #closelabel { right: 12px; bottom: 10px; text-align: right; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="graphs">airspeed · u/s<canvas id="sg" width="230" height="52"></canvas>
+sideslip · deg (travel vs facing)<canvas id="sl" width="230" height="52"></canvas></div>
+<div class="panel" id="tag">nesting probe · auto-land glide<br>ghosts every ~11 units of the approach</div>
+<div class="panel" id="timeline"></div>
+<div class="panel" id="closelabel">seated in the bowl ↓</div>
+<div class="panel" id="stats"></div>
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE, CSS } from '/gauntlet/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import {
+  surfaceRadius, continentalHeight, PLANET_RADIUS,
+} from '/gauntlet/src/core/terrain.js';
+import { makeRng, rngRange, fibonacciDirection } from '/gauntlet/src/core/rng.js';
+import { createNests } from '/gauntlet/src/world/nests.js';
+import { createBird } from '/gauntlet/src/bird/bird-model.js';
+import { createBirdAnimator } from '/gauntlet/src/bird/bird-anim.js';
+import { GauntletFlight } from '/gauntlet/src/bird/flight.js';
+import {
+  createNesting, createNestingCore, NESTING_STATES, NESTING_CONFIG,
+  glideSpeedCap, approachThrottle, takeOffImpulse, stateIsFreeFlight,
+} from '/gauntlet/src/nesting/nesting-system.js';
+
+const THREE = await loadThree();
+const S = NESTING_STATES;
+
+// ---------------------------------------------------------------------------
+// Self-test FIRST. It runs the whole state machine, the wrapper against a stub
+// flight controller, and dispose() — things a still frame can never show. It
+// throws, so a zero exit from the harness covers all of it.
+// ---------------------------------------------------------------------------
+window.__nestingSelfTest = () => {
+  // --- the pure core ------------------------------------------------------
+  const core = createNestingCore();
+  if (core.state !== S.FLYING) throw new Error('initial state ' + core.state);
+  core.update(1 / 60, 2, Infinity);
+  if (core.state !== S.APPROACHING) throw new Error('no APPROACHING on proximity');
+  core.update(1 / 60, -1, Infinity);
+  if (core.state !== S.FLYING) throw new Error('no exit from APPROACHING');
+  if (core.takeOff()) throw new Error('takeOff fired while flying');
+  if (!core.requestLand(2)) throw new Error('requestLand refused');
+  if (core.requestLand(3)) throw new Error('landing restarted mid-glide');
+  core.update(1 / 60, 2, 0.1);
+  if (core.state !== S.NESTED) throw new Error('did not arrive');
+  if (!core.takeOff()) throw new Error('takeOff refused from NESTED');
+  for (let i = 0; i < 40; i++) core.update(1 / 60, -1, Infinity);
+  if (core.state !== S.FLYING) throw new Error('take-off never ended');
+
+  // --- the wrapper against a stub, so the glide maths is exercised without
+  //     depending on the frame the probe happens to capture ------------------
+  const stubNests = {
+    positions: new Float32Array([0, 120, 0]),
+    normals: new Float32Array([0, 1, 0]),
+    update() {}, setActive(i) { stubNests.active = i; }, active: -1,
+    nearestGround() { return 0; },
+    positionOf(i, o) { return o.set(0, 120, 0); },
+    normalOf(i, o) { return o.set(0, 1, 0); },
+  };
+  const f = new GauntletFlight(THREE, {
+    sphereRadius: 100, terrainHeightAt: () => 0, birdRadius: 1.2,
+    position: new THREE.Vector3(70, 90, 0),
+  });
+  f.setHeading(0, 0, -1);
+  const n = createNesting(THREE, { flight: f, nests: stubNests, sphereRadius: 100 });
+  n.update(1 / 60);
+  if (n.state !== S.APPROACHING) throw new Error('wrapper missed proximity');
+  if (stubNests.active !== 0) throw new Error('highlight not synced');
+  if (n.drivesFlight) throw new Error('wrapper claimed the bird while approaching');
+  if (!n.requestLand()) throw new Error('wrapper requestLand refused');
+  if (!n.drivesFlight) throw new Error('wrapper did not claim the bird for the glide');
+  let steps = 0;
+  while (n.state === S.LANDING && steps++ < 3000) n.update(1 / 60);
+  if (n.state !== S.NESTED) throw new Error('wrapper glide never arrived (' + steps + ')');
+  if (n.core.stalled) throw new Error('arrival came from the safety valve');
+  // The bird perches `seatLift` above the bowl floor — see NESTING_CONFIG.
+  const perch = new THREE.Vector3(0, 120 + NESTING_CONFIG.seatLift, 0);
+  if (f.position.distanceTo(perch) > 1e-6) {
+    throw new Error('seated pose is not the perch: ' + f.position.toArray());
+  }
+  const up = f.position.clone().normalize();
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(f.quaternion);
+  if (Math.abs(fwd.dot(up)) > 1e-5) throw new Error('seated bird is not level');
+  if (!n.shouldShowWelcome() || n.shouldShowWelcome()) throw new Error('welcome fired wrong');
+  // Held for a second: it must not drift out of the bowl.
+  for (let i = 0; i < 60; i++) n.update(1 / 60);
+  if (f.position.distanceTo(perch) > 1e-6) throw new Error('drifted while nested');
+  if (!n.takeOff()) throw new Error('wrapper takeOff refused');
+  if (n.takeOff()) throw new Error('takeOff fired twice');
+  for (let i = 0; i < 40; i++) n.update(1 / 60);
+  // The stub always reports a nest in range, so the take-off lands back in
+  // APPROACHING rather than FLYING — both mean "the player has the bird again".
+  if (!stateIsFreeFlight(n.state)) throw new Error('wrapper never gave the bird back: ' + n.state);
+  if (n.activeNest !== -1) throw new Error('nest not released');
+  if (f.position.length() <= perch.length()) throw new Error('take-off did not gain height');
+  n.dispose();
+  if (n.update(1 / 60) !== S.FLYING || n.requestLand(0) || n.takeOff()) {
+    throw new Error('disposed system still live');
+  }
+
+  // --- the pure glide maths ----------------------------------------------
+  for (let d = 0; d <= 90; d += 0.37) {
+    if (glideSpeedCap(d, 1 / 60) * (1 / 60) > d + 1e-9) throw new Error('overshoot at ' + d);
+  }
+  if (glideSpeedCap(500, 1 / 60) !== 16) throw new Error('autoFlySpeed is not verbatim');
+  if (takeOffImpulse(NESTING_CONFIG.takeOffDuration) !== 3) throw new Error('boost not verbatim');
+  if (approachThrottle(1000, 27) !== 1) throw new Error('throttle not full when far');
+  return 'ok';
+};
+if (window.__nestingSelfTest() !== 'ok') throw new Error('nesting self-test failed');
+
+// ---------------------------------------------------------------------------
+// Scene
+// ---------------------------------------------------------------------------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 120, 420);
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 2000);
+createLightRig(THREE, scene);
+
+// A real slice of planet: the glide has to be judged against the terrain it
+// descends over, not against a void.
+{
+  const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 34);
+  const pos = geo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const cLit = new THREE.Color(PALETTE.meadowLit);
+  const cDeep = new THREE.Color(PALETTE.canyonDeep);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    const r = surfaceRadius(nx, ny, nz);
+    pos.setXYZ(i, nx * r, ny * r, nz * r);
+    const depth = Math.min(1, -continentalHeight(nx, ny, nz) / 26);
+    tmp.copy(cLit).lerp(cDeep, depth);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  scene.add(new THREE.Mesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+  })));
+}
+
+// Probe-only context canopy. The planet module is not in this probe, and a
+// glide judged against a bald green hill is not judged: the descent has to be
+// read against something with scale in it. ONE InstancedMesh, reported
+// separately from the nesting system's own cost.
+{
+  const trunk = new THREE.CylinderGeometry(0.30, 0.52, 3.4, 5, 1, true);
+  trunk.translate(0, 1.7, 0);
+  const crown = new THREE.IcosahedronGeometry(1.9, 0);
+  crown.scale(1.1, 0.86, 1.1);
+  crown.translate(0, 4.3, 0);
+  const parts = [[trunk, new THREE.Color(PALETTE.trunk)], [crown, new THREE.Color(PALETTE.foliageMid)]];
+  let total = 0;
+  for (const [g] of parts) total += g.getAttribute('position').count;
+  const pos = new Float32Array(total * 3), nrm = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  let o = 0;
+  for (const [g, c] of parts) {
+    const p = g.getAttribute('position'), nn = g.getAttribute('normal');
+    for (let v = 0; v < p.count; v++) {
+      const w = (o + v) * 3;
+      pos[w] = p.getX(v); pos[w + 1] = p.getY(v); pos[w + 2] = p.getZ(v);
+      nrm[w] = nn.getX(v); nrm[w + 1] = nn.getY(v); nrm[w + 2] = nn.getZ(v);
+      col[w] = c.r; col[w + 1] = c.g; col[w + 2] = c.b;
+    }
+    o += p.count;
+    g.dispose();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+  const N = 1400;
+  const mesh = new THREE.InstancedMesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, flatShading: true, specStrength: 0, rimStrength: 0.25,
+  }), N);
+  mesh.frustumCulled = false;
+  const rng = makeRng(4242);
+  const d = new THREE.Vector3(), q = new THREE.Quaternion(), m = new THREE.Matrix4();
+  const sc = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0), pv = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    fibonacciDirection(i, N, d, rng, 0.06);
+    const r = surfaceRadius(d.x, d.y, d.z);
+    q.setFromUnitVectors(Y, d);
+    const k = rngRange(rng, 0.75, 1.45);
+    sc.set(k, k * rngRange(rng, 0.9, 1.3), k);
+    pv.copy(d).multiplyScalar(r - 0.4);
+    m.compose(pv, q, sc);
+    mesh.setMatrixAt(i, m);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  scene.add(mesh);
+}
+
+const nests = createNests(THREE, { quality: 'high', seed: 90210 });
+scene.add(nests.group);
+
+// ---------------------------------------------------------------------------
+// The run. Deterministic: fixed dt, no rng, no input beyond the autopilot.
+// ---------------------------------------------------------------------------
+const DT = 1 / 60;
+const NEST = 0;
+
+const nestPos = nests.positionOf(NEST, new THREE.Vector3());
+const nestUp = nests.normalOf(NEST, new THREE.Vector3());
+// Where the bird actually ends up: the bowl floor plus the perch lift, so the
+// probe measures its arrival error against the real target rather than against
+// a point 1.6 units under the bird.
+const perchPos = nestPos.clone().addScaledVector(nestUp, NESTING_CONFIG.seatLift);
+
+// Start ~86 units of ground away, at cruise altitude, deliberately pointed 42
+// degrees off the nest so the autopilot has a real turn to fly. A probe where
+// the bird starts aimed at the target proves nothing.
+const ARC = 0.86;                      // radians -> ~86 world units of ground
+const side = new THREE.Vector3(0, 1, 0).cross(nestUp).normalize();
+const startDir = nestUp.clone().applyAxisAngle(side, ARC).normalize();
+const startPos = startDir.clone().multiplyScalar(PLANET_RADIUS + 14);
+
+const flight = new GauntletFlight(THREE, {
+  sphereRadius: PLANET_RADIUS,
+  terrainHeightAt: (nx, ny, nz) => continentalHeight(nx, ny, nz),
+  birdRadius: 1.4,
+  position: startPos,
+});
+{
+  // Tangential heading toward the nest, then yawed off by 42 degrees.
+  const toNest = nestPos.clone().sub(flight.position);
+  const up = flight.position.clone().normalize();
+  toNest.addScaledVector(up, -toNest.dot(up)).normalize();
+  toNest.applyAxisAngle(up, 0.73);
+  flight.setHeading(toNest.x, toNest.y, toNest.z);
+}
+
+const nesting = createNesting(THREE, {
+  flight, nests, sphereRadius: PLANET_RADIUS,
+  onStateChange(next, prev) { transitions.push(prev + '->' + next + ' @' + t.toFixed(2) + 's'); },
+});
+
+const transitions = [];
+const trail = [];         // Vector3 per frame, for the trajectory line
+const samples = [];       // ghost poses
+const speedTrace = [];
+const slipTrace = [];
+const freeInput = { x: 0, y: 0, boost: false };
+
+let t = 0;
+let nextGhostAt = 86;     // ghost every ~11 units of remaining distance
+let landed = -1;
+let tookOff = -1;
+let maxSlip = 0;
+let maxCaptureSlip = 0;
+let arrivalError = -1;
+let lastLandingDist = Infinity;
+let requestedAt = -1;
+
+const _v = new THREE.Vector3();
+
+for (let step = 0; step < 2400; step++) {
+  // Phase 1: free flight, no stick — the player cruising past. The nesting
+  // system does NOT own the bird here, so the probe ticks it, exactly the way
+  // the integrator will.
+  if (!nesting.drivesFlight) flight.tick(freeInput, DT);
+  const state = nesting.update(DT);
+  t += DT;
+
+  // Fly hands-off for 0.9s so the frame shows the bird arriving on its own
+  // trajectory, then commit to the landing from full range.
+  if (requestedAt < 0 && t > 0.9) {
+    if (nesting.requestLand(NEST)) requestedAt = t;
+  }
+
+  const dist = flight.position.distanceTo(perchPos);
+  if (Number.isFinite(nesting.distanceToNest)) lastLandingDist = nesting.distanceToNest;
+  trail.push(flight.position.clone());
+  speedTrace.push(flight.speed);
+  if (state === S.LANDING) {
+    slipTrace.push(nesting.slipDegrees);
+    // Measured OUTSIDE the touchdown capture: inside it the step is
+    // deliberately blended toward the bowl, so counting it would be measuring
+    // the exception rather than the glide. Reported separately below.
+    if (dist > NESTING_CONFIG.captureRadius && nesting.slipDegrees > maxSlip) {
+      maxSlip = nesting.slipDegrees;
+    }
+    if (dist <= NESTING_CONFIG.captureRadius && nesting.slipDegrees > maxCaptureSlip) {
+      maxCaptureSlip = nesting.slipDegrees;
+    }
+  } else {
+    slipTrace.push(0);
+  }
+
+  // Ghosts, spaced by remaining distance rather than by time, so they read as
+  // an even ladder down the approach instead of bunching up in the flare.
+  if (state === S.LANDING && dist <= nextGhostAt) {
+    samples.push({
+      pos: flight.position.clone(), quat: flight.quaternion.clone(),
+      turn: flight.turn, pitch: flight.pitchInput,
+      speed01: flight.airSpeed01, grounded: false,
+    });
+    nextGhostAt = dist - 11;
+  }
+
+  if (landed < 0 && state === S.NESTED) {
+    landed = t;
+    arrivalError = lastLandingDist;
+    samples.push({
+      pos: flight.position.clone(), quat: flight.quaternion.clone(),
+      turn: 0, pitch: 0, speed01: 0, grounded: true,
+    });
+  }
+  // Sit in the nest for 1.2s, then leave.
+  if (landed > 0 && tookOff < 0 && t - landed > 1.2) {
+    if (nesting.takeOff()) tookOff = t;
+  }
+  if (tookOff > 0 && t - tookOff > 1.0) break;
+}
+
+// ---------------------------------------------------------------------------
+// Ghost birds along the recorded approach
+// ---------------------------------------------------------------------------
+for (let i = 0; i < samples.length; i++) {
+  const s = samples[i];
+  const last = i === samples.length - 1;
+  const bird = createBird(THREE, {
+    bodyColor: PALETTE.birdPlayer, bellyColor: PALETTE.birdPlayerBelly,
+    scale: 1.15, quality: 'high', outline: last,
+  });
+  bird.group.position.copy(s.pos);
+  bird.group.quaternion.copy(s.quat);
+  scene.add(bird.group);
+
+  // Settle each ghost's animator against its recorded stick so the wings show
+  // the bank the bird was actually flying — a static model would hide the whole
+  // point of the glide being flown rather than lerped.
+  const anim = createBirdAnimator(THREE, bird);
+  const st = {
+    speed01: s.speed01, turn: s.turn, pitch: s.pitch, boosting: false,
+    flapImpulse: s.grounded ? 0 : 0.35, tumbling: false, grounded: s.grounded,
+    celebrating: false, phase: i * 0.37,
+  };
+  for (let k = 0; k < 90; k++) anim.update(1 / 60, st);
+}
+
+// Trajectory ribbon: one line, one draw call, so the descending curve reads
+// even where the ghosts are far apart.
+{
+  // A tube, not a Line: `linewidth` is ignored by every WebGL driver, so a
+  // THREE.Line is a 1px hairline that vanishes at retina DPR — the first
+  // capture had a trajectory nobody could see.
+  const curve = new THREE.CatmullRomCurve3(trail.filter((_, i) => i % 3 === 0));
+  const g = new THREE.TubeGeometry(curve, 220, 0.22, 5, false);
+  scene.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PALETTE.sparkCyan })));
+}
+
+// ---------------------------------------------------------------------------
+// Cameras. Main: side-on to the glide plane so the descent curve is visible.
+// ---------------------------------------------------------------------------
+// Square-on to the plane the glide is flown in, far enough out that the whole
+// 88-unit approach fits. The first capture put the camera 86 units off a point
+// 34 above the surface, which framed a wall of hillside with the birds strung
+// along the horizon — the descent was there, just entirely foreshortened.
+//
+// Portrait needs a different frame, not just a wider lens: on a 0.5 aspect the
+// landscape composition put the landing nest off the left edge and the whole
+// subject of the probe was missing. Portrait therefore aims at the nest end of
+// the glide and lets the approach run off the top corner.
+const mid = startDir.clone().add(nestUp).normalize();
+const planeN = new THREE.Vector3().crossVectors(startDir, nestUp).normalize();
+function frameCamera(aspect) {
+  const portrait = aspect < 0.85;
+  const aim = portrait
+    ? nestUp.clone().addScaledVector(startDir, 0.30).normalize()
+    : mid;
+  camera.position.copy(mid).multiplyScalar(PLANET_RADIUS + 24)
+    .addScaledVector(planeN, portrait ? 86 : 99);
+  camera.up.copy(mid);
+  // Aim BELOW the glide so the approach climbs into the upper half of the frame
+  // instead of leaving the top 45% as empty sky, which is what an earlier
+  // capture did.
+  camera.lookAt(_v.copy(aim).multiplyScalar(PLANET_RADIUS + (portrait ? 8 : 3)));
+}
+frameCamera(innerWidth / innerHeight);
+
+const closeCam = new THREE.PerspectiveCamera(40, 1, 0.1, 900);
+{
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(flight.quaternion);
+  const s2 = new THREE.Vector3().crossVectors(nestUp, fwd).normalize();
+  // Near side-on. Looking down at the perch from above showed the bird's back
+  // and read as a face-plant; the silhouette is what has to be judged.
+  closeCam.position.copy(perchPos)
+    .addScaledVector(nestUp, 2.1)
+    .addScaledVector(s2, 10.4)
+    .addScaledVector(fwd, -3.0);
+  closeCam.up.copy(nestUp);
+  closeCam.lookAt(_v.copy(perchPos));
+}
+
+// ---------------------------------------------------------------------------
+// Graphs
+// ---------------------------------------------------------------------------
+function plot(id, trace, max, color, zeroLine) {
+  const el = document.getElementById(id);
+  const g = el.getContext('2d');
+  g.clearRect(0, 0, el.width, el.height);
+  g.strokeStyle = color;
+  g.lineWidth = 2;
+  g.beginPath();
+  for (let i = 0; i < trace.length; i++) {
+    const x = (i / Math.max(1, trace.length - 1)) * (el.width - 4) + 2;
+    const y = el.height - 3 - Math.min(1, trace[i] / max) * (el.height - 8);
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.stroke();
+  if (zeroLine) {
+    g.strokeStyle = CSS.uiGold; g.globalAlpha = 0.45;
+    g.beginPath(); g.moveTo(2, el.height - 3); g.lineTo(el.width - 2, el.height - 3); g.stroke();
+    g.globalAlpha = 1;
+  }
+}
+plot('sg', speedTrace, 30, CSS.uiCyan, true);
+plot('sl', slipTrace, 8, CSS.uiGold, true);
+
+// ---------------------------------------------------------------------------
+let mainStats = { drawCalls: 0, triangles: 0 };
+
+/** Inset geometry. Portrait gets a bigger one, lifted clear of the stats. */
+function insetRect() {
+  const portrait = innerWidth / innerHeight < 0.85;
+  const w = Math.round(portrait ? Math.min(300, innerWidth * 0.62) : Math.min(268, innerWidth * 0.33));
+  return { w, h: Math.round(w * 0.72), y: portrait ? 96 : 26 };
+}
+
+function draw() {
+  const W = innerWidth, H = innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.render(scene, camera);
+  mainStats = {
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+  };
+
+  const R2 = insetRect();
+  const iw = R2.w, ih = R2.h, ix = W - iw - 8, iy = R2.y;
+  closeCam.aspect = iw / ih;
+  closeCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setViewport(ix, iy, iw, ih);
+  renderer.setScissor(ix, iy, iw, ih);
+  renderer.render(scene, closeCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.fov = camera.aspect >= 0.85 ? 48 : 48 + (0.85 - camera.aspect) * 30;
+  camera.updateProjectionMatrix();
+  frameCamera(camera.aspect);
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  draw();
+  document.getElementById('closelabel').style.bottom =
+    (insetRect().y + insetRect().h + 4) + 'px';
+  document.getElementById('tag').textContent2 = '';
+  document.getElementById('stats').textContent =
+    `glide ${(landed - requestedAt).toFixed(2)}s  arrival err ${arrivalError.toFixed(3)}u  ` +
+    `sideslip max ${maxSlip.toFixed(2)}deg  ${mainStats.drawCalls} draws / ` +
+    `${mainStats.triangles} tris (nests ${nests.drawCallCount})`;
+  document.getElementById('timeline').textContent = transitions.join('  ');
+}
+addEventListener('resize', resize);
+resize();
+
+window.__GAUNTLET_STATS = () => ({
+  drawCalls: mainStats.drawCalls,
+  triangles: mainStats.triangles,
+  nestDrawCalls: nests.drawCallCount,
+  nestTriangles: nests.triangleCount,
+  ghosts: samples.length,
+  transitions: transitions.slice(),
+  glideSeconds: +(landed - requestedAt).toFixed(3),
+  arrivalErrorUnits: +arrivalError.toFixed(4),
+  maxSideslipDeg: +maxSlip.toFixed(3),
+  maxCaptureSideslipDeg: +maxCaptureSlip.toFixed(3),
+  finalState: nesting.state,
+  peakSpeed: +Math.max.apply(null, speedTrace).toFixed(2),
+  touchdownSpeed: +speedTrace[Math.max(0, Math.round(landed / DT) - 1)].toFixed(2),
+});
+
+window.__GAUNTLET_READY = true;
+</script>
+</body>
+</html>

@@ -313,6 +313,7 @@ export class GauntletFlight {
         this.birdRadius = options.birdRadius ?? 1.2;
 
         this.cfg = FLIGHT_CONFIG;
+        this.speedScale = 1;
         this.cruiseSpeed = options.speed ?? FLIGHT_CONFIG.cruiseSpeed;
         this.yawRate = options.yawRate ?? FLIGHT_CONFIG.yawRate;
         this.pitchRate = options.pitchRate ?? FLIGHT_CONFIG.pitchRate;
@@ -439,6 +440,37 @@ export class GauntletFlight {
         this.boost.pulse = 0;
         this.boost.cooldown = this.cfg.boostKnockLockout;
         this.isBoosting = false;
+    }
+
+    /**
+     * Scale the whole speed envelope for this bird only.
+     *
+     * `this.cfg` normally POINTS AT the shared FLIGHT_CONFIG, so mutating it
+     * would retune every bird in the world — including the rivals. This takes
+     * an own copy instead.
+     *
+     * The accelerations scale with the envelope so the time constants of the
+     * energy trade and the boost are unchanged: a slower bird should feel
+     * calmer, not mushier. Turn rates are deliberately NOT scaled — leaving
+     * them alone while speed drops tightens the turning radius, which is most
+     * of what makes a slower mode feel more controllable.
+     */
+    setSpeedScale(scale) {
+        const k = clamp(Number.isFinite(scale) ? scale : 1, 0.2, 2);
+        this.speedScale = k;
+        this.cfg = (k === 1) ? FLIGHT_CONFIG : Object.assign({}, FLIGHT_CONFIG, {
+            cruiseSpeed: FLIGHT_CONFIG.cruiseSpeed * k,
+            minSpeed: FLIGHT_CONFIG.minSpeed * k,
+            maxSpeed: FLIGHT_CONFIG.maxSpeed * k,
+            boostMaxSpeed: FLIGHT_CONFIG.boostMaxSpeed * k,
+            diveEnergy: FLIGHT_CONFIG.diveEnergy * k,
+            climbEnergy: FLIGHT_CONFIG.climbEnergy * k,
+            boostAccel: FLIGHT_CONFIG.boostAccel * k,
+            launchSpeed: FLIGHT_CONFIG.launchSpeed * k,
+        });
+        this.cruiseSpeed = this.cfg.cruiseSpeed;
+        if (this.speed > this.cfg.maxSpeed) this.speed = this.cfg.maxSpeed;
+        return k;
     }
 
     /** Add boost meter from outside — a clean gate line, a boost pad. */

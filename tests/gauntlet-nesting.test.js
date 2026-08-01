@@ -292,7 +292,9 @@ test('glideSpeedCap keeps Birb Mobile\'s overshoot guard', () => {
     // Far out: capped by autoFlySpeed, verbatim 16.
     assert.equal(glideSpeedCap(500, DT), 16.0);
     // The guard: never step further than the remaining distance.
-    assert.equal(glideSpeedCap(0.1, DT), Math.min(16, 0.1 / DT, Math.max(1.1, 0.1 * 2.1)));
+    const C = NESTING_CONFIG;
+    assert.equal(glideSpeedCap(0.1, DT),
+        Math.min(C.autoFlySpeed, 0.1 / DT, Math.max(C.flareMinSpeed, 0.1 * C.flareRate)));
     assert.ok(glideSpeedCap(0.1, DT) * DT <= 0.1 + 1e-12, 'a step may never overshoot');
     for (let d = 0; d <= 60; d += 0.13) {
         assert.ok(glideSpeedCap(d, DT) * DT <= d + 1e-12, 'overshoot at d=' + d);
@@ -308,7 +310,8 @@ test('glideSpeedCap flares monotonically toward the bowl', () => {
     }
     assert.ok(glideSpeedCap(0, DT) >= 0);
     // The floor is what stops arrival being an asymptote.
-    assert.equal(glideSpeedCap(0.2, 1), Math.min(16, 0.2, 1.1));
+    assert.equal(glideSpeedCap(0.2, 1),
+        Math.min(NESTING_CONFIG.autoFlySpeed, 0.2, NESTING_CONFIG.flareMinSpeed));
 });
 
 test('glideSpeedCap tolerates a zero dt', () => {
