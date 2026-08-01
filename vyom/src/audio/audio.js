@@ -102,7 +102,11 @@ export function createAudio(opts = {}) {
     let hapticsEnabled = true;
 
     function ensureHapticSwitch() {
-        if (hapticSwitch || CAN_VIBRATE || typeof document === 'undefined' || !document.body) return null;
+        // Must return the EXISTING element on every call after the first —
+        // returning null there would mean iOS got exactly one haptic tick per
+        // session and none afterwards. (The dev probe asserts this.)
+        if (hapticSwitch) return hapticSwitch;
+        if (CAN_VIBRATE || typeof document === 'undefined' || !document.body) return null;
         try {
             const el = document.createElement('input');
             el.type = 'checkbox';

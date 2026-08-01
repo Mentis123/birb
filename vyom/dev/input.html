@@ -10,7 +10,9 @@
   #stage { position: fixed; inset: 0; }
   #panels {
     position: fixed; inset: 0; z-index: 40; pointer-events: none;
-    display: flex; flex-direction: column; gap: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+    /* bottom padding leaves the real BOOST pill (bottom-right) uncovered */
+    padding: 10px 10px 104px;
     font-family: ui-rounded, "Arial Rounded MT Bold", "Nunito", "Trebuchet MS", "DejaVu Sans", system-ui, sans-serif;
   }
   .row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }

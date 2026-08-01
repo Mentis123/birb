@@ -75,6 +75,12 @@ function ensureStyle() {
 }
 .vi-knob svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
+.vi-wedge {
+  position: absolute; inset: 0; opacity: 0;
+  will-change: transform, opacity;
+}
+.vi-wedge svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
 /* --- boost ------------------------------------------------------------- */
 .vi-boost {
   position: absolute; right: 22px; bottom: 34px;
@@ -118,22 +124,43 @@ function ensureStyle() {
     document.head.appendChild(el);
 }
 
-/** Cel base ring: cream disc, ink border, ink tick marks, gloss. */
+/**
+ * Cel base ring. Cream sticker at low alpha rather than a dark scrim: a navy
+ * wash over a bright sky reads as a dead grey puck, while tinted cream keeps
+ * the sticker language of the HUD and stays legible over both meadow and sky.
+ */
 function baseSvg() {
     let ticks = '';
     for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
         const major = i % 2 === 0;
-        const r0 = major ? 34 : 37, r1 = 43;
+        const r0 = major ? 31 : 35, r1 = 40;
         ticks += `<line x1="${(50 + Math.cos(a) * r0).toFixed(2)}" y1="${(50 + Math.sin(a) * r0).toFixed(2)}"`
             + ` x2="${(50 + Math.cos(a) * r1).toFixed(2)}" y2="${(50 + Math.sin(a) * r1).toFixed(2)}"`
-            + ` stroke="${CSS.ink}" stroke-width="${major ? 3.2 : 2}" stroke-linecap="round" opacity="${major ? 0.85 : 0.4}"/>`;
+            + ` stroke="${CSS.ink}" stroke-width="${major ? 3.4 : 2.2}" stroke-linecap="round" opacity="${major ? 0.9 : 0.45}"/>`;
     }
     return `<svg viewBox="0 0 100 100" aria-hidden="true">
-  <circle cx="50" cy="50" r="46" fill="rgba(15,28,51,0.30)" stroke="${CSS.ink}" stroke-width="4"/>
-  <circle cx="50" cy="50" r="38" fill="none" stroke="${CSS.uiCream}" stroke-width="2.4" opacity="0.55"/>
-  <circle cx="50" cy="50" r="17" fill="none" stroke="${CSS.uiCream}" stroke-width="2" opacity="0.3"/>
+  <circle cx="50" cy="52.5" r="45" fill="${CSS.ink}" opacity="0.42"/>
+  <circle cx="50" cy="50" r="45" fill="${CSS.uiCream}" fill-opacity="0.34" stroke="${CSS.ink}" stroke-width="4.5"/>
+  <circle cx="50" cy="50" r="36" fill="none" stroke="${CSS.uiCream}" stroke-width="2.6" opacity="0.7"/>
+  <circle cx="50" cy="50" r="13" fill="none" stroke="${CSS.uiCream}" stroke-width="2.2" opacity="0.42"/>
   ${ticks}
+</svg>`;
+}
+
+/**
+ * Gold direction wedge: an arc segment that swings to point where the thumb is
+ * pushing. Without it the base is a static ring and the control has no
+ * feedback beyond the knob position; with it, the stick reads as an
+ * instrument. Updated from the pointer handler, never from update().
+ */
+function wedgeSvg() {
+    // 64-degree sector between r=37 and r=47, centred on "up".
+    const half = 32 * Math.PI / 180;
+    const p = (r, a) => `${(50 + Math.sin(a) * r).toFixed(2)} ${(50 - Math.cos(a) * r).toFixed(2)}`;
+    const d = `M ${p(37, -half)} A 37 37 0 0 1 ${p(37, half)} L ${p(48, half)} A 48 48 0 0 0 ${p(48, -half)} Z`;
+    return `<svg viewBox="0 0 100 100" aria-hidden="true">
+  <path d="${d}" fill="${CSS.uiGold}" stroke="${CSS.ink}" stroke-width="3" stroke-linejoin="round"/>
 </svg>`;
 }
 
@@ -171,9 +198,13 @@ export function createInput(rootEl, opts = {}) {
     const stick = document.createElement('div');
     stick.className = 'vi-stick';
     stick.innerHTML = baseSvg();
+    const wedge = document.createElement('div');
+    wedge.className = 'vi-wedge';
+    wedge.innerHTML = wedgeSvg();
     const knob = document.createElement('div');
     knob.className = 'vi-knob';
     knob.innerHTML = knobSvg();
+    stick.appendChild(wedge);
     stick.appendChild(knob);
 
     const boostPill = document.createElement('div');
@@ -233,6 +264,13 @@ export function createInput(rootEl, opts = {}) {
         if (dx === knobX && dy === knobY) return;
         knobX = dx; knobY = dy;
         knob.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+        const m = Math.hypot(dx, dy) / tune.radius;
+        if (m < 0.06) {
+            wedge.style.opacity = '0';
+        } else {
+            wedge.style.opacity = String(Math.min(1, 0.35 + m * 0.75));
+            wedge.style.transform = `rotate(${(Math.atan2(dx, -dy) * 180 / Math.PI).toFixed(1)}deg)`;
+        }
     }
 
     function setBoost(down, px, py) {
