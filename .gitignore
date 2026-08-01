@@ -5,3 +5,8 @@ npm-debug.log*
 
 # Claude Code worktrees (local only)
 .claude/worktrees/
+
+# Screenshot-harness output. `tools/gauntlet-shot.mjs` writes here; the
+# captures are throwaway evidence for one change, regenerated on demand, and
+# they are large. The harness exiting zero is the durable result, not the PNG.
+shots/
