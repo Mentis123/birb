@@ -38,8 +38,8 @@ renderer.setClearColor(PALETTE.skyMid);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
-camera.position.set(0, 0.15, 10.6);
-camera.lookAt(0, 0.05, 0);
+camera.position.set(0, 0, 13.2);
+camera.lookAt(0, 0, 0);
 createLightRig(THREE, scene);
 
 // --- backdrop: a flat gradient card so silhouettes are judged against the
@@ -79,7 +79,7 @@ const POSES = [
   {
     label: 'power downstroke',
     color: PALETTE.birdPlayer, belly: PALETTE.birdPlayerBelly,
-    x: -1.85, y: 1.62, yaw: Math.PI - 0.72,
+    x: -1.95, y: 2.30, yaw: Math.PI - 0.42, tilt: -0.26,
     state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
     target: 0.22,
@@ -87,7 +87,7 @@ const POSES = [
   {
     label: 'recovery upstroke',
     color: PALETTE.birdRival1, belly: bellyFor(PALETTE.birdRival1),
-    x: 1.85, y: 1.62, yaw: Math.PI - 0.72,
+    x: 1.95, y: 2.30, yaw: Math.PI - 0.42, tilt: -0.26,
     state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
     target: 0.70,
@@ -95,18 +95,37 @@ const POSES = [
   {
     label: 'banked right turn',
     color: PALETTE.birdRival2, belly: bellyFor(PALETTE.birdRival2),
-    x: -1.85, y: -1.62, yaw: Math.PI - 0.55,
+    x: -1.95, y: 0, yaw: Math.PI - 0.78, tilt: -0.30,
     state: { speed01: 0.85, turn: 0.9, pitch: 0.05, boosting: false, flapImpulse: 0,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
     target: 0.48,
   },
   {
-    label: 'boost dive tuck',
+    // The view the game actually renders for 99% of a race: chase cam, from
+    // behind and slightly above. If the bird does not read from here, nothing
+    // else matters.
+    label: 'chase cam · boost dive',
     color: PALETTE.birdRival3, belly: bellyFor(PALETTE.birdRival3),
-    x: 1.85, y: -1.62, yaw: Math.PI - 0.90,
-    state: { speed01: 1, turn: -0.15, pitch: -0.9, boosting: true, flapImpulse: 0,
+    x: 1.95, y: 0, yaw: 0.58, tilt: -0.40,
+    state: { speed01: 1, turn: -0.35, pitch: -0.55, boosting: true, flapImpulse: 0,
              tumbling: false, grounded: false, celebrating: false, phase: 0 },
     target: 0.40,
+  },
+  {
+    label: 'glide · mid blink',
+    color: PALETTE.birdPlayer, belly: PALETTE.birdPlayerBelly,
+    x: -1.95, y: -2.30, yaw: Math.PI - 0.42, tilt: -0.22,
+    state: { speed01: 0.95, turn: 0.05, pitch: 0.0, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.55, blink: true,
+  },
+  {
+    label: 'celebration',
+    color: PALETTE.birdRival3, belly: bellyFor(PALETTE.birdRival3),
+    x: 1.95, y: -2.30, yaw: Math.PI - 0.18, tilt: -0.10,
+    state: { speed01: 0.2, turn: 0, pitch: 0.3, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: true, phase: 0 },
+    target: 0.30,
   },
 ];
 
@@ -119,8 +138,9 @@ for (let i = 0; i < POSES.length; i++) {
     bodyColor: P.color, bellyColor: P.belly, scale: 1, quality: 'high', outline: true,
   });
   bird.group.position.set(P.x, P.y, 0);
+  bird.group.rotation.order = 'YXZ';
   bird.group.rotation.y = P.yaw;
-  bird.group.rotation.x = -0.06;
+  bird.group.rotation.x = P.tilt;
   scene.add(bird.group);
 
   const anim = createBirdAnimator(THREE, bird);
@@ -135,6 +155,8 @@ for (let i = 0; i < POSES.length; i++) {
     const after = anim.flap01;
     if (before < P.target && after >= P.target) break;
   }
+  // Freeze a blink open at its widest so the capture can actually show one.
+  if (P.blink) bird.uniforms.blink.value = 1;
 
   birds.push(bird);
 
@@ -148,7 +170,7 @@ function placeLabels() {
   const v = new THREE.Vector3();
   for (let i = 0; i < POSES.length; i++) {
     const P = POSES[i];
-    v.set(P.x, P.y - 1.30, 0).project(camera);
+    v.set(P.x, P.y - 0.98, 0).project(camera);
     P.el.style.left = ((v.x * 0.5 + 0.5) * innerWidth) + 'px';
     P.el.style.top = ((-v.y * 0.5 + 0.5) * innerHeight) + 'px';
   }
@@ -158,7 +180,7 @@ function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
   // Portrait phone capture: pull back so the 2x2 grid still fits.
-  camera.position.z = camera.aspect < 0.7 ? 15.0 : 10.6;
+  camera.position.z = camera.aspect < 0.7 ? 19.0 : 13.2;
   camera.updateProjectionMatrix();
   updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
   placeLabels();

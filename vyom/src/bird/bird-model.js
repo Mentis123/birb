@@ -76,6 +76,117 @@ function feather(THREE, len, rad, seg, flatY, flatZ) {
     );
 }
 
+/** Build a non-indexed geometry from a flat xyz triangle-soup array. */
+function makeGeo(THREE, tris) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(tris), 3));
+    return orientOutward(THREE, g);
+}
+
+/**
+ * Safety net for hand-wound geometry: if the whole shell ended up inside-out,
+ * reverse it. Getting winding wrong is invisible on a lit mesh with two-sided
+ * lighting but catastrophic with inverted-hull outlines — the hull renders the
+ * outside in solid ink. Cheap insurance, build time only.
+ */
+function orientOutward(THREE, geo) {
+    geo.computeVertexNormals();
+    const p = geo.getAttribute('position');
+    const n = geo.getAttribute('normal');
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < p.count; i++) { cx += p.getX(i); cy += p.getY(i); cz += p.getZ(i); }
+    cx /= p.count; cy /= p.count; cz /= p.count;
+    let dot = 0;
+    for (let i = 0; i < p.count; i++) {
+        dot += (p.getX(i) - cx) * n.getX(i) + (p.getY(i) - cy) * n.getY(i) + (p.getZ(i) - cz) * n.getZ(i);
+    }
+    if (dot < 0) {
+        const a = p.array;
+        for (let t = 0; t < p.count; t += 3) {
+            for (let k = 0; k < 3; k++) {
+                const tmp = a[(t + 1) * 3 + k];
+                a[(t + 1) * 3 + k] = a[(t + 2) * 3 + k];
+                a[(t + 2) * 3 + k] = tmp;
+            }
+        }
+        p.needsUpdate = true;
+        geo.computeVertexNormals();
+    }
+    return geo;
+}
+
+/**
+ * Loft a diamond cross-section along +X and close it with a tip point.
+ *
+ * This replaced the original cone-based feathers. A cone tapers linearly to a
+ * point, so by 60% of the span it has almost no chord left and the wing renders
+ * as a knife blade — which is exactly what the fourth captured frame showed. A
+ * loft lets the planform hold its chord out to the wrist and then taper, which
+ * is what makes a wing read as a wing.
+ *
+ * @param {Array} stations [x, halfChord(Z), halfThick(Y), zCentre, yCentre]
+ * @param {Array} tip      [x, y, z]
+ */
+function loftBlade(THREE, stations, tip) {
+    const rings = [];
+    for (let i = 0; i < stations.length; i++) {
+        const s = stations[i];
+        rings.push([
+            [s[0], s[4] + s[2], s[3]],          // top
+            [s[0], s[4], s[3] + s[1]],          // trailing edge
+            [s[0], s[4] - s[2], s[3]],          // bottom
+            [s[0], s[4], s[3] - s[1]],          // leading edge
+        ]);
+    }
+    const out = [];
+    function T(a, b, c) { out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); }
+
+    const r0 = rings[0];
+    T(r0[0], r0[1], r0[2]);
+    T(r0[0], r0[2], r0[3]);
+    for (let i = 0; i < rings.length - 1; i++) {
+        const a = rings[i], b = rings[i + 1];
+        for (let k = 0; k < 4; k++) {
+            const k2 = (k + 1) & 3;
+            T(a[k], b[k], b[k2]);
+            T(a[k], b[k2], a[k2]);
+        }
+    }
+    const last = rings[rings.length - 1];
+    for (let k = 0; k < 4; k++) T(last[k], tip, last[(k + 1) & 3]);
+    return makeGeo(THREE, out);
+}
+
+/**
+ * The tail: one scalloped lens-shaped plate rather than a bundle of cones.
+ * Five separate cones read as five spikes; a single plate with a notched
+ * trailing edge reads as a fan, costs a third of the triangles, and spreads
+ * cleanly under the `uTailFan` deformer (which scales X).
+ */
+function tailPlate(THREE, len, halfAngle, points, thick) {
+    const rim = [];
+    for (let i = 0; i < points; i++) {
+        const t = (i / (points - 1)) * 2 - 1;
+        const a = t * halfAngle;
+        const r = len * (i % 2 === 1 ? 1.0 : 0.82);
+        rim.push([Math.sin(a) * r, 0, Math.cos(a) * r]);
+    }
+    const root = [0, 0, 0];
+    const apexT = [0, thick, len * 0.30];
+    const apexB = [0, -thick, len * 0.30];
+    const out = [];
+    function T(a, b, c) { out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); }
+    for (let i = 0; i < points - 1; i++) {
+        T(apexT, rim[i], rim[i + 1]);
+        T(apexB, rim[i + 1], rim[i]);
+    }
+    T(apexT, root, rim[0]);
+    T(apexT, rim[points - 1], root);
+    T(apexB, rim[0], root);
+    T(apexB, root, rim[points - 1]);
+    return makeGeo(THREE, out);
+}
+
 /** Two-stop gradient painter, allocation-free per vertex (build time anyway). */
 function gradient(THREE, hexA, hexB, fn) {
     const a = new THREE.Color(hexA);
@@ -400,11 +511,11 @@ function toonWithDeform(THREE, baseOpts, uniformsGlsl, deform, uniforms, cacheKe
 // can never drift apart. Set forward rather than sideways: a chibi bird needs
 // both eyes readable from behind, and eyes far out on the sides break the head
 // silhouette into lumps.
-const EYE_DIR_X = 0.44, EYE_DIR_Y = 0.40, EYE_DIR_Z = -0.80;
+const EYE_DIR_X = 0.40, EYE_DIR_Y = 0.38, EYE_DIR_Z = -0.83;
 const EYE_SET = 0.310;
 
 const TAIL_Z = 0.54;
-const TAIL_LEN = 0.80;
+const TAIL_LEN = 0.88;
 const WING_SPAN = 1.06;
 
 function bodyEntries(THREE, S, col, hullOnly) {
@@ -435,13 +546,13 @@ function bodyEntries(THREE, S, col, hullOnly) {
     // them down; `parts.leftFoot`/`rightFoot` are anchors at their positions.
     for (let s = -1; s <= 1; s += 2) {
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.050, 0.16, S(6), 1, false),
-                s * 0.112, -0.240, 0.10, 2.45, 0, 0, 1, 1, 1),
+            geo: xform(THREE, new THREE.ConeGeometry(0.047, 0.15, S(6), 1, false),
+                s * 0.108, -0.205, 0.11, 2.55, 0, 0, 1, 1, 1),
             color: hullOnly ? bodyCol : PALETTE.foot,
         });
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.027, 0.12, S(5), 1, false),
-                s * 0.112, -0.278, 0.045, 2.70, 0, 0, 1, 1, 1),
+            geo: xform(THREE, new THREE.ConeGeometry(0.025, 0.11, S(5), 1, false),
+                s * 0.108, -0.238, 0.055, 2.80, 0, 0, 1, 1, 1),
             color: hullOnly ? bodyCol : PALETTE.foot,
         });
     }
@@ -449,19 +560,13 @@ function bodyEntries(THREE, S, col, hullOnly) {
     // Tail fan: five flattened feathers splayed in the XZ plane from TAIL_Z.
     // Deformed by the tail uniforms in the vertex shader.
     const tailPaint = gradient(THREE, bodyCol, PALETTE.inkSoft, function (x, y, z) {
-        return ((z - TAIL_Z - 0.10) / 0.50) * 0.40;
+        return ((z - TAIL_Z - 0.12) / 0.56) * 0.42;
     });
-    const fanCount = 5;
-    for (let i = 0; i < fanCount; i++) {
-        const t = (i / (fanCount - 1)) * 2 - 1;              // -1 .. 1
-        const len = TAIL_LEN * (1 - Math.abs(t) * 0.18);
-        const g = feather(THREE, len, 0.160, S(5), 0.28, 1);
-        // Feathers point +X by default; rotate them to point +Z (backwards)
-        // and splay by t.
-        xform(THREE, g, 0, 0.08 - Math.abs(t) * 0.016, TAIL_Z,
-            0, -Math.PI / 2 + t * 0.44, 0, 1, 1, 1);
-        e.push({ geo: g, color: hullOnly ? bodyCol : tailPaint });
-    }
+    e.push({
+        geo: xform(THREE, tailPlate(THREE, TAIL_LEN, 0.74, 7, 0.055),
+            0, 0.07, TAIL_Z, -0.05, 0, 0, 1, 1, 1),
+        color: hullOnly ? bodyCol : tailPaint,
+    });
     return e;
 }
 
@@ -551,31 +656,35 @@ function wingEntries(THREE, S, col, hullOnly) {
 
     // Shoulder mass — hides the join with the torso from every angle.
     e.push({
-        geo: xform(THREE, new THREE.SphereGeometry(0.185, S(8), S(6)), 0.03, 0, 0.02,
-            0, 0, 0, 1, 0.80, 1.20),
+        geo: xform(THREE, new THREE.SphereGeometry(0.150, S(7), S(5)), 0.02, -0.02, 0.02,
+            0, 0, 0, 1, 0.80, 1.25),
         color: paint,
     });
 
-    // Three layered coverts/secondaries/primaries, each longer, thinner and
-    // swept a little further back than the last.
-    const layers = [
-        { len: 0.56, rad: 0.255, flat: 0.42, y: 0.050, z: -0.040, sweep: 0.00 },
-        { len: 0.80, rad: 0.220, flat: 0.30, y: 0.014, z: 0.030, sweep: 0.07 },
-        { len: 1.02, rad: 0.180, flat: 0.24, y: -0.020, z: 0.070, sweep: 0.13 },
-    ];
-    for (let i = 0; i < layers.length; i++) {
-        const L = layers[i];
-        const g = feather(THREE, L.len, L.rad, S(7), L.flat, 1);
-        xform(THREE, g, 0, L.y, L.z, 0, -L.sweep, 0, 1, 1, 1);
-        e.push({ geo: g, color: paint });
-    }
+    // Wing planform: broad at the shoulder, holding chord out to the wrist,
+    // then sweeping and tapering into the hand. The trailing edge drifts back
+    // (rising zCentre) so the wing has natural sweep without the group having
+    // to be rotated, which would fight the flap axis.
+    e.push({
+        geo: loftBlade(THREE, [
+            [0.00, 0.300, 0.090, 0.020, 0.030],
+            [0.28, 0.325, 0.072, 0.035, 0.020],
+            [0.58, 0.300, 0.052, 0.075, 0.000],
+            [0.84, 0.235, 0.034, 0.130, -0.020],
+            [1.00, 0.150, 0.020, 0.185, -0.030],
+        ], [1.12, -0.040, 0.250]),
+        color: paint,
+    });
 
-    // Splayed primary "fingers" at the tip — the detail that stops the wing
-    // ending in a blunt cone and reads as feathers even in a 40px silhouette.
+    // Splayed primary "fingers" past the wrist — the detail that stops the wing
+    // ending in a blunt edge and reads as feathers even in a 40px silhouette.
     for (let i = 0; i < 3; i++) {
-        const g = feather(THREE, 0.34 - i * 0.035, 0.064, S(5), 0.40, 1);
-        xform(THREE, g, 0.88, -0.014 - i * 0.013, 0.07 + i * 0.048,
-            0, -(0.14 + i * 0.13), 0, 1, 1, 1);
+        const g = loftBlade(THREE, [
+            [0.00, 0.070, 0.024, 0, 0],
+            [0.20, 0.055, 0.016, 0.010, 0],
+        ], [0.36 - i * 0.04, -0.004, 0.030]);
+        xform(THREE, g, 0.86, -0.012 - i * 0.014, 0.10 + i * 0.075,
+            0, -(0.16 + i * 0.15), 0, 1, 1, 1);
         e.push({ geo: g, color: paint });
     }
     return e;
@@ -656,7 +765,7 @@ export function createBird(THREE, opts = {}) {
     const head = new THREE.Group();
     head.name = 'head';
     head.rotation.order = 'YXZ';
-    head.position.set(0, 0.30, -0.32);
+    head.position.set(0, 0.28, -0.31);
     body.add(head);
 
     const headUniforms = {
@@ -667,7 +776,7 @@ export function createBird(THREE, opts = {}) {
     const headGeo = mergeGeos(THREE, headEntries(THREE, S, col, false), true);
     const headMat = toonWithDeform(
         THREE,
-        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.18, specThreshold: 0.70 },
+        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.11, specThreshold: 0.74 },
         BLINK_UNIFORMS_GLSL, null, headUniforms, 'vyom-bird-head-v1',
         {
             vertBody: BLINK_POSITION_GLSL,
@@ -699,7 +808,7 @@ export function createBird(THREE, opts = {}) {
         const g = new THREE.Group();
         g.name = name;
         g.rotation.order = 'YXZ';
-        g.position.set(side * 0.26, 0.16, -0.12);
+        g.position.set(side * 0.215, 0.13, -0.12);
         body.add(g);
 
         const u = {
@@ -714,7 +823,7 @@ export function createBird(THREE, opts = {}) {
         if (side < 0) mirrorX(geo);
         const mat = toonWithDeform(
             THREE,
-            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.62, specStrength: 0.14, specThreshold: 0.70 },
+            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.26, specStrength: 0.0, specThreshold: 0.72 },
             WING_UNIFORMS_GLSL, def, u, 'vyom-bird-wing-v1'
         );
         const mesh = new THREE.Mesh(geo, mat);

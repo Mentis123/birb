@@ -181,8 +181,8 @@ export function createBirdAnimator(THREE, bird) {
 
         // Rest angle: wings sit high in a glide, low and folded when grounded,
         // thrown wide open when celebrating.
-        let rest = CFG.restDihedral + glide * 0.10 - groundT * 0.30;
-        rest += celebrate * 1.05;
+        let rest = CFG.restDihedral + glide * 0.10 - groundT * 0.30 - tuck * 0.12;
+        rest += celebrate * 0.80;
         rest -= boost * 0.10;
 
         shoulder = rest + amp * stroke;
@@ -198,13 +198,16 @@ export function createBirdAnimator(THREE, bird) {
         api.curl = lag;
 
         // --- attitude: tuck on a dive, spread on a climb / landing -----------
-        const wantTuck = clamp(-pitchS, 0, 1) * 0.85 + boost * 0.45;
+        const wantTuck = clamp(-pitchS, 0, 1) * 0.70 + boost * 0.25;
         tuck = damp(tuck, clamp(wantTuck, 0, 1), 6.0, dt);
         const wantSpread = clamp(pitchS, 0, 1) * 0.8 + groundT * 1.0;
         spread = damp(spread, clamp(wantSpread, 0, 1), 5.0, dt);
 
-        const sweepBack = tuck * 0.62 - spread * 0.22;
-        const spanScale = 1 - tuck * 0.24 + spread * 0.07;
+        // A dive tuck used to sweep the wings so far back that they vanished
+        // inside the torso from the chase camera. Swept + slightly drooped, but
+        // still visibly a wing, reads as a stooping falcon instead of a blob.
+        const sweepBack = tuck * 0.40 - spread * 0.22;
+        const spanScale = 1 - tuck * 0.13 + spread * 0.07;
 
         // --- per-wing ---------------------------------------------------------
         // Differential dihedral: the wing on the inside of the turn drops, the
