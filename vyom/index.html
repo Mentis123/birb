@@ -378,7 +378,6 @@
 import { loadThree } from '/vyom/src/core/three-loader.js';
 import { PALETTE } from '/vyom/src/core/palette.js';
 import { createToonMaterial, createLightRig } from '/vyom/src/core/toon.js';
-import { updateOutlineProjection } from '/vyom/src/core/outline.js';
 import { PLANET_RADIUS, continentalHeight } from '/vyom/src/core/terrain.js';
 import { paintKeyArt } from '/vyom/src/ui/keyart.js';
 
@@ -457,6 +456,11 @@ function pickQuality() {
 }
 
 const DPR_CAP = { low: 1.2, mid: 1.4, high: 1.8 };
+
+// World units/second -> the number on the speedometer. Purely cosmetic: the
+// planet is 100 units in radius, so real units/sec would read as single
+// digits and feel slow no matter how fast the bird actually moves.
+const SPEED_TO_KMH = 4.2;
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -547,7 +551,8 @@ async function boot() {
         birdRadius: 1.6,
         position: _startPos,
     });
-    flight.faceAlong ? flight.faceAlong(_startTangent) : null;
+    // Point the bird down the racing line, or lap 1 starts with a 180.
+    flight.setHeading(_startTangent.x, _startTangent.y, _startTangent.z);
 
     const chase = createChaseCamera(THREE, camera, { quality });
     chase.snapToTarget(flight.position, flight.quaternion);
@@ -592,12 +597,17 @@ async function boot() {
     };
 
     // --- resize -------------------------------------------------------------
+    // The chase rig owns the FOV (it kicks with speed), so it also owns the
+    // outline projection scale — telling it the viewport keeps ink line width
+    // constant in screen space through a boost. Calling
+    // updateOutlineProjection here as well would fight it every frame.
+    chase.setRenderer(renderer);
     function resize() {
         const w = innerWidth, h = innerHeight;
         renderer.setSize(w, h, false);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
-        updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+        chase.setViewport(renderer.domElement.height, renderer.getPixelRatio());
         hud.resize && hud.resize();
     }
     addEventListener('resize', resize);
@@ -674,13 +684,26 @@ async function boot() {
 
         ai.update(dt, raceLogic.racerProgress(race, 0), race);
 
-        // --- gates ----------------------------------------------------------
+        // --- spline position, gates -----------------------------------------
+        // updateRacerT is not just the wrong-way check: it also advances each
+        // racer's sub-gate progress, which is what standings are sorted on. It
+        // has to run every frame for EVERY racer or the order freezes between
+        // gates and the position readout only moves 12 times a lap.
+        if (phase !== 'countdown') {
+            raceLogic.updateRacerT(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z));
+            for (let i = 0; i < ai.racers.length; i++) {
+                const p = ai.racers[i].group.position;
+                raceLogic.updateRacerT(race, i + 1, course.nearestT(p.x, p.y, p.z));
+            }
+        }
+
         if (phase === 'racing') {
             checkGates(0, pose.position);
             for (let i = 0; i < ai.racers.length; i++) {
                 checkGates(i + 1, ai.racers[i].group.position);
             }
         }
+        raceLogic.updateStandings(race);
 
         // --- fx ---------------------------------------------------------------
         _up.copy(pose.position).normalize();
@@ -700,13 +723,25 @@ async function boot() {
         audio.setFlightSpeed(animState.speed01);
 
         // --- hud --------------------------------------------------------------
-        const me = race.racers[0];
-        hud.setLap(Math.min(me.lap + 1, race.laps), race.laps);
-        hud.setPosition(race.order.indexOf(0) + 1, 4);
-        hud.setSpeed(Math.round(flight.speed * 12), animState.speed01);
+        // Race state lives in typed arrays keyed by racer index, not in
+        // per-racer objects.
+        hud.setLap(race.lap[0], race.laps);
+        hud.setPosition(raceLogic.placeOf(race, 0), race.racerCount);
+        hud.setSpeed(Math.round(flight.speed * SPEED_TO_KMH), animState.speed01);
         hud.setBoost(flight.boost01 || 0);
-        hud.setGate(me.nextGate, course.gateCount);
-        hud.showWrongWay(phase === 'racing' && raceLogic.isWrongWay(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z)));
+        hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
+        hud.showWrongWay(phase === 'racing' && race.wrongWay[0] === 1);
+
+        if (phase === 'racing') {
+            const lapMs = now - race.lapStartMs[0];
+            const leader = race.order[0];
+            hud.setSplit(
+                raceLogic.formatTime(lapMs),
+                leader === 0 ? null : raceLogic.formatDelta(
+                    -raceLogic.progressGap(race, 0, leader) * 1000
+                )
+            );
+        }
 
         _racerPositions[0] = pose.position.x; _racerPositions[1] = pose.position.y; _racerPositions[2] = pose.position.z;
         for (let i = 0; i < ai.racers.length; i++) {
@@ -724,8 +759,7 @@ async function boot() {
     const ZERO_INPUT = { x: 0, y: 0, boost: false };
 
     function checkGates(racerIndex, position) {
-        const r = race.racers[racerIndex];
-        const g = r.nextGate;
+        const g = race.nextGate[racerIndex];
         const gx = course.gatePositions[g * 3];
         const gy = course.gatePositions[g * 3 + 1];
         const gz = course.gatePositions[g * 3 + 2];
@@ -733,21 +767,52 @@ async function boot() {
         const radius = raceLogic.RACE_CONFIG.gateRadius;
         if (dx * dx + dy * dy + dz * dz > radius * radius) return;
 
+        // recordGate returns false unless this was the gate that racer was
+        // actually due to pass, so skipping one or re-triggering the last one
+        // changes nothing. That is what makes the ribbon the only legal line.
         if (!raceLogic.recordGate(race, racerIndex, g, performance.now())) return;
 
         if (racerIndex === 0) {
-            audio.gate(race.racers[0].streak || 1);
+            audio.gate(race.gatesPassed[0]);
+            flight.chargeBoost();
             feathers.burst(gx, gy, gz, 14, PALETTE.sparkCyan);
-            course.setNextGate(race.racers[0].nextGate);
+            course.setNextGate(race.nextGate[0]);
         }
-        raceLogic.updateStandings(race);
 
-        if (raceLogic.isFinished(race, racerIndex) && racerIndex === 0 && phase === 'racing') {
+        if (racerIndex === 0 && raceLogic.isFinished(race, 0) && phase === 'racing') {
             phase = 'finished';
             chase.setMode('results');
-            audio.finish(race.order.indexOf(0) + 1);
-            hud.showResults(raceLogic.buildResults ? raceLogic.buildResults(race) : []);
+            raceLogic.updateStandings(race);
+            const place = raceLogic.placeOf(race, 0);
+            audio.finish(place);
+            hud.showResults(buildResults());
+            input.setVisible(false);
         }
+    }
+
+    /**
+     * Results rows for the HUD. race-logic deliberately stays free of any
+     * presentation concern, so assembling the display rows is the
+     * integrator's job.
+     */
+    const RACER_NAMES = ['You', 'Talon', 'Zephyr', 'Pip'];
+    function buildResults() {
+        const rows = [];
+        for (let k = 0; k < race.racerCount; k++) {
+            const i = race.order[k];
+            const laps = [];
+            for (let l = 1; l <= race.laps; l++) laps.push(raceLogic.lapSplit(race, i, l));
+            rows.push({
+                index: i,
+                isPlayer: i === 0,
+                name: RACER_NAMES[i] || ('Racer ' + i),
+                place: raceLogic.placeOf(race, i),
+                time: race.finishMs[i] >= 0 ? race.finishMs[i] : null,
+                best: raceLogic.bestLap(race, i),
+                laps,
+            });
+        }
+        return rows;
     }
 
     requestAnimationFrame(frame);
