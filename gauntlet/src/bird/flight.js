@@ -64,15 +64,21 @@
  */
 export const FLIGHT_CONFIG = {
     // --- speed envelope (world units / second) ---------------------------
-    cruiseSpeed: 34,        // what drag pulls you back toward
-    minSpeed: 19,           // stall floor: a hard climb can never park you
-    maxSpeed: 58,           // ceiling without boost
-    boostMaxSpeed: 76,      // HARD ceiling while boosting
+    // Whole envelope taken down 20% from the original tuning: on a real phone
+    // the bird outran the player's ability to read the next gate. Turn RATES
+    // were deliberately left alone, so the same angular rate at a lower speed
+    // gives a tighter turning radius — that is most of the "easier to control".
+    // The accelerations (pitchEnergy, boostAccel) scale with it so the time
+    // constants of the energy trade and the boost feel unchanged.
+    cruiseSpeed: 27,        // what drag pulls you back toward
+    minSpeed: 15,           // stall floor: a hard climb can never park you
+    maxSpeed: 46,           // ceiling without boost
+    boostMaxSpeed: 61,      // HARD ceiling while boosting
 
     // --- energy trade ------------------------------------------------------
     // dv/dt = -sinPitch * pitchEnergy. sinPitch is forward-dot-radial-up, so
     // nose-up (climb) is positive and bleeds speed; nose-down gains it.
-    pitchEnergy: 30,
+    pitchEnergy: 24,
     dragCoef: 0.55,         // exponential pull back toward cruise, per second
 
     // --- handling ----------------------------------------------------------
@@ -99,7 +105,7 @@ export const FLIGHT_CONFIG = {
     ceilingSoftness: 9,     // world units over which the climb rate fades out
 
     // --- boost -------------------------------------------------------------
-    boostAccel: 95,         // u/s^2 toward boostMaxSpeed while boosting
+    boostAccel: 76,         // u/s^2 toward boostMaxSpeed while boosting
     boostDrain: 0.55,       // meter units per second while boosting
     boostDiveCharge: 0.30,  // meter per second at a full-angle dive
     boostGateCharge: 0.22,  // added by course code on a clean gate line
@@ -107,13 +113,13 @@ export const FLIGHT_CONFIG = {
     boostCooldown: 1.1,     // seconds after a burst empties
 
     // --- knockdown ---------------------------------------------------------
-    knockFallSpeed: 16,     // base radial fall, ramped by fallRampMultiplier
+    knockFallSpeed: 13,     // base radial fall, ramped by fallRampMultiplier
     knockSpin: 7.4,         // rad/s tumble spin
     knockDrift: 0.5,        // fraction of speed retained while tumbling
     knockMaxDuration: 3.2,  // safety valve if the floor is never reached
-    launchImpulse: 26,      // outward u/s on relaunch
+    launchImpulse: 21,      // outward u/s on relaunch
     launchDuration: 0.45,
-    launchSpeed: 26,        // airspeed handed back after a tumble
+    launchSpeed: 21,        // airspeed handed back after a tumble
 };
 
 /** Fall ramp: 1x at t=0 -> 3x after 3s, then held. (Birb Mobile's curve.) */

@@ -87,9 +87,10 @@ const CFG = {
     /** Pace a rival holds on the ridge straight, world units/sec. The player's
      *  cruise is 34 and their ceiling is 58, so a rival at 36 is beatable by
      *  anyone using the boost and uncatchable by anyone who never turns. */
-    baseSpeed: 36,
-    minSpeed: 15,
-    maxSpeed: 54,
+    // Matched to the player's 20% speed reduction so the race stays even.
+    baseSpeed: 29,
+    minSpeed: 12,
+    maxSpeed: 43,
 
     /** Curvature (rad/world-unit) that maps to |k| = 1. The hairpin measures
      *  2.37 deg/u = 0.0414 rad/u, so the hairpin saturates the table and every

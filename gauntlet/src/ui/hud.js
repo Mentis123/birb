@@ -15,7 +15,7 @@
  *     value, so `textContent` is written only when the string genuinely
  *     changes and the minimap redraw allocates nothing at all.
  *   - `prefers-reduced-motion` gates DECORATIVE motion only (countdown punch,
- *     wrong-way shake, boost glow pulse). Lap counters, speed, minimap and the
+ *     wrong-way shake, countdown punch). Lap counters, speed, minimap and the
  *     countdown NUMBERS keep updating. A HUD that stops updating is a bug, not
  *     an accessibility feature.
  *
@@ -89,7 +89,7 @@ function styleText() {
 .vh-val small { font-size: 0.52em; letter-spacing: 0.04em; opacity: 0.66; }
 
 /* --- corners ------------------------------------------------------------- */
-.vh-tl, .vh-tr, .vh-br { position: absolute; display: flex; gap: 6px; }
+.vh-tl, .vh-tr { position: absolute; display: flex; gap: 6px; }
 .vh-tl { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left));
          flex-direction: column; align-items: flex-start; }
 .vh-tr { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
@@ -100,8 +100,6 @@ function styleText() {
    the minimap and the joystick base occupy the same pixels. Both modules are
    correct in isolation; only integration can see the collision. */
 
-.vh-br { bottom: calc(var(--vh-bottom, 18px) + env(safe-area-inset-bottom)); right: calc(12px + env(safe-area-inset-right));
-         flex-direction: column; align-items: flex-end; }
 
 .vh-pos .vh-val { color: var(--ink); }
 .vh-pos.is-lead { background: var(--gold); }
@@ -141,7 +139,7 @@ function styleText() {
   border-bottom: 7px solid var(--gold);
 }
 
-/* --- speed + boost ------------------------------------------------------- */
+/* --- speed --------------------------------------------------------------- */
 .vh-speed { position: relative; align-self: flex-end; overflow: hidden; }
 .vh-speed .v { font-size: 17px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .vh-speed .k { font-size: 8px; font-weight: 800; letter-spacing: 0.14em;
@@ -157,32 +155,6 @@ function styleText() {
   position: absolute; left: 0; right: 0; top: 50%; margin-top: 14px;
   text-align: center; font-size: 9px; font-weight: 800; letter-spacing: 0.24em;
   color: var(--ink); opacity: 0.55;
-}
-.vh-boost {
-  position: relative; width: 108px; height: 14px; border-radius: 8px;
-  border: 2px solid var(--ink); background: var(--cream); overflow: hidden;
-  box-shadow: 0 4px 0 0 var(--ink), 0 9px 16px rgba(4, 10, 22, 0.42);
-}
-.vh-boost-fill {
-  position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0);
-  background: linear-gradient(90deg, ${CSS.uiCyan}, ${CSS.ribbon} 55%, ${CSS.uiGold});
-}
-.vh-boost-notch {
-  position: absolute; inset: 0;
-  background: repeating-linear-gradient(90deg, transparent 0 calc(25% - 2px), rgba(15, 28, 51, 0.85) calc(25% - 2px) 25%);
-}
-/* The label lives ABOVE the bar: inside it, the notch lines cut the letters. */
-.vh-boost-cap {
-  width: 108px; display: flex; justify-content: space-between; align-items: baseline;
-  margin: 0 0 2px; font-size: 8px; font-weight: 900; letter-spacing: 0.26em;
-  text-transform: uppercase; color: var(--cream);
-  text-shadow: 0 2px 0 var(--ink), 2px 0 0 var(--ink), -2px 0 0 var(--ink), 0 -2px 0 var(--ink);
-}
-.vh-boost-cap .pct { letter-spacing: 0.06em; color: var(--gold); font-variant-numeric: tabular-nums; }
-.vh-boost.is-full { animation: vh-boostpulse 0.62s ease-in-out infinite; }
-@keyframes vh-boostpulse {
-  0%, 100% { box-shadow: 0 4px 0 0 var(--ink), 0 0 0 0 rgba(255, 221, 68, 0.0); }
-  50%      { box-shadow: 0 4px 0 0 var(--ink), 0 0 16px 4px rgba(255, 221, 68, 0.85); }
 }
 
 /* --- countdown ----------------------------------------------------------- */
@@ -337,7 +309,6 @@ function styleText() {
 .gauntlet-hud.vh-reduce .vh-count-num.punch,
 .gauntlet-hud.vh-reduce .vh-count-ring.spin,
 .gauntlet-hud.vh-reduce .vh-wrong.anim,
-.gauntlet-hud.vh-reduce .vh-boost.is-full,
 .gauntlet-hud.vh-reduce .vh-res-card.pop { animation: none !important; }
 
 /* --- desktop: the same design, scaled up from each corner ---------------
@@ -347,14 +318,12 @@ function styleText() {
 @media (min-width: 700px) and (min-height: 560px) {
   .vh-tl { transform: scale(1.3); transform-origin: top left; }
   .vh-tr { transform: scale(1.3); transform-origin: top right; }
-  .vh-br { transform: scale(1.3); transform-origin: bottom right; }
-}
+  }
 
 /* --- narrow phones: shrink the furniture, never the numbers ------------- */
 @media (max-width: 400px) {
   .vh-val { font-size: 18px; }
-  .vh-boost { width: 96px; height: 13px; }
-}
+  }
 `;
 }
 
@@ -439,13 +408,6 @@ export function createHUD(rootEl, options = {}) {
     const speedNum = speedWrap.querySelector('.v');
     const gaugeFill = speedWrap.querySelector('.vh-speed-bar');
 
-    // ---- bottom-right: boost only, sitting just above the boost button ----
-    const br = el('div', 'vh-br', rootEl);
-    const boostCap = el('div', 'vh-boost-cap', br, '<span>Boost</span><span class="pct">0%</span>');
-    const boostPct = boostCap.querySelector('.pct');
-    const boostBar = el('div', 'vh-boost', br);
-    const boostFill = el('div', 'vh-boost-fill', boostBar);
-    el('div', 'vh-boost-notch', boostBar);
 
     // ---- countdown --------------------------------------------------------
     // Inserted BEFORE the corner furniture so the countdown scrim dims the
@@ -785,7 +747,6 @@ export function createHUD(rootEl, options = {}) {
     let _lap = -1, _lapTotal = -1;
     let _pos = -1, _posTotal = -1;
     let _kmh = -1, _speed01 = -1;
-    let _boost = -1, _boostFull = false;
     let _gateIdx = -1, _gateTotal = -1;
     let _splitText = null, _splitDelta = NaN;
     let _countN = -999, _countShown = false;
@@ -819,23 +780,6 @@ export function createHUD(rootEl, options = {}) {
         if (q !== _speed01) {
             _speed01 = q;
             gaugeFill.style.width = (q * 100).toFixed(1) + '%';
-        }
-    }
-
-    function setBoost(boost01) {
-        const b = boost01 < 0 ? 0 : boost01 > 1 ? 1 : boost01;
-        const q = Math.round(b * 100) / 100;
-        if (q !== _boost) {
-            const prevPct = Math.round(_boost * 100);
-            _boost = q;
-            boostFill.style.transform = 'scaleX(' + q + ')';
-            const pct = Math.round(q * 100);
-            if (pct !== prevPct) boostPct.textContent = pct + '%';
-        }
-        const full = q >= 0.999;
-        if (full !== _boostFull) {
-            _boostFull = full;
-            boostBar.classList.toggle('is-full', full);
         }
     }
 
@@ -1024,7 +968,7 @@ export function createHUD(rootEl, options = {}) {
             if (motionMq.removeEventListener) motionMq.removeEventListener('change', applyMotion);
             else if (motionMq.removeListener) motionMq.removeListener(applyMotion);
         }
-        [tl, tr, br, countWrap, wrong, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
+        [tl, tr, countWrap, wrong, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
         rootEl.classList.remove('gauntlet-hud', 'vh-reduce');
         if (ownsStyle && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
         _srcRef = null;
@@ -1035,7 +979,6 @@ export function createHUD(rootEl, options = {}) {
         setLap,
         setPosition,
         setSpeed,
-        setBoost,
         setSplit,
         setGate,
         showCountdown,

@@ -319,6 +319,18 @@
     background: var(--cream);
     transition: transform 0.15s ease;
   }
+  .set-reset {
+    padding: 0.4rem 0.8rem;
+    border-radius: 999px;
+    border: 2px solid var(--ink);
+    background: rgba(10, 19, 36, 0.9);
+    color: var(--cream);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
   .set-toggle[aria-pressed="true"] { background: var(--gold); }
   .set-toggle[aria-pressed="true"]::after { transform: translateX(1.5rem); }
 
@@ -408,6 +420,7 @@
     <div class="set-row"><span>Music</span><button type="button" class="set-toggle" data-set="music"></button></div>
     <div class="set-row"><span>Sound Effects</span><button type="button" class="set-toggle" data-set="sfx"></button></div>
     <div class="set-row" data-haptics-row hidden><span>Haptics</span><button type="button" class="set-toggle" data-set="haptics"></button></div>
+    <div class="set-row"><span>Boost button</span><button type="button" class="set-reset" data-reset-boost>Reset position</button></div>
   </div>
   <div class="tap-pill">Tap anywhere to close</div>
 </div>
@@ -525,6 +538,18 @@ document.querySelector('[data-settings-open]').addEventListener('click', (e) => 
     showScreen('settings');
 });
 screens.settings.addEventListener('click', (e) => {
+    // The boost button is draggable; this is the way back if it ends up
+    // somewhere unreachable. Settings is reachable before the game boots, so
+    // clear the stored position directly rather than going through the input
+    // module, which does not exist yet.
+    if (e.target.closest('[data-reset-boost]')) {
+        e.stopPropagation();
+        try { localStorage.removeItem('gauntlet.boostPos.v1'); } catch { /* private mode */ }
+        if (game && game.input && game.input.resetBoostPosition) game.input.resetBoostPosition();
+        e.target.textContent = 'Reset ✓';
+        setTimeout(() => { e.target.textContent = 'Reset position'; }, 1200);
+        return;
+    }
     const btn = e.target.closest('[data-set]');
     if (!btn) { showScreen('title'); return; }
     const key = btn.dataset.set;
@@ -840,7 +865,9 @@ async function boot() {
         hud.setLap(race.lap[0], race.laps);
         hud.setPosition(raceLogic.placeOf(race, 0), race.racerCount);
         hud.setSpeed(Math.round(flight.speed * SPEED_TO_KMH), animState.speed01);
-        hud.setBoost(flight.boost01 || 0);
+        // Boost charge lives on the button itself now, so it travels with it
+        // when the player drags the control to the other side of the screen.
+        input.setBoost01(flight.boost01 || 0);
         hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
         hud.showWrongWay(phase === 'racing' && race.wrongWay[0] === 1);
 
@@ -931,7 +958,7 @@ async function boot() {
 
     // --- harness hooks ------------------------------------------------------
     game = {
-        THREE, renderer, scene, camera, flight, course, race, ai, hud, audio, quality,
+        THREE, renderer, scene, camera, flight, course, race, ai, hud, audio, input, quality,
         /**
          * Drop the green light immediately. The screenshot harness runs on
          * software GL at a few frames a second, and the loop clamps dt to 50ms

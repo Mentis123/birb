@@ -68,6 +68,33 @@ function ensureStyle() {
 /* The resting ghost. 0.42 was tried first and the ink washed into the grass —
    a control that reads as a smudge is worse than no control. */
 .vi-stick.is-hint { opacity: 0.7; }
+
+/* Drag grip on the boost pill. A deliberately generous 30px circle hanging off
+   the corner: a grip small enough to look tidy is too small to hit with a
+   thumb. The dot texture is drawn with a gradient rather than a glyph so it
+   cannot fall back to tofu on a device missing the character. */
+.vi-boost-grip {
+  position: absolute; left: -11px; top: -11px;
+  width: 30px; height: 30px; border-radius: 50%;
+  background-color: ${CSS.uiPanel};
+  background-image: radial-gradient(circle, ${CSS.uiCream} 1.1px, transparent 1.2px);
+  background-size: 6px 6px;
+  border: 2px solid ${CSS.ink};
+  box-shadow: 0 2px 0 ${CSS.ink};
+  touch-action: none; cursor: grab;
+}
+.vi-boost.is-dragging { opacity: 0.85; cursor: grabbing; }
+.vi-boost.is-dragging .vi-boost-grip { cursor: grabbing; }
+
+/* Charge meter, drawn behind the label inside the button, so the readout
+   travels with the control instead of being stranded in a screen corner. */
+.vi-boost-charge {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+  background: linear-gradient(90deg, ${CSS.uiCyan}, ${CSS.ribbon});
+  opacity: 0.55; pointer-events: none; transition: width 0.12s linear;
+}
+.vi-boost.is-cold .vi-boost-chargeed { opacity: 0.3; }
+.vi-boost.is-cold { filter: saturate(0.45) brightness(0.92); }
 .vi-stick svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 
 .vi-knob {
@@ -202,7 +229,11 @@ export function createInput(rootEl, opts = {}) {
 
     const boostPill = document.createElement('div');
     boostPill.className = 'vi-boost';
-    boostPill.innerHTML = '<span class="vi-chev">»</span><span>BOOST</span>';
+    boostPill.innerHTML =
+        '<i class="vi-boost-charge"></i>'
+        + '<span class="vi-chev">\u00bb</span><span>BOOST</span>'
+        + '<i class="vi-boost-grip" aria-label="Drag to move the boost button"></i>';
+    const boostCharge = boostPill.querySelector('.vi-boost-charge');
 
     const ripple = document.createElement('div');
     ripple.className = 'vi-ripple';
@@ -214,6 +245,37 @@ export function createInput(rootEl, opts = {}) {
 
     // --- state (all pre-allocated; update() touches numbers only) ----------
     let stickId = null, boostId = null;
+
+    // --- boost button placement -------------------------------------------
+    // The button is draggable, and which SIDE it lands on decides which half
+    // of the screen is the stick. That is the point of moving it: a left-handed
+    // player puts boost bottom-left and steers with the right thumb.
+    const POS_KEY = 'gauntlet.boostPos.v1';
+    let boostFx = 0.82, boostFy = 0.90;   // viewport fractions of the pill centre
+    let boostSide = 'right';
+    let dragId = null, dragDX = 0, dragDY = 0;
+
+    try {
+        const saved = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+        if (saved && Number.isFinite(saved.fx) && Number.isFinite(saved.fy)) {
+            boostFx = Math.min(0.97, Math.max(0.03, saved.fx));
+            boostFy = Math.min(0.97, Math.max(0.03, saved.fy));
+        }
+    } catch (_) { /* private mode, or a corrupt entry — defaults are fine */ }
+
+    /** Apply the stored fractional position, clamped to the current viewport. */
+    function placeBoost() {
+        const w = boostPill.offsetWidth || 120;
+        const h = boostPill.offsetHeight || 44;
+        const x = Math.min(rectW - w - 8, Math.max(8, boostFx * rectW - w / 2));
+        const y = Math.min(rectH - h - 8, Math.max(8, boostFy * rectH - h / 2));
+        boostPill.style.left = x + 'px';
+        boostPill.style.top = y + 'px';
+        boostPill.style.right = 'auto';
+        boostPill.style.bottom = 'auto';
+        boostSide = (x + w / 2) < rectW * 0.5 ? 'left' : 'right';
+        placeHint();
+    }
     let originX = 0, originY = 0;
     let rawX = 0, rawY = 0;            // unshaped stick deflection, -1..1
     let keyX = 0, keyY = 0, keyBoost = false;
@@ -233,12 +295,16 @@ export function createInput(rootEl, opts = {}) {
         // A dim ghost stick until the player's first touch, so the control is
         // discoverable without a tutorial card.
         if (everTouched || stickId !== null) return;
-        const x = Math.min(rectW * 0.24, 132);
+        const x = boostSide === 'left'
+            ? rectW - Math.min(rectW * 0.24, 132)
+            : Math.min(rectW * 0.24, 132);
         const y = rectH - 148;
         stick.style.transform = `translate3d(${x}px, ${y}px, 0) scale(0.82)`;
         stick.classList.add('is-hint');
     }
-    placeHint();
+    // placeBoost() positions the button, derives which side it is on, and then
+    // places the hint on the OTHER side — so this one call seeds both.
+    placeBoost();
 
     function showStick(x, y) {
         stick.classList.remove('is-hint');
@@ -291,14 +357,32 @@ export function createInput(rootEl, opts = {}) {
     function onPointerDown(e) {
         if (!visible || disposed) return;
         readRect();
+
+        // A pointer that starts on the grip is a move, never a boost.
+        if (dragId === null && e.target && e.target.closest &&
+            e.target.closest('.vi-boost-grip')) {
+            dragId = e.pointerId;
+            const r = boostPill.getBoundingClientRect();
+            dragDX = e.clientX - r.left;
+            dragDY = e.clientY - r.top;
+            boostPill.classList.add('is-dragging');
+            try { layer.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+            if (e.cancelable) e.preventDefault();
+            return;
+        }
+
         const lx = e.clientX - rectX;
         const ly = e.clientY - rectY;
-        if (lx < rectW * 0.5) {
+        // Whichever half the boost button is NOT on belongs to the stick.
+        const onBoostHalf = boostSide === 'left' ? (lx < rectW * 0.5) : (lx >= rectW * 0.5);
+        if (!onBoostHalf) {
             if (stickId !== null) return;            // one stick, first thumb wins
             stickId = e.pointerId;
             everTouched = true;
             const m = tune.edgeMargin;
-            originX = Math.max(m, Math.min(rectW * 0.5 - 8, lx));
+            const loX = boostSide === 'left' ? rectW * 0.5 + 8 : m;
+            const hiX = boostSide === 'left' ? rectW - m : rectW * 0.5 - 8;
+            originX = Math.max(Math.min(loX, hiX), Math.min(Math.max(loX, hiX), lx));
             originY = Math.max(m, Math.min(rectH - m, ly));
             rawX = 0; rawY = 0;
             showStick(originX, originY);
@@ -318,6 +402,17 @@ export function createInput(rootEl, opts = {}) {
 
     function onPointerMove(e) {
         if (disposed) return;
+        if (e.pointerId === dragId) {
+            const w = boostPill.offsetWidth, h = boostPill.offsetHeight;
+            const x = Math.min(rectW - w - 8, Math.max(8, e.clientX - rectX - dragDX));
+            const y = Math.min(rectH - h - 8, Math.max(8, e.clientY - rectY - dragDY));
+            boostPill.style.left = x + 'px';
+            boostPill.style.top = y + 'px';
+            boostFx = (x + w / 2) / rectW;
+            boostFy = (y + h / 2) / rectH;
+            if (e.cancelable) e.preventDefault();
+            return;
+        }
         if (e.pointerId !== stickId) return;         // boost pointer needs no tracking
         const dx = (e.clientX - rectX) - originX;
         const dy = (e.clientY - rectY) - originY;
@@ -333,6 +428,15 @@ export function createInput(rootEl, opts = {}) {
 
     function onPointerUp(e) {
         if (disposed) return;
+        if (e.pointerId === dragId) {
+            dragId = null;
+            boostPill.classList.remove('is-dragging');
+            placeBoost();
+            try { localStorage.setItem(POS_KEY, JSON.stringify({ fx: boostFx, fy: boostFy })); }
+            catch (_) { /* private mode — the position just won't persist */ }
+            try { layer.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+            return;
+        }
         if (e.pointerId === stickId) {
             stickId = null;
             rawX = 0; rawY = 0;
@@ -397,7 +501,7 @@ export function createInput(rootEl, opts = {}) {
         if (boostId === null) setBoost(false);
     }
 
-    function onResize() { readRect(); placeHint(); }
+    function onResize() { readRect(); placeBoost(); }
 
     layer.addEventListener('pointerdown', onPointerDown, { passive: false });
     window.addEventListener('pointermove', onPointerMove, { passive: false });
@@ -485,5 +589,20 @@ export function createInput(rootEl, opts = {}) {
         get boostActive() { return boostHeld; },
         get stickPointerId() { return stickId; },
         get boostPointerId() { return boostId; },
+        get boostSide() { return boostSide; },
+
+        /** Charge meter, drawn inside the button so it travels with it. */
+        setBoost01(v) {
+            const q = v > 1 ? 1 : (v > 0 ? v : 0);
+            boostCharge.style.width = (q * 100).toFixed(1) + '%';
+            boostPill.classList.toggle('is-cold', q < 0.15);
+        },
+
+        /** Put the boost button back where it started. */
+        resetBoostPosition() {
+            boostFx = 0.82; boostFy = 0.90;
+            placeBoost();
+            try { localStorage.removeItem(POS_KEY); } catch (_) { /* ignore */ }
+        },
     };
 }
