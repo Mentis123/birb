@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYOM dev · input + audio</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a1324; }
+  #bg { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
+  #stage { position: fixed; inset: 0; }
+  #panels {
+    position: fixed; inset: 0; z-index: 40; pointer-events: none;
+    display: flex; flex-direction: column; gap: 8px; padding: 10px;
+    font-family: ui-rounded, "Arial Rounded MT Bold", "Nunito", "Trebuchet MS", "DejaVu Sans", system-ui, sans-serif;
+  }
+  .row { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+  .card {
+    background: var(--cream); border: 3px solid var(--ink); border-radius: 14px;
+    box-shadow: 0 4px 0 0 var(--ink), 0 10px 20px rgba(4,10,22,0.42);
+    padding: 7px 10px 9px; color: var(--ink); position: relative;
+  }
+  .card::after {
+    content: ''; position: absolute; inset: 3px 3px auto; height: 34%;
+    border-radius: 10px 10px 40% 40%; background: rgba(255,255,255,0.6); pointer-events: none;
+  }
+  .card > * { position: relative; z-index: 1; }
+  .lab { font-size: 10px; font-weight: 900; letter-spacing: 0.16em; opacity: 0.62; }
+  .big { font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .kv { font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .tests { font-size: 11px; font-weight: 800; line-height: 1.55; }
+  .ok  { color: #0d7a4a; }
+  .bad { color: #c1352b; }
+  .pill {
+    display: inline-block; padding: 1px 7px; border-radius: 99px; border: 2px solid var(--ink);
+    font-size: 10px; font-weight: 900; letter-spacing: 0.08em;
+  }
+  canvas.mini { display: block; border: 2px solid var(--ink); border-radius: 8px; background: #0a1324; }
+  .grow { flex: 1 1 220px; min-width: 0; }
+  .spacer { flex: 1 1 auto; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="stage"></div>
+<div id="panels">
+  <div class="row">
+    <div class="card" style="min-width:150px">
+      <div class="lab">INPUT VALUE</div>
+      <div class="big" id="vx">x +0.000</div>
+      <div class="big" id="vy">y +0.000</div>
+      <div class="kv" style="margin-top:3px">boost <span class="pill" id="vb">OFF</span></div>
+      <div class="kv" id="vraw" style="opacity:.6">raw +0.00 / +0.00</div>
+    </div>
+    <div class="card">
+      <div class="lab">STICK PAD</div>
+      <canvas class="mini" id="pad" width="112" height="112" style="width:112px;height:112px"></canvas>
+      <div class="kv" style="opacity:.6;margin-top:2px">ghost = raw</div>
+    </div>
+    <div class="card">
+      <div class="lab">DEADZONE · EXPO</div>
+      <canvas class="mini" id="curve" width="150" height="96" style="width:150px;height:96px"></canvas>
+      <div class="kv" style="opacity:.6;margin-top:2px">dz .14 · expo .30</div>
+    </div>
+    <div class="card grow">
+      <div class="lab">SELF-TEST</div>
+      <div class="tests" id="tests">running…</div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="row">
+    <div class="card grow" style="flex:1 1 100%">
+      <div class="lab">AUDIO · OFFLINE RENDER OF THE SYNTH <span id="astats" style="opacity:.6"></span></div>
+      <canvas class="mini" id="wave" style="width:100%;height:96px"></canvas>
+      <div class="kv" style="margin-top:3px">LIVE CONTEXT <span class="pill" id="lstate">—</span></div>
+      <canvas class="mini" id="live" style="width:100%;height:40px;margin-top:4px"></canvas>
+    </div>
+  </div>
+</div>
+<script type="module">
+import { createInput, INPUT_TUNING } from '/vyom/src/input/touch.js';
+import { createAudio } from '/vyom/src/audio/audio.js';
+import { CSS } from '/vyom/src/core/palette.js';
+import { makeRng, rngRange } from '/vyom/src/core/rng.js';
+
+document.documentElement.style.setProperty('--ink', CSS.ink);
+document.documentElement.style.setProperty('--cream', CSS.uiCream);
+
+// ---------------------------------------------------------------------------
+// Background — a plausible game frame so the controls are judged in context,
+// not against a void. Painted, deterministic, no assets.
+// ---------------------------------------------------------------------------
+const bg = document.getElementById('bg');
+const bx = bg.getContext('2d');
+function paintBg() {
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+    bg.width = W; bg.height = H;
+    const S = Math.min(W, H) / 390;
+    const rng = makeRng(4242);
+    const sky = bx.createLinearGradient(0, 0, 0, H * 0.8);
+    sky.addColorStop(0, CSS.skyZenith);
+    sky.addColorStop(0.5, CSS.skyMid);
+    sky.addColorStop(1, CSS.skyHorizon);
+    bx.fillStyle = sky; bx.fillRect(0, 0, W, H);
+
+    const sx = W * 0.74, sy = H * 0.14;
+    const halo = bx.createRadialGradient(sx, sy, 0, sx, sy, 160 * S);
+    halo.addColorStop(0, 'rgba(255,212,105,0.8)');
+    halo.addColorStop(1, 'rgba(255,212,105,0)');
+    bx.fillStyle = halo; bx.beginPath(); bx.arc(sx, sy, 160 * S, 0, Math.PI * 2); bx.fill();
+    bx.fillStyle = CSS.sunCore; bx.beginPath(); bx.arc(sx, sy, 28 * S, 0, Math.PI * 2); bx.fill();
+
+    for (let i = 0; i < 6; i++) {
+        const cx = rngRange(rng, 0.02, 0.95) * W;
+        const cy = rngRange(rng, 0.08, 0.42) * H;
+        const s = rngRange(rng, 0.6, 1.4) * S;
+        bx.beginPath();
+        for (let p = 0; p < 5; p++) {
+            const px = cx + (p - 2) * 24 * s;
+            const py = cy + Math.sin(p * 1.7 + i) * 6 * s;
+            bx.moveTo(px + 26 * s, py);
+            bx.arc(px, py, 26 * s - Math.abs(p - 2) * 6 * s, 0, Math.PI * 2);
+        }
+        bx.fillStyle = 'rgba(255,253,246,0.95)'; bx.fill();
+    }
+
+    // planet horizon
+    const R = Math.max(W, H) * 1.6, cy = H * 0.70 + R;
+    bx.save();
+    bx.beginPath(); bx.arc(W * 0.5, cy, R, 0, Math.PI * 2); bx.clip();
+    const gnd = bx.createLinearGradient(0, H * 0.6, 0, H);
+    gnd.addColorStop(0, CSS.meadowLit);
+    gnd.addColorStop(0.55, CSS.meadowMid);
+    gnd.addColorStop(1, CSS.meadowDeep);
+    bx.fillStyle = gnd; bx.fillRect(0, H * 0.55, W, H * 0.45);
+    for (let i = 0; i < 40; i++) {
+        const tx = rngRange(rng, -0.05, 1.05) * W;
+        const ty = H * 0.74 + rngRange(rng, 0, 0.3) * H;
+        const h = (18 + (ty - H * 0.74) / H * 90) * S;
+        bx.fillStyle = CSS.trunk;
+        bx.fillRect(tx - 2 * S, ty - h * 0.3, 4 * S, h * 0.3);
+        bx.beginPath();
+        bx.moveTo(tx, ty - h); bx.lineTo(tx + h * 0.42, ty - h * 0.28); bx.lineTo(tx - h * 0.42, ty - h * 0.28);
+        bx.closePath();
+        bx.fillStyle = i % 3 ? CSS.foliageMid : CSS.pineLit; bx.fill();
+        bx.strokeStyle = CSS.ink; bx.lineWidth = 2.4 * S; bx.stroke();
+    }
+    bx.restore();
+    bx.strokeStyle = CSS.ink; bx.lineWidth = 4 * S;
+    bx.beginPath(); bx.arc(W * 0.5, cy, R, 0, Math.PI * 2); bx.stroke();
+}
+paintBg();
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+let boostEdges = 0;
+const input = createInput(document.getElementById('stage'), {
+    onBoost: (down) => { if (down) boostEdges++; },
+});
+
+// ---------------------------------------------------------------------------
+// Test rig — synthesised pointer events, driven through the real DOM path.
+// ---------------------------------------------------------------------------
+const results = [];
+function record(name, pass, detail) { results.push({ name, pass, detail }); }
+
+function pd(id, x, y) {
+    input.element.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true,
+        pointerType: 'touch', isPrimary: id === 1, button: 0, buttons: 1,
+    }));
+}
+function pm(id, x, y) {
+    window.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true,
+        pointerType: 'touch', buttons: 1,
+    }));
+}
+function pu(id, x, y) {
+    window.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true,
+        pointerType: 'touch', buttons: 0,
+    }));
+}
+function settle(frames = 120) { for (let i = 0; i < frames; i++) input.update(1 / 60); }
+
+/** The shaping curve, restated independently so the test is a real check. */
+function expected(mag) {
+    const dz = INPUT_TUNING.deadzone, ex = INPUT_TUNING.expo;
+    let n = (mag - dz) / (1 - dz);
+    if (n <= 0) return 0;
+    if (n > 1) n = 1;
+    return n * (1 - ex) + n * n * n * ex;
+}
+
+function runInputTests() {
+    const R = INPUT_TUNING.radius;
+    const ox = Math.round(innerWidth * 0.22), oy = Math.round(innerHeight * 0.62);
+    const rightX = Math.round(innerWidth * 0.78), rightY = Math.round(innerHeight * 0.55);
+
+    // 1 — inside the deadzone must resolve to a dead zero.
+    pd(1, ox, oy);
+    pm(1, ox + R * 0.10, oy);
+    settle();
+    record('deadzone 0.10 -> 0', Math.abs(input.value.x) < 1e-3, input.value.x.toFixed(4));
+
+    // 2 — expo curve matches the spec at half deflection.
+    pm(1, ox + R * 0.5, oy);
+    settle();
+    record('expo 0.50 -> ' + expected(0.5).toFixed(3),
+        Math.abs(input.value.x - expected(0.5)) < 3e-3, input.value.x.toFixed(4));
+
+    // 3 — full deflection saturates at 1.0 (clamped to the ring).
+    pm(1, ox + R * 2.5, oy);
+    settle();
+    record('clamp 2.5R -> 1.000', Math.abs(input.value.x - 1) < 3e-3, input.value.x.toFixed(4));
+
+    // 4 — stick + boost at the same time, on separate pointerIds.
+    pd(2, rightX, rightY);
+    settle(2);
+    record('multi-touch stick+boost',
+        input.stickActive && input.boostActive && input.value.boost === true,
+        'ids ' + input.stickPointerId + '/' + input.boostPointerId);
+
+    // 5 — losing the boost pointer must not cancel the stick.
+    pu(2, rightX, rightY);
+    settle(2);
+    record('release boost, stick lives',
+        input.stickActive && !input.boostActive && Math.abs(input.value.x - 1) < 3e-3,
+        'x=' + input.value.x.toFixed(3));
+
+    // 6 — and the reverse: losing the stick must not cancel boost.
+    pd(2, rightX, rightY);
+    pu(1, ox + R * 2.5, oy);
+    settle(2);
+    record('release stick, boost lives',
+        !input.stickActive && input.boostActive, 'boost=' + input.value.boost);
+    pu(2, rightX, rightY);
+    settle(4);
+
+    // 7 — a right-half press must never steal the stick, and vice versa.
+    pd(3, rightX, rightY);
+    settle(2);
+    const zoneOk = !input.stickActive && input.boostActive;
+    pu(3, rightX, rightY);
+    settle(2);
+    record('zones do not cross', zoneOk, 'left=stick right=boost');
+
+    // 8 — onBoost fired once per press edge (three presses above).
+    record('onBoost edges = 3', boostEdges === 3, String(boostEdges));
+
+    // 9 — keyboard fallback.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', bubbles: true, cancelable: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
+    settle();
+    const keyOk = Math.abs(input.value.y - expected(1)) < 3e-3 && input.value.boost === true;
+    record('keyboard W + space', keyOk, 'y=' + input.value.y.toFixed(3));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'w', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true }));
+    settle();
+
+    // 10 — smoothing is framerate-independent: 1s of 30fps and 1s of 120fps
+    // must land in the same place.
+    pd(1, ox, oy); pm(1, ox + R, oy);
+    for (let i = 0; i < 30; i++) input.update(1 / 30);
+    const at30 = input.value.x;
+    pu(1, ox + R, oy); settle(200);
+    pd(1, ox, oy); pm(1, ox + R, oy);
+    for (let i = 0; i < 120; i++) input.update(1 / 120);
+    const at120 = input.value.x;
+    record('smoothing fps-independent', Math.abs(at30 - at120) < 5e-3,
+        at30.toFixed(3) + ' vs ' + at120.toFixed(3));
+    pu(1, ox + R, oy); settle(200);
+
+    // --- leave the frame in a photogenic, *held* state for the capture ----
+    pd(1, ox, oy);
+    pm(1, ox + R * 0.78, oy - R * 0.62);
+    pd(2, rightX, rightY);
+    settle();
+}
+
+// ---------------------------------------------------------------------------
+// Audio
+// ---------------------------------------------------------------------------
+const waveCv = document.getElementById('wave');
+const liveCv = document.getElementById('live');
+const astats = document.getElementById('astats');
+
+// Haptics. Headless Chromium blocks navigator.vibrate outside a real tap (and
+// logs a console error), so the probe stubs it with a spy — which also turns
+// "does it call vibrate" into a real assertion instead of a hope. The iOS
+// branch is exercised by removing vibrate entirely first.
+let vibeCalls = 0, vibeLast = 0;
+function hapticTests() {
+    const realVibrate = navigator.vibrate;
+    // --- iOS 18 branch: no navigator.vibrate -> hidden <input switch> tick ---
+    try {
+        Object.defineProperty(navigator, 'vibrate', { value: undefined, configurable: true });
+        const a = createAudio();
+        let clicked = 0;
+        a.triggerHaptic(10);
+        const sw = document.querySelector('input[switch]');
+        if (sw) { sw.addEventListener('click', () => clicked++); a.triggerHaptic(10); }
+        record('haptic iOS switch bridge', !!sw && clicked === 1,
+            sw ? 'clicks ' + clicked : 'no bridge element');
+        a.dispose();
+    } catch (err) {
+        record('haptic iOS switch bridge', false, String(err && err.message || err));
+    }
+    // --- Android branch: navigator.vibrate, stubbed so headless stays quiet ---
+    try {
+        Object.defineProperty(navigator, 'vibrate', {
+            value: (ms) => { vibeCalls++; vibeLast = ms; return true; },
+            configurable: true, writable: true,
+        });
+        const a = createAudio();
+        a.triggerHaptic(33);
+        record('haptic android vibrate', vibeCalls === 1 && vibeLast === 33,
+            'calls ' + vibeCalls + ' last ' + vibeLast);
+        a.setHapticsEnabled(false);
+        a.triggerHaptic(33);
+        record('haptics can be disabled', vibeCalls === 1, 'calls ' + vibeCalls);
+        a.dispose();
+    } catch (err) {
+        record('haptic android vibrate', false, String(err && err.message || err));
+        try { Object.defineProperty(navigator, 'vibrate', { value: realVibrate, configurable: true }); } catch (_) { /* ignore */ }
+    }
+}
+
+// Test 0: every method must be safe before unlock() — this is the iOS
+// contract, and the game really does call setFlightSpeed behind the splash.
+function preUnlockSafety() {
+    let ok = true, why = '';
+    try {
+        const a = createAudio();
+        a.setFlightSpeed(0.8); a.flap(); a.gate(4); a.boost(); a.impact();
+        a.countdownBeep(2); a.countdownBeep(0); a.horn(); a.finish(1); a.finish(4);
+        a.setEnabled(false, true); a.setEnabled(true, true);
+        a.triggerHaptic(8);
+        if (a.isReady) { ok = false; why = 'built a graph before unlock'; }
+        a.dispose();
+        a.flap(); a.setFlightSpeed(0.2);   // safe after dispose too
+    } catch (err) { ok = false; why = String(err && err.message || err); }
+    record('audio safe before unlock', ok, why || 'no throw, no context');
+}
+
+async function renderOffline() {
+    const SR = 44100, DUR = 3.6;
+    const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OC) { record('audio offline render', false, 'no OfflineAudioContext'); return null; }
+    const oc = new OC(1, Math.ceil(SR * DUR), SR);
+    const a = createAudio({ context: oc, seed: 99 });
+    const unlocked = a.unlock();
+    record('audio unlock builds graph', unlocked && a.isReady, 'ready=' + a.isReady);
+    a.setFlightSpeed(0.12);
+
+    const q = 128 / SR;
+    const marks = [
+        [0.10, () => a.flap()],
+        [0.36, () => a.flap()],
+        [0.62, () => { a.setFlightSpeed(0.45); a.gate(0); }],
+        [0.92, () => a.gate(1)],
+        [1.20, () => a.gate(2)],
+        [1.48, () => a.gate(3)],
+        [1.80, () => { a.setFlightSpeed(0.95); a.boost(); }],
+        [2.30, () => a.impact()],
+        [2.62, () => a.countdownBeep(2)],
+        [2.86, () => a.countdownBeep(0)],
+        [3.02, () => { a.setFlightSpeed(0.35); a.horn(); }],
+    ];
+    const labels = marks.map(([t]) => t);
+    for (let i = 0; i < marks.length; i++) {
+        const t = Math.max(q, Math.round(marks[i][0] / q) * q);
+        oc.suspend(t).then(() => { try { marks[i][1](); } catch (_) { /* ignore */ } oc.resume(); });
+    }
+    const buf = await oc.startRendering();
+    return { buf, labels, SR, DUR };
+}
+
+function drawWave(render) {
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    const cssW = waveCv.clientWidth || 300, cssH = 96;
+    waveCv.width = Math.round(cssW * dpr); waveCv.height = Math.round(cssH * dpr);
+    const g = waveCv.getContext('2d');
+    const W = waveCv.width, H = waveCv.height;
+    g.fillStyle = CSS.uiPanel; g.fillRect(0, 0, W, H);
+    if (!render) {
+        g.fillStyle = CSS.birdRival1; g.font = `${14 * dpr}px sans-serif`;
+        g.fillText('no offline render', 10 * dpr, H / 2);
+        return;
+    }
+    const d = render.buf.getChannelData(0);
+    // event markers
+    g.strokeStyle = 'rgba(127,245,255,0.35)'; g.lineWidth = 1 * dpr;
+    for (const t of render.labels) {
+        const x = (t / render.DUR) * W;
+        g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+    }
+    g.strokeStyle = 'rgba(255,246,220,0.25)'; g.beginPath();
+    g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+
+    const cols = Math.min(W, 1400);
+    const step = d.length / cols;
+    let peak = 0, sum = 0;
+    g.fillStyle = CSS.ribbon;
+    for (let i = 0; i < cols; i++) {
+        let lo = 1, hi = -1;
+        const s0 = Math.floor(i * step), s1 = Math.floor((i + 1) * step);
+        for (let s = s0; s < s1; s++) {
+            const v = d[s];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+        const x = (i / cols) * W;
+        const y0 = (0.5 - hi * 0.48) * H, y1 = (0.5 - lo * 0.48) * H;
+        g.fillRect(x, y0, Math.max(1, W / cols), Math.max(1 * dpr, y1 - y0));
+    }
+    for (let s = 0; s < d.length; s += 7) {
+        const v = Math.abs(d[s]);
+        if (v > peak) peak = v;
+        sum += d[s] * d[s];
+    }
+    const rms = Math.sqrt(sum / (d.length / 7));
+    astats.textContent = `· peak ${peak.toFixed(3)} · rms ${rms.toFixed(4)} · ${render.DUR}s @ ${render.SR}Hz`;
+    record('synth is not silent', peak > 0.05 && rms > 0.002,
+        'peak ' + peak.toFixed(3) + ' rms ' + rms.toFixed(4));
+    record('synth does not clip', peak <= 1.0, 'peak ' + peak.toFixed(3));
+}
+
+// Live context: proves the real (non-offline) path constructs and runs. In a
+// headless capture the autoplay policy usually leaves it suspended, which is
+// exactly the iOS condition the module is written for — so a flat live trace
+// with state=suspended is a PASS for "did not throw", not a failure of synth.
+let liveAudio = null, analyser = null, liveData = null;
+function startLive() {
+    try {
+        liveAudio = createAudio({ seed: 5 });
+        liveAudio.unlock();
+        const ctx = liveAudio.context;
+        if (ctx && liveAudio.tap()) {
+            analyser = ctx.createAnalyser();
+            analyser.fftSize = 1024;
+            liveData = new Float32Array(analyser.fftSize);
+            liveAudio.tap().connect(analyser);
+            liveAudio.setFlightSpeed(0.7);
+            setInterval(() => { if (liveAudio) { liveAudio.gate(3); } }, 900);
+        }
+        record('live context constructs', !!ctx, 'state ' + (ctx ? ctx.state : 'none'));
+    } catch (err) {
+        record('live context constructs', false, String(err && err.message || err));
+    }
+}
+
+function drawLive() {
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    const cssW = liveCv.clientWidth || 300, cssH = 40;
+    if (liveCv.width !== Math.round(cssW * dpr)) {
+        liveCv.width = Math.round(cssW * dpr); liveCv.height = Math.round(cssH * dpr);
+    }
+    const g = liveCv.getContext('2d');
+    const W = liveCv.width, H = liveCv.height;
+    g.fillStyle = CSS.uiPanel; g.fillRect(0, 0, W, H);
+    g.strokeStyle = analyser ? CSS.uiCyan : CSS.gatePassed;
+    g.lineWidth = 1.6 * dpr;
+    g.beginPath();
+    if (analyser) {
+        analyser.getFloatTimeDomainData(liveData);
+        for (let i = 0; i < liveData.length; i++) {
+            const x = (i / (liveData.length - 1)) * W;
+            const y = (0.5 - liveData[i] * 0.45) * H;
+            if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+    } else {
+        g.moveTo(0, H / 2); g.lineTo(W, H / 2);
+    }
+    g.stroke();
+    const st = liveAudio ? liveAudio.state : 'none';
+    const pill = document.getElementById('lstate');
+    if (pill.textContent !== st.toUpperCase()) {
+        pill.textContent = st.toUpperCase();
+        pill.style.background = st === 'running' ? CSS.ribbon : CSS.gatePassed;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Live readouts
+// ---------------------------------------------------------------------------
+const padCv = document.getElementById('pad');
+const curveCv = document.getElementById('curve');
+
+function drawPad() {
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    if (padCv.width !== 112 * dpr) { padCv.width = 112 * dpr; padCv.height = 112 * dpr; }
+    const g = padCv.getContext('2d');
+    const W = padCv.width, H = padCv.height, cx = W / 2, cy = H / 2, r = W * 0.42;
+    g.fillStyle = CSS.uiPanel; g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(255,246,220,0.28)'; g.lineWidth = 1.5 * dpr;
+    g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.arc(cx, cy, r * INPUT_TUNING.deadzone, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.moveTo(cx - r, cy); g.lineTo(cx + r, cy); g.moveTo(cx, cy - r); g.lineTo(cx, cy + r); g.stroke();
+    const raw = input.raw;
+    g.fillStyle = 'rgba(255,221,68,0.55)';
+    g.beginPath(); g.arc(cx + raw.x * r, cy - raw.y * r, 5 * dpr, 0, Math.PI * 2); g.fill();
+    g.fillStyle = CSS.uiCyan;
+    g.beginPath(); g.arc(cx + input.value.x * r, cy - input.value.y * r, 6.5 * dpr, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = CSS.ink; g.lineWidth = 2 * dpr; g.stroke();
+}
+
+function drawCurve() {
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    if (curveCv.width !== 150 * dpr) { curveCv.width = 150 * dpr; curveCv.height = 96 * dpr; }
+    const g = curveCv.getContext('2d');
+    const W = curveCv.width, H = curveCv.height, pad = 8 * dpr;
+    g.fillStyle = CSS.uiPanel; g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(255,246,220,0.22)'; g.lineWidth = 1 * dpr;
+    g.strokeRect(pad, pad, W - pad * 2, H - pad * 2);
+    g.strokeStyle = 'rgba(255,246,220,0.4)'; g.setLineDash([3 * dpr, 3 * dpr]);
+    g.beginPath(); g.moveTo(pad, H - pad); g.lineTo(W - pad, pad); g.stroke();
+    g.setLineDash([]);
+    g.strokeStyle = CSS.ribbon; g.lineWidth = 2.4 * dpr;
+    g.beginPath();
+    for (let i = 0; i <= 60; i++) {
+        const m = i / 60;
+        const x = pad + m * (W - pad * 2);
+        const y = H - pad - expected(m) * (H - pad * 2);
+        if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.stroke();
+    const mag = Math.min(1, Math.hypot(input.value.x, input.value.y));
+    const rawMag = Math.min(1, Math.hypot(input.raw.x, input.raw.y));
+    g.fillStyle = CSS.uiGold;
+    g.beginPath();
+    g.arc(pad + rawMag * (W - pad * 2), H - pad - mag * (H - pad * 2), 4.5 * dpr, 0, Math.PI * 2);
+    g.fill();
+}
+
+const el = {
+    vx: document.getElementById('vx'), vy: document.getElementById('vy'),
+    vb: document.getElementById('vb'), vraw: document.getElementById('vraw'),
+};
+function fmt(v) { return (v < 0 ? '' : '+') + v.toFixed(3); }
+let lastTxt = ['', '', '', ''];
+function drawReadout() {
+    const a = 'x ' + fmt(input.value.x), b = 'y ' + fmt(input.value.y);
+    const c = input.value.boost ? 'ON' : 'OFF';
+    const d = 'raw ' + fmt(input.raw.x) + ' / ' + fmt(input.raw.y);
+    if (a !== lastTxt[0]) { el.vx.textContent = a; lastTxt[0] = a; }
+    if (b !== lastTxt[1]) { el.vy.textContent = b; lastTxt[1] = b; }
+    if (c !== lastTxt[2]) {
+        el.vb.textContent = c; lastTxt[2] = c;
+        el.vb.style.background = input.value.boost ? CSS.uiGold : 'transparent';
+    }
+    if (d !== lastTxt[3]) { el.vraw.textContent = d; lastTxt[3] = d; }
+}
+
+function renderTests() {
+    let html = '';
+    for (const r of results) {
+        html += `<div class="${r.pass ? 'ok' : 'bad'}">${r.pass ? '✔' : '✘'} ${r.name}`
+            + `<span style="opacity:.55;font-weight:700"> — ${r.detail}</span></div>`;
+    }
+    const fails = results.filter((r) => !r.pass).length;
+    html += `<div style="margin-top:3px;font-weight:900">${results.length - fails}/${results.length} PASS</div>`;
+    document.getElementById('tests').innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+let last = performance.now();
+function frame(t) {
+    if (frame.stop) return;
+    const dt = Math.min(0.1, (t - last) / 1000);
+    last = t;
+    input.update(dt);
+    drawReadout(); drawPad(); drawCurve(); drawLive();
+    requestAnimationFrame(frame);
+}
+
+(async () => {
+    hapticTests();
+    preUnlockSafety();
+    let render = null;
+    try { render = await renderOffline(); }
+    catch (err) { record('audio offline render', false, String(err && err.message || err)); }
+    startLive();
+    runInputTests();
+    drawWave(render);
+    renderTests();
+    requestAnimationFrame(frame);
+    window.__VYOM_READY = true;
+})();
+
+addEventListener('resize', () => { paintBg(); });
+
+// DOM/audio subsystem: no WebGL draw calls of its own.
+window.__VYOM_STATS = () => ({ drawCalls: 0, triangles: 0 });
+</script>
+</body>
+</html>
