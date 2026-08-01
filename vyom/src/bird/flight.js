@@ -78,7 +78,10 @@ export const FLIGHT_CONFIG = {
     // --- handling ----------------------------------------------------------
     yawRate: Math.PI * 0.55,
     pitchRate: Math.PI * 0.5,
-    maxPitch: Math.PI * 0.42,
+    // 61 degrees. Steep enough for a committed canyon dive, shallow enough
+    // that the horizon never leaves frame — past ~70 the chase view reads as
+    // a rollercoaster and the course becomes unreadable.
+    maxPitch: Math.PI * 0.34,
     // Yaw rate multiplier at the top of the speed range. >1 = turns tighten as
     // you go faster (the angular rate rises, so the radius does not blow out).
     turnTighten: 0.5,
@@ -443,15 +446,26 @@ export class VyomFlight {
         const s = this._s;
         const cfg = this.cfg;
 
-        // 1. Steering. Yaw is around LOCAL up, pitch around LOCAL x, both
-        //    applied with `multiply` (local space, applied after) so they read
-        //    relative to the bird's own frame no matter where on the planet it
-        //    is. This is the half of the fix people usually get right.
+        // 1. Steering.
+        //
+        //    Yaw turns around the RADIAL up, not around the bird's local Y, and
+        //    is therefore premultiplied (world space, applied first). This is
+        //    not a stylistic choice: yawing around local Y while pitched tips
+        //    the turn axis away from vertical by the pitch angle, so every
+        //    turn injects roll at yawRate*sin(pitch). In a steep dive with the
+        //    stick held over that reaches ~2.3 rad/s of roll, which the
+        //    levelling term can only fight to an equilibrium of ~60 degrees —
+        //    measured, not guessed, in the probe: the bird flew a whole
+        //    canyon dive lying on its side. Turning about the radial injects
+        //    exactly zero roll anywhere on the planet.
+        //
+        //    Pitch stays around LOCAL x with `multiply` (local space, applied
+        //    after), because pitch genuinely is relative to the bird's frame.
+        s.up.copy(this.position).normalize();
         if (ix !== 0) {
             const scale = turnRateScale(this.speed01, cfg);
-            s.axis.set(0, 1, 0);
-            s.quat.setFromAxisAngle(s.axis, -ix * this.yawRate * scale * dt);
-            this.quaternion.multiply(s.quat);
+            s.quat.setFromAxisAngle(s.up, -ix * this.yawRate * scale * dt);
+            this.quaternion.premultiply(s.quat);
         }
         if (iy !== 0) {
             s.axis.set(1, 0, 0);
@@ -726,8 +740,20 @@ export class VyomFlight {
         s.slide.copy(s.forward).addScaledVector(s.surfNormal, -into);
         if (s.slide.lengthSq() < 1e-6) return;
         s.slide.normalize();
-        s.quat.setFromUnitVectors(s.forward, s.slide);
-        this.quaternion.premultiply(s.quat);
+
+        // Re-aim onto the deflected heading with the radial as the reference
+        // up, rather than applying the minimal forward->slide rotation.
+        //
+        // The minimal rotation is the obvious move and it is wrong: on a
+        // sloped wall the deflection has a sideways component, and the shortest
+        // arc that turns the nose sideways also tips the wings. Skimming a
+        // canyon flank for a second or two accumulated that into 66 degrees of
+        // roll in the probe — the bird flew the dive lying on its side, which
+        // then also defeated the pitch clamp (rotating about a rolled local X
+        // is no longer a pure pitch change). Rebuilding the frame keeps the
+        // heading change and throws the roll away.
+        s.up.copy(this.position).normalize();
+        this._orientTo(s.slide, s.up);
     }
 
     /**

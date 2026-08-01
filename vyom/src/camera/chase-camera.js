@@ -38,10 +38,14 @@ import { updateOutlineProjection } from '../core/outline.js';
  */
 const MODES = {
     chase: {
-        dist: 15.0,        // behind the bird
-        height: 4.4,       // above it, along the radial
-        lookAhead: 13.0,   // aim point in front of the bird
-        lookLift: 1.2,
+        dist: 11.5,        // behind the bird
+        height: 3.9,       // above it, along the radial
+        lookAhead: 11.0,   // aim point in front of the bird
+        // Aim BELOW the bird, not level with it. A level aim puts the horizon
+        // across the middle of the frame and hands the top half to empty sky;
+        // dropping the aim point fills the frame with the ground the bird is
+        // racing over, which is where all the readable motion is.
+        lookLift: -1.1,
         posK: 6.0,
         lookK: 10.0,
         fov: 60,
@@ -166,9 +170,15 @@ export function createChaseCamera(THREE, camera, opts = {}) {
             .addScaledVector(_up, mode.height);
         if (mode.sideOffset) _desired.addScaledVector(_right, mode.sideOffset);
 
+        // Portrait correction. A phone frame at the same pitch is over half
+        // sky, so aim further down as the aspect narrows. Same correction the
+        // planet probe needed — it is a property of the framing, not of one
+        // subsystem.
+        const aspect = camera.aspect || 1;
+        const portrait = aspect >= 1 ? 0 : Math.min(1, (1 - aspect) / 0.5);
         _desiredLook.copy(targetPos)
             .addScaledVector(_fwd, mode.lookAhead)
-            .addScaledVector(_up, mode.lookLift);
+            .addScaledVector(_up, mode.lookLift - 3.2 * portrait);
     }
 
     /** Deterministic shake — two incommensurate sines, no RNG, no allocation. */

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYOM dev · bird (model + animator)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #labels { position: fixed; inset: 0; pointer-events: none;
+            font: 600 13px/1.2 ui-rounded, "Trebuchet MS", system-ui, sans-serif;
+            letter-spacing: .08em; text-transform: uppercase; }
+  #labels div { position: absolute; transform: translate(-50%, 0);
+                color: #fff6dc; text-shadow: 0 1px 0 #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { position: fixed; left: 10px; bottom: 8px; color: #fff6dc;
+           font: 600 12px/1.4 ui-monospace, monospace; text-shadow: 0 1px 2px #0f1c33; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="labels"></div>
+<div id="stats"></div>
+<script type="module">
+import { loadThree } from '/vyom/src/core/three-loader.js';
+import { PALETTE } from '/vyom/src/core/palette.js';
+import { createLightRig } from '/vyom/src/core/toon.js';
+import { updateOutlineProjection } from '/vyom/src/core/outline.js';
+import { createBird } from '/vyom/src/bird/bird-model.js';
+import { createBirdAnimator } from '/vyom/src/bird/bird-anim.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 0.15, 11);
+camera.lookAt(0, 0.05, 0);
+createLightRig(THREE, scene);
+
+// --- backdrop: a flat gradient card so silhouettes are judged against the
+// --- game's own sky values rather than a flat clear colour.
+{
+  const g = new THREE.PlaneGeometry(60, 60, 1, 4);
+  const pos = g.getAttribute('position');
+  const cols = new Float32Array(pos.count * 3);
+  const top = new THREE.Color(PALETTE.skyZenith);
+  const mid = new THREE.Color(PALETTE.skyMid);
+  const low = new THREE.Color(PALETTE.skyHorizon);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) / 60) + 0.5;              // 0 bottom .. 1 top
+    if (t < 0.55) tmp.copy(low).lerp(mid, t / 0.55);
+    else tmp.copy(mid).lerp(top, (t - 0.55) / 0.45);
+    cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, depthWrite: false }));
+  m.position.set(0, 0, -16);
+  m.renderOrder = -100;
+  scene.add(m);
+}
+
+// ---------------------------------------------------------------------------
+// Four birds, four moments of the same animator. Side by side is the only way
+// to tell whether the stroke actually has follow-through: a single frame of a
+// flapping wing looks identical whether the tip lags or not.
+// ---------------------------------------------------------------------------
+const POSES = [
+  {
+    label: 'power downstroke',
+    color: PALETTE.birdPlayer, belly: PALETTE.birdPlayerBelly,
+    x: -1.85, y: 1.62, yaw: Math.PI - 0.72,
+    state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.22,
+  },
+  {
+    label: 'recovery upstroke',
+    color: PALETTE.birdRival1, belly: PALETTE.birdPlayerBelly,
+    x: 1.85, y: 1.62, yaw: Math.PI - 0.72,
+    state: { speed01: 0.45, turn: 0, pitch: 0.10, boosting: false, flapImpulse: 1,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.70,
+  },
+  {
+    label: 'banked right turn',
+    color: PALETTE.birdRival2, belly: PALETTE.birdPlayerBelly,
+    x: -1.85, y: -1.62, yaw: Math.PI - 0.55,
+    state: { speed01: 0.85, turn: 0.9, pitch: 0.05, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.48,
+  },
+  {
+    label: 'boost dive tuck',
+    color: PALETTE.birdRival3, belly: PALETTE.birdPlayerBelly,
+    x: 1.85, y: -1.62, yaw: Math.PI - 0.90,
+    state: { speed01: 1, turn: -0.15, pitch: -0.9, boosting: true, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 },
+    target: 0.40,
+  },
+];
+
+const birds = [];
+const labelRoot = document.getElementById('labels');
+
+for (let i = 0; i < POSES.length; i++) {
+  const P = POSES[i];
+  const bird = createBird(THREE, {
+    bodyColor: P.color, bellyColor: P.belly, scale: 1, quality: 'high', outline: true,
+  });
+  bird.group.position.set(P.x, P.y, 0);
+  bird.group.rotation.y = P.yaw;
+  bird.group.rotation.x = -0.06;
+  scene.add(bird.group);
+
+  const anim = createBirdAnimator(THREE, bird);
+
+  // Settle, then step to the requested point in the flap cycle. Fixed dt and
+  // seeded rng make this bit-identical on every capture.
+  const dt = 1 / 60;
+  for (let s = 0; s < 260; s++) anim.update(dt, P.state);
+  for (let s = 0; s < 400; s++) {
+    const before = anim.flap01;
+    anim.update(dt, P.state);
+    const after = anim.flap01;
+    if (before < P.target && after >= P.target) break;
+  }
+
+  birds.push(bird);
+
+  const el = document.createElement('div');
+  el.textContent = P.label;
+  labelRoot.appendChild(el);
+  P.el = el;
+}
+
+function placeLabels() {
+  const v = new THREE.Vector3();
+  for (let i = 0; i < POSES.length; i++) {
+    const P = POSES[i];
+    v.set(P.x, P.y - 1.30, 0).project(camera);
+    P.el.style.left = ((v.x * 0.5 + 0.5) * innerWidth) + 'px';
+    P.el.style.top = ((-v.y * 0.5 + 0.5) * innerHeight) + 'px';
+  }
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  // Portrait phone capture: pull back so the 2x2 grid still fits.
+  camera.position.z = camera.aspect < 0.7 ? 15.5 : 11;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  placeLabels();
+}
+addEventListener('resize', resize);
+resize();
+
+renderer.render(scene, camera);
+
+const perBird = {
+  drawCalls: birds[0].drawCallCount,
+  triangles: birds[0].triangleCount,
+};
+document.getElementById('stats').textContent =
+  `per bird: ${perBird.drawCalls} draws / ${perBird.triangles} tris   ` +
+  `frame: ${renderer.info.render.calls} draws / ${renderer.info.render.triangles} tris`;
+
+window.__VYOM_STATS = () => ({
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles,
+  perBirdDrawCalls: perBird.drawCalls,
+  perBirdTriangles: perBird.triangles,
+});
+window.__VYOM_READY = true;
+</script>
+</body>
+</html>

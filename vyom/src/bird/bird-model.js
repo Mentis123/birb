@@ -290,7 +290,7 @@ ${uniformsGlsl || ''}
 void main() {
     vec3 transformed = position;
     vec3 objNormal = aOutlineNormal;
-${deform ? deform.normal.replace(/objNormalTARGET/g, 'objNormal') : ''}
+${deform ? deform.normal : ''}
 ${deform ? deform.position : ''}
     vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );
     vec3 viewNormal = normalize( normalMatrix * objNormal );
@@ -302,8 +302,8 @@ ${deform ? deform.position : ''}
 `;
 }
 
-function makeHull(THREE, THREEgeo, parent, opts) {
-    ensureSmoothNormals(THREE, THREEgeo);
+function makeHull(THREE, geo, parent, opts) {
+    ensureSmoothNormals(THREE, geo);
     const mat = createOutlineMaterial(THREE, {
         color: PALETTE.ink,
         pixels: opts.pixels,
@@ -313,7 +313,7 @@ function makeHull(THREE, THREEgeo, parent, opts) {
         mat.vertexShader = outlineVertexSource(opts.uniformsGlsl, opts.deform);
         Object.assign(mat.uniforms, opts.uniforms);
     }
-    const hull = new THREE.Mesh(THREEgeo, mat);
+    const hull = new THREE.Mesh(geo, mat);
     hull.name = parent.name + '__outline';
     hull.userData.isOutline = true;
     hull.raycast = function noop() {};
@@ -370,7 +370,6 @@ const WING_SPAN = 0.98;
 function bodyEntries(THREE, S, col, hullOnly) {
     const e = [];
     const bodyCol = col.body, bellyCol = col.belly;
-    const tmp = new THREE.Color();
 
     // Egg torso. Belly colour is painted by height so the underside reads pale
     // from below (which is the only angle a trailing racer ever sees).
@@ -381,46 +380,40 @@ function bodyEntries(THREE, S, col, hullOnly) {
     );
     e.push({
         geo: torso,
-        color: function (x, y, z, out) {
-            const t = Math.min(1, Math.max(0, (y + 0.20) / 0.20));
-            out.copy(tmp.setHex(bellyCol)).lerp(tmp.clone().setHex(bodyCol), t);
-        },
+        color: gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.21) / 0.19; }),
     });
 
-    // Tucked feet: two stubby toes each, pinned under the belly. They live in
-    // the body mesh (no separate draw call) because a racing bird never puts
+    // Tucked feet: two stubby toes each, folded back along the belly. They live
+    // in the body mesh (no separate draw call) because a racing bird never puts
     // them down; `parts.leftFoot`/`rightFoot` are anchors at their positions.
     for (let s = -1; s <= 1; s += 2) {
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.062, 0.19, S(6), 1, false),
-                s * 0.135, -0.30, 0.10, -1.15, 0, 0, 1, 1, 1),
+            geo: xform(THREE, new THREE.ConeGeometry(0.058, 0.20, S(6), 1, false),
+                s * 0.130, -0.285, 0.02, 2.00, 0, 0, 1, 1, 1),
             color: hullOnly ? bodyCol : PALETTE.foot,
         });
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.030, 0.14, S(5), 1, false),
-                s * 0.135, -0.365, 0.005, -2.05, 0, 0, 1, 1, 1),
+            geo: xform(THREE, new THREE.ConeGeometry(0.032, 0.15, S(5), 1, false),
+                s * 0.130, -0.345, -0.03, 2.35, 0, 0, 1, 1, 1),
             color: hullOnly ? bodyCol : PALETTE.foot,
         });
     }
 
     // Tail fan: five flattened feathers splayed in the XZ plane from TAIL_Z.
     // Deformed by the tail uniforms in the vertex shader.
+    const tailPaint = gradient(THREE, bodyCol, PALETTE.inkSoft, function (x, y, z) {
+        return ((z - TAIL_Z - 0.08) / 0.44) * 0.74;
+    });
     const fanCount = 5;
     for (let i = 0; i < fanCount; i++) {
         const t = (i / (fanCount - 1)) * 2 - 1;              // -1 .. 1
-        const len = TAIL_LEN * (1 - Math.abs(t) * 0.22);
-        const g = feather(THREE, len, 0.105, S(5), 0.34, 1);
+        const len = TAIL_LEN * (1 - Math.abs(t) * 0.20);
+        const g = feather(THREE, len, 0.110, S(5), 0.34, 1);
         // Feathers point +X by default; rotate them to point +Z (backwards)
         // and splay by t.
-        xform(THREE, g, 0, 0.02 - Math.abs(t) * 0.01, TAIL_Z,
-            0, -Math.PI / 2 + t * 0.40, 0, 1, 1, 1);
-        e.push({
-            geo: g,
-            color: hullOnly ? bodyCol : function (x, y, z, out) {
-                const k = Math.min(1, Math.max(0, (z - TAIL_Z - 0.10) / 0.42));
-                out.copy(tmp.setHex(bodyCol)).lerp(tmp.clone().setHex(PALETTE.inkSoft), k * 0.72);
-            },
-        });
+        xform(THREE, g, 0, 0.03 - Math.abs(t) * 0.012, TAIL_Z,
+            0, -Math.PI / 2 + t * 0.38, 0, 1, 1, 1);
+        e.push({ geo: g, color: hullOnly ? bodyCol : tailPaint });
     }
     return e;
 }
@@ -428,7 +421,6 @@ function bodyEntries(THREE, S, col, hullOnly) {
 function headEntries(THREE, S, col, hullOnly) {
     const e = [];
     const bodyCol = col.body, bellyCol = col.belly;
-    const tmp = new THREE.Color();
 
     // Skull: oversized relative to the torso — the whole chibi read depends on
     // this ratio. Centre sits forward and up of the neck pivot.
@@ -438,35 +430,33 @@ function headEntries(THREE, S, col, hullOnly) {
     );
     e.push({
         geo: skull,
-        color: function (x, y, z, out) {
-            const t = Math.min(1, Math.max(0, (y - 0.05 + 0.16) / 0.16));
-            out.copy(tmp.setHex(bellyCol)).lerp(tmp.clone().setHex(bodyCol), t);
-        },
+        color: gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.14) / 0.17; }),
     });
 
     // Beak: two flattened cones, upper long and hooked slightly down, lower
-    // short. Prominent is the brief — this one is 0.42 long on a 0.40 skull.
+    // short. "Prominent" is the brief — this one is 0.44 long on a 0.40 skull.
+    // The cone's local Z becomes vertical after the -90deg X rotation, so the
+    // vertical flatten is applied there.
     e.push({
-        geo: xform(THREE, new THREE.ConeGeometry(0.165, 0.44, S(7), 1, false),
-            0, 0.015, -0.52, -Math.PI / 2 - 0.07, 0, 0, 1, 0.74, 1),
+        geo: xform(THREE, new THREE.ConeGeometry(0.170, 0.46, S(7), 1, false),
+            0, 0.015, -0.52, -Math.PI / 2 - 0.07, 0, 0, 1, 1, 0.72),
         color: hullOnly ? bodyCol : PALETTE.beak,
     });
     e.push({
-        geo: xform(THREE, new THREE.ConeGeometry(0.125, 0.30, S(6), 1, false),
-            0, -0.075, -0.44, -Math.PI / 2 + 0.10, 0, 0, 1, 0.55, 1),
+        geo: xform(THREE, new THREE.ConeGeometry(0.128, 0.30, S(6), 1, false),
+            0, -0.080, -0.42, -Math.PI / 2 + 0.11, 0, 0, 1, 1, 0.55),
         color: hullOnly ? bodyCol : PALETTE.beak,
     });
 
     // Crest: three little quills, swept back. Cheap, and it gives the
     // silhouette something to read against the sky besides a circle.
+    const crestPaint = gradient(THREE, bodyCol, PALETTE.inkSoft, function () { return 0.34; });
     for (let i = 0; i < 3; i++) {
         const t = (i - 1) * 0.5;
         e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.052, 0.22 - Math.abs(t) * 0.05, S(5), 1, false),
-                t * 0.10, 0.42, 0.02 + Math.abs(t) * 0.02, 0.55, t * 0.5, 0, 1, 1, 1),
-            color: hullOnly ? bodyCol : function (x, y, z, out) {
-                out.copy(tmp.setHex(bodyCol)).lerp(tmp.clone().setHex(PALETTE.inkSoft), 0.35);
-            },
+            geo: xform(THREE, new THREE.ConeGeometry(0.054, 0.24 - Math.abs(t) * 0.06, S(5), 1, false),
+                t * 0.105, 0.40, 0.01 + Math.abs(t) * 0.02, 0.62, t * 0.45, 0, 1, 1, 1),
+            color: hullOnly ? bodyCol : crestPaint,
         });
     }
 
@@ -506,12 +496,9 @@ function wingEntries(THREE, S, col, side, hullOnly) {
     // keeps triangle winding and normals correct.
     const e = [];
     const bodyCol = col.body;
-    const tmp = new THREE.Color();
-    const tipColor = function (x, y, z, out) {
-        const k = Math.min(1, Math.max(0, (Math.abs(x) - 0.42) / 0.52));
-        out.copy(tmp.setHex(bodyCol)).lerp(tmp.clone().setHex(PALETTE.inkSoft), k * 0.62);
-    };
-    const paint = hullOnly ? bodyCol : tipColor;
+    const paint = hullOnly ? bodyCol : gradient(THREE, bodyCol, PALETTE.inkSoft, function (x) {
+        return ((Math.abs(x) - 0.40) / 0.55) * 0.66;
+    });
 
     // Shoulder mass — hides the join with the torso from every angle.
     e.push({

@@ -51,6 +51,10 @@ const P = new URLSearchParams(location.search);
 const view = P.get('view') || 'chase';          // chase | orbit
 const quality = P.get('quality') || 'high';
 const DURATION = parseFloat(P.get('t') ?? '46');
+// The sim always runs the full DURATION for the invariants, but the RENDERED
+// moment is `stop`: the camera and the trail freeze there, so the hero frame is
+// a chosen beat instead of "wherever the script happened to end".
+const STOP = parseFloat(P.get('stop') ?? '24');
 const DT = 1 / 60;
 const BIRD_RADIUS = 1.3;
 
@@ -121,9 +125,10 @@ function makeStandInBird() {
   for (const side of [-1, 1]) {
     const wing = new THREE.Mesh(new THREE.ConeGeometry(0.62, 2.5, 5), skin);
     wing.position.set(side * 1.0, 0.16, 0.05);
-    wing.rotation.z = side * Math.PI * 0.52;
-    wing.rotation.y = side * -0.22;
-    wing.scale.set(1, 1, 0.42);
+    wing.rotation.z = side * Math.PI * 0.56;
+    wing.rotation.y = side * -0.55;   // sweep back, so it is not a flat bowtie
+    wing.rotation.x = 0.18;
+    wing.scale.set(1, 1, 0.38);
     g.add(wing);
   }
 
@@ -192,13 +197,14 @@ let minClearance = Infinity;
 let minRadius = Infinity;
 let maxRadius = -Infinity;
 let angleTravelled = 0;
-let worstUprightDot = 1;
+let worstRoll = 0;
 let worstPitchAbs = 0;
 let sawTumble = false;
 let sawRelaunch = false;
 let shakeAmt = 0;
 let knocked = false;
 let maxSpeedSeen = 0, minSpeedSeen = Infinity, maxBoostSeen = 0;
+const frozen = { speed: 0, boost: 0, speed01: 0 };
 
 dirB.copy(flight.position).normalize();
 
@@ -222,12 +228,15 @@ for (let i = 0; i < steps; i++) {
   if (r < minRadius) minRadius = r;
   if (r > maxRadius) maxRadius = r;
 
-  // Upright / pitch are only meaningful under control — a tumble is SUPPOSED
-  // to be inverted, that is the whole point of a committed knockdown.
+  // Roll / pitch are only meaningful under control — a tumble is SUPPOSED to
+  // be inverted, that is the whole point of a committed knockdown.
+  // NOTE: the upright metric is ROLL (radial vs the bird's own right vector),
+  // not localUp-dot-radial. The latter is just cos(pitch), so a legitimate
+  // steep dive would read as a failure.
   if (flight.state !== FLIGHT_STATE.TUMBLING) {
-    localUp.set(0, 1, 0).applyQuaternion(pose.quaternion);
-    const upDot = localUp.dot(radial);
-    if (upDot < worstUprightDot) worstUprightDot = upDot;
+    localUp.set(1, 0, 0).applyQuaternion(pose.quaternion);
+    const rollSin = Math.abs(localUp.dot(radial));
+    if (rollSin > worstRoll) worstRoll = rollSin;
 
     fwd.set(0, 0, -1).applyQuaternion(pose.quaternion);
     const pa = Math.abs(fwd.dot(radial));
@@ -242,15 +251,17 @@ for (let i = 0; i < steps; i++) {
   if (flight.boost01 > maxBoostSeen) maxBoostSeen = flight.boost01;
 
   // --- camera, driven exactly as the game will drive it -----------------
-  shakeAmt *= Math.exp(-6 * DT);
-  chase.update(DT, pose.position, pose.quaternion, flight.speed01, shakeAmt);
-
-  if (i % SAMPLE_EVERY === 0) path.push(pose.position.clone());
+  if (t <= STOP) {
+    shakeAmt *= Math.exp(-6 * DT);
+    chase.update(DT, pose.position, pose.quaternion, flight.speed01, shakeAmt);
+    if (i % SAMPLE_EVERY === 0) path.push(pose.position.clone());
+    bird.position.copy(pose.position);
+    bird.quaternion.copy(pose.quaternion);
+    frozen.speed = flight.speed;
+    frozen.boost = flight.boost01;
+    frozen.speed01 = flight.speed01;
+  }
 }
-path.push(flight.position.clone());
-
-bird.position.copy(flight.position);
-bird.quaternion.copy(flight.quaternion);
 
 // --- extra headless runs for the invariants a single flight can't show ----
 
@@ -334,9 +345,13 @@ const knockdown = (() => {
 // ---------------------------------------------------------------------------
 // trajectory ribbon — the past positions, drawn so the sphere behaviour reads
 // ---------------------------------------------------------------------------
-const curve = new THREE.CatmullRomCurve3(path, false, 'catmullrom', 0.5);
+// Stop the ribbon a few samples short of the bird. Drawn all the way to the
+// current position it runs straight through the model and out of the lens,
+// which reads as a ramp the bird is sitting on rather than as a trail.
+const trailPts = path.slice(0, Math.max(2, path.length - 7));
+const curve = new THREE.CatmullRomCurve3(trailPts, false, 'catmullrom', 0.5);
 const trail = new THREE.Mesh(
-  new THREE.TubeGeometry(curve, Math.min(1400, path.length * 2), 0.42, 5, false),
+  new THREE.TubeGeometry(curve, Math.min(1400, trailPts.length * 2), 0.22, 5, false),
   createToonMaterial(THREE, {
     color: PALETTE.ribbon, ramp: 'emissive',
     emissive: PALETTE.ribbon, emissiveIntensity: 0.55, fog: true,
@@ -345,16 +360,16 @@ const trail = new THREE.Mesh(
 scene.add(trail);
 
 // Ghost markers every 2s of flight, so speed along the path is legible.
-const tickGeo = new THREE.OctahedronGeometry(0.85, 0);
+const tickGeo = new THREE.OctahedronGeometry(0.62, 0);
 const tickMat = createToonMaterial(THREE, {
   color: PALETTE.gateNext, ramp: 'graphic', emissive: PALETTE.gateNext, emissiveIntensity: 0.35,
 });
 const tickEvery = Math.round(2 / (DT * SAMPLE_EVERY));
-const tickCount = Math.floor(path.length / tickEvery);
+const tickCount = Math.floor(trailPts.length / tickEvery);
 const ticks = new THREE.InstancedMesh(tickGeo, tickMat, Math.max(1, tickCount));
 const m4 = new THREE.Matrix4();
 for (let i = 0; i < tickCount; i++) {
-  const p = path[i * tickEvery];
+  const p = trailPts[i * tickEvery];
   m4.makeTranslation(p.x, p.y, p.z);
   ticks.setMatrixAt(i, m4);
 }
@@ -400,7 +415,7 @@ const checks = [
   ['descends below baseline', minRadius < PLANET_RADIUS, minRadius.toFixed(1)],
   ['stays on the planet', maxRadius < PLANET_RADIUS + 60, maxRadius.toFixed(1)],
   ['circles the planet', angleTravelled > Math.PI * 2, (angleTravelled / Math.PI).toFixed(2) + 'pi'],
-  ['stays upright', worstUprightDot > 0.55, worstUprightDot.toFixed(3)],
+  ['roll stays levelled', worstRoll < 0.35, worstRoll.toFixed(3)],
   ['pitch clamped', worstPitchAbs <= Math.sin(FLIGHT_CONFIG.maxPitch) + 0.02, worstPitchAbs.toFixed(3)],
   ['no upward ratchet', ratchet.gain < 0.01, ratchet.gain.toFixed(5)],
   ['great circle w/ no input', greatCircle < 0.02, greatCircle.toFixed(5)],
@@ -411,14 +426,15 @@ const checks = [
   ['launch impulse outward', knockdown.launchGain > 0.5, knockdown.launchGain.toFixed(2)],
   ['boost charged by diving', maxBoostSeen > 0.2, maxBoostSeen.toFixed(2)],
   ['boost beat the dive ceiling', maxSpeedSeen > FLIGHT_CONFIG.maxSpeed, maxSpeedSeen.toFixed(1)],
-  ['speed never stalled', minSpeedSeen >= FLIGHT_CONFIG.minSpeed * 0.5 - 1e-6, minSpeedSeen.toFixed(1)],
+  ['speed never stalled (tumble floor)', minSpeedSeen >= FLIGHT_CONFIG.minSpeed * 0.5 - 1e-6, minSpeedSeen.toFixed(1)],
 ];
 const failed = checks.filter((c) => !c[1]);
 
 const stats = { drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
 document.getElementById('hud').innerHTML =
   `view=${view} q=${quality} t=${DURATION}s  draws=${stats.drawCalls} tris=${stats.triangles}\n` +
-  `speed ${minSpeedSeen.toFixed(1)}..${maxSpeedSeen.toFixed(1)}  r ${minRadius.toFixed(1)}..${maxRadius.toFixed(1)}  fov=${chase.fov.toFixed(1)}\n` +
+  `speed ${minSpeedSeen.toFixed(1)}..${maxSpeedSeen.toFixed(1)}  r ${minRadius.toFixed(1)}..${maxRadius.toFixed(1)}\n` +
+  `@stop=${STOP}s  v=${frozen.speed.toFixed(1)} boost=${frozen.boost.toFixed(2)} s01=${frozen.speed01.toFixed(2)} fov=${chase.fov.toFixed(1)}\n` +
   checks.map((c) => `${c[1] ? 'ok  ' : '<span class="bad">FAIL</span>'} ${c[0]} = ${c[2]}`).join('\n');
 
 if (failed.length) {
