@@ -33,12 +33,17 @@
 
 import { makeRng } from '/vyom/src/core/rng.js';
 
-/** Mix levels, tuned so nothing clips against the wind bed. */
+/**
+ * Mix levels. Tuned against a captured offline render, not by ear-in-the-head:
+ * the first pass ran the wind bed at 0.34 and at full speed it visibly buried
+ * the gate chimes in the waveform. The bed has to sit UNDER the events — it is
+ * the floor of the mix, not a voice.
+ */
 const MIX = {
     master: 0.85,
-    wind: 0.34,        // peak wind gain at speed01 = 1
-    whistle: 0.14,     // high-speed edge tone, only above ~0.6
-    airframe: 0.075,   // low body tone so speed has weight, not just hiss
+    wind: 0.2,         // peak wind gain at speed01 = 1 — see the note below
+    whistle: 0.085,    // high-speed edge tone, only above ~0.6
+    airframe: 0.055,   // low body tone so speed has weight, not just hiss
     flap: 0.5,
     gate: 0.34,
     boost: 0.42,
@@ -159,7 +164,22 @@ export function createAudio(opts = {}) {
     function buildGraph() {
         master = ctx.createGain();
         master.gain.value = MIX.master;
-        master.connect(ctx.destination);
+        // Safety limiter. Nothing in the mix clips on its own, but a gate chime
+        // landing on top of a boost surge and an impact while the wind bed is
+        // wide open does — and on a phone speaker that reads as a crackle, not
+        // as loudness. One compressor is cheaper than ducking everything.
+        if (typeof ctx.createDynamicsCompressor === 'function') {
+            const limiter = ctx.createDynamicsCompressor();
+            limiter.threshold.value = -8;
+            limiter.knee.value = 6;
+            limiter.ratio.value = 9;
+            limiter.attack.value = 0.003;
+            limiter.release.value = 0.16;
+            master.connect(limiter);
+            limiter.connect(ctx.destination);
+        } else {
+            master.connect(ctx.destination);
+        }
 
         musicBus = ctx.createGain();
         musicBus.gain.value = musicOn ? 1 : 0;

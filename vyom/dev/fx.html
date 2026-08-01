@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYOM dev · fx (feathers + shake)</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas#c { display: block; width: 100%; height: 100%; }
+  .panel { position: fixed; color: #fff6dc; pointer-events: none;
+           font: 600 11px/1.45 ui-monospace, SFMono-Regular, monospace;
+           letter-spacing: .04em; text-shadow: 0 1px 2px #0f1c33, 0 0 6px #0f1c3399; }
+  #stats { left: 10px; bottom: 8px; }
+  #shakebox { left: 10px; top: 10px; }
+  #shakebox canvas { display: block; background: #0a132488; border: 1px solid #24344f;
+                     border-radius: 4px; margin-top: 4px; }
+  #tag { right: 10px; top: 10px; text-align: right; }
+  @media (max-aspect-ratio: 85/100) { #tag { top: 92px; } }
+  #closelabel { right: 12px; bottom: 10px; text-align: right; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="panel" id="shakebox">shake · trauma² decay<canvas id="sg" width="220" height="64"></canvas></div>
+<div class="panel" id="tag">feather fx probe<br>trail · gate burst · impact burst</div>
+<div class="panel" id="closelabel">silhouette close-up ↓</div>
+<div class="panel" id="stats"></div>
+<script type="module">
+import { loadThree } from '/vyom/src/core/three-loader.js';
+import { PALETTE, CSS } from '/vyom/src/core/palette.js';
+import { createToonMaterial, createLightRig } from '/vyom/src/core/toon.js';
+import { updateOutlineProjection } from '/vyom/src/core/outline.js';
+import { surfaceRadius, continentalHeight, PLANET_RADIUS } from '/vyom/src/core/terrain.js';
+import { createFeatherFX } from '/vyom/src/fx/feathers.js';
+import { createScreenShake } from '/vyom/src/fx/shake.js';
+import { createBird } from '/vyom/src/bird/bird-model.js';
+
+const THREE = await loadThree();
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(PALETTE.skyMid);
+renderer.autoClear = true;
+
+// ---------------------------------------------------------------------------
+// Main scene — a real slice of planet at real bird altitude, because a feather
+// judged against a black void is a feather that has not been judged.
+// ---------------------------------------------------------------------------
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(PALETTE.fog, 90, 320);
+const camera = new THREE.PerspectiveCamera(52, innerWidth / innerHeight, 0.1, 2000);
+createLightRig(THREE, scene);
+
+{
+  const geo = new THREE.IcosahedronGeometry(PLANET_RADIUS, 30);
+  const pos = geo.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  const cLit = new THREE.Color(PALETTE.meadowLit);
+  const cDeep = new THREE.Color(PALETTE.canyonDeep);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const inv = 1 / Math.hypot(x, y, z);
+    const nx = x * inv, ny = y * inv, nz = z * inv;
+    const r = surfaceRadius(nx, ny, nz);
+    pos.setXYZ(i, nx * r, ny * r, nz * r);
+    const depth = Math.min(1, -continentalHeight(nx, ny, nz) / 26);
+    tmp.copy(cLit).lerp(cDeep, depth);
+    colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  scene.add(new THREE.Mesh(geo, createToonMaterial(THREE, {
+    ramp: 'terrain', vertexColors: true, specStrength: 0, rimStrength: 0.2,
+  })));
+}
+
+// ---------------------------------------------------------------------------
+// Three racers on offset great-circle paths. The point of three is that the
+// trail has to stay readable as THREE separate coloured plumes, not one soup.
+// ---------------------------------------------------------------------------
+const ALT = 24;                 // cruise altitude above baseline
+const R = PLANET_RADIUS + ALT;
+
+const RACERS = [
+  { color: PALETTE.birdPlayer, belly: PALETTE.birdPlayerBelly, phase: 0.00, tilt: 0.000, speed: 1.00 },
+  { color: PALETTE.birdRival1, belly: 0xffd9c2,               phase: -0.055, tilt: 0.150, speed: 0.97 },
+  { color: PALETTE.birdRival3, belly: 0xfff2c4,               phase: -0.105, tilt: -0.135, speed: 1.03 },
+];
+
+// Great-circle basis. e1/e2 are orthonormal; `tilt` rotates the plane so the
+// three paths diverge instead of stacking.
+const e1 = new THREE.Vector3(1, 0, 0);
+const e2 = new THREE.Vector3(0, 0.34, 0.94).normalize();
+e2.sub(e1.clone().multiplyScalar(e2.dot(e1))).normalize();
+
+const _p = new THREE.Vector3();
+const _pPrev = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+const _up = new THREE.Vector3();
+const _look = new THREE.Vector3();
+const _axis = new THREE.Vector3();
+
+function pathPoint(r, a, out) {
+  out.copy(e1).multiplyScalar(Math.cos(a)).addScaledVector(e2, Math.sin(a));
+  // tilt the plane about e1 so the racers fan out vertically
+  _axis.copy(e1);
+  out.applyAxisAngle(_axis, r.tilt);
+  out.normalize().multiplyScalar(R + Math.sin(a * 3.1 + r.phase * 9) * 3.2);
+  return out;
+}
+
+for (const r of RACERS) {
+  r.bird = createBird(THREE, {
+    bodyColor: r.color, bellyColor: r.belly, scale: 1.15, quality: 'high', outline: true,
+  });
+  scene.add(r.bird.group);
+  r.a = 0;
+}
+
+// ---------------------------------------------------------------------------
+// The system under test.
+// ---------------------------------------------------------------------------
+const fx = createFeatherFX(THREE, { quality: 'high', seed: 20260801 });
+scene.add(fx.group);
+
+const shake = createScreenShake({ seed: 7 });
+
+// ---------------------------------------------------------------------------
+// Deterministic simulation: fixed dt, seeded rng, so the capture is repeatable.
+// 3.4s of flight leaves a fully developed trail with the oldest feathers deep
+// into their quantised fade — exactly the range that has to be judged.
+// ---------------------------------------------------------------------------
+const DT = 1 / 60;
+const STEPS = 205;
+const ANG_RATE = 0.105;         // radians/sec along the circle
+const SPEED = ANG_RATE * R;     // ~13 u/s, VYOM cruise
+
+const traumaTrace = [];
+
+for (let s = 0; s < STEPS; s++) {
+  const t = s * DT;
+
+  for (const r of RACERS) {
+    _pPrev.copy(pathPoint(r, r.a, new THREE.Vector3()));
+    r.a += ANG_RATE * r.speed * DT;
+    pathPoint(r, r.a, _p);
+    _fwd.copy(_p).sub(_pPrev).normalize();
+
+    r.bird.group.position.copy(_p);
+    _up.copy(_p).normalize();
+    r.bird.group.up.copy(_up);
+    // createBird faces -Z, so aim the model AWAY from the travel direction.
+    _look.copy(_p).sub(_fwd);
+    r.bird.group.lookAt(_look);
+
+    fx.emitTrail(
+      _p.x, _p.y, _p.z,
+      _fwd.x * SPEED * r.speed, _fwd.y * SPEED * r.speed, _fwd.z * SPEED * r.speed,
+      r.color
+    );
+  }
+
+  // A gate pass at 1.05s (small puff) and an impact at 2.15s (big one), both on
+  // the lead racer, so the frame shows trail + both burst sizes at once.
+  if (s === 63) {
+    const r = RACERS[0];
+    fx.burst(r.bird.group.position.x, r.bird.group.position.y, r.bird.group.position.z,
+             10, PALETTE.gateNext, 0.8);
+    shake.add(0.22);
+  }
+  if (s === 129) {
+    const r = RACERS[1];
+    fx.burst(r.bird.group.position.x, r.bird.group.position.y, r.bird.group.position.z,
+             26, r.color, 1.35);
+    shake.add(0.85);
+  }
+
+  fx.update(DT);
+  shake.update(DT);
+  traumaTrace.push(shake.value);
+}
+
+// ---------------------------------------------------------------------------
+// Chase camera on the lead racer, behind and above — the view the game renders
+// 99% of the time. If the plume does not read from here it does not read.
+// ---------------------------------------------------------------------------
+{
+  const lead = RACERS[0];
+  const p = lead.bird.group.position;
+  _pPrev.copy(pathPoint(lead, lead.a - 0.004, new THREE.Vector3()));
+  _fwd.copy(p).sub(_pPrev).normalize();
+  _up.copy(p).normalize();
+  const side = new THREE.Vector3().crossVectors(_up, _fwd).normalize();
+  camera.position.copy(p)
+    .addScaledVector(_fwd, -15.0)
+    .addScaledVector(_up, 8.5)
+    .addScaledVector(side, 6.0);
+  camera.up.copy(_up);
+  // Pitched down hard enough that the planet fills the lower half. Feathers
+  // judged against empty sky are not judged: the whole question is whether a
+  // pale plume still reads over green terrain.
+  camera.lookAt(p.clone().addScaledVector(_fwd, 5.0).addScaledVector(_up, -9.0));
+}
+
+// ---------------------------------------------------------------------------
+// Close-up scene — three feathers at hand-picked angles so the silhouette,
+// the camber and the hard two-tone across the rachis can all be inspected.
+// ---------------------------------------------------------------------------
+const closeScene = new THREE.Scene();
+const closeCam = new THREE.PerspectiveCamera(38, 1, 0.1, 60);
+closeCam.position.set(0, 0, 7.6);
+closeCam.lookAt(0, 0, 0);
+createLightRig(THREE, closeScene);
+{
+  const g = new THREE.PlaneGeometry(40, 40);
+  const m = new THREE.MeshBasicMaterial({ color: PALETTE.skyZenith });
+  const card = new THREE.Mesh(g, m);
+  card.position.z = -14;
+  closeScene.add(card);
+}
+
+const closeFx = createFeatherFX(THREE, { capacity: 3, seed: 3 });
+closeScene.add(closeFx.group);
+{
+  const POSES = [
+    { x: -2.15, y: 0.15, rx: 0.10, ry: 0.00, rz: 0.28, s: 2.35, c: PALETTE.birdPlayer },
+    { x: 0.00, y: 0.05, rx: 0.55, ry: 0.95, rz: -0.18, s: 2.35, c: PALETTE.birdRival1 },
+    { x: 2.15, y: 0.15, rx: -0.25, ry: 2.35, rz: 0.55, s: 2.35, c: PALETTE.birdRival3 },
+  ];
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const v = new THREE.Vector3();
+  const sv = new THREE.Vector3();
+  const col = new THREE.Color();
+  const cream = new THREE.Color(PALETTE.uiCream);
+  for (let i = 0; i < POSES.length; i++) {
+    const P = POSES[i];
+    e.set(P.rx, P.ry, P.rz, 'YXZ');
+    q.setFromEuler(e);
+    v.set(P.x, P.y, 0);
+    sv.set(P.s, P.s, P.s);
+    m.compose(v, q, sv);
+    closeFx.mesh.setMatrixAt(i, m);
+    col.setHex(P.c).lerp(cream, 0.46);
+    closeFx.mesh.instanceColor.setXYZ(i, col.r, col.g, col.b);
+  }
+  closeFx.mesh.instanceMatrix.needsUpdate = true;
+  closeFx.mesh.instanceColor.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------------------
+// Shake trace graph — proves the curve is trauma², not a linear taper.
+// ---------------------------------------------------------------------------
+{
+  const sg = document.getElementById('sg');
+  const g2 = sg.getContext('2d');
+  g2.strokeStyle = CSS.uiCyan;
+  g2.lineWidth = 2;
+  g2.beginPath();
+  for (let i = 0; i < traumaTrace.length; i++) {
+    const x = (i / (traumaTrace.length - 1)) * (sg.width - 4) + 2;
+    const y = sg.height - 3 - traumaTrace[i] * (sg.height - 8) / 0.75;
+    if (i === 0) g2.moveTo(x, y); else g2.lineTo(x, y);
+  }
+  g2.stroke();
+  g2.strokeStyle = CSS.uiGold;
+  g2.globalAlpha = 0.5;
+  g2.beginPath();
+  g2.moveTo(2, sg.height - 3);
+  g2.lineTo(sg.width - 2, sg.height - 3);
+  g2.stroke();
+}
+
+// ---------------------------------------------------------------------------
+let mainStats = { drawCalls: 0, triangles: 0 };
+
+function draw() {
+  const W = innerWidth, H = innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.render(scene, camera);
+  mainStats = {
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+  };
+
+  // Inset, bottom-right, square-ish.
+  const iw = Math.round(Math.min(300, W * 0.42));
+  const ih = Math.round(iw * 0.62);
+  const ix = W - iw - 8, iy = 26;
+  closeCam.aspect = iw / ih;
+  closeCam.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setViewport(ix, iy, iw, ih);
+  renderer.setScissor(ix, iy, iw, ih);
+  renderer.render(closeScene, closeCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  // Portrait phone: a 52 deg VERTICAL fov on a 0.46 aspect leaves a keyhole of
+  // horizontal view and crops the plume out of frame. Widen so the phone
+  // capture judges the same composition the desktop one does.
+  camera.fov = camera.aspect >= 0.85 ? 52 : 52 + (0.85 - camera.aspect) * 46;
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+  draw();
+  const insetTop = 26 + Math.round(Math.min(300, innerWidth * 0.42) * 0.62) + 4;
+  document.getElementById('closelabel').style.bottom = insetTop + 'px';
+  document.getElementById('stats').textContent =
+    `feathers live ${fx.liveCount}/${fx.capacity}   fx draws 1   ` +
+    `frame ${mainStats.drawCalls} draws / ${mainStats.triangles} tris`;
+}
+addEventListener('resize', resize);
+resize();
+
+window.__VYOM_STATS = () => ({
+  drawCalls: mainStats.drawCalls,
+  triangles: mainStats.triangles,
+  featherDrawCalls: fx.drawCallCount,
+  featherCapacity: fx.capacity,
+  featherLive: fx.liveCount,
+  featherMaxTriangles: fx.triangleCount,
+  shakePeak: Math.max.apply(null, traumaTrace),
+});
+
+// Self-test: exercises the paths the still frame cannot show — tier capacity,
+// over-emission into the ring buffer, clear(), dt spikes, and dispose().
+window.__fxSelfTest = () => {
+  const low = createFeatherFX(THREE, { quality: 'low', seed: 1 });
+  if (low.capacity !== 90) throw new Error('low tier capacity ' + low.capacity);
+  for (let i = 0; i < 4000; i++) low.emitTrail(0, 120, 0, 0, 0, -14, 0x4ec9f5);
+  if (low.liveCount > low.capacity) throw new Error('ring buffer overflowed');
+  low.burst(0, 120, 0, 500, 0xffffff, 2);
+  if (low.liveCount > low.capacity) throw new Error('burst overflowed');
+  low.update(0); low.update(-1); low.update(10);
+  for (let i = 0; i < 400; i++) low.update(1 / 60);
+  if (low.liveCount !== 0) throw new Error('feathers outlived their ttl: ' + low.liveCount);
+  low.burst(0, 120, 0, 20, 0xffffff);
+  low.clear();
+  if (low.liveCount !== 0) throw new Error('clear() left ' + low.liveCount);
+  low.dispose(); low.update(1 / 60); low.emitTrail(0, 0, 0, 0, 0, 1, 0xffffff);
+
+  const sh = createScreenShake({ seed: 2 });
+  if (sh.update(0.016) !== 0) throw new Error('idle shake is not zero');
+  sh.add(1); sh.add(1);
+  const a = sh.update(0.016);
+  if (!(a > 0.9)) throw new Error('trauma did not clamp to 1: ' + a);
+  let prev = a;
+  for (let i = 0; i < 200; i++) {
+    const v = sh.update(1 / 60);
+    if (v > prev + 1e-6) throw new Error('shake value increased without input');
+    prev = v;
+  }
+  if (prev !== 0) throw new Error('shake did not settle: ' + prev);
+  if (sh.offsetX !== 0 || sh.roll !== 0) throw new Error('stale offset at rest');
+  sh.add(0.5); sh.update(0.016);
+  sh.dispose();
+  if (sh.value !== 0) throw new Error('dispose did not zero');
+  return 'ok';
+};
+if (window.__fxSelfTest() !== 'ok') throw new Error('fx self-test failed');
+
+window.__VYOM_READY = true;
+</script>
+</body>
+</html>

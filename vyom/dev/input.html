@@ -39,6 +39,22 @@
   canvas.mini { display: block; border: 2px solid var(--ink); border-radius: 8px; background: #0a1324; }
   .grow { flex: 1 1 220px; min-width: 0; }
   .spacer { flex: 1 1 auto; }
+  /* Phone: the debug panels must NOT swallow the screen — the whole point of a
+     mobile capture is to judge the control, so everything compacts to the top
+     third and the bottom half is left clear for the stick and the BOOST pill. */
+  @media (max-width: 560px) {
+    #panels { padding: 6px 6px 0; gap: 5px; }
+    .card { padding: 4px 7px 6px; border-width: 2.5px; border-radius: 11px; }
+    .lab { font-size: 8px; letter-spacing: 0.12em; }
+    .big { font-size: 15px; }
+    .kv { font-size: 9px; }
+    .tests { font-size: 8.2px; line-height: 1.34; }
+    .spacer { display: none; }
+    #pad { width: 62px !important; height: 62px !important; }
+    #curve { width: 84px !important; height: 54px !important; }
+    #wave { height: 54px !important; }
+    #live { height: 26px !important; }
+  }
 </style>
 </head>
 <body>
@@ -157,9 +173,12 @@ paintBg();
 // Input
 // ---------------------------------------------------------------------------
 let boostEdges = 0;
-const input = createInput(document.getElementById('stage'), {
-    onBoost: (down) => { if (down) boostEdges++; },
-});
+function makeInput() {
+    return createInput(document.getElementById('stage'), {
+        onBoost: (down) => { if (down) boostEdges++; },
+    });
+}
+let input = makeInput();
 
 // ---------------------------------------------------------------------------
 // Test rig — synthesised pointer events, driven through the real DOM path.
@@ -198,8 +217,11 @@ function expected(mag) {
 
 function runInputTests() {
     const R = INPUT_TUNING.radius;
-    const ox = Math.round(innerWidth * 0.22), oy = Math.round(innerHeight * 0.62);
-    const rightX = Math.round(innerWidth * 0.78), rightY = Math.round(innerHeight * 0.55);
+    const narrow = innerWidth < 560;
+    const ox = Math.round(innerWidth * (narrow ? 0.26 : 0.22));
+    const oy = Math.round(innerHeight * (narrow ? 0.76 : 0.62));
+    const rightX = Math.round(innerWidth * 0.78);
+    const rightY = Math.round(innerHeight * (narrow ? 0.7 : 0.55));
 
     // 1 — inside the deadzone must resolve to a dead zero.
     pd(1, ox, oy);
@@ -276,6 +298,14 @@ function runInputTests() {
     pu(1, ox + R, oy); settle(200);
 
     // --- leave the frame in a photogenic, *held* state for the capture ----
+    // ?pose=idle instead captures the untouched state (dim discoverability
+    // ghost, unlit BOOST pill), which is the first thing a player ever sees.
+    if (new URLSearchParams(location.search).get('pose') === 'idle') {
+        // Fresh instance so the untouched discoverability ghost is on show.
+        input.dispose();
+        input = makeInput();
+        return;
+    }
     pd(1, ox, oy);
     pm(1, ox + R * 0.78, oy - R * 0.62);
     pd(2, rightX, rightY);
@@ -348,7 +378,7 @@ function preUnlockSafety() {
 }
 
 async function renderOffline() {
-    const SR = 44100, DUR = 3.6;
+    const SR = 44100, DUR = 5.4;
     const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     if (!OC) { record('audio offline render', false, 'no OfflineAudioContext'); return null; }
     const oc = new OC(1, Math.ceil(SR * DUR), SR);
@@ -370,6 +400,8 @@ async function renderOffline() {
         [2.62, () => a.countdownBeep(2)],
         [2.86, () => a.countdownBeep(0)],
         [3.02, () => { a.setFlightSpeed(0.35); a.horn(); }],
+        [3.90, () => a.finish(1)],
+        [4.70, () => a.finish(4)],
     ];
     const labels = marks.map(([t]) => t);
     for (let i = 0; i < marks.length; i++) {

@@ -40,6 +40,7 @@
 import { PALETTE, getRamp } from '../core/palette.js';
 import { patchToon } from '../core/toon.js';
 import { makeRng } from '../core/rng.js';
+import { PLANET_RADIUS, surfaceRadius } from '../core/terrain.js';
 
 /** Feather budget per quality tier (ARCHITECTURE.md's table). */
 const TIER_CAPACITY = { low: 90, mid: 180, high: 320 };
@@ -57,12 +58,18 @@ const TIER_TRAIL_STRIDE = { low: 4, mid: 2, high: 1 };
  * last one. Scale steps down hard and tone lifts slightly toward the sky so a
  * dying feather dissolves into the background as a graphic pop, not a fade.
  */
-const FADE_SCALE = [1.0, 0.88, 0.62, 0.33];
-const FADE_TONE = [1.0, 1.06, 1.14, 1.24];
+const FADE_SCALE = [1.0, 0.80, 0.52, 0.24];
+const FADE_TONE = [1.0, 1.07, 1.16, 1.28];
 const FADE_STEPS = FADE_SCALE.length;
 
 const TRAIL_LIFE = 1.75;   // seconds
 const BURST_LIFE = 2.35;
+
+/** How far above the rendered surface a settled feather parks. */
+const GROUND_EPS = 0.5;
+
+/** Seconds a landed feather is allowed to lie there before it steps out. */
+const GROUND_LINGER = 0.5;
 
 /**
  * Build the feather blade.
@@ -80,20 +87,30 @@ const BURST_LIFE = 2.35;
  * darkened. The rachis vertices are duplicated so that step never interpolates.
  */
 function buildFeatherGeometry(THREE) {
-    // t along the shaft, half-width, and how far the rachis is cambered up.
+    // [t along the shaft, half-width LEFT, half-width RIGHT].
+    //
+    // Three things separate this from the almond shape a naive taper produces,
+    // and all three are what the eye actually uses to say "feather":
+    //   - a BARE QUILL for the first fifth, then a hard shoulder where the vane
+    //     starts (the duplicated t=0.20 row makes that shoulder a step, not a
+    //     ramp);
+    //   - ASYMMETRIC vanes, leading edge narrower than trailing, as on a real
+    //     flight feather;
+    //   - a blunt, slightly hooked tip rather than a needle point.
     const ROWS = [
-        [0.00, 0.014],
-        [0.10, 0.052],
-        [0.26, 0.098],
-        [0.46, 0.118],
-        [0.66, 0.104],
-        [0.84, 0.064],
-        [1.00, 0.000],
+        [0.00, 0.007, 0.007],
+        [0.20, 0.011, 0.011],
+        [0.20, 0.040, 0.086],   // hard shoulder: vane begins
+        [0.38, 0.058, 0.124],
+        [0.56, 0.062, 0.132],
+        [0.74, 0.051, 0.110],
+        [0.88, 0.032, 0.070],
+        [1.00, 0.007, 0.016],
     ];
     const N = ROWS.length;
-    const PIVOT = 0.42;      // fraction of length behind the pivot
-    const CURVE = 0.16;      // lateral sweep at the tip
-    const CAMBER = 0.055;    // rachis lift, in local Z
+    const PIVOT = 0.45;      // fraction of length behind the pivot
+    const CURVE = 0.20;      // lateral sweep at the tip
+    const CAMBER = 0.075;    // rachis lift, in local Z
 
     // 4 verts per row: left edge, left-rachis, right-rachis, right edge.
     const vertCount = N * 4;
@@ -101,38 +118,46 @@ function buildFeatherGeometry(THREE) {
     const colors = new Float32Array(vertCount * 3);
     const indices = [];
 
-    // Two flat tones, hard split at the shaft. Values are multipliers applied
-    // to the per-instance colour, so a racer's hue survives the split.
-    const TONE_L = 1.0;
-    const TONE_R = 0.58;
+    // Two flat tones with a hard split at the shaft. The centre vertices are
+    // duplicated so the step never interpolates — a smooth gradient across the
+    // vane is what makes a stylised feather read as a photographed leaf. 2.2:1
+    // is deliberately loud: at 30px tall a subtle split is no split at all.
+    const TONE_L = 1.28;
+    const TONE_R = 0.60;
 
     for (let i = 0; i < N; i++) {
         const t = ROWS[i][0];
-        const w = ROWS[i][1];
+        const wl = ROWS[i][1];
+        const wr = ROWS[i][2];
         const y = t - PIVOT;
         const x = CURVE * t * t;                  // swept, not straight
-        const z = CAMBER * Math.sin(Math.PI * t); // rachis ridge
+        // Camber only over the vane, so the bare quill stays a clean straight
+        // shaft instead of bowing.
+        const z = t < 0.2 ? 0 : CAMBER * Math.sin(Math.PI * (t - 0.2) / 0.8);
 
         const o = i * 4 * 3;
         // left edge
-        positions[o + 0] = x - w; positions[o + 1] = y; positions[o + 2] = 0;
+        positions[o + 0] = x - wl; positions[o + 1] = y; positions[o + 2] = 0;
         // left rachis (duplicated centre)
         positions[o + 3] = x; positions[o + 4] = y; positions[o + 5] = z;
         // right rachis (duplicated centre)
         positions[o + 6] = x; positions[o + 7] = y; positions[o + 8] = z;
         // right edge
-        positions[o + 9] = x + w; positions[o + 10] = y; positions[o + 11] = 0;
+        positions[o + 9] = x + wr; positions[o + 10] = y; positions[o + 11] = 0;
 
-        // Tip rows get a small extra lift so the point does not read as dirty
-        // when it lands in the dark band.
-        const tipLift = 1 + 0.22 * t * t;
-        colors[o + 0] = TONE_L * tipLift; colors[o + 1] = TONE_L * tipLift; colors[o + 2] = TONE_L * tipLift;
-        colors[o + 3] = TONE_L * tipLift; colors[o + 4] = TONE_L * tipLift; colors[o + 5] = TONE_L * tipLift;
-        colors[o + 6] = TONE_R * tipLift; colors[o + 7] = TONE_R * tipLift; colors[o + 8] = TONE_R * tipLift;
-        colors[o + 9] = TONE_R * tipLift; colors[o + 10] = TONE_R * tipLift; colors[o + 11] = TONE_R * tipLift;
+        // Tips lift slightly so the point does not read as dirty when it lands
+        // in the dark band; the quill darkens so the shaft reads as a shaft.
+        const lift = t < 0.2 ? 0.62 : (1 + 0.20 * t * t);
+        colors[o + 0] = TONE_L * lift; colors[o + 1] = TONE_L * lift; colors[o + 2] = TONE_L * lift;
+        colors[o + 3] = TONE_L * lift; colors[o + 4] = TONE_L * lift; colors[o + 5] = TONE_L * lift;
+        colors[o + 6] = TONE_R * lift; colors[o + 7] = TONE_R * lift; colors[o + 8] = TONE_R * lift;
+        colors[o + 9] = TONE_R * lift; colors[o + 10] = TONE_R * lift; colors[o + 11] = TONE_R * lift;
     }
 
     for (let i = 0; i < N - 1; i++) {
+        // The duplicated shoulder row spans zero length — skip it rather than
+        // emitting degenerate triangles.
+        if (ROWS[i + 1][0] === ROWS[i][0]) continue;
         const a = i * 4;
         const b = (i + 1) * 4;
         // left vane quad (a+0,a+1 / b+0,b+1)
@@ -186,10 +211,10 @@ export function createFeatherFX(THREE, opts = {}) {
     });
     patchToon(THREE, material, {
         ramp: 'graphic',
-        rimColor: PALETTE.uiCream,
-        rimStrength: 0.30,
+        rimColor: PALETTE.skyGlow,
+        rimStrength: 0.34,
         rimPower: 1.8,
-        rimThreshold: 0.40,
+        rimThreshold: 0.55,
         rimSoftness: 0.05,
         specStrength: 0.0,
     });
@@ -233,9 +258,11 @@ export function createFeatherFX(THREE, opts = {}) {
     const life = new Float32Array(capacity);   // seconds remaining
     const ttl = new Float32Array(capacity);    // seconds at birth
     const size = new Float32Array(capacity);
+    const aspect = new Float32Array(capacity);   // length/width jitter
     const drag = new Float32Array(capacity);
     const sink = new Float32Array(capacity);
     const alive = new Uint8Array(capacity);
+    const resting = new Uint8Array(capacity);  // has settled onto the terrain
     const step = new Int8Array(capacity).fill(-1); // last written fade step
 
     let cursor = 0;
@@ -252,7 +279,7 @@ export function createFeatherFX(THREE, opts = {}) {
     const _col = new THREE.Color();
     const _zero = new THREE.Vector3(0, 0, 0);
     const _one = new THREE.Quaternion();
-    const _colCream = new THREE.Color(PALETTE.uiCream);
+    const _colWhite = new THREE.Color(0xffffff);
 
     // Zero the whole buffer once so untouched slots draw nothing.
     _mat.compose(_zero, _one, _zero);
@@ -275,6 +302,7 @@ export function createFeatherFX(THREE, opts = {}) {
         cursor = (cursor + 1) % capacity;
         if (!alive[i]) liveCount++;
         alive[i] = 1;
+        resting[i] = 0;
         step[i] = -1;
         return i;
     }
@@ -305,13 +333,15 @@ export function createFeatherFX(THREE, opts = {}) {
         const hlen = Math.hypot(hx, hy, hz) || 1;
         fx[i] = hx / hlen; fy[i] = hy / hlen; fz[i] = hz / hlen;
         fPhase[i] = rng() * Math.PI * 2;
-        fRate[i] = 3.4 + rng() * 3.2;
-        fAmp[i] = 3.0 + rng() * 4.0;
+        fRate[i] = 3.0 + rng() * 3.4;
+        fAmp[i] = 4.5 + rng() * 6.0;
 
         _col.setHex(colorHex);
-        // 0.46 toward cream: keeps racer identity legible while stopping a
-        // saturated body colour from reading as confetti.
-        _col.lerp(_colCream, 0.46);
+        // Lift toward WHITE, not toward the warm cream: creaming an orange
+        // racer turns its plume into dead brown leaf litter. White keeps the
+        // hue and just raises the value, so a rival's trail still reads as
+        // that rival at a glance.
+        _col.lerp(_colWhite, 0.34);
         // Per-feather value jitter so a burst is not one flat sticker.
         const j = 0.86 + rng() * 0.28;
         cr[i] = _col.r * j; cg[i] = _col.g * j; cb[i] = _col.b * j;
@@ -319,8 +349,15 @@ export function createFeatherFX(THREE, opts = {}) {
         const t = ttlSec * (0.82 + rng() * 0.36);
         life[i] = t; ttl[i] = t;
         size[i] = sizeMin + rng() * (sizeMax - sizeMin);
-        drag[i] = 1.35 + rng() * 1.15;
-        sink[i] = 1.6 + rng() * 1.9;
+        // Non-uniform per-instance scale. Without it a few hundred copies of one
+        // blade read as a repeating stamp — the eye picks the repetition out of
+        // a moving plume long before it picks out any single feather.
+        aspect[i] = 0.78 + rng() * 0.5;
+        // Low drag on purpose: heavy drag freezes the plume into a rigid rope
+        // behind the racer. Letting each feather keep its own drift is what
+        // makes the trail spread and dissipate instead of trailing like a rope.
+        drag[i] = 0.75 + rng() * 0.95;
+        sink[i] = 1.8 + rng() * 2.6;
         return i;
     }
 
@@ -333,10 +370,11 @@ export function createFeatherFX(THREE, opts = {}) {
         if (st > FADE_STEPS - 1) st = FADE_STEPS - 1;
 
         const s = size[i] * FADE_SCALE[st];
+        const sw = s / aspect[i];
         _pos.set(px[i], py[i], pz[i]);
         _axis.set(sx[i], sy[i], sz[i]);
         _quat.setFromAxisAngle(_axis, ang[i]);
-        _scl.set(s, s, s);
+        _scl.set(sw, s * aspect[i], sw);
         _mat.compose(_pos, _quat, _scl);
         mesh.setMatrixAt(i, _mat);
 
@@ -387,13 +425,17 @@ export function createFeatherFX(THREE, opts = {}) {
         lx /= llen; ly /= llen; lz /= llen;
 
         const spread = s1();
-        const keep = 0.26 + rng() * 0.16;          // trails behind the racer
-        const lat = spread * (1.1 + vlen * 0.055); // plume widening
-        const lift = 0.7 + rng() * 1.4;
+        const keep = 0.22 + rng() * 0.14;          // trails behind the racer
+        const lat = spread * (2.2 + vlen * 0.11);  // plume widening
+        const lift = 0.6 + rng() * 2.6;
 
         // Offset the birth point behind the racer so feathers do not spawn
         // inside the bird mesh.
-        const back = 0.9 + rng() * 0.9;
+        // Spread the birth point along the last frame's travel span. Emitting
+        // at one exact point every frame stacks feathers into a bouquet at the
+        // tail; smearing them along the path is what turns that clump into a
+        // stream.
+        const back = 0.4 + rng() * 2.8;
 
         return spawn(
             x - dx * back + lx * spread * 0.35,
@@ -402,7 +444,7 @@ export function createFeatherFX(THREE, opts = {}) {
             ivx * keep + lx * lat + ux * lift,
             ivy * keep + ly * lat + uy * lift,
             ivz * keep + lz * lat + uz * lift,
-            colorHex, TRAIL_LIFE, 0.85, 1.45, 1.0
+            colorHex, TRAIL_LIFE, 0.62, 1.05, 1.0
         );
     }
 
@@ -426,7 +468,7 @@ export function createFeatherFX(THREE, opts = {}) {
                 ax * sp + ux * (1.6 + rng() * 2.4) * power,
                 ay * sp + uy * (1.6 + rng() * 2.4) * power,
                 az * sp + uz * (1.6 + rng() * 2.4) * power,
-                colorHex, BURST_LIFE, 1.0, 1.75, 1.5
+                colorHex, BURST_LIFE, 0.85, 1.40, 1.5
             );
         }
     }
@@ -450,6 +492,15 @@ export function createFeatherFX(THREE, opts = {}) {
             const plen = Math.hypot(x, y, z) || 1;
             const ux = x / plen, uy = y / plen, uz = z / plen;
 
+            if (resting[i]) {
+                // Settled: hold the pose and let the quantised fade finish the
+                // job. Still counts as live so the trail keeps its tail on the
+                // ground for a beat, which is what sells "something shed here".
+                writeInstance(i);
+                touched = true;
+                continue;
+            }
+
             // flutter sway, oscillating about the sway axis
             fPhase[i] += fRate[i] * dt;
             const sway = Math.sin(fPhase[i]) * fAmp[i];
@@ -465,9 +516,32 @@ export function createFeatherFX(THREE, opts = {}) {
             nvx *= d; nvy *= d; nvz *= d;
 
             vx[i] = nvx; vy[i] = nvy; vz[i] = nvz;
-            px[i] = x + nvx * dt;
-            py[i] = y + nvy * dt;
-            pz[i] = z + nvz * dt;
+            let nx = x + nvx * dt;
+            let ny = y + nvy * dt;
+            let nz = z + nvz * dt;
+
+            // Ground rest. Terrain never rises above PLANET_RADIUS (terrain.js's
+            // load-bearing invariant), so anything still outside that radius
+            // cannot possibly be underground — which lets us skip the expensive
+            // fbm sample for the overwhelming majority of live feathers and only
+            // pay for it on the handful actually about to land.
+            const nlen = Math.hypot(nx, ny, nz);
+            if (nlen <= PLANET_RADIUS + GROUND_EPS && nlen > 1e-3) {
+                const rx = nx / nlen, ry = ny / nlen, rz = nz / nlen;
+                const ground = surfaceRadius(rx, ry, rz) + GROUND_EPS;
+                if (nlen < ground) {
+                    nx = rx * ground; ny = ry * ground; nz = rz * ground;
+                    vx[i] = 0; vy[i] = 0; vz[i] = 0;
+                    angVel[i] = 0;
+                    resting[i] = 1;
+                    // Landing is punctuation, not accumulation. Without this
+                    // cut, everything shed over a lap piles into a permanent
+                    // carpet of litter across the terrain.
+                    if (life[i] > GROUND_LINGER) life[i] = GROUND_LINGER;
+                }
+            }
+
+            px[i] = nx; py[i] = ny; pz[i] = nz;
 
             // Tumble. Rate bleeds off with the same drag so a settling feather
             // stops spinning instead of drilling.

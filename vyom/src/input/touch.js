@@ -65,21 +65,29 @@ function ensureStyle() {
   will-change: transform, opacity;
 }
 .vi-stick.is-active { opacity: 1; }
-.vi-stick.is-hint { opacity: 0.42; }
+/* The resting ghost. 0.42 was tried first and the ink washed into the grass —
+   a control that reads as a smudge is worse than no control. */
+.vi-stick.is-hint { opacity: 0.7; }
 .vi-stick svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 
 .vi-knob {
   position: absolute; left: 50%; top: 50%;
-  width: 62px; height: 62px; margin-left: -31px; margin-top: -31px;
+  width: 54px; height: 54px; margin-left: -27px; margin-top: -27px;
   will-change: transform;
 }
 .vi-knob svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-.vi-wedge {
-  position: absolute; inset: 0; opacity: 0;
-  will-change: transform, opacity;
+/* The shaft: a physical link from base to knob. A direction wedge at the rim
+   was tried first and the knob sat on top of it at full deflection — invisible
+   exactly when it mattered. The shaft is always between the two, so it reads. */
+.vi-shaft {
+  position: absolute; left: 50%; top: 50%;
+  height: 17px; margin-top: -8.5px; width: 0;
+  transform-origin: 0 50%; opacity: 0;
+  border: 3px solid ${CSS.ink}; border-radius: 999px;
+  background: ${CSS.uiCream};
+  will-change: transform, width, opacity;
 }
-.vi-wedge svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 /* --- boost ------------------------------------------------------------- */
 .vi-boost {
@@ -137,30 +145,16 @@ function baseSvg() {
         const r0 = major ? 31 : 35, r1 = 40;
         ticks += `<line x1="${(50 + Math.cos(a) * r0).toFixed(2)}" y1="${(50 + Math.sin(a) * r0).toFixed(2)}"`
             + ` x2="${(50 + Math.cos(a) * r1).toFixed(2)}" y2="${(50 + Math.sin(a) * r1).toFixed(2)}"`
-            + ` stroke="${CSS.ink}" stroke-width="${major ? 3.4 : 2.2}" stroke-linecap="round" opacity="${major ? 0.9 : 0.45}"/>`;
+            + ` stroke="${CSS.ink}" stroke-width="${major ? 3.6 : 2.4}" stroke-linecap="round" opacity="${major ? 1 : 0.62}"/>`;
     }
+    // The shadow is a RING, not a disc: a dark disc read through the
+    // translucent cream face turned the whole base grey in the first capture.
     return `<svg viewBox="0 0 100 100" aria-hidden="true">
-  <circle cx="50" cy="52.5" r="45" fill="${CSS.ink}" opacity="0.42"/>
-  <circle cx="50" cy="50" r="45" fill="${CSS.uiCream}" fill-opacity="0.34" stroke="${CSS.ink}" stroke-width="4.5"/>
-  <circle cx="50" cy="50" r="36" fill="none" stroke="${CSS.uiCream}" stroke-width="2.6" opacity="0.7"/>
-  <circle cx="50" cy="50" r="13" fill="none" stroke="${CSS.uiCream}" stroke-width="2.2" opacity="0.42"/>
+  <circle cx="50" cy="53" r="44.5" fill="none" stroke="${CSS.ink}" stroke-width="5" opacity="0.34"/>
+  <circle cx="50" cy="50" r="44.5" fill="${CSS.uiCream}" fill-opacity="0.15" stroke="${CSS.ink}" stroke-width="5"/>
+  <circle cx="50" cy="50" r="36" fill="none" stroke="${CSS.uiCream}" stroke-width="2.8" opacity="0.8"/>
+  <circle cx="50" cy="50" r="13" fill="none" stroke="${CSS.uiCream}" stroke-width="2.2" opacity="0.5"/>
   ${ticks}
-</svg>`;
-}
-
-/**
- * Gold direction wedge: an arc segment that swings to point where the thumb is
- * pushing. Without it the base is a static ring and the control has no
- * feedback beyond the knob position; with it, the stick reads as an
- * instrument. Updated from the pointer handler, never from update().
- */
-function wedgeSvg() {
-    // 64-degree sector between r=37 and r=47, centred on "up".
-    const half = 32 * Math.PI / 180;
-    const p = (r, a) => `${(50 + Math.sin(a) * r).toFixed(2)} ${(50 - Math.cos(a) * r).toFixed(2)}`;
-    const d = `M ${p(37, -half)} A 37 37 0 0 1 ${p(37, half)} L ${p(48, half)} A 48 48 0 0 0 ${p(48, -half)} Z`;
-    return `<svg viewBox="0 0 100 100" aria-hidden="true">
-  <path d="${d}" fill="${CSS.uiGold}" stroke="${CSS.ink}" stroke-width="3" stroke-linejoin="round"/>
 </svg>`;
 }
 
@@ -198,13 +192,12 @@ export function createInput(rootEl, opts = {}) {
     const stick = document.createElement('div');
     stick.className = 'vi-stick';
     stick.innerHTML = baseSvg();
-    const wedge = document.createElement('div');
-    wedge.className = 'vi-wedge';
-    wedge.innerHTML = wedgeSvg();
+    const shaft = document.createElement('div');
+    shaft.className = 'vi-shaft';
     const knob = document.createElement('div');
     knob.className = 'vi-knob';
     knob.innerHTML = knobSvg();
-    stick.appendChild(wedge);
+    stick.appendChild(shaft);
     stick.appendChild(knob);
 
     const boostPill = document.createElement('div');
@@ -256,6 +249,7 @@ export function createInput(rootEl, opts = {}) {
     function hideStick() {
         stick.classList.remove('is-active');
         knob.style.transform = 'translate3d(0px, 0px, 0)';
+        shaft.style.opacity = '0';
         knobX = knobY = 0;
         placeHint();
     }
@@ -264,12 +258,17 @@ export function createInput(rootEl, opts = {}) {
         if (dx === knobX && dy === knobY) return;
         knobX = dx; knobY = dy;
         knob.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
-        const m = Math.hypot(dx, dy) / tune.radius;
-        if (m < 0.06) {
-            wedge.style.opacity = '0';
+        const len = Math.hypot(dx, dy);
+        const m = len / tune.radius;
+        if (m < 0.08) {
+            shaft.style.opacity = '0';
         } else {
-            wedge.style.opacity = String(Math.min(1, 0.35 + m * 0.75));
-            wedge.style.transform = `rotate(${(Math.atan2(dx, -dy) * 180 / Math.PI).toFixed(1)}deg)`;
+            shaft.style.opacity = '1';
+            shaft.style.width = (len + 6) + 'px';
+            shaft.style.transform = `rotate(${(Math.atan2(dy, dx) * 180 / Math.PI).toFixed(1)}deg)`;
+            // Past the deadzone the shaft goes gold: the control tells you it
+            // is actually commanding something, without a number on screen.
+            shaft.style.background = m > tune.deadzone ? CSS.uiGold : CSS.uiCream;
         }
     }
 
