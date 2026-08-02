@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>probe parts</title>
+<style>html,body{margin:0;height:100%;background:#59647a;overflow:hidden}canvas{display:block;width:100%;height:100%}</style>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+import { loadThree } from '/sculpture/src/core/three-loader.js';
+import * as FIG from '/sculpture/src/model/figure.js';
+
+const THREE = await loadThree();
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+renderer.setSize(innerWidth, innerHeight, false);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x59647a);
+const camera = new THREE.PerspectiveCamera(35, innerWidth/innerHeight, 0.05, 60);
+scene.add(new THREE.HemisphereLight(0xbcd8f5, 0x8b8271, 2.0));
+const d = new THREE.DirectionalLight(0xfff4e2, 2.6); d.position.set(-3,4,5); scene.add(d);
+const d2 = new THREE.DirectionalLight(0xcae2ff, 1.2); d2.position.set(4,2,-4); scene.add(d2);
+
+const mat = new THREE.MeshStandardMaterial({ color: 0x8a8f80, roughness: 0.7, metalness: 0.15, side: THREE.DoubleSide });
+const matShell = new THREE.MeshStandardMaterial({ color: 0x6b7d9a, roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 0.42 });
+
+const o = { seed: 23, bun: true, faceless: false, hands: false, pregnant: true, baby: false,
+            stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, trainAngle: 3.05, trainAmount: 0.50, scale: 1 };
+
+// Rebuild the parts individually via the module's own internals by asking for a
+// full figure and, separately, a figure with the shell suppressed.
+const shown = {};
+window.__PROBE = { THREE, scene, renderer, camera, shown };
+
+// body + head + feet only
+const bodyOnly = FIG.buildFigure(THREE, { ...o, only: (new URLSearchParams(location.search).get('only')||'shell,body,head,feet').split(',') });
+scene.add(new THREE.Mesh(bodyOnly, mat));
+
+function setView(yawDeg, pitchDeg, dist, ty) {
+    const y = yawDeg*Math.PI/180, p = pitchDeg*Math.PI/180;
+    camera.position.set(Math.sin(y)*Math.cos(p)*dist, ty + Math.sin(p)*dist, Math.cos(y)*Math.cos(p)*dist);
+    camera.lookAt(0, ty, 0);
+    renderer.render(scene, camera);
+}
+window.__PROBE.setView = setView;
+setView(0, 0, 3.2, 1.5);
+window.__SCULPT_READY = true;
+</script></body></html>

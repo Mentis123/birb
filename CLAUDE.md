@@ -190,8 +190,24 @@ structure materially and the findings are recorded here so they survive:
 - **The hood is a hollow open plate**, not a tube. It rises behind the head with
   a visible rim and a dark interior you can see into from three-quarter angles.
 - **The figures are flat slabs.** Depth is about half the width; the cloak is a
-  PANEL. The group is a **zigzag concertina** of those panels, which is why it
-  reads as one mass from the front and as four people from the side.
+  PANEL.
+- **The cloak stands BEHIND the woman and the whole front is open.** This is the
+  single most expensive thing that was got wrong. `ref-c-under.jpg` silhouettes
+  the group against sky and settles it: the cloak covers her back, curls a little
+  round her sides, rises into a hollow collar-arch behind her head, and that is
+  all it does. Her face, throat, shoulders, breasts and belly are in open air in
+  front of it. So the opening runs to about **1.5 rad EACH SIDE at chest height**
+  — roughly 170° of the circle simply is not there — and the cloak's axis sits
+  ~0.15m behind the spine up top, closing to the body's axis only at the hem.
+  Modelled with a 0.55 rad opening and a shared axis, the shell is a near-complete
+  tube with a slot in it: the body was fully and correctly modelled the whole
+  time and **not one square millimetre of it was visible**. The group rendered as
+  four ghosts for four passes.
+- **The group is a crowded diagonal**, not a zigzag: nearest figure front-left,
+  each of the other three further back and further right, all facing roughly the
+  same way and turning a little more to the right as they go back. The earlier
+  "folded screen" reading makes a decorative arrangement of panels; the
+  photographs read as four women standing close.
 - **Every figure carries a story** and this is the subject of the sculpture, not
   decoration: one is heavily pregnant, one cradles a swaddled newborn with both
   forearms under it, one is the clinician with a stethoscope round her neck.
@@ -223,6 +239,40 @@ rising only a little above the crown.
 Verify with `node tools/sculpture-shot.mjs` (same harness contract as Gauntlet:
 non-zero exit on any page or console error, `--eval "window.__SCULPT.setView(
 yawDeg, pitchDeg, distance)"` to park the camera at a repeatable angle).
+`sculpture/dev/probe-parts.html` renders any subset of a single figure
+(`?only=body,head,feet`) — **rendering the body without the cloak in front of it
+is the only way to tell "the torso is wrong" from "the torso is hidden"**, and
+this model was debugged the wrong way round for several passes before that probe
+existed.
+
+### Three things that look like lighting problems and are not
+
+Each of these cost a round of material tuning before being identified, and each
+was found by an A/B that turned one thing off rather than by adjusting numbers.
+
+1. **`material.shadowSide` must be `FrontSide`.** Three defaults a FrontSide
+   material's shadow pass to `BackSide`, which is correct for watertight solids
+   and wrong here: a figure is a merge of an open-topped cloak sheet, a
+   surface-nets body, a head and two feet, so the "far side" the depth pass
+   writes is not a valid occluder for its own front. Every figure shadowed its
+   own chest and the whole group above waist height rendered in ambient only.
+   Toggling `castShadow` off on the figures is what proved it was the depth pass.
+2. **The patina's occlusion term must use a FIXED radius, not the geometry's own
+   extent.** Normalising by max radius was fine until the cloaks grew trains: one
+   vertex a metre out rescaled everything, every point on the torso landed near
+   r = 0, and the bodies were flooded with crevice black. The figures went flat
+   in the same commit the trains appeared, which is the tell.
+3. **Light intensity and albedo are one knob, turned opposite ways.** Three's
+   lights are plain irradiance multipliers, so a 0.17 bronze under a 3.0 sun
+   tone-maps to a 0.7 grey and the group renders as plaster no matter how dark
+   the vertex colours get. Dark patina *and* low intensities (sun ~1.7, hemi
+   ~0.6) is the pair that lands on bronze.
+
+Also, on blending: **the blend radius must be well under the protrusion.** It is
+the one rule of modelling with `smin`, it is broken by default, and it is broken
+silently — a bust standing 0.02 proud of the chest wall blended at k = 0.10 is
+not a soft bust, it is no bust at all. The first SDF pass lost the bust, the
+belly, the swaddled bundle, the brow, the nose and the lips to exactly this.
 
 ## What This Is
 

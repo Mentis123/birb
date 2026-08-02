@@ -32,6 +32,7 @@
  */
 
 import { fbm3 } from '../core/noise.js';
+import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets } from './sdf.js';
 
 // ---------------------------------------------------------------------------
 // Profile curves
@@ -110,56 +111,88 @@ const SHELL_PROFILE = [
     // thin front-to-back, so the group reads as a folded screen rather than as
     // four barrels. Depth never exceeds about half the width, and the hem
     // spreads wide where the cloth pools on the paving.
-    [0.000, 0.520, 0.240],
-    [0.140, 0.482, 0.226],
-    [0.340, 0.428, 0.208],
-    [0.560, 0.376, 0.190],
-    [0.800, 0.330, 0.175],
-    [1.000, 0.300, 0.166],
-    [1.160, 0.278, 0.158],
-    [1.300, 0.266, 0.152],
-    [1.420, 0.268, 0.150],
-    [1.520, 0.270, 0.148],
-    [1.610, 0.270, 0.145],
-    [1.700, 0.270, 0.142],
-    [1.800, 0.272, 0.140],
-    [1.900, 0.276, 0.140],
-    [2.050, 0.278, 0.142],
-    [2.180, 0.272, 0.140],
-    [2.300, 0.250, 0.130],
-    [2.380, 0.208, 0.110],
-    [2.420, 0.156, 0.086],
+    [0.000, 0.560, 0.330],
+    [0.120, 0.520, 0.292],
+    [0.320, 0.452, 0.240],
+    [0.560, 0.396, 0.212],
+    [0.800, 0.352, 0.192],
+    [1.000, 0.324, 0.180],
+    [1.160, 0.306, 0.172],
+    [1.300, 0.298, 0.166],
+    [1.420, 0.298, 0.162],
+    [1.520, 0.300, 0.160],
+    [1.610, 0.302, 0.158],
+    [1.700, 0.304, 0.156],
+    [1.800, 0.306, 0.154],
+    [1.900, 0.308, 0.152],
+    // The arch narrows hard above the shoulders. Left as wide as the body it
+    // framed each head in a doorway three times the head's width; in
+    // `ref-c-under.jpg` the collar clears the crown by a hand's breadth.
+    [2.050, 0.272, 0.146],
+    [2.180, 0.254, 0.138],
+    [2.300, 0.232, 0.128],
+    [2.380, 0.198, 0.112],
+    [2.420, 0.166, 0.096],
 ];
 
 /**
  * [height, halfAngle of the FRONT opening]. Zero = a closed robe.
  *
- * The opening starts at the HIP, not at the shoulder. This is the thing the
- * model kept getting wrong: in the originals the cloak falls open all the way
- * down the front and the torso inside it is bare — breasts, ribs and belly are
- * fully modelled. Closing the robe at chest height turns four women into four
- * bottles, which is what the earlier passes looked like.
+ * THE WHOLE FRONT IS OPEN, and getting this wrong is what made every earlier
+ * render a row of ghosts. Read `ref-c-under.jpg`, where the group is silhouetted
+ * against sky: the cloak is a THIN SHEET STANDING BEHIND EACH WOMAN. It covers
+ * her back, curls a little round her sides, and rises into a hollow collar-arch
+ * behind her head — and that is all it does. Her face, throat, shoulders,
+ * breasts and belly are in open air, in front of it, catching the sun.
+ *
+ * So at chest height the opening is about 1.5 rad EACH SIDE — roughly 170 deg of
+ * the circle simply is not there. Only near the ground does the cloth wrap round
+ * into a closed column, because that is where it pools.
+ *
+ * The earlier table opened 0.55 rad at the chest and 1.92 at the crown, which
+ * left a near-complete tube standing in front of the body with a slot cut in it.
+ * The body was fully modelled the whole time; you could not see any of it.
  */
 const FRONT_OPENING = [
-    [0.860, 0.00],
-    [0.980, 0.30],
-    [1.150, 0.55],
-    [1.330, 0.72],
-    [1.520, 0.86],
-    [1.700, 1.02],
-    [1.860, 1.24],
-    [2.000, 1.46],
-    [2.180, 1.66],
-    [2.300, 1.80],
-    [2.420, 1.92],
+    [0.000, 0.00],
+    [0.240, 0.00],
+    [0.460, 0.16],
+    [0.680, 0.44],
+    [0.900, 0.74],
+    [1.120, 1.00],
+    [1.320, 1.20],
+    [1.520, 1.34],
+    [1.720, 1.46],
+    [1.920, 1.58],
+    [2.100, 1.70],
+    [2.260, 1.80],
+    [2.420, 1.88],
 ];
+
+/**
+ * How far behind the body's own axis the cloak hangs, at height `y`.
+ *
+ * The companion fix to `FRONT_OPENING`, and just as load-bearing. A cloak hangs
+ * from the shoulders, so up there its axis is well behind the spine, while at
+ * the hem the cloth has fallen round the ankles and shares the body's axis. With
+ * a shared axis all the way up, the shell's rim passes through the chest no
+ * matter how wide the opening is, and the bust is buried in bronze.
+ */
+function shellOffsetZ(y) {
+    const t = Math.min(1, Math.max(0, (y - 0.55) / 0.95));
+    return -0.150 * t * t * (3 - 2 * t);
+}
 
 const WALL = 0.040;
 
 function buildShell(THREE, opts) {
     const RINGS = 76;
     const ARC = 30;                       // segments along one wall of the crescent
-    const yTop = SHELL_PROFILE[SHELL_PROFILE.length - 1][0];
+    // NOT every cloak goes over its wearer's head. In `ref-a-front.jpg` the
+    // nearest figure's stops at her shoulders and her head stands completely
+    // free; two others carry the full arch behind the crown. Building all four
+    // the same height gave a row of identical doorways.
+    const yTop = opts.cowlTop;
 
     const positions = [];
     const indices = [];
@@ -169,6 +202,11 @@ function buildShell(THREE, opts) {
         const y = (r / RINGS) * yTop;
         const [hw, hd] = sampleProfile(SHELL_PROFILE, y);
         const open = sampleProfile(FRONT_OPENING, y)[0];
+        const zOff = shellOffsetZ(y);
+        // Round the last 28cm off to whatever height this cloak stops at, so a
+        // truncated one ends in a curve rather than a flat lid.
+        const capT = Math.max(0, (y - (yTop - 0.28)) / 0.28);
+        const cap = 1 - 0.66 * capT * capT;
 
         for (let side = 0; side < 2; side++) {
             const k = side === 0 ? 1 : 1 - WALL / Math.max(hw, 0.06);
@@ -182,6 +220,19 @@ function buildShell(THREE, opts) {
                 // fullness at the sides, not as a round tube.
                 const flat = 1 - 0.09 * Math.pow(Math.abs(cs), 3);
 
+                // THE TRAIN. Each cloak drags out to one side and pools on the
+                // paving — in `ref-b-threequarter.jpg` the nearest figure's
+                // sweeps almost a metre clear of her feet. Without it the hems
+                // are four tidy bells and the group loses the sense of cloth
+                // that has been walked in.
+                // Kept modest on purpose. The first version ran to +0.74 and
+                // the hems came out as four flat sails, wider than the figures
+                // and reading as sheet card — the sculpture's hems are heavy
+                // pooled cloth, not drapery blowing off a stand.
+                const trail = Math.max(0, Math.cos(th - opts.trainAngle));
+                const low = Math.pow(Math.max(0, 1 - y / 0.78), 2.1);
+                const spread = 1 + opts.trainAmount * trail * trail * low;
+
                 // DRAPERY. Every reference photograph is dominated by vertical
                 // fold ridges running the length of the robe, and without them
                 // the shell reads as a smooth cone no amount of surface noise
@@ -189,11 +240,15 @@ function buildShell(THREE, opts) {
                 // and they DEEPEN toward the hem where the cloth gathers —
                 // constant-depth folds look machined, like fluting on a column.
                 const gather = Math.pow(Math.max(0, 1 - y / 1.85), 1.35);
-                const depth = (0.030 + 0.105 * gather) * opts.foldDepth;
+                const depth = (0.026 + 0.058 * gather) * opts.foldDepth;
                 const fold = 1
                     + depth * Math.cos(th * opts.folds + y * 0.55 + opts.foldPhase)
                     + depth * 0.42 * Math.cos(th * (opts.folds * 2 + 1) - y * 0.9 + opts.foldPhase * 1.7);
-                positions.push(sn * hw * k * fold, y, cs * hd * flat * k * fold);
+                positions.push(
+                    sn * hw * cap * k * fold * spread,
+                    y,
+                    cs * hd * cap * flat * k * fold * spread + zOff
+                );
             }
         }
     }
@@ -225,14 +280,28 @@ function buildShell(THREE, opts) {
 }
 
 /**
- * The nude torso standing inside the open cloak.
+ * THE BODY, as one blended distance field.
  *
- * Runs from inside the skirt up to the neck. Deliberately narrower than the
- * shell at every height so it never pokes through the back of the cloak, and
- * deliberately NOT a smooth taper — the waist pinch and the swell of the belly
- * are what read as a body rather than as a mannequin stand.
+ * Everything from the hips to the collarbone — torso, bust, shoulders, arms,
+ * and whichever narrative each figure carries — is a single field, smooth-
+ * unioned and meshed in one piece. That is the whole point: a union of separate
+ * ellipsoids has a visible crease wherever two of them meet, and the earlier
+ * passes showed it badly, with the pregnant belly sitting on the torso like an
+ * applied egg and the shoulders reading as two balls. Bronze has fillets, not
+ * creases, and `smin` is how you get one.
+ *
+ * The blend radii below are modelling decisions, not tolerances:
+ *   0.03  a jaw or a wrist — crisp, still not a crease
+ *   0.06  arms into shoulders
+ *   0.10  bust onto the chest wall
+ *   0.14  a pregnancy growing out of a torso
  */
 const TORSO_PROFILE = [
+    // The trunk runs well below the hip. It has to: the cloak's front opening
+    // starts closing around 0.68 and if the body stops at the same height there
+    // is a notch where neither surface is, which reads as a tear in the casting.
+    [0.420, 0.244, 0.148],
+    [0.560, 0.258, 0.150],
     [0.700, 0.268, 0.150],
     [0.912, 0.262, 0.148],
     [1.076, 0.256, 0.146],
@@ -248,234 +317,255 @@ const TORSO_PROFILE = [
     [2.046, 0.068, 0.062],   // neck
 ];
 
-function buildTorso(THREE, opts) {
-    const RINGS = 34;
-    const SEG = 34;
-    const y0 = TORSO_PROFILE[0][0];
-    const y1 = TORSO_PROFILE[TORSO_PROFILE.length - 1][0];
-    const positions = [];
-    const indices = [];
+/**
+ * Distance to the tapered elliptical trunk described by TORSO_PROFILE.
+ *
+ * A stack of blended spheres would need dozens of primitives to stay smooth;
+ * sampling the profile directly costs one lookup and gives an exact elliptical
+ * cross-section at every height.
+ */
+function sdTrunk(x, y, z, y0, y1) {
+    if (y < y0) {
+        const d = sdTrunkAt(x, y0, z);
+        return Math.hypot(Math.max(d, 0), y0 - y) + Math.min(d, 0) * 0;
+    }
+    if (y > y1) {
+        const d = sdTrunkAt(x, y1, z);
+        return Math.hypot(Math.max(d, 0), y - y1);
+    }
+    return sdTrunkAt(x, y, z);
+}
 
-    for (let r = 0; r <= RINGS; r++) {
-        const y = y0 + (y1 - y0) * (r / RINGS);
-        const [hw, hd] = sampleProfile(TORSO_PROFILE, y);
-        for (let s = 0; s <= SEG; s++) {
-            const a = (s / SEG) * Math.PI * 2;
-            positions.push(Math.sin(a) * hw, y, Math.cos(a) * hd);
+function sdTrunkAt(x, y, z) {
+    const [hw, hd] = sampleProfile(TORSO_PROFILE, y);
+    // Elliptical bound, scaled back into world units by the smaller radius so
+    // the value stays a usable distance rather than a raw ratio.
+    const kx = x / hw, kz = z / hd;
+    const r = Math.sqrt(kx * kx + kz * kz);
+    return (r - 1) * Math.min(hw, hd);
+}
+
+function buildBodyField(THREE, o) {
+    const seed = o.seed;
+
+    function field(x, y, z) {
+        // Trunk from well down inside the skirt up to the base of the neck.
+        let d = sdTrunk(x, y, z, 0.420, 2.046);
+
+        // Bust. THE BLEND RADIUS MUST BE WELL UNDER THE PROTRUSION — this is
+        // the one rule of modelling with smin and the first version broke it.
+        // A form standing 0.02 proud of the chest wall, blended at k=0.10, is
+        // not a soft bust: it is no bust at all, because the fillet is five
+        // times deeper than the feature and swallows it whole. Everything
+        // below protrudes 2-3x its own blend.
+        for (const sx of [-1, 1]) {
+            d = smin(d, sdEllipsoid(x - sx * 0.090, y - 1.698, z - 0.132,
+                0.095, 0.087, 0.088), 0.034);
         }
-    }
-    for (let r = 0; r < RINGS; r++) {
-        for (let s = 0; s < SEG; s++) {
-            const a = r * (SEG + 1) + s;
-            const b = a + SEG + 1;
-            indices.push(a, b, a + 1, b, b + 1, a + 1);
+
+        // Shoulders and arms: one continuous run from the deltoid to the wrist,
+        // pressed against the ribs.
+        for (const sx of [-1, 1]) {
+            d = smin(d, sdEllipsoid(x - sx * 0.186, y - 1.880, z,
+                0.074, 0.066, 0.080), 0.050);
+            d = smin(d, sdCapsule(x, y, z,
+                sx * 0.226, 1.858, 0.012, sx * 0.244, 1.476, 0.030, 0.052), 0.040);
+            d = smin(d, sdCapsule(x, y, z,
+                sx * 0.244, 1.476, 0.030, sx * 0.236, 1.174, 0.078, 0.046), 0.032);
         }
+
+        // Neck, rising to meet the head field.
+        d = smin(d, sdCapsule(x, y, z, 0, 1.910, 0.008, 0, 2.108, 0.010, 0.059), 0.055);
+
+        if (o.pregnant) {
+            // A pregnancy is not a ball on a torso — it is the torso, changed.
+            // The largest blend radius in the model, deliberately.
+            d = smin(d, sdEllipsoid(x, y - 1.310, z - 0.086,
+                0.200, 0.202, 0.156), 0.055);
+        }
+
+        if (o.baby) {
+            // Swaddled bundle, with both forearms carried under it.
+            d = smin(d, sdEllipsoid(x - 0.012, y - 1.330, z - 0.148,
+                0.150, 0.102, 0.114), 0.032);
+            for (const sx of [-1, 1]) {
+                d = smin(d, sdCapsule(x, y, z,
+                    sx * 0.202, 1.290, 0.070, sx * 0.030, 1.276, 0.168, 0.042), 0.032);
+            }
+        }
+
+        if (o.stethoscope) {
+            // Two cords over the shoulders into a bell at the sternum. Small
+            // blend so they stay legible as applied objects, not as anatomy.
+            for (const sx of [-1, 1]) {
+                d = smin(d, sdCapsule(x, y, z,
+                    sx * 0.132, 1.882, 0.030, sx * 0.076, 1.600, 0.140, 0.015), 0.010);
+            }
+            d = smin(d, sdEllipsoid(x - 0.050, y - 1.560, z - 0.146,
+                0.036, 0.036, 0.024), 0.012);
+        }
+
+        // Hand-worked surface, in the FIELD rather than as a post-pass vertex
+        // push: displacing a meshed surface along its normals re-creases the
+        // very blends this whole approach exists to remove.
+        d += fbm3(x * 3.1, y * 3.1, z * 3.1, seed, 2) * 0.010;
+        return d;
     }
+
+    const mesh = surfaceNets(field, {
+        min: [-0.46, 0.38, -0.30],
+        max: [0.46, 2.13, 0.40],
+        voxel: 0.0135,
+    });
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setIndex(indices);
-    return roughen(THREE, geo, { amount: 0.007, scale: 4.4, seed: opts.seed + 61 });
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
+    return geo;
 }
 
-/** Head, with the face carved as shallow relief on the front of an ovoid. */
-function buildHead(THREE, opts) {
-    const parts = [];
+/**
+ * THE HEAD, as its own field at a finer voxel.
+ *
+ * Separate from the body because a face needs roughly twice the resolution and
+ * paying for that over the whole figure would quadruple the build for nothing.
+ *
+ * The eye sockets are SUBTRACTED with a soft rim rather than modelled as dark
+ * spheres — the references show real hollows with a shadow in them, and a
+ * carved socket is the only thing that reads as one from any angle.
+ */
+function buildHeadField(THREE, o) {
     const yc = 2.159;
+    const seed = o.seed + 13;
 
-    const skull = new THREE.SphereGeometry(1, 30, 22);
-    skull.scale(0.113, 0.146, 0.119);
-    skull.translate(0, yc, 0.004);
-    parts.push(skull);
+    // Smoothstep, for the hairline. Kept local: this file has no maths module
+    // and one helper does not earn one.
+    const ss = (a, b, t) => {
+        const k = Math.min(1, Math.max(0, (t - a) / (b - a)));
+        return k * k * (3 - 2 * k);
+    };
 
-    // Brow: a shallow bar, not a ridge. On the originals the brow is the only
-    // hard line on the face and everything else is soft.
-    const brow = new THREE.SphereGeometry(1, 16, 10);
-    brow.scale(0.092, 0.020, 0.026);
-    brow.translate(0, yc + 0.058, 0.108);
-    parts.push(brow);
+    function field(x, y, z) {
+        // Skull: a flattened wedge, much narrower front-to-back than a sphere.
+        let d = sdEllipsoid(x, y - yc, z - 0.004, 0.112, 0.144, 0.098);
 
-    // Nose: long, straight, narrow — the Modigliani note in these faces.
-    const nose = new THREE.SphereGeometry(1, 14, 12);
-    nose.scale(0.016, 0.086, 0.030);
-    nose.translate(0, yc + 0.006, 0.098);
-    parts.push(nose);
+        // Jaw and chin, blended into the cranium.
+        d = smin(d, sdEllipsoid(x, y - (yc - 0.096), z - 0.020,
+            0.086, 0.070, 0.078), 0.06);
 
-    // Mouth: a small horizontal pad. A slit modelled as a groove disappears at
-    // any distance; a slightly proud pad keeps a readable shadow under it.
-    const mouth = new THREE.SphereGeometry(1, 14, 10);
-    mouth.scale(0.040, 0.011, 0.014);
-    mouth.translate(0, yc - 0.086, 0.092);
-    parts.push(mouth);
+        if (!o.faceless) {
+            // THE FACIAL PLANE. These faces are flats, not bulbs: a slab across
+            // the front of the skull that the nose and brow then stand off. An
+            // egg with features smeared on it is what the previous version was,
+            // and no amount of feature tuning rescues it.
+            d = smin(d, sdRoundBox(x, y - (yc - 0.010), z - 0.048,
+                0.070, 0.088, 0.044, 0.026), 0.026);
+        }
 
-    // Chin/jaw fullness.
-    const jaw = new THREE.SphereGeometry(1, 18, 14);
-    jaw.scale(0.086, 0.070, 0.072);
-    jaw.translate(0, yc - 0.096, 0.022);
-    parts.push(jaw);
+        // HAIR. A helmet over the cranium and down to the nape, and it has to
+        // keep an EDGE at the temple — in `ref-a-front.jpg` the hair frames each
+        // face with a clear step, and blending it away leaves a bald egg.
+        //
+        // The edge is cut, not blended: everything in front of `hairFrontZ` is
+        // simply not hair. That plane sweeps FORWARD above the brow, which is
+        // the fringe crossing the forehead, and stops at the temple below it.
+        {
+            // The edge has to sit where the surface still faces the camera —
+            // at z = 0.028 it fell on the grazing side of the skull and the head
+            // rendered bald from the front.
+            const hairFrontZ = 0.058 + 0.062 * ss(yc + 0.048, yc + 0.114, y);
+            let hair = sdEllipsoid(x, y - (yc + 0.008), z + 0.022,
+                0.134, 0.148, 0.118);
+            hair = smax(hair, z - hairFrontZ, 0.016);
+            d = smin(d, hair, 0.010);
+        }
 
-    // Neck.
-    // Short neck. An exposed column reads as a doll; on the originals the
-    // head sits almost straight on the shoulders.
-    const neck = new THREE.CylinderGeometry(0.058, 0.104, 0.135, 20, 1);
-    neck.translate(0, yc - 0.192, 0.008);
-    parts.push(neck);
+        if (o.bun) {
+            // A coiled knot sitting ON TOP of the crown with daylight under it,
+            // not tucked behind — it is the tallest thing on three of the four
+            // figures and most of what tells them apart at a distance.
+            d = smin(d, sdEllipsoid(x, y - (yc + 0.178), z + 0.012,
+                0.059, 0.045, 0.057), 0.018);
+            d = smin(d, sdCapsule(x, y, z,
+                0, yc + 0.132, 0.014, 0, yc + 0.166, 0.012, 0.040), 0.030);
+        }
 
-    // Hair as a smooth cap down to the jaw. It is on EVERY figure in the
-    // close-up references — a bob, not a bare skull — and it is most of what
-    // separates the heads from featureless eggs at a distance.
-    const cap = new THREE.SphereGeometry(1, 26, 18);
-    cap.scale(0.126, 0.152, 0.108);
-    cap.translate(0, yc + 0.010, -0.020);
-    parts.push(cap);
+        if (!o.faceless) {
+            // Every feature here is small, so every blend has to be smaller
+            // still. An earlier version blended a 0.017-thick brow at k = 0.030
+            // and a 0.016-radius nose at k = 0.030 — filleting each feature away
+            // with a radius twice its own size, leaving a smooth mask. Same rule
+            // as the bust: k well under the protrusion.
+            //
+            // ONE ridge from the brow to the tip of the nose, unbroken, and it
+            // must stand clear of the facial plane (front face at z = 0.092) or
+            // there is no nose at all.
+            d = smin(d, sdCapsule(x, y, z,
+                0, yc + 0.070, 0.078, 0, yc - 0.030, 0.112, 0.019), 0.010);
+            // Brow bar. Narrow — the full-width version read as a shelf.
+            d = smin(d, sdEllipsoid(x, y - (yc + 0.062), z - 0.080,
+                0.066, 0.014, 0.020), 0.009);
+            // Lips: a low proud pad, not a groove — a groove vanishes at any
+            // distance, a pad keeps a shadow under it.
+            d = smin(d, sdEllipsoid(x, y - (yc - 0.084), z - 0.086,
+                0.040, 0.014, 0.018), 0.008);
+            // Chin, just proud of the plane.
+            d = smin(d, sdEllipsoid(x, y - (yc - 0.126), z - 0.070,
+                0.044, 0.030, 0.032), 0.026);
 
-    if (opts.bun) {
-        // Coiled bun, sitting high and to the back. Two of the four wear one.
-        const bun = new THREE.TorusGeometry(0.045, 0.021, 10, 22);
-        bun.rotateX(Math.PI / 2 - 0.30);
-        bun.translate(0, yc + 0.134, -0.038);
-        parts.push(bun);
-        const hair = new THREE.SphereGeometry(1, 20, 14);
-        hair.scale(0.108, 0.088, 0.100);
-        hair.translate(0, yc + 0.056, -0.026);
-        parts.push(hair);
+            // Sockets, SHALLOW and small. Carved 0.034 deep into a head only
+            // 0.098 deep, they came out as two black slots.
+            for (const sx of [-1, 1]) {
+                d = subtract(d, sdEllipsoid(x - sx * 0.044, y - (yc + 0.030), z - 0.106,
+                    0.030, 0.017, 0.028), 0.012);
+            }
+        } else {
+            // The turned-away figure in `ref-d-wide.jpg`: a smooth ovoid, no
+            // relief at all. Nothing to add.
+        }
+
+        // Neck stub, so head and body overlap when both are welded. It is
+        // STRICTLY THINNER than the body's own neck (0.058): head and body are
+        // two separate closed surfaces, not one field, so wherever they are the
+        // same radius they intersect in a hard rim instead of disappearing into
+        // each other — which is what put a dark hard-edged trapezoid under every
+        // chin and made the faces read as visors.
+        d = smin(d, sdCapsule(x, y, z, 0, yc - 0.150, 0.008, 0, yc - 0.280, 0.008, 0.048), 0.05);
+
+        d += fbm3(x * 9, y * 9, z * 9, seed, 2) * 0.0022;
+        return d;
     }
 
-    const geo = mergeGeometries(THREE, parts);
-    return roughen(THREE, geo, { amount: 0.0035, scale: 8.0, seed: opts.seed + 13 });
+    const mesh = surfaceNets(field, {
+        min: [-0.22, yc - 0.30, -0.22],
+        max: [0.22, yc + 0.27, 0.22],
+        voxel: 0.0062,
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
+    return geo;
 }
 
 /**
- * Shoulders and arms.
+ * Bare feet peeping from under the hem.
  *
- * The originals are not armless columns — each figure has a clear shoulder line
- * and upper arms held against the body, and on two of them a forearm crosses
- * the waist. Without these the torso reads as a bottle, which is exactly what
- * the first render of this model looked like.
+ * They have to clear the hem's own front depth (0.30 at y = 0) or they are cast
+ * inside the cloth and you see nothing — which is what happened when they sat at
+ * z = 0.29. Small, long and low, exactly as they read in `ref-c-under.jpg`.
  */
-function buildArms(THREE, opts) {
-    const parts = [];
-
-    // Shoulder slope, not a yoke bar. The first attempt used a wide flattened
-    // bar and the figures read as scarecrows on a crosspiece — the originals
-    // have a soft shoulder that falls straight into the arm.
-    for (const sx of [-1, 1]) {
-        const shoulder = new THREE.SphereGeometry(1, 18, 14);
-        shoulder.scale(0.068, 0.060, 0.074);
-        shoulder.translate(sx * 0.168, 1.898, 0.002);
-        parts.push(shoulder);
-
-        // Upper arm: essentially VERTICAL, pressed against the ribs. Anything
-        // more than a few degrees out and the silhouette stops being a column.
-        const upper = new THREE.CylinderGeometry(0.044, 0.038, 0.40, 16, 1);
-        upper.rotateZ(sx * 0.052);
-        upper.translate(sx * 0.214, 1.678, 0.014);
-        parts.push(upper);
-
-        // Elbow into forearm, still close to the body, drifting a little
-        // forward as it descends.
-        const fore = new THREE.CylinderGeometry(0.038, 0.034, 0.32, 14, 1);
-        fore.rotateZ(sx * 0.10);
-        fore.rotateX(-0.20);
-        fore.translate(sx * 0.212, 1.348, 0.044);
-        parts.push(fore);
-    }
-
-    if (opts.hands) {
-        // Two hands meeting low at the front — the gesture in ref-a-front. A
-        // single flattened mass, because that is how it was cast: you read a
-        // pair of hands, not ten fingers.
-        const hand = new THREE.SphereGeometry(1, 18, 14);
-        hand.scale(0.106, 0.052, 0.070);
-        hand.translate(0, 1.155, 0.200);
-        parts.push(hand);
-    }
-
-    const geo = mergeGeometries(THREE, parts);
-    return roughen(THREE, geo, { amount: 0.005, scale: 6.5, seed: opts.seed + 41 });
-}
-
-/**
- * The narrative each figure carries.
- *
- * This is the Royal Women's Hospital, and Meszaros gave every figure a reason
- * to be there: one is pregnant, one carries a newborn, one is the clinician
- * with a stethoscope round her neck. Modelling four identical women loses the
- * entire subject of the sculpture, so these are not decoration — they are the
- * point, and the detail inventory treats them as identity-defining.
- */
-function buildNarrative(THREE, opts) {
-    const parts = [];
-
-    if (opts.pregnant) {
-        // A full, low, rounded belly. It sits proud of the torso wall rather
-        // than being blended into it, exactly as the reference reads.
-        const belly = new THREE.SphereGeometry(1, 24, 18);
-        belly.scale(0.196, 0.196, 0.072);
-        belly.translate(0, 1.318, 0.086);
-        parts.push(belly);
-    }
-
-    if (opts.baby) {
-        // A swaddled bundle held at the waist, with both forearms under it.
-        const bundle = new THREE.SphereGeometry(1, 22, 16);
-        bundle.scale(0.146, 0.096, 0.062);
-        bundle.translate(0.012, 1.330, 0.126);
-        parts.push(bundle);
-        for (const sx of [-1, 1]) {
-            const arm = new THREE.CylinderGeometry(0.040, 0.036, 0.24, 14, 1);
-            arm.rotateZ(Math.PI / 2);
-            arm.rotateY(sx * 0.30);
-            arm.translate(sx * 0.096, 1.278, 0.112);
-            parts.push(arm);
-        }
-    }
-
-    if (opts.stethoscope) {
-        // Two cords over the shoulders meeting in a bell at the sternum. Thin
-        // tubes read as a stethoscope at a glance; anything more detailed just
-        // becomes noise on a 2.4m bronze.
-        for (const sx of [-1, 1]) {
-            const cord = new THREE.TorusGeometry(0.088, 0.0125, 8, 20, Math.PI * 1.05);
-            cord.rotateY(Math.PI / 2);
-            cord.rotateZ(sx * 0.22);
-            cord.translate(sx * 0.066, 1.756, 0.072);
-            parts.push(cord);
-        }
-        const bell = new THREE.CylinderGeometry(0.030, 0.030, 0.016, 14, 1);
-        bell.rotateX(Math.PI / 2);
-        bell.translate(0.046, 1.556, 0.112);
-        parts.push(bell);
-    }
-
-    if (!parts.length) return null;
-    const geo = mergeGeometries(THREE, parts);
-    return roughen(THREE, geo, { amount: 0.004, scale: 7.5, seed: opts.seed + 71 });
-}
-
-/** Bare feet peeping from under the hem. */
 function buildFeet(THREE, opts) {
     const parts = [];
     for (const sx of [-1, 1]) {
         const f = new THREE.SphereGeometry(1, 14, 10);
-        f.scale(0.058, 0.034, 0.105);
-        f.translate(sx * 0.070, 0.040, 0.290 + (sx > 0 ? 0.020 : 0));
+        // Set so the HEM COVERS THE HEEL and only the front of the foot shows.
+        // Standing entirely clear of the cloth they read as four pairs of loose
+        // eggs on the paving, which is what they looked like for three passes.
+        f.scale(0.056, 0.034, 0.115);
+        f.translate(sx * 0.068, 0.038, 0.318 + (sx > 0 ? 0.026 : 0));
         parts.push(f);
     }
     const geo = mergeGeometries(THREE, parts);
     return roughen(THREE, geo, { amount: 0.004, scale: 9, seed: opts.seed + 21 });
-}
-
-/** Breasts, as applied hemispheres. */
-function buildBust(THREE, opts) {
-    const parts = [];
-    for (const sx of [-1, 1]) {
-        const b = new THREE.SphereGeometry(1, 20, 16);
-        b.scale(0.078, 0.070, 0.044);
-        b.translate(sx * 0.086, 1.705, 0.104);
-        parts.push(b);
-    }
-    const geo = mergeGeometries(THREE, parts);
-    return roughen(THREE, geo, { amount: 0.005, scale: 7, seed: opts.seed + 31 });
 }
 
 /**
@@ -563,16 +653,24 @@ export function buildFigure(THREE, opts = {}) {
         folds: opts.folds ?? 7,
         foldDepth: opts.foldDepth ?? 1,
         foldPhase: opts.foldPhase ?? 0,
+        cowlTop: opts.cowlTop ?? 2.420,
+        trainAngle: opts.trainAngle ?? Math.PI,
+        trainAmount: opts.trainAmount ?? 0.55,
         scale: opts.scale ?? 1,
     };
 
-    const parts = [
-        buildShell(THREE, o), buildTorso(THREE, o), buildBust(THREE, o),
-        buildArms(THREE, o), buildFeet(THREE, o),
-    ];
-    const narrative = buildNarrative(THREE, o);
-    if (narrative) parts.push(narrative);
-    parts.push(o.faceless ? buildBlankHead(THREE, o) : buildHead(THREE, o));
+    // `only` exists for the isolation probes in sculpture/dev/. Rendering the
+    // body without the cloak in front of it is the only way to tell "the torso
+    // is wrong" apart from "the torso is hidden", and this model has been
+    // debugged the wrong way round once already.
+    const only = opts.only || null;
+    const want = (name) => !only || only.includes(name);
+
+    const parts = [];
+    if (want('shell')) parts.push(buildShell(THREE, o));
+    if (want('body')) parts.push(buildBodyField(THREE, o));
+    if (want('head')) parts.push(buildHeadField(THREE, o));
+    if (want('feet')) parts.push(buildFeet(THREE, o));
 
     const geo = mergeGeometries(THREE, parts);
     if (o.scale !== 1) geo.scale(o.scale, o.scale, o.scale);
