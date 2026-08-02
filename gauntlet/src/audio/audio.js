@@ -42,7 +42,10 @@ const MIX = {
     master: 0.85,
     wind: 0.26,        // peak wind gain at speed01 = 1 — carries speed alone now
     whistle: 0.10,     // high-speed edge tone, only above ~0.6
-    flap: 0.5,
+    // Wingbeats are ambience, not events. Now that every completed stroke fires
+    // one, 0.5 turned a climb into a machine gun — the bang-bang-bang was the
+    // sound doing the same job at full level three times a second.
+    flap: 0.17,
     gate: 0.34,
     boost: 0.42,
     impact: 0.62,
@@ -356,13 +359,24 @@ export function createAudio(opts = {}) {
     }
 
     /** Wing flap: a filtered noise whoosh with a downward pitch sweep. */
-    function flap() {
+    /**
+     * One wingbeat. `strength` 0..1 scales it, so a gentle climb stroke is a
+     * soft push of air and only a boost stroke really cracks — identical level
+     * on every stroke is exactly what reads as bang-bang-bang.
+     *
+     * The attack is softened too. A 14ms attack on a repeating sound is a
+     * transient, and a transient three times a second is a rhythm section.
+     */
+    function flap(strength = 0.5) {
         if (!ready || disposed) return;
+        let s = strength;
+        if (!(s >= 0)) s = 0; else if (s > 1) s = 1;
+        const g = MIX.flap * (0.55 + 0.45 * s);
         const t = now();
         const jitter = 0.9 + rng() * 0.25;
-        noiseVoice(t, 'bandpass', 1500 * jitter, 320, 1.5, MIX.flap, 0.014, 0.22, 1.55, 0.72);
+        noiseVoice(t, 'bandpass', 1200 * jitter, 300, 1.2, g, 0.030, 0.26, 1.4, 0.7);
         // A touch of low body so the downstroke has weight, not just hiss.
-        toneVoice(t, 'sine', 190 * jitter, 92, 0.1, 0.02, 0.16);
+        toneVoice(t, 'sine', 190 * jitter, 92, 0.045 * (0.5 + s), 0.03, 0.17);
     }
 
     /**

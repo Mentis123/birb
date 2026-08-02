@@ -409,6 +409,46 @@
   .set-toggle[aria-pressed="true"] { background: var(--gold); }
   .set-toggle[aria-pressed="true"]::after { transform: translateX(1.5rem); }
 
+  /* --- plumage picker ------------------------------------------------- */
+  .set-h2 { margin: 1.1rem 0 0.15rem; font-size: 1rem; letter-spacing: 0.06em; }
+  .set-swatches {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.6rem;
+    padding: 0.5rem 0 0.2rem;
+  }
+  .set-swatch {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    border: 3px solid var(--ink);
+    cursor: pointer;
+    padding: 0;
+    position: relative;
+    box-shadow: 0 3px 0 0 rgba(10, 19, 36, 0.55);
+    transition: transform 0.1s ease;
+  }
+  /* The belly colour rides as an inner arc, so a swatch previews the actual
+     two-tone bird instead of one flat blob. */
+  .set-swatch::before {
+    content: '';
+    position: absolute;
+    left: 18%; right: 18%; bottom: 12%; height: 42%;
+    border-radius: 999px;
+    background: var(--belly);
+  }
+  .set-swatch[aria-pressed="true"] {
+    transform: translateY(-3px) scale(1.06);
+    box-shadow: 0 0 0 3px var(--gold), 0 5px 0 0 rgba(10, 19, 36, 0.55);
+  }
+  .set-swatch:active { transform: translateY(1px); }
+  .set-note {
+    text-align: center;
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+
   /* Loading state on the Tap to Start button, for slow networks */
   .loading-note {
     min-height: 1.2rem;
@@ -550,6 +590,9 @@
     <div class="set-row"><span>Sound Effects</span><button type="button" class="set-toggle" data-set="sfx"></button></div>
     <div class="set-row" data-haptics-row hidden><span>Haptics</span><button type="button" class="set-toggle" data-set="haptics"></button></div>
     <div class="set-row"><span>Boost button</span><button type="button" class="set-reset" data-reset-boost>Reset position</button></div>
+    <h2 class="set-h2">Your Birb</h2>
+    <div class="set-swatches" data-bird-colors></div>
+    <div class="set-note" data-bird-color-name>Birb Blue</div>
   </div>
   <div class="tap-pill">Tap anywhere to close</div>
 </div>
@@ -591,7 +634,7 @@
 
 <script type="module">
 import { loadThree } from '/gauntlet/src/core/three-loader.js';
-import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { PALETTE, BIRD_COLORS, birdColorById } from '/gauntlet/src/core/palette.js';
 import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
 import { PLANET_RADIUS, continentalHeight } from '/gauntlet/src/core/terrain.js';
 import { paintKeyArt } from '/gauntlet/src/ui/keyart.js';
@@ -683,7 +726,7 @@ document.querySelectorAll('[data-howto-open]').forEach((b) =>
 // ---------------------------------------------------------------------------
 const SETTINGS_KEY = 'gauntlet.settings.v1';
 const settings = (() => {
-    const fallback = { music: true, sfx: true, haptics: true };
+    const fallback = { music: true, sfx: true, haptics: true, birdColor: BIRD_COLORS[0].id };
     try {
         const raw = localStorage.getItem(SETTINGS_KEY);
         return raw ? Object.assign(fallback, JSON.parse(raw)) : fallback;
@@ -697,6 +740,37 @@ function saveSettings() {
 function paintSettings() {
     document.querySelectorAll('[data-set]').forEach((btn) => {
         btn.setAttribute('aria-pressed', String(Boolean(settings[btn.dataset.set])));
+    });
+    document.querySelectorAll('[data-bird-color]').forEach((btn) => {
+        btn.setAttribute('aria-pressed', String(btn.dataset.birdColor === settings.birdColor));
+    });
+    const label = document.querySelector('[data-bird-color-name]');
+    if (label) label.textContent = birdColorById(settings.birdColor).name;
+}
+
+// --- plumage picker ---------------------------------------------------------
+// Built from BIRD_COLORS rather than hand-written markup, so adding a colour is
+// a palette entry and nothing else. The swatch previews body AND belly, since
+// that pairing is what you actually see in flight.
+const swatchWrap = document.querySelector('[data-bird-colors]');
+if (swatchWrap) {
+    const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+    BIRD_COLORS.forEach((c) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'set-swatch';
+        b.dataset.birdColor = c.id;
+        b.style.background = hex(c.body);
+        b.style.setProperty('--belly', hex(c.belly));
+        b.title = c.name;
+        b.setAttribute('aria-label', c.name);
+        b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settings.birdColor = c.id;
+            saveSettings();
+            paintSettings();
+        });
+        swatchWrap.appendChild(b);
     });
 }
 
@@ -992,9 +1066,16 @@ async function boot(requestedMode) {
 
 
     // --- player ------------------------------------------------------------
+    // Read once at boot. The bird's colours are baked into VERTEX COLOURS when
+    // the geometry is built, so recolouring means rebuilding the mesh — not
+    // worth it, because the settings panel only exists on the title screen and
+    // every run therefore starts with the current choice already applied. The
+    // feather trail and every burst take their colour from here too, so the
+    // whole bird reads as one choice.
+    const plumage = birdColorById(settings.birdColor);
     const bird = createBird(THREE, {
-        bodyColor: PALETTE.birdPlayer,
-        bellyColor: PALETTE.birdPlayerBelly,
+        bodyColor: plumage.body,
+        bellyColor: plumage.belly,
         scale: BIRD_SCALE,
         quality,
         outline: true,
@@ -1229,15 +1310,20 @@ async function boot(requestedMode) {
         bird.group.quaternion.copy(pose.quaternion);
 
         animState.speed01 = flight.speed01 !== undefined ? flight.speed01 : 0.5;
-        animState.turn = input.value.x;
-        animState.pitch = input.value.y;
+        // Seated on a nest the stick aims the GUN, not the bird. Feeding it to
+        // the animator made the bird "climb" every time you raised the barrel,
+        // so it beat its wings — and sounded them — for as long as you sat
+        // there. Perched is a pose, not a flight state.
+        animState.grounded = Boolean(nesting && nesting.isNested());
+        animState.turn = animState.grounded ? 0 : input.value.x;
+        animState.pitch = animState.grounded ? 0 : input.value.y;
         animState.boosting = Boolean(flight.isBoosting);
         // Stick UP is +y and climbs — measured: two seconds of +1 takes the
         // bird from radius 114 to 124.9, -1 takes it to 96.7. This was
         // max(0, -y), so the bird beat its wings hardest in a DIVE and locked
         // them on the climb, which is backwards and is most of why the wings
         // never looked like they were doing anything.
-        animState.flapImpulse = Math.max(0, input.value.y);
+        animState.flapImpulse = animState.grounded ? 0 : Math.max(0, input.value.y);
         animState.celebrating = phase === 'finished';
         animator.update(dt, animState);
 
@@ -1245,12 +1331,13 @@ async function boot(requestedMode) {
         // seen. Before this the flap was a silent background loop and
         // `audio.flap()` had nothing to fire it. Boost strokes throw feathers
         // — three of them, so the burst punctuates rather than litters.
-        if (animator.strokeEvent && phase === 'racing') {
-            audio.flap();
+        if (animator.strokeEvent && phase === 'racing' && !turretView) {
+            // Boost strokes are the loud ones; a gentle climb is a soft push.
+            audio.flap(flight.isBoosting ? 1 : 0.35 + animState.flapImpulse * 0.4);
             if (animator.burstLeft >= 0 && flight.isBoosting) {
                 feathers.burst(
                     pose.position.x, pose.position.y, pose.position.z,
-                    7, PALETTE.featherPlayer
+                    7, plumage.feather
                 );
             }
         }
@@ -1278,7 +1365,7 @@ async function boot(requestedMode) {
         feathers.emitTrail(
             pose.position.x, pose.position.y, pose.position.z,
             _up.x, _up.y, _up.z,
-            PALETTE.featherPlayer
+            plumage.feather
         );
         // Everything a mode switched on, in one place. Runs before the camera
         // so a knockdown shake or a turret takeover lands on THIS frame.
@@ -1495,7 +1582,7 @@ async function boot(requestedMode) {
                     // Everywhere else a drone is an obstacle: a shove and a
                     // scare, never a death. Casual explicitly cannot fail.
                     audio.impact();
-                    feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 14, PALETTE.featherPlayer);
+                    feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 14, plumage.feather);
                     shake.add(0.5);
                     flight.speed = Math.max(flight.cfg.minSpeed, flight.speed * 0.55);
                     knockTimer = 1.0;

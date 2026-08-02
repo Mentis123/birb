@@ -187,3 +187,32 @@ export function disposeRamps() {
     _rampCache.forEach((tex) => tex.dispose());
     _rampCache.clear();
 }
+
+/**
+ * Selectable player plumage.
+ *
+ * Every entry has to survive the same two backgrounds the rival colours were
+ * chosen against — green lowland and pale alpine crest — because the player
+ * bird is the one thing on screen you must never lose. That rules out mid
+ * greens and anything close to the terrain's sand. Index 0 is the default and
+ * is Birb-brand cyan; `feather` is the trail colour, kept a few steps lighter
+ * than the body so the trail reads as feathers rather than as a smear.
+ */
+export const BIRD_COLORS = Object.freeze([
+    { id: 'cyan', name: 'Birb Blue', body: 0x4ec9f5, belly: 0xdff4ff, feather: 0xbfeeff },
+    { id: 'ember', name: 'Ember', body: 0xf2764b, belly: 0xffe0cd, feather: 0xffc6a8 },
+    { id: 'orchid', name: 'Orchid', body: 0xb47ff0, belly: 0xf0e2ff, feather: 0xdcc4ff },
+    { id: 'sunny', name: 'Sunny', body: 0xf5d84e, belly: 0xfff6d0, feather: 0xffeba6 },
+    { id: 'mint', name: 'Mint', body: 0x4fe0a8, belly: 0xdcfff1, feather: 0xa8f5d6 },
+    { id: 'rose', name: 'Rose', body: 0xff7fa8, belly: 0xffe2ec, feather: 0xffbdd2 },
+    { id: 'ink', name: 'Midnight', body: 0x3d5a9e, belly: 0xc3d4f5, feather: 0x9fb8e8 },
+    { id: 'snow', name: 'Snow', body: 0xeef4fb, belly: 0xffffff, feather: 0xdcecff },
+]);
+
+/** Look up a plumage by id, never returning undefined. */
+export function birdColorById(id) {
+    for (let i = 0; i < BIRD_COLORS.length; i++) {
+        if (BIRD_COLORS[i].id === id) return BIRD_COLORS[i];
+    }
+    return BIRD_COLORS[0];
+}

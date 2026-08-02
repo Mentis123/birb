@@ -200,7 +200,16 @@ export function createBirdAnimator(THREE, bird) {
         // Everything the wing does comes from these four numbers.
         const climb01 = clamp(Math.max(pitchS, impulse), 0, 1);
         const dive01 = clamp(-pitchS, 0, 1);
-        const stall01 = clamp((CFG.stallSpeed01 - speed01) / CFG.stallSpeed01, 0, 1);
+
+        // PERCHED BEATS EVERYTHING. A bird sitting on a nest has zero airspeed
+        // and, in Turret Defense, a stick that is aiming a gun rather than
+        // flying — so both of the "should it beat?" rules fire at once and the
+        // wing flapped forever in the nest, with a wingbeat sound on every
+        // stroke. Neither rule means anything to a bird that is not airborne.
+        const perched = Boolean(sIn.grounded);
+        const stall01 = perched
+            ? 0
+            : clamp((CFG.stallSpeed01 - speed01) / CFG.stallSpeed01, 0, 1);
 
         // Boost fires a fixed burst on the RISING EDGE. Reading the flag every
         // frame instead would restart the count for as long as boost is held
@@ -212,8 +221,11 @@ export function createBirdAnimator(THREE, bird) {
         if (burstHold > 0) burstHold -= dt;
 
         // --- is the wing beating? ---------------------------------------------
-        const climbing = climb01 > CFG.climbGate;
-        const scripted = Boolean(sIn.grounded || sIn.celebrating || sIn.tumbling);
+        const climbing = !perched && climb01 > CFG.climbGate;
+        // `grounded` is deliberately NOT in here. It used to force a stroke,
+        // which is backwards: perched is the one state where the wings are
+        // folded and still.
+        const scripted = Boolean(sIn.celebrating || sIn.tumbling);
         const wantStroke = bursting || climbing || stall01 > 0.02 || scripted;
 
         // Once a stroke is running it FINISHES. Cutting the wing dead the frame
