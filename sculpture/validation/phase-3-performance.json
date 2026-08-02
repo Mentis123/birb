@@ -1,0 +1,60 @@
+{
+  "measuredAt": "2026-08-02T13:40:27.061Z",
+  "simulatedMobile": true,
+  "simulationNote": "Chromium mobile emulation with SwiftShader on a GitHub Actions Linux runner; not equivalent to real iOS Safari or a real iPhone.",
+  "navigationToReadyMs": 4626.375794,
+  "navigationTiming": {
+    "domContentLoadedMs": 66.69999999995343,
+    "loadEventMs": 66.89999999990687,
+    "responseEndMs": 9.099999999976717
+  },
+  "baseline": {
+    "stats": {
+      "drawCalls": 6,
+      "triangles": 490840,
+      "fps": 54,
+      "figures": 4,
+      "yaw": 0,
+      "pitch": 6,
+      "distance": 7
+    },
+    "renderer": {
+      "pixelRatio": 2,
+      "drawingBufferWidth": 780,
+      "drawingBufferHeight": 1688,
+      "webglVendor": "WebKit",
+      "webglRenderer": "WebKit WebGL"
+    },
+    "viewport": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "devicePixelRatio": 3
+    },
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.7922.34 Safari/537.36"
+  },
+  "orbit": {
+    "mode": "scripted camera orbit; each animation frame calls the production setView hook and performs a full renderer pass",
+    "durationMs": 6920.199999999953,
+    "animationFrames": 31,
+    "measuredFps": 4.905529005918355,
+    "meanFrameMs": 203.85161290322282,
+    "p95FrameMs": 1390.6999999999534,
+    "p99FrameMs": 1413.1000000000931,
+    "framesOver25Ms": 6,
+    "framesOver50Ms": 5,
+    "statsAfterOrbit": {
+      "drawCalls": 6,
+      "triangles": 490840,
+      "fps": 47,
+      "figures": 4,
+      "yaw": -7,
+      "pitch": 11,
+      "distance": 4.92
+    }
+  },
+  "errors": {
+    "console": [],
+    "page": [],
+    "requests": []
+  }
+}

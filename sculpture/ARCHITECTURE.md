@@ -18,16 +18,19 @@ that caused them.
 ## What it is, in one paragraph
 
 Four bronze women standing close in a crowded diagonal. Each is generated in
-code from profile tables and signed distance fields — nothing is loaded, there
-are no assets of any kind. You drag to orbit, pinch to zoom, two fingers to pan,
-double-tap to reset, and hold three fingers to raise a QR of the production URL.
+code from profile tables and signed distance fields — the running page loads no
+model, image, font or texture assets. The repository's reference and validation
+images are development evidence only. You drag to orbit, pinch to zoom, two
+fingers to pan, double-tap to reset, and hold three fingers to raise a QR of the
+production URL.
 
 ## Hard rules
 
-1. **Zero external assets.** No images, no meshes, no fonts, no textures. Every
-   surface is generated. This is not purism: it is what makes every proportion a
-   NUMBER in a table that can be tuned against a photograph, which is the whole
-   workflow.
+1. **Zero production assets.** The running page imports no images, meshes, fonts
+   or textures; every surface is generated. `reference/` and `validation/` hold
+   development evidence only and must never be imported by the application.
+   This is not purism: generated geometry is what makes every proportion a
+   NUMBER in a table that can be tuned against a photograph.
 2. **No build step.** Vanilla ES modules, Three pinned at 0.183.2 from esm.sh.
 3. **Airtight against the rest of the repo.** Nothing in `sculpture/` imports
    from `src/` or `gauntlet/`, and nothing outside imports from inside it.
@@ -47,8 +50,9 @@ double-tap to reset, and hold three fingers to raise a QR of the production URL.
 sculpture/
   index.html            scene, renderer, ground, boot, harness hooks
   ARCHITECTURE.md       this file
-  LIKENESS.md           the 32-check rubric and the current score
+  LIKENESS.md           the 41-check rubric and the current score
   reference/            Mentis's four photos, EXIF-transposed only
+  validation/           committed closeout records and render evidence; not runtime
   dev/probe-parts.html  render any subset of ONE figure in isolation
   src/
     core/three-loader.js   CDN or local Three, per ?three=local
@@ -92,10 +96,18 @@ buildFeet()                heel + toe spheres
 Then in `model/sculpture.js`: `paintPatina()` writes vertex colours, four meshes
 share one `MeshStandardMaterial`, plus a base slab and the light rig.
 
-Cost: ~75k triangles per figure, 6 draw calls for the scene, ~1.5s to build all
-four on a laptop. The page renders **on demand** — `orbit.update()` returns
-whether anything moved and the frame is skipped if not, so a still sculpture
-costs zero draw calls.
+Phase 3's measured scene cost is **490,840 triangles and 6 draw calls** for the
+last rendered frame. Do not retain the old ~75k-per-figure / ~302k-total estimate:
+the finer block-head fields raised the complete scene to roughly 491k, and the
+four heads are not identical enough for a useful per-figure average. In the
+simulated 390×844 Chromium baseline, navigation to `__SCULPT_READY` took 4.63s;
+active software-rendered orbit measured 4.91 FPS. Those are CI/SwiftShader
+numbers, not iPhone results — see `validation/phase-3-closeout.md`.
+
+The page still renders **on demand**: `orbit.update()` returns whether anything
+moved and no additional renderer pass is issued while the sculpture is still.
+`renderer.info.render.calls` therefore remains the cost of the most recent
+render, not a claim that the last frame contained zero draw calls.
 
 ### Why surface nets and not marching cubes
 
@@ -211,9 +223,10 @@ hooded figures with flared cloaks.
   clinician with a stethoscope round her neck. Building them is not the same as
   their reading — see `LIKENESS.md` F2 and F3 for how each one failed to read
   while being measurably present in the mesh.
-- **Every head wears a smooth hair cap** to the jaw, two with a coiled top-knot.
-  Faces are planar with a long nose ridge from the brow, hollow triangular eye
-  sockets and a wide flat mouth.
+- **The heads are intentionally non-uniform.** The nearest is bare/plain, the
+  turned-away head is faceless, and two carry a coiled top-knot. Faces are
+  planar with a long nose ridge from the brow, hollow triangular eye sockets and
+  a wide flat mouth. Do not restore one identical cap to all four.
 
 ### Reference set
 
@@ -270,6 +283,11 @@ is evidence the code ran.
   looks like evidence. Pass a real function.
 - The page keeps damping and, after nine idle seconds, starts a slow idle spin.
   A multi-view sheet takes longer than that, so re-park after the settle.
+- Phase 3's ~491k-triangle mesh can make a software-rendered Chromium screenshot
+  exceed Playwright's 30-second default even after `__SCULPT_READY` is true.
+  Readiness and PNG readback are separate deadlines; use the sheet harness's
+  `--screenshot-timeout` rather than misreporting a slow readback as a model
+  construction failure.
 - `--eval` must be a single expression; wrap multi-statement scripts in an IIFE.
 - The harness needs `npm install --no-save playwright three-real@npm:three@0.183.2`
   followed by `git checkout -- node_modules/three/index.js`, because any npm
@@ -281,10 +299,11 @@ is evidence the code ran.
 ## Where the model is, and what is left
 
 **`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
-Currently 30.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
-+0.023 — which is necessary and not sufficient, since this gate has been green
-and wrong twice. Phase 1 is done; the rubric is what says how far there is left
-to go.
+Phase 3 independently revalidated at 30 / 41.** The proportion gate is GREEN at
+0 of 12 outside tolerance, worst +0.023 — which is necessary and not sufficient,
+since this gate has been green and wrong twice. The full closeout record and
+committed evidence are in `validation/phase-3-closeout.md` and
+`validation/phase-3-revalidated.png`.
 
 The remaining work, in the order the evidence says to do it:
 
@@ -311,17 +330,58 @@ opening was run full height, and anything still positioned against the old
 outline stands a fifth of a metre clear of the model.
 
 **Phase 3 — Heads. DONE (2026-08-02).** The head is a rounded BLOCK, not an
-ovoid — flat front, flat sides, domed top — and only two of the four wear hair.
-E3 and E5 remain: the eye sockets are lenses where the reference has hollow
-triangles, and the hair's temple edge is not legible at group distance.
-**Triangle count went 302k to 491k in this phase**; that needs a mobile check.
+ovoid — flat front, flat sides, domed top. The nearest is bare/plain, the
+turned-away head is faceless, and two carry coiled top-knots. E3 and E5 remain:
+the eye sockets are lenses where the reference has hollow triangles, and the
+hair's temple edge is not legible at group distance.
+**Triangle count went from roughly 302k to 490,840 in this phase.** The simulated
+mobile baseline is recorded, but a real iPhone 12-or-newer load and orbit test is
+still outstanding and now sits in front of Phase 4 rather than at the end.
 
-**Phase 4 — Arms per figure, and surface.** Negative space between arm and ribs;
-each figure's arms doing something different. Stronger hand-working, vertical
-run-off streaks, warmer lit bronze judged against the photo crops on the sheet.
-*Target: A7, F4, G2–G5.*
+### Entry gate before Phase 4
 
-**Phase 5 — Score, fix the misses, mobile perf, ship.**
+- full tests green;
+- proportions green;
+- independently rescored contact sheet;
+- no visual Phase 3 regression;
+- simulated mobile baseline recorded;
+- real-phone validation clearly marked complete or outstanding.
+
+The first five are complete. Because the software-rendered orbit result was poor
+and is not representative of an iPhone GPU, **Phase 4 modelling remains NO-GO
+until the real iPhone check is run**. Do not optimize geometry from SwiftShader
+alone; if a real phone reproduces the problem, test a lower mobile DPR cap before
+rewriting meshes.
+
+### Phase 4A — arms and negative space
+
+Target `A7` and `F4`. Replace the generic arm/hands treatment with per-figure,
+reference-led poses when implementation begins. Preserve the baby's crossed
+supporting forearms and the four narrative identities.
+
+### Phase 4B — surface and bronze
+
+Target `G2`, `G3` and `G5`. The existing noise and runoff systems already exist;
+future work should make them legible at group viewing distance, not add
+complexity merely because the checks currently fail.
+
+### Phase 5A — arrangement, weight and shadow
+
+Target `C4`, `D2` and `H3`.
+
+### Phase 5B — remaining form and facial refinements
+
+Target `B3`, `E3` and `E5`.
+
+### Final ship gate
+
+- at least 37 / 41, honestly rescored;
+- proportions still green;
+- full test suite green;
+- matched contact sheet committed or reproducibly archived;
+- real iPhone 12-or-newer interaction and load test;
+- no console errors;
+- acceptable initial construction time and orbit performance.
 
 ### Process rules for that run
 
