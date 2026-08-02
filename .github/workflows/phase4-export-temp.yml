@@ -1,4 +1,4 @@
-name: Phase 4 Harness Export
+name: Phase 4 Chromium Export
 
 on:
   pull_request:
@@ -15,18 +15,19 @@ jobs:
   export:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install harness packages
+      - name: Install harness and Chromium
         shell: bash
         run: |
           set -euo pipefail
           npm install --no-save playwright three-real@npm:three@0.183.2
           git checkout -- node_modules/three/index.js
-          tar -czf /tmp/phase4-node-modules.tar.gz node_modules
+          npx playwright install chromium
+          tar -czf /tmp/phase4-chromium.tar.gz -C "$HOME/.cache" ms-playwright
       - uses: actions/upload-artifact@v4
         with:
-          name: phase4-node-modules
-          path: /tmp/phase4-node-modules.tar.gz
+          name: phase4-chromium
+          path: /tmp/phase4-chromium.tar.gz
           retention-days: 1
