@@ -1,0 +1,30 @@
+name: Phase 4 Workspace Export
+
+on:
+  push:
+    branches:
+      - agent/bronze-phase-4
+    paths:
+      - '.github/workflows/phase4-export-temp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Archive workspace
+        run: |
+          set -euo pipefail
+          tar --exclude=.git -czf /tmp/birb-phase4-workspace.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: birb-phase4-workspace
+          path: /tmp/birb-phase4-workspace.tar.gz
+          retention-days: 1
