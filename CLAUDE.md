@@ -162,11 +162,12 @@ Three-finger QR as usual.
 > The summary below is the short version.
 
 Own stack, same house rules as Gauntlet: pinned CDN Three, vanilla ES modules,
-no build step, **zero external assets** — the sculpture is generated from
-profile curves in code, not loaded as a mesh. That is not purism: every
-proportion is a NUMBER in a table (`SHELL_PROFILE`, `TORSO_PROFILE`,
-`FRONT_OPENING`) that can be tuned against a photograph, which is the whole
-workflow for getting a likeness.
+no build step, **zero production assets** — the running sculpture imports no
+images, meshes, fonts or textures and is generated in code. The committed
+reference and validation images are evidence only and are never imported by the
+page. That is not purism: every proportion is a NUMBER in a table
+(`SHELL_PROFILE`, `TORSO_PROFILE`, `FRONT_OPENING`) that can be tuned against a
+photograph, which is the whole workflow for getting a likeness.
 
 **The reference photos were upside down**, and that mattered more than it
 sounds. All four arrive with EXIF orientation 3; `ImageOps.exif_transpose`
@@ -227,9 +228,10 @@ structure materially and the findings are recorded here so they survive:
   keeps a hard seam (k = 0.016) — a crease is wrong for anatomy and right for an
   object being held. The stethoscope's bell stood 19mm off the chest, which is a
   bump you cannot find; cast bronze tubing is fat and hangs in front of her.
-- **Every head wears a smooth hair cap** to the jaw — a bob, not a bare skull.
-  The earlier "two of them have buns" reading came from seeing a top-knot over
-  the same cap on two figures.
+- **The heads are intentionally non-uniform.** The nearest figure is a bare,
+  plain rounded block; the turned-away figure is faceless; two figures carry a
+  coiled top-knot. Do not restore one identical cap to all four — that was a
+  major reason the heads once read as interchangeable.
 - The faces are planar with a **long nose ridge running from the brow**, hollow
   triangular eye sockets and a wide flat mouth.
 
@@ -311,10 +313,13 @@ bug, before one normal-material render found it.
 
 ### State, and how to pick it up (2026-08-02)
 
-**19 of 41 on the rubric; the proportion gate is green at 0 of 12.** Both were
-rebuilt honest on this date — earlier greens were measuring the wrong things, and
-a green gate here is necessary and not sufficient: it has been green and wrong
-twice. The phased plan is at the end of `sculpture/ARCHITECTURE.md`.
+**Phase 3 independently revalidated at 30 of 41; the proportion gate is green at
+0 of 12.** The committed matched sheet is
+`sculpture/validation/phase-3-revalidated.png` and the complete closeout record
+is `sculpture/validation/phase-3-closeout.md`. Earlier greens were measuring the
+wrong things, and a green numeric gate is necessary and not sufficient: it has
+been green and visually wrong twice. The revised gated plan is at the end of
+`sculpture/ARCHITECTURE.md`.
 
 **Phase 1 (mass) is done.** Every span was ~20% too narrow, the head ~35% too
 small, the bust too high, and the hem read 0.56 of figure height against the
@@ -335,14 +340,24 @@ a placement problem twice and was never one.
 
 **Phase 3 (the heads) is done, and cost more than the other two together.** The
 head is a rounded BLOCK — flat front, flat sides, domed top — not an ovoid; built
-as an egg a face has nowhere flat to sit and every feature slides off. Only two of
-the four wear hair. The lesson worth keeping is that **thin features do not
-survive surface nets, and it fails silently**: the mesher averages one vertex per
-cell, so a form three or four cells thick vanishes — while the field measures
-correct AND a max-z sweep of the mesh still finds the stray slivers, so every
-number agrees the brow is there and no render shows it. A `MeshNormalMaterial`
-pass is what settles it. Four other hypotheses were tested and discarded first;
-two of them were real bugs worth fixing and neither was the cause.
+as an egg a face has nowhere flat to sit and every feature slides off. The
+nearest head is bare/plain, the turned-away head is faceless, and two carry
+coiled top-knots. The lesson worth keeping is that **thin features do not survive
+surface nets, and it fails silently**: the mesher averages one vertex per cell,
+so a form three or four cells thick vanishes — while the field measures correct
+AND a max-z sweep of the mesh still finds the stray slivers, so every number
+agrees the brow is there and no render shows it. A `MeshNormalMaterial` pass is
+what settles it. Four other hypotheses were tested and discarded first; two of
+them were real bugs worth fixing and neither was the cause.
+
+**Performance is now a Phase 4 entry gate.** The current scene is 490,840
+triangles, 6 draw calls and 4 figures. In simulated 390×844 Chromium at renderer
+DPR 2, navigation to `window.__SCULPT_READY` took 4.63s and a scripted active
+orbit measured 4.91 FPS under SwiftShader; there were no page, console or request
+errors. That software-rendered result is not a real-iPhone result and is not a
+reason to rewrite the geometry blindly. Phase 4 modelling remains blocked until
+an iPhone 12-or-newer load and orbit test is recorded; if the real device also
+struggles, test a lower mobile renderer-DPR cap before changing mesh resolution.
 
 ## What This Is
 
@@ -439,7 +454,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |
 | `gauntlet/ARCHITECTURE.md` | Birb Gauntlet (`/gauntlet`) — read before touching it |
 | `sculpture/ARCHITECTURE.md` | Bronze (`/sculpture`) — module map, invariants, verification, plan |
-| `sculpture/LIKENESS.md` | Bronze — the 32-check rubric and the current score |
+| `sculpture/LIKENESS.md` | Bronze — the 41-check rubric and the current score |
 | `KNOWN_ISSUES.md` | Bug tracker with detailed fix attempts |
 | `FLIGHT_CONTROLS_PLAN.md` | 4-phase flight system redesign plan |
 | `TURRET_RESEARCH.md` | Gun feel research, spring-damper physics |

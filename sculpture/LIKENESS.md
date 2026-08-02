@@ -30,8 +30,9 @@ regressions on this model were caused by fixing one thing.
 ## A · Silhouette and mass — `ref-a-front`
 
 - [x] **A1** The figures are HEAVY. Shoulder, bust and waist spans are within
-      0.03 of each other — a column, not an hourglass. *(Currently the model is
-      ~20% narrow at every one of them; see the proportion gate.)*
+      0.03 of each other — a column, not an hourglass. *(Current model spans are
+      shoulder 0.327, bust 0.350 and waist 0.349 against reference 0.327, 0.342
+      and 0.356; all are inside the ±0.03 proportion tolerance.)*
 - [x] **A2** The head is roughly one fifth of the figure's height. These are
       squat, big-headed, stylised women, about five and a half heads tall.
 - [x] **A3** The neck is barely visible — chin almost on the shoulders.
@@ -121,9 +122,17 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**30 / 41** after Phase 3 (2026-08-02), scored against
-`shots/sculpt/sheet-p3.png`. Was 26 after Phase 2, 19 after Phase 1, 10 before
-any of them.
+**30 / 41**, independently revalidated after Phase 3 on 2026-08-02 against the
+committed matched sheet `validation/phase-3-revalidated.png`. The complete
+command log, pass/fail classification, render statistics and evidence checksum
+are in `validation/phase-3-closeout.md`. The score progression is 10 before the
+phased work, 19 after Phase 1, 26 after Phase 2 and 30 after Phase 3.
+
+The closeout confirmed 30 passes, 10 failures and one ambiguous item counted as
+a non-pass. The confirmed failures are `A7 C4 D2 E3 E5 F4 G2 G3 G5 H3`;
+`B3` remains ambiguous because a narrow dark gap is present but does not read
+unambiguously as the reference's broad hollow collar-arch. No Phase 3 visual
+regression was detected.
 
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
@@ -165,7 +174,8 @@ feature that silently stops matching its neighbours.
 
 The gate is green at 0 of 12, worst +0.023. **That is necessary and not
 sufficient**, and the file it lives in says so: this gate has been green and
-wrong twice. The rubric above is what makes the difference, and it is 20.
+wrong twice. The rubric above is what makes the difference; Phase 1 closed at
+19 of 41.
 
 ### Phase 2 — cast section and the stride. Done.
 
@@ -198,9 +208,10 @@ was opened to full height.
 **The head is a rounded BLOCK, not an ovoid.** Read off the nearest figure at
 4x: flat front, flat sides, domed top, broad flat jaw — a loaf standing on end.
 Built as an egg the face has nowhere flat to sit and every feature slides off the
-curvature. Only two of the four wear hair; the nearest is bare-headed, and giving
-every figure a cap was part of what made the four interchangeable. The bun is a
-thick rolled plait lying across the crown, not a knob on top of it.
+curvature. The nearest is bare/plain, the turned-away head is faceless, and two
+carry a coiled top-knot. Giving every figure one identical cap was part of what
+made the four interchangeable. The top-knot is a thick rolled plait lying across
+the crown, not a knob on top of it.
 
 **THIN FEATURES DO NOT SURVIVE THE MESHER, AND IT FAILS SILENTLY.** This is the
 lesson worth the whole phase. Surface nets places ONE vertex per cell at the mean
@@ -228,14 +239,47 @@ that was not there, and it was GREEN.
 
 ### What is left, in the order the evidence says to do it
 
-**Phase 4 — arms and surface.** A7, F4, G2, G3, G5. Negative space between arm
-and ribs; each figure's arms doing something different; stronger hand-working and
-the vertical run-off streaks.
+#### Entry gate before Phase 4
 
-**Phase 5 — B3, C4, D2, E3, E5, H3, mobile perf, ship.** The collar-arch hollow
-still does not read as an opening; no figure shows a weight shift onto one leg;
-the eye sockets are lenses where the reference has hollow triangles; the hair's
-hard temple edge is not legible at group distance. **Triangle count is now 491k,
-up from 302k** — that is a mobile check, not a desktop one. The collar-arch hollow still
-does not read; only one figure carries an arch and its interior is not legible
-as an opening. No figure shows a weight shift onto one leg.
+- full tests green;
+- proportions green;
+- independently rescored contact sheet;
+- no visual Phase 3 regression;
+- simulated mobile baseline recorded;
+- real-phone validation clearly marked complete or outstanding.
+
+The first five are complete. The simulated SwiftShader orbit result was poor and
+is not representative of an iPhone GPU, so Phase 4 modelling remains **NO-GO**
+until an iPhone 12-or-newer load and orbit test is recorded. Preserve the current
+490,840-triangle geometry meanwhile; if the real phone reproduces poor
+interaction, test a lower mobile renderer-DPR cap before changing mesh structure.
+
+#### Phase 4A — arms and negative space
+
+Target `A7` and `F4`. Replace the generic treatment with per-figure,
+reference-led arm poses when implementation begins. Preserve the baby's crossed
+supporting forearms and the four narrative identities.
+
+#### Phase 4B — surface and bronze
+
+Target `G2`, `G3` and `G5`. Noise and runoff systems already exist. Make them
+legible at group viewing distance rather than adding complexity merely because a
+check fails.
+
+#### Phase 5A — arrangement, weight and shadow
+
+Target `C4`, `D2` and `H3`.
+
+#### Phase 5B — remaining form and facial refinements
+
+Target `B3`, `E3` and `E5`.
+
+#### Final ship gate
+
+- at least 37 / 41, honestly rescored;
+- proportions still green;
+- full test suite green;
+- matched contact sheet committed or reproducibly archived;
+- real iPhone 12-or-newer interaction and load test;
+- no console errors;
+- acceptable initial construction time and orbit performance.

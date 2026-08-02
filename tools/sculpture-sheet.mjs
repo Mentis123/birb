@@ -30,6 +30,7 @@
  *   --dpr     device pixel ratio for the renders             (default 2)
  *   --wait    ms to wait for window.__SCULPT_READY           (default 60000)
  *   --settle  ms to wait after parking each camera           (default 350)
+ *   --screenshot-timeout  max ms per rendered screenshot   (default 120000)
  *   --no-photos  skip the reference column
  *   --allow-console-errors
  */
@@ -201,6 +202,7 @@ async function main() {
     const cellH = Number(args.cell || 620);
     const dpr = Number(args.dpr || 2);
     const settle = Number(args.settle || 350);
+    const screenshotTimeout = Number(args['screenshot-timeout'] || 120000);
 
     const views = [
         ...(withPhotos ? REFERENCE_VIEWS : []),
@@ -265,7 +267,12 @@ async function main() {
         await park(page, view);
 
         const renderPath = path.join(tmpDir, `${view.id}-render.png`);
-        await page.screenshot({ path: renderPath });
+        // The Phase 3 mesh is roughly 491k triangles. On software-rendered
+        // CI Chromium, readback can legitimately exceed Playwright's 30s
+        // default even after the frame itself is ready. Keep readiness and
+        // screenshot deadlines separate so a slow PNG readback is not reported
+        // as a sculpture failure.
+        await page.screenshot({ path: renderPath, timeout: screenshotTimeout });
 
         const images = [];
         if (crop) {

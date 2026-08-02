@@ -1,31 +1,30 @@
 /**
  * model/figure.js — one of the four bronze women, built from curves.
  *
- * Nothing here is loaded. The whole sculpture is generated from profile curves
- * and swept surfaces, the same way Birb Gauntlet generates its world, so it
- * works offline, ships as a few kilobytes of source, and — the part that
- * matters for this job — every proportion is a NUMBER you can tune against a
- * photograph rather than a vertex you would have to sculpt.
+ * Nothing here is loaded. The whole sculpture is generated from profile curves,
+ * swept cast sections and signed-distance fields, so it works offline, ships as
+ * source, and — the part that matters for this job — every proportion is a
+ * NUMBER you can tune against a photograph rather than a vertex you would have
+ * to sculpt.
  *
  * ---------------------------------------------------------------------------
  * ANATOMY OF ONE FIGURE, as read off the four reference photos
  * ---------------------------------------------------------------------------
  *
- *   COWL      The dominant form and the one that makes the silhouette. A large
- *             curved shell standing up behind the head, open at the front,
- *             sweeping down and outward to the ground as a cloak. In profile it
- *             is a thin plate; from the front it is an arch framing the face.
- *   BODY      A lathe: shoulders → bust → waist → hips → robe flaring to the
- *             ground. Elliptical, not circular — the figures are noticeably
- *             deeper front-to-back at the hem than they are wide.
- *   BREASTS   Two hemispheres sitting ON the torso, not blended into it. The
- *             originals read as applied lumps and copying that is what stops
- *             the torso looking like a vase.
- *   HEAD      An ovoid with a face in shallow relief: brow, straight nose,
- *             slit mouth, recessed eyes. Extremely reduced — anything more
- *             detailed reads as a mannequin rather than as cast bronze.
- *   FEET      Bare, protruding from under the hem at the front. Small, but they
- *             are the only thing telling you there is a person inside the robe.
+ *   COWL      One thick swept plate standing BEHIND the body. It stays open its
+ *             full height, rises into the collar-arch and trails on the paving;
+ *             the front skirt is not part of this shell.
+ *   BODY      One blended distance field from skirt hem to collarbone: tapered
+ *             elliptical trunk, bust, shoulders, arms and the narrative forms.
+ *             It is heavy and columnar, not a pinched lathe or a flared bell.
+ *   BREASTS   Bold ellipsoidal relief blended into the chest with a fillet well
+ *             smaller than the protrusion. Separate hemispheres and over-large
+ *             blends both produced applied lumps or erased the form entirely.
+ *   HEAD      A rounded block with flat front and sides, domed crown and broad
+ *             jaw. The face is deliberately reduced but its features must be
+ *             thick enough to survive surface nets at group viewing distance.
+ *   FEET      Bare and enlarged enough to read as feet, seated against the
+ *             SKIRT's front face with the heel hidden under the hem.
  *
  * Units are metres. The figures stand about 2.3m; a person walks past one in
  * `ref-d-wide.jpg` for scale.
@@ -89,20 +88,21 @@ function roughen(THREE, geo, { amount = 0.012, scale = 3.2, seed = 1, octaves = 
 // ---------------------------------------------------------------------------
 
 /**
- * The robe AND the hood, as ONE swept shell.
+ * The cloak and collar-arch, as ONE swept cast shell.
  *
- * This started as two pieces — a body lathe with a separate cowl shell around
- * it — and that was the single biggest thing wrong with the model. A shell
- * whose radius is only a little larger than the body it wraps presents nothing
- * but its two vertical edges to a front-on camera, so the figures read as
- * people standing between a pair of rails. In the originals there is no
- * separate cowl: the robe simply keeps going up past the shoulders and opens at
- * the front to let the face out. One surface, one silhouette.
+ * This started as a body robe with a separate cowl around it, and that was the
+ * first structural failure: a cowl whose radius is only a little larger than
+ * the body presents only two vertical rails to a front camera. Later reference
+ * work settled the other half of the structure: the front skirt belongs to the
+ * BODY field and the cloak is a plate behind it, open for its full height. The
+ * invariant is therefore specific: the trailing cloak and the collar-arch are
+ * one cast shell; do not split the cowl off and do not close the shell round the
+ * body again.
  *
  * The cross-section is a crescent (outer wall, inner wall, closed at the rim),
- * so the casting has real wall thickness and the hem and the hood opening both
- * show an edge. `FRONT_OPENING` is what turns the robe into a hood: zero below
- * the shoulders, opening up to nearly a half-turn at the crown.
+ * so the casting has real wall thickness and every free edge shows section.
+ * `FRONT_OPENING` removes the whole front at every height; it does not turn a
+ * closed robe into a hood only above the shoulders.
  */
 const SHELL_PROFILE = [
     // [height, halfWidthX, halfDepthZ]
@@ -157,8 +157,9 @@ const SHELL_PROFILE = [
  * breasts and belly are in open air, in front of it, catching the sun.
  *
  * So at chest height the opening is about 1.5 rad EACH SIDE — roughly 170 deg of
- * the circle simply is not there. Only near the ground does the cloth wrap round
- * into a closed column, because that is where it pools.
+ * the circle simply is not there — and it remains open at the ground. The smooth
+ * front surface down to the paving is the skirt in `buildBodyField`, not a cloak
+ * that closes round the legs.
  *
  * The earlier table opened 0.55 rad at the chest and 1.92 at the crown, which
  * left a near-complete tube standing in front of the body with a slot cut in it.
@@ -388,9 +389,9 @@ function buildShell(THREE, opts) {
  *   0.14  a pregnancy growing out of a torso
  */
 const TORSO_PROFILE = [
-    // The trunk runs well below the hip. It has to: the cloak's front opening
-    // starts closing around 0.68 and if the body stops at the same height there
-    // is a notch where neither surface is, which reads as a tear in the casting.
+    // The trunk includes the skirt and runs all the way to the paving. It has to:
+    // the cloak's front opening never closes, so stopping the body at the hip
+    // leaves no front surface below it and reads as a tear in the casting.
     // A STRAIGHT TAPER, WIDENING DOWNWARD, with no waist to speak of. Measured
     // off the nearest figure in `ref-a-front.jpg` at four heights, her spans go
     // shoulder 0.327, bust 0.342, waist 0.356, hem 0.387 of her own height —
@@ -562,12 +563,13 @@ function buildBodyField(THREE, o) {
         return d;
     }
 
-    // The top bound has to CLEAR the neck capsule's cap (0.059 above its 2.108
-    // end point, so 2.167). At 2.13 the box sliced straight through the neck,
-    // surface nets left the cut open with a torn rim, and every figure wore what
-    // looked like a dark trapezoidal visor from the eyes to the collarbone.
-    // Three passes were spent hunting that as a lighting bug, a shadow bug and a
-    // facial-geometry bug; a MeshNormalMaterial render found it in one.
+    // The top bound has to CLEAR the neck capsule's cap. In the current field
+    // the cap reaches 1.974 and the box reaches 2.06. An earlier neck ended at
+    // 2.108 with a 0.059 cap, while its box stopped at 2.13; surface nets sliced
+    // it open and left a torn rim that looked like a dark trapezoidal visor from
+    // the eyes to the collarbone. Three passes were spent hunting that as a
+    // lighting bug, a shadow bug and a facial-geometry bug; one
+    // MeshNormalMaterial render found it.
     const mesh = surfaceNets(field, {
         min: [-0.60, -0.03, -0.36],
         max: [0.60, 2.06, 0.46],
@@ -644,9 +646,10 @@ function buildHeadField(THREE, o) {
      *   BROW   a straight ridge across the FULL width of the face, with a
      *          shadow under it. The old one was two thirds as wide and read as
      *          a bump between the eyes.
-     *   EYES   two long horizontal lenses, nearly closed, each about a third of
-     *          the face wide, angled slightly down and out. Not sockets. The old
-     *          ones were small round hollows and read as holes.
+     *   EYES   the Phase 3 approximation is two long shallow lens-shaped cuts,
+     *          nearly closed and angled slightly down and out. The reference
+     *          target remains a pair of hollow triangular sockets; that is E3
+     *          in the rubric and is intentionally still unresolved.
      *   NOSE   a NARROW ridge, about a sixth of the face across, running
      *          unbroken from between the brows to a small blunt tip.
      *   MOUTH  a WIDE flat bar, about half the face across, split by one
@@ -671,9 +674,10 @@ function buildHeadField(THREE, o) {
             d = smax(d, z - 0.090, 0.020);
         }
 
-        // HAIR. Only two of the four wear it. The nearest figure in ref-a is
-        // bare-headed — a plain block — and giving every figure a cap was one of
-        // the things making the four heads interchangeable.
+        // HAIR. The nearest figure in ref-a is bare-headed — a plain block — and
+        // giving every figure the same cap was one of the things making the four
+        // heads interchangeable. The turned-away figure may carry a plain cap;
+        // only the two `capbun` figures carry the coiled crown silhouette.
         if (o.hair !== 'none') {
             // The edge is CUT, not blended: in the photographs the hair meets
             // the face along a hard vertical line in front of the ear, and
@@ -953,7 +957,7 @@ export const FIGURE_LANDMARKS = {
  * @param {object} opts
  * @param {number} opts.seed     drives every noise field, so two figures with
  *                               different seeds are visibly different castings
- * @param {boolean} opts.bun     wears the coiled bun
+ * @param {'none'|'cap'|'capbun'} opts.hair head treatment
  * @param {boolean} opts.faceless the head is turned away — no face relief
  * @param {boolean} opts.hands   hands meet at the front of the waist
  * @param {number} opts.scale    overall height multiplier
@@ -1023,7 +1027,7 @@ export function buildFigure(THREE, opts = {}) {
     return geo;
 }
 
-/** The fourth figure faces away: a smooth ovoid with a bun and no features. */
+/** Legacy, currently unused: the pre-Phase-3 smooth ovoid blank head. */
 function buildBlankHead(THREE, opts) {
     const parts = [];
     const yc = 2.005;
