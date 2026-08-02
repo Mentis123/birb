@@ -3,7 +3,14 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v12-2026-08-01';
+const CACHE_VERSION = 'v13-2026-08-02';
+
+/**
+ * Paths owned by other Birb Labs artefacts. This worker must not touch them.
+ * See the bypass in the fetch handler for why this is a correctness issue and
+ * not housekeeping.
+ */
+const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture'];
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -112,15 +119,18 @@ self.addEventListener('fetch', (event) => {
 
   const sameOrigin = url.origin === self.location.origin;
 
-  // Birb Gauntlet (/gauntlet) is a separate, self-contained Birb Labs artefact with its own
-  // asset graph. It is deliberately excluded from this service worker.
+  // Sibling Birb Labs artefacts are separate, self-contained apps with their own
+  // asset graphs. They are deliberately excluded from this service worker.
   //
   // This is not tidiness — it is a correctness fix. networkFirst() below writes
   // EVERY navigation response into the cache under the key './index.html', so
   // a single visit to /gauntlet would overwrite Birb Mobile's offline shell with
   // Birb Gauntlet's HTML, and the next offline launch of the main game would boot the
-  // wrong game. Bypassing here keeps the two artefacts fully independent.
-  if (sameOrigin && url.pathname.startsWith('/gauntlet')) return;
+  // wrong game. Bypassing here keeps the artefacts fully independent.
+  //
+  // Add every new sibling to this list BEFORE it ships, not after someone
+  // reports the main game booting the wrong thing.
+  if (sameOrigin && SIBLING_ARTEFACTS.some((p) => url.pathname.startsWith(p))) return;
 
   const cdnCacheable = RUNTIME_CACHEABLE_HOSTS.has(url.host);
   if (!sameOrigin && !cdnCacheable) return;

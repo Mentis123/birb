@@ -147,6 +147,42 @@ live in `gauntlet/dev/`. Note: the harness needs
 the hand-written Three test stub this repo tracks there and silently breaks
 `npm test`.
 
+### Bronze — unlisted sibling at `/sculpture` (2026-08-02)
+
+A **3D study of the bronze group outside The Women's** (Royal Women's Hospital,
+Parkville), living at `sculpture/` and deployed to
+**birbmobile.vercel.app/sculpture**. Unlisted: `noindex`, linked from nowhere.
+Drag to orbit, pinch to zoom, double-tap to reset. Three-finger QR as usual.
+
+Own stack, same house rules as Gauntlet: pinned CDN Three, vanilla ES modules,
+no build step, **zero external assets** — the sculpture is generated from
+profile curves in code, not loaded as a mesh. That is not purism: every
+proportion is a NUMBER in a table (`SHELL_PROFILE`, `TORSO_PROFILE`,
+`FRONT_OPENING`) that can be tuned against a photograph, which is the whole
+workflow for getting a likeness.
+
+**The reference photos were upside down**, and that mattered more than it
+sounds. All four arrive with EXIF orientation 3; `ImageOps.exif_transpose`
+alone is the correct fix, and an extra flip double-corrects and mirrors the
+signage — which is how you can tell you have got it wrong. The first plan for
+this scene was written against the un-rotated images and described a completely
+different sculpture (hooded figures with flared cloaks). Upright crops live in
+`sculpture/reference/` and every modelling decision is made against those.
+
+Two structural lessons already paid for, do not undo them:
+
+- **The robe and the hood are ONE swept shell**, not a body with a cowl around
+  it. Modelled as two pieces, the cowl's radius sits barely outside the body's,
+  so a front-on camera sees only its two vertical edges and the figures read as
+  people standing between a pair of rails.
+- **The cloak opens at the HIP, not the shoulder.** The torso inside is bare and
+  fully modelled. Closing the robe at chest height turns four women into four
+  bottles.
+
+Verify with `node tools/sculpture-shot.mjs` (same harness contract as Gauntlet:
+non-zero exit on any page or console error, `--eval "window.__SCULPT.setView(
+yawDeg, pitchDeg, distance)"` to park the camera at a repeatable angle).
+
 ## What This Is
 
 A mobile-first 3D bird flight game built with Three.js. A bird flies on a spherical world — you control it with touch (virtual joystick), collect rings, shoot rockets from nests, and fight drones. Four game modes: Casual free flight, Ring Rush (timed collection), Drone Hunter (60s survival), Turret Defense (wave-based).
