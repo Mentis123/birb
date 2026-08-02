@@ -1,0 +1,38 @@
+name: Phase 4 Headless Shell Export
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/phase4-export-temp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Chromium headless shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright
+          npx playwright install chromium-headless-shell
+          cd "$HOME/.cache/ms-playwright"
+          ls -lah
+          tar -czf /tmp/phase4-headless-shell.tar.gz chromium_headless_shell-*
+          ls -lh /tmp/phase4-headless-shell.tar.gz
+          sha256sum /tmp/phase4-headless-shell.tar.gz > /tmp/phase4-headless-shell.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase4-headless-shell
+          path: |
+            /tmp/phase4-headless-shell.tar.gz
+            /tmp/phase4-headless-shell.sha256
+          retention-days: 1
