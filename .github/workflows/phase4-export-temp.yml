@@ -1,9 +1,9 @@
 name: Phase 4 Workspace Export
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/bronze-phase-4
+      - main
     paths:
       - '.github/workflows/phase4-export-temp.yml'
   workflow_dispatch:
