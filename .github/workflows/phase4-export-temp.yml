@@ -48,6 +48,8 @@ jobs:
           npm install --no-save playwright three-real@npm:three@0.183.2
           git checkout -- node_modules/three/index.js
           npx playwright install --with-deps chromium
+          sudo apt-get install -y python3-pil
+          python3 -c 'from PIL import Image; print(Image.__version__)'
 
       - name: Run tests and proportion gate
         shell: bash
@@ -98,18 +100,21 @@ jobs:
             | tee evidence/arm-clinical-front.txt
 
       - name: Record candidate metadata
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p evidence
           {
             echo "candidate_source=${GITHUB_SHA}"
             echo "main_base=$(git rev-parse origin/main)"
             echo "patch_sha256=0107a32554137cd328ea9e2aa3c6dd47102d966de1f815abde58c86eacc6d7ce"
-            sha256sum evidence/*.png
+            find evidence -maxdepth 1 -type f -name '*.png' -print0 | sort -z | xargs -0 -r sha256sum
             git diff --cached --stat
           } | tee evidence/candidate-metadata.txt
 
       - name: Upload Phase 4 candidate evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bronze-phase4-candidate
