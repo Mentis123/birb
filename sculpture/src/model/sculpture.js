@@ -64,13 +64,20 @@ const LAYOUT = [
     // roughly backward (pi) with a small fan, because cloth trailing off a
     // walking figure goes behind her, not out to the sides.
     //
+    // THE WALK. Every figure is mid-step: `strideAngle` is the direction she is
+    // stepping, `hemRake` how far her hem lifts clear of the leading foot,
+    // `stride` which side leads, `lean` how far her column tips forward, and
+    // `headTurn`/`headTilt` where she is looking. No two agree on any of them —
+    // four figures at identical angles is one of the loudest tells that a group
+    // is a render rather than a casting.
+    //
     // `cowlTop` clears the crown by about 0.05 of figure height on the tall
     // ones. Figure 0's stops at her shoulders and her head stands completely
     // free, which is what `ref-a-front.jpg` shows on the nearest figure.
-    { x: -0.75, z: 0.50, turn: -0.05, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, trainAngle: 3.42, trainAmount: 0.46 },
-    { x: -0.25, z: 0.06, turn: 0.13, scale: 0.995, seed: 23, bun: true, faceless: true, hands: false, pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, trainAngle: 3.10, trainAmount: 0.40 },
-    { x: 0.25, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, bun: true, faceless: false, hands: false, pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, trainAngle: 2.86, trainAmount: 0.54 },
-    { x: 0.75, z: -0.82, turn: 0.50, scale: 1.010, seed: 51, bun: true, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, trainAngle: 2.62, trainAmount: 0.62 },
+    { x: -0.75, z: 0.50, turn: -0.05, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, openScale: 1.06, sweepLean: -0.030, strideAngle: 0.10, hemRake: 0.055, stride: -1, lean: 0.042, headTurn: -0.16, headTilt: 0.035, trainAngle: 3.42, trainAmount: 0.50 },
+    { x: -0.25, z: 0.06, turn: 0.13, scale: 0.995, seed: 23, bun: true, faceless: true, hands: false, pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, openScale: 0.94, sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038, stride: 1, lean: 0.028, headTurn: 0.30, headTilt: -0.030, trainAngle: 3.10, trainAmount: 0.44 },
+    { x: 0.25, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, bun: true, faceless: false, hands: false, pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, openScale: 1.02, sweepLean: -0.014, strideAngle: 0.22, hemRake: 0.048, stride: -1, lean: 0.036, headTurn: -0.34, headTilt: 0.018, trainAngle: 2.86, trainAmount: 0.58 },
+    { x: 0.75, z: -0.82, turn: 0.50, scale: 1.010, seed: 51, bun: true, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, openScale: 0.98, sweepLean: 0.026, strideAngle: -0.06, hemRake: 0.030, stride: 1, lean: 0.022, headTurn: 0.12, headTilt: -0.042, trainAngle: 2.62, trainAmount: 0.66 },
 ];
 
 /**
@@ -170,7 +177,10 @@ export function createSculpture(THREE, opts = {}) {
             seed: L.seed, bun: L.bun, faceless: L.faceless, hands: L.hands, scale: L.scale,
             pregnant: L.pregnant, baby: L.baby, stethoscope: L.stethoscope,
             folds: L.folds, foldDepth: L.foldDepth, foldPhase: L.foldPhase,
-            cowlTop: L.cowlTop, trainAngle: L.trainAngle, trainAmount: L.trainAmount,
+            cowlTop: L.cowlTop, openScale: L.openScale, sweepLean: L.sweepLean,
+            strideAngle: L.strideAngle, hemRake: L.hemRake, stride: L.stride,
+            lean: L.lean, headTurn: L.headTurn, headTilt: L.headTilt,
+            trainAngle: L.trainAngle, trainAmount: L.trainAmount,
         });
         paintPatina(THREE, geo, L.seed);
         const mesh = new THREE.Mesh(geo, material);

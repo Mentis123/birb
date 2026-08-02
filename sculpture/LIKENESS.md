@@ -46,25 +46,25 @@ regressions on this model were caused by fixing one thing.
 
 ## B · The cloak — `ref-c-under`, `ref-d-wide`
 
-- [ ] **B1** The cloak is a PLATE, not cloth. Every free edge shows visible
+- [x] **B1** The cloak is a PLATE, not cloth. Every free edge shows visible
       thickness; the rim reads as a cast section, not as a paper edge.
 - [x] **B2** It hugs close behind the body. Its width at chest height is barely
       more than her shoulders.
 - [ ] **B3** The collar-arch behind the head is HOLLOW and you can see into it
       from three-quarter angles — a dark opening with a rim, not a solid slab.
 - [x] **B4** The hem does not flare sideways. What spreads, spreads BACKWARD.
-- [ ] **B5** The trailing hem lies on the paving as a long low tail, flat to the
+- [x] **B5** The trailing hem lies on the paving as a long low tail, flat to the
       ground, reaching well behind the figure.
-- [ ] **B6** No two cloaks are swept alike. Height, sweep direction and how far
+- [x] **B6** No two cloaks are swept alike. Height, sweep direction and how far
       each rises behind the head all differ.
 - [x] **B7** The cowl height varies per figure: some stop at the shoulders and
       the head stands completely free.
 
 ## C · Pose and motion — `ref-c-under`, `ref-b-threequarter`
 
-- [ ] **C1** The group is WALKING. Hems raked back off a planted forward foot.
-- [ ] **C2** The torsos lean very slightly forward of vertical.
-- [ ] **C3** The heads are not all level and not all facing the same way.
+- [x] **C1** The group is WALKING. Hems raked back off a planted forward foot.
+- [x] **C2** The torsos lean very slightly forward of vertical.
+- [x] **C3** The heads are not all level and not all facing the same way.
 - [ ] **C4** At least one figure's weight is visibly on one leg.
 
 ## D · Arrangement — `ref-a-front`, `ref-d-wide`
@@ -114,15 +114,15 @@ regressions on this model were caused by fixing one thing.
 ## H · Feet and ground
 
 - [x] **H1** Bare feet emerge from under the hem at the front, heel hidden.
-- [ ] **H2** They read as feet — heel, instep, toes — not as pebbles.
+- [x] **H2** They read as feet — heel, instep, toes — not as pebbles.
 - [ ] **H3** The group casts one connected shadow, as it does on the paving.
 
 ---
 
 ## Score
 
-**19 / 41** after Phase 1 (2026-08-02), scored against
-`shots/sculpt/sheet-p1-final.png`. Was 10 before it.
+**26 / 41** after Phase 2 (2026-08-02), scored against
+`shots/sculpt/sheet-p2e.png`. Was 19 after Phase 1 and 10 before either.
 
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
@@ -166,12 +166,33 @@ The gate is green at 0 of 12, worst +0.023. **That is necessary and not
 sufficient**, and the file it lives in says so: this gate has been green and
 wrong twice. The rubric above is what makes the difference, and it is 20.
 
-### What is left, in the order the evidence says to do it
+### Phase 2 — cast section and the stride. Done.
 
-**Phase 2 — the cloak as cast bronze, and the stride.** B1, B3, B5, B6, C1-C4.
-The rims are still razor-thin, which is also what leaves a hard V-notch where the
-front opening closes — the photographs show a cast section there, not a cut. The
-collar-arch needs opening into the hollow `ref-c` shows. Then the walk.
+**The V-notch was structural, not cosmetic.** A dark wedge ran up the front of
+every figure where the cloak's two rims converged, and no amount of moving the
+opening's keyframes removed it, because a cloak that closes has to close
+somewhere. The photographs show it never closes: she wears a long SKIRT — that
+smooth continuous surface down her front in `ref-a-front.jpg` — and the cloak is
+a panel hanging behind it, open its whole height. The skirt is now part of the
+body field, running to the paving, and the opening holds at 1.1 rad even at the
+ground.
+
+**Every free edge carries a rounded bead** at half the wall thickness, built as
+one closed cross-section — outer wall, bead, inner wall, bead — instead of two
+walls meeting in a fold. Those edges draw the collar-arch and both sides of the
+open front; with no section to show they read as cut paper.
+
+**The walk.** Hems lift clear of a leading foot (a lift only — dropping the back
+edge pushes it through the paving), each column shears forward of vertical, and
+no two figures agree on stride side, rake, lean, head turn or head tilt.
+
+**The feet were three times too small** — 0.10m long on a 2.3m figure. They read
+as pebbles wherever they were placed, which was diagnosed as a placement problem
+twice and was never one. They also had to be re-seated against the SKIRT's front
+face, since the cloak stopped reaching the front of the figure when its opening
+was opened to full height.
+
+### What is left, in the order the evidence says to do it
 
 **Phase 3 — heads.** E1-E5, E7. Worth doing now and not earlier, because the
 head has just changed size by a third. Key insight to apply: under a
@@ -182,4 +203,6 @@ protrusion, so cut the flanks rather than raising the ridge.
 and ribs; each figure's arms doing something different; stronger hand-working and
 the vertical run-off streaks.
 
-**Phase 5 — D2, H3, mobile perf, ship.**
+**Phase 5 — B3, C4, D2, H3, mobile perf, ship.** The collar-arch hollow still
+does not read; only one figure carries an arch and its interior is not legible
+as an opening. No figure shows a weight shift onto one leg.

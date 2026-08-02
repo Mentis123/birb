@@ -165,13 +165,23 @@ const SHELL_PROFILE = [
  * The body was fully modelled the whole time; you could not see any of it.
  */
 const FRONT_OPENING = [
-    [0.000, 0.00],
-    [0.240, 0.00],
-    [0.460, 0.16],
-    [0.680, 0.44],
-    [0.900, 0.74],
-    [1.120, 1.00],
-    [1.320, 1.20],
+    // IT NEVER CLOSES. Earlier versions ran the opening to zero by knee height,
+    // which turned the cloak into a tube below the hip and put a deep dark V up
+    // the front of every figure where its two rims converged. No amount of
+    // moving these keyframes removed that notch, because the notch was the
+    // structure: a cloak that closes has to close SOMEWHERE.
+    //
+    // The photographs show it does not. She wears a long skirt — that is the
+    // smooth continuous surface down the front of her in `ref-a-front.jpg` — and
+    // the cloak is a panel hanging BEHIND it, open its whole height. So the
+    // skirt is now part of the body field (see TORSO_PROFILE, which runs to the
+    // ground) and the cloak just stays open.
+    [0.000, 1.10],
+    [0.300, 1.12],
+    [0.620, 1.16],
+    [0.900, 1.20],
+    [1.120, 1.24],
+    [1.320, 1.28],
     [1.520, 1.34],
     [1.700, 1.46],
     [1.849, 1.58],   // shoulder
@@ -194,11 +204,25 @@ function shellOffsetZ(y) {
     return -0.150 * t * t * (3 - 2 * t);
 }
 
-const WALL = 0.040;
+/**
+ * Wall thickness of the casting, in metres, and the radius of the bead that
+ * rounds every free edge.
+ *
+ * This is a LOOK, not a detail. The cloak's edges are the most-seen lines in the
+ * whole model — they draw the silhouette of the collar-arch and both sides of
+ * the open front — and at 0.040 with the two walls meeting in a hard fold they
+ * read as cut paper. A cast bronze sheet shows its section: a rounded bead with
+ * a highlight along the top of it and a shadow under. Rounding those edges is
+ * also what removes the hard V-notch where the front opening closes, which no
+ * amount of moving the opening's keyframes ever fixed, because the notch was
+ * never the opening — it was the edge having no thickness to show.
+ */
+const WALL = 0.055;
 
 function buildShell(THREE, opts) {
     const RINGS = 76;
     const ARC = 30;                       // segments along one wall of the crescent
+    const RIM = 5;                        // segments rounding one free edge
     // NOT every cloak goes over its wearer's head. In `ref-a-front.jpg` the
     // nearest figure's stops at her shoulders and her head stands completely
     // free; two others carry the full arch behind the crown. Building all four
@@ -207,25 +231,52 @@ function buildShell(THREE, opts) {
 
     const positions = [];
     const indices = [];
-    const loop = (ARC + 1) * 2;
+    // outer wall + far bead + inner wall + near bead
+    const loop = (ARC + 1) * 2 + (RIM - 1) * 2;
 
     for (let r = 0; r <= RINGS; r++) {
         const y = (r / RINGS) * yTop;
         const [hw, hd] = sampleProfile(SHELL_PROFILE, y);
-        const open = sampleProfile(FRONT_OPENING, y)[0];
+        const open = sampleProfile(FRONT_OPENING, y)[0] * opts.openScale;
         const zOff = shellOffsetZ(y);
         // Round the last 28cm off to whatever height this cloak stops at, so a
         // truncated one ends in a curve rather than a flat lid.
         const capT = Math.max(0, (y - (yTop - 0.28)) / 0.28);
         const cap = 1 - 0.66 * capT * capT;
 
-        for (let side = 0; side < 2; side++) {
-            const k = side === 0 ? 1 : 1 - WALL / Math.max(hw, 0.06);
-            for (let s = 0; s <= ARC; s++) {
-                const u = side === 0 ? s / ARC : 1 - s / ARC;
-                // Walk from the near edge of the opening, round the back, to
-                // the far edge. At open = 0 this is a complete revolution.
-                const th = open + u * (Math.PI * 2 - open * 2);
+        // THE CROSS-SECTION, as ONE closed loop: outer wall from the near edge
+        // round the back to the far edge, a rounded bead over that edge, the
+        // inner wall back again, and a bead over the near edge. Built as two
+        // separate walls meeting at a fold, which is what it was, the free edges
+        // had no section to show and the cloak read as cut paper.
+        //
+        // The bead sweeps radius from the outer wall to the inner one while
+        // bulging PAST the edge by half the wall thickness, so it is a proper
+        // half-round. `rimRad` converts that half-thickness into radians at this
+        // ring's radius, and fades out as the opening closes — a ring with no
+        // opening has no free edge to round, and bulging past a seam that is not
+        // there just creases the front of the skirt.
+        const kIn = 1 - WALL / Math.max(hw, 0.06);
+        const midR = (1 + kIn) * 0.5;
+        const halfT = (1 - kIn) * 0.5;
+        const far = Math.PI * 2 - open;
+        const rimFade = Math.min(1, Math.max(0, (open - 0.02) / 0.14));
+        const rimRad = (WALL / (2 * Math.max(hw, 0.06))) * rimFade;
+
+        const section = [];
+        for (let s = 0; s <= ARC; s++) section.push([open + (far - open) * s / ARC, 1]);
+        for (let i = 1; i < RIM; i++) {
+            const ph = Math.PI * i / RIM;
+            section.push([far + rimRad * Math.sin(ph), midR + halfT * Math.cos(ph)]);
+        }
+        for (let s = 0; s <= ARC; s++) section.push([far - (far - open) * s / ARC, kIn]);
+        for (let i = 1; i < RIM; i++) {
+            const ph = Math.PI * i / RIM;
+            section.push([open - rimRad * Math.sin(ph), midR - halfT * Math.cos(ph)]);
+        }
+
+        {
+            for (const [th, k] of section) {
                 const cs = Math.cos(th), sn = Math.sin(th);
                 // Slight flattening front and back: the robes carry their
                 // fullness at the sides, not as a round tube.
@@ -249,8 +300,12 @@ function buildShell(THREE, opts) {
                 // So the trailing half of each low ring is translated along
                 // `trainAngle` by up to `trainAmount` METRES, and the leading
                 // half does not move at all.
+                // Concentrated hard at the ground so the tail LIES FLAT on the
+                // paving rather than sweeping up the back of the figure like a
+                // cape. In `ref-c-under.jpg` it is a long low tongue of bronze
+                // on the pavement, and its top edge barely leaves the ground.
                 const trail = Math.max(0, Math.cos(th - opts.trainAngle));
-                const low = Math.pow(Math.max(0, 1 - y / 0.72), 2.0);
+                const low = Math.pow(Math.max(0, 1 - y / 0.58), 2.6);
                 const tail = opts.trainAmount * trail * trail * low;
 
                 // DRAPERY. Every reference photograph is dominated by vertical
@@ -259,14 +314,24 @@ function buildShell(THREE, opts) {
                 // can rescue. The ridges run down the figure with a slow twist,
                 // and they DEEPEN toward the hem where the cloth gathers —
                 // constant-depth folds look machined, like fluting on a column.
+                // THE RAKE. A walking figure's hem is not a horizontal line: it
+                // is lifted clear of the leading foot and left trailing behind
+                // the other. In `ref-c-under.jpg` you can see straight under the
+                // near figure's hem to her planted foot, and the cloth behind
+                // her is still on the ground. Lift only — dropping the back edge
+                // would push it through the paving.
+                const rake = opts.hemRake * Math.max(0, Math.cos(th - opts.strideAngle))
+                    * Math.pow(Math.max(0, 1 - y / 0.62), 2.0);
+
                 const gather = Math.pow(Math.max(0, 1 - y / 1.85), 1.35);
                 const depth = (0.026 + 0.058 * gather) * opts.foldDepth;
                 const fold = 1
                     + depth * Math.cos(th * opts.folds + y * 0.55 + opts.foldPhase)
                     + depth * 0.42 * Math.cos(th * (opts.folds * 2 + 1) - y * 0.9 + opts.foldPhase * 1.7);
                 positions.push(
-                    sn * hw * cap * k * fold + Math.sin(opts.trainAngle) * tail,
-                    y,
+                    sn * hw * cap * k * fold + Math.sin(opts.trainAngle) * tail
+                        + y * opts.sweepLean,
+                    y + rake,
                     cs * hd * cap * flat * k * fold + zOff + Math.cos(opts.trainAngle) * tail
                 );
             }
@@ -284,11 +349,15 @@ function buildShell(THREE, opts) {
 
     // Close the hem: a flat annulus between the outer and inner walls, so the
     // figure is not an open pipe when you orbit down to ground level.
-    const base = 0;
+    //
+    // The inner wall runs the opposite way round from the outer, so the vertex
+    // facing outer[s] is inner[ARC - s]; the inner wall itself starts after the
+    // outer wall and the far bead, at ARC + RIM.
+    const INNER0 = ARC + RIM;
     for (let s = 0; s < ARC; s++) {
-        const o1 = base + s, o2 = base + s + 1;
-        const i1 = base + loop - 1 - s, i2 = base + loop - 2 - s;
-        indices.push(o1, o2, i1, o2, i2, i1);
+        const o1 = s, o2 = s + 1;
+        const i1 = INNER0 + (ARC - s), i2 = INNER0 + (ARC - s - 1);
+        indices.push(o1, o2, i2, o1, i2, i1);
     }
 
     const geo = new THREE.BufferGeometry();
@@ -334,10 +403,15 @@ const TORSO_PROFILE = [
     // line has come DOWN from 1.911 to 1.849. Both came out of the rebuilt
     // proportion gate, which found every width in the model short by roughly the
     // same fraction — the tell that it was one systematic error, not four.
-    [0.420, 0.330, 0.172],
-    [0.560, 0.348, 0.176],
-    [0.700, 0.360, 0.176],
-    [0.900, 0.354, 0.174],
+    // Below the hip this IS the skirt, and it runs to the paving. It has to:
+    // with the cloak open its whole height there is nothing else down there, and
+    // in the photographs the front of each figure below the waist is one smooth
+    // continuous surface reaching the ground.
+    [0.000, 0.395, 0.238],
+    [0.180, 0.388, 0.228],
+    [0.400, 0.378, 0.212],
+    [0.620, 0.368, 0.196],
+    [0.820, 0.360, 0.182],
     [1.070, 0.346, 0.172],
     [1.210, 0.336, 0.168],
     [1.330, 0.326, 0.162],
@@ -389,7 +463,10 @@ function buildBodyField(THREE, o) {
 
     function field(x, y, z) {
         // Trunk from well down inside the skirt up to the base of the neck.
-        let d = sdTrunk(x, y, z, 0.420, 1.960);
+        // The skirt's hem is raked to match the cloak's, so the lift reveals a
+        // planted foot rather than cutting a step into the front of the drape.
+        const hemY = o.hemRake * Math.max(0, Math.cos(Math.atan2(x, z) - o.strideAngle)) * 0.92;
+        let d = sdTrunk(x, y, z, hemY, 1.960);
 
         // Bust. THE BLEND RADIUS MUST BE WELL UNDER THE PROTRUSION — this is
         // the one rule of modelling with smin and the first version broke it.
@@ -492,9 +569,9 @@ function buildBodyField(THREE, o) {
     // Three passes were spent hunting that as a lighting bug, a shadow bug and a
     // facial-geometry bug; a MeshNormalMaterial render found it in one.
     const mesh = surfaceNets(field, {
-        min: [-0.60, 0.38, -0.36],
+        min: [-0.60, -0.03, -0.36],
         max: [0.60, 2.06, 0.46],
-        voxel: 0.0135,
+        voxel: 0.0145,
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
@@ -649,7 +726,20 @@ function buildHeadField(THREE, o) {
     // only needs the sign and a monotonic crossing, so a uniformly scaled
     // distance meshes identically — but scaling it keeps the value honest for
     // anything that later reads it as metres.
-    const field = (x, y, z) => headField(x / HS, (y - yc) / HS + YC0, z / HS) * HS;
+    // Head turn and tilt, applied as an inverse rotation of the sample point.
+    // Four heads at identical angles is one of the loudest tells that a group is
+    // a render rather than a casting: in every photograph the four are looking
+    // slightly different ways and none of them is quite level.
+    const cT = Math.cos(o.headTurn), sT = Math.sin(o.headTurn);
+    const cP = Math.cos(o.headTilt), sP = Math.sin(o.headTilt);
+    const field = (x, y, z) => {
+        const dy = y - yc;
+        const rx = x * cT - z * sT;
+        const rz = x * sT + z * cT;
+        const ry2 = dy * cP + rz * sP;
+        const rz2 = -dy * sP + rz * cP;
+        return headField(rx / HS, ry2 / HS + YC0, rz2 / HS) * HS;
+    };
 
     // Bounds and voxel are in WORLD units and both scale with the head, so the
     // relative detail is unchanged. Same rule as the body's box: clear the neck
@@ -675,19 +765,34 @@ function buildHeadField(THREE, o) {
 function buildFeet(THREE, opts) {
     const parts = [];
     for (const sx of [-1, 1]) {
-        const lead = sx > 0 ? 0.030 : 0;
-        // Set so the HEM COVERS THE HEEL and only the front of the foot shows.
+        // ONE FOOT FORWARD. `stride` is which side leads, so the pair reads as a
+        // step rather than as a stance: the leading foot sits well out under the
+        // lifted hem and the trailing one is still tucked under the cloth.
+        const leads = sx === opts.stride;
+        const lead = leads ? 0.088 : -0.026;
+        // Set against the SKIRT's front face at the ground (z = 0.238), not against
+    // the cloak's — the cloak stopped reaching the front of the figure when its
+    // opening was made to run the whole height. Placed against the old outline
+    // the feet stood a fifth of a metre clear of anything and read as loose
+    // objects on the paving.
+    //
+    // Set so the HEM COVERS THE HEEL and only the front of the foot shows.
         // Standing entirely clear of the cloth they read as four pairs of loose
         // eggs on the paving, which is what they looked like for three passes.
         // Built as ONE squashed sphere they still did: it is the heel-to-toe
         // taper, heel high and back, toes low and forward, that makes a foot.
+        // SIZED FOR A 2.3m FIGURE. At 0.10 long these were a third of the foot
+        // this woman needs and they read as pebbles no matter where they were
+        // put — which was diagnosed twice as a placement problem and was never
+        // one. Scaled off a human foot at her scale: about 0.31 long, 0.15
+        // across, 0.09 at the instep.
         const heel = new THREE.SphereGeometry(1, 14, 10);
-        heel.scale(0.050, 0.048, 0.064);
-        heel.translate(sx * 0.098, 0.048, 0.372 + lead);
+        heel.scale(0.072, 0.068, 0.092);
+        heel.translate(sx * 0.104, leads ? 0.066 : 0.082, 0.174 + lead);
         parts.push(heel);
         const foot = new THREE.SphereGeometry(1, 16, 10);
-        foot.scale(0.052, 0.028, 0.104);
-        foot.translate(sx * 0.099, 0.027, 0.450 + lead);
+        foot.scale(0.075, 0.042, 0.155);
+        foot.translate(sx * 0.106, 0.040, 0.268 + lead);
         parts.push(foot);
     }
     const geo = mergeGeometries(THREE, parts);
@@ -801,6 +906,21 @@ export function buildFigure(THREE, opts = {}) {
         foldDepth: opts.foldDepth ?? 1,
         foldPhase: opts.foldPhase ?? 0,
         cowlTop: opts.cowlTop ?? 2.420,
+        // No two cloaks in the group are swept alike. `openScale` widens or
+        // narrows this one's front opening, `sweepLean` leans the whole panel
+        // sideways as it rises — both small, both per figure, and together they
+        // stop the four cloaks reading as four copies of one part.
+        openScale: opts.openScale ?? 1,
+        sweepLean: opts.sweepLean ?? 0,
+        // The walk. `strideAngle` is the direction she is stepping, `hemRake`
+        // how far the hem lifts off the leading foot, `stride` which side leads,
+        // and `lean` how far her whole column tips forward of vertical.
+        strideAngle: opts.strideAngle ?? 0,
+        hemRake: opts.hemRake ?? 0,
+        stride: opts.stride ?? -1,
+        lean: opts.lean ?? 0,
+        headTurn: opts.headTurn ?? 0,
+        headTilt: opts.headTilt ?? 0,
         trainAngle: opts.trainAngle ?? Math.PI,
         trainAmount: opts.trainAmount ?? 0.55,
         scale: opts.scale ?? 1,
@@ -820,6 +940,19 @@ export function buildFigure(THREE, opts = {}) {
     if (want('feet')) parts.push(buildFeet(THREE, o));
 
     const geo = mergeGeometries(THREE, parts);
+
+    // FORWARD LEAN, as a shear rather than a rotation. Rotating the figure would
+    // tip her feet off the paving and lift one edge of the hem into the air;
+    // shearing z by height leaves everything at ground level exactly where it
+    // was and tips only what is above it, which is what walking looks like.
+    if (o.lean) {
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            pos.setZ(i, pos.getZ(i) + pos.getY(i) * o.lean);
+        }
+        pos.needsUpdate = true;
+    }
+
     if (o.scale !== 1) geo.scale(o.scale, o.scale, o.scale);
     geo.computeVertexNormals();
     return geo;

@@ -320,8 +320,18 @@ twice. The phased plan is at the end of `sculpture/ARCHITECTURE.md`.
 small, the bust too high, and the hem read 0.56 of figure height against the
 photograph's 0.39 — that last one entirely because the train scaled the ring's
 RADIUS and so pushed the hem sideways as well as backward, while the base profile
-measured correct to within 0.007. It is a displacement now. Next is the cloak's
-cast section and the walking stride, then the faces.
+measured correct to within 0.007. It is a displacement now.
+
+**Phase 2 (cast section and the stride) is done.** The dark V up the front of
+every figure was structural, not cosmetic: the cloak closed into a tube below the
+hip, and a cloak that closes has to close somewhere. It never closes in the
+photographs — she wears a long skirt, and the cloak is a panel hanging behind it
+— so the skirt is now part of the body field, running to the paving, and the
+opening holds its full height. Every free edge carries a rounded bead built into
+one closed cross-section; hems rake clear of a leading foot; each column shears
+forward of vertical; no two figures agree on stride, rake, lean or head angle.
+The feet also turned out to be three times too small, which had been diagnosed as
+a placement problem twice and was never one. Next are the faces.
 
 ## What This Is
 

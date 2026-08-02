@@ -266,7 +266,7 @@ is evidence the code ran.
 ## Where the model is, and what is left
 
 **`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
-Currently 19.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
+Currently 26.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
 +0.023 — which is necessary and not sufficient, since this gate has been green
 and wrong twice. Phase 1 is done; the rubric is what says how far there is left
 to go.
@@ -281,11 +281,19 @@ flared. The train became a DISPLACEMENT rather than a radius scale, which was
 the whole of the 0.56-vs-0.39 hem error. Group tightened to 0.50 spacing across
 0.80-wide cloaks so it reads as one mass. Gate green, A1-A5 and B2/B4/D3/E6.
 
-**Phase 2 — The cloak as cast bronze, and the stride.** Thick rounded rims on
-every free edge; the crescent wall exists but reads paper-thin. Open the
-collar-arch into the visible hollow `ref-c` shows. Per-figure variation in sweep.
-Then the walk: raked hems, planted forward foot, slight forward lean.
-*Target: B1–B6, C1–C4.*
+**Phase 2 — The cloak as cast bronze, and the stride. DONE (2026-08-02).** The
+front opening now never closes and the SKIRT is part of the body field running to
+the paving — that is what the V-notch up every figure's front actually was, and
+it could not be tuned away because a cloak that closes has to close somewhere.
+Every free edge carries a rounded bead built into one closed cross-section. Hems
+rake off a leading foot, columns shear forward of vertical, and no two figures
+agree on stride, rake, lean or head angle. Feet resized 3x — at 0.10m long they
+read as pebbles wherever they were put. B3 and C4 remain.
+
+Add to the invariants: **the feet are seated against the SKIRT's front face, not
+the cloak's.** The cloak stopped reaching the front of the figure when its
+opening was run full height, and anything still positioned against the old
+outline stands a fifth of a metre clear of the model.
 
 **Phase 3 — Heads.** Where likeness judgement concentrates, and worth doing after
 Phase 1 because the head is about to change size. Key insight to apply: under a
