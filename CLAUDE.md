@@ -179,6 +179,24 @@ Two structural lessons already paid for, do not undo them:
   fully modelled. Closing the robe at chest height turns four women into four
   bottles.
 
+**The likeness gate is `node tools/sculpture-proportions.mjs`**, and it is
+PROPORTION ONLY — it says so in its own output. Pixel IoU against the photos
+was tried and abandoned on evidence: luminance thresholding, centre flood fill
+and a blue-vs-neutral colour test each leaked into the winter trees or dropped
+the sunlit robe, because the bronze is dark against dark trees, dark mullions
+and its own shadow. A landmark is locatable in a cluttered photo where an
+outline is not, so the gate compares vertical landmark heights as fractions of
+figure height.
+
+**When the gate and the eye disagree, re-measure.** The first version of that
+table was read off ref-c, where the nearest figure is turned away — the mass at
+the top is the near figure's hood but the face below belongs to a figure
+further back. The model was solved to match it exactly, the gate went green,
+and the render visibly got worse. Re-measured on ref-d's front-right figure,
+the only unambiguous single figure crown-to-ground in any of the four photos.
+The correction that mattered: THE TOP OF THE FIGURE IS THE HEAD, with the cloak
+rising only a little above the crown.
+
 Verify with `node tools/sculpture-shot.mjs` (same harness contract as Gauntlet:
 non-zero exit on any page or console error, `--eval "window.__SCULPT.setView(
 yawDeg, pitchDeg, distance)"` to park the camera at a repeatable angle).

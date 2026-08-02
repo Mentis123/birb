@@ -129,7 +129,9 @@ createQrOverlay({
     ground.receiveShadow = true;
     scene.add(ground);
 
-    const orbit = createOrbit(camera, canvas);
+    // The group is 2.42m tall, so the orbit target sits at its middle rather
+    // than at eye height.
+    const orbit = createOrbit(camera, canvas, { targetY: 1.30, distance: 7.0, maxDistance: 15 });
 
     function resize() {
         const w = innerWidth, h = innerHeight;

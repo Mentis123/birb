@@ -39,10 +39,10 @@ const PATINA = {
  * right of `ref-d-wide.jpg`.
  */
 const LAYOUT = [
-    { x: -0.46, z: 0.18, turn: 0.16, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false },
-    { x: -0.02, z: -0.34, turn: -0.10, scale: 0.985, seed: 23, bun: true, faceless: false, hands: false },
-    { x: 0.42, z: 0.08, turn: -0.26, scale: 1.005, seed: 37, bun: true, faceless: false, hands: true },
-    { x: 0.86, z: -0.26, turn: -0.62, scale: 0.960, seed: 51, bun: false, faceless: true, hands: false },
+    { x: -0.52, z: 0.20, turn: 0.16, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0 },
+    { x: -0.04, z: -0.38, turn: -0.10, scale: 0.985, seed: 23, bun: true, faceless: false, hands: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7 },
+    { x: 0.46, z: 0.10, turn: -0.26, scale: 1.005, seed: 37, bun: true, faceless: false, hands: true, folds: 6, foldDepth: 1.12, foldPhase: 3.1 },
+    { x: 0.94, z: -0.28, turn: -0.62, scale: 0.960, seed: 51, bun: false, faceless: true, hands: false, folds: 7, foldDepth: 0.94, foldPhase: 4.6 },
 ];
 
 /**
@@ -122,6 +122,7 @@ export function createSculpture(THREE, opts = {}) {
         const L = LAYOUT[i];
         const geo = buildFigure(THREE, {
             seed: L.seed, bun: L.bun, faceless: L.faceless, hands: L.hands, scale: L.scale,
+            folds: L.folds, foldDepth: L.foldDepth, foldPhase: L.foldPhase,
         });
         paintPatina(THREE, geo, L.seed);
         const mesh = new THREE.Mesh(geo, material);
@@ -136,7 +137,7 @@ export function createSculpture(THREE, opts = {}) {
 
     // The low bronze base plate the group stands on. In the photos it is barely
     // a step — a shallow irregular slab that reads as part of the casting.
-    const baseGeo = new THREE.CylinderGeometry(1.24, 1.28, 0.030, 44, 1);
+    const baseGeo = new THREE.CylinderGeometry(1.42, 1.46, 0.030, 44, 1);
     baseGeo.scale(1.0, 1, 0.78);
     baseGeo.translate(0.16, 0.014, -0.06);
     const baseCol = new Float32Array(baseGeo.attributes.position.count * 3);

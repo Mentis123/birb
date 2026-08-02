@@ -118,11 +118,12 @@ const SHELL_PROFILE = [
     [1.610, 0.246, 0.208],
     [1.700, 0.248, 0.200],
     [1.800, 0.252, 0.196],
-    [1.900, 0.258, 0.196],
-    [2.000, 0.262, 0.198],
-    [2.080, 0.258, 0.196],
-    [2.140, 0.240, 0.186],
-    [2.180, 0.206, 0.162],
+    [1.900, 0.262, 0.200],
+    [2.050, 0.268, 0.204],
+    [2.180, 0.264, 0.200],
+    [2.300, 0.242, 0.184],
+    [2.380, 0.200, 0.154],
+    [2.420, 0.150, 0.116],
 ];
 
 /**
@@ -142,9 +143,9 @@ const FRONT_OPENING = [
     [1.520, 0.86],
     [1.700, 1.00],
     [1.900, 1.14],
-    [2.040, 1.26],
-    [2.140, 1.38],
-    [2.180, 1.48],
+    [2.080, 1.26],
+    [2.260, 1.38],
+    [2.420, 1.50],
 ];
 
 const WALL = 0.040;
@@ -174,7 +175,19 @@ function buildShell(THREE, opts) {
                 // Slight flattening front and back: the robes carry their
                 // fullness at the sides, not as a round tube.
                 const flat = 1 - 0.09 * Math.pow(Math.abs(cs), 3);
-                positions.push(sn * hw * k, y, cs * hd * flat * k);
+
+                // DRAPERY. Every reference photograph is dominated by vertical
+                // fold ridges running the length of the robe, and without them
+                // the shell reads as a smooth cone no amount of surface noise
+                // can rescue. The ridges run down the figure with a slow twist,
+                // and they DEEPEN toward the hem where the cloth gathers —
+                // constant-depth folds look machined, like fluting on a column.
+                const gather = Math.pow(Math.max(0, 1 - y / 1.85), 1.35);
+                const depth = (0.030 + 0.105 * gather) * opts.foldDepth;
+                const fold = 1
+                    + depth * Math.cos(th * opts.folds + y * 0.55 + opts.foldPhase)
+                    + depth * 0.42 * Math.cos(th * (opts.folds * 2 + 1) - y * 0.9 + opts.foldPhase * 1.7);
+                positions.push(sn * hw * k * fold, y, cs * hd * flat * k * fold);
             }
         }
     }
@@ -215,18 +228,18 @@ function buildShell(THREE, opts) {
  */
 const TORSO_PROFILE = [
     [0.700, 0.212, 0.176],
-    [0.880, 0.204, 0.172],
-    [1.020, 0.196, 0.168],
-    [1.140, 0.180, 0.156],
-    [1.240, 0.166, 0.146],
-    [1.330, 0.162, 0.144],   // waist
-    [1.420, 0.172, 0.150],
-    [1.500, 0.180, 0.154],   // ribs, under the bust
-    [1.580, 0.180, 0.150],
-    [1.660, 0.172, 0.140],
-    [1.730, 0.156, 0.126],   // shoulder line
-    [1.790, 0.104, 0.096],
-    [1.845, 0.062, 0.062],   // neck
+    [0.912, 0.204, 0.172],
+    [1.076, 0.196, 0.168],
+    [1.217, 0.180, 0.156],
+    [1.334, 0.166, 0.146],
+    [1.440, 0.162, 0.144],   // waist
+    [1.546, 0.172, 0.150],
+    [1.640, 0.180, 0.154],   // ribs, under the bust
+    [1.734, 0.180, 0.150],
+    [1.828, 0.172, 0.140],
+    [1.911, 0.156, 0.126],   // shoulder line — 0.790 of total height
+    [1.981, 0.104, 0.096],
+    [2.046, 0.062, 0.062],   // neck
 ];
 
 function buildTorso(THREE, opts) {
@@ -261,10 +274,10 @@ function buildTorso(THREE, opts) {
 /** Head, with the face carved as shallow relief on the front of an ovoid. */
 function buildHead(THREE, opts) {
     const parts = [];
-    const yc = 1.995;
+    const yc = 2.159;
 
     const skull = new THREE.SphereGeometry(1, 30, 22);
-    skull.scale(0.118, 0.152, 0.124);
+    skull.scale(0.113, 0.146, 0.119);
     skull.translate(0, yc, 0.004);
     parts.push(skull);
 
@@ -272,44 +285,44 @@ function buildHead(THREE, opts) {
     // hard line on the face and everything else is soft.
     const brow = new THREE.SphereGeometry(1, 16, 10);
     brow.scale(0.082, 0.018, 0.032);
-    brow.translate(0, yc + 0.040, 0.109);
+    brow.translate(0, yc + 0.058, 0.108);
     parts.push(brow);
 
     // Nose: long, straight, narrow — the Modigliani note in these faces.
     const nose = new THREE.SphereGeometry(1, 14, 12);
     nose.scale(0.019, 0.058, 0.028);
-    nose.translate(0, yc + 0.002, 0.118);
+    nose.translate(0, yc - 0.014, 0.119);
     parts.push(nose);
 
     // Mouth: a small horizontal pad. A slit modelled as a groove disappears at
     // any distance; a slightly proud pad keeps a readable shadow under it.
     const mouth = new THREE.SphereGeometry(1, 14, 10);
     mouth.scale(0.030, 0.010, 0.017);
-    mouth.translate(0, yc - 0.064, 0.112);
+    mouth.translate(0, yc - 0.082, 0.112);
     parts.push(mouth);
 
     // Chin/jaw fullness.
     const jaw = new THREE.SphereGeometry(1, 18, 14);
     jaw.scale(0.082, 0.066, 0.086);
-    jaw.translate(0, yc - 0.080, 0.022);
+    jaw.translate(0, yc - 0.096, 0.022);
     parts.push(jaw);
 
     // Neck.
     // Short neck. An exposed column reads as a doll; on the originals the
     // head sits almost straight on the shoulders.
     const neck = new THREE.CylinderGeometry(0.058, 0.104, 0.135, 20, 1);
-    neck.translate(0, yc - 0.176, 0.008);
+    neck.translate(0, yc - 0.192, 0.008);
     parts.push(neck);
 
     if (opts.bun) {
         // Coiled bun, sitting high and to the back. Two of the four wear one.
         const bun = new THREE.TorusGeometry(0.045, 0.021, 10, 22);
         bun.rotateX(Math.PI / 2 - 0.30);
-        bun.translate(0, yc + 0.128, -0.036);
+        bun.translate(0, yc + 0.134, -0.038);
         parts.push(bun);
         const hair = new THREE.SphereGeometry(1, 20, 14);
         hair.scale(0.108, 0.088, 0.100);
-        hair.translate(0, yc + 0.052, -0.024);
+        hair.translate(0, yc + 0.056, -0.026);
         parts.push(hair);
     }
 
@@ -334,14 +347,14 @@ function buildArms(THREE, opts) {
     for (const sx of [-1, 1]) {
         const shoulder = new THREE.SphereGeometry(1, 18, 14);
         shoulder.scale(0.068, 0.060, 0.074);
-        shoulder.translate(sx * 0.124, 1.706, 0.002);
+        shoulder.translate(sx * 0.124, 1.905, 0.002);
         parts.push(shoulder);
 
         // Upper arm: essentially VERTICAL, pressed against the ribs. Anything
         // more than a few degrees out and the silhouette stops being a column.
         const upper = new THREE.CylinderGeometry(0.048, 0.042, 0.40, 16, 1);
         upper.rotateZ(sx * 0.052);
-        upper.translate(sx * 0.152, 1.500, 0.018);
+        upper.translate(sx * 0.152, 1.678, 0.018);
         parts.push(upper);
 
         // Elbow into forearm, still close to the body, drifting a little
@@ -349,7 +362,7 @@ function buildArms(THREE, opts) {
         const fore = new THREE.CylinderGeometry(0.042, 0.037, 0.32, 14, 1);
         fore.rotateZ(sx * 0.10);
         fore.rotateX(-0.20);
-        fore.translate(sx * 0.146, 1.190, 0.058);
+        fore.translate(sx * 0.146, 1.348, 0.058);
         parts.push(fore);
     }
 
@@ -359,7 +372,7 @@ function buildArms(THREE, opts) {
         // pair of hands, not ten fingers.
         const hand = new THREE.SphereGeometry(1, 18, 14);
         hand.scale(0.106, 0.052, 0.070);
-        hand.translate(0, 1.005, 0.196);
+        hand.translate(0, 1.155, 0.200);
         parts.push(hand);
     }
 
@@ -386,7 +399,7 @@ function buildBust(THREE, opts) {
     for (const sx of [-1, 1]) {
         const b = new THREE.SphereGeometry(1, 20, 16);
         b.scale(0.081, 0.072, 0.050);
-        b.translate(sx * 0.073, 1.478, 0.118);
+        b.translate(sx * 0.073, 1.711, 0.122);
         parts.push(b);
     }
     const geo = mergeGeometries(THREE, parts);
@@ -436,6 +449,24 @@ export function mergeGeometries(THREE, geos) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Vertical landmarks, in metres, for `tools/sculpture-proportions.mjs`.
+ *
+ * Exported rather than duplicated in the tool so the gate can never drift out
+ * of step with the geometry it is meant to be checking — if someone moves the
+ * head, the measurement moves with it.
+ */
+export const FIGURE_LANDMARKS = {
+    cowlTop: 2.420,
+    headCrown: 2.159 + 0.146,
+    brow: 2.159 + 0.058,
+    nose: 2.159 - 0.014,
+    chin: 2.159 - 0.146,
+    shoulder: 1.911,
+    bust: 1.711,
+    headHeight: 0.292,
+};
+
+/**
  * Build one figure as a single merged geometry, in local space with its feet on
  * y = 0 and facing +Z.
  *
@@ -454,6 +485,9 @@ export function buildFigure(THREE, opts = {}) {
         bun: opts.bun ?? false,
         faceless: opts.faceless ?? false,
         hands: opts.hands ?? false,
+        folds: opts.folds ?? 7,
+        foldDepth: opts.foldDepth ?? 1,
+        foldPhase: opts.foldPhase ?? 0,
         scale: opts.scale ?? 1,
     };
 
@@ -482,7 +516,7 @@ function buildBlankHead(THREE, opts) {
     jaw.translate(0, yc - 0.074, 0.014);
     parts.push(jaw);
     const neck = new THREE.CylinderGeometry(0.049, 0.062, 0.14, 20, 1);
-    neck.translate(0, yc - 0.175, 0.004);
+    neck.translate(0, yc - 0.192, 0.004);
     parts.push(neck);
     const geo = mergeGeometries(THREE, parts);
     return roughen(THREE, geo, { amount: 0.004, scale: 7.5, seed: opts.seed + 13 });
