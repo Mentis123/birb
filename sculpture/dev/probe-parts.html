@@ -20,8 +20,10 @@ const d2 = new THREE.DirectionalLight(0xcae2ff, 1.2); d2.position.set(4,2,-4); s
 const mat = new THREE.MeshStandardMaterial({ color: 0x8a8f80, roughness: 0.7, metalness: 0.15, side: (new URLSearchParams(location.search).get('side')==='front')?THREE.FrontSide:THREE.DoubleSide });
 const matShell = new THREE.MeshStandardMaterial({ color: 0x6b7d9a, roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 0.42 });
 
-const o = { seed: 23, bun: true, faceless: false, hands: false, pregnant: true, baby: false,
-            stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, trainAngle: 3.05, trainAmount: 0.50, scale: 1 };
+const Q = new URLSearchParams(location.search);
+const o = { seed: 37, bun: true, faceless: false, hands: false,
+            pregnant: Q.has('pregnant'), baby: Q.has('baby'), stethoscope: Q.has('steth'),
+            folds: 6, foldDepth: 1.12, foldPhase: 3.1, trainAngle: 2.52, trainAmount: 0.38, scale: 1 };
 
 // Rebuild the parts individually via the module's own internals by asking for a
 // full figure and, separately, a figure with the shell suppressed.

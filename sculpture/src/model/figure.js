@@ -282,8 +282,10 @@ function buildShell(THREE, opts) {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geo.setIndex(indices);
     // Broad, low-frequency undulation: this is a big hand-beaten sheet, so it
-    // should ripple rather than pebble.
-    return roughen(THREE, geo, { amount: 0.014, scale: 2.2, seed: opts.seed });
+    // should ripple rather than pebble — then a second finer pass for the
+    // hammer marks, because ripple alone still reads as a moulded plastic shell.
+    roughen(THREE, geo, { amount: 0.014, scale: 2.2, seed: opts.seed });
+    return roughen(THREE, geo, { amount: 0.0042, scale: 11.0, seed: opts.seed + 9 });
 }
 
 /**
@@ -386,8 +388,15 @@ function buildBodyField(THREE, o) {
                 0.076, 0.068, 0.082), 0.050);
             d = smin(d, sdCapsule(x, y, z,
                 sx * 0.268, 1.858, 0.012, sx * 0.286, 1.476, 0.030, 0.053), 0.040);
-            d = smin(d, sdCapsule(x, y, z,
-                sx * 0.286, 1.476, 0.030, sx * 0.278, 1.174, 0.078, 0.047), 0.032);
+            if (o.baby) {
+                // Cradling: the forearm comes OFF the body and crosses in front
+                // of the waist, so the bundle has something visibly under it.
+                d = smin(d, sdCapsule(x, y, z,
+                    sx * 0.286, 1.476, 0.030, sx * 0.062, 1.372, 0.212, 0.050), 0.030);
+            } else {
+                d = smin(d, sdCapsule(x, y, z,
+                    sx * 0.286, 1.476, 0.030, sx * 0.278, 1.174, 0.078, 0.047), 0.032);
+            }
         }
 
         // Neck, rising to meet the head field.
@@ -398,35 +407,59 @@ function buildBodyField(THREE, o) {
         if (o.pregnant) {
             // A pregnancy is not a ball on a torso — it is the torso, changed.
             // The largest blend radius in the model, deliberately.
-            d = smin(d, sdEllipsoid(x, y - 1.310, z - 0.094,
-                0.228, 0.206, 0.164), 0.055);
+            d = smin(d, sdEllipsoid(x, y - 1.296, z - 0.104,
+                0.244, 0.220, 0.182), 0.048);
         }
 
         if (o.baby) {
-            // Swaddled bundle, with both forearms carried under it.
-            d = smin(d, sdEllipsoid(x - 0.012, y - 1.330, z - 0.148,
-                0.150, 0.102, 0.114), 0.032);
-            for (const sx of [-1, 1]) {
-                d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.202, 1.290, 0.070, sx * 0.030, 1.276, 0.168, 0.042), 0.032);
-            }
+            // A SWADDLED NEWBORN, CARRIED — not a second pregnancy. The first
+            // version put a 0.15 sphere on the belly at 1.33 and blended it at
+            // k = 0.032, which produced a form indistinguishable from the
+            // pregnant figure's: same place, same size, same soft merge. Nothing
+            // in the render told you one woman was expecting and the other was
+            // holding a baby, which is most of what the sculpture is about.
+            //
+            // Three changes make it read: it sits HIGHER, at the forearms rather
+            // than the womb; it is OBLONG across the body rather than round; and
+            // it keeps a CREASE where it meets her (k = 0.016). A crease is
+            // wrong for anatomy and right here — this is a separate object held
+            // against a body, and the seam is the thing that says so.
+            d = smin(d, sdEllipsoid(x + 0.014, y - 1.442, z - 0.196,
+                0.172, 0.100, 0.128), 0.016);
+            // The head end, standing proud of the wrap so the bundle has a
+            // direction and reads as a baby rather than as a bolster.
+            d = smin(d, sdEllipsoid(x + 0.148, y - 1.476, z - 0.196,
+                0.080, 0.078, 0.086), 0.018);
         }
 
         if (o.stethoscope) {
-            // Two cords over the shoulders into a bell at the sternum. Small
-            // blend so they stay legible as applied objects, not as anatomy.
+            // Round the back of the neck, over both shoulders, into a bell at
+            // the sternum. It has to STAND OFF the chest to exist at all: the
+            // first version's bell was 19mm proud of the body and measured as a
+            // bump you could not find in a render. Cast bronze tubing is fat and
+            // it hangs in front of her, not on her.
             for (const sx of [-1, 1]) {
                 d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.132, 1.882, 0.030, sx * 0.076, 1.600, 0.140, 0.015), 0.010);
+                    sx * 0.050, 1.952, -0.030, sx * 0.152, 1.896, 0.078, 0.024), 0.012);
+                d = smin(d, sdCapsule(x, y, z,
+                    sx * 0.152, 1.896, 0.078, sx * 0.060, 1.648, 0.222, 0.024), 0.012);
             }
-            d = smin(d, sdEllipsoid(x - 0.050, y - 1.560, z - 0.146,
-                0.036, 0.036, 0.024), 0.012);
+            // The bell, hanging clear at the sternum.
+            d = smin(d, sdEllipsoid(x - 0.004, y - 1.606, z - 0.240,
+                0.052, 0.052, 0.034), 0.014);
         }
 
         // Hand-worked surface, in the FIELD rather than as a post-pass vertex
         // push: displacing a meshed surface along its normals re-creases the
         // very blends this whole approach exists to remove.
+        // HAND-WORKED SURFACE, in the FIELD rather than as a post-pass vertex
+        // push, which would re-crease the very blends this approach exists to
+        // remove. Two octaves: a broad swell, and a finer one whose amplitude
+        // stays well under the 13.5mm voxel so it modulates the surface instead
+        // of aliasing holes into it. Without the second, the bronze is a
+        // machined lathe and no amount of patina rescues it.
         d += fbm3(x * 3.1, y * 3.1, z * 3.1, seed, 2) * 0.010;
+        d += fbm3(x * 9.5, y * 9.5, z * 9.5, seed + 3, 2) * 0.0045;
         return d;
     }
 
@@ -561,7 +594,8 @@ function buildHeadField(THREE, o) {
         // chin and made the faces read as visors.
         d = smin(d, sdCapsule(x, y, z, 0, yc - 0.150, 0.008, 0, yc - 0.280, 0.008, 0.048), 0.05);
 
-        d += fbm3(x * 9, y * 9, z * 9, seed, 2) * 0.0022;
+        d += fbm3(x * 9, y * 9, z * 9, seed, 2) * 0.0028;
+        d += fbm3(x * 27, y * 27, z * 27, seed + 7, 2) * 0.0011;
         return d;
     }
 
@@ -588,13 +622,20 @@ function buildHeadField(THREE, o) {
 function buildFeet(THREE, opts) {
     const parts = [];
     for (const sx of [-1, 1]) {
-        const f = new THREE.SphereGeometry(1, 14, 10);
+        const lead = sx > 0 ? 0.030 : 0;
         // Set so the HEM COVERS THE HEEL and only the front of the foot shows.
         // Standing entirely clear of the cloth they read as four pairs of loose
         // eggs on the paving, which is what they looked like for three passes.
-        f.scale(0.056, 0.034, 0.115);
-        f.translate(sx * 0.082, 0.038, 0.372 + (sx > 0 ? 0.030 : 0));
-        parts.push(f);
+        // Built as ONE squashed sphere they still did: it is the heel-to-toe
+        // taper, heel high and back, toes low and forward, that makes a foot.
+        const heel = new THREE.SphereGeometry(1, 14, 10);
+        heel.scale(0.048, 0.046, 0.062);
+        heel.translate(sx * 0.082, 0.046, 0.330 + lead);
+        parts.push(heel);
+        const foot = new THREE.SphereGeometry(1, 16, 10);
+        foot.scale(0.050, 0.027, 0.100);
+        foot.translate(sx * 0.083, 0.026, 0.404 + lead);
+        parts.push(foot);
     }
     const geo = mergeGeometries(THREE, parts);
     return roughen(THREE, geo, { amount: 0.004, scale: 9, seed: opts.seed + 21 });

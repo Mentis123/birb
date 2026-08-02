@@ -211,7 +211,15 @@ structure materially and the findings are recorded here so they survive:
 - **Every figure carries a story** and this is the subject of the sculpture, not
   decoration: one is heavily pregnant, one cradles a swaddled newborn with both
   forearms under it, one is the clinician with a stethoscope round her neck.
-  Modelling four identical women loses the point of the piece.
+  Modelling four identical women loses the point of the piece. Note that
+  *building* them is not the same as their *reading*: the first versions were
+  all present in the field and measurably in the mesh, and none of them was
+  findable in a render. The bundle sat at the womb, was round, and blended at
+  k = 0.032, so it was indistinguishable from the pregnant figure's belly; it
+  reads only once it moves up to the forearms, goes oblong across the body, and
+  keeps a hard seam (k = 0.016) — a crease is wrong for anatomy and right for an
+  object being held. The stethoscope's bell stood 19mm off the chest, which is a
+  bump you cannot find; cast bronze tubing is fat and hangs in front of her.
 - **Every head wears a smooth hair cap** to the jaw — a bob, not a bare skull.
   The earlier "two of them have buns" reading came from seeing a top-knot over
   the same cap on two figures.
