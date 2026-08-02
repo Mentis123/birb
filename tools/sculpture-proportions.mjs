@@ -76,11 +76,16 @@ export const REFERENCE = {
         bust: 0.665,
         headHeight: 0.175,
     },
+    // Read from the left edge at four heights: shoulder y=505 x=275, bust y=645
+    // x=268, waist y=760 x=262, hem y=1170 x=248, doubled about x=422. They
+    // widen monotonically from shoulder to hem — she is a straight taper, with
+    // no waist to speak of, and that is most of what makes these figures read as
+    // heavy rather than as mannequins.
     widths: {
         headWidth: 0.150,
         shoulderSpan: 0.327,
         bustSpan: 0.342,
-        waistSpan: 0.320,
+        waistSpan: 0.356,
         hemSpan: 0.387,
     },
 };

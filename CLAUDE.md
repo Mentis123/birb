@@ -241,8 +241,8 @@ the photos was tried and abandoned on evidence: luminance thresholding, centre
 flood fill and a blue-vs-neutral colour test each leaked into the winter trees or
 dropped the sunlit robe, because the bronze is dark against dark trees, dark
 mullions and its own shadow. A landmark is locatable in a cluttered photo where
-an outline is not. `sculpture/LIKENESS.md` is the other half: 32 binary checks
-each citing the photograph that settles it, scored by eye. 90% is 29 of 32.
+an outline is not. `sculpture/LIKENESS.md` is the other half: 41 binary checks
+each citing the photograph that settles it, scored by eye. 90% is 37 of 41.
 
 **`node tools/sculpture-sheet.mjs` is how you score it** — it renders every
 matched camera pose in ONE browser boot and composites each render beside the
@@ -311,16 +311,17 @@ bug, before one normal-material render found it.
 
 ### State, and how to pick it up (2026-08-02)
 
-**12 of 32 on the rubric; the proportion gate is red at 9 of 12.** Both were
-rebuilt honest on this date — earlier greens were measuring the wrong things.
-The phased plan to finish is written out at the end of
-`sculpture/ARCHITECTURE.md`; the short version is that the largest remaining
-errors are all MASS and all have numeric targets: every span is ~20% too narrow,
-the head is ~35% too small, the bust sits too high, and the hem reads 0.56 of
-figure height against the photograph's 0.39 — which is entirely the train
-spreading sideways where real cloth trails backward, since the hem base profile
-measures correct to within 0.007. Do those first, then the cloak's cast section
-and the walking stride, then the faces.
+**19 of 41 on the rubric; the proportion gate is green at 0 of 12.** Both were
+rebuilt honest on this date — earlier greens were measuring the wrong things, and
+a green gate here is necessary and not sufficient: it has been green and wrong
+twice. The phased plan is at the end of `sculpture/ARCHITECTURE.md`.
+
+**Phase 1 (mass) is done.** Every span was ~20% too narrow, the head ~35% too
+small, the bust too high, and the hem read 0.56 of figure height against the
+photograph's 0.39 — that last one entirely because the train scaled the ring's
+RADIUS and so pushed the hem sideways as well as backward, while the base profile
+measured correct to within 0.007. It is a displacement now. Next is the cloak's
+cast section and the walking stride, then the faces.
 
 ## What This Is
 

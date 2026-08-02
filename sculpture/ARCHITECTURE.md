@@ -265,20 +265,21 @@ is evidence the code ran.
 
 ## Where the model is, and what is left
 
-**`LIKENESS.md` is the scorecard: 32 binary checks, 90% is 29 of them.
-Currently 12.** The proportion gate is red at 9 of 12 outside tolerance. Both
-were rebuilt on 2026-08-02 and both are honest; earlier greens were not.
+**`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
+Currently 19.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
++0.023 — which is necessary and not sufficient, since this gate has been green
+and wrong twice. Phase 1 is done; the rubric is what says how far there is left
+to go.
 
 The remaining work, in the order the evidence says to do it:
 
-**Phase 1 — Mass.** The largest, cheapest, most objective errors, all with
-numeric targets in the gate. Widen every span by ~20% (shoulder 0.257 → 0.327 of
-figure height, bust 0.284 → 0.342, waist 0.287 → 0.320). Grow the head ~35%
-(0.130 → 0.175) and widen it (0.116 → 0.150). Drop the bust (0.733 → 0.665) and
-with it the brow, nose and chin. Kill the sideways train — the hem base profile
-is correct to within 0.007, so the 0.56-vs-0.39 hem error is entirely the train
-spreading sideways where real cloth trails backward. Close the gaps between
-figures so the group reads as one mass. *Target: gate green, A1–A5.*
+**Phase 1 — Mass. DONE (2026-08-02).** Every span widened ~20%, shoulder line
+dropped 1.911 → 1.849, head grown 33%, bust dropped 0.07 of figure height, and
+the torso table lost its waist — measured on the nearest figure the spans widen
+monotonically from shoulder to hem, where every earlier version pinched and
+flared. The train became a DISPLACEMENT rather than a radius scale, which was
+the whole of the 0.56-vs-0.39 hem error. Group tightened to 0.50 spacing across
+0.80-wide cloaks so it reads as one mass. Gate green, A1-A5 and B2/B4/D3/E6.
 
 **Phase 2 — The cloak as cast bronze, and the stride.** Thick rounded rims on
 every free edge; the crescent wall exists but reads paper-thin. Open the

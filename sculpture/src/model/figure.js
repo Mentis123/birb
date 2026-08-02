@@ -118,28 +118,32 @@ const SHELL_PROFILE = [
     // seen from a low three-quarter: the pooling goes BACKWARD, which is the
     // train, not sideways. Built at 0.46 of height the figures read as four
     // bells and the diagonal arrangement disappeared into one skirt.
-    [0.000, 0.440, 0.420],
-    [0.120, 0.415, 0.385],
-    [0.320, 0.392, 0.330],
-    [0.560, 0.372, 0.286],
-    [0.800, 0.356, 0.250],
-    [1.000, 0.346, 0.226],
-    [1.160, 0.338, 0.208],
-    [1.300, 0.334, 0.194],
-    [1.420, 0.332, 0.184],
-    [1.520, 0.332, 0.176],
-    [1.610, 0.332, 0.170],
-    [1.700, 0.332, 0.166],
-    [1.800, 0.332, 0.162],
-    [1.900, 0.330, 0.158],
+    // The hem is narrow in BOTH directions. Depth at the ground belongs to the
+    // TRAIN, which trails behind her; a deep ring just makes a crinoline, and
+    // read from a low angle that is exactly what 0.43 looked like.
+    [0.000, 0.449, 0.296],
+    [0.120, 0.436, 0.284],
+    [0.320, 0.418, 0.264],
+    [0.560, 0.404, 0.246],
+    [0.800, 0.396, 0.232],
+    [1.000, 0.390, 0.234],
+    [1.160, 0.390, 0.216],
+    [1.300, 0.392, 0.202],
+    [1.420, 0.394, 0.192],
+    [1.520, 0.396, 0.184],
+    [1.610, 0.398, 0.178],
+    [1.700, 0.398, 0.174],
+    [1.800, 0.396, 0.170],
+    [1.849, 0.392, 0.166],   // shoulder line
     // The arch narrows hard above the shoulders. Left as wide as the body it
     // framed each head in a doorway three times the head's width; in
-    // `ref-c-under.jpg` the collar clears the crown by a hand's breadth.
-    [2.050, 0.300, 0.150],
-    [2.180, 0.276, 0.142],
-    [2.300, 0.248, 0.130],
-    [2.380, 0.210, 0.114],
-    [2.420, 0.174, 0.098],
+    // `ref-c-under.jpg` the collar clears the crown by a hand's breadth. It has
+    // to clear a HEAD, though, and the head is now a third bigger than it was.
+    [2.000, 0.340, 0.156],
+    [2.140, 0.302, 0.146],
+    [2.280, 0.264, 0.132],
+    [2.380, 0.220, 0.116],
+    [2.440, 0.180, 0.100],
 ];
 
 /**
@@ -169,11 +173,11 @@ const FRONT_OPENING = [
     [1.120, 1.00],
     [1.320, 1.20],
     [1.520, 1.34],
-    [1.720, 1.46],
-    [1.920, 1.58],
-    [2.100, 1.70],
-    [2.260, 1.80],
-    [2.420, 1.88],
+    [1.700, 1.46],
+    [1.849, 1.58],   // shoulder
+    [2.030, 1.70],
+    [2.220, 1.80],
+    [2.440, 1.88],
 ];
 
 /**
@@ -232,13 +236,22 @@ function buildShell(THREE, opts) {
                 // sweeps almost a metre clear of her feet. Without it the hems
                 // are four tidy bells and the group loses the sense of cloth
                 // that has been walked in.
-                // Kept modest on purpose. The first version ran to +0.74 and
-                // the hems came out as four flat sails, wider than the figures
-                // and reading as sheet card — the sculpture's hems are heavy
-                // pooled cloth, not drapery blowing off a stand.
+                // THE TRAIN IS A DISPLACEMENT, NOT A SCALE, and that distinction
+                // is the single biggest silhouette fix in this pass. Multiplying
+                // the ring's radius pushed the hem out in EVERY direction on the
+                // trailing half, including sideways: measured on the first
+                // matched-view sheet the model's hem spanned 0.56 of figure
+                // height against the photograph's 0.39, while the base profile
+                // measured correct to within 0.007. All of that error was this
+                // one line. Real cloth trailing off a walking figure goes
+                // BACKWARD; it does not make her wider.
+                //
+                // So the trailing half of each low ring is translated along
+                // `trainAngle` by up to `trainAmount` METRES, and the leading
+                // half does not move at all.
                 const trail = Math.max(0, Math.cos(th - opts.trainAngle));
-                const low = Math.pow(Math.max(0, 1 - y / 0.78), 2.1);
-                const spread = 1 + opts.trainAmount * trail * trail * low;
+                const low = Math.pow(Math.max(0, 1 - y / 0.72), 2.0);
+                const tail = opts.trainAmount * trail * trail * low;
 
                 // DRAPERY. Every reference photograph is dominated by vertical
                 // fold ridges running the length of the robe, and without them
@@ -252,9 +265,9 @@ function buildShell(THREE, opts) {
                     + depth * Math.cos(th * opts.folds + y * 0.55 + opts.foldPhase)
                     + depth * 0.42 * Math.cos(th * (opts.folds * 2 + 1) - y * 0.9 + opts.foldPhase * 1.7);
                 positions.push(
-                    sn * hw * cap * k * fold * spread,
+                    sn * hw * cap * k * fold + Math.sin(opts.trainAngle) * tail,
                     y,
-                    cs * hd * cap * flat * k * fold * spread + zOff
+                    cs * hd * cap * flat * k * fold + zOff + Math.cos(opts.trainAngle) * tail
                 );
             }
         }
@@ -309,30 +322,38 @@ const TORSO_PROFILE = [
     // The trunk runs well below the hip. It has to: the cloak's front opening
     // starts closing around 0.68 and if the body stops at the same height there
     // is a notch where neither surface is, which reads as a tear in the casting.
-    // Widened about 18% over the first pass. The reference figures are BROAD:
-    // shoulder to shoulder runs ~0.28 of total height in `ref-a-front.jpg`,
-    // against 0.21 as first built, and slender ones read as mannequins rather
-    // than as the heavy standing women in the photographs.
-    [0.420, 0.288, 0.157],
-    [0.560, 0.304, 0.159],
-    [0.700, 0.316, 0.159],
-    [0.912, 0.309, 0.157],
-    [1.076, 0.302, 0.155],
-    [1.217, 0.290, 0.151],
-    [1.334, 0.276, 0.144],
-    [1.440, 0.269, 0.140],   // waist
-    [1.546, 0.278, 0.144],
-    [1.640, 0.288, 0.146],   // ribs, under the bust
-    [1.734, 0.288, 0.144],
+    // A STRAIGHT TAPER, WIDENING DOWNWARD, with no waist to speak of. Measured
+    // off the nearest figure in `ref-a-front.jpg` at four heights, her spans go
+    // shoulder 0.327, bust 0.342, waist 0.356, hem 0.387 of her own height —
+    // monotonically wider all the way down. Every earlier version of this table
+    // pinched at the waist and flared below it, which is a fashion croquis, not
+    // these women; it is most of why the model read as four mannequins beside
+    // photographs of four heavy standing people.
+    //
+    // The whole table is also about 20% wider than the last one and the shoulder
+    // line has come DOWN from 1.911 to 1.849. Both came out of the rebuilt
+    // proportion gate, which found every width in the model short by roughly the
+    // same fraction — the tell that it was one systematic error, not four.
+    [0.420, 0.330, 0.172],
+    [0.560, 0.348, 0.176],
+    [0.700, 0.360, 0.176],
+    [0.900, 0.354, 0.174],
+    [1.070, 0.346, 0.172],
+    [1.210, 0.336, 0.168],
+    [1.330, 0.326, 0.162],
+    [1.430, 0.320, 0.158],   // waist — barely narrower than the ribs
+    [1.530, 0.328, 0.162],
+    [1.620, 0.336, 0.164],   // ribs, under the bust
+    [1.720, 0.336, 0.162],
     // The shoulder stays broad ALL THE WAY to the shoulder line and then rises
-    // fast. Tapering from 1.83 gave a long cone that read as a bird's neck; in
-    // the photographs the shoulders are near-horizontal slabs and the neck is
-    // short.
-    [1.828, 0.284, 0.141],
-    [1.911, 0.268, 0.134],   // shoulder line — 0.790 of total height
-    [1.958, 0.152, 0.096],
-    [2.005, 0.082, 0.067],
-    [2.046, 0.072, 0.062],   // neck
+    // fast. Tapering from further down gave a long cone that read as a bird's
+    // neck; in the photographs the shoulders are near-horizontal slabs and the
+    // chin sits almost on them.
+    [1.800, 0.328, 0.156],
+    [1.849, 0.312, 0.150],   // shoulder line — 0.797 of total height
+    [1.895, 0.170, 0.104],
+    [1.930, 0.092, 0.072],
+    [1.960, 0.082, 0.068],   // neck
 ];
 
 /**
@@ -368,7 +389,7 @@ function buildBodyField(THREE, o) {
 
     function field(x, y, z) {
         // Trunk from well down inside the skirt up to the base of the neck.
-        let d = sdTrunk(x, y, z, 0.420, 2.046);
+        let d = sdTrunk(x, y, z, 0.420, 1.960);
 
         // Bust. THE BLEND RADIUS MUST BE WELL UNDER THE PROTRUSION — this is
         // the one rule of modelling with smin and the first version broke it.
@@ -377,38 +398,39 @@ function buildBodyField(THREE, o) {
         // times deeper than the feature and swallows it whole. Everything
         // below protrudes 2-3x its own blend.
         for (const sx of [-1, 1]) {
-            d = smin(d, sdEllipsoid(x - sx * 0.108, y - 1.698, z - 0.142,
-                0.100, 0.090, 0.092), 0.034);
+            d = smin(d, sdEllipsoid(x - sx * 0.128, y - 1.535, z - 0.148,
+                0.116, 0.108, 0.114), 0.030);
         }
 
         // Shoulders and arms: one continuous run from the deltoid to the wrist,
-        // pressed against the ribs.
+        // pressed against the ribs. The outer edge of this run IS the figure's
+        // silhouette from bust to waist, so the three widths the gate measures
+        // are set here and not by the trunk.
         for (const sx of [-1, 1]) {
-            d = smin(d, sdEllipsoid(x - sx * 0.222, y - 1.880, z,
-                0.076, 0.068, 0.082), 0.050);
+            d = smin(d, sdEllipsoid(x - sx * 0.298, y - 1.820, z,
+                0.081, 0.072, 0.087), 0.050);
             d = smin(d, sdCapsule(x, y, z,
-                sx * 0.268, 1.858, 0.012, sx * 0.286, 1.476, 0.030, 0.053), 0.040);
+                sx * 0.345, 1.796, 0.012, sx * 0.358, 1.440, 0.030, 0.052), 0.040);
             if (o.baby) {
                 // Cradling: the forearm comes OFF the body and crosses in front
                 // of the waist, so the bundle has something visibly under it.
                 d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.286, 1.476, 0.030, sx * 0.062, 1.372, 0.212, 0.050), 0.030);
+                    sx * 0.358, 1.440, 0.030, sx * 0.070, 1.330, 0.226, 0.050), 0.030);
             } else {
                 d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.286, 1.476, 0.030, sx * 0.278, 1.174, 0.078, 0.047), 0.032);
+                    sx * 0.358, 1.440, 0.030, sx * 0.366, 1.130, 0.078, 0.047), 0.032);
             }
         }
 
-        // Neck, rising to meet the head field.
-        // Stops BELOW the chin (2.013). Run up to 2.108 its cap reaches 2.167 and
-        // pushes a bare dome straight up through the middle of the face.
-        d = smin(d, sdCapsule(x, y, z, 0, 1.880, 0.006, 0, 1.975, 0.010, 0.062), 0.055);
+        // Neck, rising to meet the head field. Stops BELOW the chin (1.919): run
+        // any higher and its cap pushes a bare dome up through the face.
+        d = smin(d, sdCapsule(x, y, z, 0, 1.812, 0.006, 0, 1.906, 0.010, 0.068), 0.055);
 
         if (o.pregnant) {
             // A pregnancy is not a ball on a torso — it is the torso, changed.
             // The largest blend radius in the model, deliberately.
-            d = smin(d, sdEllipsoid(x, y - 1.296, z - 0.104,
-                0.244, 0.220, 0.182), 0.048);
+            d = smin(d, sdEllipsoid(x, y - 1.270, z - 0.118,
+                0.284, 0.232, 0.198), 0.048);
         }
 
         if (o.baby) {
@@ -424,12 +446,12 @@ function buildBodyField(THREE, o) {
             // it keeps a CREASE where it meets her (k = 0.016). A crease is
             // wrong for anatomy and right here — this is a separate object held
             // against a body, and the seam is the thing that says so.
-            d = smin(d, sdEllipsoid(x + 0.014, y - 1.442, z - 0.196,
-                0.172, 0.100, 0.128), 0.016);
+            d = smin(d, sdEllipsoid(x + 0.014, y - 1.400, z - 0.214,
+                0.192, 0.106, 0.136), 0.016);
             // The head end, standing proud of the wrap so the bundle has a
             // direction and reads as a baby rather than as a bolster.
-            d = smin(d, sdEllipsoid(x + 0.148, y - 1.476, z - 0.196,
-                0.080, 0.078, 0.086), 0.018);
+            d = smin(d, sdEllipsoid(x + 0.164, y - 1.436, z - 0.214,
+                0.086, 0.084, 0.092), 0.018);
         }
 
         if (o.stethoscope) {
@@ -440,13 +462,13 @@ function buildBodyField(THREE, o) {
             // it hangs in front of her, not on her.
             for (const sx of [-1, 1]) {
                 d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.050, 1.952, -0.030, sx * 0.152, 1.896, 0.078, 0.024), 0.012);
+                    sx * 0.052, 1.886, -0.032, sx * 0.170, 1.824, 0.086, 0.026), 0.012);
                 d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.152, 1.896, 0.078, sx * 0.060, 1.648, 0.222, 0.024), 0.012);
+                    sx * 0.170, 1.824, 0.086, sx * 0.066, 1.556, 0.238, 0.026), 0.012);
             }
             // The bell, hanging clear at the sternum.
-            d = smin(d, sdEllipsoid(x - 0.004, y - 1.606, z - 0.240,
-                0.052, 0.052, 0.034), 0.014);
+            d = smin(d, sdEllipsoid(x - 0.004, y - 1.512, z - 0.258,
+                0.056, 0.056, 0.036), 0.014);
         }
 
         // Hand-worked surface, in the FIELD rather than as a post-pass vertex
@@ -470,8 +492,8 @@ function buildBodyField(THREE, o) {
     // Three passes were spent hunting that as a lighting bug, a shadow bug and a
     // facial-geometry bug; a MeshNormalMaterial render found it in one.
     const mesh = surfaceNets(field, {
-        min: [-0.52, 0.38, -0.32],
-        max: [0.52, 2.22, 0.42],
+        min: [-0.60, 0.38, -0.36],
+        max: [0.60, 2.06, 0.46],
         voxel: 0.0135,
     });
     const geo = new THREE.BufferGeometry();
@@ -491,7 +513,23 @@ function buildBodyField(THREE, o) {
  * carved socket is the only thing that reads as one from any angle.
  */
 function buildHeadField(THREE, o) {
-    const yc = 2.159;
+    /**
+     * HEAD SCALE. Every offset and radius below is in the head's own units and
+     * multiplied by this, so the whole head grows about its own centre without
+     * any of its internal proportions changing.
+     *
+     * It exists because the head was 35% too small and nobody could see it. The
+     * old proportion table normalised by the top of the COWL, whose height
+     * varies per figure by design, so it compared different figures against
+     * different rulers and reported a head 0.120 of the figure when measurement
+     * against the crown on two figures independently gives 0.175. That single
+     * bad denominator is most of why the model read as elongated and
+     * small-headed beside photographs of squat, big-headed women about five and
+     * a half heads tall.
+     */
+    const HS = 1.335;
+    const yc = 2.113;
+    const YC0 = 2.159;          // the head's own origin, in head units
     const seed = o.seed + 13;
 
     // Smoothstep, for the hairline. Kept local: this file has no maths module
@@ -501,7 +539,15 @@ function buildHeadField(THREE, o) {
         return k * k * (3 - 2 * k);
     };
 
-    function field(x, y, z) {
+    /**
+     * The field in the head's OWN units. Everything inside is written at the
+     * original scale — thirty offsets and radii tuned against the photographs
+     * over several passes — and `field` below maps world space into here. That
+     * is deliberately a coordinate change and not a rescaling of the constants:
+     * rescaling thirty numbers by hand is thirty chances to miss one, and a
+     * missed one is a feature that silently stops matching its neighbours.
+     */
+    function headField(x, y, z) {
         // Skull: a flattened wedge, much narrower front-to-back than a sphere.
         let d = sdEllipsoid(x, y - yc, z - 0.004, 0.112, 0.144, 0.098);
 
@@ -599,12 +645,19 @@ function buildHeadField(THREE, o) {
         return d;
     }
 
-    // Same rule as the body's box: clear the neck stub's bottom cap (0.048 below
-    // its 1.879 end) or surface nets leaves a torn rim at the collar.
+    // World space in, head units out, and the distance scaled back. Surface nets
+    // only needs the sign and a monotonic crossing, so a uniformly scaled
+    // distance meshes identically — but scaling it keeps the value honest for
+    // anything that later reads it as metres.
+    const field = (x, y, z) => headField(x / HS, (y - yc) / HS + YC0, z / HS) * HS;
+
+    // Bounds and voxel are in WORLD units and both scale with the head, so the
+    // relative detail is unchanged. Same rule as the body's box: clear the neck
+    // stub's bottom cap or surface nets leaves a torn rim at the collar.
     const mesh = surfaceNets(field, {
-        min: [-0.22, yc - 0.35, -0.22],
-        max: [0.22, yc + 0.27, 0.22],
-        voxel: 0.0062,
+        min: [-0.22 * HS, yc - 0.35 * HS, -0.22 * HS],
+        max: [0.22 * HS, yc + 0.27 * HS, 0.22 * HS],
+        voxel: 0.0062 * HS,
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
@@ -629,12 +682,12 @@ function buildFeet(THREE, opts) {
         // Built as ONE squashed sphere they still did: it is the heel-to-toe
         // taper, heel high and back, toes low and forward, that makes a foot.
         const heel = new THREE.SphereGeometry(1, 14, 10);
-        heel.scale(0.048, 0.046, 0.062);
-        heel.translate(sx * 0.082, 0.046, 0.330 + lead);
+        heel.scale(0.050, 0.048, 0.064);
+        heel.translate(sx * 0.098, 0.048, 0.372 + lead);
         parts.push(heel);
         const foot = new THREE.SphereGeometry(1, 16, 10);
-        foot.scale(0.050, 0.027, 0.100);
-        foot.translate(sx * 0.083, 0.026, 0.404 + lead);
+        foot.scale(0.052, 0.028, 0.104);
+        foot.translate(sx * 0.099, 0.027, 0.450 + lead);
         parts.push(foot);
     }
     const geo = mergeGeometries(THREE, parts);
@@ -694,14 +747,18 @@ export const FIGURE_LANDMARKS = {
     // Heights, metres above the paving. `headCrown` is the normaliser: it is the
     // one landmark every figure has and can be read unambiguously in every
     // photograph, whereas the cowl's height varies per figure by design.
-    headCrown: 2.159 + 0.156,      // top of the hair mass
-    cowlTop: 2.420,                // tallest cloak in the group, figures 1 and 2
-    brow: 2.159 + 0.058,
-    nose: 2.159 - 0.014,
-    chin: 2.159 - 0.146,
-    shoulder: 1.911,
-    bust: 1.698,
-    headHeight: 0.302,             // crown to chin
+    // The head is built in its own units about `yc` and scaled by `HS` — see
+    // buildHeadField. These have to be derived the same way or the gate measures
+    // a model that no longer exists, which is a worse failure than a red gate
+    // because it is a green one.
+    headCrown: 2.113 + 0.156 * 1.335,   // top of the hair mass
+    cowlTop: 2.440,                     // tallest cloak in the group
+    brow: 2.113 + 0.062 * 1.335,
+    nose: 2.113 - 0.032 * 1.335,        // tip of the ridge, not its root
+    chin: 2.113 - 0.146 * 1.335,
+    shoulder: 1.849,
+    bust: 1.543,
+    headHeight: 0.302 * 1.335,          // crown to chin
 
     // Widths, metres, measured across the figure. These are what the gate was
     // missing: every landmark it checked was vertical and all eight had been
@@ -711,11 +768,11 @@ export const FIGURE_LANDMARKS = {
     // that is what can be read off a photograph. Measuring the model's bust as
     // the breasts alone and the photograph's as the whole body compares two
     // different things and reports a 0.12 error that is not there.
-    headWidth: 0.268,              // hair mass, 2 x rx
-    shoulderSpan: 0.596,           // 2 x (deltoid centre 0.222 + r 0.076)
-    bustSpan: 0.657,               // 2 x upper-arm outer edge at y = 1.698
-    waistSpan: 0.664,              // 2 x forearm outer edge at y = 1.440
-    hemSpan: 0.880,                // cloak at the ground, ignoring the train
+    headWidth: 2 * 0.134 * 1.335,  // hair mass, 2 x rx
+    shoulderSpan: 0.758,           // 2 x (deltoid centre 0.298 + r 0.081)
+    bustSpan: 0.812,               // 2 x upper-arm outer edge at y = 1.543
+    waistSpan: 0.811,              // 2 x forearm outer edge at y = 1.430
+    hemSpan: 0.898,                // cloak at the ground, ignoring the train
 };
 
 /**

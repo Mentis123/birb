@@ -42,6 +42,12 @@ const PATINA = {
  * right of `ref-d-wide.jpg`.
  */
 const LAYOUT = [
+    // Spaced 0.50 apart across a group whose cloaks are 0.80 wide, so every
+    // neighbour overlaps its predecessor by a third of its own width. That is
+    // deliberate and it is what `ref-a-front.jpg` shows: no daylight between any
+    // two figures above waist height, and you cannot count them at a glance. The
+    // depth stagger is what stops the overlap reading as collision.
+    //
     // A CROWDED DIAGONAL, running back and to the right — read straight off
     // `ref-a-front.jpg`, where the nearest figure stands front-left and each of
     // the other three sits further back and further right, shoulders almost
@@ -52,12 +58,19 @@ const LAYOUT = [
     // That reads as a decorative arrangement of panels; the photographs read as
     // four women standing close.
     //
-    // `trainAngle` is the azimuth the cloak's hem drags toward, so the four
-    // trains fan out rather than all pooling on the same side.
-    { x: -0.92, z: 0.40, turn: -0.05, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 1.98, trainAngle: 3.72, trainAmount: 0.22 },
-    { x: -0.30, z: -0.06, turn: 0.13, scale: 0.995, seed: 23, bun: true, faceless: true, hands: false, pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.42, trainAngle: 3.05, trainAmount: 0.18 },
-    { x: 0.33, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, bun: true, faceless: false, hands: false, pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.42, trainAngle: 2.52, trainAmount: 0.25 },
-    { x: 0.96, z: -0.70, turn: 0.50, scale: 1.010, seed: 51, bun: true, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.30, trainAngle: 2.05, trainAmount: 0.28 },
+    // `trainAngle` is the azimuth the cloak's hem drags toward and `trainAmount`
+    // is now how far it drags, IN METRES — the train became a displacement
+    // rather than a radius scale, so the numbers changed meaning. All four point
+    // roughly backward (pi) with a small fan, because cloth trailing off a
+    // walking figure goes behind her, not out to the sides.
+    //
+    // `cowlTop` clears the crown by about 0.05 of figure height on the tall
+    // ones. Figure 0's stops at her shoulders and her head stands completely
+    // free, which is what `ref-a-front.jpg` shows on the nearest figure.
+    { x: -0.75, z: 0.50, turn: -0.05, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, trainAngle: 3.42, trainAmount: 0.46 },
+    { x: -0.25, z: 0.06, turn: 0.13, scale: 0.995, seed: 23, bun: true, faceless: true, hands: false, pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, trainAngle: 3.10, trainAmount: 0.40 },
+    { x: 0.25, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, bun: true, faceless: false, hands: false, pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, trainAngle: 2.86, trainAmount: 0.54 },
+    { x: 0.75, z: -0.82, turn: 0.50, scale: 1.010, seed: 51, bun: true, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, trainAngle: 2.62, trainAmount: 0.62 },
 ];
 
 /**
