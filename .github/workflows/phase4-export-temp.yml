@@ -1,4 +1,4 @@
-name: Phase 4 Workspace Export
+name: Bronze Phase 4 Candidate Validation
 
 on:
   pull_request:
@@ -6,25 +6,112 @@ on:
       - main
     paths:
       - '.github/workflows/phase4-export-temp.yml'
+      - '.github/phase4-candidate-patch/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  export:
+  validate:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout candidate branch with full history
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: Archive workspace
+
+      - name: Reconstruct candidate on current main
+        shell: bash
         run: |
           set -euo pipefail
-          tar --exclude=.git -czf /tmp/birb-phase4-workspace.tar.gz .
-      - uses: actions/upload-artifact@v4
+          git fetch origin main
+          cat .github/phase4-candidate-patch/part-* > /tmp/phase4.patch.gz.b64
+          echo 'ef0ce414bed1e8f2fcaf37c59dc5408f831daa555381c5d65ed4dfd8960fadf7  /tmp/phase4.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/phase4.patch.gz.b64 > /tmp/phase4.patch.gz
+          echo 'ca833adc73a35fe05194b4ed7ac858f6b89b08c928a71a2c45f661da7c045240  /tmp/phase4.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/phase4.patch.gz > /tmp/phase4.patch
+          echo '0107a32554137cd328ea9e2aa3c6dd47102d966de1f815abde58c86eacc6d7ce  /tmp/phase4.patch' | sha256sum -c -
+          git reset --hard origin/main
+          git clean -fd
+          git apply --index /tmp/phase4.patch
+          git diff --cached --check
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = 'sculpture/src/model/figure.js sculpture/src/model/sculpture.js '
+
+      - name: Install the existing visual harness only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright three-real@npm:three@0.183.2
+          git checkout -- node_modules/three/index.js
+          npx playwright install --with-deps chromium
+
+      - name: Run tests and proportion gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          npm test | tee evidence/npm-test.txt
+          node tools/sculpture-proportions.mjs | tee evidence/proportions.txt
+          node --check sculpture/src/model/figure.js
+          node --check sculpture/src/model/sculpture.js
+
+      - name: Render matched sheet and arm probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/sculpture-sheet.mjs \
+            --out evidence/sheet-p4-candidate.png \
+            --cell 760 --dpr 2 --wait 90000 --screenshot-timeout 120000 \
+            | tee evidence/sheet.txt
+
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/mobile-front.png \
+            --query 'three=local' --w 390 --h 844 --dpr 3 --wait 90000 --settle 700 \
+            | tee evidence/mobile-front.txt
+
+          node tools/sculpture-shot.mjs \
+            --page sculpture/dev/probe-parts.html --out evidence/arm-open-front.png \
+            --query 'three=local&only=body&side=front' --w 620 --h 800 --dpr 2 --wait 90000 \
+            --eval 'window.__PROBE.setView(0,4,2.75,1.35)' \
+            | tee evidence/arm-open-front.txt
+
+          node tools/sculpture-shot.mjs \
+            --page sculpture/dev/probe-parts.html --out evidence/arm-pregnant-front.png \
+            --query 'three=local&only=body&side=front&pregnant=1' --w 620 --h 800 --dpr 2 --wait 90000 \
+            --eval 'window.__PROBE.setView(0,4,2.75,1.35)' \
+            | tee evidence/arm-pregnant-front.txt
+
+          node tools/sculpture-shot.mjs \
+            --page sculpture/dev/probe-parts.html --out evidence/arm-cradle-front.png \
+            --query 'three=local&only=body&side=front&baby=1' --w 620 --h 800 --dpr 2 --wait 90000 \
+            --eval 'window.__PROBE.setView(0,4,2.75,1.35)' \
+            | tee evidence/arm-cradle-front.txt
+
+          node tools/sculpture-shot.mjs \
+            --page sculpture/dev/probe-parts.html --out evidence/arm-clinical-front.png \
+            --query 'three=local&only=body&side=front&steth=1' --w 620 --h 800 --dpr 2 --wait 90000 \
+            --eval 'window.__PROBE.setView(0,4,2.75,1.35)' \
+            | tee evidence/arm-clinical-front.txt
+
+      - name: Record candidate metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate_source=${GITHUB_SHA}"
+            echo "main_base=$(git rev-parse origin/main)"
+            echo "patch_sha256=0107a32554137cd328ea9e2aa3c6dd47102d966de1f815abde58c86eacc6d7ce"
+            sha256sum evidence/*.png
+            git diff --cached --stat
+          } | tee evidence/candidate-metadata.txt
+
+      - name: Upload Phase 4 candidate evidence
+        uses: actions/upload-artifact@v4
         with:
-          name: birb-phase4-workspace
-          path: /tmp/birb-phase4-workspace.tar.gz
-          retention-days: 1
+          name: bronze-phase4-candidate
+          path: evidence
+          retention-days: 3
