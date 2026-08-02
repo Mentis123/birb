@@ -152,7 +152,14 @@ the hand-written Three test stub this repo tracks there and silently breaks
 A **3D study of the bronze group outside The Women's** (Royal Women's Hospital,
 Parkville), living at `sculpture/` and deployed to
 **birbmobile.vercel.app/sculpture**. Unlisted: `noindex`, linked from nowhere.
-Drag to orbit, pinch to zoom, double-tap to reset. Three-finger QR as usual.
+Drag to orbit, pinch to zoom, two fingers to pan, double-tap to reset.
+Three-finger QR as usual.
+
+> **Read `sculpture/ARCHITECTURE.md` before touching any of it**, and
+> `sculpture/LIKENESS.md` for where it currently stands. Between them they carry
+> the module map, the build pipeline, the invariants that must not be undone,
+> the verification protocol, the current score and the phased plan to finish.
+> The summary below is the short version.
 
 Own stack, same house rules as Gauntlet: pinned CDN Three, vanilla ES modules,
 no build step, **zero external assets** — the sculpture is generated from
@@ -226,32 +233,45 @@ structure materially and the findings are recorded here so they survive:
 - The faces are planar with a **long nose ridge running from the brow**, hollow
   triangular eye sockets and a wide flat mouth.
 
-**The likeness gate is `node tools/sculpture-proportions.mjs`**, and it is
-PROPORTION ONLY — it says so in its own output. Pixel IoU against the photos
-was tried and abandoned on evidence: luminance thresholding, centre flood fill
-and a blue-vs-neutral colour test each leaked into the winter trees or dropped
-the sunlit robe, because the bronze is dark against dark trees, dark mullions
-and its own shadow. A landmark is locatable in a cluttered photo where an
-outline is not, so the gate compares vertical landmark heights as fractions of
-figure height.
+**The likeness gate has two halves and neither is sufficient alone.**
 
-**When the gate and the eye disagree, re-measure.** The first version of that
-table was read off ref-c, where the nearest figure is turned away — the mass at
-the top is the near figure's hood but the face below belongs to a figure
-further back. The model was solved to match it exactly, the gate went green,
-and the render visibly got worse. Re-measured on ref-d's front-right figure,
-the only unambiguous single figure crown-to-ground in any of the four photos.
-The correction that mattered: THE TOP OF THE FIGURE IS THE HEAD, with the cloak
-rising only a little above the crown.
+`node tools/sculpture-proportions.mjs` is the measurable half — landmark heights
+and spans as fractions of the figure's crown-to-ground height. Pixel IoU against
+the photos was tried and abandoned on evidence: luminance thresholding, centre
+flood fill and a blue-vs-neutral colour test each leaked into the winter trees or
+dropped the sunlit robe, because the bronze is dark against dark trees, dark
+mullions and its own shadow. A landmark is locatable in a cluttered photo where
+an outline is not. `sculpture/LIKENESS.md` is the other half: 32 binary checks
+each citing the photograph that settles it, scored by eye. 90% is 29 of 32.
 
-Verify with `node tools/sculpture-shot.mjs` (same harness contract as Gauntlet:
-non-zero exit on any page or console error, `--eval "window.__SCULPT.setView(
-yawDeg, pitchDeg, distance)"` to park the camera at a repeatable angle).
+**`node tools/sculpture-sheet.mjs` is how you score it** — it renders every
+matched camera pose in ONE browser boot and composites each render beside the
+reference photograph it was matched to. Building it should have been the first
+thing done on this model, not the seventh: ninety renders had been judged by
+comparing the model against a *memory* of the photo, and the first side-by-side
+pair exposed a hem 40% too wide inside a minute. Poses live in
+`tools/sculpture-views.mjs` and use the CROP's field of view, not the photo's.
+
+**When the gate and the eye disagree, re-measure.** This has now happened twice
+and the tell was identical both times — green gate, worse render. First, the
+table was read off ref-c where the nearest figure is turned away, so the mass at
+the top is her hood but the face below belongs to a figure further back; the
+model was solved to match it exactly and got visibly worse. Second, the table
+normalised by the top of the COWL, which varies per figure by design, so it
+measured different figures against different rulers — and `headHeight` came out
+wrong by 45%. **Normalise by the crown**: it is the one landmark every figure has
+and every photograph shows. Re-measured on two figures independently, the head is
+0.175 of the figure and the model had been building it at 0.130.
+
+Verify with `node tools/sculpture-shot.mjs` for a single angle (same harness
+contract as Gauntlet: non-zero exit on any page or console error).
 `sculpture/dev/probe-parts.html` renders any subset of a single figure
 (`?only=body,head,feet`) — **rendering the body without the cloak in front of it
 is the only way to tell "the torso is wrong" from "the torso is hidden"**, and
 this model was debugged the wrong way round for several passes before that probe
-existed.
+existed. When something looks like a lighting bug, turn one thing off or swap the
+material rather than tuning: `MeshNormalMaterial` found a clipped neck in one
+render after three passes of chasing it as light.
 
 ### Three things that look like lighting problems and are not
 
@@ -281,6 +301,26 @@ the one rule of modelling with `smin`, it is broken by default, and it is broken
 silently — a bust standing 0.02 proud of the chest wall blended at k = 0.10 is
 not a soft bust, it is no bust at all. The first SDF pass lost the bust, the
 belly, the swaddled bundle, the brow, the nose and the lips to exactly this.
+
+And one more of the same family: **every `surfaceNets` sampling box must clear
+its contents' caps.** The mesher leaves a torn open rim wherever the box cuts
+through geometry. The body box topped out at y = 2.13 while the neck capsule's
+cap reaches 2.167, and the resulting slab read as a dark trapezoidal visor across
+every face — hunted as a lighting bug, then a shadow bug, then a facial-geometry
+bug, before one normal-material render found it.
+
+### State, and how to pick it up (2026-08-02)
+
+**12 of 32 on the rubric; the proportion gate is red at 9 of 12.** Both were
+rebuilt honest on this date — earlier greens were measuring the wrong things.
+The phased plan to finish is written out at the end of
+`sculpture/ARCHITECTURE.md`; the short version is that the largest remaining
+errors are all MASS and all have numeric targets: every span is ~20% too narrow,
+the head is ~35% too small, the bust sits too high, and the hem reads 0.56 of
+figure height against the photograph's 0.39 — which is entirely the train
+spreading sideways where real cloth trails backward, since the hem base profile
+measures correct to within 0.007. Do those first, then the cloak's cast section
+and the walking stride, then the faces.
 
 ## What This Is
 
@@ -375,6 +415,9 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |
 | `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |
+| `gauntlet/ARCHITECTURE.md` | Birb Gauntlet (`/gauntlet`) — read before touching it |
+| `sculpture/ARCHITECTURE.md` | Bronze (`/sculpture`) — module map, invariants, verification, plan |
+| `sculpture/LIKENESS.md` | Bronze — the 32-check rubric and the current score |
 | `KNOWN_ISSUES.md` | Bug tracker with detailed fix attempts |
 | `FLIGHT_CONTROLS_PLAN.md` | 4-phase flight system redesign plan |
 | `TURRET_RESEARCH.md` | Gun feel research, spring-damper physics |

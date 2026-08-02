@@ -1,4 +1,32 @@
 <!DOCTYPE html>
+<!--
+  probe-parts.html — ONE figure, any subset of its parts, in isolation.
+
+  WHY IT EXISTS. Rendering the body without the cloak in front of it is the only
+  way to tell "the torso is wrong" from "the torso is hidden", and this model was
+  debugged the wrong way round for several passes before this page existed: the
+  bust, belly, arms and shoulders were all correct and none of them was visible,
+  because the cloak's front opening was a fifth of the size it should have been.
+
+  Query parameters, all optional:
+    ?only=shell,body,head,feet   which parts to build   (default: all four)
+    &pregnant &baby &steth       which story this figure carries
+    &side=front                  FrontSide material, to expose culling and holes
+                                 (default DoubleSide, which hides inverted winding)
+    &three=local                 use node_modules Three instead of the CDN
+
+  Drive it with the same harness as the main page, which fails the run on any
+  page or console error:
+
+    node tools/sculpture-shot.mjs --page sculpture/dev/probe-parts.html \
+      --out shots/sculpt/probe.png --query "three=local&only=body,head&side=front" \
+      --w 620 --h 800 --dpr 2 --wait 60000 \
+      --eval "window.__PROBE.setView(-12, 4, 1.9, 1.45)"   // yaw, pitch, dist, targetY
+
+  The lighting here is deliberately flat and frontal so you are looking at FORM,
+  not at the scene's key. Do not judge patina, contrast or relief-under-raking-
+  light from this page — use tools/sculpture-sheet.mjs for anything about light.
+-->
 <html><head><meta charset="utf-8"><title>probe parts</title>
 <style>html,body{margin:0;height:100%;background:#59647a;overflow:hidden}canvas{display:block;width:100%;height:100%}</style>
 </head><body><canvas id="c"></canvas>
