@@ -691,14 +691,31 @@ export function mergeGeometries(THREE, geos) {
  * head, the measurement moves with it.
  */
 export const FIGURE_LANDMARKS = {
-    cowlTop: 2.420,
-    headCrown: 2.159 + 0.146,
+    // Heights, metres above the paving. `headCrown` is the normaliser: it is the
+    // one landmark every figure has and can be read unambiguously in every
+    // photograph, whereas the cowl's height varies per figure by design.
+    headCrown: 2.159 + 0.156,      // top of the hair mass
+    cowlTop: 2.420,                // tallest cloak in the group, figures 1 and 2
     brow: 2.159 + 0.058,
     nose: 2.159 - 0.014,
     chin: 2.159 - 0.146,
     shoulder: 1.911,
-    bust: 1.711,
-    headHeight: 0.292,
+    bust: 1.698,
+    headHeight: 0.302,             // crown to chin
+
+    // Widths, metres, measured across the figure. These are what the gate was
+    // missing: every landmark it checked was vertical and all eight had been
+    // green since the model was half its current shape, while the errors that
+    // remained were all horizontal.
+    // All spans are the OUTER SILHOUETTE at that height, arms included, because
+    // that is what can be read off a photograph. Measuring the model's bust as
+    // the breasts alone and the photograph's as the whole body compares two
+    // different things and reports a 0.12 error that is not there.
+    headWidth: 0.268,              // hair mass, 2 x rx
+    shoulderSpan: 0.596,           // 2 x (deltoid centre 0.222 + r 0.076)
+    bustSpan: 0.657,               // 2 x upper-arm outer edge at y = 1.698
+    waistSpan: 0.664,              // 2 x forearm outer edge at y = 1.440
+    hemSpan: 0.880,                // cloak at the ground, ignoring the train
 };
 
 /**
