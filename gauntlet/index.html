@@ -645,6 +645,9 @@ import {
     applyKillScore, decayCombo, nextWaveSpawnCount,
     droneHunterRemaining, formatTime, evaluateBest,
 } from '/gauntlet/src/game/modes.js';
+import {
+    createDamageState, updateDamage, damageVisible, reviveDamage, MAX_PIPS,
+} from '/gauntlet/src/game/damage.js';
 
 const params = new URLSearchParams(location.search);
 
@@ -1325,6 +1328,10 @@ async function boot(requestedMode) {
         // never looked like they were doing anything.
         animState.flapImpulse = animState.grounded ? 0 : Math.max(0, input.value.y);
         animState.celebrating = phase === 'finished';
+        // Downed: the animator folds the wings and spins the body inside the
+        // root group, so the bird visibly loses control while the flight
+        // controller keeps owning the heading.
+        animState.tumbling = downTimer > 0;
         animator.update(dt, animState);
 
         // A completed wingbeat is now a real event, so it can be heard and
@@ -1453,10 +1460,25 @@ async function boot(requestedMode) {
     /** Normalised speed a ram must carry to destroy a drone rather than bounce. */
     const HUNT_STRIKE_SPEED01 = 0.5;
 
+    /** Collision radius used for the damage tests. */
+    const BIRD_HIT_RADIUS = 1.6;
+    /** How long the bird tumbles after losing the last pip. */
+    const DOWN_SECONDS = 2.2;
+    /** How fast it drops while downed, world units per second. */
+    const DOWN_FALL_SPEED = 26;
+
     let turretView = false;          // camera is on the gun, not behind the bird
     let wasNested = false;
     let boostWasDown = false;
     let knockTimer = 0;              // post-collision control lockout, seconds
+
+    // --- damage -------------------------------------------------------------
+    // One ring for every hazard in the game. `touching` is recomputed each
+    // frame from the things it makes sense to be hurt by — drones and solid
+    // props — and the ring module owns every rule about what that costs.
+    const damage = createDamageState();
+    let touchingHazard = false;
+    let downTimer = 0;               // seconds of tumble left after a downing
     let waveBreak = 0;               // countdown between Turret Defense waves
     let ringHintTimer = 0;
 
@@ -1579,13 +1601,13 @@ async function boot(requestedMode) {
                     shake.add(gained.after > gained.before ? 0.42 : 0.3);
                     knockTimer = 0.12;
                 } else {
-                    // Everywhere else a drone is an obstacle: a shove and a
-                    // scare, never a death. Casual explicitly cannot fail.
-                    audio.impact();
+                    // Everywhere else a drone is a hazard you take damage
+                    // from. The ring owns the consequences; this just reports
+                    // the contact and shoves the bird.
                     feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 14, plumage.feather);
-                    shake.add(0.5);
-                    flight.speed = Math.max(flight.cfg.minSpeed, flight.speed * 0.55);
-                    knockTimer = 1.0;
+                    flight.speed = Math.max(flight.cfg.minSpeed, flight.speed * 0.72);
+                    touchingHazard = true;
+                    knockTimer = 0.35;
                 }
             }
 
@@ -1595,6 +1617,52 @@ async function boot(requestedMode) {
                 audio.alarm();
                 shake.add(0.7);
                 if (rockets) rockets.explodeAt(d.nestHitX, d.nestHitY, d.nestHitZ, 0.9);
+            }
+        }
+
+        // --- damage ----------------------------------------------------------
+        // Only things it makes sense to be hurt by. Rings, gates and the
+        // course ribbon are not solid; ferns and snowcaps are ground clutter.
+        // Perched on a nest you are not flying into anything either.
+        if (!nesting || !nesting.isNested()) {
+            if (downTimer <= 0) {
+                const prop = planet.hazardAt(
+                    pose.position.x, pose.position.y, pose.position.z, BIRD_HIT_RADIUS
+                );
+                if (prop >= 0 && !touchingHazard) {
+                    planet.hazardPosition(prop, _tmpVec);
+                    feathers.burst(_tmpVec.x, _tmpVec.y, _tmpVec.z, 12, plumage.feather);
+                }
+                touchingHazard = touchingHazard || prop >= 0;
+            }
+            updateDamage(damage, dt, touchingHazard && downTimer <= 0);
+            if (damage.hitThisFrame) {
+                audio.impact();
+                shake.add(0.55);
+                // Every hit sheds speed, so a run of contacts is felt in the
+                // flying and not only in the HUD.
+                flight.speed = Math.max(flight.cfg.minSpeed, flight.speed * 0.78);
+            }
+            if (damage.downed) downTimer = DOWN_SECONDS;
+        }
+        touchingHazard = false;          // re-armed by next frame's tests
+
+        // Downed: the bird stops flying and falls. Casual cannot fail, and
+        // neither can this — it is a spectacular interruption, not a death.
+        if (downTimer > 0) {
+            downTimer -= dt;
+            const r = pose.position.length();
+            const floor = PLANET_RADIUS + 2.5;
+            if (r > floor) {
+                pose.position.setLength(Math.max(floor, r - DOWN_FALL_SPEED * dt));
+            }
+            if (downTimer <= 0) {
+                // Back in the air with half a ring and a grace window, so the
+                // tree you fell into cannot immediately down you again.
+                reviveDamage(damage);
+                flight.speed = flight.cfg.cruiseSpeed;
+                audio.horn();
+                shake.add(0.4);
             }
         }
 
@@ -1654,6 +1722,8 @@ async function boot(requestedMode) {
         if (def.drones === 'hunt') hud.setCombo(run.combo);
         if (def.drones === 'waves') hud.setWave(run.wave);
         if (def.canFail) hud.setLives(run.lives);
+        // Damage is mode-agnostic: everything can fly into a tree.
+        hud.setDamage(damage.pips, damageVisible(damage));
 
         // One contextual action, driven off nesting state rather than a mode
         // id — which is why Casual gets the turret for free.
@@ -1873,6 +1943,7 @@ async function boot(requestedMode) {
         // Mini-game systems, for the probes. Null when the mode did not build
         // them — which is itself the thing a capability-flag probe checks.
         run, rings, drones, nests, nesting, rockets, aim, animator, animState,
+        planet, damage,
         get turretView() { return turretView; },
         /** Force the run to its end condition, so a probe can shoot results. */
         debugFinish() { if (!run.finished) finishRun(); },

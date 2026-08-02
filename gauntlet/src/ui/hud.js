@@ -259,6 +259,52 @@ function styleText() {
 .vh-action:active { transform: translateX(-50%) translateY(3px); box-shadow: 0 0 0 0 var(--ink); opacity: 1; }
 .vh-action.calm { background: var(--cream); }
 
+/* --- damage ring ---------------------------------------------------------
+   Centre-screen, just under the crosshair line, because damage is the one
+   readout you must not have to look away from the horizon to read. Four hard
+   segments with a gap between them — a continuous arc would read as a
+   percentage, and this is explicitly four discrete clicks. */
+.vh-dmg {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  /* Sized to encircle the bird rather than sit on top of it — the chase cam
+     keeps the bird at frame centre, so the ring reads as its status aura. */
+  width: 108px; height: 108px;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 0 rgba(10, 19, 36, 0.55));
+}
+.vh-dmg[hidden] { display: none; }
+.vh-dmg svg { width: 100%; height: 100%; overflow: visible; }
+.vh-dmg .seg {
+  fill: none; stroke-width: 4.5; stroke-linecap: butt;
+  transition: stroke 0.18s ease, opacity 0.18s ease;
+}
+/* A depleted pip still has to be VISIBLE, or the ring reads as a two-segment
+   gauge rather than as two of four spent. */
+.vh-dmg .seg.gone { opacity: 0.55; }
+/* The ring gets angrier as it empties rather than staying one flat red — the
+   colour is the warning, not just the count. */
+.vh-dmg.p3 .seg.live { stroke: ${CSS.gold}; }
+.vh-dmg.p2 .seg.live { stroke: #ff9a3c; }
+.vh-dmg.p1 .seg.live { stroke: #ff4d4d; }
+.vh-dmg.p0 .seg.live { stroke: #ff4d4d; }
+.vh-dmg .seg.dead { stroke: rgba(255, 246, 220, 0.42); }
+/* One pulse on each hit. Retriggered by removing/adding the class. */
+.vh-dmg.hit { animation: vh-dmg-hit 0.34s ease-out; }
+@keyframes vh-dmg-hit {
+  0%   { transform: translate(-50%, -50%) scale(1.42); }
+  55%  { transform: translate(-50%, -50%) scale(0.94); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+/* At one pip left the whole ring breathes, so peripheral vision catches it. */
+.vh-dmg.p1 { animation: vh-dmg-crit 0.9s ease-in-out infinite; }
+@keyframes vh-dmg-crit {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.gauntlet-hud.vh-reduce .vh-dmg,
+.gauntlet-hud.vh-reduce .vh-dmg.hit { animation: none !important; }
+
 /* --- results ------------------------------------------------------------- */
 .vh-results {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -493,6 +539,29 @@ export function createHUD(rootEl, options = {}) {
     const wrong = el('div', 'vh-wrong', rootEl,
         '<span class="ch">&#9666;&#9666;</span><span>Wrong way</span><span class="ch">&#9656;&#9656;</span>');
     wrong.hidden = true;
+
+    // ---- damage ring ------------------------------------------------------
+    // Four arcs on one circle, drawn as SVG strokes with a dash gap so the
+    // segments are genuinely separate objects rather than a divided bar.
+    const dmg = el('div', 'vh-dmg', rootEl);
+    dmg.hidden = true;
+    {
+        const R = 24, C = 2 * Math.PI * R;
+        const seg = C / 4;
+        const gap = 7;                       // px of arc removed between pips
+        let svg = '<svg viewBox="0 0 62 62">';
+        for (let i = 0; i < 4; i++) {
+            // Start at 12 o'clock and go clockwise; pips deplete in that order.
+            svg += `<circle class="seg" cx="31" cy="31" r="${R}"`
+                + ` stroke-dasharray="${seg - gap} ${C - seg + gap}"`
+                + ` stroke-dashoffset="${-(i * seg) + gap / 2}"`
+                + ' transform="rotate(-90 31 31)"></circle>';
+        }
+        svg += '</svg>';
+        dmg.innerHTML = svg;
+    }
+    const dmgSegs = dmg.querySelectorAll('.seg');
+    let _dmgPips = -1;
 
     // ---- action prompt ----------------------------------------------------
     const actionBtn = el('button', 'vh-action', rootEl);
@@ -1181,6 +1250,36 @@ export function createHUD(rootEl, options = {}) {
         actionBtn.hidden = false;
     }
 
+    /**
+     * The damage ring. `pips` 0..4 remaining, `visible` false before the first
+     * hit and again once fully healed.
+     *
+     * Called every frame, so it early-outs on an unchanged count — rewriting
+     * four SVG class lists at 60Hz is style recalculation the phone does not
+     * need.
+     */
+    function setDamage(pips, visible) {
+        if (!visible) {
+            if (!dmg.hidden) { dmg.hidden = true; _dmgPips = -1; }
+            return;
+        }
+        dmg.hidden = false;
+        const p = pips < 0 ? 0 : (pips > 4 ? 4 : pips | 0);
+        if (p === _dmgPips) return;
+        const lost = _dmgPips >= 0 && p < _dmgPips;
+        _dmgPips = p;
+        dmg.className = 'vh-dmg p' + p;
+        for (let i = 0; i < dmgSegs.length; i++) {
+            // Segment i is still live while i < p.
+            dmgSegs[i].setAttribute('class', 'seg ' + (i < p ? 'live' : 'dead gone'));
+        }
+        if (lost && !reduced()) {
+            dmg.classList.remove('hit');
+            void dmg.offsetWidth;            // restart the animation
+            dmg.classList.add('hit');
+        }
+    }
+
     /** Who to call when the action button is tapped. */
     function onAction(fn) {
         _onAction = typeof fn === 'function' ? fn : null;
@@ -1229,7 +1328,7 @@ export function createHUD(rootEl, options = {}) {
             if (motionMq.removeEventListener) motionMq.removeEventListener('change', applyMotion);
             else if (motionMq.removeListener) motionMq.removeListener(applyMotion);
         }
-        [tl, tr, countWrap, wrong, actionBtn, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
+        [tl, tr, countWrap, wrong, dmg, actionBtn, results].forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
         rootEl.classList.remove('gauntlet-hud', 'vh-reduce');
         if (ownsStyle && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
         _srcRef = null;
@@ -1253,6 +1352,7 @@ export function createHUD(rootEl, options = {}) {
         hideCountdown,
         showWrongWay,
         setAction,
+        setDamage,
         onAction,
         showResults,
         showModeResults,

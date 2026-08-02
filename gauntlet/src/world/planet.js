@@ -303,6 +303,7 @@ const PROP_VERT_BODY = /* glsl */`
 const LAYERS = [
     {
         name: 'broadleaf',
+        hazard: true,   // solid enough that flying into it should hurt
         cap: 520,
         scatter: 3400,     // global even spread — the anti-sparseness layer
         clusters: 46,
@@ -336,6 +337,7 @@ const LAYERS = [
     },
     {
         name: 'pine',
+        hazard: true,   // solid enough that flying into it should hurt
         cap: 450,
         scatter: 2600,
         clusters: 36,
@@ -359,6 +361,7 @@ const LAYERS = [
     },
     {
         name: 'spire',
+        hazard: true,   // solid enough that flying into it should hurt
         cap: 700,
         scatter: 11000,
         clusters: 24,
@@ -386,6 +389,7 @@ const LAYERS = [
     },
     {
         name: 'boulder',
+        hazard: true,   // solid enough that flying into it should hurt
         cap: 700,
         scatter: 7000,
         clusters: 30,
@@ -776,6 +780,19 @@ export function createPlanet(THREE, opts = {}) {
 
     const layerMeshes = [];
     const layerCounts = {};
+
+    // --- hazard colliders ---------------------------------------------------
+    // Props are collider-free by design — they are how the world expresses
+    // height above the flight floor, and giving them all colliders would make
+    // the sky a minefield. But you have to be able to fly INTO a tree, so the
+    // layers marked `hazard` also publish a collider: an upright cylinder from
+    // the ground to the top of the model, sized from the geometry's own
+    // bounding box rather than from a hand-tuned guess that drifts the moment
+    // anyone edits a prop.
+    //
+    // Flat arrays, packed 5-wide: [nx, ny, nz, topRadius, radius].
+    const hazN = [];
+    let hazTopMax = 0;
     const dir = { x: 0, y: 1, z: 0 };
     const cDir = { x: 0, y: 1, z: 0 };
     const bw = [0, 0, 0];
@@ -902,6 +919,21 @@ export function createPlanet(THREE, opts = {}) {
         };
         pmat.customProgramCacheKey = () => 'gauntlet-prop-v1';
 
+        // Measured from the built geometry, so a prop's collider can never
+        // drift out of sync with the shape the player actually sees.
+        let hazBox = null;
+        if (layer.hazard) {
+            pgeo.computeBoundingBox();
+            const bb = pgeo.boundingBox;
+            hazBox = {
+                max: { y: bb.max.y },
+                radius: Math.max(
+                    Math.abs(bb.max.x), Math.abs(bb.min.x),
+                    Math.abs(bb.max.z), Math.abs(bb.min.z)
+                ),
+            };
+        }
+
         const mesh = new THREE.InstancedMesh(pgeo, pmat, count);
         mesh.name = 'gauntlet-prop-' + layer.name;
         // Props blanket the whole sphere, so the mesh bounds always intersect
@@ -943,6 +975,17 @@ export function createPlanet(THREE, opts = {}) {
             _m.compose(_p, _q, _s);
             mesh.setMatrixAt(i, _m);
             mesh.setColorAt(i, tintFor(layer.name, rng, _tint));
+
+            if (layer.hazard && hazBox) {
+                // `r` is where the model's origin sits (already sunk); the box
+                // is in model space, so the top is r + maxY * yScale.
+                const top = r + hazBox.max.y * _s.y;
+                // Trunks are thin and the canopy is what you actually clip, so
+                // the collider takes the widest part of the silhouette.
+                const rad = hazBox.radius * _s.x;
+                hazN.push(nx, ny, nz, top, rad);
+                if (top > hazTopMax) hazTopMax = top;
+            }
         }
         mesh.instanceMatrix.needsUpdate = true;
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -989,11 +1032,64 @@ export function createPlanet(THREE, opts = {}) {
         group.clear();
     }
 
+    const hazards = new Float32Array(hazN);
+    const hazardCount = hazards.length / 5;
+
+    /**
+     * Is the bird inside a solid prop? Returns the hazard index, or -1.
+     *
+     * Each prop is an upright cylinder about its own radial axis, so the test
+     * is exact for the shape it models: the bird is inside if it is below the
+     * canopy top AND its perpendicular distance from that axis is inside the
+     * radius.
+     *
+     * The scan is linear over every hazard prop, which sounds careless at ~1500
+     * of them — but it is guarded by the altitude early-out below, and a bird
+     * at cruise is ABOVE every canopy in the world, so the common case costs
+     * one comparison and returns. Only a low pass through the trees pays for
+     * the loop, and even then it is two dot products per prop with no
+     * allocation and no square roots.
+     */
+    function hazardAt(x, y, z, birdRadius) {
+        const pr2 = x * x + y * y + z * z;
+        const br = birdRadius || 0;
+        // Above everything: nothing to test. This is the whole reason a linear
+        // scan is affordable.
+        const ceil = hazTopMax + br;
+        if (pr2 > ceil * ceil) return -1;
+
+        for (let i = 0; i < hazardCount; i++) {
+            const o = i * 5;
+            const nx = hazards[o], ny = hazards[o + 1], nz = hazards[o + 2];
+            const dot = x * nx + y * ny + z * nz;
+            // Far hemisphere — kills roughly half the list for free.
+            if (dot <= 0) continue;
+            const top = hazards[o + 3] + br;
+            if (dot > top) continue;               // above this canopy
+            const rad = hazards[o + 4] + br;
+            // Perpendicular distance from the prop's radial axis, squared.
+            const perp2 = pr2 - dot * dot;
+            if (perp2 < rad * rad) return i;
+        }
+        return -1;
+    }
+
+    /** World position of hazard `i` into `out` — for the impact FX. */
+    function hazardPosition(i, out) {
+        const o = i * 5;
+        return out.set(hazards[o], hazards[o + 1], hazards[o + 2])
+            .multiplyScalar(hazards[o + 3]);
+    }
+
     return {
         group,
         terrain,
         propLayers: layerMeshes,
         layerCounts,
+        hazardAt,
+        hazardPosition,
+        hazardCount,
+        hazardCeiling: hazTopMax,
         update,
         triangleCount: Math.round(triangleCount),
         drawCallCount,
