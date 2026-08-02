@@ -17,7 +17,7 @@ scene.add(new THREE.HemisphereLight(0xbcd8f5, 0x8b8271, 2.0));
 const d = new THREE.DirectionalLight(0xfff4e2, 2.6); d.position.set(-3,4,5); scene.add(d);
 const d2 = new THREE.DirectionalLight(0xcae2ff, 1.2); d2.position.set(4,2,-4); scene.add(d2);
 
-const mat = new THREE.MeshStandardMaterial({ color: 0x8a8f80, roughness: 0.7, metalness: 0.15, side: THREE.DoubleSide });
+const mat = new THREE.MeshStandardMaterial({ color: 0x8a8f80, roughness: 0.7, metalness: 0.15, side: (new URLSearchParams(location.search).get('side')==='front')?THREE.FrontSide:THREE.DoubleSide });
 const matShell = new THREE.MeshStandardMaterial({ color: 0x6b7d9a, roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 0.42 });
 
 const o = { seed: 23, bun: true, faceless: false, hands: false, pregnant: true, baby: false,

@@ -220,13 +220,17 @@ export function createLightRig(THREE, scene) {
     const hemi = new THREE.HemisphereLight(0xa8c6ea, 0x6d6455, 0.62);
     scene.add(hemi);
 
-    // Well round to the FRONT and high. At (-4.2, 4.4, 4.6) the cloak's own left
-    // flank — which runs the full height of the figure — threw a shadow straight
-    // across the chest, so the bust and belly the model works hardest to get
-    // right were the darkest part of the render. Physically correct, and it is
-    // what `ref-c-under.jpg` shows, but this study exists to be looked at.
-    const sun = new THREE.DirectionalLight(0xfff2dc, 1.72);
-    sun.position.set(-1.4, 6.2, 7.0);
+    // Round to the FRONT, and LOW. Two failure modes bracket this position and
+    // both were rendered before landing on it: swing the key out to the side and
+    // the cloak's own flank, which runs the full height of the figure, throws a
+    // shadow straight across the chest, so the bust and belly the model works
+    // hardest to get right become the darkest part of the frame; push it high
+    // and frontal to fix that and every piece of relief flat-lights instead —
+    // the noses vanish, and the only shadow left on a head is the one under the
+    // chin, which reads as a black visor. About 22 deg off-front at 28 deg
+    // elevation lights the fronts and still rakes across them.
+    const sun = new THREE.DirectionalLight(0xfff2dc, 1.78);
+    sun.position.set(-2.6, 3.6, 6.6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 0.5;
@@ -262,7 +266,7 @@ export function createLightRig(THREE, scene) {
     // shadow each other's chests almost completely under a single key, and the
     // bust and belly are the whole point of the modelling — this keeps them
     // readable without flattening the key's shadows.
-    const fill = new THREE.DirectionalLight(0xd8e4f4, 0.42);
+    const fill = new THREE.DirectionalLight(0xd8e4f4, 0.34);
     fill.position.set(1.6, 1.2, 6.0);
     scene.add(fill);
 

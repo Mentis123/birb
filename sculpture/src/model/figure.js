@@ -32,7 +32,7 @@
  */
 
 import { fbm3 } from '../core/noise.js';
-import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets } from './sdf.js';
+import { sdEllipsoid, sdCapsule, smin, smax, subtract, surfaceNets } from './sdf.js';
 
 // ---------------------------------------------------------------------------
 // Profile curves
@@ -111,28 +111,35 @@ const SHELL_PROFILE = [
     // thin front-to-back, so the group reads as a folded screen rather than as
     // four barrels. Depth never exceeds about half the width, and the hem
     // spreads wide where the cloth pools on the paving.
-    [0.000, 0.560, 0.330],
-    [0.120, 0.520, 0.292],
-    [0.320, 0.452, 0.240],
-    [0.560, 0.396, 0.212],
-    [0.800, 0.352, 0.192],
-    [1.000, 0.324, 0.180],
-    [1.160, 0.306, 0.172],
-    [1.300, 0.298, 0.166],
-    [1.420, 0.298, 0.162],
-    [1.520, 0.300, 0.160],
-    [1.610, 0.302, 0.158],
-    [1.700, 0.304, 0.156],
-    [1.800, 0.306, 0.154],
-    [1.900, 0.308, 0.152],
+    // NARROW ACROSS, DEEP FRONT-TO-BACK at the hem. Measured off
+    // `ref-a-front.jpg`: the nearest figure's skirt spans about 0.31 of her
+    // height at the ground, barely more than her shoulders — she is a column
+    // seen head-on. The wide flared bell in `ref-c-under.jpg` is the same cloth
+    // seen from a low three-quarter: the pooling goes BACKWARD, which is the
+    // train, not sideways. Built at 0.46 of height the figures read as four
+    // bells and the diagonal arrangement disappeared into one skirt.
+    [0.000, 0.440, 0.420],
+    [0.120, 0.415, 0.385],
+    [0.320, 0.392, 0.330],
+    [0.560, 0.372, 0.286],
+    [0.800, 0.356, 0.250],
+    [1.000, 0.346, 0.226],
+    [1.160, 0.338, 0.208],
+    [1.300, 0.334, 0.194],
+    [1.420, 0.332, 0.184],
+    [1.520, 0.332, 0.176],
+    [1.610, 0.332, 0.170],
+    [1.700, 0.332, 0.166],
+    [1.800, 0.332, 0.162],
+    [1.900, 0.330, 0.158],
     // The arch narrows hard above the shoulders. Left as wide as the body it
     // framed each head in a doorway three times the head's width; in
     // `ref-c-under.jpg` the collar clears the crown by a hand's breadth.
-    [2.050, 0.272, 0.146],
-    [2.180, 0.254, 0.138],
-    [2.300, 0.232, 0.128],
-    [2.380, 0.198, 0.112],
-    [2.420, 0.166, 0.096],
+    [2.050, 0.300, 0.150],
+    [2.180, 0.276, 0.142],
+    [2.300, 0.248, 0.130],
+    [2.380, 0.210, 0.114],
+    [2.420, 0.174, 0.098],
 ];
 
 /**
@@ -300,21 +307,30 @@ const TORSO_PROFILE = [
     // The trunk runs well below the hip. It has to: the cloak's front opening
     // starts closing around 0.68 and if the body stops at the same height there
     // is a notch where neither surface is, which reads as a tear in the casting.
-    [0.420, 0.244, 0.148],
-    [0.560, 0.258, 0.150],
-    [0.700, 0.268, 0.150],
-    [0.912, 0.262, 0.148],
-    [1.076, 0.256, 0.146],
-    [1.217, 0.246, 0.142],
-    [1.334, 0.234, 0.136],
-    [1.440, 0.228, 0.132],   // waist
-    [1.546, 0.236, 0.136],
-    [1.640, 0.244, 0.138],   // ribs, under the bust
-    [1.734, 0.244, 0.136],
-    [1.828, 0.232, 0.128],
-    [1.911, 0.208, 0.116],   // shoulder line — 0.790 of total height
-    [1.981, 0.128, 0.090],
-    [2.046, 0.068, 0.062],   // neck
+    // Widened about 18% over the first pass. The reference figures are BROAD:
+    // shoulder to shoulder runs ~0.28 of total height in `ref-a-front.jpg`,
+    // against 0.21 as first built, and slender ones read as mannequins rather
+    // than as the heavy standing women in the photographs.
+    [0.420, 0.288, 0.157],
+    [0.560, 0.304, 0.159],
+    [0.700, 0.316, 0.159],
+    [0.912, 0.309, 0.157],
+    [1.076, 0.302, 0.155],
+    [1.217, 0.290, 0.151],
+    [1.334, 0.276, 0.144],
+    [1.440, 0.269, 0.140],   // waist
+    [1.546, 0.278, 0.144],
+    [1.640, 0.288, 0.146],   // ribs, under the bust
+    [1.734, 0.288, 0.144],
+    // The shoulder stays broad ALL THE WAY to the shoulder line and then rises
+    // fast. Tapering from 1.83 gave a long cone that read as a bird's neck; in
+    // the photographs the shoulders are near-horizontal slabs and the neck is
+    // short.
+    [1.828, 0.284, 0.141],
+    [1.911, 0.268, 0.134],   // shoulder line — 0.790 of total height
+    [1.958, 0.152, 0.096],
+    [2.005, 0.082, 0.067],
+    [2.046, 0.072, 0.062],   // neck
 ];
 
 /**
@@ -359,29 +375,31 @@ function buildBodyField(THREE, o) {
         // times deeper than the feature and swallows it whole. Everything
         // below protrudes 2-3x its own blend.
         for (const sx of [-1, 1]) {
-            d = smin(d, sdEllipsoid(x - sx * 0.090, y - 1.698, z - 0.132,
-                0.095, 0.087, 0.088), 0.034);
+            d = smin(d, sdEllipsoid(x - sx * 0.108, y - 1.698, z - 0.142,
+                0.100, 0.090, 0.092), 0.034);
         }
 
         // Shoulders and arms: one continuous run from the deltoid to the wrist,
         // pressed against the ribs.
         for (const sx of [-1, 1]) {
-            d = smin(d, sdEllipsoid(x - sx * 0.186, y - 1.880, z,
-                0.074, 0.066, 0.080), 0.050);
+            d = smin(d, sdEllipsoid(x - sx * 0.222, y - 1.880, z,
+                0.076, 0.068, 0.082), 0.050);
             d = smin(d, sdCapsule(x, y, z,
-                sx * 0.226, 1.858, 0.012, sx * 0.244, 1.476, 0.030, 0.052), 0.040);
+                sx * 0.268, 1.858, 0.012, sx * 0.286, 1.476, 0.030, 0.053), 0.040);
             d = smin(d, sdCapsule(x, y, z,
-                sx * 0.244, 1.476, 0.030, sx * 0.236, 1.174, 0.078, 0.046), 0.032);
+                sx * 0.286, 1.476, 0.030, sx * 0.278, 1.174, 0.078, 0.047), 0.032);
         }
 
         // Neck, rising to meet the head field.
-        d = smin(d, sdCapsule(x, y, z, 0, 1.910, 0.008, 0, 2.108, 0.010, 0.059), 0.055);
+        // Stops BELOW the chin (2.013). Run up to 2.108 its cap reaches 2.167 and
+        // pushes a bare dome straight up through the middle of the face.
+        d = smin(d, sdCapsule(x, y, z, 0, 1.880, 0.006, 0, 1.975, 0.010, 0.062), 0.055);
 
         if (o.pregnant) {
             // A pregnancy is not a ball on a torso — it is the torso, changed.
             // The largest blend radius in the model, deliberately.
-            d = smin(d, sdEllipsoid(x, y - 1.310, z - 0.086,
-                0.200, 0.202, 0.156), 0.055);
+            d = smin(d, sdEllipsoid(x, y - 1.310, z - 0.094,
+                0.228, 0.206, 0.164), 0.055);
         }
 
         if (o.baby) {
@@ -412,9 +430,15 @@ function buildBodyField(THREE, o) {
         return d;
     }
 
+    // The top bound has to CLEAR the neck capsule's cap (0.059 above its 2.108
+    // end point, so 2.167). At 2.13 the box sliced straight through the neck,
+    // surface nets left the cut open with a torn rim, and every figure wore what
+    // looked like a dark trapezoidal visor from the eyes to the collarbone.
+    // Three passes were spent hunting that as a lighting bug, a shadow bug and a
+    // facial-geometry bug; a MeshNormalMaterial render found it in one.
     const mesh = surfaceNets(field, {
-        min: [-0.46, 0.38, -0.30],
-        max: [0.46, 2.13, 0.40],
+        min: [-0.52, 0.38, -0.32],
+        max: [0.52, 2.22, 0.42],
         voxel: 0.0135,
     });
     const geo = new THREE.BufferGeometry();
@@ -453,12 +477,14 @@ function buildHeadField(THREE, o) {
             0.086, 0.070, 0.078), 0.06);
 
         if (!o.faceless) {
-            // THE FACIAL PLANE. These faces are flats, not bulbs: a slab across
-            // the front of the skull that the nose and brow then stand off. An
-            // egg with features smeared on it is what the previous version was,
-            // and no amount of feature tuning rescues it.
-            d = smin(d, sdRoundBox(x, y - (yc - 0.010), z - 0.048,
-                0.070, 0.088, 0.044, 0.026), 0.026);
+            // THE FACIAL PLANE. These faces are flats, not bulbs. It is made by
+            // SLICING the front off the skull, not by adding a slab to it: an
+            // added box is wider than the skull down at jaw height and pokes out
+            // as a literal dark rectangle, which is exactly what the first
+            // version rendered — a visor bolted to each head. A smooth-max
+            // against a half-space plane flattens the front and lets the cut
+            // roll off into the skull's own curvature.
+            d = smax(d, z - 0.090, 0.045);
         }
 
         // HAIR. A helmet over the cranium and down to the nape, and it has to
@@ -469,10 +495,14 @@ function buildHeadField(THREE, o) {
         // simply not hair. That plane sweeps FORWARD above the brow, which is
         // the fringe crossing the forehead, and stops at the temple below it.
         {
-            // The edge has to sit where the surface still faces the camera —
-            // at z = 0.028 it fell on the grazing side of the skull and the head
-            // rendered bald from the front.
-            const hairFrontZ = 0.058 + 0.062 * ss(yc + 0.048, yc + 0.114, y);
+            // Two constraints bracket this. The edge has to sit where the
+            // surface still faces the camera — at z = 0.028 it fell on the
+            // grazing side of the skull and the head rendered bald from the
+            // front. But it must also stay BEHIND the facial plane (z = 0.085):
+            // running the fringe out to 0.120 built a 3.5cm brim across the
+            // forehead, the whole face sat in a recess behind it, and every head
+            // in the group wore a black visor from the eyes to the chin.
+            const hairFrontZ = 0.038 + 0.040 * ss(yc + 0.030, yc + 0.122, y);
             let hair = sdEllipsoid(x, y - (yc + 0.008), z + 0.022,
                 0.134, 0.148, 0.118);
             hair = smax(hair, z - hairFrontZ, 0.016);
@@ -500,7 +530,7 @@ function buildHeadField(THREE, o) {
             // must stand clear of the facial plane (front face at z = 0.092) or
             // there is no nose at all.
             d = smin(d, sdCapsule(x, y, z,
-                0, yc + 0.070, 0.078, 0, yc - 0.030, 0.112, 0.019), 0.010);
+                0, yc + 0.072, 0.080, 0, yc - 0.032, 0.128, 0.021), 0.010);
             // Brow bar. Narrow — the full-width version read as a shelf.
             d = smin(d, sdEllipsoid(x, y - (yc + 0.062), z - 0.080,
                 0.066, 0.014, 0.020), 0.009);
@@ -515,8 +545,8 @@ function buildHeadField(THREE, o) {
             // Sockets, SHALLOW and small. Carved 0.034 deep into a head only
             // 0.098 deep, they came out as two black slots.
             for (const sx of [-1, 1]) {
-                d = subtract(d, sdEllipsoid(x - sx * 0.044, y - (yc + 0.030), z - 0.106,
-                    0.030, 0.017, 0.028), 0.012);
+                d = subtract(d, sdEllipsoid(x - sx * 0.044, y - (yc + 0.030), z - 0.112,
+                    0.031, 0.017, 0.030), 0.012);
             }
         } else {
             // The turned-away figure in `ref-d-wide.jpg`: a smooth ovoid, no
@@ -535,8 +565,10 @@ function buildHeadField(THREE, o) {
         return d;
     }
 
+    // Same rule as the body's box: clear the neck stub's bottom cap (0.048 below
+    // its 1.879 end) or surface nets leaves a torn rim at the collar.
     const mesh = surfaceNets(field, {
-        min: [-0.22, yc - 0.30, -0.22],
+        min: [-0.22, yc - 0.35, -0.22],
         max: [0.22, yc + 0.27, 0.22],
         voxel: 0.0062,
     });
@@ -561,7 +593,7 @@ function buildFeet(THREE, opts) {
         // Standing entirely clear of the cloth they read as four pairs of loose
         // eggs on the paving, which is what they looked like for three passes.
         f.scale(0.056, 0.034, 0.115);
-        f.translate(sx * 0.068, 0.038, 0.318 + (sx > 0 ? 0.026 : 0));
+        f.translate(sx * 0.082, 0.038, 0.372 + (sx > 0 ? 0.030 : 0));
         parts.push(f);
     }
     const geo = mergeGeometries(THREE, parts);
