@@ -243,17 +243,20 @@ function styleText() {
    Bottom-CENTRE, between the two thumbs rather than under either. The stick
    owns the left half and the boost pill roams the right, so a button parked in
    either corner is a button someone lands on by accident mid-turn. */
+/* Small, and low enough to stay out of the turret's sight picture. It used to
+   sit a full thumb-height above the bottom edge, right where the gun is. */
 .vh-action {
   position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: calc(var(--vh-bottom, 92px) + 12px);
+  bottom: max(8px, env(safe-area-inset-bottom, 0px));
   pointer-events: auto; cursor: pointer;
-  font-family: var(--font); font-size: 13px; font-weight: 900;
-  letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink);
-  background: var(--gold); border: 4px solid var(--ink); border-radius: 999px;
-  padding: 9px 20px 10px; box-shadow: 0 5px 0 0 var(--ink);
+  font-family: var(--font); font-size: 10px; font-weight: 900;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink);
+  background: var(--gold); border: 3px solid var(--ink); border-radius: 999px;
+  padding: 5px 13px 6px; box-shadow: 0 3px 0 0 var(--ink);
   transition: transform 0.08s ease, box-shadow 0.08s ease;
+  opacity: 0.92;
 }
-.vh-action:active { transform: translateX(-50%) translateY(4px); box-shadow: 0 1px 0 0 var(--ink); }
+.vh-action:active { transform: translateX(-50%) translateY(3px); box-shadow: 0 0 0 0 var(--ink); opacity: 1; }
 .vh-action.calm { background: var(--cream); }
 
 /* --- results ------------------------------------------------------------- */

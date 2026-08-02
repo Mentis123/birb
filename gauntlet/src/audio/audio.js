@@ -50,7 +50,10 @@ const MIX = {
     horn: 0.34,
     finish: 0.3,
     ring: 0.36,        // ring pickup — sits with the gate chime, not above it
-    rocket: 0.4,
+    // The gun is the loudest thing in the game and should be. It is the one
+    // sound the player CAUSES on purpose, and at 0.4 it sat under the wind bed
+    // and read as a puff rather than a launch.
+    rocket: 0.9,
     explode: 0.5,
     kill: 0.42,
     alarm: 0.34,
@@ -512,9 +515,14 @@ export function createAudio(opts = {}) {
     function rocketFire() {
         if (!ready || disposed) return;
         const t = now();
+        // Four layers, because "louder" alone just clips: a crack to start it,
+        // a body thump you feel, the whoosh of the motor, and a low tail that
+        // keeps the launch ringing after the transient is gone.
+        noiseVoice(t, 'highpass', 4200, 2000, 0.7, MIX.rocket * 0.75, 0.001, 0.055, 1, 1);
+        toneVoice(t, 'sine', 240, 52, MIX.rocket * 0.95, 0.003, 0.26);
         noiseVoice(t, 'bandpass', 380, 2600, 0.8, MIX.rocket, 0.012, 0.42, 0.7, 1.8);
-        toneVoice(t, 'triangle', 210, 70, MIX.rocket * 0.55, 0.005, 0.2);
-        triggerHaptic(30);
+        toneVoice(t, 'triangle', 150, 62, MIX.rocket * 0.6, 0.006, 0.34);
+        triggerHaptic(46);
     }
 
     /**

@@ -45,9 +45,20 @@
  * the LOCAL horizon, and on a planet you fly all the way around, world +Y is
  * sideways on screen for most of a lap. See layoutClouds().
  *
- * DEPTH. Everything here is depthTest:false / depthWrite:false with a very low
- * renderOrder, so the sky is painted first, in the order listed, and every
- * other object in the scene draws over it regardless of the dome's radius.
+ * DEPTH. Nothing here writes depth, and everything carries a very low
+ * renderOrder so the sky paints first, in the order listed. Only the DOME sets
+ * depthTest:false — it has to fill the background unconditionally. Everything
+ * else depth-tests.
+ *
+ * That distinction is load-bearing and was got wrong once. renderOrder does
+ * NOT order an object against the opaque pass: Three renders all opaque
+ * objects, then all `transparent:true` ones, and renderOrder only sorts within
+ * each group. So a transparent, non-depth-testing cloud at renderOrder -997
+ * was drawn LAST and ignored the depth buffer, painting a cloud 400 units away
+ * over a drone three metres from the camera. Nothing real in this game is more
+ * than ~250 units out (camera at radius ~118, far limb of a radius-100 planet
+ * at 218) while the nearest sky shell is at 330, so honest depth testing sorts
+ * all of it correctly with room to spare.
  *
  * Budget: <= 8 draw calls, <= 6k triangles. Actual: 5 draw calls, ~5.5k tris
  * at `high`.
@@ -469,7 +480,7 @@ export function createSky(THREE, opts = {}) {
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         fog: false,
     });
     const halo = new THREE.Mesh(haloGeo, haloMat);
@@ -488,7 +499,7 @@ export function createSky(THREE, opts = {}) {
         color: PALETTE.sunCore,
         transparent: true,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         fog: false,
         toneMapped: false,
     });
@@ -559,7 +570,7 @@ export function createSky(THREE, opts = {}) {
             blendDst: THREE.OneFactor,
             blendEquation: THREE.AddEquation,
             depthWrite: false,
-            depthTest: false,
+            depthTest: true,
             fog: false,
         });
         stars = new THREE.Points(starGeo, starMat);
@@ -577,10 +588,17 @@ export function createSky(THREE, opts = {}) {
 
     const cloudMat = new THREE.MeshBasicMaterial({
         vertexColors: true,
-        transparent: true,
-        opacity: 1,
+        // NOT transparent, deliberately. A cloud card is solid triangles with
+        // vertex colours — there is no alpha anywhere in it, and asking for
+        // transparency moved the whole mesh into Three's transparent pass,
+        // which runs AFTER every opaque object. renderOrder then only sorted it
+        // against other transparent things and could not pull it back in front
+        // of the terrain pass, so a cloud 400 units out painted straight over a
+        // drone three metres from the camera. Opaque puts it back where
+        // renderOrder -997 actually means "first".
+        transparent: false,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         // Cards are built facing the camera anchor, so back faces never show.
         // DoubleSide would double the reported triangle count for nothing.
         side: THREE.FrontSide,
