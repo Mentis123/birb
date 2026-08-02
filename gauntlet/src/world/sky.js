@@ -19,8 +19,18 @@
  *      body) via vertex colours, so the hard two-tone edge costs no extra draw
  *      call. Each card drifts on its own angular speed, giving real parallax.
  *   4. Stars as one Points cloud with a procedural four-point sparkle and a
- *      quantised (4-step) twinkle, faded in toward the zenith so they only
- *      appear in the deep blue.
+ *      quantised (4-step) twinkle, faded in toward the LOCAL zenith so they
+ *      only appear in the deep blue overhead, wherever you are on the planet.
+ *
+ * THE HORIZON IS NOT AT EYE LEVEL, and every visibility test here depends on
+ * that. From 118.5 units up on a radius-100 planet the sight line does not
+ * graze the ground until 32.4 degrees BELOW horizontal; the 32-degree band
+ * between is sky you see straight over the limb. So the dome's horizon band,
+ * the star fade and the cloud cull all measure height against sin(dip)
+ * (uniform `uDip`, recomputed per frame from the camera's radius), never
+ * against dot(dir, up) alone. Getting this wrong draws the horizon a third of
+ * the sky too high, and anything real sitting in that band — the sun, most
+ * obviously — appears BELOW the drawn horizon line while nothing occludes it.
  *
  * ORIENTATION. The group's *position* follows the camera every frame so the
  * dome can never be clipped or escaped, but its *rotation* stays world-fixed.
@@ -44,6 +54,7 @@
  */
 
 import { PALETTE, KEY_LIGHT_DIR } from '../core/palette.js';
+import { PLANET_RADIUS } from '../core/terrain.js';
 import { makeRng, rngRange } from '../core/rng.js';
 
 /** Per-tier counts. Read the tier you are handed; never sniff the user agent. */
@@ -81,6 +92,7 @@ uniform vec3  uGlow;
 uniform vec3  uSunTint;
 uniform vec3  uSunDir;
 uniform vec3  uUp;
+uniform float uDip;
 varying vec3  vDir;
 
 vec3 ramp( float h ) {
@@ -94,17 +106,30 @@ vec3 ramp( float h ) {
 
 void main() {
     vec3 d = normalize( vDir );
-    // Height ABOVE THE LOCAL HORIZON, not above world Y=0. On a planet you fly
-    // all the way around, a gradient banded on world Y puts the horizon glow
-    // diagonally across the screen for most of a lap, and the sky reads as
-    // tipped over. Banding on the player's own up keeps the horizon where the
-    // horizon actually is.
+    // Height above THE HORIZON YOU CAN ACTUALLY SEE.
     //
-    // The SUN is untouched by this: it is still drawn at uSunDir in world
-    // space, which is what keeps it agreeing with KEY_LIGHT_DIR. The only
-    // change is that it now genuinely rises and sets through the gradient as
-    // you circle the planet, instead of being pinned at one height in it.
-    float h = dot( d, uUp );
+    // Two corrections live in this one line, and the second is easy to miss.
+    //
+    // (1) Band on the player's up, not on world Y. On a planet you fly all the
+    //     way around, a gradient banded on world Y runs diagonally across the
+    //     screen for most of a lap and the sky reads as tipped over.
+    //
+    // (2) The horizon is NOT at local horizontal. From 118.5 units up on a
+    //     radius-100 planet the line of sight only grazes the ground 32.4
+    //     DEGREES below horizontal — everything between is sky you can see
+    //     straight through, over the limb. Painting the horizon band at
+    //     elevation 0 therefore drew the horizon a third of the sky too high,
+    //     and anything real sitting in that band appeared BELOW the drawn
+    //     horizon line while being occluded by nothing. That is why the sun
+    //     came up early: measured, it clears the terrain at -32.4 and does not
+    //     cross the drawn line until 0.
+    //
+    // uDip is sin(dip), so this maps the true horizon to 0 and the zenith to
+    // 1 and every band downstream lands where it should.
+    //
+    // The SUN itself is untouched: still drawn at uSunDir in world space, so it
+    // still agrees with KEY_LIGHT_DIR.
+    float h = ( dot( d, uUp ) + uDip ) / ( 1.0 + uDip );
 
     // Smooth ramp, then the same ramp evaluated on a quantised height. Mixing
     // the two gives painted-looking steps that still read as a gradient — a
@@ -320,12 +345,25 @@ attribute float aSize;
 attribute float aBase;
 uniform float uTime;
 uniform float uScale;
+uniform vec3  uUp;
+uniform float uDip;
 varying float vA;
 void main() {
     // Quantised twinkle: four discrete brightness levels, never a sine fade.
     float t = sin( uTime * ( 0.7 + fract( aPhase ) * 1.9 ) + aPhase * 6.2831 );
     float q = floor( t * 2.0 + 2.0 ) / 3.0;
-    vA = aBase * ( 0.34 + 0.66 * q );
+
+    // Zenith fade against the LOCAL zenith, evaluated per frame.
+    //
+    // This used to be baked into aBase from the star's world Y at build time,
+    // with the field itself scattered only over a world-Y cap. On a planet you
+    // circle, that cap is somewhere else entirely half a lap later: stars sat
+    // in the warm horizon band on one side and the sky overhead was empty on
+    // the other. The field is a full sphere now and this picks the half you
+    // are actually under.
+    float e = ( dot( normalize( position ), uUp ) + uDip ) / ( 1.0 + uDip );
+    float zen = clamp( ( e - 0.42 ) / 0.34, 0.0, 1.0 );
+    vA = aBase * zen * zen * ( 0.34 + 0.66 * q );
     vec4 mv = modelViewMatrix * vec4( position, 1.0 );
     gl_PointSize = aSize * uScale * ( 0.72 + 0.28 * q );
     gl_Position = projectionMatrix * mv;
@@ -397,8 +435,10 @@ export function createSky(THREE, opts = {}) {
             uGlow: { value: new THREE.Color(PALETTE.skyGlow) },
             uSunTint: { value: new THREE.Color(PALETTE.sunHalo) },
             uSunDir: { value: sunDir.clone() },
-            // The player's radial up, refreshed every frame by update().
+            // The player's radial up, and sin(horizon dip) for the current
+            // altitude. Both refreshed every frame by update().
             uUp: { value: new THREE.Vector3(0, 1, 0) },
+            uDip: { value: 0 },
         },
         side: THREE.BackSide,
         depthWrite: false,
@@ -472,8 +512,11 @@ export function createSky(THREE, opts = {}) {
         const sSize = new Float32Array(n);
         const sBase = new Float32Array(n);
         for (let i = 0; i < n; i++) {
-            // Upper sky only — stars in the warm horizon band look like dirt.
-            const y = rngRange(rng, 0.45, 0.995);
+            // FULL sphere. The zenith selection happens per frame in the vertex
+            // shader against the local up — see STAR_VERT. Scattering only over
+            // a world-Y cap here is what left half the planet with no stars
+            // overhead at all.
+            const y = rngRange(rng, -1, 1);
             const r = Math.sqrt(Math.max(0, 1 - y * y));
             const a = rngRange(rng, 0, Math.PI * 2);
             sPos[i * 3] = Math.cos(a) * r * R_STARS;
@@ -486,9 +529,10 @@ export function createSky(THREE, opts = {}) {
             // `away` only has to clear the sun's own glow pocket (~16 degrees).
             // A wide gate silently deletes every star in the half of the sky
             // the camera is actually pointed at.
-            const zen = Math.min(1, Math.max(0, (y - 0.44) / 0.34));
+            // Only the sun-avoidance and the per-star brightness are baked; the
+            // zenith term is per frame now and must NOT be pre-multiplied here.
             const away = Math.min(1, Math.max(0, (0.962 - dot) / 0.055));
-            sBase[i] = Math.pow(zen, 1.5) * away * rngRange(rng, 0.80, 1.0);
+            sBase[i] = away * rngRange(rng, 0.80, 1.0);
         }
         const starGeo = new THREE.BufferGeometry();
         starGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
@@ -502,6 +546,8 @@ export function createSky(THREE, opts = {}) {
                 uTime: { value: 0 },
                 uScale: { value: 6.0 },
                 uTint: { value: new THREE.Color(PALETTE.starTint) },
+                uUp: { value: new THREE.Vector3(0, 1, 0) },
+                uDip: { value: 0 },
             },
             transparent: true,
             // NOT AdditiveBlending. Three's additive preset is (SrcAlpha, One),
@@ -643,7 +689,7 @@ export function createSky(THREE, opts = {}) {
      * That buys back the "no CPU work per frame" the baked matrices had, and it
      * is a rounding error next to one draw call.
      */
-    function layoutClouds(upX, upY, upZ, t) {
+    function layoutClouds(upX, upY, upZ, t, sinDip) {
         for (let i = 0; i < cloudCount; i++) {
             // Drift: a slow spin of the cloud's bearing about world +Y. This
             // used to live in the vertex shader, where it was free — but there
@@ -671,13 +717,16 @@ export function createSky(THREE, opts = {}) {
             else orient.up.set(upX, upY, upZ);
             orient.lookAt(0, 0, 0);
 
-            // Collapse anything below the local horizon. Cloud bearings are
-            // world-fixed while the horizon is now local, so a card can end up
-            // under your feet — and the sky draws with depthTest off, so it
-            // would paint straight over the ground. Pre-existing, but a level
-            // cloud sitting on a hillside is a lot more obviously wrong than a
-            // vertical sliver was. `align` IS the sine of its elevation.
-            const vis = align > 0.02 ? 1 : 0;
+            // Collapse anything below the horizon you can actually SEE. Cloud
+            // bearings are world-fixed while the horizon is local, so a card
+            // can end up behind the planet — and the sky draws with depthTest
+            // off, so it would paint straight over the ground.
+            //
+            // The cut is at the true horizon (-sinDip), NOT at local horizontal.
+            // Culling at horizontal threw away every cloud in the 32-degree
+            // band you can see over the limb, popping them out in mid-air a
+            // third of the sky above the ground.
+            const vis = align > -sinDip + 0.02 ? 1 : 0;
             orient.scale.set(cloudScale[i * 2] * vis, cloudScale[i * 2 + 1] * vis, 1);
             orient.rotateZ(cloudRoll[i]);
             orient.updateMatrix();
@@ -686,7 +735,7 @@ export function createSky(THREE, opts = {}) {
         }
         clouds.instanceMatrix.needsUpdate = true;
     }
-    layoutClouds(0, 1, 0, 0);
+    layoutClouds(0, 1, 0, 0, 0.54);
     if (clouds.instanceColor) clouds.instanceColor.needsUpdate = true;
     cloudGeo.setAttribute('aShape', new THREE.InstancedBufferAttribute(shape, 2));
 
@@ -719,8 +768,21 @@ export function createSky(THREE, opts = {}) {
             const ux = len > 1e-4 ? cx / len : 0;
             const uy = len > 1e-4 ? cy / len : 1;
             const uz = len > 1e-4 ? cz / len : 0;
-            layoutClouds(ux, uy, uz, time);
+            // sin(horizon dip) for this altitude. From radius r on a radius-R
+            // planet the sight line grazes the ground at asin(sqrt(1-(R/r)^2))
+            // below horizontal — 32.4 degrees at cruise. Everything above that
+            // is sky, and every "is this above the horizon" test in this file
+            // has to use it rather than assuming horizontal.
+            const ratio = len > 1e-4 ? Math.min(1, PLANET_RADIUS / len) : 1;
+            const sinDip = Math.sqrt(Math.max(0, 1 - ratio * ratio));
+
+            layoutClouds(ux, uy, uz, time, sinDip);
             domeMat.uniforms.uUp.value.set(ux, uy, uz);
+            domeMat.uniforms.uDip.value = sinDip;
+            if (starMat) {
+                starMat.uniforms.uUp.value.set(ux, uy, uz);
+                starMat.uniforms.uDip.value = sinDip;
+            }
         }
     }
 
