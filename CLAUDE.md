@@ -179,6 +179,29 @@ Two structural lessons already paid for, do not undo them:
   fully modelled. Closing the robe at chest height turns four women into four
   bottles.
 
+**Reference set (2026-08-02).** Mentis's four photos in `sculpture/reference/`
+plus seven Google Maps community photos used TRANSIENTLY for measurement and
+deliberately NOT committed — they are other people's copyrighted images, and
+only the landmarks extracted from them feed the model. Those seven changed the
+structure materially and the findings are recorded here so they survive:
+
+- The work is **Michael Meszaros, 2008**, commissioned via the Harold Mitchell
+  Foundation for the hospital's opening. Maps lists it as "Women's Sculpture".
+- **The hood is a hollow open plate**, not a tube. It rises behind the head with
+  a visible rim and a dark interior you can see into from three-quarter angles.
+- **The figures are flat slabs.** Depth is about half the width; the cloak is a
+  PANEL. The group is a **zigzag concertina** of those panels, which is why it
+  reads as one mass from the front and as four people from the side.
+- **Every figure carries a story** and this is the subject of the sculpture, not
+  decoration: one is heavily pregnant, one cradles a swaddled newborn with both
+  forearms under it, one is the clinician with a stethoscope round her neck.
+  Modelling four identical women loses the point of the piece.
+- **Every head wears a smooth hair cap** to the jaw — a bob, not a bare skull.
+  The earlier "two of them have buns" reading came from seeing a top-knot over
+  the same cap on two figures.
+- The faces are planar with a **long nose ridge running from the brow**, hollow
+  triangular eye sockets and a wide flat mouth.
+
 **The likeness gate is `node tools/sculpture-proportions.mjs`**, and it is
 PROPORTION ONLY — it says so in its own output. Pixel IoU against the photos
 was tried and abandoned on evidence: luminance thresholding, centre flood fill

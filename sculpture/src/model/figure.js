@@ -105,25 +105,30 @@ function roughen(THREE, geo, { amount = 0.012, scale = 3.2, seed = 1, octaves = 
  */
 const SHELL_PROFILE = [
     // [height, halfWidthX, halfDepthZ]
-    [0.000, 0.430, 0.362],
-    [0.140, 0.400, 0.344],
-    [0.340, 0.358, 0.316],
-    [0.560, 0.318, 0.288],
-    [0.800, 0.282, 0.262],
-    [1.000, 0.258, 0.243],
-    [1.160, 0.240, 0.228],
-    [1.300, 0.232, 0.219],
-    [1.420, 0.238, 0.217],
-    [1.520, 0.244, 0.214],
-    [1.610, 0.246, 0.208],
-    [1.700, 0.248, 0.200],
-    [1.800, 0.252, 0.196],
-    [1.900, 0.262, 0.200],
-    [2.050, 0.268, 0.204],
-    [2.180, 0.264, 0.200],
-    [2.300, 0.242, 0.184],
-    [2.380, 0.200, 0.154],
-    [2.420, 0.150, 0.116],
+    //
+    // FLAT. The profile references show the cloak is a PANEL — wide across and
+    // thin front-to-back, so the group reads as a folded screen rather than as
+    // four barrels. Depth never exceeds about half the width, and the hem
+    // spreads wide where the cloth pools on the paving.
+    [0.000, 0.520, 0.240],
+    [0.140, 0.482, 0.226],
+    [0.340, 0.428, 0.208],
+    [0.560, 0.376, 0.190],
+    [0.800, 0.330, 0.175],
+    [1.000, 0.300, 0.166],
+    [1.160, 0.278, 0.158],
+    [1.300, 0.266, 0.152],
+    [1.420, 0.268, 0.150],
+    [1.520, 0.270, 0.148],
+    [1.610, 0.270, 0.145],
+    [1.700, 0.270, 0.142],
+    [1.800, 0.272, 0.140],
+    [1.900, 0.276, 0.140],
+    [2.050, 0.278, 0.142],
+    [2.180, 0.272, 0.140],
+    [2.300, 0.250, 0.130],
+    [2.380, 0.208, 0.110],
+    [2.420, 0.156, 0.086],
 ];
 
 /**
@@ -141,11 +146,12 @@ const FRONT_OPENING = [
     [1.150, 0.55],
     [1.330, 0.72],
     [1.520, 0.86],
-    [1.700, 1.00],
-    [1.900, 1.14],
-    [2.080, 1.26],
-    [2.260, 1.38],
-    [2.420, 1.50],
+    [1.700, 1.02],
+    [1.860, 1.24],
+    [2.000, 1.46],
+    [2.180, 1.66],
+    [2.300, 1.80],
+    [2.420, 1.92],
 ];
 
 const WALL = 0.040;
@@ -227,19 +233,19 @@ function buildShell(THREE, opts) {
  * are what read as a body rather than as a mannequin stand.
  */
 const TORSO_PROFILE = [
-    [0.700, 0.212, 0.176],
-    [0.912, 0.204, 0.172],
-    [1.076, 0.196, 0.168],
-    [1.217, 0.180, 0.156],
-    [1.334, 0.166, 0.146],
-    [1.440, 0.162, 0.144],   // waist
-    [1.546, 0.172, 0.150],
-    [1.640, 0.180, 0.154],   // ribs, under the bust
-    [1.734, 0.180, 0.150],
-    [1.828, 0.172, 0.140],
-    [1.911, 0.156, 0.126],   // shoulder line — 0.790 of total height
-    [1.981, 0.104, 0.096],
-    [2.046, 0.062, 0.062],   // neck
+    [0.700, 0.268, 0.150],
+    [0.912, 0.262, 0.148],
+    [1.076, 0.256, 0.146],
+    [1.217, 0.246, 0.142],
+    [1.334, 0.234, 0.136],
+    [1.440, 0.228, 0.132],   // waist
+    [1.546, 0.236, 0.136],
+    [1.640, 0.244, 0.138],   // ribs, under the bust
+    [1.734, 0.244, 0.136],
+    [1.828, 0.232, 0.128],
+    [1.911, 0.208, 0.116],   // shoulder line — 0.790 of total height
+    [1.981, 0.128, 0.090],
+    [2.046, 0.068, 0.062],   // neck
 ];
 
 function buildTorso(THREE, opts) {
@@ -284,26 +290,26 @@ function buildHead(THREE, opts) {
     // Brow: a shallow bar, not a ridge. On the originals the brow is the only
     // hard line on the face and everything else is soft.
     const brow = new THREE.SphereGeometry(1, 16, 10);
-    brow.scale(0.082, 0.018, 0.032);
+    brow.scale(0.092, 0.020, 0.026);
     brow.translate(0, yc + 0.058, 0.108);
     parts.push(brow);
 
     // Nose: long, straight, narrow — the Modigliani note in these faces.
     const nose = new THREE.SphereGeometry(1, 14, 12);
-    nose.scale(0.019, 0.058, 0.028);
-    nose.translate(0, yc - 0.014, 0.119);
+    nose.scale(0.016, 0.086, 0.030);
+    nose.translate(0, yc + 0.006, 0.098);
     parts.push(nose);
 
     // Mouth: a small horizontal pad. A slit modelled as a groove disappears at
     // any distance; a slightly proud pad keeps a readable shadow under it.
     const mouth = new THREE.SphereGeometry(1, 14, 10);
-    mouth.scale(0.030, 0.010, 0.017);
-    mouth.translate(0, yc - 0.082, 0.112);
+    mouth.scale(0.040, 0.011, 0.014);
+    mouth.translate(0, yc - 0.086, 0.092);
     parts.push(mouth);
 
     // Chin/jaw fullness.
     const jaw = new THREE.SphereGeometry(1, 18, 14);
-    jaw.scale(0.082, 0.066, 0.086);
+    jaw.scale(0.086, 0.070, 0.072);
     jaw.translate(0, yc - 0.096, 0.022);
     parts.push(jaw);
 
@@ -313,6 +319,14 @@ function buildHead(THREE, opts) {
     const neck = new THREE.CylinderGeometry(0.058, 0.104, 0.135, 20, 1);
     neck.translate(0, yc - 0.192, 0.008);
     parts.push(neck);
+
+    // Hair as a smooth cap down to the jaw. It is on EVERY figure in the
+    // close-up references — a bob, not a bare skull — and it is most of what
+    // separates the heads from featureless eggs at a distance.
+    const cap = new THREE.SphereGeometry(1, 26, 18);
+    cap.scale(0.126, 0.152, 0.108);
+    cap.translate(0, yc + 0.010, -0.020);
+    parts.push(cap);
 
     if (opts.bun) {
         // Coiled bun, sitting high and to the back. Two of the four wear one.
@@ -347,22 +361,22 @@ function buildArms(THREE, opts) {
     for (const sx of [-1, 1]) {
         const shoulder = new THREE.SphereGeometry(1, 18, 14);
         shoulder.scale(0.068, 0.060, 0.074);
-        shoulder.translate(sx * 0.124, 1.905, 0.002);
+        shoulder.translate(sx * 0.168, 1.898, 0.002);
         parts.push(shoulder);
 
         // Upper arm: essentially VERTICAL, pressed against the ribs. Anything
         // more than a few degrees out and the silhouette stops being a column.
-        const upper = new THREE.CylinderGeometry(0.048, 0.042, 0.40, 16, 1);
+        const upper = new THREE.CylinderGeometry(0.044, 0.038, 0.40, 16, 1);
         upper.rotateZ(sx * 0.052);
-        upper.translate(sx * 0.152, 1.678, 0.018);
+        upper.translate(sx * 0.214, 1.678, 0.014);
         parts.push(upper);
 
         // Elbow into forearm, still close to the body, drifting a little
         // forward as it descends.
-        const fore = new THREE.CylinderGeometry(0.042, 0.037, 0.32, 14, 1);
+        const fore = new THREE.CylinderGeometry(0.038, 0.034, 0.32, 14, 1);
         fore.rotateZ(sx * 0.10);
         fore.rotateX(-0.20);
-        fore.translate(sx * 0.146, 1.348, 0.058);
+        fore.translate(sx * 0.212, 1.348, 0.044);
         parts.push(fore);
     }
 
@@ -378,6 +392,64 @@ function buildArms(THREE, opts) {
 
     const geo = mergeGeometries(THREE, parts);
     return roughen(THREE, geo, { amount: 0.005, scale: 6.5, seed: opts.seed + 41 });
+}
+
+/**
+ * The narrative each figure carries.
+ *
+ * This is the Royal Women's Hospital, and Meszaros gave every figure a reason
+ * to be there: one is pregnant, one carries a newborn, one is the clinician
+ * with a stethoscope round her neck. Modelling four identical women loses the
+ * entire subject of the sculpture, so these are not decoration — they are the
+ * point, and the detail inventory treats them as identity-defining.
+ */
+function buildNarrative(THREE, opts) {
+    const parts = [];
+
+    if (opts.pregnant) {
+        // A full, low, rounded belly. It sits proud of the torso wall rather
+        // than being blended into it, exactly as the reference reads.
+        const belly = new THREE.SphereGeometry(1, 24, 18);
+        belly.scale(0.196, 0.196, 0.072);
+        belly.translate(0, 1.318, 0.086);
+        parts.push(belly);
+    }
+
+    if (opts.baby) {
+        // A swaddled bundle held at the waist, with both forearms under it.
+        const bundle = new THREE.SphereGeometry(1, 22, 16);
+        bundle.scale(0.146, 0.096, 0.062);
+        bundle.translate(0.012, 1.330, 0.126);
+        parts.push(bundle);
+        for (const sx of [-1, 1]) {
+            const arm = new THREE.CylinderGeometry(0.040, 0.036, 0.24, 14, 1);
+            arm.rotateZ(Math.PI / 2);
+            arm.rotateY(sx * 0.30);
+            arm.translate(sx * 0.096, 1.278, 0.112);
+            parts.push(arm);
+        }
+    }
+
+    if (opts.stethoscope) {
+        // Two cords over the shoulders meeting in a bell at the sternum. Thin
+        // tubes read as a stethoscope at a glance; anything more detailed just
+        // becomes noise on a 2.4m bronze.
+        for (const sx of [-1, 1]) {
+            const cord = new THREE.TorusGeometry(0.088, 0.0125, 8, 20, Math.PI * 1.05);
+            cord.rotateY(Math.PI / 2);
+            cord.rotateZ(sx * 0.22);
+            cord.translate(sx * 0.066, 1.756, 0.072);
+            parts.push(cord);
+        }
+        const bell = new THREE.CylinderGeometry(0.030, 0.030, 0.016, 14, 1);
+        bell.rotateX(Math.PI / 2);
+        bell.translate(0.046, 1.556, 0.112);
+        parts.push(bell);
+    }
+
+    if (!parts.length) return null;
+    const geo = mergeGeometries(THREE, parts);
+    return roughen(THREE, geo, { amount: 0.004, scale: 7.5, seed: opts.seed + 71 });
 }
 
 /** Bare feet peeping from under the hem. */
@@ -398,8 +470,8 @@ function buildBust(THREE, opts) {
     const parts = [];
     for (const sx of [-1, 1]) {
         const b = new THREE.SphereGeometry(1, 20, 16);
-        b.scale(0.081, 0.072, 0.050);
-        b.translate(sx * 0.073, 1.711, 0.122);
+        b.scale(0.078, 0.070, 0.044);
+        b.translate(sx * 0.086, 1.705, 0.104);
         parts.push(b);
     }
     const geo = mergeGeometries(THREE, parts);
@@ -485,6 +557,9 @@ export function buildFigure(THREE, opts = {}) {
         bun: opts.bun ?? false,
         faceless: opts.faceless ?? false,
         hands: opts.hands ?? false,
+        pregnant: opts.pregnant ?? false,
+        baby: opts.baby ?? false,
+        stethoscope: opts.stethoscope ?? false,
         folds: opts.folds ?? 7,
         foldDepth: opts.foldDepth ?? 1,
         foldPhase: opts.foldPhase ?? 0,
@@ -495,6 +570,8 @@ export function buildFigure(THREE, opts = {}) {
         buildShell(THREE, o), buildTorso(THREE, o), buildBust(THREE, o),
         buildArms(THREE, o), buildFeet(THREE, o),
     ];
+    const narrative = buildNarrative(THREE, o);
+    if (narrative) parts.push(narrative);
     parts.push(o.faceless ? buildBlankHead(THREE, o) : buildHead(THREE, o));
 
     const geo = mergeGeometries(THREE, parts);

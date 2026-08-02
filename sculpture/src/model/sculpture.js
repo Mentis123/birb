@@ -39,10 +39,15 @@ const PATINA = {
  * right of `ref-d-wide.jpg`.
  */
 const LAYOUT = [
-    { x: -0.52, z: 0.20, turn: 0.16, scale: 1.030, seed: 11, bun: false, faceless: false, hands: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0 },
-    { x: -0.04, z: -0.38, turn: -0.10, scale: 0.985, seed: 23, bun: true, faceless: false, hands: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7 },
-    { x: 0.46, z: 0.10, turn: -0.26, scale: 1.005, seed: 37, bun: true, faceless: false, hands: true, folds: 6, foldDepth: 1.12, foldPhase: 3.1 },
-    { x: 0.94, z: -0.28, turn: -0.62, scale: 0.960, seed: 51, bun: false, faceless: true, hands: false, folds: 7, foldDepth: 0.94, foldPhase: 4.6 },
+    // ZIGZAG, not a rank. The cloak panels fold back and forth like a screen —
+    // that concertina is the group's whole plan-view and it is why the mass
+    // reads as one object from the front and as four people from the side.
+    // Alternating `turn` is what makes the fold; a shared heading gave four
+    // parallel slabs and no sculpture.
+    { x: -0.78, z: 0.16, turn: 0.42, scale: 1.020, seed: 11, bun: false, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0 },
+    { x: -0.26, z: -0.20, turn: -0.34, scale: 0.995, seed: 23, bun: true, faceless: false, hands: false, pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7 },
+    { x: 0.28, z: 0.14, turn: 0.30, scale: 1.005, seed: 37, bun: true, faceless: false, hands: false, pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1 },
+    { x: 0.80, z: -0.18, turn: -0.40, scale: 1.010, seed: 51, bun: false, faceless: false, hands: false, pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6 },
 ];
 
 /**
@@ -122,6 +127,7 @@ export function createSculpture(THREE, opts = {}) {
         const L = LAYOUT[i];
         const geo = buildFigure(THREE, {
             seed: L.seed, bun: L.bun, faceless: L.faceless, hands: L.hands, scale: L.scale,
+            pregnant: L.pregnant, baby: L.baby, stethoscope: L.stethoscope,
             folds: L.folds, foldDepth: L.foldDepth, foldPhase: L.foldPhase,
         });
         paintPatina(THREE, geo, L.seed);
@@ -137,8 +143,8 @@ export function createSculpture(THREE, opts = {}) {
 
     // The low bronze base plate the group stands on. In the photos it is barely
     // a step — a shallow irregular slab that reads as part of the casting.
-    const baseGeo = new THREE.CylinderGeometry(1.42, 1.46, 0.030, 44, 1);
-    baseGeo.scale(1.0, 1, 0.78);
+    const baseGeo = new THREE.CylinderGeometry(1.36, 1.40, 0.026, 44, 1);
+    baseGeo.scale(1.12, 1, 0.62);
     baseGeo.translate(0.16, 0.014, -0.06);
     const baseCol = new Float32Array(baseGeo.attributes.position.count * 3);
     for (let i = 0; i < baseCol.length; i += 3) {
