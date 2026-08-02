@@ -126,6 +126,19 @@ Two constraints worth knowing:
   normal-varying fill paints a smooth gradient straight over the hard bands and
   the whole cel look silently dies.
 
+**Three-finger QR (2026-08-02).** Birb Labs demo convention: three fingers
+held and released pops a QR of the production URL so a bystander can scan it
+off your phone (`Q` on desktop). Three is the first touch count the game itself
+can never produce — one is the stick, two is stick+boost. The QR is generated
+in code (`gauntlet/src/ui/qr.js`, byte mode / ECC M / versions 1-10) because the
+artefact ships zero external assets and this has to work offline. That encoder
+was verified module-for-module against the `qrcode` npm package during
+development, which caught two bugs that produce a symbol that LOOKS right and
+does not scan: the two format-info copies were transposed, and version >= 7
+reserved the version-info blocks without ever writing them. Both are pinned by
+tests. The URL is PINNED to production, not `location.href` — a localhost or
+preview URL is useless to the person scanning it.
+
 Verify visual work with `node tools/gauntlet-shot.mjs` — it exits non-zero on any
 page or console error, so a captured PNG proves the code ran. Isolation probes
 live in `gauntlet/dev/`. Note: the harness needs

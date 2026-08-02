@@ -638,6 +638,7 @@ import { PALETTE, BIRD_COLORS, birdColorById } from '/gauntlet/src/core/palette.
 import { createToonMaterial, createLightRig } from '/gauntlet/src/core/toon.js';
 import { PLANET_RADIUS, continentalHeight } from '/gauntlet/src/core/terrain.js';
 import { paintKeyArt } from '/gauntlet/src/ui/keyart.js';
+import { createQrOverlay } from '/gauntlet/src/ui/qr-overlay.js';
 import {
     MODES, MODE_ORDER, DEFAULT_MODE, modeDef, isMode,
     bestKey, formatBest, advanceStreak, STREAK_KEY,
@@ -650,6 +651,20 @@ import {
 } from '/gauntlet/src/game/damage.js';
 
 const params = new URLSearchParams(location.search);
+
+// Three-finger QR reveal — the Birb Labs demo affordance. Installed at module
+// scope so it works on the splash pages and mid-run alike, and deliberately
+// invisible until asked for. See ui/qr-overlay.js for why three.
+// The URL is PINNED to production, not taken from location.href. The point of
+// the gesture is that somebody else scans the code off your phone, and a
+// localhost or preview-deployment URL is useless to them — which is exactly
+// what location.href gives you on the machine you are most likely demoing from.
+const GAUNTLET_URL = 'https://birbmobile.vercel.app/gauntlet';
+const qrOverlay = createQrOverlay({
+    url: GAUNTLET_URL,
+    label: 'birbmobile.vercel.app/gauntlet',
+});
+window.__gauntletQr = qrOverlay;
 
 // ---------------------------------------------------------------------------
 // Service-worker skew guard.
