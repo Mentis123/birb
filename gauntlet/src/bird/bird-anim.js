@@ -22,7 +22,8 @@
  *   4. **Attitude changes the wing shape.** Diving sweeps the wings back and
  *      shortens the span; climbing and landing spread and reach.
  *
- *   5. **It is never still.** Idle bob, blink, micro flap during a glide.
+ *   5. **It is never still.** A wing that is not beating still breathes on
+ *      the air; a stooping wing trembles. Plus idle bob and blink.
  *
  * Everything is driven from a caller-owned state object that is mutated in
  * place. `update` allocates nothing: every value below is a captured number,
@@ -37,33 +38,53 @@ const TAU = Math.PI * 2;
 const DOWNSTROKE = 0.36;
 
 const CFG = {
-    flapRateBase: 1.25,     // Hz at rest
-    flapRateImpulse: 3.10,  // added Hz at full flapImpulse
-    flapRateSpeed: 0.55,
-    flapAmpBase: 0.30,      // rad, half-amplitude at rest
-    flapAmpImpulse: 0.62,
-    // --- glide band --------------------------------------------------------
-    // A hands-off bird above `glideEnter` stops beating and starts riding.
+    // =======================================================================
+    // WING STATE MACHINE
     //
-    // These used to be one threshold at 0.45, which cruise never reached:
-    // measured, level flight sits at speed01 0.286, so the bird beat its wings
-    // at ~1.4 Hz permanently and read as WORKING — which is what made cruising
-    // feel fast even though the velocity was unchanged. 0.22 puts cruise
-    // comfortably inside the band; the exit is lower so a speed wobble through
-    // a turn cannot flicker the whole flap state on and off.
-    glideEnter: 0.22,
-    glideExit: 0.17,
+    // A flap is an EVENT, not a background loop. The old animator beat the
+    // wings continuously and only modulated the rate, so the bird looked
+    // equally busy climbing, cruising and diving — the most expressive thing
+    // on the model was saying nothing. Now the wing has four things to say,
+    // and says exactly one at a time:
+    //
+    //   POWER  climbing        deep beats; rate and depth scale with effort
+    //   SOAR   cruise / bank   NO beat. Held out, breathing on the air
+    //   STOOP  diving          swept back, drawn in, trembling at speed
+    //   BURST  boost           three fast deep strokes, then a swept hold
+    //
+    // Lift is not simulated, so cruising needs no minimum flap to hold
+    // altitude. The one exception is `stallSpeed01`: down near the stall floor
+    // the bird labours, because a rigid glider at walking pace looks broken.
+    // =======================================================================
 
-    // The glide is not one pose. At the BOTTOM of the band (cruise) the bird
-    // still beats, just slowly and shallowly — a lazy cruise stroke. At the top
-    // (a dive or a boost) the wings lock out almost rigid, which is what a real
-    // bird does at speed and what this originally shipped as. Interpolating
-    // between the two keeps the fast look exactly as it was and only changes
-    // how cruising reads.
-    cruiseAmp: 0.17,        // rad, half-amplitude at the bottom of the band
-    cruiseRate: 0.62,       // Hz at the bottom of the band
-    glideAmp: 0.055,        // rad, wings locked out at full speed
-    glideRate: 0.42,        // Hz at full speed
+    /** Below this much climb input, the bird is not "going up". */
+    climbGate: 0.06,
+    /** Airspeed below which it starts labouring to stay up. */
+    stallSpeed01: 0.13,
+
+    flapRateBase: 2.15,     // Hz for the gentlest powered stroke
+    flapRateClimb: 2.70,    // added Hz at a full-effort climb
+    flapAmpBase: 0.34,      // rad, half-amplitude of a gentle stroke
+    flapAmpClimb: 0.44,     // added at full effort
+
+    // Boost is a fixed COUNT of strokes, not a rate change. You watch the bird
+    // physically buy the speed; the count is what makes it read as an act
+    // rather than as someone turning up the animation speed.
+    burstFlaps: 3,
+    burstRate: 7.2,         // Hz — hard and fast
+    burstAmp: 0.92,         // rad — the deepest strokes in the game
+    burstHold: 0.85,        // s of swept-back hold after the last stroke
+
+    // Soaring is not stillness. Two slow out-of-phase dihedral waves plus a
+    // fine speed-scaled buffet: always moving, never beating.
+    soarBreathe: 0.026,
+    soarBuffet: 0.006,
+
+    // Stoop: swept, drawn in, drooped, vibrating.
+    stoopSweep: 0.58,
+    stoopDroop: 0.20,
+    stoopSpan: 0.19,
+    stoopTremble: 0.012,
     restDihedral: 0.20,     // wings sit slightly above level when gliding
     restSweep: 0.15,        // wings trail back at rest — straight-out wings
                             // read as a paper plane and, in a 3/4 view, the far
@@ -116,8 +137,11 @@ export function createBirdAnimator(THREE, bird) {
     let t = 0;
     let flapPhase = rng();
     let impulse = 0;
-    let glide = 0;
-    let gliding = false;    // latched, for the glide band's hysteresis
+    let power = 0;          // how much of the wing the beat currently owns
+    let stroking = false;   // a stroke is running (and will finish)
+    let burstLeft = 0;      // strokes remaining in a boost burst
+    let burstHold = 0;      // s of swept hold after the burst
+    let wasBoosting = false;
     let bank = 0;
     let pitchS = 0;
     let turnS = 0;
@@ -172,32 +196,73 @@ export function createBirdAnimator(THREE, bird) {
         impulse = Math.max(impulse - dt * 1.45, flapImpulse);
 
         // --- flap cycle ------------------------------------------------------
-        // Gliding is what the bird does at speed with no input; it is a state,
-        // not an absence of one, so it gets its own blend.
-        // Hysteresis: once gliding, it takes a real slowdown to start beating
-        // again, not a wobble across a single number.
-        const fast = gliding ? speed01 > CFG.glideExit : speed01 > CFG.glideEnter;
-        const wantGlide = (fast && impulse < 0.16 && !sIn.grounded && !sIn.celebrating) ? 1 : 0;
-        gliding = wantGlide === 1;
-        glide = damp(glide, wantGlide, wantGlide ? 1.8 : 6.0, dt);
+        // --- intent ----------------------------------------------------------
+        // Everything the wing does comes from these four numbers.
+        const climb01 = clamp(Math.max(pitchS, impulse), 0, 1);
+        const dive01 = clamp(-pitchS, 0, 1);
+        const stall01 = clamp((CFG.stallSpeed01 - speed01) / CFG.stallSpeed01, 0, 1);
 
-        // How far INTO the glide band we are: 0 at cruise, 1 flat out. Drives
-        // the lazy-cruise-stroke to locked-wings blend.
-        const lock = clamp((speed01 - CFG.glideEnter) / (1 - CFG.glideEnter), 0, 1);
-        const glideRate = CFG.cruiseRate + (CFG.glideRate - CFG.cruiseRate) * lock;
-        const glideAmp = CFG.cruiseAmp + (CFG.glideAmp - CFG.cruiseAmp) * lock;
+        // Boost fires a fixed burst on the RISING EDGE. Reading the flag every
+        // frame instead would restart the count for as long as boost is held
+        // and turn three deliberate strokes into a blur.
+        const boostOn = Boolean(sIn.boosting);
+        if (boostOn && !wasBoosting) { burstLeft = CFG.burstFlaps; flapPhase = 0; }
+        wasBoosting = boostOn;
+        const bursting = burstLeft > 0;
+        if (burstHold > 0) burstHold -= dt;
 
-        let rate = CFG.flapRateBase + impulse * CFG.flapRateImpulse + speed01 * CFG.flapRateSpeed;
-        rate = rate * (1 - glide) + glideRate * glide;
+        // --- is the wing beating? ---------------------------------------------
+        const climbing = climb01 > CFG.climbGate;
+        const scripted = Boolean(sIn.grounded || sIn.celebrating || sIn.tumbling);
+        const wantStroke = bursting || climbing || stall01 > 0.02 || scripted;
+
+        // Once a stroke is running it FINISHES. Cutting the wing dead the frame
+        // you release the stick leaves it frozen mid-downbeat; a real bird gets
+        // one last beat in and then locks out, and that trailing stroke is what
+        // sells the transition into the glide.
+        if (wantStroke) stroking = true;
+
+        let rate;
+        if (bursting) rate = CFG.burstRate;
+        else rate = CFG.flapRateBase + Math.max(climb01, stall01) * CFG.flapRateClimb;
         if (celebrate > 0.01) rate = rate * (1 - celebrate) + 2.9 * celebrate;
         if (tumble > 0.01) rate = rate * (1 - tumble) + 4.6 * tumble;
 
-        flapPhase += dt * rate;
-        if (flapPhase >= 1) flapPhase -= Math.floor(flapPhase);
+        let wrapped = false;
+        if (stroking) {
+            flapPhase += dt * rate;
+            if (flapPhase >= 1) {
+                flapPhase -= Math.floor(flapPhase);
+                wrapped = true;
+                if (bursting) burstLeft--;
+                // The burst's last stroke hands straight over to a swept hold,
+                // so the boost ends on a pose rather than just petering out.
+                if (bursting && burstLeft === 0) burstHold = CFG.burstHold;
+                // Re-ask AFTER the decrement, not before. `wantStroke` was
+                // computed at the top of the frame while the burst still had a
+                // stroke left in it, so testing that stale value let the
+                // finish-the-stroke rule add a fourth beat to every boost —
+                // measured 4 from one press when the whole point is three.
+                const stillWanted = climbing || stall01 > 0.02 || scripted
+                    || burstLeft > 0;
+                // Nothing wants another stroke: park at the top of the cycle,
+                // which is the wings-out pose the soar blend expects.
+                if (!stillWanted) { stroking = false; flapPhase = 0; }
+            }
+        }
+
+        // `power` is how much of the wing the beat currently owns. Damped, so
+        // amplitude eases in and out instead of snapping.
+        power = damp(power, stroking ? 1 : 0, stroking ? 9.0 : 4.5, dt);
 
         let cyc = flapPhase + phaseOff;
         cyc -= Math.floor(cyc);
         api.flap01 = cyc;
+        api.stroking = stroking;
+        api.burstLeft = burstLeft;
+        // True on the single frame a stroke completes — for feather bursts and
+        // wingbeat audio. The caller must not have to diff flap01 itself.
+        api.strokeEvent = wrapped;
 
         // Time warp: compress the first DOWNSTROKE of the cycle into the first
         // half of the waveform. Fast, powerful down; long, soft recovery.
@@ -206,15 +271,32 @@ export function createBirdAnimator(THREE, bird) {
             : 0.5 + ((cyc - DOWNSTROKE) / (1 - DOWNSTROKE)) * 0.5;
         const stroke = Math.cos(warp * TAU);        // +1 top, -1 bottom
 
-        let amp = CFG.flapAmpBase + impulse * CFG.flapAmpImpulse;
-        amp = amp * (1 - glide) + glideAmp * glide;
+        // --- amplitude --------------------------------------------------------
+        let amp = bursting
+            ? CFG.burstAmp
+            : CFG.flapAmpBase + Math.max(climb01, stall01) * CFG.flapAmpClimb;
+        amp *= power;                       // no beat means no amplitude at all
         amp *= 1 - 0.45 * groundT;
 
-        // Rest angle: wings sit high in a glide, low and folded when grounded,
-        // thrown wide open when celebrating.
-        let rest = CFG.restDihedral + glide * 0.10 - groundT * 0.30 - tuck * 0.12;
+        // --- soar: alive without beating ---------------------------------------
+        // Two slow out-of-phase waves so the period never reads as a loop, plus
+        // a fine buffet that only shows up at speed. This is what stops a
+        // non-flapping wing from looking like a frozen mesh.
+        const soar = 1 - power;
+        const breathe = (Math.sin(t * 0.63) * 0.62 + Math.sin(t * 1.07 + 1.9) * 0.38)
+            * CFG.soarBreathe;
+        const buffet = Math.sin(t * 11.3) * CFG.soarBuffet * speedS;
+        // A stoop is held rigid, so the tremble replaces the breathing rather
+        // than adding to it — a wing that breathes AND vibrates reads as noise.
+        const tremble = Math.sin(t * 37.0) * CFG.stoopTremble * dive01 * speedS;
+        const air = ((breathe + buffet) * (1 - dive01) + tremble) * soar;
+
+        // Rest angle: high and open soaring, drooped in a stoop, folded low on
+        // the ground, thrown wide when celebrating.
+        let rest = CFG.restDihedral + soar * 0.09 - groundT * 0.30
+            - dive01 * CFG.stoopDroop;
         rest += celebrate * 0.80;
-        rest -= boost * 0.10;
+        rest += air;
 
         shoulder = rest + amp * stroke;
 
@@ -228,17 +310,27 @@ export function createBirdAnimator(THREE, bird) {
         const lag = clamp(tip - shoulder, -0.85, 0.85);
         api.curl = lag;
 
-        // --- attitude: tuck on a dive, spread on a climb / landing -----------
-        const wantTuck = clamp(-pitchS, 0, 1) * 0.70 + boost * 0.25;
-        tuck = damp(tuck, clamp(wantTuck, 0, 1), 6.0, dt);
-        const wantSpread = clamp(pitchS, 0, 1) * 0.8 + groundT * 1.0;
+        // --- attitude: stoop on a dive, spread on a climb / landing ----------
+        // The post-burst hold reuses the stoop pose deliberately: the boost
+        // ends with the bird streamlined and going somewhere, which is the same
+        // shape a dive wants. One pose, two reasons to be in it.
+        const holdT = burstHold > 0 ? clamp(burstHold / CFG.burstHold, 0, 1) : 0;
+        const wantTuck = clamp(dive01 * 0.92 + holdT * 0.70, 0, 1);
+        tuck = damp(tuck, wantTuck, 6.0, dt);
+        const wantSpread = climb01 * 0.8 + groundT * 1.0;
         spread = damp(spread, clamp(wantSpread, 0, 1), 5.0, dt);
+
+        // Finger splay: the primaries fan on the powered DOWNstroke and close
+        // on the recovery. `stroke` is +1 at the top, so its derivative is
+        // negative on the way down — that sign is the whole tell, and it is the
+        // difference between a wing that beats and a wing that waves.
+        const down = clamp(-Math.sin(warp * TAU), 0, 1) * power;
 
         // A dive tuck used to sweep the wings so far back that they vanished
         // inside the torso from the chase camera. Swept + slightly drooped, but
         // still visibly a wing, reads as a stooping falcon instead of a blob.
-        const sweepBack = tuck * 0.40 - spread * 0.22;
-        const spanScale = 1 - tuck * 0.13 + spread * 0.07;
+        const sweepBack = tuck * CFG.stoopSweep - spread * 0.22 - down * 0.10;
+        const spanScale = 1 - tuck * CFG.stoopSpan + spread * 0.07 + down * 0.06;
 
         // --- per-wing ---------------------------------------------------------
         // Differential dihedral: the wing on the inside of the turn drops, the
@@ -315,7 +407,7 @@ export function createBirdAnimator(THREE, bird) {
         // when turning hard or flaring, and pitches down to brake on a climb.
         u.tailYaw.value = -turnS * 0.34;
         u.tailPitch.value = -pitchS * 0.30 + groundT * 0.55 + celebrate * -0.30
-            + Math.sin(warp * TAU + 2.2) * 0.05 * (1 - glide);
+            + Math.sin(warp * TAU + 2.2) * 0.05 * power;
         u.tailFan.value = 1
             + Math.abs(turnS) * 0.55
             + spread * 0.45

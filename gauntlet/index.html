@@ -1232,9 +1232,28 @@ async function boot(requestedMode) {
         animState.turn = input.value.x;
         animState.pitch = input.value.y;
         animState.boosting = Boolean(flight.isBoosting);
-        animState.flapImpulse = Math.max(0, -input.value.y);
+        // Stick UP is +y and climbs — measured: two seconds of +1 takes the
+        // bird from radius 114 to 124.9, -1 takes it to 96.7. This was
+        // max(0, -y), so the bird beat its wings hardest in a DIVE and locked
+        // them on the climb, which is backwards and is most of why the wings
+        // never looked like they were doing anything.
+        animState.flapImpulse = Math.max(0, input.value.y);
         animState.celebrating = phase === 'finished';
         animator.update(dt, animState);
+
+        // A completed wingbeat is now a real event, so it can be heard and
+        // seen. Before this the flap was a silent background loop and
+        // `audio.flap()` had nothing to fire it. Boost strokes throw feathers
+        // — three of them, so the burst punctuates rather than litters.
+        if (animator.strokeEvent && phase === 'racing') {
+            audio.flap();
+            if (animator.burstLeft >= 0 && flight.isBoosting) {
+                feathers.burst(
+                    pose.position.x, pose.position.y, pose.position.z,
+                    7, PALETTE.featherPlayer
+                );
+            }
+        }
 
         ai.update(dt, raceLogic.racerProgress(race, 0), race);
 
