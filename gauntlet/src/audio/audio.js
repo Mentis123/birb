@@ -570,6 +570,23 @@ export function createAudio(opts = {}) {
         triggerHaptic(20);
     }
 
+    /**
+     * Tube loaded. A short mechanical double-click, not a musical chime: it
+     * has to say "the machine is ready" without competing with the gate and
+     * ring chimes that carry actual scoring information.
+     *
+     * This exists so the player can keep their eyes on the target. A reload
+     * you can only see is a reload you have to look away to check.
+     */
+    function reload() {
+        if (!ready || disposed) return;
+        const t = now();
+        noiseVoice(t, 'highpass', 3000, 5200, 1.4, 0.16, 0.001, 0.035, 1, 1);
+        noiseVoice(t + 0.065, 'highpass', 3600, 6000, 1.6, 0.20, 0.001, 0.045, 1, 1);
+        toneVoice(t + 0.065, 'square', 880, 880, 0.075, 0.003, 0.06);
+        triggerHaptic(14);
+    }
+
     /** Nest under attack. Two-tone alarm — deliberately unpleasant. */
     function alarm() {
         if (!ready || disposed) return;
@@ -630,6 +647,7 @@ export function createAudio(opts = {}) {
         explode,
         kill,
         alarm,
+        reload,
         triggerHaptic,
         dispose,
         // --- inspection hooks (dev probe / HUD debug; never used in the loop) ---

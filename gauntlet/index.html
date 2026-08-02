@@ -1418,8 +1418,25 @@ async function boot(requestedMode) {
         hud.setSpeed(Math.round(flight.speed * SPEED_TO_KMH), animState.speed01);
         // Boost charge lives on the button itself now, so it travels with it
         // when the player drags the control to the other side of the screen.
-        input.setBoost01(flight.boost01 || 0);
-        if (flight.boostStarted) { input.pulseBoost(); audio.boost(); }
+        //
+        // While manning the gun that same button is FIRE, so the meter has to
+        // show the RELOAD instead — it was still showing flight boost, which is
+        // meaningless in a nest and meant the one thing the player needed (how
+        // long until I can shoot again) was shown nowhere at all.
+        if (turretView && rockets) {
+            const ready01 = 1 - rockets.cooldown01;
+            input.setBoost01(ready01);
+            input.setBoostReloading(ready01 < 1);
+            aim.setReady01(ready01);
+            if (ready01 >= 1 && wasReloading) {
+                input.flashBoostReady();
+                audio.reload();
+            }
+            wasReloading = ready01 < 1;
+        } else {
+            input.setBoost01(flight.boost01 || 0);
+            if (flight.boostStarted) { input.pulseBoost(); audio.boost(); }
+        }
         updateModeHUD();
         if (def.course) hud.setGate(race.gatesPassed[0] % course.gateCount, course.gateCount);
         hud.showWrongWay(def.course && phase === 'racing' && race.wrongWay[0] === 1);
@@ -1470,6 +1487,7 @@ async function boot(requestedMode) {
     let turretView = false;          // camera is on the gun, not behind the bird
     let wasNested = false;
     let boostWasDown = false;
+    let wasReloading = false;        // for the reload-complete flash and click
     let knockTimer = 0;              // post-collision control lockout, seconds
 
     // --- damage -------------------------------------------------------------
@@ -1520,8 +1538,11 @@ async function boot(requestedMode) {
     function dismountTurret() {
         if (aim) { aim.setActive(false); aim.group.visible = false; }
         turretView = false;
+        wasReloading = false;
         bird.group.visible = true;
         input.setBoostLabel('BOOST');
+        // Or the pill stays greyed-out mid-reload while reading BOOST.
+        input.setBoostReloading(false);
     }
 
     function updateModeSystems(dt, pose) {

@@ -95,6 +95,22 @@ function ensureStyle() {
 }
 .vi-boost.is-cold { filter: saturate(0.45) brightness(0.92); }
 
+/* Reloading. Distinct from is-cold on purpose: a boost meter that is merely
+   low is still usable, whereas a gun mid-reload is not, so this reads as OFF —
+   greyed, faded, and with the label struck through by the fill line. */
+.vi-boost.is-reloading {
+  filter: grayscale(0.85) brightness(0.86);
+  opacity: 0.72;
+}
+.vi-boost.is-reloading .vi-boost-charge { background: #7fb2d8; }
+/* One pulse of the frame when the tube is loaded again — the moment you can
+   fire is an EVENT and deserves to be announced, not just arrived at. */
+@keyframes vi-boost-ready {
+  0%   { box-shadow: 0 0 0 0 rgba(120, 240, 255, 0.95); }
+  100% { box-shadow: 0 0 0 14px rgba(120, 240, 255, 0); }
+}
+.vi-boost.is-ready-flash { animation: vi-boost-ready 0.42s ease-out; }
+
 /* Quarter dividers. Boost is spent in four discrete taps, so the meter is
    drawn in four segments — you can see one go rather than watching a bar
    slide. */
@@ -633,6 +649,22 @@ export function createInput(rootEl, opts = {}) {
          */
         setBoostLabel(text) {
             boostLabel.textContent = text || 'BOOST';
+        },
+
+        /**
+         * Mark the button as unusable while the gun reloads. Separate from the
+         * `is-cold` dimming that an underfull boost meter uses: cold means
+         * "expensive", reloading means "impossible".
+         */
+        setBoostReloading(on) {
+            boostPill.classList.toggle('is-reloading', Boolean(on));
+        },
+
+        /** One ring pulse: the gun just finished reloading. */
+        flashBoostReady() {
+            boostPill.classList.remove('is-ready-flash');
+            void boostPill.offsetWidth;          // restart the animation
+            boostPill.classList.add('is-ready-flash');
         },
 
         /** Put the boost button back where it started. */

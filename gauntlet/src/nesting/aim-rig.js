@@ -301,6 +301,8 @@ export function createAimRig(THREE, opts = {}) {
     const aimQuaternion = new THREE.Quaternion();
     const aimForward = new THREE.Vector3(0, 0, -1);
     const viewQuaternion = new THREE.Quaternion();
+    /** Scratch for setReady01 — the loop must not allocate a Color per frame. */
+    const _readyCol = new THREE.Color();
 
     // -----------------------------------------------------------------------
     // Visual: mount / barrel / reticle
@@ -862,6 +864,30 @@ export function createAimRig(THREE, opts = {}) {
         aimQuaternion,
         aimForward,
         viewQuaternion,
+
+        /**
+         * Show the gun's readiness on the reticle. `ready01` is 0 the instant
+         * you fire and 1 when the tube is loaded again.
+         *
+         * The reticle is where the player's eye already is, so it has to carry
+         * the reload — a meter on a button by your thumb is a meter you have to
+         * look away from the target to read. It shrinks and goes dim-amber
+         * while loading, then snaps back to full-size cyan when it is ready,
+         * and that SNAP is the tell: a smooth fade tells you nothing about the
+         * moment you can fire again.
+         */
+        setReady01(ready01) {
+            if (!reticle) return api;
+            let r = ready01;
+            if (!(r >= 0)) r = 0; else if (r > 1) r = 1;
+            const loaded = r >= 1;
+            _readyCol.set(loaded ? PALETTE.uiCyan : PALETTE.gateIdle);
+            reticle.material.color.copy(_readyCol);
+            reticle.material.opacity = loaded ? 0.92 : 0.30 + 0.30 * r;
+            const s = loaded ? 1 : 0.55 + 0.35 * r;
+            reticle.scale.set(s, s, 1);
+            return api;
+        },
 
         // control
         update,
