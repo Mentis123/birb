@@ -331,7 +331,18 @@ opening holds its full height. Every free edge carries a rounded bead built into
 one closed cross-section; hems rake clear of a leading foot; each column shears
 forward of vertical; no two figures agree on stride, rake, lean or head angle.
 The feet also turned out to be three times too small, which had been diagnosed as
-a placement problem twice and was never one. Next are the faces.
+a placement problem twice and was never one.
+
+**Phase 3 (the heads) is done, and cost more than the other two together.** The
+head is a rounded BLOCK — flat front, flat sides, domed top — not an ovoid; built
+as an egg a face has nowhere flat to sit and every feature slides off. Only two of
+the four wear hair. The lesson worth keeping is that **thin features do not
+survive surface nets, and it fails silently**: the mesher averages one vertex per
+cell, so a form three or four cells thick vanishes — while the field measures
+correct AND a max-z sweep of the mesh still finds the stray slivers, so every
+number agrees the brow is there and no render shows it. A `MeshNormalMaterial`
+pass is what settles it. Four other hypotheses were tested and discarded first;
+two of them were real bugs worth fixing and neither was the cause.
 
 ## What This Is
 

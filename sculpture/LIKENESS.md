@@ -80,16 +80,16 @@ regressions on this model were caused by fixing one thing.
 
 ## E · Heads and faces — `ref-a-front`
 
-- [ ] **E1** The face reads HEAD-ON, at the group's normal viewing distance — not
+- [x] **E1** The face reads HEAD-ON, at the group's normal viewing distance — not
       only at three-quarter and not only zoomed in.
-- [ ] **E2** A long straight nose ridge runs unbroken from the brow.
+- [x] **E2** A long straight nose ridge runs unbroken from the brow.
 - [ ] **E3** The eye sockets are hollow triangles holding a shadow.
-- [ ] **E4** The mouth is a wide flat bar, not a bud.
+- [x] **E4** The mouth is a wide flat bar, not a bud.
 - [ ] **E5** The hair is a smooth cap with a hard edge at the temple, clearly a
       separate mass from the face.
 - [x] **E6** Two figures carry a coiled top-knot; it sits ON the crown and is
       unmistakable in silhouette.
-- [ ] **E7** The four heads are individually distinguishable at group distance.
+- [x] **E7** The four heads are individually distinguishable at group distance.
 
 ## F · The stories each figure carries — `ref-b`, `ref-c`, `ref-d`
 
@@ -121,8 +121,9 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**26 / 41** after Phase 2 (2026-08-02), scored against
-`shots/sculpt/sheet-p2e.png`. Was 19 after Phase 1 and 10 before either.
+**30 / 41** after Phase 3 (2026-08-02), scored against
+`shots/sculpt/sheet-p3.png`. Was 26 after Phase 2, 19 after Phase 1, 10 before
+any of them.
 
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
@@ -192,17 +193,49 @@ twice and was never one. They also had to be re-seated against the SKIRT's front
 face, since the cloak stopped reaching the front of the figure when its opening
 was opened to full height.
 
-### What is left, in the order the evidence says to do it
+### Phase 3 — the heads. Done, and it cost more than the other two together.
 
-**Phase 3 — heads.** E1-E5, E7. Worth doing now and not earlier, because the
-head has just changed size by a third. Key insight to apply: under a
-near-frontal key a nose reads from the shadows carved BESIDE it, not from its own
-protrusion, so cut the flanks rather than raising the ridge.
+**The head is a rounded BLOCK, not an ovoid.** Read off the nearest figure at
+4x: flat front, flat sides, domed top, broad flat jaw — a loaf standing on end.
+Built as an egg the face has nowhere flat to sit and every feature slides off the
+curvature. Only two of the four wear hair; the nearest is bare-headed, and giving
+every figure a cap was part of what made the four interchangeable. The bun is a
+thick rolled plait lying across the crown, not a knob on top of it.
+
+**THIN FEATURES DO NOT SURVIVE THE MESHER, AND IT FAILS SILENTLY.** This is the
+lesson worth the whole phase. Surface nets places ONE vertex per cell at the mean
+of its edge crossings, so a form three or four cells thick is averaged into
+nothing. What makes it expensive is that it defeats every check short of looking:
+
+- the field is correct — a numeric march finds a 25mm brow and a 30mm eye socket;
+- a max-z sweep of the MESH also finds them, because the few stray slivers that
+  survive are still the highest vertices in the band;
+- so every measurement agrees the feature is there, and no render shows it.
+
+Four separate hypotheses were tested and discarded first — cheek hollows too
+large, blend radii exceeding protrusions, the mesher's voxel, and `normalBias`
+exceeding the facial relief. Two of those were real bugs and worth fixing; none
+was the cause. A `MeshNormalMaterial` pass is what settles it, because it shows
+the surface with no lighting to argue about: the brow rendered as a few isolated
+fins. Doubling every feature's thickness fixed it immediately.
+
+**A real coordinate bug fell out of the same hunt.** When the head was scaled by
+a coordinate change, `headField` kept using `yc` — the head's origin in WORLD
+space — for offsets, while its own `y` is in head units centred on `YC0`. Every
+offset shifted by the same amount, so the head stayed internally correct and
+simply sat 62mm below where FIGURE_LANDMARKS said. The gate was measuring a head
+that was not there, and it was GREEN.
+
+### What is left, in the order the evidence says to do it
 
 **Phase 4 — arms and surface.** A7, F4, G2, G3, G5. Negative space between arm
 and ribs; each figure's arms doing something different; stronger hand-working and
 the vertical run-off streaks.
 
-**Phase 5 — B3, C4, D2, H3, mobile perf, ship.** The collar-arch hollow still
+**Phase 5 — B3, C4, D2, E3, E5, H3, mobile perf, ship.** The collar-arch hollow
+still does not read as an opening; no figure shows a weight shift onto one leg;
+the eye sockets are lenses where the reference has hollow triangles; the hair's
+hard temple edge is not legible at group distance. **Triangle count is now 491k,
+up from 302k** — that is a mobile check, not a desktop one. The collar-arch hollow still
 does not read; only one figure carries an arch and its interior is not legible
 as an opening. No figure shows a weight shift onto one leg.

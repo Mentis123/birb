@@ -138,6 +138,21 @@ as a dark trapezoidal visor across every face. Three passes were spent hunting
 it as a lighting bug, a shadow bug and a facial-geometry bug; one
 `MeshNormalMaterial` render found it immediately.
 
+**Thin features do not survive the mesher, and it fails silently.** Surface nets
+places one vertex per cell at the mean of its edge crossings, so a form three or
+four cells thick is averaged into nothing. It defeats every check short of
+looking: the field is correct under a numeric march, and a max-z sweep of the
+MESH also finds the feature, because the few stray slivers that survive are still
+the highest vertices in the band. Every measurement agrees it is there and no
+render shows it. **A `MeshNormalMaterial` pass is what settles it** — it shows
+the surface with nothing to argue about. Keep facial features at least six cells
+thick, which for these faces means a brow that is a slab, not a line.
+
+**`headField` works in HEAD units about `YC0`, never in world units about `yc`.**
+Mixing them shifts every offset by the same amount, so the head stays internally
+correct and simply sits 62mm below where `FIGURE_LANDMARKS` says — and the gate
+goes green measuring a head that is not there.
+
 **Two closed surfaces at equal radius intersect in a hard rim.** The head and
 body are separate meshes, not one field. Wherever they overlap, the inner one
 must be strictly thinner or you get a visible seam. The head's neck stub is
@@ -266,7 +281,7 @@ is evidence the code ran.
 ## Where the model is, and what is left
 
 **`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
-Currently 26.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
+Currently 30.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
 +0.023 — which is necessary and not sufficient, since this gate has been green
 and wrong twice. Phase 1 is done; the rubric is what says how far there is left
 to go.
@@ -295,11 +310,11 @@ the cloak's.** The cloak stopped reaching the front of the figure when its
 opening was run full height, and anything still positioned against the old
 outline stands a fifth of a metre clear of the model.
 
-**Phase 3 — Heads.** Where likeness judgement concentrates, and worth doing after
-Phase 1 because the head is about to change size. Key insight to apply: under a
-near-frontal key a nose reads from the shadows carved BESIDE it, not from its own
-protrusion, so cut the flanks rather than raising the ridge. Four distinguishable
-heads — identical heads is what makes a group read as a render. *Target: E1–E7.*
+**Phase 3 — Heads. DONE (2026-08-02).** The head is a rounded BLOCK, not an
+ovoid — flat front, flat sides, domed top — and only two of the four wear hair.
+E3 and E5 remain: the eye sockets are lenses where the reference has hollow
+triangles, and the hair's temple edge is not legible at group distance.
+**Triangle count went 302k to 491k in this phase**; that needs a mobile check.
 
 **Phase 4 — Arms per figure, and surface.** Negative space between arm and ribs;
 each figure's arms doing something different. Stronger hand-working, vertical

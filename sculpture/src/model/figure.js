@@ -32,7 +32,7 @@
  */
 
 import { fbm3 } from '../core/noise.js';
-import { sdEllipsoid, sdCapsule, smin, smax, subtract, surfaceNets } from './sdf.js';
+import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets } from './sdf.js';
 
 // ---------------------------------------------------------------------------
 // Profile curves
@@ -606,7 +606,13 @@ function buildHeadField(THREE, o) {
      */
     const HS = 1.335;
     const yc = 2.113;
-    const YC0 = 2.159;          // the head's own origin, in head units
+    // The head's own origin, IN HEAD UNITS. `headField` must use this and never
+    // `yc`: `yc` is where the head sits in the WORLD, and mixing the two is a
+    // bug that hides well — every offset shifts by the same amount, so the head
+    // stays internally correct and simply sits 62mm below where FIGURE_LANDMARKS
+    // says it does. The gate then measures a head that is not there, which is a
+    // worse failure than a red gate because it is a green one.
+    const YC0 = 2.159;
     const seed = o.seed + 13;
 
     // Smoothstep, for the hairline. Kept local: this file has no maths module
@@ -624,98 +630,148 @@ function buildHeadField(THREE, o) {
      * rescaling thirty numbers by hand is thirty chances to miss one, and a
      * missed one is a feature that silently stops matching its neighbours.
      */
+    /**
+     * THE HEAD IS A ROUNDED BLOCK, not an ovoid.
+     *
+     * Read off the nearest figure in `ref-a-front.jpg` at 4x: flat front, flat
+     * sides, a domed top and a broad flat jaw — a loaf standing on end. Built as
+     * an egg, which is what every version before this one was, the face has
+     * nowhere flat to sit on and every feature slides off the curvature. The
+     * flats are the whole reason a face this reduced reads at all.
+     *
+     * The features are just as specific and none of them was right:
+     *
+     *   BROW   a straight ridge across the FULL width of the face, with a
+     *          shadow under it. The old one was two thirds as wide and read as
+     *          a bump between the eyes.
+     *   EYES   two long horizontal lenses, nearly closed, each about a third of
+     *          the face wide, angled slightly down and out. Not sockets. The old
+     *          ones were small round hollows and read as holes.
+     *   NOSE   a NARROW ridge, about a sixth of the face across, running
+     *          unbroken from between the brows to a small blunt tip.
+     *   MOUTH  a WIDE flat bar, about half the face across, split by one
+     *          horizontal line. The old one was a small pad and read as a bud.
+     *
+     * And under a near-frontal key — which is where this scene's sun has to sit,
+     * see createLightRig — a nose reads from the shadow carved BESIDE it, not
+     * from how far it stands out. Hence the cheek hollows either side of it.
+     */
     function headField(x, y, z) {
-        // Skull: a flattened wedge, much narrower front-to-back than a sphere.
-        let d = sdEllipsoid(x, y - yc, z - 0.004, 0.112, 0.144, 0.098);
-
-        // Jaw and chin, blended into the cranium.
-        d = smin(d, sdEllipsoid(x, y - (yc - 0.096), z - 0.020,
-            0.086, 0.070, 0.078), 0.06);
+        // Skull: a rounded block spanning chin to crown.
+        let d = sdRoundBox(x, y - (YC0 + 0.005), z - 0.004, 0.112, 0.151, 0.094, 0.052);
+        // Jaw: broad and flat, softening the block's lower corners.
+        d = smin(d, sdEllipsoid(x, y - (YC0 - 0.090), z - 0.002,
+            0.098, 0.072, 0.082), 0.05);
 
         if (!o.faceless) {
-            // THE FACIAL PLANE. These faces are flats, not bulbs. It is made by
-            // SLICING the front off the skull, not by adding a slab to it: an
-            // added box is wider than the skull down at jaw height and pokes out
-            // as a literal dark rectangle, which is exactly what the first
-            // version rendered — a visor bolted to each head. A smooth-max
-            // against a half-space plane flattens the front and lets the cut
-            // roll off into the skull's own curvature.
-            d = smax(d, z - 0.090, 0.045);
+            // THE FACIAL PLANE, made by SLICING the front off, not by adding a
+            // slab to it: an added box is wider than the skull at jaw height and
+            // pokes out as a literal dark rectangle, which is what the first
+            // version rendered — a visor bolted to each head.
+            d = smax(d, z - 0.090, 0.020);
         }
 
-        // HAIR. A helmet over the cranium and down to the nape, and it has to
-        // keep an EDGE at the temple — in `ref-a-front.jpg` the hair frames each
-        // face with a clear step, and blending it away leaves a bald egg.
-        //
-        // The edge is cut, not blended: everything in front of `hairFrontZ` is
-        // simply not hair. That plane sweeps FORWARD above the brow, which is
-        // the fringe crossing the forehead, and stops at the temple below it.
-        {
-            // Two constraints bracket this. The edge has to sit where the
-            // surface still faces the camera — at z = 0.028 it fell on the
-            // grazing side of the skull and the head rendered bald from the
-            // front. But it must also stay BEHIND the facial plane (z = 0.085):
-            // running the fringe out to 0.120 built a 3.5cm brim across the
-            // forehead, the whole face sat in a recess behind it, and every head
-            // in the group wore a black visor from the eyes to the chin.
-            const hairFrontZ = 0.038 + 0.040 * ss(yc + 0.030, yc + 0.122, y);
-            let hair = sdEllipsoid(x, y - (yc + 0.008), z + 0.022,
-                0.134, 0.148, 0.118);
-            hair = smax(hair, z - hairFrontZ, 0.016);
+        // HAIR. Only two of the four wear it. The nearest figure in ref-a is
+        // bare-headed — a plain block — and giving every figure a cap was one of
+        // the things making the four heads interchangeable.
+        if (o.hair !== 'none') {
+            // The edge is CUT, not blended: in the photographs the hair meets
+            // the face along a hard vertical line in front of the ear, and
+            // blending it away leaves a bald head. It must also stay behind the
+            // facial plane; run forward as a fringe it builds a brim and the
+            // whole face sits in a recess under it.
+            const hairFrontZ = 0.030 + 0.042 * ss(YC0 + 0.030, YC0 + 0.122, y);
+            let hair = sdRoundBox(x, y - (YC0 + 0.012), z + 0.020,
+                0.120, 0.150, 0.108, 0.056);
+            hair = smax(hair, z - hairFrontZ, 0.014);
             d = smin(d, hair, 0.010);
         }
 
-        if (o.bun) {
-            // A coiled knot sitting ON TOP of the crown with daylight under it,
-            // not tucked behind — it is the tallest thing on three of the four
-            // figures and most of what tells them apart at a distance.
-            d = smin(d, sdEllipsoid(x, y - (yc + 0.178), z + 0.012,
-                0.059, 0.045, 0.057), 0.018);
-            d = smin(d, sdCapsule(x, y, z,
-                0, yc + 0.132, 0.014, 0, yc + 0.166, 0.012, 0.040), 0.030);
+        if (o.hair === 'capbun') {
+            // A THICK ROLL lying across the crown, not a knob on top of it. In
+            // `ref-a-front.jpg` it is unmistakably a rolled plait seen end-on,
+            // wide across the head and flattened front to back.
+            d = smin(d, sdEllipsoid(x, y - (YC0 + 0.152), z + 0.024,
+                0.098, 0.046, 0.062), 0.022);
+            d = smin(d, sdEllipsoid(x, y - (YC0 + 0.130), z + 0.040,
+                0.076, 0.038, 0.052), 0.026);
         }
 
         if (!o.faceless) {
-            // Every feature here is small, so every blend has to be smaller
-            // still. An earlier version blended a 0.017-thick brow at k = 0.030
-            // and a 0.016-radius nose at k = 0.030 — filleting each feature away
-            // with a radius twice its own size, leaving a smooth mask. Same rule
-            // as the bust: k well under the protrusion.
+            // Every feature is small, so every blend is smaller still. An early
+            // version blended a 0.017-thick brow at k = 0.030 — filleting the
+            // feature away with a radius twice its own size — and left a mask.
             //
-            // ONE ridge from the brow to the tip of the nose, unbroken, and it
-            // must stand clear of the facial plane (front face at z = 0.092) or
-            // there is no nose at all.
-            d = smin(d, sdCapsule(x, y, z,
-                0, yc + 0.072, 0.080, 0, yc - 0.032, 0.128, 0.021), 0.010);
-            // Brow bar. Narrow — the full-width version read as a shelf.
-            d = smin(d, sdEllipsoid(x, y - (yc + 0.062), z - 0.080,
-                0.066, 0.014, 0.020), 0.009);
-            // Lips: a low proud pad, not a groove — a groove vanishes at any
-            // distance, a pad keeps a shadow under it.
-            d = smin(d, sdEllipsoid(x, y - (yc - 0.084), z - 0.086,
-                0.040, 0.014, 0.018), 0.008);
-            // Chin, just proud of the plane.
-            d = smin(d, sdEllipsoid(x, y - (yc - 0.126), z - 0.070,
-                0.044, 0.030, 0.032), 0.026);
+            // BOLD, because thin features do not survive the mesher. Surface
+            // nets places ONE vertex per cell at the mean of its edge crossings,
+            // so a form only three or four cells thick is averaged into nothing
+            // — and it fails SILENTLY and misleadingly: the field is correct, a
+            // numeric march through it finds the feature, and even a max-z sweep
+            // of the mesh finds the few stray slivers that survive, so every
+            // measurement agrees the brow is there while no render shows it. A
+            // MeshNormalMaterial pass is what settles it.
+            //
+            // These faces are extremely reduced anyway, so bold is also truer:
+            // the reference brow is a slab, not a line.
+            //
+            // THE BLEND RADIUS MUST BE WELL UNDER THE PROTRUSION, and the
+            // first version of this face broke that rule on every feature but
+            // the nose: a brow standing 5mm proud of the plane, blended at
+            // k = 0.010, is not a soft brow, it is no brow. The nose survived
+            // only because it happened to stand 47mm out. Every feature here
+            // now clears the facial plane by two to three times its own blend.
+            //
+            // BROW: full width, straight, with a shadow under it.
+            d = smin(d, sdEllipsoid(x, y - (YC0 + 0.058), z - 0.092,
+                0.098, 0.019, 0.029), 0.008);
 
-            // Sockets, SHALLOW and small. Carved 0.034 deep into a head only
-            // 0.098 deep, they came out as two black slots.
+            // EYES: long horizontal lenses. Carved shallow and WIDE, with an
+            // upper lid standing just proud above each so the groove keeps a
+            // shadow instead of reading as a dark hole.
+            // SHALLOW, and separated by a bridge of nose. At rx 0.050 centred
+            // on x 0.050 the two carves met in the middle and removed a
+            // full-width band 28mm deep, which left the brow above it standing
+            // as an overhanging shelf over a cave — the single thing that made
+            // every face unreadable. The carve now cuts about 4mm.
             for (const sx of [-1, 1]) {
-                d = subtract(d, sdEllipsoid(x - sx * 0.044, y - (yc + 0.030), z - 0.112,
-                    0.031, 0.017, 0.030), 0.012);
+                d = smin(d, sdEllipsoid(x - sx * 0.056, y - (YC0 + 0.026), z - 0.096,
+                    0.048, 0.013, 0.023), 0.006);
+                d = subtract(d, sdEllipsoid(x - sx * 0.056, y - (YC0 - 0.002), z - 0.126,
+                    0.048, 0.019, 0.034), 0.008);
+                // The lower lid, so the lens is a slot between two edges rather
+                // than a scoop fading into the cheek.
+                d = smin(d, sdEllipsoid(x - sx * 0.056, y - (YC0 - 0.028), z - 0.092,
+                    0.044, 0.011, 0.020), 0.006);
             }
-        } else {
-            // The turned-away figure in `ref-d-wide.jpg`: a smooth ovoid, no
-            // relief at all. Nothing to add.
+
+            // NOSE: one narrow ridge, unbroken from between the brows to the
+            // tip. It must clear the facial plane at z = 0.090 or there is no
+            // nose; it must also stay NARROW, or it reads as a muzzle.
+            d = smin(d, sdCapsule(x, y, z,
+                0, YC0 + 0.050, 0.086, 0, YC0 - 0.044, 0.124, 0.019), 0.009);
+            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.040), z - 0.104,
+                0.030, 0.015, 0.021), 0.008);
+
+            // The cheek hollows either side of it. Under a near-frontal key this
+            // is what makes the nose read: the shadow beside a ridge, not the
+            // ridge itself.
+
+            // MOUTH: a wide bar, two flat pads split by one line.
+            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.076), z - 0.098,
+                0.064, 0.014, 0.026), 0.006);
+            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.106), z - 0.096,
+                0.060, 0.015, 0.025), 0.006);
+
+            // Chin, just proud of the plane.
+            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.126), z - 0.068,
+                0.052, 0.028, 0.032), 0.024);
         }
 
-        // Neck stub, so head and body overlap when both are welded. It is
-        // STRICTLY THINNER than the body's own neck (0.058): head and body are
-        // two separate closed surfaces, not one field, so wherever they are the
-        // same radius they intersect in a hard rim instead of disappearing into
-        // each other — which is what put a dark hard-edged trapezoid under every
-        // chin and made the faces read as visors.
-        d = smin(d, sdCapsule(x, y, z, 0, yc - 0.150, 0.008, 0, yc - 0.280, 0.008, 0.048), 0.05);
+        // Neck stub, so head and body overlap when both are welded. STRICTLY
+        // THINNER than the body's own neck: they are two separate closed
+        // surfaces, and wherever they are the same radius they intersect in a
+        // hard rim rather than disappearing into each other.
+        d = smin(d, sdCapsule(x, y, z, 0, YC0 - 0.150, 0.008, 0, YC0 - 0.280, 0.008, 0.048), 0.05);
 
         d += fbm3(x * 9, y * 9, z * 9, seed, 2) * 0.0028;
         d += fbm3(x * 27, y * 27, z * 27, seed + 7, 2) * 0.0011;
@@ -741,13 +797,22 @@ function buildHeadField(THREE, o) {
         return headField(rx / HS, ry2 / HS + YC0, rz2 / HS) * HS;
     };
 
-    // Bounds and voxel are in WORLD units and both scale with the head, so the
-    // relative detail is unchanged. Same rule as the body's box: clear the neck
-    // stub's bottom cap or surface nets leaves a torn rim at the collar.
+    // TIGHT BOX, FINER VOXEL. The face's features were measurably correct in the
+    // field — 25mm of brow standing off the plane, a 30mm eye socket — and none
+    // of them survived the mesher: at 0.0062 the upper lid was three and a half
+    // cells tall, and surface nets places ONE vertex per cell at the mean of its
+    // edge crossings, so anything that thin is averaged flat. Three passes were
+    // spent moving those features around in a field that already had them right.
+    //
+    // The box is now sized to the head rather than to a generous cube, which
+    // pays for the finer sampling: 0.0042 is a third finer than before at rather
+    // fewer samples than the loose box cost. Same rule as the body's box —
+    // clear the neck stub's bottom cap and the bun's top, or surface nets leaves
+    // a torn rim.
     const mesh = surfaceNets(field, {
-        min: [-0.22 * HS, yc - 0.35 * HS, -0.22 * HS],
-        max: [0.22 * HS, yc + 0.27 * HS, 0.22 * HS],
-        voxel: 0.0062 * HS,
+        min: [-0.135 * HS, yc - 0.340 * HS, -0.145 * HS],
+        max: [0.135 * HS, yc + 0.215 * HS, 0.165 * HS],
+        voxel: 0.0042 * HS,
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
@@ -896,7 +961,7 @@ export const FIGURE_LANDMARKS = {
 export function buildFigure(THREE, opts = {}) {
     const o = {
         seed: opts.seed ?? 1,
-        bun: opts.bun ?? false,
+        hair: opts.hair ?? 'cap',
         faceless: opts.faceless ?? false,
         hands: opts.hands ?? false,
         pregnant: opts.pregnant ?? false,
