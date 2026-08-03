@@ -8,6 +8,7 @@ on:
       - '.github/workflows/phase4-likeness-qa-temp.yml'
       - 'sculpture/src/model/figure.js'
       - 'sculpture/src/model/sculpture.js'
+      - 'tools/sculpture-shot.mjs'
       - 'tests/sculpture-figure-details.test.js'
 
 permissions:
@@ -55,6 +56,14 @@ jobs:
             --page sculpture/index.html --out evidence/desktop-side.png \
             --query 'three=local' --w 1200 --h 900 --dpr 1 --wait 90000 \
             --eval 'window.__SCULPT.orbit.setTarget(0,1.20,0,true); window.__SCULPT.setView(-78,3,4.6)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-rear.png \
+            --query 'three=local' --w 1200 --h 900 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.28,0,true); window.__SCULPT.setView(178,4,4.2)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/mobile-rear-close.png \
+            --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.42,0,true); window.__SCULPT.setView(176,3,3.3)' --settle 700
           node tools/sculpture-shot.mjs \
             --page sculpture/index.html --out evidence/desktop-feet.png \
             --query 'three=local' --w 1200 --h 650 --dpr 1 --wait 90000 \
