@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as THREE from 'three-real';
 
 import { buildFigure } from '../sculpture/src/model/figure.js';
 import { FIGURE_LAYOUT } from '../sculpture/src/model/sculpture.js';
 import { sdTriPrism } from '../sculpture/src/model/sdf.js';
 import { PHASE5_ACCEPTANCE_VIEWS } from '../tools/sculpture-views.mjs';
+import { SCULPTURE_THREE as THREE } from './helpers/sculpture-three.js';
 
 function bounds(geometry) {
     const p = geometry.attributes.position;
