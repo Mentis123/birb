@@ -311,12 +311,13 @@ cap reaches 2.167, and the resulting slab read as a dark trapezoidal visor acros
 every face — hunted as a lighting bug, then a shadow bug, then a facial-geometry
 bug, before one normal-material render found it.
 
-### State, and how to pick it up (2026-08-02)
+### State, and how to pick it up (2026-08-03)
 
-**Phase 3 independently revalidated at 30 of 41; the proportion gate is green at
+**Phase 4 independently revalidated at 35 of 41; the proportion gate is green at
 0 of 12.** The committed matched sheet is
-`sculpture/validation/phase-3-revalidated.png` and the complete closeout record
-is `sculpture/validation/phase-3-closeout.md`. Earlier greens were measuring the
+`sculpture/validation/phase-4-revalidated.png`, the isolated arm evidence is
+`sculpture/validation/phase-4-arm-probes.png`, and the complete closeout record
+is `sculpture/validation/phase-4-closeout.md`. Earlier greens were measuring the
 wrong things, and a green numeric gate is necessary and not sufficient: it has
 been green and visually wrong twice. The revised gated plan is at the end of
 `sculpture/ARCHITECTURE.md`.
@@ -350,14 +351,22 @@ agrees the brow is there and no render shows it. A `MeshNormalMaterial` pass is
 what settles it. Four other hypotheses were tested and discarded first; two of
 them were real bugs worth fixing and neither was the cause.
 
-**Performance is now a Phase 4 entry gate.** The current scene is 490,840
+**Phase 4A (arms and negative space) is done.** The four figures now use distinct
+reference-led arm paths: open negative space, pregnancy support, crossed baby
+support and a clinician pose that clears the stethoscope. `A7` and `F4` pass.
+
+**Phase 4B (surface and bronze) is done.** Stronger existing displacement,
+two-scale vertical runoff, warmer bronze values and a colder environment make
+the hand-worked casting legible at group distance. `G2`, `G3` and `G5` pass.
+
+**Performance remains a final ship gate.** The current scene is 497,176
 triangles, 6 draw calls and 4 figures. In simulated 390×844 Chromium at renderer
-DPR 2, navigation to `window.__SCULPT_READY` took 4.63s and a scripted active
-orbit measured 4.91 FPS under SwiftShader; there were no page, console or request
+DPR 2, navigation to `window.__SCULPT_READY` took 4.53s and a scripted active
+orbit measured 5.83 FPS under SwiftShader; there were no page, console or request
 errors. That software-rendered result is not a real-iPhone result and is not a
-reason to rewrite the geometry blindly. Phase 4 modelling remains blocked until
-an iPhone 12-or-newer load and orbit test is recorded; if the real device also
-struggles, test a lower mobile renderer-DPR cap before changing mesh resolution.
+reason to rewrite the geometry blindly. An iPhone 12-or-newer load and orbit test
+is still outstanding; if the real device also struggles, test a lower mobile
+renderer-DPR cap before changing mesh resolution.
 
 ## What This Is
 

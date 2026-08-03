@@ -17,6 +17,10 @@
  *   BODY      One blended distance field from skirt hem to collarbone: tapered
  *             elliptical trunk, bust, shoulders, arms and the narrative forms.
  *             It is heavy and columnar, not a pinched lathe or a flared bell.
+ *   ARMS      Four reference-led poses, not one generic pair copied four times.
+ *             The nearest arm bows clear of the ribs; the pregnant figure
+ *             supports her belly; the mother's forearms cross under the baby;
+ *             the clinician carries one arm back beside the stethoscope.
  *   BREASTS   Bold ellipsoidal relief blended into the chest with a fillet well
  *             smaller than the protrusion. Separate hemispheres and over-large
  *             blends both produced applied lumps or erased the form entirely.
@@ -36,6 +40,51 @@ import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets }
 // ---------------------------------------------------------------------------
 // Profile curves
 // ---------------------------------------------------------------------------
+
+/**
+ * Per-figure arm paths, in local metres.
+ *
+ * Phase 3 left every figure with the same two capsules pressed against the
+ * ribs. That kept the silhouette measurements green, but it erased the gesture:
+ * no daylight beside the nearest figure, no crossed support under the baby and
+ * no way to distinguish one woman's arms from another's at group distance.
+ *
+ * Each arm is a shoulder point, an elbow and a wrist. The shoulder centre stays
+ * close to the measured outer silhouette; only the path below it changes. This
+ * keeps the hard-won mass proportions while allowing the arm to peel away from
+ * the trunk. The wrist is the rounded end of the forearm capsule — deliberately
+ * reduced like the hands in the casting, rather than a detailed hand model.
+ */
+export const ARM_POSES = Object.freeze({
+    open: [
+        // Nearest figure: her left arm makes the reference's clear wedge of sky
+        // between arm and ribs. The other arm stays close and is partly lost in
+        // the crowded group, as it is in ref-a-front.
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.405, 1.500, 0.030], wrist: [-0.432, 0.900, 0.070], upper: 0.054, fore: 0.047 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.352, 1.500, 0.028], wrist: [ 0.360, 0.935, 0.074], upper: 0.052, fore: 0.047 },
+    ],
+    pregnant: [
+        // One arm hangs; the other turns forward and supports the underside of
+        // the pregnancy. It remains a restrained gesture, but it cannot be
+        // mistaken for the open pose or the crossed baby pose.
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.362, 1.505, 0.020], wrist: [-0.360, 0.910, 0.080], upper: 0.053, fore: 0.047 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.360, 1.555, 0.038], wrist: [ 0.082, 1.205, 0.252], upper: 0.053, fore: 0.048 },
+    ],
+    cradle: [
+        // The mother's forearms CROSS beneath the swaddled newborn. Their
+        // slightly different heights keep the crossing readable instead of
+        // collapsing into one horizontal bolster.
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [ 0.098, 1.326, 0.238], upper: 0.053, fore: 0.049 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.350, 1.515, 0.054], wrist: [-0.090, 1.282, 0.250], upper: 0.053, fore: 0.049 },
+    ],
+    clinical: [
+        // The clinician's near arm hangs straight while the far arm sweeps a
+        // little back and out. That leaves the stethoscope and chest unobscured
+        // and gives her a different side silhouette from the open figure.
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.360, 1.490, 0.018], wrist: [-0.352, 0.885, 0.072], upper: 0.052, fore: 0.046 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.365, 1.505, -0.002], wrist: [ 0.425, 0.940, -0.018], upper: 0.052, fore: 0.046 },
+    ],
+});
 
 
 // ---------------------------------------------------------------------------
@@ -367,8 +416,8 @@ function buildShell(THREE, opts) {
     // Broad, low-frequency undulation: this is a big hand-beaten sheet, so it
     // should ripple rather than pebble — then a second finer pass for the
     // hammer marks, because ripple alone still reads as a moulded plastic shell.
-    roughen(THREE, geo, { amount: 0.014, scale: 2.2, seed: opts.seed });
-    return roughen(THREE, geo, { amount: 0.0042, scale: 11.0, seed: opts.seed + 9 });
+    roughen(THREE, geo, { amount: 0.020, scale: 2.0, seed: opts.seed });
+    return roughen(THREE, geo, { amount: 0.0060, scale: 10.5, seed: opts.seed + 9 });
 }
 
 /**
@@ -461,6 +510,7 @@ function sdTrunkAt(x, y, z) {
 
 function buildBodyField(THREE, o) {
     const seed = o.seed;
+    const arms = ARM_POSES[o.armPose] || ARM_POSES.open;
 
     function field(x, y, z) {
         // Trunk from well down inside the skirt up to the base of the neck.
@@ -480,24 +530,21 @@ function buildBodyField(THREE, o) {
                 0.116, 0.108, 0.114), 0.030);
         }
 
-        // Shoulders and arms: one continuous run from the deltoid to the wrist,
-        // pressed against the ribs. The outer edge of this run IS the figure's
-        // silhouette from bust to waist, so the three widths the gate measures
-        // are set here and not by the trunk.
-        for (const sx of [-1, 1]) {
-            d = smin(d, sdEllipsoid(x - sx * 0.298, y - 1.820, z,
+        // Per-figure arms. The deltoid still grows out of the measured shoulder
+        // line, but below it each path follows the reference instead of one
+        // generic vertical capsule. The smaller forearm blend is deliberate:
+        // a large smooth-union radius bridges a real gap back to the trunk and
+        // silently destroys A7 even when the centreline is in the right place.
+        for (const arm of arms) {
+            const [sx, sy, sz] = arm.shoulder;
+            const [ex, ey, ez] = arm.elbow;
+            const [wx, wy, wz] = arm.wrist;
+            d = smin(d, sdEllipsoid(x - sx, y - sy, z - sz,
                 0.081, 0.072, 0.087), 0.050);
             d = smin(d, sdCapsule(x, y, z,
-                sx * 0.345, 1.796, 0.012, sx * 0.358, 1.440, 0.030, 0.052), 0.040);
-            if (o.baby) {
-                // Cradling: the forearm comes OFF the body and crosses in front
-                // of the waist, so the bundle has something visibly under it.
-                d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.358, 1.440, 0.030, sx * 0.070, 1.330, 0.226, 0.050), 0.030);
-            } else {
-                d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.358, 1.440, 0.030, sx * 0.366, 1.130, 0.078, 0.047), 0.032);
-            }
+                sx, sy - 0.018, sz + 0.010, ex, ey, ez, arm.upper), 0.032);
+            d = smin(d, sdCapsule(x, y, z,
+                ex, ey, ez, wx, wy, wz, arm.fore), 0.022);
         }
 
         // Neck, rising to meet the head field. Stops BELOW the chin (1.919): run
@@ -558,8 +605,8 @@ function buildBodyField(THREE, o) {
         // stays well under the 13.5mm voxel so it modulates the surface instead
         // of aliasing holes into it. Without the second, the bronze is a
         // machined lathe and no amount of patina rescues it.
-        d += fbm3(x * 3.1, y * 3.1, z * 3.1, seed, 2) * 0.010;
-        d += fbm3(x * 9.5, y * 9.5, z * 9.5, seed + 3, 2) * 0.0045;
+        d += fbm3(x * 2.8, y * 2.8, z * 2.8, seed, 2) * 0.014;
+        d += fbm3(x * 8.8, y * 8.8, z * 8.8, seed + 3, 2) * 0.0055;
         return d;
     }
 
@@ -959,7 +1006,7 @@ export const FIGURE_LANDMARKS = {
  *                               different seeds are visibly different castings
  * @param {'none'|'cap'|'capbun'} opts.hair head treatment
  * @param {boolean} opts.faceless the head is turned away — no face relief
- * @param {boolean} opts.hands   hands meet at the front of the waist
+ * @param {'open'|'pregnant'|'cradle'|'clinical'} opts.armPose reference-led arm path
  * @param {number} opts.scale    overall height multiplier
  */
 export function buildFigure(THREE, opts = {}) {
@@ -967,10 +1014,11 @@ export function buildFigure(THREE, opts = {}) {
         seed: opts.seed ?? 1,
         hair: opts.hair ?? 'cap',
         faceless: opts.faceless ?? false,
-        hands: opts.hands ?? false,
         pregnant: opts.pregnant ?? false,
         baby: opts.baby ?? false,
         stethoscope: opts.stethoscope ?? false,
+        armPose: opts.armPose
+            ?? (opts.baby ? 'cradle' : opts.pregnant ? 'pregnant' : opts.stethoscope ? 'clinical' : 'open'),
         folds: opts.folds ?? 7,
         foldDepth: opts.foldDepth ?? 1,
         foldPhase: opts.foldPhase ?? 0,
