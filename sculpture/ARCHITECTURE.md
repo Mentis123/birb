@@ -60,7 +60,7 @@ sculpture/
     core/rng.js            seeded RNG (shared shape with Gauntlet)
     model/sdf.js           sdEllipsoid/sdCapsule/sdRoundBox, smin/smax/subtract,
                            surfaceNets
-    model/figure.js        ONE figure: shell, body field, head field, feet
+    model/figure.js        ONE figure: shell, body field, head field, integrated stride
     model/sculpture.js     the four of them, arranged, patinated, lit
     view/orbit.js          orbit / pinch / two-finger pan, hand-rolled
     ui/qr.js               QR encoder, byte mode, ECC M, versions 1-10
@@ -88,7 +88,7 @@ TORSO_PROFILE + sdEllipsoid/sdCapsule primitives
 skull/jaw/hair/bun/face primitives
       └─ buildHeadField()  separate field → surfaceNets @ 6.2mm voxel
 
-buildFeet()                heel + toe spheres
+buildFeet()                isolation/topology probe for the body-field stride
 
       └─ mergeGeometries() → one BufferGeometry per figure
 ```
@@ -96,13 +96,13 @@ buildFeet()                heel + toe spheres
 Then in `model/sculpture.js`: `paintPatina()` writes vertex colours, four meshes
 share one `MeshStandardMaterial`, plus a base slab and the light rig.
 
-Phase 3's measured scene cost is **490,840 triangles and 6 draw calls** for the
-last rendered frame. Do not retain the old ~75k-per-figure / ~302k-total estimate:
-the finer block-head fields raised the complete scene to roughly 491k, and the
-four heads are not identical enough for a useful per-figure average. In the
-simulated 390×844 Chromium baseline, navigation to `__SCULPT_READY` took 4.63s;
-active software-rendered orbit measured 4.91 FPS. Those are CI/SwiftShader
-numbers, not iPhone results — see `validation/phase-3-closeout.md`.
+The corrected Phase 4 scene measures **494,596 triangles and 6 draw calls** in
+GitHub Actions run `30805881057`. Do not restore the old
+~75k-per-figure / ~302k-total estimate: the finer block-head fields and the
+robe-integrated stride keep the complete scene near 495k, and the four figures
+are not identical enough for a useful per-figure average. The historical
+simulated-mobile timing remains in `validation/phase-3-closeout.md`; it is a
+CI/SwiftShader result, not an iPhone measurement.
 
 The page still renders **on demand**: `orbit.update()` returns whether anything
 moved and no additional renderer pass is issued while the sculpture is still.
@@ -229,9 +229,10 @@ hooded figures with flared cloaks.
   their reading — see `LIKENESS.md` F2 and F3 for how each one failed to read
   while being measurably present in the mesh.
 - **The heads are intentionally non-uniform.** The nearest is bare/plain, the
-  turned-away head is faceless, and two carry a coiled top-knot. Faces are
-  planar with a long nose ridge from the brow, hollow triangular eye sockets and
-  a wide flat mouth. Do not restore one identical cap to all four.
+  turned-away head presents its back while retaining a complete face on the far
+  side, and two carry a coiled top-knot. Faces are planar with a long nose ridge
+  from the brow, shallow eye sockets and a wide flat mouth. Do not restore one
+  identical cap to all four.
 
 ### Reference set
 
@@ -264,8 +265,10 @@ node tools/sculpture-shot.mjs --page sculpture/dev/probe-parts.html \
   --out shots/probe.png --query "three=local&only=body,head&side=front" ...
 ```
 
-Both harnesses **exit non-zero on any page or console error**, so a captured PNG
-is evidence the code ran.
+Both harnesses **exit non-zero on any page or console error**. The single-shot
+harness also reads the live WebGL framebuffer and rejects blank, transparent or
+uniform output, so a file existing on disk is no longer accepted as render
+evidence by itself.
 
 ### The four moves that have actually found bugs here
 
@@ -288,12 +291,15 @@ is evidence the code ran.
   looks like evidence. Pass a real function.
 - The page keeps damping and, after nine idle seconds, starts a slow idle spin.
   A multi-view sheet takes longer than that, so re-park after the settle.
-- Phase 3's ~491k-triangle mesh can make a software-rendered Chromium screenshot
+- The ~495k-triangle mesh can make a software-rendered Chromium screenshot
   exceed Playwright's 30-second default even after `__SCULPT_READY` is true.
   Readiness and PNG readback are separate deadlines; use the sheet harness's
   `--screenshot-timeout` rather than misreporting a slow readback as a model
   construction failure.
 - `--eval` must be a single expression; wrap multi-statement scripts in an IIFE.
+- `sculpture-shot.mjs` reads the live WebGL framebuffer after rendering and
+  rejects blank, transparent or uniform output. A created PNG is not by itself
+  evidence that a 3D scene rendered.
 - The harness needs `npm install --no-save playwright three-real@npm:three@0.183.2`
   followed by `git checkout -- node_modules/three/index.js`, because any npm
   install prunes the hand-written Three test stub this repo tracks there and
@@ -304,11 +310,12 @@ is evidence the code ran.
 ## Where the model is, and what is left
 
 **`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
-Phase 4 independently revalidated at 35 / 41.** The proportion gate is GREEN at
-0 of 12 outside tolerance, worst +0.023 — which is necessary and not sufficient,
-since this gate has been green and wrong twice. The full closeout record and
-committed evidence are in `validation/phase-4-closeout.md`,
-`validation/phase-4-revalidated.png` and `validation/phase-4-arm-probes.png`.
+Phase 4 remains honestly scored at 35 / 41 after its visual-acceptance
+correction.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
++0.024 — necessary and not sufficient, since this gate has been green and wrong
+twice. The closeout record and corrected evidence are in
+`validation/phase-4-closeout.md` and
+`validation/phase-4-likeness-corrected.png`.
 
 The remaining work, in the order the evidence says to do it:
 
@@ -320,44 +327,43 @@ flared. The train became a DISPLACEMENT rather than a radius scale, which was
 the whole of the 0.56-vs-0.39 hem error. Group tightened to 0.50 spacing across
 0.80-wide cloaks so it reads as one mass. Gate green, A1-A5 and B2/B4/D3/E6.
 
-**Phase 2 — The cloak as cast bronze, and the stride. DONE (2026-08-02).** The
-front opening now never closes and the SKIRT is part of the body field running to
-the paving — that is what the V-notch up every figure's front actually was, and
-it could not be tuned away because a cloak that closes has to close somewhere.
-Every free edge carries a rounded bead built into one closed cross-section. Hems
-rake off a leading foot, columns shear forward of vertical, and no two figures
-agree on stride, rake, lean or head angle. Feet resized 3x — at 0.10m long they
-read as pebbles wherever they were put. B3 and C4 remain.
+**Phase 2 — The cloak as cast bronze, and the stride. DONE (2026-08-02;
+acceptance corrected 2026-08-03).** The front opening never closes and the
+SKIRT is part of the body field running to the paving. Every free edge carries
+a rounded bead built into one closed cross-section. Hems rake off a leading
+stride and no two figures agree on rake, lean or head angle.
 
-Add to the invariants: **the feet are seated against the SKIRT's front face, not
-the cloak's.** The cloak stopped reaching the front of the figure when its
-opening was run full height, and anything still positioned against the old
-outline stands a fifth of a metre clear of the model.
+The first closeout still modeled a planted foot as a separate closed object.
+Low-angle mobile evidence showed the join and bulbous instep. The stride now
+uses the same field as the skirt: three tapered sections overlap the hem deeply
+and extend along the paving. Do not restore detached heel/toe primitives or
+exposed legs; `ref-c-under` shows a smooth robe-to-ground extension. B3 and C4
+remain.
 
-**Phase 3 — Heads. DONE (2026-08-02).** The head is a rounded BLOCK, not an
-ovoid — flat front, flat sides, domed top. The nearest is bare/plain, the
-turned-away head is faceless, and two carry coiled top-knots. E3 and E5 remain:
-the eye sockets are lenses where the reference has hollow triangles, and the
-hair's temple edge is not legible at group distance.
-**Phase 4A — Arms and negative space. DONE (2026-08-03).** Four reference-led
-arm paths replace the generic vertical pair: the nearest arm opens a visible
-wedge beside the ribs, the pregnant figure supports the belly, the mother's
-forearms cross beneath the baby, and the clinician's far arm sweeps back. `A7`
-and `F4` now pass.
+**Phase 3 — Heads. DONE (2026-08-02; acceptance corrected 2026-08-03).**
+The head is a rounded BLOCK, not an ovoid — flat front, flat sides, domed top.
+The nearest is bare/plain, the turned-away figure keeps a complete face rotated
+to the far side, and two carry coiled top-knots. E3 and E5 remain: the eye
+sockets are shallow where the reference has hollow triangles, and the hair's
+temple edge is not legible at group distance.
 
-**Phase 4B — Surface and bronze. DONE (2026-08-03).** Existing shell roughness
-and body-field noise were strengthened rather than replaced. Patina runoff
-combines broad and fine vertical bands, but its contrast is bounded so it cannot
-replace the scene's shadows. A neutral-warm key, stronger sky floor and cool rear
-fill keep the weathered bronze readable through the full orbit. `G2`, `G3` and
-`G5` pass after the post-merge lighting correction.
+**Phase 4A — Arms and negative space. DONE (2026-08-03).** Four
+reference-led paths replace the generic vertical pair. Their radii now taper
+from shoulder to reduced cast tips; support wrists terminate inside the
+pregnancy/newborn gestures instead of becoming pipe caps or mitten blobs. The
+chest is one shallow shelf with restrained lobes rather than attached spheres.
+`A7` and `F4` remain passes.
 
-**The current Phase 4 scene is 498,028 triangles, 6 draw calls and 4 figures.**
-The committed simulated-mobile record is internally clean but is still a
-SwiftShader result. A real iPhone 12-or-newer load and orbit test remains
-outstanding and is part of the final ship gate. Do not optimize geometry from
-the software-rendered timings alone; if a real phone reproduces poor
-interaction, test a lower mobile DPR cap before changing mesh resolution.
+**Phase 4B — Surface and bronze. DONE (2026-08-03).** Shell roughness and
+body-field noise are retained, and patina runoff stays subordinate to the
+lighting. The reopened rear-orbit check added a second cool source so broad cowl
+planes remain visible on mobile while the frontal key preserves facial relief.
+`G2`, `G3` and `G5` remain passes.
+
+The final reproducible scene statistics and eight-view artifact are recorded in
+`validation/phase-4-closeout.md`. The simulated browser uses SwiftShader; a
+real iPhone 12-or-newer load and orbit test remains part of the final ship gate.
+Do not optimize geometry from software-rendered timings alone.
 
 ### Phase 5A — arrangement, weight and shadow
 
