@@ -129,13 +129,13 @@ decision.
 
 Each cost at least one full pass to find.
 
-**`material.shadowSide` must be `FrontSide`.** Three defaults a FrontSide
-material's shadow pass to `BackSide`, correct for watertight solids and wrong
-here: a figure is a merge of an open-topped cloak sheet, a surface-nets body, a
-head and two feet, so the "far side" the depth pass writes is not a valid
-occluder for its own front. Symptom: every figure shadows its own chest and the
-group above waist height renders in ambient only. It looks exactly like a
-lighting bug and survives any amount of material tuning.
+**Every generated surface must be closed and outward-wound.** A FrontSide
+material culls an inward-wound near surface and exposes the far interior, which
+looks like clipping, transparency or missing bronze. The Phase 4 integrity
+repair found negative signed volume in the body, head and cloak, plus open cloak
+and head boundary rings. Keep the surface-nets and cloak winding outward, cap
+both ends of the cloak wall, and preserve Three's normal closed-solid shadow
+pass. Do not use `material.shadowSide` to mask broken topology.
 
 **The blend radius must be well under the protrusion.** The one rule of
 modelling with `smin`, broken by default, broken silently. A bust standing 0.02
@@ -148,7 +148,9 @@ torn open rim wherever the box cuts through geometry. The body box topped out at
 y = 2.13 while the neck capsule's cap reaches 2.167, and the resulting slab read
 as a dark trapezoidal visor across every face. Three passes were spent hunting
 it as a lighting bug, a shadow bug and a facial-geometry bug; one
-`MeshNormalMaterial` render found it immediately.
+`MeshNormalMaterial` render found it immediately. Sampling bounds are
+world-axis-aligned, so they must also contain the full rotated head, not only its
+forward-facing extent.
 
 **Thin features do not survive the mesher, and it fails silently.** Surface nets
 places one vertex per cell at the mean of its edge crossings, so a form three or
@@ -350,7 +352,7 @@ replace the scene's shadows. A neutral-warm key, stronger sky floor and cool rea
 fill keep the weathered bronze readable through the full orbit. `G2`, `G3` and
 `G5` pass after the post-merge lighting correction.
 
-**The current Phase 4 scene is 497,176 triangles, 6 draw calls and 4 figures.**
+**The current Phase 4 scene is 498,028 triangles, 6 draw calls and 4 figures.**
 The committed simulated-mobile record is internally clean but is still a
 SwiftShader result. A real iPhone 12-or-newer load and orbit test remains
 outstanding and is part of the final ship gate. Do not optimize geometry from

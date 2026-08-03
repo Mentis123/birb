@@ -1,9 +1,12 @@
-# Bronze Phase 4 closeout and lighting correction
+# Bronze Phase 4 closeout, lighting and surface corrections
 
 Phase 4A (arms and negative space) and Phase 4B (surface and bronze) were
-integrated on 2026-08-03. A post-merge visual report then exposed crushed black
-shadows and an over-orange key in real orbit views. The corrective Phase 4 pass
-changed only patina/material/light values; Phase 5 was not started.
+integrated on 2026-08-03. A post-merge visual report first exposed crushed
+black shadows and an over-orange key in real orbit views. A second real-orbit
+report then exposed the structural defect those settings had obscured: the
+body, head and cloak triangles were wound inward, while head sampling and the
+cloak wall left open boundary rings. The corrective Phase 4 work now covers
+both lighting and surface integrity. Phase 5 was not started.
 
 ## Source and archive provenance
 
@@ -45,26 +48,42 @@ bronze shadow floor, narrows runoff contrast, neutralises the orange key and add
 enough cool sky/rear fill to keep the full orbit readable while retaining a rough,
 dark weathered surface.
 
+The surface-integrity pass reverses the procedural surface-net and cloak
+triangle winding, caps the complete cloak wall at its hem and crown, and expands
+the head sampling box below the blended neck and around every configured head
+turn. It restores normal closed-solid shadowing and adds a regression test for a
+closed, manifold, outward-wound procedural isosurface.
+
 ## Validation
 
-- `npm test`: 190 passed, 0 failed.
+- `npm test`: 191 passed, 0 failed.
 - `node tools/sculpture-proportions.mjs`: 0 of 12 outside tolerance; worst
   error `+0.023`.
 - `node --check sculpture/src/model/figure.js`: passed.
 - `node --check sculpture/src/model/sculpture.js`: passed.
 - `git diff --check`: passed.
+- Four-figure topology check: all 12 head/body/cloak components have positive
+  signed volume and zero boundary edges.
 - GitHub Actions run `30789507000` captured fixed front, close, three-quarter,
   rear and 390x844 mobile views with no page, console or request errors. The
   downloaded artifact matched SHA-256
   `5ca8166e324d35df01d050fbf08bd8ef292b946ffae3410cf252b3622edd1b22`.
+- GitHub Actions run `30798039083` captured final desktop front/close/side,
+  rear and two 390x844 mobile views with no page, console or request errors.
+  Its artifact digest is SHA-256
+  `32fb4e4ac1c3340313d34b5ba8b772dbf987e09fc25f6dd31120aaa0f2199f5b`.
+- Canvas-pixel checks confirmed all six final frames were nonblank, with
+  32.6%-80.9% non-background coverage across the fixed views.
 - The matched sheet and isolated probes were reviewed against all 41 likeness
   checks. `A7`, `F4`, `G2`, `G3` and `G5` moved from fail to pass,
   with no observed Phase 1-3 regression.
 
-The supplied simulated-mobile record reports 6 draw calls, 497,176 triangles,
-4 figures, 4.535 seconds from navigation to ready, and no console, page or
-request errors. Its scripted orbit measured 5.83 FPS under SwiftShader. This is
-not representative of a real iPhone GPU.
+The supplied simulated-mobile record predates the surface-integrity repair and
+reports 6 draw calls, 497,176 triangles, 4 figures, 4.535 seconds from
+navigation to ready, and no console, page or request errors. Its scripted orbit
+measured 5.83 FPS under SwiftShader. The repaired scene is 498,028 triangles;
+the screenshot workflow is not a replacement performance profile. Neither result
+is representative of a real iPhone GPU.
 
 ## Score and remaining gate
 

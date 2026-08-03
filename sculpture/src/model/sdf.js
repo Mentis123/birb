@@ -199,8 +199,11 @@ export function surfaceNets(field, opts) {
     const indices = [];
     const quad = (a, b, c, d, flip) => {
         if (a < 0 || b < 0 || c < 0 || d < 0) return;
-        if (flip) indices.push(a, c, b, a, d, c);
-        else indices.push(a, b, c, a, c, d);
+        // Negative values are inside, so normals must point toward the positive
+        // side. The previous order exposed the far interior through a culled
+        // near surface whenever the material rendered FrontSide.
+        if (flip) indices.push(a, b, c, a, c, d);
+        else indices.push(a, c, b, a, d, c);
     };
 
     for (let k = 0; k < sz; k++) {

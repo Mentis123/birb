@@ -393,22 +393,34 @@ function buildShell(THREE, opts) {
             const s2 = (s + 1) % loop;
             const a = r * loop + s, b = r * loop + s2;
             const c = (r + 1) * loop + s, d = (r + 1) * loop + s2;
-            indices.push(a, c, b, b, c, d);
+            indices.push(a, b, c, b, d, c);
         }
     }
 
-    // Close the hem: a flat annulus between the outer and inner walls, so the
-    // figure is not an open pipe when you orbit down to ground level.
-    //
-    // The inner wall runs the opposite way round from the outer, so the vertex
-    // facing outer[s] is inner[ARC - s]; the inner wall itself starts after the
-    // outer wall and the far bead, at ARC + RIM.
-    const INNER0 = ARC + RIM;
-    for (let s = 0; s < ARC; s++) {
-        const o1 = s, o2 = s + 1;
-        const i1 = INNER0 + (ARC - s), i2 = INNER0 + (ARC - s - 1);
-        indices.push(o1, o2, i2, o1, i2, i1);
-    }
+    // Close the complete wall section at both ends. The old hem cap covered
+    // only the straight outer/inner arcs, leaving the rounded beads open, and
+    // the top had no cap at all.
+    const capRing = (ring, outwardY) => {
+        const offset = ring * loop;
+        const contour = [];
+        for (let s = 0; s < loop; s++) {
+            contour.push(new THREE.Vector2(
+                positions[(offset + s) * 3],
+                positions[(offset + s) * 3 + 2]
+            ));
+        }
+        for (const face of THREE.ShapeUtils.triangulateShape(contour, [])) {
+            let a = offset + face[0], b = offset + face[1], c = offset + face[2];
+            const ax = positions[a * 3], az = positions[a * 3 + 2];
+            const bx = positions[b * 3], bz = positions[b * 3 + 2];
+            const cx = positions[c * 3], cz = positions[c * 3 + 2];
+            const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+            if (ny * outwardY < 0) [b, c] = [c, b];
+            indices.push(a, b, c);
+        }
+    };
+    capRing(0, -1);
+    capRing(RINGS, 1);
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -858,11 +870,14 @@ function buildHeadField(THREE, o) {
     // The box is now sized to the head rather than to a generous cube, which
     // pays for the finer sampling: 0.0042 is a third finer than before at rather
     // fewer samples than the loose box cost. Same rule as the body's box —
-    // clear the neck stub's bottom cap and the bun's top, or surface nets leaves
-    // a torn rim.
+    // clear the neck stub's full smooth-union envelope and the bun's top, or
+    // surface nets leaves a torn rim. The neck reaches about 0.38 head units
+    // below YC0 after its blend; 0.34 cut straight through it. The X margin
+    // also has to contain the skull after headTurn rotates its Z depth sideways;
+    // the rear Z margin must contain the same turn in the other axis.
     const mesh = surfaceNets(field, {
-        min: [-0.135 * HS, yc - 0.340 * HS, -0.145 * HS],
-        max: [0.135 * HS, yc + 0.215 * HS, 0.165 * HS],
+        min: [-0.170 * HS, yc - 0.440 * HS, -0.185 * HS],
+        max: [0.170 * HS, yc + 0.215 * HS, 0.185 * HS],
         voxel: 0.0042 * HS,
     });
     const geo = new THREE.BufferGeometry();

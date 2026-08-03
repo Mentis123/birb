@@ -158,16 +158,11 @@ export function createSculpture(THREE, opts = {}) {
     const material = new THREE.MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.68,
-        // Three defaults a FrontSide material's `shadowSide` to BackSide, which
-        // is right for watertight solids and WRONG for this geometry: a figure
-        // is a merge of an open-topped cloak sheet, a surface-nets body, a head
-        // and two feet, so the "far side" the depth pass writes is not a valid
-        // occluder for its own front. The result was every figure shadowing its
-        // own chest — the entire group above waist height rendered in ambient
-        // only, which for three passes looked exactly like a lighting or
-        // material problem and survived every attempt to fix it as one. Toggling
-        // castShadow off on the figures is what proved it was the depth pass.
-        shadowSide: THREE.FrontSide,
+        // Every generated component is now closed and outward-wound, so
+        // Three's normal BackSide shadow pass for a FrontSide material is
+        // the correct closed-solid behaviour. Do not reintroduce a
+        // shadowSide override to compensate for broken topology; validate
+        // the geometry instead.
         // PATINATED bronze, which is the point: the surface in the photographs
         // is oxide, not metal. Run at metalness 0.42 the diffuse term is scaled
         // by 0.58 and the group renders as a black cut-out no matter how bright
