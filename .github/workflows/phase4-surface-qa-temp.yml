@@ -44,6 +44,10 @@ jobs:
             --query 'three=local' --w 1024 --h 576 --dpr 2 --wait 90000 \
             --eval 'window.__SCULPT.setView(0,4,4.7)' --settle 700
           node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-front-default-shadow.png \
+            --query 'three=local' --w 1024 --h 576 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.sculpture.material.shadowSide=window.__SCULPT.THREE.BackSide;window.__SCULPT.sculpture.material.needsUpdate=true;window.__SCULPT.setView(0,4,4.7)' --settle 700
+          node tools/sculpture-shot.mjs \
             --page sculpture/index.html --out evidence/desktop-side-close.png \
             --query 'three=local' --w 1024 --h 576 --dpr 2 --wait 90000 \
             --eval 'window.__SCULPT.setView(-75,4,4.7)' --settle 700
@@ -55,6 +59,10 @@ jobs:
             --page sculpture/index.html --out evidence/mobile-front.png \
             --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
             --eval 'window.__SCULPT.setView(-2,4,4.4)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/mobile-front-default-shadow.png \
+            --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.sculpture.material.shadowSide=window.__SCULPT.THREE.BackSide;window.__SCULPT.sculpture.material.needsUpdate=true;window.__SCULPT.setView(-2,4,4.4)' --settle 700
           node tools/sculpture-shot.mjs \
             --page sculpture/index.html --out evidence/mobile-side.png \
             --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
