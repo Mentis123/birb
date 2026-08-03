@@ -68,6 +68,12 @@ closed, manifold, outward-wound procedural isosurface.
   rear and 390x844 mobile views with no page, console or request errors. The
   downloaded artifact matched SHA-256
   `5ca8166e324d35df01d050fbf08bd8ef292b946ffae3410cf252b3622edd1b22`.
+- GitHub Actions run `30798039083` captured final desktop front/close/side,
+  rear and two 390x844 mobile views with no page, console or request errors.
+  Its artifact digest is SHA-256
+  `32fb4e4ac1c3340313d34b5ba8b772dbf987e09fc25f6dd31120aaa0f2199f5b`.
+- Canvas-pixel checks confirmed all six final frames were nonblank, with
+  32.6%-80.9% non-background coverage across the fixed views.
 - The matched sheet and isolated probes were reviewed against all 41 likeness
   checks. `A7`, `F4`, `G2`, `G3` and `G5` moved from fail to pass,
   with no observed Phase 1-3 regression.
