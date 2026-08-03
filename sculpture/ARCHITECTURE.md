@@ -176,9 +176,12 @@ metre out rescaled everything, every point on the torso landed near r = 0, and
 the bodies flooded with crevice black.
 
 **Light intensity and albedo are one knob turned opposite ways.** Three's lights
-are plain irradiance multipliers, so a 0.17 bronze under a 3.0 sun tone-maps to a
-0.7 grey and the group renders as plaster. Dark patina AND low intensities (sun
-~1.8, hemi ~0.6) is the pair that lands on bronze.
+are plain irradiance multipliers, so the body colour, runoff multiplier and fill
+must be tuned as one system. The first Phase 4 pass combined a 0.148 body colour,
+a 0.72 runoff floor and an orange 1.82 key; real orbit views collapsed into black
+and tan slabs. The corrected rig uses a 0.215 olive-brown body, a 0.88 runoff
+floor, a neutral-warm 1.60 key, a 0.90 hemisphere and a 0.78 cool rear fill. This
+keeps the front modelled and the full orbit readable.
 
 **The key light sits about 22° off-front at 28° elevation, and both brackets are
 real.** Swing it out to the side and the cloak's flank — which runs the figure's
@@ -341,10 +344,11 @@ forearms cross beneath the baby, and the clinician's far arm sweeps back. `A7`
 and `F4` now pass.
 
 **Phase 4B — Surface and bronze. DONE (2026-08-03).** Existing shell roughness
-and body-field noise were strengthened rather than replaced. Patina runoff now
-combines broad and fine vertical bands, the bronze is warmer against a colder
-sky, and the rough dielectric response keeps it weathered rather than polished.
-`G2`, `G3` and `G5` now pass.
+and body-field noise were strengthened rather than replaced. Patina runoff
+combines broad and fine vertical bands, but its contrast is bounded so it cannot
+replace the scene's shadows. A neutral-warm key, stronger sky floor and cool rear
+fill keep the weathered bronze readable through the full orbit. `G2`, `G3` and
+`G5` pass after the post-merge lighting correction.
 
 **The current Phase 4 scene is 497,176 triangles, 6 draw calls and 4 figures.**
 The committed simulated-mobile record is internally clean but is still a

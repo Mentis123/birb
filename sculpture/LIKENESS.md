@@ -122,10 +122,11 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**35 / 41**, independently revalidated after Phase 4 on 2026-08-03 against the
-committed matched sheet `validation/phase-4-revalidated.png` and the isolated
-arm sheet `validation/phase-4-arm-probes.png`. The complete command log,
-pass/fail classification, render statistics and evidence checksums are in
+**35 / 41**, retained after the Phase 4 lighting correction on 2026-08-03. The
+committed matched sheet `validation/phase-4-revalidated.png` and isolated arm
+sheet `validation/phase-4-arm-probes.png` remain the geometry evidence; a fixed
+desktop/mobile/rear render then verified the corrected material through the
+orbit. The complete command log, classification and evidence checksums are in
 `validation/phase-4-closeout.md`. The score progression is 10 before the phased
 work, 19 after Phase 1, 26 after Phase 2, 30 after Phase 3 and 35 after Phase 4.
 
@@ -244,10 +245,10 @@ that was not there, and it was GREEN.
 
 Phase 4A and 4B are complete. Four reference-led arm paths make the nearest
 figure's negative space, the pregnancy support, the crossed baby support and the
-clinician's swept-back arm distinct. Broader surface displacement, higher patina
-contrast, readable vertical runoff and a warmer sun/bronze pair close `A7`,
-`F4`, `G2`, `G3` and `G5` without changing the Phase 1-3 mass, head or
-arrangement invariants.
+clinician's swept-back arm distinct. Broader surface displacement and vertical
+runoff close `A7`, `F4`, `G2`, `G3` and `G5`; the corrective lighting pass
+bounds the patina contrast and uses neutral daylight plus cool front/rear fill so
+those forms remain readable without changing the Phase 1-3 geometry.
 
 The full tests and proportion gate are green, the matched sheet and arm probes
 are committed, and the simulated mobile record reports no page, console or
