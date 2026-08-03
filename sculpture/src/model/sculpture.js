@@ -28,10 +28,10 @@ const PATINA = {
     // Dark. Weathered bronze reads almost black in the photographs and only the
     // washed edges come up to a mid grey-green; the pale values these started at
     // rendered the group as plaster once the shadow bug stopped hiding them.
-    deep: [0.042, 0.044, 0.039],     // crevice black, faintly warm
-    body: [0.170, 0.176, 0.155],     // the general bronze
-    lit: [0.335, 0.344, 0.296],      // washed, up-facing surfaces
-    verdigris: [0.148, 0.203, 0.170], // green bloom in the sheltered hollows
+    deep: [0.036, 0.032, 0.026],      // crevice black, unmistakably warm
+    body: [0.148, 0.132, 0.104],      // dark weathered bronze, not neutral grey
+    lit: [0.360, 0.292, 0.202],       // warm washed bronze under the winter sun
+    verdigris: [0.108, 0.164, 0.145], // restrained green bloom in sheltered runs
 };
 
 /**
@@ -74,10 +74,10 @@ const LAYOUT = [
     // `cowlTop` clears the crown by about 0.05 of figure height on the tall
     // ones. Figure 0's stops at her shoulders and her head stands completely
     // free, which is what `ref-a-front.jpg` shows on the nearest figure.
-    { x: -0.75, z: 0.50, turn: -0.05, scale: 1.030, seed: 11, hair: 'none', faceless: false, hands: false, pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, openScale: 1.06, sweepLean: -0.030, strideAngle: 0.10, hemRake: 0.055, stride: -1, lean: 0.042, headTurn: -0.16, headTilt: 0.035, trainAngle: 3.42, trainAmount: 0.50 },
-    { x: -0.25, z: 0.06, turn: 0.13, scale: 0.995, seed: 23, hair: 'cap', faceless: true, hands: false, pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, openScale: 0.94, sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038, stride: 1, lean: 0.028, headTurn: 0.30, headTilt: -0.030, trainAngle: 3.10, trainAmount: 0.44 },
-    { x: 0.25, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, hair: 'capbun', faceless: false, hands: false, pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, openScale: 1.02, sweepLean: -0.014, strideAngle: 0.22, hemRake: 0.048, stride: -1, lean: 0.036, headTurn: -0.34, headTilt: 0.018, trainAngle: 2.86, trainAmount: 0.58 },
-    { x: 0.75, z: -0.82, turn: 0.50, scale: 1.010, seed: 51, hair: 'capbun', faceless: false, hands: false, pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, openScale: 0.98, sweepLean: 0.026, strideAngle: -0.06, hemRake: 0.030, stride: 1, lean: 0.022, headTurn: 0.12, headTilt: -0.042, trainAngle: 2.62, trainAmount: 0.66 },
+    { x: -0.75, z: 0.50, turn: -0.05, scale: 1.030, seed: 11, hair: 'none', faceless: false, armPose: 'open', pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, openScale: 1.06, sweepLean: -0.030, strideAngle: 0.10, hemRake: 0.055, stride: -1, lean: 0.042, headTurn: -0.16, headTilt: 0.035, trainAngle: 3.42, trainAmount: 0.50 },
+    { x: -0.25, z: 0.06, turn: 0.13, scale: 0.995, seed: 23, hair: 'cap', faceless: true, armPose: 'pregnant', pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, openScale: 0.94, sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038, stride: 1, lean: 0.028, headTurn: 0.30, headTilt: -0.030, trainAngle: 3.10, trainAmount: 0.44 },
+    { x: 0.25, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, hair: 'capbun', faceless: false, armPose: 'cradle', pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, openScale: 1.02, sweepLean: -0.014, strideAngle: 0.22, hemRake: 0.048, stride: -1, lean: 0.036, headTurn: -0.34, headTilt: 0.018, trainAngle: 2.86, trainAmount: 0.58 },
+    { x: 0.75, z: -0.82, turn: 0.50, scale: 1.010, seed: 51, hair: 'capbun', faceless: false, armPose: 'clinical', pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, openScale: 0.98, sweepLean: 0.026, strideAngle: -0.06, hemRake: 0.030, stride: 1, lean: 0.022, headTurn: 0.12, headTilt: -0.042, trainAngle: 2.62, trainAmount: 0.66 },
 ];
 
 /**
@@ -113,7 +113,10 @@ function paintPatina(THREE, geo, seed) {
         // 3. vertical run-off streaks: high frequency around the figure, very
         //    low frequency up it, which is exactly how water actually marks a
         //    standing bronze.
-        const streak = fbm3(x * 11, y * 0.55, z * 11, seed + 5, 2) * 0.5 + 0.5;
+        const broadRun = fbm3(x * 12.5, y * 0.38, z * 12.5, seed + 5, 2) * 0.5 + 0.5;
+        const fineRun = fbm3(x * 24, y * 0.16, z * 24, seed + 17, 1) * 0.5 + 0.5;
+        const streak = Math.min(1, Math.max(0, broadRun * 0.74 + fineRun * 0.26));
+        const runoff = Math.pow(streak, 1.45);
 
         // The wash is raised to a high power so it lands on genuine shelves —
         // shoulders, brows, the top edge of a cowl — and not on everything with
@@ -122,11 +125,15 @@ function paintPatina(THREE, geo, seed) {
         // Nothing near the ground is rain-washed pale — it is splashed and
         // filthy — so the wash fades out over the last 40cm.
         const washable = Math.min(1, Math.max(0, (y - 0.10) / 0.40));
-        let c = mix(PATINA.body, PATINA.lit, Math.pow(up, 2.0) * 0.60 * washable);
-        c = mix(c, PATINA.deep, Math.min(1, pocket) * 0.55);
-        c = mix(c, PATINA.verdigris, Math.max(0, 0.55 - up) * streak * 0.5);
-        // The streaks themselves, as a light/dark multiply.
-        const s = 0.86 + streak * 0.28;
+        let c = mix(PATINA.body, PATINA.lit, Math.pow(up, 1.85) * 0.72 * washable);
+        c = mix(c, PATINA.deep, Math.min(1, pocket) * 0.60);
+        c = mix(c, PATINA.verdigris,
+            Math.max(0, 0.62 - up) * Math.pow(runoff, 2.2) * 0.52);
+        // Make the existing vertically stretched noise legible at group
+        // distance. This is colour contrast, not extra geometry: broad pale
+        // washes and narrow dark runs remain continuous down the standing
+        // surfaces instead of turning into isotropic speckle.
+        const s = 0.72 + runoff * 0.50;
         col[i * 3] = c[0] * s;
         col[i * 3 + 1] = c[1] * s;
         col[i * 3 + 2] = c[2] * s;
@@ -151,7 +158,7 @@ export function createSculpture(THREE, opts = {}) {
 
     const material = new THREE.MeshStandardMaterial({
         vertexColors: true,
-        roughness: 0.58,
+        roughness: 0.64,
         // Three defaults a FrontSide material's `shadowSide` to BackSide, which
         // is right for watertight solids and WRONG for this geometry: a figure
         // is a merge of an open-topped cloak sheet, a surface-nets body, a head
@@ -166,7 +173,7 @@ export function createSculpture(THREE, opts = {}) {
         // is oxide, not metal. Run at metalness 0.42 the diffuse term is scaled
         // by 0.58 and the group renders as a black cut-out no matter how bright
         // the sun. Weathered bronze behaves far closer to a rough dielectric.
-        metalness: 0.20,
+        metalness: 0.14,
         envMapIntensity: 1.0,
     });
 
@@ -174,7 +181,7 @@ export function createSculpture(THREE, opts = {}) {
     for (let i = 0; i < LAYOUT.length; i++) {
         const L = LAYOUT[i];
         const geo = buildFigure(THREE, {
-            seed: L.seed, hair: L.hair, faceless: L.faceless, hands: L.hands, scale: L.scale,
+            seed: L.seed, hair: L.hair, faceless: L.faceless, armPose: L.armPose, scale: L.scale,
             pregnant: L.pregnant, baby: L.baby, stethoscope: L.stethoscope,
             folds: L.folds, foldDepth: L.foldDepth, foldPhase: L.foldPhase,
             cowlTop: L.cowlTop, openScale: L.openScale, sweepLean: L.sweepLean,
@@ -240,7 +247,7 @@ export function createLightRig(THREE, scene) {
     // 0.7 grey and the group renders as plaster no matter how dark the vertex
     // colours are. Darkening the patina and brightening the sun are the same
     // knob turned opposite ways; this is the pair that actually lands on bronze.
-    const hemi = new THREE.HemisphereLight(0xa8c6ea, 0x6d6455, 0.62);
+    const hemi = new THREE.HemisphereLight(0x9fc6f2, 0x62594c, 0.60);
     scene.add(hemi);
 
     // Round to the FRONT, and LOW. Two failure modes bracket this position and
@@ -252,7 +259,7 @@ export function createLightRig(THREE, scene) {
     // the noses vanish, and the only shadow left on a head is the one under the
     // chin, which reads as a black visor. About 22 deg off-front at 28 deg
     // elevation lights the fronts and still rakes across them.
-    const sun = new THREE.DirectionalLight(0xfff2dc, 1.78);
+    const sun = new THREE.DirectionalLight(0xffd7a8, 1.82);
     sun.position.set(-2.6, 3.6, 6.6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);

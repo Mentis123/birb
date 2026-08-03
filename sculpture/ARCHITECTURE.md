@@ -299,11 +299,11 @@ is evidence the code ran.
 ## Where the model is, and what is left
 
 **`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
-Phase 3 independently revalidated at 30 / 41.** The proportion gate is GREEN at
+Phase 4 independently revalidated at 35 / 41.** The proportion gate is GREEN at
 0 of 12 outside tolerance, worst +0.023 — which is necessary and not sufficient,
 since this gate has been green and wrong twice. The full closeout record and
-committed evidence are in `validation/phase-3-closeout.md` and
-`validation/phase-3-revalidated.png`.
+committed evidence are in `validation/phase-4-closeout.md`,
+`validation/phase-4-revalidated.png` and `validation/phase-4-arm-probes.png`.
 
 The remaining work, in the order the evidence says to do it:
 
@@ -334,36 +334,24 @@ ovoid — flat front, flat sides, domed top. The nearest is bare/plain, the
 turned-away head is faceless, and two carry coiled top-knots. E3 and E5 remain:
 the eye sockets are lenses where the reference has hollow triangles, and the
 hair's temple edge is not legible at group distance.
-**Triangle count went from roughly 302k to 490,840 in this phase.** The simulated
-mobile baseline is recorded, but a real iPhone 12-or-newer load and orbit test is
-still outstanding and now sits in front of Phase 4 rather than at the end.
+**Phase 4A — Arms and negative space. DONE (2026-08-03).** Four reference-led
+arm paths replace the generic vertical pair: the nearest arm opens a visible
+wedge beside the ribs, the pregnant figure supports the belly, the mother's
+forearms cross beneath the baby, and the clinician's far arm sweeps back. `A7`
+and `F4` now pass.
 
-### Entry gate before Phase 4
+**Phase 4B — Surface and bronze. DONE (2026-08-03).** Existing shell roughness
+and body-field noise were strengthened rather than replaced. Patina runoff now
+combines broad and fine vertical bands, the bronze is warmer against a colder
+sky, and the rough dielectric response keeps it weathered rather than polished.
+`G2`, `G3` and `G5` now pass.
 
-- full tests green;
-- proportions green;
-- independently rescored contact sheet;
-- no visual Phase 3 regression;
-- simulated mobile baseline recorded;
-- real-phone validation clearly marked complete or outstanding.
-
-The first five are complete. Because the software-rendered orbit result was poor
-and is not representative of an iPhone GPU, **Phase 4 modelling remains NO-GO
-until the real iPhone check is run**. Do not optimize geometry from SwiftShader
-alone; if a real phone reproduces the problem, test a lower mobile DPR cap before
-rewriting meshes.
-
-### Phase 4A — arms and negative space
-
-Target `A7` and `F4`. Replace the generic arm/hands treatment with per-figure,
-reference-led poses when implementation begins. Preserve the baby's crossed
-supporting forearms and the four narrative identities.
-
-### Phase 4B — surface and bronze
-
-Target `G2`, `G3` and `G5`. The existing noise and runoff systems already exist;
-future work should make them legible at group viewing distance, not add
-complexity merely because the checks currently fail.
+**The current Phase 4 scene is 497,176 triangles, 6 draw calls and 4 figures.**
+The committed simulated-mobile record is internally clean but is still a
+SwiftShader result. A real iPhone 12-or-newer load and orbit test remains
+outstanding and is part of the final ship gate. Do not optimize geometry from
+the software-rendered timings alone; if a real phone reproduces poor
+interaction, test a lower mobile DPR cap before changing mesh resolution.
 
 ### Phase 5A — arrangement, weight and shadow
 

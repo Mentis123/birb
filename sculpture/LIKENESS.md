@@ -42,7 +42,7 @@ regressions on this model were caused by fixing one thing.
       adjacent figures above waist height.
 - [x] **A6** The whole front of each body is open to the air — face, throat,
       shoulders, breasts and belly all visible, cloak entirely behind.
-- [ ] **A7** There is real negative space between the nearest figure's arm and
+- [x] **A7** There is real negative space between the nearest figure's arm and
       her ribs. You can see through it.
 
 ## B · The cloak — `ref-c-under`, `ref-d-wide`
@@ -99,17 +99,17 @@ regressions on this model were caused by fixing one thing.
       held at the forearms, oblong across the body, with a hard seam.
 - [x] **F3** One wears a stethoscope, cord round the neck and bell standing clear
       of the chest.
-- [ ] **F4** Each figure's arms do something different, and the difference is
+- [x] **F4** Each figure's arms do something different, and the difference is
       legible.
 
 ## G · Surface, patina and light — all four
 
 - [x] **G1** The bronze is dark. Sunlit faces read mid-grey-green, not plaster.
-- [ ] **G2** The surface is hand-worked. Every panel holds pushes and hollows;
+- [x] **G2** The surface is hand-worked. Every panel holds pushes and hollows;
       nothing reads as a lathe or a moulded shell.
-- [ ] **G3** Vertical run-off streaks mark the standing surfaces.
+- [x] **G3** Vertical run-off streaks mark the standing surfaces.
 - [x] **G4** Up-facing edges are washed pale; crevices go black.
-- [ ] **G5** The lit bronze is faintly WARM against a cold sky, as in every
+- [x] **G5** The lit bronze is faintly WARM against a cold sky, as in every
       photograph.
 
 ## H · Feet and ground
@@ -122,17 +122,18 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**30 / 41**, independently revalidated after Phase 3 on 2026-08-02 against the
-committed matched sheet `validation/phase-3-revalidated.png`. The complete
-command log, pass/fail classification, render statistics and evidence checksum
-are in `validation/phase-3-closeout.md`. The score progression is 10 before the
-phased work, 19 after Phase 1, 26 after Phase 2 and 30 after Phase 3.
+**35 / 41**, independently revalidated after Phase 4 on 2026-08-03 against the
+committed matched sheet `validation/phase-4-revalidated.png` and the isolated
+arm sheet `validation/phase-4-arm-probes.png`. The complete command log,
+pass/fail classification, render statistics and evidence checksums are in
+`validation/phase-4-closeout.md`. The score progression is 10 before the phased
+work, 19 after Phase 1, 26 after Phase 2, 30 after Phase 3 and 35 after Phase 4.
 
-The closeout confirmed 30 passes, 10 failures and one ambiguous item counted as
-a non-pass. The confirmed failures are `A7 C4 D2 E3 E5 F4 G2 G3 G5 H3`;
-`B3` remains ambiguous because a narrow dark gap is present but does not read
-unambiguously as the reference's broad hollow collar-arch. No Phase 3 visual
-regression was detected.
+The closeout confirmed 35 passes, five failures and one ambiguous item counted
+as a non-pass. The confirmed failures are `C4 D2 E3 E5 H3`; `B3` remains
+ambiguous because a narrow dark gap is present but does not read unambiguously
+as the reference's broad hollow collar-arch. No Phase 1-3 visual regression was
+detected.
 
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
@@ -239,32 +240,21 @@ that was not there, and it was GREEN.
 
 ### What is left, in the order the evidence says to do it
 
-#### Entry gate before Phase 4
+#### Phase 4 closeout
 
-- full tests green;
-- proportions green;
-- independently rescored contact sheet;
-- no visual Phase 3 regression;
-- simulated mobile baseline recorded;
-- real-phone validation clearly marked complete or outstanding.
+Phase 4A and 4B are complete. Four reference-led arm paths make the nearest
+figure's negative space, the pregnancy support, the crossed baby support and the
+clinician's swept-back arm distinct. Broader surface displacement, higher patina
+contrast, readable vertical runoff and a warmer sun/bronze pair close `A7`,
+`F4`, `G2`, `G3` and `G5` without changing the Phase 1-3 mass, head or
+arrangement invariants.
 
-The first five are complete. The simulated SwiftShader orbit result was poor and
-is not representative of an iPhone GPU, so Phase 4 modelling remains **NO-GO**
-until an iPhone 12-or-newer load and orbit test is recorded. Preserve the current
-490,840-triangle geometry meanwhile; if the real phone reproduces poor
-interaction, test a lower mobile renderer-DPR cap before changing mesh structure.
-
-#### Phase 4A — arms and negative space
-
-Target `A7` and `F4`. Replace the generic treatment with per-figure,
-reference-led arm poses when implementation begins. Preserve the baby's crossed
-supporting forearms and the four narrative identities.
-
-#### Phase 4B — surface and bronze
-
-Target `G2`, `G3` and `G5`. Noise and runoff systems already exist. Make them
-legible at group viewing distance rather than adding complexity merely because a
-check fails.
+The full tests and proportion gate are green, the matched sheet and arm probes
+are committed, and the simulated mobile record reports no page, console or
+request errors. A real iPhone 12-or-newer load and orbit test is still
+outstanding. SwiftShader performance is not a phone result and must not be used
+to justify geometry changes; the real-device check remains part of the final
+ship gate.
 
 #### Phase 5A — arrangement, weight and shadow
 
