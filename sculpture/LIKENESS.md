@@ -31,7 +31,7 @@ regressions on this model were caused by fixing one thing.
 
 - [x] **A1** The figures are HEAVY. Shoulder, bust and waist spans are within
       0.03 of each other — a column, not an hourglass. *(Current model spans are
-      shoulder 0.327, bust 0.350 and waist 0.349 against reference 0.327, 0.342
+      shoulder 0.329, bust 0.366 and waist 0.367 against reference 0.327, 0.342
       and 0.356; all are inside the ±0.03 proportion tolerance.)*
 - [x] **A2** The head is roughly one fifth of the figure's height. These are
       squat, big-headed, stylised women, about five and a half heads tall.
@@ -122,19 +122,24 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**35 / 41**, retained after the Phase 4 lighting correction on 2026-08-03. The
-committed matched sheet `validation/phase-4-revalidated.png` and isolated arm
-sheet `validation/phase-4-arm-probes.png` remain the geometry evidence; a fixed
-desktop/mobile/rear render then verified the corrected material through the
-orbit. The complete command log, classification and evidence checksums are in
-`validation/phase-4-closeout.md`. The score progression is 10 before the phased
-work, 19 after Phase 1, 26 after Phase 2, 30 after Phase 3 and 35 after Phase 4.
+**35 / 41**, retained after the Phase 4 visual-acceptance correction on
+2026-08-03. The earlier `validation/phase-4-revalidated.png` and isolated arm
+sheet remain provenance, but live desktop/mobile close-ups invalidated their
+visual sign-off: wrists ended as pipes or mittens, chest forms read as attached
+balls, stride pieces sat in front of the hems, the turned head looked unfinished
+and rear orbit views collapsed toward black.
 
-The closeout confirmed 35 passes, five failures and one ambiguous item counted
-as a non-pass. The confirmed failures are `C4 D2 E3 E5 H3`; `B3` remains
-ambiguous because a narrow dark gap is present but does not read unambiguously
-as the reference's broad hollow collar-arch. No Phase 1-3 visual regression was
-detected.
+The corrected evidence is `validation/phase-4-likeness-corrected.png`; the
+reproducible eight-view Chromium run, framebuffer checks, topology results and
+artifact digest are recorded in `validation/phase-4-closeout.md`. The score
+progression remains 10 before the phased work, 19 after Phase 1, 26 after Phase
+2, 30 after Phase 3 and 35 after Phase 4. This correction repairs the quality of
+existing Phase 4 passes; it does not claim any Phase 5 item.
+
+The current score still contains 35 passes, five failures and one ambiguous item
+counted as a non-pass. The confirmed failures are `C4 D2 E3 E5 H3`; `B3`
+remains ambiguous because a narrow dark gap is present but does not read
+unambiguously as the reference's broad hollow collar-arch.
 
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
@@ -199,19 +204,21 @@ open front; with no section to show they read as cut paper.
 edge pushes it through the paving), each column shears forward of vertical, and
 no two figures agree on stride side, rake, lean, head turn or head tilt.
 
-**The feet were three times too small** — 0.10m long on a 2.3m figure. They read
-as pebbles wherever they were placed, which was diagnosed as a placement problem
-twice and was never one. They also had to be re-seated against the SKIRT's front
-face, since the cloak stopped reaching the front of the figure when its opening
-was opened to full height.
+**The apparent foot is a continuation of the stride, not a separate shoe.**
+The first repair replaced heel/toe pebbles with one closed object but still
+merged that object only at draw time. Live low-angle screenshots exposed the
+remaining seam and bulbous instep. The leading extension now belongs to the same
+distance field as the skirt: its root overlaps the hem deeply and tapers along
+the paving, matching `ref-c-under` without inventing exposed legs.
 
 ### Phase 3 — the heads. Done, and it cost more than the other two together.
 
 **The head is a rounded BLOCK, not an ovoid.** Read off the nearest figure at
 4x: flat front, flat sides, domed top, broad flat jaw — a loaf standing on end.
 Built as an egg the face has nowhere flat to sit and every feature slides off the
-curvature. The nearest is bare/plain, the turned-away head is faceless, and two
-carry a coiled top-knot. Giving every figure one identical cap was part of what
+curvature. The nearest is bare/plain, the turned-away head carries a complete
+face on its far side, and two carry a coiled top-knot. Giving every figure one
+identical cap was part of what
 made the four interchangeable. The top-knot is a thick rolled plait lying across
 the crown, not a knob on top of it.
 
@@ -243,19 +250,23 @@ that was not there, and it was GREEN.
 
 #### Phase 4 closeout
 
-Phase 4A and 4B are complete. Four reference-led arm paths make the nearest
-figure's negative space, the pregnancy support, the crossed baby support and the
-clinician's swept-back arm distinct. Broader surface displacement and vertical
-runoff close `A7`, `F4`, `G2`, `G3` and `G5`; the corrective lighting pass
-bounds the patina contrast and uses neutral daylight plus cool front/rear fill so
-those forms remain readable without changing the Phase 1-3 geometry.
+Phase 4A and 4B are implemented, and their visual acceptance was reopened
+after production close-ups contradicted the original evidence. Tapered arm
+fields replace constant-radius pipes; supporting wrists disappear into the
+pregnancy/newborn gestures; one shallow chest shelf replaces applied spheres;
+the planted stride is unioned into the robe field; and the turned-away head
+retains a complete far-side face whose profile is visible when orbited.
 
-The full tests and proportion gate are green, the matched sheet and arm probes
-are committed, and the simulated mobile record reports no page, console or
-request errors. A real iPhone 12-or-newer load and orbit test is still
-outstanding. SwiftShader performance is not a phone result and must not be used
-to justify geometry changes; the real-device check remains part of the final
-ship gate.
+The rear light floor was also revalidated at the same desktop and 390x844
+angles that reproduced the crushed mobile view. A second rear source keeps the
+cowl planes visible without removing the front key's facial shadows. The
+screenshot harness now rejects blank, transparent or uniform WebGL framebuffers
+instead of treating any PNG as evidence.
+
+The full 193-test suite and the proportion gate are green (0 of 12 outside
+tolerance, worst +0.024). Eight browser views and the corrected contact sheet
+are recorded in the closeout file. A real iPhone 12-or-newer load and orbit test
+is still outstanding; SwiftShader performance is not a phone result.
 
 #### Phase 5A — arrangement, weight and shadow
 

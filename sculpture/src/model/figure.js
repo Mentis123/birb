@@ -27,8 +27,8 @@
  *   HEAD      A rounded block with flat front and sides, domed crown and broad
  *             jaw. The face is deliberately reduced but its features must be
  *             thick enough to survive surface nets at group viewing distance.
- *   FEET      Bare and enlarged enough to read as feet, seated against the
- *             SKIRT's front face with the heel hidden under the hem.
+ *   FEET      One fused planted foot emerges from each raised hem, tapered from
+ *             instep to toe and seated under the SKIRT instead of beside it.
  *
  * Units are metres. The figures stand about 2.3m; a person walks past one in
  * `ref-d-wide.jpg` for scale.
@@ -36,6 +36,21 @@
 
 import { fbm3 } from '../core/noise.js';
 import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets } from './sdf.js';
+
+/**
+ * Approximate distance to a capsule whose radius tapers along its centreline.
+ * The ordinary capsule is useful for bones but reads as pipework on the long,
+ * reduced arms in the reference. Interpolating the radius gives the limb a
+ * shoulder-to-wrist silhouette while preserving rounded, closed ends.
+ */
+function sdTaperedCapsule(px, py, pz, ax, ay, az, bx, by, bz, ra, rb) {
+    const bax = bx - ax, bay = by - ay, baz = bz - az;
+    const pax = px - ax, pay = py - ay, paz = pz - az;
+    const len2 = bax * bax + bay * bay + baz * baz || 1;
+    const h = Math.min(1, Math.max(0, (pax * bax + pay * bay + paz * baz) / len2));
+    const qx = pax - bax * h, qy = pay - bay * h, qz = paz - baz * h;
+    return Math.hypot(qx, qy, qz) - (ra + (rb - ra) * h);
+}
 
 // ---------------------------------------------------------------------------
 // Profile curves
@@ -52,37 +67,37 @@ import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets }
  * Each arm is a shoulder point, an elbow and a wrist. The shoulder centre stays
  * close to the measured outer silhouette; only the path below it changes. This
  * keeps the hard-won mass proportions while allowing the arm to peel away from
- * the trunk. The wrist is the rounded end of the forearm capsule — deliberately
- * reduced like the hands in the casting, rather than a detailed hand model.
+ * the trunk. Radius tapers continuously into a reduced cast tip; supporting
+ * wrists terminate inside their gesture instead of growing separate hand blobs.
  */
 export const ARM_POSES = Object.freeze({
     open: [
         // Nearest figure: her left arm makes the reference's clear wedge of sky
         // between arm and ribs. The other arm stays close and is partly lost in
         // the crowded group, as it is in ref-a-front.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.405, 1.500, 0.030], wrist: [-0.432, 0.900, 0.070], upper: 0.054, fore: 0.047 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.352, 1.500, 0.028], wrist: [ 0.360, 0.935, 0.074], upper: 0.052, fore: 0.047 },
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.382, 1.500, 0.030], wrist: [-0.408, 0.900, 0.070], upper: 0.058, fore: 0.052, end: 0.034, hand: 0.032 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.352, 1.500, 0.028], wrist: [ 0.360, 0.935, 0.074], upper: 0.058, fore: 0.052, end: 0.034, hand: 0.032 },
     ],
     pregnant: [
         // One arm hangs; the other turns forward and supports the underside of
         // the pregnancy. It remains a restrained gesture, but it cannot be
         // mistaken for the open pose or the crossed baby pose.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.362, 1.505, 0.020], wrist: [-0.360, 0.910, 0.080], upper: 0.053, fore: 0.047 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.360, 1.555, 0.038], wrist: [ 0.082, 1.205, 0.252], upper: 0.053, fore: 0.048 },
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.362, 1.505, 0.020], wrist: [-0.360, 0.910, 0.080], upper: 0.059, fore: 0.052, end: 0.034, hand: 0.032 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.360, 1.555, 0.038], wrist: [ 0.082, 1.205, 0.252], upper: 0.059, fore: 0.053, end: 0.020, hand: 0.010 },
     ],
     cradle: [
         // The mother's forearms CROSS beneath the swaddled newborn. Their
         // slightly different heights keep the crossing readable instead of
         // collapsing into one horizontal bolster.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [ 0.098, 1.326, 0.238], upper: 0.053, fore: 0.049 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.350, 1.515, 0.054], wrist: [-0.090, 1.282, 0.250], upper: 0.053, fore: 0.049 },
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [ 0.098, 1.326, 0.238], upper: 0.058, fore: 0.052, end: 0.018, hand: 0.000 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.350, 1.515, 0.054], wrist: [-0.090, 1.315, 0.250], upper: 0.058, fore: 0.052, end: 0.018, hand: 0.000 },
     ],
     clinical: [
         // The clinician's near arm hangs straight while the far arm sweeps a
         // little back and out. That leaves the stethoscope and chest unobscured
         // and gives her a different side silhouette from the open figure.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.360, 1.490, 0.018], wrist: [-0.352, 0.885, 0.072], upper: 0.052, fore: 0.046 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.365, 1.505, -0.002], wrist: [ 0.425, 0.940, -0.018], upper: 0.052, fore: 0.046 },
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.360, 1.490, 0.018], wrist: [-0.352, 0.885, 0.072], upper: 0.058, fore: 0.051, end: 0.034, hand: 0.032 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.365, 1.505, -0.002], wrist: [ 0.425, 0.940, -0.018], upper: 0.058, fore: 0.051, end: 0.034, hand: 0.032 },
     ],
 });
 
@@ -446,8 +461,8 @@ function buildShell(THREE, opts) {
  * The blend radii below are modelling decisions, not tolerances:
  *   0.03  a jaw or a wrist — crisp, still not a crease
  *   0.06  arms into shoulders
- *   0.10  bust onto the chest wall
- *   0.14  a pregnancy growing out of a torso
+ *   0.05  bust onto the chest wall
+ *   0.08  a pregnancy growing out of a torso
  */
 const TORSO_PROFILE = [
     // The trunk includes the skirt and runs all the way to the paving. It has to:
@@ -520,6 +535,28 @@ function sdTrunkAt(x, y, z) {
     return (r - 1) * Math.min(hw, hd);
 }
 
+/**
+ * Distance to the reference's planted stride: a low tapered extension of the
+ * front hem, not a separate shoe. The root overlaps the skirt deeply and the
+ * section narrows continuously into the long cast-bronze toe.
+ */
+function sdLeadingStride(x, y, z, o) {
+    const yaw = o.strideAngle * 0.65;
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    const dx = x - o.stride * 0.140;
+    const dz = z - 0.100;
+    const fx = dx * c - dz * s;
+    const fz = dx * s + dz * c;
+
+    let d = sdEllipsoid(fx, y - 0.060, fz - 0.095,
+        0.100, 0.068, 0.200);
+    d = smin(d, sdEllipsoid(fx, y - 0.042, fz - 0.330,
+        0.069, 0.044, 0.205), 0.042);
+    d = smin(d, sdEllipsoid(fx, y - 0.027, fz - 0.535,
+        0.036, 0.020, 0.095), 0.024);
+    return d;
+}
+
 function buildBodyField(THREE, o) {
     const seed = o.seed;
     const arms = ARM_POSES[o.armPose] || ARM_POSES.open;
@@ -530,33 +567,43 @@ function buildBodyField(THREE, o) {
         // planted foot rather than cutting a step into the front of the drape.
         const hemY = o.hemRake * Math.max(0, Math.cos(Math.atan2(x, z) - o.strideAngle)) * 0.92;
         let d = sdTrunk(x, y, z, hemY, 1.960);
+        d = smin(d, sdLeadingStride(x, y, z, o), 0.028);
 
-        // Bust. THE BLEND RADIUS MUST BE WELL UNDER THE PROTRUSION — this is
-        // the one rule of modelling with smin and the first version broke it.
-        // A form standing 0.02 proud of the chest wall, blended at k=0.10, is
-        // not a soft bust: it is no bust at all, because the fillet is five
-        // times deeper than the feature and swallows it whole. Everything
-        // below protrudes 2-3x its own blend.
+        // The reference chest is one broad cast mass with two restrained lobes,
+        // not two balls attached to a flat torso. A shallow base establishes the
+        // continuous shelf; the smaller front lobes supply the lower contour.
+        d = smin(d, sdEllipsoid(x, y - 1.535, z - 0.125,
+            0.215, 0.082, 0.090), 0.050);
         for (const sx of [-1, 1]) {
-            d = smin(d, sdEllipsoid(x - sx * 0.128, y - 1.535, z - 0.148,
-                0.116, 0.108, 0.114), 0.030);
+            d = smin(d, sdEllipsoid(x - sx * 0.094, y - 1.515, z - 0.140,
+                0.102, 0.068, 0.078), 0.034);
         }
 
-        // Per-figure arms. The deltoid still grows out of the measured shoulder
-        // line, but below it each path follows the reference instead of one
-        // generic vertical capsule. The smaller forearm blend is deliberate:
-        // a large smooth-union radius bridges a real gap back to the trunk and
-        // silently destroys A7 even when the centreline is in the right place.
+        // Per-figure arms taper continuously from the shoulder into a reduced
+        // wrist. The reference does not show bulbous hands: hanging limbs end in
+        // a narrow cast tip, while supporting wrists disappear into the gesture.
         for (const arm of arms) {
             const [sx, sy, sz] = arm.shoulder;
             const [ex, ey, ez] = arm.elbow;
             const [wx, wy, wz] = arm.wrist;
             d = smin(d, sdEllipsoid(x - sx, y - sy, z - sz,
-                0.081, 0.072, 0.087), 0.050);
-            d = smin(d, sdCapsule(x, y, z,
-                sx, sy - 0.018, sz + 0.010, ex, ey, ez, arm.upper), 0.032);
-            d = smin(d, sdCapsule(x, y, z,
-                ex, ey, ez, wx, wy, wz, arm.fore), 0.022);
+                0.077, 0.068, 0.082), 0.046);
+            d = smin(d, sdTaperedCapsule(x, y, z,
+                sx, sy - 0.018, sz + 0.010, ex, ey, ez, 0.070, arm.upper), 0.028);
+            const wristRadius = arm.end ?? arm.fore * 0.70;
+            d = smin(d, sdTaperedCapsule(x, y, z,
+                ex, ey, ez, wx, wy, wz, arm.upper, wristRadius), 0.018);
+
+            const tipLength = arm.hand ?? 0.036;
+            if (tipLength > 0) {
+                const hdx = wx - ex, hdy = wy - ey, hdz = wz - ez;
+                const hlen = Math.hypot(hdx, hdy, hdz) || 1;
+                const htx = wx + hdx / hlen * tipLength;
+                const hty = wy + hdy / hlen * tipLength;
+                const htz = wz + hdz / hlen * tipLength;
+                d = smin(d, sdTaperedCapsule(x, y, z,
+                    wx, wy, wz, htx, hty, htz, wristRadius, 0.014), 0.008);
+            }
         }
 
         // Neck, rising to meet the head field. Stops BELOW the chin (1.919): run
@@ -566,8 +613,8 @@ function buildBodyField(THREE, o) {
         if (o.pregnant) {
             // A pregnancy is not a ball on a torso — it is the torso, changed.
             // The largest blend radius in the model, deliberately.
-            d = smin(d, sdEllipsoid(x, y - 1.270, z - 0.118,
-                0.284, 0.232, 0.198), 0.048);
+            d = smin(d, sdEllipsoid(x, y - 1.245, z - 0.100,
+                0.262, 0.222, 0.176), 0.080);
         }
 
         if (o.baby) {
@@ -583,12 +630,17 @@ function buildBodyField(THREE, o) {
             // it keeps a CREASE where it meets her (k = 0.016). A crease is
             // wrong for anatomy and right here — this is a separate object held
             // against a body, and the seam is the thing that says so.
-            d = smin(d, sdEllipsoid(x + 0.014, y - 1.400, z - 0.214,
-                0.192, 0.106, 0.136), 0.016);
+            d = smin(d, sdEllipsoid(x + 0.010, y - 1.395, z - 0.205,
+                0.178, 0.082, 0.108), 0.016);
             // The head end, standing proud of the wrap so the bundle has a
             // direction and reads as a baby rather than as a bolster.
-            d = smin(d, sdEllipsoid(x + 0.164, y - 1.436, z - 0.214,
-                0.086, 0.084, 0.092), 0.018);
+            d = smin(d, sdEllipsoid(x + 0.150, y - 1.424, z - 0.224,
+                0.064, 0.060, 0.068), 0.012);
+            // A raised diagonal seam makes the swaddle a carried object instead
+            // of another anatomical bulge. It remains shallow enough to sit
+            // beneath the crossing hands.
+            d = smin(d, sdCapsule(x, y, z,
+                -0.118, 1.430, 0.298, 0.118, 1.352, 0.298, 0.014), 0.005);
         }
 
         if (o.stethoscope) {
@@ -614,11 +666,11 @@ function buildBodyField(THREE, o) {
         // HAND-WORKED SURFACE, in the FIELD rather than as a post-pass vertex
         // push, which would re-crease the very blends this approach exists to
         // remove. Two octaves: a broad swell, and a finer one whose amplitude
-        // stays well under the 13.5mm voxel so it modulates the surface instead
+        // stays well under the 14.5mm voxel so it modulates the surface instead
         // of aliasing holes into it. Without the second, the bronze is a
         // machined lathe and no amount of patina rescues it.
-        d += fbm3(x * 2.8, y * 2.8, z * 2.8, seed, 2) * 0.014;
-        d += fbm3(x * 8.8, y * 8.8, z * 8.8, seed + 3, 2) * 0.0055;
+        d += fbm3(x * 2.8, y * 2.8, z * 2.8, seed, 2) * 0.0100;
+        d += fbm3(x * 8.8, y * 8.8, z * 8.8, seed + 3, 2) * 0.0035;
         return d;
     }
 
@@ -631,7 +683,7 @@ function buildBodyField(THREE, o) {
     // MeshNormalMaterial render found it.
     const mesh = surfaceNets(field, {
         min: [-0.60, -0.03, -0.36],
-        max: [0.60, 2.06, 0.46],
+        max: [0.60, 2.06, 0.82],
         voxel: 0.0145,
     });
     const geo = new THREE.BufferGeometry();
@@ -719,20 +771,17 @@ function buildHeadField(THREE, o) {
      * from how far it stands out. Hence the cheek hollows either side of it.
      */
     function headField(x, y, z) {
-        // Skull: a rounded block spanning chin to crown.
-        let d = sdRoundBox(x, y - (YC0 + 0.005), z - 0.004, 0.112, 0.151, 0.094, 0.052);
-        // Jaw: broad and flat, softening the block's lower corners.
+        // Every head is complete, including the face on the figure looking
+        // away. `faceless` describes what the camera sees, not missing geometry;
+        // deleting her relief made the back view look like an unfinished slab.
+        let d = sdRoundBox(x, y - (YC0 + 0.005), z - 0.004,
+            0.112, 0.151, 0.094, 0.052);
         d = smin(d, sdEllipsoid(x, y - (YC0 - 0.090), z - 0.002,
-            0.098, 0.072, 0.082), 0.05);
+            0.098, 0.072, 0.082), 0.050);
 
-        if (!o.faceless) {
-            // THE FACIAL PLANE, made by SLICING the front off, not by adding a
-            // slab to it: an added box is wider than the skull at jaw height and
-            // pokes out as a literal dark rectangle, which is what the first
-            // version rendered — a visor bolted to each head.
-            d = smax(d, z - 0.090, 0.020);
-        }
-
+        // Slice a planar face into the front of the complete skull. On the
+        // turned-away figure this plane and all relief rotate to the far side.
+        d = smax(d, z - 0.090, 0.020);
         // HAIR. The nearest figure in ref-a is bare-headed — a plain block — and
         // giving every figure the same cap was one of the things making the four
         // heads interchangeable. The turned-away figure may carry a plain cap;
@@ -760,7 +809,9 @@ function buildHeadField(THREE, o) {
                 0.076, 0.038, 0.052), 0.026);
         }
 
-        if (!o.faceless) {
+        // Keep the far-side face physically present so a three-quarter orbit
+        // reveals its profile and confirms that the blank view is intentional.
+        {
             // Every feature is small, so every blend is smaller still. An early
             // version blended a 0.017-thick brow at k = 0.030 — filleting the
             // feature away with a radius twice its own size — and left a mask.
@@ -785,46 +836,35 @@ function buildHeadField(THREE, o) {
             // now clears the facial plane by two to three times its own blend.
             //
             // BROW: full width, straight, with a shadow under it.
-            d = smin(d, sdEllipsoid(x, y - (YC0 + 0.058), z - 0.092,
-                0.098, 0.019, 0.029), 0.008);
+            d = smin(d, sdEllipsoid(x, y - (YC0 + 0.055), z - 0.088,
+                0.086, 0.012, 0.019), 0.005);
 
-            // EYES: long horizontal lenses. Carved shallow and WIDE, with an
-            // upper lid standing just proud above each so the groove keeps a
-            // shadow instead of reading as a dark hole.
-            // SHALLOW, and separated by a bridge of nose. At rx 0.050 centred
+            // EYES: two shallow, wide cuts separated by the nose bridge. Earlier
+            // upper and lower lid additions survived as four horizontal bars,
+            // overpowering the nose and making the faces read as masks.
+            // At rx 0.050 centred
             // on x 0.050 the two carves met in the middle and removed a
             // full-width band 28mm deep, which left the brow above it standing
             // as an overhanging shelf over a cave — the single thing that made
-            // every face unreadable. The carve now cuts about 4mm.
+            // every face unreadable. The carve now cuts about 9mm.
             for (const sx of [-1, 1]) {
-                d = smin(d, sdEllipsoid(x - sx * 0.056, y - (YC0 + 0.026), z - 0.096,
-                    0.048, 0.013, 0.023), 0.006);
-                d = subtract(d, sdEllipsoid(x - sx * 0.056, y - (YC0 - 0.002), z - 0.126,
-                    0.048, 0.019, 0.034), 0.008);
-                // The lower lid, so the lens is a slot between two edges rather
-                // than a scoop fading into the cheek.
-                d = smin(d, sdEllipsoid(x - sx * 0.056, y - (YC0 - 0.028), z - 0.092,
-                    0.044, 0.011, 0.020), 0.006);
+                d = subtract(d, sdEllipsoid(x - sx * 0.052, y - (YC0 + 0.004), z - 0.111,
+                    0.038, 0.012, 0.030), 0.004);
             }
 
             // NOSE: one narrow ridge, unbroken from between the brows to the
             // tip. It must clear the facial plane at z = 0.090 or there is no
             // nose; it must also stay NARROW, or it reads as a muzzle.
             d = smin(d, sdCapsule(x, y, z,
-                0, YC0 + 0.050, 0.086, 0, YC0 - 0.044, 0.124, 0.019), 0.009);
+                0, YC0 + 0.050, 0.084, 0, YC0 - 0.044, 0.115, 0.016), 0.007);
             d = smin(d, sdEllipsoid(x, y - (YC0 - 0.040), z - 0.104,
-                0.030, 0.015, 0.021), 0.008);
+                0.027, 0.014, 0.019), 0.006);
 
-            // The cheek hollows either side of it. Under a near-frontal key this
-            // is what makes the nose read: the shadow beside a ridge, not the
-            // ridge itself.
-
-            // MOUTH: a wide bar, two flat pads split by one line.
-            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.076), z - 0.098,
-                0.064, 0.014, 0.026), 0.006);
-            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.106), z - 0.096,
-                0.060, 0.015, 0.025), 0.006);
-
+            // MOUTH: one low lip mass split by a shallow cast line.
+            d = smin(d, sdEllipsoid(x, y - (YC0 - 0.088), z - 0.088,
+                0.055, 0.013, 0.018), 0.005);
+            d = subtract(d, sdEllipsoid(x, y - (YC0 - 0.088), z - 0.104,
+                0.046, 0.004, 0.018), 0.003);
             // Chin, just proud of the plane.
             d = smin(d, sdEllipsoid(x, y - (YC0 - 0.126), z - 0.068,
                 0.052, 0.028, 0.032), 0.024);
@@ -887,49 +927,31 @@ function buildHeadField(THREE, o) {
 }
 
 /**
- * Bare feet peeping from under the hem.
+ * One planted bare foot peeping from under the leading hem.
  *
- * They have to clear the hem's own front depth (0.30 at y = 0) or they are cast
- * inside the cloth and you see nothing — which is what happened when they sat at
- * z = 0.29. Small, long and low, exactly as they read in `ref-c-under.jpg`.
+ * Its rear overlaps the skirt while the low tapered toe reaches forward. The
+ * reference hides the trailing foot; exposing both sides made the group look as
+ * though pairs of loose stones had been placed in front of every robe.
  */
 function buildFeet(THREE, opts) {
-    const parts = [];
-    for (const sx of [-1, 1]) {
-        // ONE FOOT FORWARD. `stride` is which side leads, so the pair reads as a
-        // step rather than as a stance: the leading foot sits well out under the
-        // lifted hem and the trailing one is still tucked under the cloth.
-        const leads = sx === opts.stride;
-        const lead = leads ? 0.088 : -0.026;
-        // Set against the SKIRT's front face at the ground (z = 0.238), not against
-    // the cloak's — the cloak stopped reaching the front of the figure when its
-    // opening was made to run the whole height. Placed against the old outline
-    // the feet stood a fifth of a metre clear of anything and read as loose
-    // objects on the paving.
-    //
-    // Set so the HEM COVERS THE HEEL and only the front of the foot shows.
-        // Standing entirely clear of the cloth they read as four pairs of loose
-        // eggs on the paving, which is what they looked like for three passes.
-        // Built as ONE squashed sphere they still did: it is the heel-to-toe
-        // taper, heel high and back, toes low and forward, that makes a foot.
-        // SIZED FOR A 2.3m FIGURE. At 0.10 long these were a third of the foot
-        // this woman needs and they read as pebbles no matter where they were
-        // put — which was diagnosed twice as a placement problem and was never
-        // one. Scaled off a human foot at her scale: about 0.31 long, 0.15
-        // across, 0.09 at the instep.
-        const heel = new THREE.SphereGeometry(1, 14, 10);
-        heel.scale(0.072, 0.068, 0.092);
-        heel.translate(sx * 0.104, leads ? 0.066 : 0.082, 0.174 + lead);
-        parts.push(heel);
-        const foot = new THREE.SphereGeometry(1, 16, 10);
-        foot.scale(0.075, 0.042, 0.155);
-        foot.translate(sx * 0.106, 0.040, 0.268 + lead);
-        parts.push(foot);
-    }
-    const geo = mergeGeometries(THREE, parts);
-    return roughen(THREE, geo, { amount: 0.004, scale: 9, seed: opts.seed + 21 });
-}
+    // Isolation geometry for the visual/topology probe. In the assembled model
+    // this same field is unioned into buildBodyField, so no shoe seam exists.
+    const field = (x, y, z) => {
+        let d = sdLeadingStride(x, y, z, opts);
+        d += fbm3(x * 12, y * 12, z * 12, opts.seed + 21, 2) * 0.0015;
+        return d;
+    };
 
+    const mesh = surfaceNets(field, {
+        min: [-0.32, -0.03, -0.05],
+        max: [0.32, 0.20, 0.75],
+        voxel: 0.0075,
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
+    return geo;
+}
 /**
  * Merge a list of BufferGeometries into one.
  *
@@ -1005,9 +1027,9 @@ export const FIGURE_LANDMARKS = {
     // the breasts alone and the photograph's as the whole body compares two
     // different things and reports a 0.12 error that is not there.
     headWidth: 2 * 0.134 * 1.335,  // hair mass, 2 x rx
-    shoulderSpan: 0.758,           // 2 x (deltoid centre 0.298 + r 0.081)
-    bustSpan: 0.812,               // 2 x upper-arm outer edge at y = 1.543
-    waistSpan: 0.811,              // 2 x forearm outer edge at y = 1.430
+    shoulderSpan: 0.763,           // measured outer mesh slice at y = 1.849
+    bustSpan: 0.850,               // measured outer mesh slice at y = 1.543
+    waistSpan: 0.853,              // measured outer mesh slice at y = 1.430
     hemSpan: 0.898,                // cloak at the ground, ignoring the train
 };
 
@@ -1020,7 +1042,7 @@ export const FIGURE_LANDMARKS = {
  * @param {number} opts.seed     drives every noise field, so two figures with
  *                               different seeds are visibly different castings
  * @param {'none'|'cap'|'capbun'} opts.hair head treatment
- * @param {boolean} opts.faceless the head is turned away — no face relief
+ * @param {boolean} opts.faceless the complete face is turned to the far side
  * @param {'open'|'pregnant'|'cradle'|'clinical'} opts.armPose reference-led arm path
  * @param {number} opts.scale    overall height multiplier
  */
@@ -1069,7 +1091,7 @@ export function buildFigure(THREE, opts = {}) {
     if (want('shell')) parts.push(buildShell(THREE, o));
     if (want('body')) parts.push(buildBodyField(THREE, o));
     if (want('head')) parts.push(buildHeadField(THREE, o));
-    if (want('feet')) parts.push(buildFeet(THREE, o));
+    if (only && want('feet') && !want('body')) parts.push(buildFeet(THREE, o));
 
     const geo = mergeGeometries(THREE, parts);
 

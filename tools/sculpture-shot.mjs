@@ -200,6 +200,41 @@ async function main() {
     // Report the page's own perf counters if it publishes them.
     const stats = await page.evaluate(() => (window.__SCULPT_STATS ? window.__SCULPT_STATS() : null)).catch(() => null);
 
+    // Read the live WebGL framebuffer immediately after a render. A successful
+    // page load can still produce an all-black canvas, so file existence is not
+    // a visual assertion. Sampling the luminance distribution catches blank,
+    // transparent and severely crushed frames without prescribing the artwork.
+    const pixelStats = await page.evaluate(() => {
+        const state = window.__SCULPT;
+        if (!state?.renderer || !state.scene || !state.camera) return null;
+        state.renderer.render(state.scene, state.camera);
+        const gl = state.renderer.getContext();
+        const width = gl.drawingBufferWidth, height = gl.drawingBufferHeight;
+        const rgba = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+        const pixelCount = width * height;
+        const step = Math.max(1, Math.floor(pixelCount / 4096));
+        let samples = 0, opaque = 0, min = 255, max = 0, sum = 0, sumSq = 0;
+        for (let pixel = 0; pixel < pixelCount; pixel += step) {
+            const offset = pixel * 4;
+            const lum = rgba[offset] * 0.2126 + rgba[offset + 1] * 0.7152 + rgba[offset + 2] * 0.0722;
+            if (rgba[offset + 3] > 240) opaque++;
+            min = Math.min(min, lum);
+            max = Math.max(max, lum);
+            sum += lum;
+            sumSq += lum * lum;
+            samples++;
+        }
+        const mean = sum / samples;
+        return { width, height, samples, opaque, min, max, mean,
+            deviation: Math.sqrt(Math.max(0, sumSq / samples - mean * mean)) };
+    }).catch(() => null);
+    const pixelOk = Boolean(pixelStats
+        && pixelStats.samples >= 100
+        && pixelStats.opaque / pixelStats.samples > 0.90
+        && pixelStats.max - pixelStats.min > 12
+        && pixelStats.deviation > 4);
+
     const outPath = path.resolve(REPO_ROOT, args.out);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     await page.screenshot({ path: outPath });
@@ -209,12 +244,14 @@ async function main() {
 
     console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x)`);
     if (stats) console.log('stats: ' + JSON.stringify(stats));
+    if (pixelStats) console.log('pixels: ' + JSON.stringify(pixelStats));
+    if (!pixelOk) console.error('PIXEL CHECK FAILED: canvas is blank, transparent or crushed');
     if (!readyOk) console.error('NOT READY: ' + readyErr);
     if (pageErrors.length) console.error('PAGE ERRORS:\n  ' + pageErrors.join('\n  '));
     if (consoleErrors.length) console.error('CONSOLE ERRORS:\n  ' + consoleErrors.join('\n  '));
 
     const allowConsole = Boolean(args['allow-console-errors']);
-    const failed = !readyOk || pageErrors.length > 0 || (!allowConsole && consoleErrors.length > 0);
+    const failed = !readyOk || !pixelOk || pageErrors.length > 0 || (!allowConsole && consoleErrors.length > 0);
     process.exit(failed ? 1 : 0);
 }
 
