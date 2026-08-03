@@ -1,0 +1,68 @@
+name: Phase 4 Likeness QA
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/phase4-likeness-qa-temp.yml'
+      - 'sculpture/src/model/figure.js'
+      - 'sculpture/src/model/sculpture.js'
+      - 'tests/sculpture-figure-details.test.js'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout correction branch
+        uses: actions/checkout@v4
+
+      - name: Install visual harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright three-real@npm:three@0.183.2
+          git checkout -- node_modules/three/index.js
+          npx playwright install --with-deps chromium
+
+      - name: Capture reference-led review views
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-front.png \
+            --query 'three=local' --w 1200 --h 900 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.28,0,true); window.__SCULPT.setView(-2,4,4.2)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/mobile-full.png \
+            --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.28,0,true); window.__SCULPT.setView(-2,4,4.4)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/mobile-face-body.png \
+            --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.58,0,true); window.__SCULPT.setView(-2,3,3.0)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-threequarter.png \
+            --query 'three=local' --w 1200 --h 900 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.24,0,true); window.__SCULPT.setView(55,4,4.0)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-side.png \
+            --query 'three=local' --w 1200 --h 900 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,1.20,0,true); window.__SCULPT.setView(-78,3,4.6)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-feet.png \
+            --query 'three=local' --w 1200 --h 650 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.orbit.setTarget(0,0.28,0,true); window.__SCULPT.setView(-8,-2,3.4)' --settle 700
+
+      - name: Upload likeness evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-likeness-review
+          path: evidence
+          retention-days: 2
