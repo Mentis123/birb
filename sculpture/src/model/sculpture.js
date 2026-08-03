@@ -283,9 +283,10 @@ export function createLightRig(THREE, scene) {
     sun.shadow.normalBias = 0.009;
     scene.add(sun);
 
-    // Rim from behind, which is what separates the cowls from the sky in
-    // `ref-c-under.jpg` and stops the group reading as one black blob.
-    const rim = new THREE.DirectionalLight(0xbcd8ff, 0.46);
+    // A cool rear fill separates the cowls from the sky and keeps the sculpture
+    // readable through the full orbit. It remains weaker than the front key, so
+    // the back stays in shade without collapsing into a black cut-out.
+    const rim = new THREE.DirectionalLight(0xbcd8ff, 0.78);
     rim.position.set(3.4, 2.6, -4.4);
     scene.add(rim);
 
