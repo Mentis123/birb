@@ -1,0 +1,62 @@
+name: Phase 4 Lighting Repair QA
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/phase4-lighting-qa-temp.yml'
+      - 'sculpture/src/model/sculpture.js'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+
+      - name: Install visual harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save playwright three-real@npm:three@0.183.2
+          git checkout -- node_modules/three/index.js
+          npx playwright install --with-deps chromium
+
+      - name: Capture fixed review views
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-front.png \
+            --query 'three=local' --w 1440 --h 900 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.setView(0,4,7)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-front-close.png \
+            --query 'three=local' --w 1024 --h 576 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.setView(0,4,4.7)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-threequarter-close.png \
+            --query 'three=local' --w 1024 --h 576 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.setView(-40,4,4.7)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/desktop-rear.png \
+            --query 'three=local' --w 1440 --h 900 --dpr 1 --wait 90000 \
+            --eval 'window.__SCULPT.setView(165,4,7)' --settle 700
+          node tools/sculpture-shot.mjs \
+            --page sculpture/index.html --out evidence/mobile-front.png \
+            --query 'three=local' --w 390 --h 844 --dpr 2 --wait 90000 \
+            --eval 'window.__SCULPT.setView(0,4,7)' --settle 700
+
+      - name: Upload lighting evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-lighting-repair
+          path: evidence
+          retention-days: 2
