@@ -872,10 +872,12 @@ function buildHeadField(THREE, o) {
     // fewer samples than the loose box cost. Same rule as the body's box —
     // clear the neck stub's full smooth-union envelope and the bun's top, or
     // surface nets leaves a torn rim. The neck reaches about 0.38 head units
-    // below YC0 after its blend; 0.34 cut straight through it.
+    // below YC0 after its blend; 0.34 cut straight through it. The X margin
+    // also has to contain the skull after headTurn rotates its Z depth sideways;
+    // the rear Z margin must contain the same turn in the other axis.
     const mesh = surfaceNets(field, {
-        min: [-0.135 * HS, yc - 0.440 * HS, -0.145 * HS],
-        max: [0.135 * HS, yc + 0.215 * HS, 0.165 * HS],
+        min: [-0.170 * HS, yc - 0.440 * HS, -0.185 * HS],
+        max: [0.170 * HS, yc + 0.215 * HS, 0.185 * HS],
         voxel: 0.0042 * HS,
     });
     const geo = new THREE.BufferGeometry();
