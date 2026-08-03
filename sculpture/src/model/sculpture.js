@@ -25,13 +25,13 @@ import { fbm3 } from '../core/noise.js';
 
 /** Patina end points, sampled off the sunlit faces in `ref-a-front.jpg`. */
 const PATINA = {
-    // Dark. Weathered bronze reads almost black in the photographs and only the
-    // washed edges come up to a mid grey-green; the pale values these started at
-    // rendered the group as plaster once the shadow bug stopped hiding them.
-    deep: [0.036, 0.032, 0.026],      // crevice black, unmistakably warm
-    body: [0.148, 0.132, 0.104],      // dark weathered bronze, not neutral grey
-    lit: [0.360, 0.292, 0.202],       // warm washed bronze under the winter sun
-    verdigris: [0.108, 0.164, 0.145], // restrained green bloom in sheltered runs
+    // The bronze stays dark, but its broad planes must remain readable in sky
+    // light. Crevices carry the near-black values; using them as the body colour
+    // crushes the whole group into a silhouette on real mobile displays.
+    deep: [0.060, 0.058, 0.050],      // dirt held in the deepest crevices
+    body: [0.215, 0.205, 0.175],      // weathered olive-brown bronze
+    lit: [0.390, 0.365, 0.300],       // pale rain-washed shelves and ridges
+    verdigris: [0.150, 0.215, 0.185], // restrained green bloom in sheltered runs
 };
 
 /**
@@ -125,15 +125,14 @@ function paintPatina(THREE, geo, seed) {
         // Nothing near the ground is rain-washed pale — it is splashed and
         // filthy — so the wash fades out over the last 40cm.
         const washable = Math.min(1, Math.max(0, (y - 0.10) / 0.40));
-        let c = mix(PATINA.body, PATINA.lit, Math.pow(up, 1.85) * 0.72 * washable);
-        c = mix(c, PATINA.deep, Math.min(1, pocket) * 0.60);
+        let c = mix(PATINA.body, PATINA.lit, Math.pow(up, 1.85) * 0.62 * washable);
+        c = mix(c, PATINA.deep, Math.min(1, pocket) * 0.44);
         c = mix(c, PATINA.verdigris,
-            Math.max(0, 0.62 - up) * Math.pow(runoff, 2.2) * 0.52);
-        // Make the existing vertically stretched noise legible at group
-        // distance. This is colour contrast, not extra geometry: broad pale
-        // washes and narrow dark runs remain continuous down the standing
-        // surfaces instead of turning into isotropic speckle.
-        const s = 0.72 + runoff * 0.50;
+            Math.max(0, 0.62 - up) * Math.pow(runoff, 2.2) * 0.42);
+        // Keep the vertical runoff visible without letting its dark end become
+        // a second shadow system. Lighting should describe the form; the patina
+        // only modulates it.
+        const s = 0.88 + runoff * 0.22;
         col[i * 3] = c[0] * s;
         col[i * 3 + 1] = c[1] * s;
         col[i * 3 + 2] = c[2] * s;
@@ -158,7 +157,7 @@ export function createSculpture(THREE, opts = {}) {
 
     const material = new THREE.MeshStandardMaterial({
         vertexColors: true,
-        roughness: 0.64,
+        roughness: 0.68,
         // Three defaults a FrontSide material's `shadowSide` to BackSide, which
         // is right for watertight solids and WRONG for this geometry: a figure
         // is a merge of an open-topped cloak sheet, a surface-nets body, a head
@@ -173,7 +172,7 @@ export function createSculpture(THREE, opts = {}) {
         // is oxide, not metal. Run at metalness 0.42 the diffuse term is scaled
         // by 0.58 and the group renders as a black cut-out no matter how bright
         // the sun. Weathered bronze behaves far closer to a rough dielectric.
-        metalness: 0.14,
+        metalness: 0.12,
         envMapIntensity: 1.0,
     });
 
@@ -236,18 +235,10 @@ export function createLightRig(THREE, scene) {
     // Sky/ground hemisphere carries the ambient. Bronze in shade is not black,
     // it is a very dark blue-grey, and that only happens with a coloured
     // ambient rather than a grey one.
-    // Ambient is deliberately LOW. At 2.15 it drowned the modelling: the
-    // reference photos are hard winter sun and everything that reads in them —
-    // the bust, the belly, the fold ridges — reads because of the shadow beneath
-    // it, and a bright sky fill erases every one of those shadows. The figures
-    // went from sculpture to pale card in exactly the amount of hemisphere light
-    // added.
-    // Intensities are LOW because the albedo is low. Three's lights are plain
-    // irradiance multipliers, so a 0.17 bronze under a 3.0 sun tone-maps to a
-    // 0.7 grey and the group renders as plaster no matter how dark the vertex
-    // colours are. Darkening the patina and brightening the sun are the same
-    // knob turned opposite ways; this is the pair that actually lands on bronze.
-    const hemi = new THREE.HemisphereLight(0x9fc6f2, 0x62594c, 0.60);
+    // The hemisphere is the exposure floor for every view. It is strong enough
+    // to preserve faces and robe planes in shade, while the directional lights
+    // still provide the modelling and contact shadows.
+    const hemi = new THREE.HemisphereLight(0xb7cbe2, 0x867d70, 0.90);
     scene.add(hemi);
 
     // Round to the FRONT, and LOW. Two failure modes bracket this position and
@@ -259,7 +250,7 @@ export function createLightRig(THREE, scene) {
     // the noses vanish, and the only shadow left on a head is the one under the
     // chin, which reads as a black visor. About 22 deg off-front at 28 deg
     // elevation lights the fronts and still rakes across them.
-    const sun = new THREE.DirectionalLight(0xffd7a8, 1.82);
+    const sun = new THREE.DirectionalLight(0xfff0dc, 1.60);
     sun.position.set(-2.6, 3.6, 6.6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -302,12 +293,12 @@ export function createLightRig(THREE, scene) {
     // shadow each other's chests almost completely under a single key, and the
     // bust and belly are the whole point of the modelling — this keeps them
     // readable without flattening the key's shadows.
-    const fill = new THREE.DirectionalLight(0xd8e4f4, 0.34);
+    const fill = new THREE.DirectionalLight(0xd8e4f4, 0.44);
     fill.position.set(1.6, 1.2, 6.0);
     scene.add(fill);
 
     // Bounce up off the pavement.
-    const bounce = new THREE.DirectionalLight(0xe4d8c2, 0.20);
+    const bounce = new THREE.DirectionalLight(0xe4d8c2, 0.24);
     bounce.position.set(0.8, -3, 2.4);
     scene.add(bounce);
 
