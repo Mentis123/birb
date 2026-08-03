@@ -11,6 +11,9 @@
   Query parameters, all optional:
     ?only=shell,body,head,feet   which parts to build   (default: all four)
     &pregnant &baby &steth       which story this figure carries
+    &hair=none|cap|capbun        head treatment                 (default: cap)
+    &weightShift=-0.11           settle the column over one foot
+    &material=normal             normal diagnostic instead of lit bronze
     &side=front                  FrontSide material, to expose culling and holes
                                  (default DoubleSide, which hides inverted winding)
     &three=local                 use node_modules Three instead of the CDN
@@ -45,12 +48,16 @@ scene.add(new THREE.HemisphereLight(0xbcd8f5, 0x8b8271, 2.0));
 const d = new THREE.DirectionalLight(0xfff4e2, 2.6); d.position.set(-3,4,5); scene.add(d);
 const d2 = new THREE.DirectionalLight(0xcae2ff, 1.2); d2.position.set(4,2,-4); scene.add(d2);
 
-const mat = new THREE.MeshStandardMaterial({ color: 0x8a8f80, roughness: 0.7, metalness: 0.15, side: (new URLSearchParams(location.search).get('side')==='front')?THREE.FrontSide:THREE.DoubleSide });
-const matShell = new THREE.MeshStandardMaterial({ color: 0x6b7d9a, roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 0.42 });
-
 const Q = new URLSearchParams(location.search);
-const o = { seed: 37, bun: true, faceless: false, hands: false,
+const side = Q.get('side') === 'front' ? THREE.FrontSide : THREE.DoubleSide;
+const mat = Q.get('material') === 'normal'
+    ? new THREE.MeshNormalMaterial({ side })
+    : new THREE.MeshStandardMaterial({
+        color: 0x8a8f80, roughness: 0.7, metalness: 0.15, side,
+    });
+const o = { seed: 37, hair: Q.get('hair') || 'cap', faceless: false,
             pregnant: Q.has('pregnant'), baby: Q.has('baby'), stethoscope: Q.has('steth'),
+            weightShift: Number(Q.get('weightShift') || 0),
             folds: 6, foldDepth: 1.12, foldPhase: 3.1, trainAngle: 2.52, trainAmount: 0.38, scale: 1 };
 
 // Rebuild the parts individually via the module's own internals by asking for a
@@ -59,8 +66,10 @@ const shown = {};
 window.__PROBE = { THREE, scene, renderer, camera, shown };
 
 // body + head + feet only
-const bodyOnly = FIG.buildFigure(THREE, { ...o, only: (new URLSearchParams(location.search).get('only')||'shell,body,head,feet').split(',') });
-scene.add(new THREE.Mesh(bodyOnly, mat));
+const bodyOnly = FIG.buildFigure(THREE, { ...o, only: (Q.get('only') || 'shell,body,head,feet').split(',') });
+const mesh = new THREE.Mesh(bodyOnly, mat);
+scene.add(mesh);
+window.__PROBE.shown.figure = mesh;
 
 function setView(yawDeg, pitchDeg, dist, ty) {
     const y = yawDeg*Math.PI/180, p = pitchDeg*Math.PI/180;

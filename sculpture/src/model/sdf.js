@@ -65,6 +65,47 @@ export function sdRoundBox(px, py, pz, hx, hy, hz, r) {
     return outside + inside - r;
 }
 
+/**
+ * Triangular prism extruded by `halfDepth` along Z.
+ *
+ * The triangle distance is exact in XY and orientation-independent. Combining
+ * it with the slab distance gives a closed carving tool with planar walls and
+ * a real triangular mouth instead of three blended capsules approximating one.
+ */
+export function sdTriPrism(
+    px, py, pz,
+    ax, ay, bx, by, cx, cy,
+    halfDepth
+) {
+    const edges = [
+        [ax, ay, bx - ax, by - ay],
+        [bx, by, cx - bx, cy - by],
+        [cx, cy, ax - cx, ay - cy],
+    ];
+    const orientation = Math.sign(
+        (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+    ) || 1;
+
+    let minDistanceSq = Infinity;
+    let inside = true;
+    for (const [vx, vy, ex, ey] of edges) {
+        const wx = px - vx, wy = py - vy;
+        const edgeLengthSq = ex * ex + ey * ey;
+        const t = edgeLengthSq > 0
+            ? Math.min(1, Math.max(0, (wx * ex + wy * ey) / edgeLengthSq))
+            : 0;
+        const dx = wx - ex * t, dy = wy - ey * t;
+        minDistanceSq = Math.min(minDistanceSq, dx * dx + dy * dy);
+        if (orientation * (ex * wy - ey * wx) < 0) inside = false;
+    }
+
+    const triangleDistance = Math.sqrt(minDistanceSq) * (inside ? -1 : 1);
+    const slabDistance = Math.abs(pz) - halfDepth;
+    const ox = Math.max(triangleDistance, 0);
+    const oz = Math.max(slabDistance, 0);
+    return Math.hypot(ox, oz) + Math.min(Math.max(triangleDistance, slabDistance), 0);
+}
+
 // ---------------------------------------------------------------------------
 // Operators
 // ---------------------------------------------------------------------------

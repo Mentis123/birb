@@ -24,17 +24,19 @@
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --only a-front,c-under
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --no-photos   # review poses only
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase4.png --phase4     # nine defect views
+ *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase5.png --phase5     # six details + mobile
  *
  * Flags:
  *   --out     output PNG path                                (required)
  *   --only    comma-separated view ids to render      (default: all)
  *   --cell    height in px of one row of the sheet           (default 620)
- *   --dpr     device pixel ratio        (default 2; Phase 4 defaults to 1)
+ *   --dpr     device pixel ratio (default 2; Phase 4/5 default to 1)
  *   --wait    ms to wait for window.__SCULPT_READY           (default 60000)
  *   --settle  ms to wait after parking each camera           (default 350)
  *   --screenshot-timeout  max ms per rendered screenshot   (default 120000)
  *   --no-photos  skip the reference column
  *   --phase4  capture the nine desktop/mobile/detail acceptance views
+ *   --phase5  capture the seven Phase 5 likeness acceptance views
  *   --allow-console-errors
  */
 
@@ -45,7 +47,12 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { PHASE4_ACCEPTANCE_VIEWS, REFERENCE_VIEWS, REVIEW_VIEWS } from './sculpture-views.mjs';
+import {
+    PHASE4_ACCEPTANCE_VIEWS,
+    PHASE5_ACCEPTANCE_VIEWS,
+    REFERENCE_VIEWS,
+    REVIEW_VIEWS,
+} from './sculpture-views.mjs';
 
 const { chromium } = await import(process.env.SCULPTURE_PLAYWRIGHT_MODULE || 'playwright');
 
@@ -98,12 +105,17 @@ function findChromium() {
     if (process.env.GAUNTLET_CHROMIUM && fs.existsSync(process.env.GAUNTLET_CHROMIUM)) {
         return process.env.GAUNTLET_CHROMIUM;
     }
-    const root = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers';
+    const root = process.env.PLAYWRIGHT_BROWSERS_PATH
+        || (process.platform === 'win32'
+            ? path.join(process.env.LOCALAPPDATA || '', 'ms-playwright')
+            : '/opt/pw-browsers');
     let entries = [];
     try { entries = fs.readdirSync(root); } catch { return undefined; }
     return entries
         .filter((n) => n.startsWith('chromium')).sort().reverse()
         .flatMap((n) => [
+            path.join(root, n, 'chrome-headless-shell-win64', 'chrome-headless-shell.exe'),
+            path.join(root, n, 'chrome-win64', 'chrome.exe'),
             path.join(root, n, 'chrome-linux', 'chrome'),
             path.join(root, n, 'chrome-linux', 'headless_shell'),
         ])
@@ -113,7 +125,15 @@ function findChromium() {
 /** Use the platform Python name without hiding real Pillow/script failures. */
 function runPython(args, options) {
     let missing = null;
-    const commands = process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+    const commands = [
+        process.env.SCULPTURE_PYTHON,
+        process.platform === 'win32' && process.env.USERPROFILE
+            ? path.join(process.env.USERPROFILE, '.cache', 'codex-runtimes',
+                'codex-primary-runtime', 'dependencies', 'python', 'python.exe')
+            : null,
+        ...(process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python']),
+    ].filter(Boolean);
+    commands.sort((a, b) => Number(fs.existsSync(b)) - Number(fs.existsSync(a)));
     for (const command of commands) {
         try {
             return execFileSync(command, args, options);
@@ -246,21 +266,26 @@ print(f'{sheet.width}x{sheet.height}')
 async function main() {
     const args = parseArgs(process.argv);
     if (!args.out) {
-        console.error('usage: sculpture-sheet.mjs --out <png> [--only id,id] [--cell 620] [--phase4]');
+        console.error('usage: sculpture-sheet.mjs --out <png> [--only id,id] [--cell 620] [--phase4|--phase5]');
         process.exit(2);
     }
 
     const only = args.only ? String(args.only).split(',').map((s) => s.trim()) : null;
     const phase4 = Boolean(args.phase4);
+    const phase5 = Boolean(args.phase5);
+    if (phase4 && phase5) throw new Error('--phase4 and --phase5 are mutually exclusive');
+    const acceptance = phase4 || phase5;
     const withPhotos = !args['no-photos'] && !phase4;
-    const cellH = Number(args.cell || (phase4 ? 400 : 620));
-    const dpr = Number(args.dpr || (phase4 ? 1 : 2));
+    const cellH = Number(args.cell || (acceptance ? 400 : 620));
+    const dpr = Number(args.dpr || (acceptance ? 1 : 2));
     const settle = Number(args.settle || 350);
     const screenshotTimeout = Number(args['screenshot-timeout'] || 120000);
 
     const views = (phase4
         ? PHASE4_ACCEPTANCE_VIEWS
-        : [...(withPhotos ? REFERENCE_VIEWS : []), ...REVIEW_VIEWS]
+        : phase5
+            ? PHASE5_ACCEPTANCE_VIEWS
+            : [...(withPhotos ? REFERENCE_VIEWS : []), ...REVIEW_VIEWS]
     ).filter((v) => !only || only.includes(v.id));
 
     if (!views.length) {

@@ -1,0 +1,535 @@
+{
+  "version": 1,
+  "project": "birb-sculpture-phase-5",
+  "details": [
+    {
+      "id": "C4-weight-on-one-leg",
+      "semanticRead": "The nearest figure visibly settles her upper-body weight over one planted leading foot instead of standing as a symmetric column.",
+      "referenceAsset": "../reference/ref-c-under.jpg",
+      "referenceCrop": [
+        180,
+        140,
+        960,
+        1060
+      ],
+      "referenceLandmarks": [
+        "supporting foot projects ahead of hem",
+        "torso axis settles toward support side",
+        "opposite hem remains trailing",
+        "shoulders remain slightly forward"
+      ],
+      "physicalBoundsMm": [
+        700,
+        2300,
+        650
+      ],
+      "smallestSignalMm": 80,
+      "representation": "explicit-geometry",
+      "occlusionContract": "The supporting foot remains robe-rooted and visible; the shift must not detach the arm, head, cowl or opposite foot.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,head,feet&side=front",
+      "integratedViews": [
+        {
+          "id": "p5-01-weight-front",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              -0.6,
+              1.15,
+              0.58
+            ],
+            "yaw": -4,
+            "pitch": 0,
+            "distance": 3.15
+          },
+          "objectWidthPx": 430,
+          "smallestSignalPx": 28
+        },
+        {
+          "id": "p5-07-mobile-full",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              0,
+              1.22,
+              -0.08
+            ],
+            "yaw": 0,
+            "pitch": 4,
+            "distance": 6.5
+          },
+          "objectWidthPx": 120,
+          "smallestSignalPx": 9
+        }
+      ],
+      "meshAssertions": [
+        "upper-body center shifts toward configured support side",
+        "supporting foot root remains connected to robe field",
+        "transformed positions and normals remain finite"
+      ],
+      "renderAssertions": [
+        "foot and shifted torso axis are simultaneously visible",
+        "figure reads load-bearing rather than bent",
+        "desktop and mobile remain opaque and nonuniform"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": [
+          "Baseline torso remains centered between the feet."
+        ]
+      }
+    },
+    {
+      "id": "D2-turned-figure-arrangement",
+      "semanticRead": "The plain-headed turned-away figure stands behind the nearest front figure yet becomes the nearest dominant cowl from the group right.",
+      "referenceAsset": "../reference/ref-d-wide.jpg",
+      "referenceCrop": [
+        420,
+        180,
+        760,
+        1020
+      ],
+      "referenceLandmarks": [
+        "turned cowl dominates right foreground",
+        "three forward figures recede behind it",
+        "front view keeps it behind nearest figure",
+        "group remains one crowded diagonal"
+      ],
+      "physicalBoundsMm": [
+        2800,
+        2400,
+        2400
+      ],
+      "smallestSignalMm": 250,
+      "representation": "explicit-geometry",
+      "occlusionContract": "The turned cowl may overlap from the right but must not hide the baby, instrument or all forward faces in delivery views.",
+      "isolationProbe": "sculpture/index.html?three=local with only figure-1 visible",
+      "integratedViews": [
+        {
+          "id": "p5-02-arrangement-right",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.3,
+              -0.1
+            ],
+            "yaw": 62,
+            "pitch": 3,
+            "distance": 4.4
+          },
+          "objectWidthPx": 1050,
+          "smallestSignalPx": 120
+        },
+        {
+          "id": "p5-07-mobile-full",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              0,
+              1.22,
+              -0.08
+            ],
+            "yaw": 0,
+            "pitch": 4,
+            "distance": 6.5
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 40
+        }
+      ],
+      "meshAssertions": [
+        "front depth keeps figure-1 behind figure-0",
+        "right projected depth makes figure-1 nearest",
+        "layout preserves four transforms"
+      ],
+      "renderAssertions": [
+        "right silhouette is led by turned cowl",
+        "front preserves crowded diagonal",
+        "baby and instrument remain readable"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": [
+          "Baseline right view is led by the clinician instead of the turned cowl."
+        ]
+      }
+    },
+    {
+      "id": "H3-connected-group-shadow",
+      "semanticRead": "All four figures cast one visually connected group shadow across the receiving ground instead of unrelated dark islands.",
+      "referenceAsset": "../reference/ref-c-under.jpg",
+      "referenceCrop": [
+        160,
+        690,
+        1120,
+        510
+      ],
+      "referenceLandmarks": [
+        "contact shadow joins hems to ground",
+        "cast shadows overlap into one mass",
+        "direction agrees across figures",
+        "feet remain distinct at contact"
+      ],
+      "physicalBoundsMm": [
+        3600,
+        20,
+        4200
+      ],
+      "smallestSignalMm": 120,
+      "representation": "explicit-geometry",
+      "occlusionContract": "Use the closed figures, light and receiver; do not paint a blob or obscure the feet.",
+      "isolationProbe": "sculpture/index.html?three=local with neutral material and only key shadows enabled",
+      "integratedViews": [
+        {
+          "id": "p5-03-connected-shadow",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            800
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 45,
+            "target": [
+              0.15,
+              0.12,
+              -0.25
+            ],
+            "yaw": 20,
+            "pitch": 35,
+            "distance": 4.8
+          },
+          "objectWidthPx": 1050,
+          "smallestSignalPx": 32
+        },
+        {
+          "id": "p5-07-mobile-full",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              0,
+              1.22,
+              -0.08
+            ],
+            "yaw": 0,
+            "pitch": 4,
+            "distance": 6.5
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 10
+        }
+      ],
+      "meshAssertions": [
+        "all figures cast shadows",
+        "ground and base receive shadows",
+        "shadow camera contains figures and receiver"
+      ],
+      "renderAssertions": [
+        "one dark component touches all contact regions",
+        "shadow does not clip at light-camera boundary",
+        "feet retain contact edges"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": [
+          "Baseline shadow has not been isolated or proven connected."
+        ]
+      }
+    },
+    {
+      "id": "B3-hollow-collar-arch",
+      "semanticRead": "The cloak rises behind the head as a broad hollow collar arch with a readable inner opening, not a narrow seam or solid pointed panel.",
+      "referenceAsset": "../reference/ref-c-under.jpg",
+      "referenceCrop": [
+        420,
+        40,
+        900,
+        760
+      ],
+      "referenceLandmarks": [
+        "outer cowl clears crown",
+        "inner opening stays broad above shoulders",
+        "side rims frame opening",
+        "arch joins trailing cloak"
+      ],
+      "physicalBoundsMm": [
+        800,
+        1150,
+        520
+      ],
+      "smallestSignalMm": 70,
+      "representation": "explicit-geometry",
+      "occlusionContract": "The arch stays behind head and body, remains open in low and three-quarter views, and does not intersect the crown.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=shell&side=front",
+      "integratedViews": [
+        {
+          "id": "p5-04-collar-under",
+          "purpose": "diagnostic",
+          "viewport": [
+            1200,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 30,
+            "target": [
+              -0.2,
+              2.02,
+              0.45
+            ],
+            "yaw": -120,
+            "pitch": -4,
+            "distance": 2.3
+          },
+          "objectWidthPx": 620,
+          "smallestSignalPx": 54
+        },
+        {
+          "id": "p5-07-mobile-full",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              0,
+              1.22,
+              -0.08
+            ],
+            "yaw": 0,
+            "pitch": 4,
+            "distance": 6.5
+          },
+          "objectWidthPx": 130,
+          "smallestSignalPx": 10
+        }
+      ],
+      "meshAssertions": [
+        "cloak shell has zero boundary and non-manifold edges",
+        "inner arch exceeds minimum opening",
+        "cowl clears head crown"
+      ],
+      "renderAssertions": [
+        "low view shows broad background-colored hollow",
+        "inner and outer rims remain distinct under normal material",
+        "opening survives bronze lighting"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": [
+          "Baseline collar opening remains ambiguous and too narrow."
+        ]
+      }
+    },
+    {
+      "id": "E3-triangular-eye-sockets",
+      "semanticRead": "Each forward face has two hollow triangular eye sockets that retain interior shadow at normal group distance.",
+      "referenceAsset": "../reference/ref-a-front.jpg",
+      "referenceCrop": [
+        300,
+        230,
+        430,
+        430
+      ],
+      "referenceLandmarks": [
+        "straight brow is top edge",
+        "socket tapers toward nose",
+        "lower outer corner stays angular",
+        "both cavities hold shadow"
+      ],
+      "physicalBoundsMm": [
+        360,
+        430,
+        280
+      ],
+      "smallestSignalMm": 36,
+      "representation": "sampled-field",
+      "voxelMm": 5.607,
+      "occlusionContract": "Sockets stay below brow and beside nose, do not cut through head, and remain separate from hair edge.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=head&hair=capbun&material=normal&side=front",
+      "integratedViews": [
+        {
+          "id": "p5-05-eye-sockets",
+          "purpose": "diagnostic",
+          "viewport": [
+            1100,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 16,
+            "target": [
+              0.2,
+              2.05,
+              -0.42
+            ],
+            "yaw": 0,
+            "pitch": 1,
+            "distance": 2.05
+          },
+          "objectWidthPx": 430,
+          "smallestSignalPx": 42
+        },
+        {
+          "id": "p5-07-mobile-full",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              0,
+              1.22,
+              -0.08
+            ],
+            "yaw": 0,
+            "pitch": 4,
+            "distance": 6.5
+          },
+          "objectWidthPx": 45,
+          "smallestSignalPx": 8
+        }
+      ],
+      "meshAssertions": [
+        "socket field has triangular extents",
+        "socket signal stays at least six head cells thick",
+        "head remains closed and outward-wound"
+      ],
+      "renderAssertions": [
+        "normal close view shows angular cavities",
+        "bronze close view retains interior shadow",
+        "one delivery head reads triangular"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": [
+          "Baseline sockets read as shallow horizontal slits."
+        ]
+      }
+    },
+    {
+      "id": "E5-hard-temple-hair-edge",
+      "semanticRead": "Hair reads as a smooth cap separate from the face through a hard temple edge while the nearest figure remains bare-headed.",
+      "referenceAsset": "../reference/ref-a-front.jpg",
+      "referenceCrop": [
+        700,
+        240,
+        520,
+        470
+      ],
+      "referenceLandmarks": [
+        "cap has smooth crown",
+        "temple boundary descends beside brow",
+        "edge creates distinct normal break",
+        "bun remains attached on two figures"
+      ],
+      "physicalBoundsMm": [
+        380,
+        450,
+        300
+      ],
+      "smallestSignalMm": 20,
+      "representation": "explicit-geometry",
+      "occlusionContract": "The edge stays outside eye cavity and face plane, joins the cap without floating, and is absent from the bare head.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=head&hair=capbun&material=normal&side=front",
+      "integratedViews": [
+        {
+          "id": "p5-06-hair-temple",
+          "purpose": "diagnostic",
+          "viewport": [
+            1100,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 18,
+            "target": [
+              0.2,
+              2.05,
+              -0.42
+            ],
+            "yaw": 34,
+            "pitch": 1,
+            "distance": 2.05
+          },
+          "objectWidthPx": 390,
+          "smallestSignalPx": 20
+        },
+        {
+          "id": "p5-07-mobile-full",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              0,
+              1.22,
+              -0.08
+            ],
+            "yaw": 0,
+            "pitch": 4,
+            "distance": 6.5
+          },
+          "objectWidthPx": 45,
+          "smallestSignalPx": 8
+        }
+      ],
+      "meshAssertions": [
+        "temple edge exists only for cap and capbun",
+        "temple edge remains connected to hair mass",
+        "bare head gets no hair-edge geometry"
+      ],
+      "renderAssertions": [
+        "normal three-quarter view shows hard temple break",
+        "bronze retains edge at group distance",
+        "four heads remain distinguishable"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": [
+          "Baseline cap blends into the face without a legible temple boundary."
+        ]
+      }
+    }
+  ]
+}

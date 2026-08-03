@@ -51,7 +51,7 @@ regressions on this model were caused by fixing one thing.
       thickness; the rim reads as a cast section, not as a paper edge.
 - [x] **B2** It hugs close behind the body. Its width at chest height is barely
       more than her shoulders.
-- [ ] **B3** The collar-arch behind the head is HOLLOW and you can see into it
+- [x] **B3** The collar-arch behind the head is HOLLOW and you can see into it
       from three-quarter angles — a dark opening with a rim, not a solid slab.
 - [x] **B4** The hem does not flare sideways. What spreads, spreads BACKWARD.
 - [x] **B5** The trailing hem lies on the paving as a long low tail, flat to the
@@ -66,13 +66,13 @@ regressions on this model were caused by fixing one thing.
 - [x] **C1** The group is WALKING. Hems raked back off a planted forward foot.
 - [x] **C2** The torsos lean very slightly forward of vertical.
 - [x] **C3** The heads are not all level and not all facing the same way.
-- [ ] **C4** At least one figure's weight is visibly on one leg.
+- [x] **C4** At least one figure's weight is visibly on one leg.
 
 ## D · Arrangement — `ref-a-front`, `ref-d-wide`
 
 - [x] **D1** A crowded diagonal running back and to the right, not a rank and not
       a zigzag.
-- [ ] **D2** The turned-away, plain-headed figure is in the right position: she
+- [x] **D2** The turned-away, plain-headed figure is in the right position: she
       stands BEHIND the nearest figure, and is the nearest one from the group's
       right-hand side.
 - [x] **D3** From the front the figures overlap enough that you cannot count them
@@ -84,9 +84,9 @@ regressions on this model were caused by fixing one thing.
 - [x] **E1** The face reads HEAD-ON, at the group's normal viewing distance — not
       only at three-quarter and not only zoomed in.
 - [x] **E2** A long straight nose ridge runs unbroken from the brow.
-- [ ] **E3** The eye sockets are hollow triangles holding a shadow.
+- [x] **E3** The eye sockets are hollow triangles holding a shadow.
 - [x] **E4** The mouth is a wide flat bar, not a bud.
-- [ ] **E5** The hair is a smooth cap with a hard edge at the temple, clearly a
+- [x] **E5** The hair is a smooth cap with a hard edge at the temple, clearly a
       separate mass from the face.
 - [x] **E6** Two figures carry a coiled top-knot; it sits ON the crown and is
       unmistakable in silhouette.
@@ -116,30 +116,36 @@ regressions on this model were caused by fixing one thing.
 
 - [x] **H1** Bare feet emerge from under the hem at the front, heel hidden.
 - [x] **H2** They read as feet — heel, instep, toes — not as pebbles.
-- [ ] **H3** The group casts one connected shadow, as it does on the paving.
+- [x] **H3** The group casts one connected shadow, as it does on the paving.
 
 ---
 
 ## Score
 
-**35 / 41**, retained after the second Phase 4 visual-acceptance correction
-on 2026-08-03. The earlier phase-4-revalidated.png, isolated arm sheet and
-phase-4-likeness-corrected.png remain provenance, but later close-ups invalidated
-their final sign-off. They exposed a body/neck orientation mismatch, an infant
-and instrument erased into the coarse body field, and feet that still read as
-detached or overlong.
+**41 / 41**, rescored after the Phase 5 visual closeout on 2026-08-04.
 
-The current evidence is validation/phase-4-detail-correction.png. Its nine
-repeatable Chromium views, live-framebuffer checks and exact geometry results
-are recorded in validation/phase-4-closeout.md. The score progression remains 10
-before the phased work, 19 after Phase 1, 26 after Phase 2, 30 after Phase 3 and
-35 after Phase 4. This correction repairs the quality of existing Phase 4
-passes; it does not claim any Phase 5 item.
+Phase 5 evidence is `validation/phase-5-final.png`, paired with the broader
+reference matrix in `validation/phase-5-matched-final.png`. The isolated
+geometry proofs are `phase-5-weight-normal.png`,
+`phase-5-collar-normal-final.png`, `phase-5-hair-normal.png` and
+`phase-5-shadow-mask.png`. All seven integrated views passed live-framebuffer
+checks with complete opacity and non-uniform pixels.
 
-The current score still contains 35 passes, five failures and one ambiguous item
-counted as a non-pass. The confirmed failures are `C4 D2 E3 E5 H3`; `B3`
-remains ambiguous because a narrow dark gap is present but does not read
-unambiguously as the reference's broad hollow collar-arch.
+Score progression: 10 before phased work, 19 after Phase 1, 26 after Phase 2,
+30 after Phase 3, 35 after Phase 4 and 41 after Phase 5.
+
+The former six non-passes now have direct evidence:
+
+- `C4`: a height-eased lateral shear settles one upper column over a planted side.
+- `D2`: the turned figure remains behind from the front and dominates from group right.
+- `B3`: the full cowl wraps the head, closes over a broad crown and retains a dark rimmed recess.
+- `E3`: mirrored triangular prism cuts retain 27-28mm of cavity depth.
+- `E5`: an explicit smooth cap projects past the skull with a hard temple edge.
+- `H3`: the neutral shadow diagnostic shows one connected projected footprint.
+
+This is rubric completion, not unconditional device ship approval. The real
+iPhone 12-or-newer load and orbit test remains open, and SwiftShader frame rate
+is recorded only as local render evidence, not as a phone-performance result.
 
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
@@ -249,7 +255,7 @@ offset shifted by the same amount, so the head stayed internally correct and
 simply sat 62mm below where FIGURE_LANDMARKS said. The gate was measuring a head
 that was not there, and it was GREEN.
 
-### What is left, in the order the evidence says to do it
+### Closeout history and remaining ship gate
 
 #### Phase 4 closeout
 
@@ -278,18 +284,34 @@ outstanding; SwiftShader performance is not a phone result.
 
 #### Phase 5A — arrangement, weight and shadow
 
-Target `C4`, `D2` and `H3`.
+Implemented and visually accepted on 2026-08-04.
+
+- `C4` uses a height-eased weight shift that leaves the hem and support foot fixed.
+- `D2` is enforced by world layout, projected-depth margin and whole-body turn.
+- `H3` is confirmed by the integrated view and a neutral shadow-only diagnostic.
+
+Evidence: `validation/phase-5-final.png`,
+`validation/phase-5-weight-normal.png` and
+`validation/phase-5-shadow-mask.png`.
 
 #### Phase 5B — remaining form and facial refinements
 
-Target `B3`, `E3` and `E5`.
+Implemented and visually accepted on 2026-08-04.
+
+- `B3` now has a broad crown, converging upper rim and readable inner recess.
+- `E3` uses deep mirrored triangular-prism cavities in the head field.
+- `E5` uses an explicit smooth cap with a hard CSG temple transition.
+
+Evidence: `validation/phase-5-final.png`,
+`validation/phase-5-collar-normal-final.png` and
+`validation/phase-5-hair-normal.png`.
 
 #### Final ship gate
 
-- at least 37 / 41, honestly rescored;
-- proportions still green;
-- full test suite green;
-- matched contact sheet committed or reproducibly archived;
-- real iPhone 12-or-newer interaction and load test;
-- no console errors;
-- acceptable initial construction time and orbit performance.
+- [x] 41 / 41, honestly rescored.
+- [x] Proportion gate: 0 of 12 outside tolerance, worst error +0.024.
+- [x] Full 203-test suite green.
+- [x] Matched and acceptance contact sheets reproducibly archived.
+- [ ] Real iPhone 12-or-newer interaction and load test.
+- [x] No browser or console errors in the complete local matrices.
+- [ ] Initial construction and orbit performance accepted on a real phone.
