@@ -13,7 +13,8 @@
  *      same scale, a difference of shape is obvious and takes one look.
  *   2. Each `sculpture-shot.mjs` invocation boots a browser, which cost roughly
  *      five seconds a look and, at ninety looks across one session, most of the
- *      iteration budget. Seven views in one boot is about five times cheaper.
+ *      iteration budget. Seven general views or nine Phase 4 acceptance views
+ *      in one boot is about five times cheaper.
  *
  * Exits non-zero on any page or console error, same contract as the shot tool,
  * so a produced sheet is evidence the code ran.
@@ -22,20 +23,21 @@
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --only a-front,c-under
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --no-photos   # review poses only
+ *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase4.png --phase4     # nine defect views
  *
  * Flags:
  *   --out     output PNG path                                (required)
  *   --only    comma-separated view ids to render      (default: all)
  *   --cell    height in px of one row of the sheet           (default 620)
- *   --dpr     device pixel ratio for the renders             (default 2)
+ *   --dpr     device pixel ratio        (default 2; Phase 4 defaults to 1)
  *   --wait    ms to wait for window.__SCULPT_READY           (default 60000)
  *   --settle  ms to wait after parking each camera           (default 350)
  *   --screenshot-timeout  max ms per rendered screenshot   (default 120000)
  *   --no-photos  skip the reference column
+ *   --phase4  capture the nine desktop/mobile/detail acceptance views
  *   --allow-console-errors
  */
 
-import { chromium } from 'playwright';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -43,7 +45,9 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { REFERENCE_VIEWS, REVIEW_VIEWS } from './sculpture-views.mjs';
+import { PHASE4_ACCEPTANCE_VIEWS, REFERENCE_VIEWS, REVIEW_VIEWS } from './sculpture-views.mjs';
+
+const { chromium } = await import(process.env.SCULPTURE_PLAYWRIGHT_MODULE || 'playwright');
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = 'sculpture/index.html';
@@ -106,6 +110,21 @@ function findChromium() {
         .find((p) => fs.existsSync(p));
 }
 
+/** Use the platform Python name without hiding real Pillow/script failures. */
+function runPython(args, options) {
+    let missing = null;
+    const commands = process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+    for (const command of commands) {
+        try {
+            return execFileSync(command, args, options);
+        } catch (error) {
+            if (error?.code !== 'ENOENT') throw error;
+            missing = error;
+        }
+    }
+    throw missing || new Error('Python is required to composite the sculpture sheet');
+}
+
 /**
  * Park the camera at an exact pose, including field of view.
  *
@@ -125,10 +144,44 @@ async function park(page, view) {
         const S = window.__SCULPT;
         S.camera.fov = v.fov;
         S.camera.updateProjectionMatrix();
-        S.orbit.setTarget(0, v.targetY, 0, true);
+        const target = v.target || [0, v.targetY, 0];
+        S.orbit.setTarget(...target, true);
         S.setView(v.yaw, v.pitch, v.distance);
         S.renderer.render(S.scene, S.camera);
     }, view);
+}
+
+/** Read the live framebuffer so a valid PNG cannot hide a failed 3D render. */
+async function framebufferStats(page) {
+    return page.evaluate(() => {
+        const state = window.__SCULPT;
+        if (!state?.renderer || !state.scene || !state.camera) return null;
+        state.renderer.render(state.scene, state.camera);
+        const gl = state.renderer.getContext();
+        const width = gl.drawingBufferWidth, height = gl.drawingBufferHeight;
+        const rgba = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+        const pixelCount = width * height;
+        const step = Math.max(1, Math.floor(pixelCount / 4096));
+        let samples = 0, opaque = 0, min = 255, max = 0, sum = 0, sumSq = 0;
+        for (let pixel = 0; pixel < pixelCount; pixel += step) {
+            const offset = pixel * 4;
+            const lum = rgba[offset] * 0.2126
+                + rgba[offset + 1] * 0.7152
+                + rgba[offset + 2] * 0.0722;
+            if (rgba[offset + 3] > 240) opaque++;
+            min = Math.min(min, lum);
+            max = Math.max(max, lum);
+            sum += lum;
+            sumSq += lum * lum;
+            samples++;
+        }
+        const mean = sum / samples;
+        return {
+            width, height, samples, opaque, min, max, mean,
+            deviation: Math.sqrt(Math.max(0, sumSq / samples - mean * mean)),
+        };
+    });
 }
 
 /**
@@ -182,7 +235,7 @@ print(f'{sheet.width}x{sheet.height}')
     const tmp = path.join(os.tmpdir(), `sculpt-sheet-${process.pid}.py`);
     fs.writeFileSync(tmp, script);
     try {
-        return execFileSync('python3', [tmp, JSON.stringify(rows), outPath, String(cellH)], {
+        return runPython([tmp, JSON.stringify(rows), outPath, String(cellH)], {
             encoding: 'utf8',
         }).trim();
     } finally {
@@ -193,21 +246,22 @@ print(f'{sheet.width}x{sheet.height}')
 async function main() {
     const args = parseArgs(process.argv);
     if (!args.out) {
-        console.error('usage: sculpture-sheet.mjs --out <png> [--only id,id] [--cell 620]');
+        console.error('usage: sculpture-sheet.mjs --out <png> [--only id,id] [--cell 620] [--phase4]');
         process.exit(2);
     }
 
     const only = args.only ? String(args.only).split(',').map((s) => s.trim()) : null;
-    const withPhotos = !args['no-photos'];
-    const cellH = Number(args.cell || 620);
-    const dpr = Number(args.dpr || 2);
+    const phase4 = Boolean(args.phase4);
+    const withPhotos = !args['no-photos'] && !phase4;
+    const cellH = Number(args.cell || (phase4 ? 400 : 620));
+    const dpr = Number(args.dpr || (phase4 ? 1 : 2));
     const settle = Number(args.settle || 350);
     const screenshotTimeout = Number(args['screenshot-timeout'] || 120000);
 
-    const views = [
-        ...(withPhotos ? REFERENCE_VIEWS : []),
-        ...REVIEW_VIEWS,
-    ].filter((v) => !only || only.includes(v.id));
+    const views = (phase4
+        ? PHASE4_ACCEPTANCE_VIEWS
+        : [...(withPhotos ? REFERENCE_VIEWS : []), ...REVIEW_VIEWS]
+    ).filter((v) => !only || only.includes(v.id));
 
     if (!views.length) {
         console.error('no views selected');
@@ -249,25 +303,43 @@ async function main() {
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sculpt-sheet-'));
     const rows = [];
+    const pixelFailures = [];
     let stats = null;
 
     for (const view of views) {
         const crop = view.crop || null;
         // Match the render's aspect to the photo crop's, so the pair sits at
         // the same scale once both are scaled to the sheet's row height.
-        const aspect = crop ? crop[2] / crop[3] : 0.82;
-        const vh = 900;
-        const vw = Math.round(vh * aspect);
+        let vw, vh;
+        if (view.viewport) {
+            [vw, vh] = view.viewport;
+        } else {
+            const aspect = crop ? crop[2] / crop[3] : 0.82;
+            vh = 900;
+            vw = Math.round(vh * aspect);
+        }
         await page.setViewportSize({ width: vw, height: vh });
         await park(page, view);
         await page.waitForTimeout(settle);
         // Re-park after the settle: the page's own frame loop keeps damping and,
-        // after nine idle seconds, starts the slow idle spin. A sheet of seven
-        // views takes longer than that.
+        // after nine idle seconds, starts the slow idle spin. A multi-view
+        // sheet takes longer than that.
         await park(page, view);
 
+        const pixels = await framebufferStats(page);
+        const render = await page.evaluate(() => (
+            window.__SCULPT_STATS ? window.__SCULPT_STATS() : null
+        )).catch(() => null);
+        const pixelOk = Boolean(pixels
+            && pixels.samples >= 100
+            && pixels.opaque / pixels.samples > 0.90
+            && pixels.max - pixels.min > 12
+            && pixels.deviation > 4);
+        if (!pixelOk) pixelFailures.push({ view: view.id, pixels });
+        console.log(`${view.id}: ${JSON.stringify({ pixels, render })}`);
+
         const renderPath = path.join(tmpDir, `${view.id}-render.png`);
-        // The Phase 3 mesh is roughly 491k triangles. On software-rendered
+        // The current mesh is roughly 515k triangles. On software-rendered
         // CI Chromium, readback can legitimately exceed Playwright's 30s
         // default even after the frame itself is ready. Keep readiness and
         // screenshot deadlines separate so a slow PNG readback is not reported
@@ -304,13 +376,15 @@ async function main() {
     if (!readyOk) console.error('NOT READY: ' + readyErr);
     if (pageErrors.length) console.error('PAGE ERRORS:\n  ' + pageErrors.join('\n  '));
     if (consoleErrors.length) console.error('CONSOLE ERRORS:\n  ' + consoleErrors.join('\n  '));
+    if (pixelFailures.length) console.error('PIXEL CHECK FAILURES: ' + JSON.stringify(pixelFailures));
 
     const allowConsole = Boolean(args['allow-console-errors']);
-    process.exit(!readyOk || pageErrors.length || (!allowConsole && consoleErrors.length) ? 1 : 0);
+    process.exit(!readyOk || pixelFailures.length || pageErrors.length
+        || (!allowConsole && consoleErrors.length) ? 1 : 0);
 }
 
 function cropPhoto(src, [x, y, w, h], dest) {
-    execFileSync('python3', ['-c',
+    runPython(['-c',
         'import sys;from PIL import Image;'
         + 'Image.open(sys.argv[1]).crop(tuple(int(v) for v in sys.argv[3:7])).save(sys.argv[2])',
         src, dest, String(x), String(y), String(x + w), String(y + h)]);

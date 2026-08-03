@@ -122,19 +122,19 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**35 / 41**, retained after the Phase 4 visual-acceptance correction on
-2026-08-03. The earlier `validation/phase-4-revalidated.png` and isolated arm
-sheet remain provenance, but live desktop/mobile close-ups invalidated their
-visual sign-off: wrists ended as pipes or mittens, chest forms read as attached
-balls, stride pieces sat in front of the hems, the turned head looked unfinished
-and rear orbit views collapsed toward black.
+**35 / 41**, retained after the second Phase 4 visual-acceptance correction
+on 2026-08-03. The earlier phase-4-revalidated.png, isolated arm sheet and
+phase-4-likeness-corrected.png remain provenance, but later close-ups invalidated
+their final sign-off. They exposed a body/neck orientation mismatch, an infant
+and instrument erased into the coarse body field, and feet that still read as
+detached or overlong.
 
-The corrected evidence is `validation/phase-4-likeness-corrected.png`; the
-reproducible eight-view Chromium run, framebuffer checks, topology results and
-artifact digest are recorded in `validation/phase-4-closeout.md`. The score
-progression remains 10 before the phased work, 19 after Phase 1, 26 after Phase
-2, 30 after Phase 3 and 35 after Phase 4. This correction repairs the quality of
-existing Phase 4 passes; it does not claim any Phase 5 item.
+The current evidence is validation/phase-4-detail-correction.png. Its nine
+repeatable Chromium views, live-framebuffer checks and exact geometry results
+are recorded in validation/phase-4-closeout.md. The score progression remains 10
+before the phased work, 19 after Phase 1, 26 after Phase 2, 30 after Phase 3 and
+35 after Phase 4. This correction repairs the quality of existing Phase 4
+passes; it does not claim any Phase 5 item.
 
 The current score still contains 35 passes, five failures and one ambiguous item
 counted as a non-pass. The confirmed failures are `C4 D2 E3 E5 H3`; `B3`
@@ -207,19 +207,22 @@ no two figures agree on stride side, rake, lean, head turn or head tilt.
 **The apparent foot is a continuation of the stride, not a separate shoe.**
 The first repair replaced heel/toe pebbles with one closed object but still
 merged that object only at draw time. Live low-angle screenshots exposed the
-remaining seam and bulbous instep. The leading extension now belongs to the same
-distance field as the skirt: its root overlaps the hem deeply and tapers along
-the paving, matching `ref-c-under` without inventing exposed legs.
+remaining seam, then later close-ups exposed an overlong paddle. The planted
+foot now belongs to the same distance field as the skirt: a buried root, instep
+and narrower forefoot overlap the hem, with a restrained toe edge and no
+detached pieces. It follows ref-c-under without inventing exposed legs.
 
 ### Phase 3 — the heads. Done, and it cost more than the other two together.
 
 **The head is a rounded BLOCK, not an ovoid.** Read off the nearest figure at
 4x: flat front, flat sides, domed top, broad flat jaw — a loaf standing on end.
 Built as an egg the face has nowhere flat to sit and every feature slides off the
-curvature. The nearest is bare/plain, the turned-away head carries a complete
-face on its far side, and two carry a coiled top-knot. Giving every figure one
-identical cap was part of what
-made the four interchangeable. The top-knot is a thick rolled plait lying across
+curvature. The nearest is bare/plain. The rear-facing figure carries a
+complete face on
+the opposite side, but its body, cowl and head now turn together while the local
+neck remains anatomical. Two other figures carry coiled top-knots. Giving every
+figure one identical cap was part of what made the four interchangeable. The
+top-knot is a thick rolled plait lying across
 the crown, not a knob on top of it.
 
 **THIN FEATURES DO NOT SURVIVE THE MESHER, AND IT FAILS SILENTLY.** This is the
@@ -250,23 +253,28 @@ that was not there, and it was GREEN.
 
 #### Phase 4 closeout
 
-Phase 4A and 4B are implemented, and their visual acceptance was reopened
-after production close-ups contradicted the original evidence. Tapered arm
-fields replace constant-radius pipes; supporting wrists disappear into the
-pregnancy/newborn gestures; one shallow chest shelf replaces applied spheres;
-the planted stride is unioned into the robe field; and the turned-away head
-retains a complete far-side face whose profile is visible when orbited.
+Phase 4A and 4B are implemented, and visual acceptance was reopened twice after
+production close-ups contradicted the earlier evidence. The second review
+corrected the remaining structural mismatches:
 
-The rear light floor was also revalidated at the same desktop and 390x844
-angles that reproduced the crushed mobile view. A second rear source keeps the
-cowl planes visible without removing the front key's facial shadows. The
-screenshot harness now rejects blank, transparent or uniform WebGL framebuffers
+- The rear-facing person now turns as a complete body/cowl/head unit, not as a
+  forward torso with a 132-degree neck twist.
+- The carried infant is a separate fine closed swaddle with broad folds, an
+  integrated head end and a curved supporting forearm.
+- The clinician's instrument is two independent curved tubes with two small
+  ringed terminals, matching the source photos.
+- Each narrower planted foot is unioned into its robe and has a restrained toe
+  edge instead of detached stones or a long paddle.
+
+The rear light floor and all prior closed-surface repairs remain intact. The
+screenshot harness rejects blank, transparent or uniform WebGL framebuffers
 instead of treating any PNG as evidence.
 
-The full 193-test suite and the proportion gate are green (0 of 12 outside
-tolerance, worst +0.024). Eight browser views and the corrected contact sheet
-are recorded in the closeout file. A real iPhone 12-or-newer load and orbit test
-is still outstanding; SwiftShader performance is not a phone result.
+The full 197-test suite and proportion gate are green (0 of 12 outside
+tolerance, worst +0.024). Nine browser views and the current evidence sheet are
+recorded in the closeout file. The scene reports 514,780 triangles, 6 draw calls
+and 4 figures. A real iPhone 12-or-newer load and orbit test is still
+outstanding; SwiftShader performance is not a phone result.
 
 #### Phase 5A — arrangement, weight and shadow
 

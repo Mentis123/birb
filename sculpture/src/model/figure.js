@@ -27,8 +27,8 @@
  *   HEAD      A rounded block with flat front and sides, domed crown and broad
  *             jaw. The face is deliberately reduced but its features must be
  *             thick enough to survive surface nets at group viewing distance.
- *   FEET      One fused planted foot emerges from each raised hem, tapered from
- *             instep to toe and seated under the SKIRT instead of beside it.
+ *   FEET      One fused planted foot emerges from each raised hem, broad through
+ *             the forefoot and seated under the SKIRT instead of beside it.
  *
  * Units are metres. The figures stand about 2.3m; a person walks past one in
  * `ref-d-wide.jpg` for scale.
@@ -89,8 +89,8 @@ export const ARM_POSES = Object.freeze({
         // The mother's forearms CROSS beneath the swaddled newborn. Their
         // slightly different heights keep the crossing readable instead of
         // collapsing into one horizontal bolster.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [ 0.098, 1.326, 0.238], upper: 0.058, fore: 0.052, end: 0.018, hand: 0.000 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.350, 1.515, 0.054], wrist: [-0.090, 1.315, 0.250], upper: 0.058, fore: 0.052, end: 0.018, hand: 0.000 },
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [-0.220, 1.305, 0.245], upper: 0.058, fore: 0.052, end: 0.050, support: [[-0.025, 1.255, 0.305], [0.175, 1.305, 0.290]], supportEnd: 0.026 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.350, 1.515, 0.054], wrist: [ 0.205, 1.360, 0.260], upper: 0.058, fore: 0.052, end: 0.045, tip: [ 0.060, 1.335, 0.302], tipEnd: 0.025 },
     ],
     clinical: [
         // The clinician's near arm hangs straight while the far arm sweeps a
@@ -536,24 +536,35 @@ function sdTrunkAt(x, y, z) {
 }
 
 /**
- * Distance to the reference's planted stride: a low tapered extension of the
- * front hem, not a separate shoe. The root overlaps the skirt deeply and the
- * section narrows continuously into the long cast-bronze toe.
+ * Distance to the reference's planted bare foot. The ankle is buried under the
+ * hem, the instep settles into a broad forefoot, and four restrained toe lobes
+ * interrupt the front edge without turning the casting into separate pebbles.
  */
-function sdLeadingStride(x, y, z, o) {
+function sdPlantedFoot(x, y, z, o) {
     const yaw = o.strideAngle * 0.65;
     const c = Math.cos(yaw), s = Math.sin(yaw);
-    const dx = x - o.stride * 0.140;
+    const dx = x - o.stride * 0.150;
     const dz = z - 0.100;
     const fx = dx * c - dz * s;
     const fz = dx * s + dz * c;
 
-    let d = sdEllipsoid(fx, y - 0.060, fz - 0.095,
-        0.100, 0.068, 0.200);
-    d = smin(d, sdEllipsoid(fx, y - 0.042, fz - 0.330,
-        0.069, 0.044, 0.205), 0.042);
-    d = smin(d, sdEllipsoid(fx, y - 0.027, fz - 0.535,
-        0.036, 0.020, 0.095), 0.024);
+    let d = sdEllipsoid(fx, y - 0.072, fz,
+        0.086, 0.082, 0.132);
+    d = smin(d, sdEllipsoid(fx, y - 0.058, fz - 0.112,
+        0.084, 0.065, 0.140), 0.046);
+    d = smin(d, sdEllipsoid(fx, y - 0.042, fz - 0.225,
+        0.092, 0.047, 0.108), 0.038);
+
+    const toes = [
+        [-0.056, 0.302, 0.024, 0.031, 0.050],
+        [-0.019, 0.315, 0.029, 0.035, 0.058],
+        [ 0.020, 0.313, 0.028, 0.034, 0.057],
+        [ 0.056, 0.298, 0.023, 0.029, 0.047],
+    ];
+    for (const [tx, tz, rx, ry, rz] of toes) {
+        d = smin(d, sdEllipsoid(fx - tx, y - 0.034, fz - tz,
+            rx, ry, rz), 0.018);
+    }
     return d;
 }
 
@@ -567,7 +578,7 @@ function buildBodyField(THREE, o) {
         // planted foot rather than cutting a step into the front of the drape.
         const hemY = o.hemRake * Math.max(0, Math.cos(Math.atan2(x, z) - o.strideAngle)) * 0.92;
         let d = sdTrunk(x, y, z, hemY, 1.960);
-        d = smin(d, sdLeadingStride(x, y, z, o), 0.028);
+        d = smin(d, sdPlantedFoot(x, y, z, o), 0.036);
 
         // The reference chest is one broad cast mass with two restrained lobes,
         // not two balls attached to a flat torso. A shallow base establishes the
@@ -594,15 +605,34 @@ function buildBodyField(THREE, o) {
             d = smin(d, sdTaperedCapsule(x, y, z,
                 ex, ey, ez, wx, wy, wz, arm.upper, wristRadius), 0.018);
 
-            const tipLength = arm.hand ?? 0.036;
-            if (tipLength > 0) {
-                const hdx = wx - ex, hdy = wy - ey, hdz = wz - ez;
-                const hlen = Math.hypot(hdx, hdy, hdz) || 1;
-                const htx = wx + hdx / hlen * tipLength;
-                const hty = wy + hdy / hlen * tipLength;
-                const htz = wz + hdz / hlen * tipLength;
+            if (arm.support) {
+                let [px, py, pz] = [wx, wy, wz];
+                let previousRadius = wristRadius;
+                for (let i = 0; i < arm.support.length; i++) {
+                    const [tx, ty, tz] = arm.support[i];
+                    const t = (i + 1) / arm.support.length;
+                    const nextRadius = wristRadius
+                        + ((arm.supportEnd ?? 0.022) - wristRadius) * t;
+                    d = smin(d, sdTaperedCapsule(x, y, z,
+                        px, py, pz, tx, ty, tz, previousRadius, nextRadius), 0.014);
+                    [px, py, pz] = [tx, ty, tz];
+                    previousRadius = nextRadius;
+                }
+            } else if (arm.tip) {
+                const [tx, ty, tz] = arm.tip;
                 d = smin(d, sdTaperedCapsule(x, y, z,
-                    wx, wy, wz, htx, hty, htz, wristRadius, 0.014), 0.008);
+                    wx, wy, wz, tx, ty, tz, wristRadius, arm.tipEnd ?? 0.022), 0.014);
+            } else {
+                const tipLength = arm.hand ?? 0.036;
+                if (tipLength > 0) {
+                    const hdx = wx - ex, hdy = wy - ey, hdz = wz - ez;
+                    const hlen = Math.hypot(hdx, hdy, hdz) || 1;
+                    const htx = wx + hdx / hlen * tipLength;
+                    const hty = wy + hdy / hlen * tipLength;
+                    const htz = wz + hdz / hlen * tipLength;
+                    d = smin(d, sdTaperedCapsule(x, y, z,
+                        wx, wy, wz, htx, hty, htz, wristRadius, 0.014), 0.008);
+                }
             }
         }
 
@@ -617,48 +647,9 @@ function buildBodyField(THREE, o) {
                 0.262, 0.222, 0.176), 0.080);
         }
 
-        if (o.baby) {
-            // A SWADDLED NEWBORN, CARRIED — not a second pregnancy. The first
-            // version put a 0.15 sphere on the belly at 1.33 and blended it at
-            // k = 0.032, which produced a form indistinguishable from the
-            // pregnant figure's: same place, same size, same soft merge. Nothing
-            // in the render told you one woman was expecting and the other was
-            // holding a baby, which is most of what the sculpture is about.
-            //
-            // Three changes make it read: it sits HIGHER, at the forearms rather
-            // than the womb; it is OBLONG across the body rather than round; and
-            // it keeps a CREASE where it meets her (k = 0.016). A crease is
-            // wrong for anatomy and right here — this is a separate object held
-            // against a body, and the seam is the thing that says so.
-            d = smin(d, sdEllipsoid(x + 0.010, y - 1.395, z - 0.205,
-                0.178, 0.082, 0.108), 0.016);
-            // The head end, standing proud of the wrap so the bundle has a
-            // direction and reads as a baby rather than as a bolster.
-            d = smin(d, sdEllipsoid(x + 0.150, y - 1.424, z - 0.224,
-                0.064, 0.060, 0.068), 0.012);
-            // A raised diagonal seam makes the swaddle a carried object instead
-            // of another anatomical bulge. It remains shallow enough to sit
-            // beneath the crossing hands.
-            d = smin(d, sdCapsule(x, y, z,
-                -0.118, 1.430, 0.298, 0.118, 1.352, 0.298, 0.014), 0.005);
-        }
-
-        if (o.stethoscope) {
-            // Round the back of the neck, over both shoulders, into a bell at
-            // the sternum. It has to STAND OFF the chest to exist at all: the
-            // first version's bell was 19mm proud of the body and measured as a
-            // bump you could not find in a render. Cast bronze tubing is fat and
-            // it hangs in front of her, not on her.
-            for (const sx of [-1, 1]) {
-                d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.052, 1.886, -0.032, sx * 0.170, 1.824, 0.086, 0.026), 0.012);
-                d = smin(d, sdCapsule(x, y, z,
-                    sx * 0.170, 1.824, 0.086, sx * 0.066, 1.556, 0.238, 0.026), 0.012);
-            }
-            // The bell, hanging clear at the sternum.
-            d = smin(d, sdEllipsoid(x - 0.004, y - 1.512, z - 0.258,
-                0.056, 0.056, 0.036), 0.014);
-        }
+        // Baby and stethoscope are deliberately separate, finer geometries.
+        // Blending either into this 14.5mm body field erased their identity and
+        // made the tubing look like wounds cut into the chest.
 
         // Hand-worked surface, in the FIELD rather than as a post-pass vertex
         // push: displacing a meshed surface along its normals re-creases the
@@ -690,6 +681,121 @@ function buildBodyField(THREE, o) {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
     geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
     return geo;
+}
+
+/**
+ * The newborn is a separate, fine field resting on the crossed forearms. Keeping
+ * it out of the coarse body field preserves a contact crease, a distinct head,
+ * and the shallow wrap lines that make this a carried bundle rather than a
+ * second pregnancy.
+ */
+function buildBabyField(THREE, o) {
+    const angle = -0.08;
+    const c = Math.cos(angle), s = Math.sin(angle);
+
+    function field(x, y, z) {
+        const dx = x + 0.002;
+        const dy = y - 1.398;
+        const u = dx * c + dy * s;
+        const v = -dx * s + dy * c;
+
+        // The reference reads as a folded, almost rectangular swaddle held tight
+        // against the torso. Its end masses overlap the wrap deeply; there is no
+        // detached spherical head or floating capsule silhouette.
+        let d = sdRoundBox(u - 0.010, v, z - 0.270,
+            0.184, 0.082, 0.088, 0.052);
+        d = smin(d, sdEllipsoid(u + 0.126, v - 0.005, z - 0.272,
+            0.088, 0.075, 0.081), 0.032);
+        // The infant's head rises from the right end of the wrapping, with deep
+        // overlap and a tight neck crease so it belongs to the bundle without
+        // reverting to the detached ball from the first correction.
+        d = smin(d, sdEllipsoid(u - 0.148, v - 0.048, z - 0.300,
+            0.067, 0.066, 0.074), 0.012);
+        d = smin(d, sdEllipsoid(u - 0.151, v - 0.050, z - 0.366,
+            0.011, 0.012, 0.014), 0.004);
+
+        // Broad field displacement describes folded wrapping without adding a
+        // second surface or creating thin boolean cells.
+        const lineWeight = (ax, ay, bx, by) => {
+            const abx = bx - ax, aby = by - ay;
+            const apx = u - ax, apy = v - ay;
+            const t = Math.min(1, Math.max(0,
+                (apx * abx + apy * aby) / (abx * abx + aby * aby)));
+            const distance = Math.hypot(apx - abx * t, apy - aby * t);
+            return Math.exp(-(distance * distance) / (2 * 0.016 * 0.016));
+        };
+        const frontWeight = Math.exp(-((z - 0.354) ** 2) / (2 * 0.042 * 0.042));
+        const wrapWeight = lineWeight(-0.135, 0.068, -0.015, -0.070)
+            + lineWeight(-0.005, 0.070, 0.125, -0.060);
+        d += Math.min(0.016, wrapWeight * 0.0125) * frontWeight;
+
+        d += fbm3(x * 13, y * 13, z * 13, o.seed + 31, 2) * 0.0018;
+        return d;
+    }
+
+    const mesh = surfaceNets(field, {
+        min: [-0.310, 1.245, 0.155],
+        max: [0.310, 1.565, 0.405],
+        voxel: 0.0055,
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
+    return geo;
+}
+
+/** Reference-led control points for the clinician's stethoscope. */
+export const STETHOSCOPE_PATHS = Object.freeze({
+    left: Object.freeze([
+        Object.freeze([-0.054, 1.902, 0.112]),
+        Object.freeze([-0.112, 1.828, 0.184]),
+        Object.freeze([-0.104, 1.702, 0.244]),
+        Object.freeze([-0.076, 1.574, 0.279]),
+    ]),
+    right: Object.freeze([
+        Object.freeze([0.054, 1.902, 0.112]),
+        Object.freeze([0.116, 1.828, 0.184]),
+        Object.freeze([0.120, 1.700, 0.244]),
+        Object.freeze([0.090, 1.564, 0.279]),
+    ]),
+    terminals: Object.freeze([
+        Object.freeze([-0.076, 1.552, 0.286]),
+        Object.freeze([ 0.090, 1.542, 0.286]),
+    ]),
+});
+
+/**
+ * Two independent curved tubes standing just proud of the torso, matching the
+ * reference casting. They end in small flat terminals over the breasts; there
+ * is no joined Y, oversized central loop or ball-shaped bell.
+ */
+function buildStethoscopeGeometry(THREE) {
+    const parts = [];
+    const paths = [STETHOSCOPE_PATHS.left, STETHOSCOPE_PATHS.right];
+    for (const path of paths) {
+        const points = path.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+        const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
+        parts.push(new THREE.TubeGeometry(curve, 30, 0.0085, 8, false));
+
+        for (const point of [path[0], path.at(-1)]) {
+            const cap = new THREE.SphereGeometry(0.010, 10, 7);
+            cap.translate(...point);
+            parts.push(cap);
+        }
+    }
+
+    for (const [tx, ty, tz] of STETHOSCOPE_PATHS.terminals) {
+        const terminal = new THREE.CylinderGeometry(0.021, 0.024, 0.012, 18, 1, false);
+        terminal.rotateX(Math.PI / 2);
+        terminal.translate(tx, ty, tz);
+        parts.push(terminal);
+        const rim = new THREE.TorusGeometry(0.021, 0.004, 7, 18);
+        rim.translate(tx, ty, tz + 0.007);
+        parts.push(rim);
+    }
+
+    const geo = mergeGeometries(THREE, parts);
+    return roughen(THREE, geo, { amount: 0.0005, scale: 38, seed: 73, octaves: 1 });
 }
 
 /**
@@ -937,14 +1043,14 @@ function buildFeet(THREE, opts) {
     // Isolation geometry for the visual/topology probe. In the assembled model
     // this same field is unioned into buildBodyField, so no shoe seam exists.
     const field = (x, y, z) => {
-        let d = sdLeadingStride(x, y, z, opts);
+        let d = sdPlantedFoot(x, y, z, opts);
         d += fbm3(x * 12, y * 12, z * 12, opts.seed + 21, 2) * 0.0015;
         return d;
     };
 
     const mesh = surfaceNets(field, {
         min: [-0.32, -0.03, -0.05],
-        max: [0.32, 0.20, 0.75],
+        max: [0.32, 0.20, 0.58],
         voxel: 0.0075,
     });
     const geo = new THREE.BufferGeometry();
@@ -1091,6 +1197,8 @@ export function buildFigure(THREE, opts = {}) {
     if (want('shell')) parts.push(buildShell(THREE, o));
     if (want('body')) parts.push(buildBodyField(THREE, o));
     if (want('head')) parts.push(buildHeadField(THREE, o));
+    if (o.baby && want('baby')) parts.push(buildBabyField(THREE, o));
+    if (o.stethoscope && want('stethoscope')) parts.push(buildStethoscopeGeometry(THREE));
     if (only && want('feet') && !want('body')) parts.push(buildFeet(THREE, o));
 
     const geo = mergeGeometries(THREE, parts);
