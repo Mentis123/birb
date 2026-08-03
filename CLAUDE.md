@@ -229,8 +229,9 @@ structure materially and the findings are recorded here so they survive:
   object being held. The stethoscope's bell stood 19mm off the chest, which is a
   bump you cannot find; cast bronze tubing is fat and hangs in front of her.
 - **The heads are intentionally non-uniform.** The nearest figure is a bare,
-  plain rounded block; the turned-away figure is faceless; two figures carry a
-  coiled top-knot. Do not restore one identical cap to all four — that was a
+  plain rounded block. The rear-facing figure has a complete face on the
+  opposite side and turns as one body/cowl/head unit. Two figures carry a
+  coiled top-knot. Do not restore one identical cap to all four - that was a
   major reason the heads once read as interchangeable.
 - The faces are planar with a **long nose ridge running from the brow**, hollow
   triangular eye sockets and a wide flat mouth.
@@ -313,14 +314,14 @@ bug, before one normal-material render found it.
 
 ### State, and how to pick it up (2026-08-03)
 
-**Phase 4 independently revalidated at 35 of 41; the proportion gate is green at
-0 of 12.** The committed matched sheet is
-`sculpture/validation/phase-4-revalidated.png`, the isolated arm evidence is
-`sculpture/validation/phase-4-arm-probes.png`, and the complete closeout record
-is `sculpture/validation/phase-4-closeout.md`. Earlier greens were measuring the
-wrong things, and a green numeric gate is necessary and not sufficient: it has
-been green and visually wrong twice. The revised gated plan is at the end of
-`sculpture/ARCHITECTURE.md`.
+**Phase 4 has passed its second visual-acceptance correction at 35 of 41; the
+proportion gate is green at 0 of 12.** The current nine-view evidence is
+sculpture/validation/phase-4-detail-correction.png and the complete record is
+sculpture/validation/phase-4-closeout.md. The earlier Phase 4 sheets remain
+provenance, not current sign-off. Later close-ups proved that a green numeric
+gate is necessary and not sufficient: it has been green and visually wrong more
+than once. The revised gated plan is at the end of
+sculpture/ARCHITECTURE.md.
 
 **Phase 1 (mass) is done.** Every span was ~20% too narrow, the head ~35% too
 small, the bust too high, and the hem read 0.56 of figure height against the
@@ -336,14 +337,18 @@ photographs — she wears a long skirt, and the cloak is a panel hanging behind 
 opening holds its full height. Every free edge carries a rounded bead built into
 one closed cross-section; hems rake clear of a leading foot; each column shears
 forward of vertical; no two figures agree on stride, rake, lean or head angle.
-The feet also turned out to be three times too small, which had been diagnosed as
-a placement problem twice and was never one.
+The original feet were too small, while the first corrections then read as
+detached pebbles or long paddles. The current planted foot is a narrower
+root/instep/forefoot/toe form unioned directly into the robe field; no separate
+shoe or exposed leg is rendered.
 
 **Phase 3 (the heads) is done, and cost more than the other two together.** The
 head is a rounded BLOCK — flat front, flat sides, domed top — not an ovoid; built
 as an egg a face has nowhere flat to sit and every feature slides off. The
-nearest head is bare/plain, the turned-away head is faceless, and two carry
-coiled top-knots. The lesson worth keeping is that **thin features do not survive
+nearest head is bare/plain. The rear-facing figure has a complete face on
+the opposite side and rotates as one body/cowl/head unit instead of twisting at
+the neck. Two figures carry coiled top-knots. The lesson worth keeping is that
+**thin features do not survive
 surface nets, and it fails silently**: the mesher averages one vertex per cell,
 so a form three or four cells thick vanishes — while the field measures correct
 AND a max-z sweep of the mesh still finds the stray slivers, so every number
@@ -351,19 +356,19 @@ agrees the brow is there and no render shows it. A `MeshNormalMaterial` pass is
 what settles it. Four other hypotheses were tested and discarded first; two of
 them were real bugs worth fixing and neither was the cause.
 
-**Phase 4A (arms and negative space) is done.** The four figures now use distinct
-reference-led arm paths: open negative space, pregnancy support, crossed baby
-support and a clinician pose that clears the stethoscope. `A7` and `F4` pass.
+**Phase 4A (arms and negative space) is done, including the reopened detail
+correction.** The four figures use distinct reference-led arm paths. The carried
+infant is a separate fine closed swaddle on a curved support; the clinician's
+instrument is two separate curved tubes with ringed terminals. A7 and F4 pass.
 
 **Phase 4B (surface and bronze) is done.** Stronger existing displacement,
 two-scale vertical runoff, warmer bronze values and a colder environment make
 the hand-worked casting legible at group distance. `G2`, `G3` and `G5` pass.
 
-**Performance remains a final ship gate.** The current scene is 497,176
-triangles, 6 draw calls and 4 figures. In simulated 390×844 Chromium at renderer
-DPR 2, navigation to `window.__SCULPT_READY` took 4.53s and a scripted active
-orbit measured 5.83 FPS under SwiftShader; there were no page, console or request
-errors. That software-rendered result is not a real-iPhone result and is not a
+**Performance remains a final ship gate.** The corrected scene is 514,780
+triangles, 6 draw calls and 4 figures. The nine-view local Chromium matrix
+reported roughly 44-60 FPS under SwiftShader with no page or console errors,
+but that software-rendered result is not a real-iPhone result and is not a
 reason to rewrite the geometry blindly. An iPhone 12-or-newer load and orbit test
 is still outstanding; if the real device also struggles, test a lower mobile
 renderer-DPR cap before changing mesh resolution.

@@ -67,7 +67,7 @@ sculpture/
     ui/qr-overlay.js       three-finger gesture, Birb Labs convention
 tools/
   sculpture-shot.mjs        one view, one browser boot
-  sculpture-sheet.mjs       all seven views, ONE boot, composited vs the photos
+  sculpture-sheet.mjs       seven general or nine Phase 4 views, one browser boot
   sculpture-views.mjs       the reference camera poses
   sculpture-proportions.mjs the measurable half of the likeness gate
 tests/sculpture-orbit.test.js   panBasis
@@ -75,34 +75,42 @@ tests/sculpture-orbit.test.js   panBasis
 
 ## The build pipeline
 
-One figure, in order, all in `model/figure.js`:
+One figure, in order, all in model/figure.js:
 
-```
-SHELL_PROFILE + FRONT_OPENING + shellOffsetZ
-      └─ buildShell()      swept crescent, two walls, hem closed, top left open
-                           → roughen() x2 (broad ripple, then hammer marks)
+    SHELL_PROFILE + FRONT_OPENING + shellOffsetZ
+      -> buildShell(): swept crescent, closed wall and hem
+      -> roughen() twice: broad ripple, then hammer marks
 
-TORSO_PROFILE + sdEllipsoid/sdCapsule primitives
-      └─ buildBodyField()  ONE smin-blended field → surfaceNets @ 13.5mm voxel
+    TORSO_PROFILE + ellipsoid/capsule primitives
+      -> buildBodyField(): one smooth-union field
+      -> surfaceNets at 14.5 mm
 
-skull/jaw/hair/bun/face primitives
-      └─ buildHeadField()  separate field → surfaceNets @ 6.2mm voxel
+    carried newborn
+      -> buildBabyField(): separate closed field at 5.5 mm
 
-buildFeet()                isolation/topology probe for the body-field stride
+    skull, jaw, hair, bun and face primitives
+      -> buildHeadField(): separate field at about 5.6 mm
 
-      └─ mergeGeometries() → one BufferGeometry per figure
-```
+    clinician instrument
+      -> buildStethoscopeGeometry(): two Catmull-Rom TubeGeometry paths
+         with independent ringed terminals
 
-Then in `model/sculpture.js`: `paintPatina()` writes vertex colours, four meshes
+    buildFeet(): isolation/topology probe for the body-field foot
+
+    mergeGeometries() -> one BufferGeometry per figure
+
+Then in model/sculpture.js: `paintPatina()` writes vertex colours, four meshes
 share one `MeshStandardMaterial`, plus a base slab and the light rig.
 
-The corrected Phase 4 scene measures **494,596 triangles and 6 draw calls** in
-GitHub Actions run `30805881057`. Do not restore the old
-~75k-per-figure / ~302k-total estimate: the finer block-head fields and the
-robe-integrated stride keep the complete scene near 495k, and the four figures
-are not identical enough for a useful per-figure average. The historical
-simulated-mobile timing remains in `validation/phase-3-closeout.md`; it is a
-CI/SwiftShader result, not an iPhone measurement.
+The current Phase 4 scene measures **514,780 triangles and 6 draw calls**
+in the nine-view local Chromium acceptance run. The increase is deliberate: the
+infant now has its own 5.5 mm closed field and the instrument uses actual curved
+tube geometry instead of being erased into the coarse torso field. Do not
+restore the old ~75k-per-figure / ~302k-total estimate or PR #412's 494,596
+count. The figures are not identical enough for a useful per-figure average.
+The historical simulated-mobile timing remains in
+validation/phase-3-closeout.md; it is a CI/SwiftShader result, not an iPhone
+measurement.
 
 The page still renders **on demand**: `orbit.update()` returns whether anything
 moved and no additional renderer pass is issued while the sculpture is still.
@@ -249,8 +257,11 @@ them feed the model. Everything they changed is written down above.
 every real bug in this model fell to an isolation test and none fell to tuning.
 
 ```bash
-# The likeness loop. Photo | model at matched cameras, seven views, one boot.
+# The likeness loop. Photo | model at seven general matched/review cameras.
 node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png
+
+# The Phase 4 defect loop. Nine desktop/mobile/detail views, one boot.
+node tools/sculpture-sheet.mjs --phase4 --out shots/sculpt/phase4.png
 
 # The measurable half of the gate. Exits non-zero when a proportion is off.
 node tools/sculpture-proportions.mjs
@@ -291,7 +302,7 @@ evidence by itself.
   looks like evidence. Pass a real function.
 - The page keeps damping and, after nine idle seconds, starts a slow idle spin.
   A multi-view sheet takes longer than that, so re-park after the settle.
-- The ~495k-triangle mesh can make a software-rendered Chromium screenshot
+- The ~515k-triangle mesh can make a software-rendered Chromium screenshot
   exceed Playwright's 30-second default even after `__SCULPT_READY` is true.
   Readiness and PNG readback are separate deadlines; use the sheet harness's
   `--screenshot-timeout` rather than misreporting a slow readback as a model
@@ -309,13 +320,14 @@ evidence by itself.
 
 ## Where the model is, and what is left
 
-**`LIKENESS.md` is the scorecard: 41 binary checks, 90% is 37 of them.
-Phase 4 remains honestly scored at 35 / 41 after its visual-acceptance
+**LIKENESS.md is the scorecard: 41 binary checks, 90% is 37 of them.
+Phase 4 remains honestly scored at 35 / 41 after its second visual-acceptance
 correction.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
-+0.024 — necessary and not sufficient, since this gate has been green and wrong
-twice. The closeout record and corrected evidence are in
-`validation/phase-4-closeout.md` and
-`validation/phase-4-likeness-corrected.png`.
++0.024 - necessary and not sufficient, since this gate has been green and wrong
+twice. The current closeout and nine-view evidence are in
+validation/phase-4-closeout.md and
+validation/phase-4-detail-correction.png. The earlier Phase 4 PNGs remain
+historical provenance.
 
 The remaining work, in the order the evidence says to do it:
 
@@ -334,25 +346,29 @@ a rounded bead built into one closed cross-section. Hems rake off a leading
 stride and no two figures agree on rake, lean or head angle.
 
 The first closeout still modeled a planted foot as a separate closed object.
-Low-angle mobile evidence showed the join and bulbous instep. The stride now
-uses the same field as the skirt: three tapered sections overlap the hem deeply
-and extend along the paving. Do not restore detached heel/toe primitives or
-exposed legs; `ref-c-under` shows a smooth robe-to-ground extension. B3 and C4
+Low-angle mobile evidence showed the join and bulbous instep. The current foot
+belongs to the same field as the skirt: a buried root, instep and narrower
+forefoot overlap the hem deeply, while a restrained toe edge interrupts the
+front silhouette without detached pebbles or a paddle. Do not restore detached
+heel/toe primitives or exposed legs; ref-c-under shows a smooth robe-to-ground
+extension. B3 and C4
 remain.
 
 **Phase 3 — Heads. DONE (2026-08-02; acceptance corrected 2026-08-03).**
 The head is a rounded BLOCK, not an ovoid — flat front, flat sides, domed top.
-The nearest is bare/plain, the turned-away figure keeps a complete face rotated
-to the far side, and two carry coiled top-knots. E3 and E5 remain: the eye
+The nearest is bare/plain. The rear-facing figure now rotates as one body,
+cowl and head, retaining a complete face on the opposite side without an
+impossible local neck twist. Two figures carry coiled top-knots. E3 and E5 remain: the eye
 sockets are shallow where the reference has hollow triangles, and the hair's
 temple edge is not legible at group distance.
 
-**Phase 4A — Arms and negative space. DONE (2026-08-03).** Four
-reference-led paths replace the generic vertical pair. Their radii now taper
-from shoulder to reduced cast tips; support wrists terminate inside the
-pregnancy/newborn gestures instead of becoming pipe caps or mitten blobs. The
-chest is one shallow shelf with restrained lobes rather than attached spheres.
-`A7` and `F4` remain passes.
+**Phase 4A — Arms and negative space. DONE (2026-08-03; acceptance
+corrected 2026-08-03).** Four reference-led paths replace the generic vertical
+pair. Their radii taper from shoulder to reduced cast tips. The infant is a
+separate fine closed swaddle supported by a curved forearm, and the clinician's
+instrument is two independent curved tubes with two small ringed terminals.
+The chest remains one shallow shelf with restrained lobes rather than attached
+spheres. A7 and F4 remain passes.
 
 **Phase 4B — Surface and bronze. DONE (2026-08-03).** Shell roughness and
 body-field noise are retained, and patina runoff stays subordinate to the
@@ -360,9 +376,9 @@ lighting. The reopened rear-orbit check added a second cool source so broad cowl
 planes remain visible on mobile while the frontal key preserves facial relief.
 `G2`, `G3` and `G5` remain passes.
 
-The final reproducible scene statistics and eight-view artifact are recorded in
-`validation/phase-4-closeout.md`. The simulated browser uses SwiftShader; a
-real iPhone 12-or-newer load and orbit test remains part of the final ship gate.
+The current reproducible scene statistics and nine-view artifact are recorded in
+validation/phase-4-closeout.md. The simulated browser uses SwiftShader; a real
+iPhone 12-or-newer load and orbit test remains part of the final ship gate.
 Do not optimize geometry from software-rendered timings alone.
 
 ### Phase 5A — arrangement, weight and shadow

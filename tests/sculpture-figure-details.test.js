@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFigure } from '../sculpture/src/model/figure.js';
+import { buildFigure, STETHOSCOPE_PATHS } from '../sculpture/src/model/figure.js';
+import { FIGURE_LAYOUT } from '../sculpture/src/model/sculpture.js';
+import { PHASE4_ACCEPTANCE_VIEWS } from '../tools/sculpture-views.mjs';
 
 class BufferAttribute {
     constructor(array, itemSize) {
@@ -125,7 +127,13 @@ test('each figure exposes one closed, connected and outward-wound planted foot',
     assert.equal(result.boundaryEdges, 0);
     assert.equal(result.nonmanifoldEdges, 0);
     assert.ok(result.signedVolume > 0);
-    assert.ok(result.bounds.maxZ - result.bounds.minZ > 0.30, 'foot should read heel-to-toe');
+    const length = result.bounds.maxZ - result.bounds.minZ;
+    const width = result.bounds.maxX - result.bounds.minX;
+    assert.ok(length > 0.38, 'foot should read heel-to-toe');
+    assert.ok(length < 0.56, 'foot should not extend into a long pointed slug');
+    assert.ok(width > 0.15, 'forefoot should remain visibly broad');
+    assert.ok(width < 0.20, 'foot should not read as a paddle');
+    assert.ok(length > width * 2.2, 'foot should retain a planted heel-to-toe proportion');
     assert.ok(result.bounds.maxY - result.bounds.minY > 0.10, 'foot should include an instep');
 });
 
@@ -137,4 +145,68 @@ test('stride selects one leading side instead of exposing a detached pair', () =
     const leftWidth = left.maxX - left.minX;
     const rightWidth = right.maxX - right.minX;
     assert.ok(Math.abs(leftWidth - rightWidth) < 0.005, 'stride should preserve foot width');
+});
+
+function buildBaby() {
+    return buildFigure(THREE, {
+        seed: 37,
+        baby: true,
+        only: ['baby'],
+    });
+}
+
+test('the carried newborn is a separate closed swaddle with a distinct horizontal silhouette', () => {
+    const result = inspectGeometry(buildBaby());
+    const width = result.bounds.maxX - result.bounds.minX;
+    const height = result.bounds.maxY - result.bounds.minY;
+    const depth = result.bounds.maxZ - result.bounds.minZ;
+    assert.equal(result.components, 1);
+    assert.equal(result.boundaryEdges, 0);
+    assert.equal(result.nonmanifoldEdges, 0);
+    assert.ok(result.signedVolume > 0);
+    assert.ok(width > 0.42, 'swaddle should span both supporting forearms');
+    assert.ok(width > height * 1.7, 'swaddle should not read as another round belly');
+    assert.ok(depth > 0.17, 'head and wrapping should stand proud of the body');
+    assert.ok(result.bounds.minY > 1.25, 'newborn should be carried above the abdomen');
+});
+
+test('stethoscope control points form two raised reference-matched tubes', () => {
+    const { left, right, terminals } = STETHOSCOPE_PATHS;
+    assert.equal(left.length, 4);
+    assert.equal(right.length, 4);
+    assert.equal(terminals.length, 2);
+    assert.deepEqual(left[0].map(Math.abs), right[0].map(Math.abs));
+    assert.ok(left.at(-1)[1] < left[0][1], 'left tube should hang from the neck');
+    assert.ok(right.at(-1)[1] < right[0][1], 'right tube should hang from the neck');
+    assert.ok([...left.slice(2), ...right.slice(2)].every((point) => point[2] > 0.24),
+        'lower tubing should stand proud of the torso');
+    assert.ok(terminals.every((point) => point[1] < 1.56 && point[2] > 0.28),
+        'small terminals should rest separately over the breasts');
+});
+
+test('the profile figure turns as one body without an impossible neck twist', () => {
+    const pregnant = FIGURE_LAYOUT.find((figure) => figure.pregnant);
+    assert.ok(pregnant);
+    assert.ok(Math.abs(pregnant.turn) > 2.4, 'the complete figure should carry the rear-facing turn');
+    assert.ok(Math.abs(pregnant.headTurn) < 0.35, 'local head turn should stay anatomical');
+    assert.equal(pregnant.faceless, false, 'face geometry should not be treated as intentionally blank');
+});
+
+test('the Phase 4 visual gate retains every critical desktop and mobile view', () => {
+    assert.equal(PHASE4_ACCEPTANCE_VIEWS.length, 9);
+    const byId = new Map(PHASE4_ACCEPTANCE_VIEWS.map((view) => [view.id, view]));
+    for (const id of [
+        '03-whole-figure-turn',
+        '04-infant-instrument',
+        '05-ground-level-feet',
+        '06-fused-foot-close',
+        '07-opposite-rear',
+        '08-mobile-full',
+        '09-mobile-detail',
+    ]) {
+        assert.ok(byId.has(id), `missing critical acceptance view: ${id}`);
+    }
+    assert.deepEqual(byId.get('08-mobile-full').viewport, [390, 844]);
+    assert.deepEqual(byId.get('09-mobile-detail').viewport, [390, 844]);
+    assert.ok(PHASE4_ACCEPTANCE_VIEWS.every((view) => view.target.length === 3));
 });

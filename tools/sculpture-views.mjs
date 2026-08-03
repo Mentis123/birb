@@ -102,4 +102,58 @@ export const REVIEW_VIEWS = [
     { id: 'head', fov: 40, yaw: -8, pitch: 2, distance: 1.05, targetY: 2.10 },
 ];
 
+
+/**
+ * Phase 4 visual-acceptance poses. These reproduce the close desktop/mobile
+ * views that exposed the whole-figure turn, infant, instrument and foot defects.
+ * They are intentionally separate from the seven general matched/review views.
+ */
+export const PHASE4_ACCEPTANCE_VIEWS = [
+    {
+        id: '01-desktop-front', viewport: [1600, 1000], fov: 40,
+        target: [0, 1.25, -0.10], yaw: 0, pitch: 4, distance: 4.70,
+        note: 'Complete front grouping and coherent rear-facing figure.',
+    },
+    {
+        id: '02-desktop-threequarter', viewport: [1600, 1000], fov: 40,
+        target: [0, 1.25, -0.10], yaw: 48, pitch: 5, distance: 4.70,
+        note: 'Opposite face evidence, group overlap and trailing cowls.',
+    },
+    {
+        id: '03-whole-figure-turn', viewport: [1200, 900], fov: 40,
+        target: [-0.25, 1.58, 0.06], yaw: 0, pitch: 2, distance: 2.45,
+        note: 'Rear-facing body, cowl and head rotate together.',
+    },
+    {
+        id: '04-infant-instrument', viewport: [1400, 900], fov: 40,
+        target: [0.42, 1.56, -0.48], yaw: 2, pitch: 2, distance: 2.55,
+        note: 'Closed swaddle, curved support and two separate instrument tubes.',
+    },
+    {
+        id: '05-ground-level-feet', viewport: [1500, 720], fov: 40,
+        target: [0, 0.19, -0.12], yaw: 0, pitch: 2, distance: 3.05,
+        note: 'Robe-rooted feet across the full group.',
+    },
+    {
+        id: '06-fused-foot-close', viewport: [1200, 700], fov: 40,
+        target: [-0.93, 0.09, 0.82], yaw: 0, pitch: 5, distance: 1.35,
+        note: 'Buried root, instep, narrow forefoot and restrained toe edge.',
+    },
+    {
+        id: '07-opposite-rear', viewport: [1600, 1000], fov: 40,
+        target: [0, 1.25, -0.10], yaw: 180, pitch: 4, distance: 4.70,
+        note: 'Closed rear surfaces and readable cowl planes.',
+    },
+    {
+        id: '08-mobile-full', viewport: [390, 844], fov: 40,
+        target: [0, 1.22, -0.10], yaw: 0, pitch: 4, distance: 5.55,
+        note: 'Full group at the production mobile viewport.',
+    },
+    {
+        id: '09-mobile-detail', viewport: [390, 844], fov: 40,
+        target: [0.38, 1.45, -0.46], yaw: 1, pitch: 3, distance: 2.75,
+        note: 'Infant, support and instrument at the production mobile viewport.',
+    },
+];
+
 export default REFERENCE_VIEWS;
