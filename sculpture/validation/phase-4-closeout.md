@@ -1,7 +1,9 @@
-# Bronze Phase 4 closeout validation
+# Bronze Phase 4 closeout and lighting correction
 
 Phase 4A (arms and negative space) and Phase 4B (surface and bronze) were
-integrated on 2026-08-03. Phase 5 was not started.
+integrated on 2026-08-03. A post-merge visual report then exposed crushed black
+shadows and an over-orange key in real orbit views. The corrective Phase 4 pass
+changed only patina/material/light values; Phase 5 was not started.
 
 ## Source and archive provenance
 
@@ -37,9 +39,11 @@ paths. The nearest figure opens a visible gap beside the ribs, the pregnant
 figure supports the belly, the mother's forearms cross beneath the newborn, and
 the clinician's far arm sweeps back to keep the stethoscope readable.
 
-Phase 4B strengthens the existing hand-worked displacement and body-field noise,
-adds broad and fine vertical runoff bands, warms the bronze and sun against the
-cold environment, and tunes the material toward rough weathered bronze.
+Phase 4B strengthens the existing hand-worked displacement and body-field noise
+and adds broad and fine vertical runoff bands. The corrective pass lifts the
+bronze shadow floor, narrows runoff contrast, neutralises the orange key and adds
+enough cool sky/rear fill to keep the full orbit readable while retaining a rough,
+dark weathered surface.
 
 ## Validation
 
@@ -49,6 +53,10 @@ cold environment, and tunes the material toward rough weathered bronze.
 - `node --check sculpture/src/model/figure.js`: passed.
 - `node --check sculpture/src/model/sculpture.js`: passed.
 - `git diff --check`: passed.
+- GitHub Actions run `30789507000` captured fixed front, close, three-quarter,
+  rear and 390x844 mobile views with no page, console or request errors. The
+  downloaded artifact matched SHA-256
+  `5ca8166e324d35df01d050fbf08bd8ef292b946ffae3410cf252b3622edd1b22`.
 - The matched sheet and isolated probes were reviewed against all 41 likeness
   checks. `A7`, `F4`, `G2`, `G3` and `G5` moved from fail to pass,
   with no observed Phase 1-3 regression.
