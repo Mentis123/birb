@@ -160,6 +160,11 @@ Three-finger QR as usual.
 > the module map, the build pipeline, the invariants that must not be undone,
 > the verification protocol, the current score and the phased plan to finish.
 > The summary below is the short version.
+>
+> **For `/img2threejsMAX` work, read the repository-shared skill at
+> `.claude/skills/img2threejs-max/SKILL.md`.** Its scripts, contracts and
+> reference guidance are part of the workflow. The zero-production-asset rule
+> below is immutable; reference imagery is evidence, never a runtime dependency.
 
 Own stack, same house rules as Gauntlet: pinned CDN Three, vanilla ES modules,
 no build step, **zero production assets** — the running sculpture imports no
