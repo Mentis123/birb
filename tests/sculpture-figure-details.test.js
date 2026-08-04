@@ -129,12 +129,29 @@ test('each figure exposes one closed, connected and outward-wound planted foot',
     assert.ok(result.signedVolume > 0);
     const length = result.bounds.maxZ - result.bounds.minZ;
     const width = result.bounds.maxX - result.bounds.minX;
-    assert.ok(length > 0.38, 'foot should read heel-to-toe');
-    assert.ok(length < 0.56, 'foot should not extend into a long pointed slug');
+    assert.ok(length > 0.48, 'foot should read heel-to-toe beyond the hem');
+    assert.ok(length < 0.68, 'foot should not extend into a long pointed slug');
     assert.ok(width > 0.15, 'forefoot should remain visibly broad');
     assert.ok(width < 0.20, 'foot should not read as a paddle');
     assert.ok(length > width * 2.2, 'foot should retain a planted heel-to-toe proportion');
     assert.ok(result.bounds.maxY - result.bounds.minY > 0.10, 'foot should include an instep');
+});
+
+test('production figures retain the fine foot field beside the closed body field', () => {
+    const opts = {
+        seed: 11,
+        stride: -1,
+        strideAngle: 0.10,
+    };
+    const body = buildFigure(THREE, { ...opts, only: ['body'] });
+    const foot = buildFigure(THREE, { ...opts, only: ['feet'] });
+    const assembled = buildFigure(THREE, { ...opts, only: ['body', 'feet'] });
+    const result = inspectGeometry(assembled);
+
+    assert.equal(assembled.index.count, body.index.count + foot.index.count);
+    assert.equal(result.components, 2, 'body and fine foot remain independent closed surfaces');
+    assert.equal(result.boundaryEdges, 0);
+    assert.equal(result.nonmanifoldEdges, 0);
 });
 
 test('stride selects one leading side instead of exposing a detached pair', () => {
@@ -155,7 +172,7 @@ function buildBaby() {
     });
 }
 
-test('the carried newborn is a separate closed swaddle with a distinct horizontal silhouette', () => {
+test('the carried newborn is a closed fully wrapped block with restrained end asymmetry', () => {
     const result = inspectGeometry(buildBaby());
     const width = result.bounds.maxX - result.bounds.minX;
     const height = result.bounds.maxY - result.bounds.minY;
@@ -164,12 +181,36 @@ test('the carried newborn is a separate closed swaddle with a distinct horizonta
     assert.equal(result.boundaryEdges, 0);
     assert.equal(result.nonmanifoldEdges, 0);
     assert.ok(result.signedVolume > 0);
-    assert.ok(width > 0.42, 'swaddle should span both supporting forearms');
-    assert.ok(width > height * 1.7, 'swaddle should not read as another round belly');
-    assert.ok(depth > 0.17, 'head and wrapping should stand proud of the body');
+    assert.ok(width > 0.42, 'swaddle should span the full support gesture');
+    assert.ok(width > height * 2.2, 'swaddle should remain broad rather than read as another belly');
+    assert.ok(depth > 0.17, 'wrapped volume should stand proud of the body');
     assert.ok(result.bounds.minY > 1.25, 'newborn should be carried above the abdomen');
+    const positions = buildBaby().attributes.position;
+    let leftTop = -Infinity, rightTop = -Infinity;
+    for (let i = 0; i < positions.count; i++) {
+        if (positions.getX(i) < -0.10) leftTop = Math.max(leftTop, positions.getY(i));
+        if (positions.getX(i) > 0.10) rightTop = Math.max(rightTop, positions.getY(i));
+    }
+    assert.ok(rightTop - leftTop > 0.015 && rightTop - leftTop < 0.045,
+        'wrapped ends should be unequal without inventing an exposed spherical head');
 });
 
+test('the hospital badge is a separate fine closed relief at readable scale', () => {
+    const result = inspectGeometry(buildFigure(THREE, {
+        seed: 79,
+        badge: true,
+        only: ['badge'],
+    }));
+    const width = result.bounds.maxX - result.bounds.minX;
+    const height = result.bounds.maxY - result.bounds.minY;
+    const depth = result.bounds.maxZ - result.bounds.minZ;
+    assert.equal(result.components, 1);
+    assert.equal(result.boundaryEdges, 0);
+    assert.equal(result.nonmanifoldEdges, 0);
+    assert.ok(width > 0.11 && width < 0.125);
+    assert.ok(height > 0.045 && height < 0.055);
+    assert.ok(depth > 0.026 && depth < 0.032);
+});
 test('stethoscope control points form two raised reference-matched tubes', () => {
     const { left, right, terminals } = STETHOSCOPE_PATHS;
     assert.equal(left.length, 4);
@@ -184,12 +225,17 @@ test('stethoscope control points form two raised reference-matched tubes', () =>
         'small terminals should rest separately over the breasts');
 });
 
-test('the profile figure turns as one body without an impossible neck twist', () => {
-    const pregnant = FIGURE_LAYOUT.find((figure) => figure.pregnant);
-    assert.ok(pregnant);
-    assert.ok(Math.abs(pregnant.turn) > 2.4, 'the complete figure should carry the rear-facing turn');
-    assert.ok(Math.abs(pregnant.headTurn) < 0.35, 'local head turn should stay anatomical');
-    assert.equal(pregnant.faceless, false, 'face geometry should not be treated as intentionally blank');
+test('all six reliefs turn as complete bodies without impossible neck twists', () => {
+    assert.equal(FIGURE_LAYOUT.length, 6);
+    for (const figure of FIGURE_LAYOUT) {
+        assert.ok(Math.abs(figure.headTurn) < 0.35,
+            `${figure.id} keeps an anatomical local head turn`);
+        if (figure.side === 'outward') {
+            assert.ok(Math.cos(figure.turn) > 0.90, `${figure.id} faces the outward side`);
+        } else {
+            assert.ok(Math.cos(figure.turn) < -0.90, `${figure.id} faces the hospital side`);
+        }
+    }
 });
 
 test('the Phase 4 visual gate retains every critical desktop and mobile view', () => {

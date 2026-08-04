@@ -49,46 +49,45 @@ export const REFERENCE_VIEWS = [
         id: 'a-front',
         photo: 'ref-a-front.jpg',
         crop: [240, 250, 900, 950],
-        note: 'Front, standing height. The clearest read of all four faces and the bare torsos.',
+        note: 'Outward/community side: developing abdomen, newborn and visitor reliefs, with alternating hospital-side recesses.',
         fov: 44,
-        yaw: -2,
+        yaw: -24,
         pitch: 4,
-        distance: 3.9,
-        targetY: 1.34,
+        distance: 3.75,
+        target: [-0.16, 1.34, 0.04],
     },
     {
         id: 'b-threequarter',
         photo: 'ref-b-threequarter.jpg',
         crop: [200, 120, 900, 1080],
-        note: 'Front-left, close. Shows the cloaks as panels behind the bodies and the stethoscope.',
+        note: 'Hospital side: badge, full pregnancy and doctor/stethoscope reliefs in reversed physical order.',
         fov: 49,
-        yaw: 56,
+        yaw: 214,
         pitch: 5,
-        distance: 3.3,
-        targetY: 1.24,
+        distance: 3.55,
+        target: [0.10, 1.24, -0.04],
     },
     {
         id: 'c-under',
         photo: 'ref-c-under.jpg',
         crop: [200, 120, 950, 1080],
-        note: 'Low, from the front-left, group silhouetted against sky. THE structural reference: '
-            + 'the open front, the hollow collar-arch, the feet, the raked hems.',
+        note: 'Low hospital-side view: three active reliefs, three recessed backs and the alternating planted feet.',
         fov: 49,
-        yaw: -12,
+        yaw: 150,
         pitch: -7,
-        distance: 3.1,
-        targetY: 1.16,
+        distance: 3.55,
+        target: [-0.12, 1.16, -0.03],
     },
     {
         id: 'd-wide',
         photo: 'ref-d-wide.jpg',
         crop: [440, 250, 620, 960],
-        note: 'From the group\'s right. The plain turned-away head and the long trailing hem.',
+        note: 'Oblique outward side: newborn, visitor and the foreground reverse-sheet edge.',
         fov: 44,
-        yaw: 62,
+        yaw: 34,
         pitch: 3,
-        distance: 4.4,
-        targetY: 1.30,
+        distance: 4.15,
+        target: [0.30, 1.30, 0.02],
     },
 ];
 
@@ -101,6 +100,27 @@ export const REVIEW_VIEWS = [
     { id: 'back', fov: 40, yaw: 184, pitch: 6, distance: 5.2, targetY: 1.25 },
     { id: 'head', fov: 40, yaw: -8, pitch: 2, distance: 1.05, targetY: 2.10 },
 ];
+
+/**
+ * Neutral eight-angle identity audit. These views are deliberately independent
+ * of the reference-camera guesses: they expose which figure, face and narrative
+ * detail is physically present at every azimuth before a matched camera is
+ * accepted. Keeping this grid reproducible prevents a good crop from hiding a
+ * wrong body turn or an occluded figure.
+ */
+export const IDENTITY_AUDIT_VIEWS = Array.from({ length: 8 }, (_, index) => {
+    const yaw = index * 45;
+    return {
+        id: `identity-${String(yaw).padStart(3, '0')}`,
+        viewport: [900, 900],
+        fov: 40,
+        target: [0, 1.25, -0.10],
+        yaw,
+        pitch: 4,
+        distance: 4.70,
+        note: `Neutral ${yaw} degree identity and occlusion audit.`,
+    };
+});
 
 
 /**
@@ -163,46 +183,62 @@ export const PHASE4_ACCEPTANCE_VIEWS = [
  */
 export const PHASE5_ACCEPTANCE_VIEWS = [
     {
-        id: 'p5-01-weight-front', photo: 'ref-c-under.jpg', crop: [180, 140, 960, 1060],
-        viewport: [1400, 900], fov: 40, target: [-0.60, 1.15, 0.58],
-        yaw: -4, pitch: 0, distance: 3.15,
-        note: 'Nearest figure visibly settles over one support leg without moving the planted foot.',
+        id: 'p5-01-outward-order', photo: 'ref-a-front.jpg', crop: [240, 250, 900, 950],
+        viewport: [1400, 900], fov: 44, target: [-0.16, 1.34, 0.04],
+        yaw: -24, pitch: 4, distance: 3.75,
+        note: 'Outward side shows developing abdomen, swaddled newborn and visitor in the photographed order.',
     },
     {
-        id: 'p5-02-arrangement-right', photo: 'ref-d-wide.jpg', crop: [420, 180, 760, 1020],
-        viewport: [1400, 900], fov: 44, target: [0, 1.30, -0.10],
-        yaw: 62, pitch: 3, distance: 4.40,
-        note: 'Turned-away plain head remains behind in front view but dominates the group right side.',
+        id: 'p5-02-hospital-order', photo: 'ref-b-threequarter.jpg', crop: [200, 120, 900, 1080],
+        viewport: [1400, 900], fov: 49, target: [0.10, 1.24, -0.04],
+        yaw: 214, pitch: 5, distance: 3.55,
+        note: 'Hospital side shows badge, full pregnancy and clinician in the reversed physical order.',
     },
     {
-        id: 'p5-03-connected-shadow', photo: 'ref-c-under.jpg', crop: [160, 690, 1120, 510],
-        viewport: [1400, 800], fov: 45, target: [0.15, 0.12, -0.25],
-        yaw: 20, pitch: 35, distance: 4.80,
-        note: 'All four figures read as one connected cast/contact shadow on the plinth.',
+        id: 'p5-03-negative-relief', photo: 'ref-d-wide.jpg', crop: [440, 250, 620, 950],
+        viewport: [1100, 900], fov: 44, target: [0.30, 1.30, 0.02],
+        yaw: 34, pitch: 3, distance: 4.15,
+        note: 'Oblique view exposes closed concave backs and the long swept cast fins.',
     },
     {
-        id: 'p5-04-collar-under', photo: 'ref-c-under.jpg', crop: [420, 40, 900, 760],
-        viewport: [1200, 900], fov: 30, target: [-0.20, 2.02, 0.45],
-        yaw: -120, pitch: -4, distance: 2.30,
-        note: 'Cowl terminates as a broad open hollow arch, not a pointed or filled panel.',
+        id: 'p5-04-newborn-support', photo: 'ref-a-front.jpg', crop: [620, 300, 600, 560],
+        viewport: [1200, 900], fov: 26, target: [-0.24, 1.46, 0.10],
+        yaw: -24, pitch: 2, distance: 2.45,
+        note: 'Fully wrapped newborn block remains distinct above one substantial U-shaped support.',
     },
     {
-        id: 'p5-05-eye-sockets', photo: 'ref-a-front.jpg', crop: [300, 230, 430, 430],
-        viewport: [1100, 900], fov: 16, target: [0.20, 2.05, -0.42],
-        yaw: 0, pitch: 1, distance: 2.05,
-        note: 'Angular hollow eye sockets retain a readable triangular shadow at close range.',
+        id: 'p5-05-pregnancy-instrument', photo: 'ref-b-threequarter.jpg', crop: [200, 240, 900, 700],
+        viewport: [1400, 900], fov: 32, target: [-0.15, 1.48, -0.04],
+        yaw: 214, pitch: 2, distance: 2.95,
+        note: 'Full pregnancy and two-ended stethoscope remain distinct at one delivery scale.',
     },
     {
-        id: 'p5-06-hair-temple', photo: 'ref-a-front.jpg', crop: [700, 240, 520, 470],
-        viewport: [1100, 900], fov: 18, target: [0.20, 2.05, -0.42],
-        yaw: 34, pitch: 1, distance: 2.05,
-        note: 'Smooth hair cap ends at a deliberate hard temple edge in three-quarter view.',
+        id: 'p5-06-grounded-feet', photo: 'ref-c-under.jpg', crop: [180, 690, 1000, 510],
+        viewport: [1400, 800], fov: 40, target: [-0.10, 0.62, -0.08],
+        yaw: 115, pitch: -7, distance: 3.60,
+        note: 'Alternating planted feet and thin closed fin bases survive the low view.',
     },
     {
-        id: 'p5-07-mobile-full', viewport: [390, 844], fov: 40,
-        target: [0, 1.22, -0.08], yaw: 0, pitch: 4, distance: 6.50,
-        note: 'Production mobile framing preserves the corrected whole-group read.',
+        id: 'p5-09-outward-identities', photo: 'ref-a-front.jpg', crop: [150, 110, 1200, 520],
+        viewport: [1400, 780], fov: 30, target: [-0.24, 2.08, 0.08],
+        yaw: -24, pitch: 0, distance: 2.95,
+        note: 'Matched head-level view exposes the developing, mother and visitor face and crown silhouettes.',
+    },
+    {
+        id: 'p5-10-hospital-identities', photo: 'ref-c-under.jpg', crop: [50, 100, 1450, 560],
+        viewport: [1400, 780], fov: 30, target: [0.20, 2.08, -0.08],
+        yaw: 204, pitch: 0, distance: 2.95,
+        note: 'Matched head-level reverse view exposes badge, pregnant and clinician identities and facing.',
+    },
+    {
+        id: 'p5-07-mobile-outward', viewport: [390, 844], fov: 44,
+        target: [0, 1.22, 0], yaw: -20, pitch: 4, distance: 8.20,
+        note: 'Production mobile framing preserves all three outward narratives.',
+    },
+    {
+        id: 'p5-08-mobile-hospital', viewport: [390, 844], fov: 44,
+        target: [0, 1.22, 0], yaw: 202, pitch: 4, distance: 8.20,
+        note: 'Production mobile framing preserves all three hospital narratives.',
     },
 ];
-
 export default REFERENCE_VIEWS;

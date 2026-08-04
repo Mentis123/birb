@@ -11,12 +11,12 @@ Phase 4 did not need repeated correction because Three.js could not represent
 the details. It needed repeated correction because the observation scale and
 the representation bandwidth were chosen after the geometry was built.
 
-The stethoscope is the clearest example. Its current tube is 17 mm in diameter.
-The torso distance field is sampled in 14.5 mm cells, so the original feature
-was only 1.17 cells thick. A feature at that ratio can exist in field math and
-still disappear or become meaningless slivers in the generated surface. Making
-the instrument separate TubeGeometry solved the representation error; adding a
-dedicated close camera solved the observability error.
+The stethoscope is the clearest example. Its tube is 17 mm in diameter. During
+Phase 4 the torso distance field was sampled in 14.5 mm cells, so the original
+feature was only 1.17 cells thick. A feature at that ratio can exist in field
+math and still disappear or become meaningless slivers in the generated
+surface. Making the instrument separate TubeGeometry solved the representation
+error; adding a dedicated close camera solved the observability error.
 
 The new rule is:
 
@@ -25,12 +25,13 @@ The new rule is:
 > written down.
 
 This changes the feedback point from a deployed whole-scene complaint to a
-local, feature-specific result. On the current machine, a geometry result is
-available in under 3 seconds and a reproducible browser view in about 26
-seconds. That removes an entire PR-and-deployment cycle from each detail
-iteration. The local time is measured; the total multiplier depends on CI and
-deployment latency. One project does not support a mathematical claim of
-exponential improvement, so this document does not make one.
+local, feature-specific result. During Phase 4, a geometry result was available
+in under 3 seconds and a reproducible browser view in about 26 seconds. Those
+measurements do not apply unchanged to the larger six-relief scene; its final
+capture wall time has not been re-baselined. The local method removes an entire
+PR-and-deployment cycle from each detail iteration, but one project does not
+support a mathematical claim of exponential improvement, so this document does
+not make one.
 
 ## What the Phase 4 progression proved
 
@@ -102,10 +103,11 @@ operating floor, not a universal theorem.
 
 | Generated part | Voxel | Stable sampled feature at 6 cells |
 | --- | ---: | ---: |
-| Body field | 14.5 mm | 87 mm |
+| Body field | 18 mm | 108 mm |
+| Production and isolation planted foot | 7.5 mm | 45 mm |
 | Head field (0.0042 * 1.335) | 5.61 mm | 33.6 mm |
 | Infant field | 5.5 mm | 33 mm |
-| Isolated foot field | 7.5 mm | 45 mm |
+| Badge field | 3.5 mm | 21 mm |
 
 Anything finer must either be intentionally exaggerated or moved to explicit
 geometry. Current explicit instrument geometry demonstrates the distinction:
@@ -155,7 +157,7 @@ screenshot is useful for exploration but is not reproducible evidence.
    old geometry is framed at the required pixel scale.
 3. Measure the intended feature and calculate rho. Choose sampled or explicit
    geometry from that result.
-4. Build the feature in isolation. Do not begin with the full four-figure scene.
+4. Build the feature in isolation. Do not begin with the full six-relief scene.
 5. Add numeric and topology assertions for bounds, continuity, winding, volume,
    component count and required clearances.
 6. Render an isolated silhouette and MeshNormalMaterial frame. This separates
@@ -164,8 +166,8 @@ screenshot is useful for exploration but is not reproducible evidence.
    occlusion geometry.
 8. Run only the affected exact view. Compare it with the stored reference crop
    at the same scale.
-9. At a visual checkpoint, run all nine Phase 4 views to catch collateral
-   changes to orientation, framing, lighting and mobile composition.
+9. At a visual checkpoint, run all ten Phase 5 views and the eight-angle
+   identity orbit. Use the nine Phase 4 views as historical regression evidence.
 10. Before closeout, run tests, proportions, the full visual matrix and the
     critical production views. Record both passes and unresolved differences.
 
@@ -199,33 +201,27 @@ The one-view benchmark passed with a 1400x900 framebuffer, 4,105 samples, 100%
 opaque samples, luminance range 133.17 and deviation 24.75. The scene reported
 514,780 triangles, 6 draw calls and 4 figures.
 
-### Phase 5 re-baseline
+### Phase 5 reconstruction re-baseline
 
-On 2026-08-04 the larger acceptance suite was measured again on the same local
-machine. These are workflow timings, not real-device performance results.
+On 2026-08-04 the six-relief reconstruction was measured again on the same local
+machine. Browser FPS is from Chromium/SwiftShader and is not a real-device
+performance result.
 
-| Gate | Phase 5 observed time |
-| --- | ---: |
-| Six focused semantic tests | 6.6-7.1 s |
-| Full 203-test suite | 6.7 s |
-| One integrated exact browser view | 25.0-25.9 s |
-| Seven-view Phase 5 matrix | 76.9 s |
-| Nine-view Phase 4 regression matrix | 97.7 s |
-| Seven-view DPR-2 reference matrix | 135.4 s |
+| Gate | Current result |
+| --- | --- |
+| Focused sculpture tests | 17/17 pass |
+| Full project suite | 208/208 pass in about 31-33 s |
+| Twelve-measure proportion gate | 0/12 outside tolerance; worst +0.024 |
+| Six exact production body fields | zero boundary and non-manifold edges |
+| Ten-view Phase 5 matrix | opaque, non-uniform, no errors; 54-60 reported FPS |
+| Eight-angle identity orbit | opaque, non-uniform, no errors; 51-60 reported FPS |
 
-The current scene reports 525,912 triangles, 6 draw calls and 4 figures.
+The current scene reports 2,070,904 triangles, 7 draw calls and 6 reliefs.
 
-The practical cadence is therefore:
-
-- focused semantic edit-to-result: about 7 seconds;
-- integrated detail edit-to-reproducible frame: about 26 seconds;
-- seven-view acceptance matrix: about 77 seconds;
-- acceptance, regression and DPR-2 reference matrices: about 5.2 minutes;
-- real-device construction and orbit performance: not yet measured.
-
-Page construction dominates the one-view time. A future persistent observer
-that keeps the scene and browser alive could reduce repeated captures to camera
-settle plus readback, but that has not been benchmarked and is not claimed here.
+Capture wall time was not re-baselined after the final geometry change, so no
+new edit-to-frame timing is claimed. The efficient cadence remains one focused
+test, one exact stored camera, then one browser boot for the complete matrix.
+Real-device construction and sustained orbit performance remain unmeasured.
 
 ## What can be verified, and how accurately
 
@@ -252,13 +248,14 @@ node --test --test-name-pattern="newborn|stethoscope" tests/sculpture-figure-det
 node --test --test-name-pattern="planted foot|stride" tests/sculpture-figure-details.test.js
 
 # One exact detail view during iteration.
-node tools/sculpture-sheet.mjs --phase4 --only 04-infant-instrument --out shots/sculpt/infant-instrument.png
+node tools/sculpture-sheet.mjs --phase5 --only p5-04-newborn-support --out shots/sculpt/newborn.png
 
 # Full local gates before closeout.
-node --test tests/sculpture-phase5.test.js
-npm test
+node --test --test-isolation=none tests/sculpture-phase5.test.js tests/sculpture-figure-details.test.js
+node --test --test-isolation=none
 node tools/sculpture-proportions.mjs
 node tools/sculpture-sheet.mjs --phase5 --out shots/sculpt/phase5.png
+node tools/sculpture-sheet.mjs --identity --out shots/sculpt/identity.png
 node tools/sculpture-sheet.mjs --phase4 --out shots/sculpt/phase4.png
 ~~~
 

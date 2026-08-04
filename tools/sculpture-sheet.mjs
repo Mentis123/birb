@@ -13,8 +13,8 @@
  *      same scale, a difference of shape is obvious and takes one look.
  *   2. Each `sculpture-shot.mjs` invocation boots a browser, which cost roughly
  *      five seconds a look and, at ninety looks across one session, most of the
- *      iteration budget. Seven general views or nine Phase 4 acceptance views
- *      in one boot is about five times cheaper.
+ *      iteration budget. The general, nine-view Phase 4, ten-view Phase 5
+ *      and eight-angle identity sets each run in one browser boot.
  *
  * Exits non-zero on any page or console error, same contract as the shot tool,
  * so a produced sheet is evidence the code ran.
@@ -24,7 +24,8 @@
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --only a-front,c-under
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --no-photos   # review poses only
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase4.png --phase4     # nine defect views
- *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase5.png --phase5     # six details + mobile
+ *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase5.png --phase5     # eight detail/scene + two mobile
+ *   node tools/sculpture-sheet.mjs --out shots/sculpt/identity.png --identity # neutral eight-angle audit
  *
  * Flags:
  *   --out     output PNG path                                (required)
@@ -36,7 +37,8 @@
  *   --screenshot-timeout  max ms per rendered screenshot   (default 120000)
  *   --no-photos  skip the reference column
  *   --phase4  capture the nine desktop/mobile/detail acceptance views
- *   --phase5  capture the seven Phase 5 likeness acceptance views
+ *   --phase5  capture the ten Phase 5 likeness acceptance views
+ *   --identity  capture the neutral eight-angle identity audit
  *   --allow-console-errors
  */
 
@@ -48,6 +50,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
+    IDENTITY_AUDIT_VIEWS,
     PHASE4_ACCEPTANCE_VIEWS,
     PHASE5_ACCEPTANCE_VIEWS,
     REFERENCE_VIEWS,
@@ -266,16 +269,19 @@ print(f'{sheet.width}x{sheet.height}')
 async function main() {
     const args = parseArgs(process.argv);
     if (!args.out) {
-        console.error('usage: sculpture-sheet.mjs --out <png> [--only id,id] [--cell 620] [--phase4|--phase5]');
+        console.error('usage: sculpture-sheet.mjs --out <png> [--only id,id] [--cell 620] [--phase4|--phase5|--identity]');
         process.exit(2);
     }
 
     const only = args.only ? String(args.only).split(',').map((s) => s.trim()) : null;
     const phase4 = Boolean(args.phase4);
     const phase5 = Boolean(args.phase5);
-    if (phase4 && phase5) throw new Error('--phase4 and --phase5 are mutually exclusive');
-    const acceptance = phase4 || phase5;
-    const withPhotos = !args['no-photos'] && !phase4;
+    const identity = Boolean(args.identity);
+    if ([phase4, phase5, identity].filter(Boolean).length > 1) {
+        throw new Error('--phase4, --phase5 and --identity are mutually exclusive');
+    }
+    const acceptance = phase4 || phase5 || identity;
+    const withPhotos = !args['no-photos'] && !phase4 && !identity;
     const cellH = Number(args.cell || (acceptance ? 400 : 620));
     const dpr = Number(args.dpr || (acceptance ? 1 : 2));
     const settle = Number(args.settle || 350);
@@ -285,7 +291,9 @@ async function main() {
         ? PHASE4_ACCEPTANCE_VIEWS
         : phase5
             ? PHASE5_ACCEPTANCE_VIEWS
-            : [...(withPhotos ? REFERENCE_VIEWS : []), ...REVIEW_VIEWS]
+            : identity
+                ? IDENTITY_AUDIT_VIEWS
+                : [...(withPhotos ? REFERENCE_VIEWS : []), ...REVIEW_VIEWS]
     ).filter((v) => !only || only.includes(v.id));
 
     if (!views.length) {

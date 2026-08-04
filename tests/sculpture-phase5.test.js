@@ -1,10 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFigure } from '../sculpture/src/model/figure.js';
+import {
+    ARM_POSES,
+    FACE_STYLES,
+    ROLE_BODY_STYLES,
+    buildFigure,
+} from '../sculpture/src/model/figure.js';
 import { FIGURE_LAYOUT } from '../sculpture/src/model/sculpture.js';
-import { sdTriPrism } from '../sculpture/src/model/sdf.js';
-import { PHASE5_ACCEPTANCE_VIEWS } from '../tools/sculpture-views.mjs';
+import {
+    IDENTITY_AUDIT_VIEWS,
+    PHASE5_ACCEPTANCE_VIEWS,
+} from '../tools/sculpture-views.mjs';
 import { SCULPTURE_THREE as THREE } from './helpers/sculpture-three.js';
 
 function bounds(geometry) {
@@ -34,7 +41,7 @@ function edgeCounts(geometry) {
             [idx[i + 1], idx[i + 2]],
             [idx[i + 2], idx[i]],
         ]) {
-            const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+            const key = a < b ? a + ':' + b : b + ':' + a;
             edges.set(key, (edges.get(key) || 0) + 1);
         }
     }
@@ -44,120 +51,205 @@ function edgeCounts(geometry) {
     };
 }
 
-test('C4 shifts the upper column over the support side while the planted hem stays fixed', () => {
-    const common = { seed: 11, only: ['body'], stride: -1, strideAngle: 0.10 };
-    const neutral = buildFigure(THREE, { ...common, weightShift: 0 });
-    const weighted = buildFigure(THREE, { ...common, weightShift: -0.110 });
-    const a = neutral.attributes.position;
-    const b = weighted.attributes.position;
-    assert.equal(a.count, b.count);
-
-    let groundMax = 0;
-    let upperDx = 0;
-    let upperCount = 0;
-    for (let i = 0; i < a.count; i++) {
-        const dx = b.getX(i) - a.getX(i);
-        assert.ok(Number.isFinite(dx));
-        if (a.getY(i) <= 0.18) groundMax = Math.max(groundMax, Math.abs(dx));
-        if (a.getY(i) >= 1.35) {
-            upperDx += dx;
-            upperCount++;
-        }
-    }
-    assert.ok(groundMax < 1e-6, 'support foot and ground hem must not slide');
-    assert.ok(upperCount > 100);
-    assert.ok(upperDx / upperCount < -0.105, 'upper mass must settle toward the left support foot');
-});
-
-test('D2 keeps the turned figure behind at the front and dominant from group right', () => {
-    const anchor = FIGURE_LAYOUT[0];
-    const turned = FIGURE_LAYOUT.find((figure) => figure.pregnant);
-    assert.ok(turned);
-    assert.ok(turned.z < anchor.z, 'turned figure must stand behind the front anchor');
-
-    const yaw = 62 * Math.PI / 180;
-    const projectedDepth = (figure) => figure.x * Math.sin(yaw) + figure.z * Math.cos(yaw);
-    const depths = FIGURE_LAYOUT.map(projectedDepth);
-    const turnedDepth = projectedDepth(turned);
-    assert.equal(turnedDepth, Math.max(...depths));
-    assert.ok(turnedDepth - Math.max(...depths.filter((depth) => depth !== turnedDepth)) > 0.035,
-        'right-side dominance needs a visible depth margin');
-
-    const faceX = Math.sin(turned.turn), faceZ = Math.cos(turned.turn);
-    const awayX = -Math.sin(yaw), awayZ = -Math.cos(yaw);
-    assert.ok(faceX * awayX + faceZ * awayZ > 0.98,
-        'the whole figure must present its broad back, not its narrow side, to the right camera');
-});
-
-test('B3 collar shell remains closed and terminates as a broad crown arch', () => {
-    const shell = buildFigure(THREE, {
-        only: ['shell'], seed: 23, cowlTop: 2.44, openScale: 0.94,
-        folds: 8, foldDepth: 0.86, foldPhase: 1.7,
-        sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038,
-        trainAngle: 3.10, trainAmount: 0.44,
-    });
-    assert.deepEqual(edgeCounts(shell), { boundary: 0, nonmanifold: 0 });
-
-    const p = shell.attributes.position;
-    const maxY = bounds(shell).maxY;
-    let minX = Infinity, maxX = -Infinity, count = 0;
-    for (let i = 0; i < p.count; i++) {
-        if (p.getY(i) < maxY - 0.025) continue;
-        minX = Math.min(minX, p.getX(i));
-        maxX = Math.max(maxX, p.getX(i));
-        count++;
-    }
-    assert.ok(count > 40);
-    assert.ok(maxX - minX > 0.36, 'crown must stay broad instead of collapsing to a point');
-});
-
-test('E3 uses a closed triangular carving tool with real depth', () => {
-    const socket = (x, y, z) => sdTriPrism(
-        x, y, z,
-        -0.032, 0.013, 0.030, 0.009, 0.009, -0.020,
-        0.029
+test('six alternating reliefs preserve the photographed physical order and facing', () => {
+    assert.deepEqual(
+        FIGURE_LAYOUT.map((figure) => figure.id),
+        [
+            'outward-developing',
+            'hospital-doctor',
+            'outward-mother',
+            'hospital-pregnant',
+            'outward-visitor',
+            'hospital-badge',
+        ],
     );
-    assert.ok(socket(0.002, 0.001, 0) < 0, 'triangle centroid should be inside');
-    assert.ok(socket(0.060, 0, 0) > 0, 'point beside the triangle should be outside');
-    assert.ok(socket(0.002, 0.001, 0.040) > 0, 'point beyond the back wall should be outside');
+    assert.deepEqual(
+        FIGURE_LAYOUT.map((figure) => figure.side),
+        ['outward', 'hospital', 'outward', 'hospital', 'outward', 'hospital'],
+    );
+    assert.equal(FIGURE_LAYOUT.length, 6);
 
-    const head = buildFigure(THREE, {
-        only: ['head'], hair: 'none', seed: 11, headTurn: 0, headTilt: 0,
-    });
-    const p = head.attributes.position;
-    for (const side of [-1, 1]) {
-        let minZ = Infinity, count = 0;
-        for (let i = 0; i < p.count; i++) {
-            if (Math.abs(p.getX(i) - side * 0.0694) < 0.050
-                && p.getY(i) > 2.085 && p.getY(i) < 2.165
-                && p.getZ(i) > 0.080 && p.getZ(i) < 0.130) {
-                minZ = Math.min(minZ, p.getZ(i));
-                count++;
-            }
+    const visitor = FIGURE_LAYOUT.find((figure) => figure.identity === 'visitor');
+    assert.ok(visitor.turn > 0.30, 'visitor panel retains the photographed profile turn');
+    assert.ok(visitor.headTurn > 0.10, 'visitor face continues the profile turn');
+    for (const figure of FIGURE_LAYOUT) {
+        assert.ok(Math.abs(figure.headTurn) < 0.35, figure.id + ' keeps an anatomical local head turn');
+        if (figure.side === 'outward') {
+            assert.ok(Math.cos(figure.turn) > 0.90, figure.id + ' faces the outward side');
+        } else {
+            assert.ok(Math.cos(figure.turn) < -0.90, figure.id + ' faces the hospital side');
         }
-        assert.ok(count > 300, `socket ${side} should survive surface nets`);
-        assert.ok(0.12015 - minZ > 0.024, `socket ${side} should retain at least 24mm depth`);
     }
 });
 
-test('E5 hair cap extends past the skull at the temple and preserves the cut edge', () => {
-    const common = { only: ['head'], seed: 37, headTurn: 0, headTilt: 0 };
-    const bare = bounds(buildFigure(THREE, { ...common, hair: 'none' }));
-    const cap = bounds(buildFigure(THREE, { ...common, hair: 'cap' }));
-    assert.ok(cap.maxX - bare.maxX > 0.012);
-    assert.ok(bare.minX - cap.minX > 0.012);
-    assert.ok(bare.minZ - cap.minZ > 0.035, 'smooth cap must remain a substantial rear mass');
+test('the six narratives and hair treatments occur exactly once on the correct side', () => {
+    const byIdentity = new Map(FIGURE_LAYOUT.map((figure) => [figure.identity, figure]));
+    assert.deepEqual([...byIdentity.keys()].sort(), [
+        'badge', 'developing', 'doctor', 'mother', 'pregnant', 'visitor',
+    ]);
+
+    assert.equal(byIdentity.get('developing').side, 'outward');
+    assert.ok(byIdentity.get('developing').belly > 0 && byIdentity.get('developing').belly < 0.35);
+    assert.equal(byIdentity.get('mother').side, 'outward');
+    assert.equal(byIdentity.get('mother').baby, true);
+    assert.equal(byIdentity.get('visitor').side, 'outward');
+
+    assert.equal(byIdentity.get('badge').side, 'hospital');
+    assert.equal(byIdentity.get('badge').badge, true);
+    assert.equal(byIdentity.get('pregnant').side, 'hospital');
+    assert.equal(byIdentity.get('pregnant').belly, 1);
+    assert.equal(byIdentity.get('doctor').side, 'hospital');
+    assert.equal(byIdentity.get('doctor').stethoscope, true);
+
+    assert.deepEqual(
+        Object.fromEntries([...byIdentity].map(([id, figure]) => [id, figure.hair])),
+        {
+            developing: 'none',
+            doctor: 'cap',
+            mother: 'capbun',
+            pregnant: 'cap',
+            visitor: 'capbun',
+            badge: 'none',
+        },
+    );
+
+    assert.equal(FIGURE_LAYOUT.filter((figure) => figure.baby).length, 1);
+    assert.equal(FIGURE_LAYOUT.filter((figure) => figure.stethoscope).length, 1);
+    assert.equal(FIGURE_LAYOUT.filter((figure) => figure.badge).length, 1);
+    assert.equal(FIGURE_LAYOUT.filter((figure) => figure.belly === 1).length, 1);
+});
+test('role contours and arm gestures encode the photographed six narratives', () => {
+    const identities = FIGURE_LAYOUT.map((figure) => figure.identity).sort();
+    assert.deepEqual(Object.keys(ROLE_BODY_STYLES).sort(), identities);
+
+    const contourSignatures = Object.values(ROLE_BODY_STYLES)
+        .map((style) => JSON.stringify(style.contour));
+    const bustSignatures = Object.values(ROLE_BODY_STYLES)
+        .map((style) => JSON.stringify(style.bust));
+    assert.equal(new Set(contourSignatures).size, 6, 'every role needs its own height contour');
+    assert.equal(new Set(bustSignatures).size, 6, 'every role needs its own chest proportions');
+
+    const developing = ARM_POSES.developing;
+    assert.ok(developing[1].wrist[0] < developing[1].elbow[0] - 0.10,
+        'developing forearm must cross inward over the lower abdomen');
+    assert.ok(developing[1].tip[0] < 0,
+        'developing gesture must finish across the centre line');
+
+    const pregnancy = ARM_POSES.pregnant;
+    assert.ok(pregnancy.every((arm) => !arm.tip && !arm.support),
+        'pregnancy references do not show a cupping arm');
+    assert.ok(pregnancy.every((arm) => arm.depth <= 0.42),
+        'pregnancy arms must remain shallow flank reliefs');
 });
 
-test('Phase 5 visual gate retains all diagnostic and delivery cameras', () => {
-    assert.equal(PHASE5_ACCEPTANCE_VIEWS.length, 7);
+test('face and crown parameters preserve six structural identities', () => {
+    const identities = FIGURE_LAYOUT.map((figure) => figure.identity).sort();
+    assert.deepEqual(Object.keys(FACE_STYLES).sort(), identities);
+
+    const signatures = Object.values(FACE_STYLES).map((face) => JSON.stringify([
+        face.headWidth, face.headHeight, face.faceWidth, face.nose, face.noseWidth,
+        face.noseLean, face.mouth, face.browWidth, face.eyeSpacing, face.jaw,
+        face.cheekAsym,
+    ]));
+    assert.equal(new Set(signatures).size, 6);
+    assert.equal(FACE_STYLES.mother.rolls, 1);
+    assert.equal(FACE_STYLES.visitor.rolls, 2);
+    for (const identity of ['developing', 'doctor', 'pregnant', 'badge']) {
+        assert.equal(FACE_STYLES[identity].rolls, 0);
+    }
+
+    const byIdentity = new Map(FIGURE_LAYOUT.map((figure) => [figure.identity, figure]));
+    assert.ok(byIdentity.get('mother').headTurn >= 0.15,
+        'mother retains the reference three-quarter head turn');
+    assert.ok(byIdentity.get('visitor').headTurn >= 0.25,
+        'visitor retains the reference profile head turn');
+});
+
+test('all six production heads are closed manifold identity meshes', () => {
+    for (const figure of FIGURE_LAYOUT) {
+        const head = buildFigure(THREE, { ...figure, only: ['head'] });
+        assert.deepEqual(edgeCounts(head), { boundary: 0, nonmanifold: 0 }, figure.id);
+        assert.ok(head.index.count / 3 < 250000, figure.id + ' exceeds head triangle budget');
+    }
+});
+
+test('the swept negative relief adds rear depth without moving the tuned front plane', () => {
+    const common = {
+        seed: 37,
+        identity: 'mother',
+        only: ['body'],
+        torsoWidth: 0.98,
+        torsoDepth: 0.80,
+        stride: -1,
+        strideAngle: 0.06,
+        hemRake: 0.038,
+    };
+    const flat = buildFigure(THREE, { ...common, sheetDepth: 0 });
+    const swept = buildFigure(THREE, { ...common, sheetDepth: 0.43 });
+    const a = bounds(flat);
+    const b = bounds(swept);
+
+    assert.ok(b.minZ < a.minZ - 0.30, 'rear fin should add substantial depth');
+    assert.ok(Math.abs(b.maxZ - a.maxZ) < 0.025, 'front relief plane should remain fixed');
+    assert.deepEqual(edgeCounts(swept), { boundary: 0, nonmanifold: 0 });
+});
+
+test('all six production body fields remain closed manifolds within the mobile triangle budget', () => {
+    const byIdentity = new Map();
+    for (const figure of FIGURE_LAYOUT) {
+        const body = buildFigure(THREE, { ...figure, only: ['body'] });
+        assert.deepEqual(edgeCounts(body), { boundary: 0, nonmanifold: 0 }, figure.id);
+        assert.ok(body.index.count / 3 < 170000, figure.id + ' exceeds body triangle budget');
+        byIdentity.set(figure.identity, bounds(body));
+    }
+
+    assert.ok(
+        byIdentity.get('pregnant').maxZ > byIdentity.get('doctor').maxZ + 0.08,
+        'full pregnancy must remain a distinct forward body silhouette',
+    );
+});
+test('identity audit covers a complete neutral orbit without duplicate angles', () => {
+    assert.equal(IDENTITY_AUDIT_VIEWS.length, 8);
+    assert.deepEqual(
+        IDENTITY_AUDIT_VIEWS.map((view) => view.yaw),
+        [0, 45, 90, 135, 180, 225, 270, 315],
+    );
+    assert.ok(IDENTITY_AUDIT_VIEWS.every((view) => view.viewport[0] === view.viewport[1]));
+    assert.ok(IDENTITY_AUDIT_VIEWS.every((view) => view.target.length === 3));
+});
+
+test('Phase 5 visual gate retains both sides, fine details, feet and mobile views', () => {
+    assert.equal(PHASE5_ACCEPTANCE_VIEWS.length, 10);
     const byId = new Map(PHASE5_ACCEPTANCE_VIEWS.map((view) => [view.id, view]));
     for (const id of [
-        'p5-01-weight-front', 'p5-02-arrangement-right', 'p5-03-connected-shadow',
-        'p5-04-collar-under', 'p5-05-eye-sockets', 'p5-06-hair-temple',
-        'p5-07-mobile-full',
-    ]) assert.ok(byId.has(id), `missing Phase 5 view: ${id}`);
-    assert.deepEqual(byId.get('p5-07-mobile-full').viewport, [390, 844]);
-    assert.ok(byId.get('p5-05-eye-sockets').fov <= 16);
-    assert.ok(byId.get('p5-05-eye-sockets').distance >= 2.05);
+        'p5-01-outward-order',
+        'p5-02-hospital-order',
+        'p5-03-negative-relief',
+        'p5-04-newborn-support',
+        'p5-05-pregnancy-instrument',
+        'p5-06-grounded-feet',
+        'p5-07-mobile-outward',
+        'p5-08-mobile-hospital',
+        'p5-09-outward-identities',
+        'p5-10-hospital-identities',
+    ]) assert.ok(byId.has(id), 'missing Phase 5 view: ' + id);
+
+    assert.deepEqual(byId.get('p5-07-mobile-outward').viewport, [390, 844]);
+    assert.deepEqual(byId.get('p5-08-mobile-hospital').viewport, [390, 844]);
+    assert.ok(byId.get('p5-07-mobile-outward').distance >= 8,
+        'narrow outward view must contain the full six-panel width');
+    assert.ok(byId.get('p5-08-mobile-hospital').distance >= 8,
+        'narrow hospital view must contain the full six-panel width');
+    assert.ok(byId.get('p5-04-newborn-support').fov <= 28);
+    const identityViews = [
+        byId.get('p5-09-outward-identities'),
+        byId.get('p5-10-hospital-identities'),
+    ];
+    assert.ok(identityViews.every((view) => view.photo && view.target[1] >= 2));
+    assert.ok(identityViews.every((view) => view.distance <= 3.1));
+    const feetView = byId.get('p5-06-grounded-feet');
+    const cameraY = feetView.target[1]
+        + Math.sin(feetView.pitch * Math.PI / 180) * feetView.distance;
+    assert.ok(cameraY > 0.12, 'feet camera must stay above the paving');
+    assert.ok(cameraY < 0.35, 'feet camera should retain the photographed low viewpoint');
 });
