@@ -57,6 +57,12 @@ correct geometry look too deep, wide or compressed. Choose a diagnostic camera
 that exposes the exact axis or contour being edited and add an orthogonal view
 when depth remains ambiguous.
 
+When a camera is matched to a reference CROP, compute its field of view from
+the crop, never from the full photograph — a crop is a narrower FOV at the
+same station point, and using the photo's FOV silently mismatches every
+proportion judged in the pair. Build the photo|model contact-sheet harness
+(all matched poses, one browser boot) before shaping begins, not after.
+
 For responsive fitting, derive horizontal FOV from vertical FOV and aspect:
 
 ```text
@@ -72,7 +78,8 @@ Do not tune portrait mobile framing by vertical FOV alone.
 
 Prefer existing project and library primitives:
 
-- GLTF/GLB loaders for supplied authored assets;
+- GLTF/GLB loaders for supplied authored assets, only where the project's
+  representation contract permits imported assets at all;
 - TubeGeometry for continuous narrow paths;
 - LatheGeometry or profiles for axial forms;
 - Shape/ExtrudeGeometry for planar profiles with thickness;

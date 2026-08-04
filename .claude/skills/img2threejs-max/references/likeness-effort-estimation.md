@@ -307,6 +307,16 @@ The estimator and workflow deliberately price or block these failure modes:
 - Vertical-FOV-only framing that clips wide geometry on mobile.
 - Closing a phase with unresolved critical human-review items because later
   polish is expected.
+- Scoring the full acceptance checklist in the same session that built the
+  geometry: a complete 41-item self-scored pass has been invalidated wholesale
+  by one independent full-resolution re-read of the references.
+- Treating a green numeric gate beside a visibly worse render as progress; both
+  recorded occurrences meant the measurement or its normalization was wrong,
+  and the fix was to re-measure, not to keep modelling.
+- Declaring a detail's diagnostic pixel scale by copying the scene's width into
+  `objectWidthPx`, or back-deriving `smallestSignalMm` from the chosen voxel so
+  the sampling ratio clears the gate. The contract validator now cross-checks
+  declared widths against the declared camera and asks for signal provenance.
 
 The fastest route is early observability: identify the exact feature, choose a
 representation that can carry it, render the axis that reveals it and reject

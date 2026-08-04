@@ -3,12 +3,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Keep in sync with REPRESENTATION in estimate-likeness-effort.mjs.
 const REPRESENTATIONS = new Set([
     'sampled-field',
     'explicit-geometry',
+    'explicit-mesh',
+    'parametric',
+    'primitive-composition',
     'hybrid',
     'texture',
+    'texture-relief',
+    'authored-asset',
 ]);
+// Declared px widths must stay within these ratios of what the declared
+// camera actually projects for the declared physical bounds. Foreshortening
+// legitimately shrinks the projection, so the lower bound is loose; a declared
+// width far ABOVE the projection means the scene's width was copied into a
+// detail's view.
+const PROJECTION_RATIO_MIN = 0.3;
+const PROJECTION_RATIO_MAX = 2;
+const DIAGNOSTIC_MIN_WIDTH_PX = 150;
 const PURPOSES = new Set(['diagnostic', 'delivery']);
 const ACCEPTANCE = new Set(['pending', 'pass', 'fail']);
 
@@ -36,6 +50,41 @@ function classifyRatio(ratio) {
     if (ratio < 3) return 'unsafe';
     if (ratio < 6) return 'fragile';
     return 'stable';
+}
+
+/**
+ * Pixels one model unit projects to at the view's target distance. Returns
+ * null when any input needed for the projection is missing or invalid.
+ */
+function pxPerModelUnit(view) {
+    const camera = view?.camera;
+    if (!camera || !isNumberArray(view.viewport, 2, true)) return null;
+    if (!isPositiveNumber(camera.fov) || camera.fov >= 180) return null;
+    if (!isPositiveNumber(camera.distance)) return null;
+    return view.viewport[1] / (2 * camera.distance * Math.tan(camera.fov * Math.PI / 360));
+}
+
+function checkProjectedScale(detail, id, metersPerUnit, warnings) {
+    if (!isNumberArray(detail.physicalBoundsMm, 3, true)) return;
+    const widthUnits = Math.max(...detail.physicalBoundsMm) / 1000 / metersPerUnit;
+    for (const view of detail.integratedViews ?? []) {
+        const scale = pxPerModelUnit(view);
+        if (scale === null || !isPositiveNumber(view?.objectWidthPx)) continue;
+        const expected = widthUnits * scale;
+        const ratio = view.objectWidthPx / expected;
+        const label = id + ': view ' + view.id;
+        if (ratio > PROJECTION_RATIO_MAX || ratio < PROJECTION_RATIO_MIN) {
+            warnings.push(label + ' declares objectWidthPx=' + view.objectWidthPx
+                + ' but the declared camera projects the declared bounds at ~'
+                + expected.toFixed(0) + ' px (' + ratio.toFixed(2)
+                + 'x); measure the object, do not copy the scene width');
+        }
+        if (view.purpose === 'diagnostic' && expected < DIAGNOSTIC_MIN_WIDTH_PX) {
+            warnings.push(label + ' can project this object at only ~'
+                + expected.toFixed(0) + ' px; the ' + DIAGNOSTIC_MIN_WIDTH_PX
+                + ' px diagnostic floor is unreachable from this camera - move it closer');
+        }
+    }
 }
 
 function validateView(detailId, view, index, errors) {
@@ -83,7 +132,7 @@ function validateView(detailId, view, index, errors) {
     }
 }
 
-function validateDetail(detail, closeout, ids, errors, warnings, rows) {
+function validateDetail(detail, closeout, ids, errors, warnings, rows, metersPerUnit) {
     if (!detail || typeof detail !== 'object') {
         errors.push('Each details entry must be an object');
         return;
@@ -130,6 +179,11 @@ function validateDetail(detail, closeout, ids, errors, warnings, rows) {
     let ratio = null;
     let ratioClass = 'n/a';
     if (detail.representation === 'sampled-field' || detail.representation === 'hybrid') {
+        if (typeof detail.signalProvenance !== 'string' || !detail.signalProvenance.trim()) {
+            warnings.push(id + ': no signalProvenance for smallestSignalMm; record the'
+                + ' reference crop and px-to-mm conversion it was measured from, and never'
+                + ' derive the signal from the voxel size to clear the sampling gate');
+        }
         if (!isPositiveNumber(detail.voxelMm)) {
             errors.push(id + ': voxelMm is required for ' + detail.representation);
         } else if (isPositiveNumber(detail.smallestSignalMm)) {
@@ -168,6 +222,7 @@ function validateDetail(detail, closeout, ids, errors, warnings, rows) {
         if (closeout && !views.some((view) => view?.purpose === 'delivery')) {
             errors.push(id + ': closeout requires at least one delivery view');
         }
+        checkProjectedScale(detail, id, metersPerUnit, warnings);
     }
 
     for (const key of ['meshAssertions', 'renderAssertions']) {
@@ -224,12 +279,20 @@ if (contract?.version !== 1) errors.push('version must be 1');
 if (typeof contract?.project !== 'string' || !contract.project.trim()) {
     errors.push('project must be a non-empty string');
 }
+let metersPerUnit = 1;
+if (contract?.modelMetersPerUnit !== undefined) {
+    if (!isPositiveNumber(contract.modelMetersPerUnit)) {
+        errors.push('modelMetersPerUnit must be a positive number when present');
+    } else {
+        metersPerUnit = contract.modelMetersPerUnit;
+    }
+}
 if (!Array.isArray(contract?.details) || contract.details.length === 0) {
     errors.push('details must contain at least one entry');
 } else {
     const ids = new Set();
     contract.details.forEach((detail) => {
-        validateDetail(detail, closeout, ids, errors, warnings, rows);
+        validateDetail(detail, closeout, ids, errors, warnings, rows, metersPerUnit);
     });
 }
 

@@ -426,6 +426,7 @@ function evaluate(threshold) {
         targetScore: threshold.targetScore,
         profileScore: weightedScore(plan.features, (feature) => targetLevel(feature, threshold)),
         status: uniqueBlockers.length ? 'blocked' : uniqueRisks.length ? 'at-risk' : 'feasible',
+        achievableAsScoped: uniqueBlockers.length === 0,
         cycles,
         nominalFeatureCycles: nominal,
         tokenRange: [
@@ -500,6 +501,10 @@ if (cli.json) {
         console.log('  Declared target/profile score: ' + target.targetScore
             + '% / ' + target.profileScore.toFixed(2) + '%');
         console.log('  Validated iteration cycles: ' + target.cycles[0] + '-' + target.cycles[1]);
+        if (target.blockers.length) {
+            console.log('  Note: ranges still include work on blocked features;'
+                + ' this target is NOT achievable as scoped until the blockers are resolved.');
+        }
         console.log('  Active engineering time: ' + formatDecimal(target.activeHoursRange[0])
             + '-' + formatDecimal(target.activeHoursRange[1]) + ' hours');
         console.log('  Model tokens: ' + formatAmount(target.tokenRange[0]) + '-'

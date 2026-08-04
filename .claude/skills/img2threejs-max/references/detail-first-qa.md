@@ -21,12 +21,25 @@ Every contract needs:
 - exact reference image and pixel crop;
 - 3-8 stable landmarks, edges or negative spaces;
 - model-space width, height and depth;
-- the smallest stroke, gap or relief carrying identity;
+- the smallest stroke, gap or relief carrying identity, with the measurement
+  provenance that produced it (crop and px-to-mm conversion);
 - contact, crossing, clearance and occlusion expectations;
 - representation and its resolution;
 - isolated and integrated render routes;
 - fixed camera and viewport values;
 - mesh, render and human acceptance criteria.
+
+The two most gameable numbers get explicit rules. `smallestSignalMm` is a
+reference measurement made BEFORE choosing the voxel size; deriving it from
+the voxel so the sampling ratio clears the gate defeats the gate, and a batch
+of ratios that all land just above the boundary is itself a review flag.
+`objectWidthPx` is what the declared camera projects for THIS object
+(`px = widthInModelUnits * viewportHeight / (2 * distance * tan(fov / 2))`),
+not the scene's width. Relabelling a whole-scene camera as a small detail's
+diagnostic view satisfies the pixel floor on paper while the detail renders at
+a fraction of it; the validator cross-checks every view's declared width
+against its camera and warns on impossible claims and on diagnostic cameras
+that cannot reach the 150 px floor at all.
 
 Before per-detail contracts, build a scene ledger covering every subject or
 panel. Record physical order, front/back, facing, pose, body state, hair,
@@ -173,7 +186,13 @@ Require for each named fine feature:
 
 Require for the scene:
 
-- a reconciled subject ledger with correct count, order, facing and relief side;
+- a subject ledger re-verified against the FULL-RESOLUTION references at
+  closeout — count, order, facing and relief class. A complete detail-contract
+  pass built on a wrong structural census is void, not partially credited; a
+  41-item self-scored acceptance has been invalidated wholesale by one
+  independent full-resolution re-read;
+- an independent acceptance pass by a reviewer who did not build the geometry,
+  judging only the matched photo|model pairs, with every demotion recorded;
 - no page or console errors;
 - nonblank, sufficiently opaque and nonuniform framebuffer samples;
 - fixed view matrix with live camera values recorded;

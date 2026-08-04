@@ -1,6 +1,7 @@
 {
   "version": 1,
   "project": "replace-with-project-name",
+  "modelMetersPerUnit": 1,
   "details": [
     {
       "id": "replace-with-detail-id",
@@ -14,6 +15,7 @@
       ],
       "physicalBoundsMm": [120, 80, 35],
       "smallestSignalMm": 30,
+      "signalProvenance": "Measured on validation/reference.png crop [0,0,512,512]: 30 mm from 24 px at 0.8 px/mm. Measure before choosing the voxel size; never derive this from the voxel.",
       "representation": "sampled-field",
       "voxelMm": 5,
       "occlusionContract": "Describe contacts, clearances and allowed occlusion.",
@@ -29,10 +31,10 @@
             "target": [0, 1, 0],
             "yaw": 0,
             "pitch": 0,
-            "distance": 2.5
+            "distance": 0.75
           },
-          "objectWidthPx": 200,
-          "smallestSignalPx": 10
+          "objectWidthPx": 198,
+          "smallestSignalPx": 45
         },
         {
           "id": "mobile-delivery",
@@ -46,7 +48,7 @@
             "pitch": 0,
             "distance": 4.5
           },
-          "objectWidthPx": 60,
+          "objectWidthPx": 30,
           "smallestSignalPx": 3
         }
       ],

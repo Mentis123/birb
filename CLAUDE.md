@@ -165,6 +165,13 @@ Three-finger QR as usual.
 > `.claude/skills/img2threejs-max/SKILL.md`.** Its scripts, contracts and
 > reference guidance are part of the workflow. The zero-production-asset rule
 > below is immutable; reference imagery is evidence, never a runtime dependency.
+>
+> **Staleness warning:** parts of this section's narrative predate the
+> 2026-08-04 six-relief reconstruction and still describe four freestanding
+> figures on a crowded diagonal. Where they disagree,
+> `sculpture/ARCHITECTURE.md` and `sculpture/validation/phase-5-closeout.md`
+> are authoritative: the object is ONE folded casting of six alternating
+> positive/negative reliefs.
 
 Own stack, same house rules as Gauntlet: pinned CDN Three, vanilla ES modules,
 no build step, **zero production assets** — the running sculpture imports no

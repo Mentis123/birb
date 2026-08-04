@@ -1,6 +1,6 @@
 ---
 name: img2threejs-max
-description: Scope, estimate, build, repair, and optimize reference-accurate Three.js models and scenes from images with explicit fidelity thresholds, calibrated effort ranges, detail-first observability, representation-scale analysis, deterministic geometry checks, reproducible screenshots, desktop/mobile visual QA, strict zero-asset support, and honest closeout. Use when the user invokes /img2threejsMAX; asks how much work or how many tokens are needed to reach a stated likeness; asks to turn photos, screenshots, scans, or concept art into Three.js/WebGL/3D geometry; asks to improve a model's likeness or fine details; or reports clipping, see-through surfaces, missing geometry, incorrect order or orientation, weak faces/hair/body shape/hands/feet/accessories, poor materials/lighting, mobile framing, or an inability to reproduce visual defects.
+description: Scope, estimate, build, repair, and optimize reference-accurate Three.js models and scenes from images, with explicit fidelity thresholds, calibrated effort ranges, detail-first observability, deterministic geometry checks, and honest closeout. Use when the user invokes /img2threejsMAX; asks how much work or how many tokens a stated likeness target needs; asks to turn photos, screenshots, scans, or concept art into Three.js/WebGL/3D geometry; asks to improve an image-referenced model's likeness, fine details, materials, or framing; or reports visual defects in a reference-driven reconstruction (clipping, see-through or missing surfaces, wrong order/facing, weak faces/hands/anatomy/accessories). Not for gameplay, physics, or scene bugs unrelated to matching reference imagery.
 ---
 
 # /img2threejsMAX
@@ -69,6 +69,12 @@ one:
    image.
 8. Mark every uncertain or occluded fact. Do not silently turn an inference into
    reference truth.
+9. Stand up the matched-comparison harness before shaping anything: one
+   scripted browser boot that renders every stored camera pose beside its
+   reference crop (photo | model). Match each camera to the CROP's field of
+   view, never the full photograph's. Judging renders against a memory of the
+   photo has hidden 40 percent scale errors across whole sessions; the first
+   side-by-side pair exposed one in a minute.
 
 When the repository already has a rendering, testing or geometry pattern, use
 it unless evidence shows that it cannot represent the required detail.
@@ -129,6 +135,19 @@ The contract must identify:
 - exact diagnostic and delivery cameras;
 - mesh and render assertions;
 - human pass/fail status and unresolved differences.
+
+Two anti-gaming rules for the numbers in the contract:
+
+- `smallestSignalMm` is a measurement of the reference (record the crop and the
+  px-to-mm conversion in `signalProvenance`), made before choosing a voxel
+  size. Never back-derive it from the voxel so the sampling ratio clears the
+  gate; a batch of ratios landing exactly on the boundary is a review flag.
+- `objectWidthPx` and `smallestSignalPx` are computed from the declared camera
+  (`px = widthInModelUnits * viewportHeight / (2 * distance * tan(fov / 2))`),
+  never copied from the scene's overall width. A whole-scene camera relabelled
+  as a detail's "diagnostic view" satisfies the pixel floor on paper while the
+  detail itself renders at a fraction of it; the validator cross-checks the
+  declared widths against the camera and flags impossible claims.
 
 Run:
 
@@ -268,21 +287,53 @@ Never convert framebuffer health, dimensions or topology into a fake likeness
 percentage. If likeness needs a percentage, use the predeclared weighted
 contract, record each feature level and state the denominator and evidence.
 
-## 9. Close out honestly
+## 9. Detect stagnation and review independently
+
+Track the accept/reject decision of every validated cycle per feature. Two
+consecutive cycles on the same feature without an accepted improvement is
+stagnation: stop editing and change strategy instead of iterating harder. Try
+these in order of suspicion:
+
+1. **Re-measure the reference.** A green gate beside a worse render means the
+   measurement or its normalization is wrong, not the model. Re-derive the
+   landmark table from the crops and normalize by a landmark every subject
+   actually shares; measuring different subjects against different rulers has
+   produced a 45 percent landmark error behind a green gate.
+2. **Re-audit the structural census at full resolution.** Wrong subject count,
+   order, relief class or facing invalidates every downstream contract.
+3. **Change representation or resolution** for the failing feature.
+4. **Re-frame the diagnostic camera.** A view that hides the edited axis
+   cannot arbitrate the edit.
+5. **Report the impasse with the evidence** rather than burning more cycles.
+
+Acceptance recorded by the author of the change, in the session that built it,
+is weak evidence: a complete 41-item self-scored pass has been invalidated
+wholesale by one independent full-resolution re-read. Before closeout, run an
+independent acceptance pass — a fresh session or subagent when available,
+judging only the matched photo|model pairs, not the code. For every accepted
+item, write the strongest one-sentence case that it FAILS against the crop;
+the item keeps its pass only if that sentence is not plausible. Record every
+demotion as an unresolved difference.
+
+## 10. Close out honestly
 
 Before completion:
 
-1. Run the contract validator with `--closeout`.
-2. Run targeted geometry tests, full project tests and any proportion gates.
-3. Capture all exact diagnostic and delivery views.
-4. Confirm no page or console errors and nonblank/nonuniform framebuffer data.
-5. Record triangles, draw calls and device/browser context.
-6. List unresolved visual differences and whether they are in or out of scope.
-7. Re-run the estimator with actual cycle samples and current feature levels;
+1. Re-verify the scene ledger against the full-resolution references — count,
+   physical order, facing, relief class per subject. A passing detail contract
+   built on a wrong structural census is void, not partially credited.
+2. Run the independent acceptance pass from section 9 and record demotions.
+3. Run the contract validator with `--closeout`.
+4. Run targeted geometry tests, full project tests and any proportion gates.
+5. Capture all exact diagnostic and delivery views.
+6. Confirm no page or console errors and nonblank/nonuniform framebuffer data.
+7. Record triangles, draw calls and device/browser context.
+8. List unresolved visual differences and whether they are in or out of scope.
+9. Re-run the estimator with actual cycle samples and current feature levels;
    report estimate error and recalibrate future ranges.
-8. Preserve unrelated local changes.
-9. Commit, push, open/merge a PR or deploy only when the user requests those
-   repository actions.
+10. Preserve unrelated local changes.
+11. Commit, push, open/merge a PR or deploy only when the user requests those
+    repository actions.
 
 Completion means the named details are observable and accepted now, not merely
 present in code.
