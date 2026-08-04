@@ -1,0 +1,4 @@
+interface:
+  display_name: "/img2threejsMAX"
+  short_description: "Three.js fidelity plans and effort estimates"
+  default_prompt: "Use $img2threejs-max to inventory these references, define supported fidelity thresholds, estimate validated cycles/time/tokens, and build or repair the Three.js scene with granular visual QA."

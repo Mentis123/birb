@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "project": "replace-with-project-name",
+  "details": [
+    {
+      "id": "replace-with-detail-id",
+      "semanticRead": "Describe what an unprompted viewer must recognize.",
+      "referenceAsset": "validation/reference.png",
+      "referenceCrop": [0, 0, 512, 512],
+      "referenceLandmarks": [
+        "landmark-a",
+        "landmark-b",
+        "landmark-c"
+      ],
+      "physicalBoundsMm": [120, 80, 35],
+      "smallestSignalMm": 30,
+      "representation": "sampled-field",
+      "voxelMm": 5,
+      "occlusionContract": "Describe contacts, clearances and allowed occlusion.",
+      "isolationProbe": "path/to/probe.html?only=detail-id",
+      "integratedViews": [
+        {
+          "id": "detail-diagnostic",
+          "purpose": "diagnostic",
+          "viewport": [1400, 900],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [0, 1, 0],
+            "yaw": 0,
+            "pitch": 0,
+            "distance": 2.5
+          },
+          "objectWidthPx": 200,
+          "smallestSignalPx": 10
+        },
+        {
+          "id": "mobile-delivery",
+          "purpose": "delivery",
+          "viewport": [390, 844],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [0, 1, 0],
+            "yaw": 0,
+            "pitch": 0,
+            "distance": 4.5
+          },
+          "objectWidthPx": 60,
+          "smallestSignalPx": 3
+        }
+      ],
+      "meshAssertions": [
+        "positive signed volume",
+        "zero boundary edges",
+        "expected component count"
+      ],
+      "renderAssertions": [
+        "opaque framebuffer",
+        "nonuniform luminance",
+        "named silhouette reads"
+      ],
+      "humanAcceptance": {
+        "status": "pending",
+        "unresolved": []
+      }
+    }
+  ]
+}
