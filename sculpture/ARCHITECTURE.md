@@ -102,13 +102,14 @@ One figure, in order, all in model/figure.js:
 Then in model/sculpture.js: `paintPatina()` writes vertex colours, four meshes
 share one `MeshStandardMaterial`, plus a base slab and the light rig.
 
-The current Phase 4 scene measures **514,780 triangles and 6 draw calls**
-in the nine-view local Chromium acceptance run. The increase is deliberate: the
-infant now has its own 5.5 mm closed field and the instrument uses actual curved
-tube geometry instead of being erased into the coarse torso field. Do not
-restore the old ~75k-per-figure / ~302k-total estimate or PR #412's 494,596
-count. The figures are not identical enough for a useful per-figure average.
-The historical simulated-mobile timing remains in
+The current Phase 5 scene measures **525,912 triangles and 6 draw calls**
+in the acceptance matrices. The Phase 4 increase was deliberate: the infant
+has its own 5.5 mm closed field and the instrument uses actual curved tube
+geometry instead of being erased into the coarse torso field. Phase 5 adds the
+deeper triangular head cavities and revised cap/cowl surfaces without
+adding draw calls. Do not restore the old ~75k-per-figure / ~302k-total estimate
+or PR #412's 494,596 count. The figures are not identical enough for a useful
+per-figure average. The historical simulated-mobile timing remains in
 validation/phase-3-closeout.md; it is a CI/SwiftShader result, not an iPhone
 measurement.
 
@@ -255,6 +256,9 @@ them feed the model. Everything they changed is written down above.
 
 **Nothing is claimed without a captured frame.** These three tools exist because
 every real bug in this model fell to an isolation test and none fell to tuning.
+The feature-scale limits, detail observation contract, measured feedback budget
+and closeout criteria are in [DETAIL-QA.md](DETAIL-QA.md). Apply that protocol
+before implementing any new fine feature.
 
 ```bash
 # The likeness loop. Photo | model at seven general matched/review cameras.
@@ -318,25 +322,26 @@ evidence by itself.
 
 ---
 
-## Where the model is, and what is left
+## Where the model is
 
 **LIKENESS.md is the scorecard: 41 binary checks, 90% is 37 of them.
-Phase 4 remains honestly scored at 35 / 41 after its second visual-acceptance
-correction.** The proportion gate is GREEN at 0 of 12 outside tolerance, worst
-+0.024 - necessary and not sufficient, since this gate has been green and wrong
-twice. The current closeout and nine-view evidence are in
-validation/phase-4-closeout.md and
-validation/phase-4-detail-correction.png. The earlier Phase 4 PNGs remain
-historical provenance.
+Phase 5 is locally complete at 41 / 41.** The proportion gate is GREEN at 0 of
+12 outside tolerance, worst +0.024 - necessary and not sufficient, since this
+gate has been green while the visual result was wrong. The current closeout is
+in `validation/phase-5-closeout.md`; the seven-view acceptance sheet, broader
+reference matrix and six-detail contract are in the same directory.
 
-The remaining work, in the order the evidence says to do it:
+The Phase 4 closeout and correction artifacts remain historical provenance.
+The real iPhone performance and interaction gate is still open.
+
+Phase closeout history:
 
 **Phase 1 — Mass. DONE (2026-08-02).** Every span widened ~20%, shoulder line
 dropped 1.911 → 1.849, head grown 33%, bust dropped 0.07 of figure height, and
 the torso table lost its waist — measured on the nearest figure the spans widen
 monotonically from shoulder to hem, where every earlier version pinched and
 flared. The train became a DISPLACEMENT rather than a radius scale, which was
-the whole of the 0.56-vs-0.39 hem error. Group tightened to 0.50 spacing across
+the whole of the 0.56-vs-0.39 hem error. Group tightened to 0.40 spacing across
 0.80-wide cloaks so it reads as one mass. Gate green, A1-A5 and B2/B4/D3/E6.
 
 **Phase 2 — The cloak as cast bronze, and the stride. DONE (2026-08-02;
@@ -351,16 +356,16 @@ belongs to the same field as the skirt: a buried root, instep and narrower
 forefoot overlap the hem deeply, while a restrained toe edge interrupts the
 front silhouette without detached pebbles or a paddle. Do not restore detached
 heel/toe primitives or exposed legs; ref-c-under shows a smooth robe-to-ground
-extension. B3 and C4
-remain.
+extension. Phase 5 retained this foot while adding the visible load-bearing
+shift required by C4 and completing the crown arch required by B3.
 
 **Phase 3 — Heads. DONE (2026-08-02; acceptance corrected 2026-08-03).**
 The head is a rounded BLOCK, not an ovoid — flat front, flat sides, domed top.
 The nearest is bare/plain. The rear-facing figure now rotates as one body,
 cowl and head, retaining a complete face on the opposite side without an
-impossible local neck twist. Two figures carry coiled top-knots. E3 and E5 remain: the eye
-sockets are shallow where the reference has hollow triangles, and the hair's
-temple edge is not legible at group distance.
+impossible local neck twist. Two figures carry coiled top-knots. Phase 5
+replaced the shallow sockets with triangular cavities and made the smooth hair
+cap terminate at a hard temple edge, completing E3 and E5.
 
 **Phase 4A — Arms and negative space. DONE (2026-08-03; acceptance
 corrected 2026-08-03).** Four reference-led paths replace the generic vertical
@@ -383,23 +388,27 @@ Do not optimize geometry from software-rendered timings alone.
 
 ### Phase 5A — arrangement, weight and shadow
 
-Target `C4`, `D2` and `H3`.
+DONE (2026-08-04). The upper-column weight shift, right-side projected-depth
+arrangement and connected-shadow diagnostic complete `C4`, `D2` and `H3`.
+Exact cameras and mesh assertions live in the Phase 5 contract and closeout.
 
 ### Phase 5B — remaining form and facial refinements
 
-Target `B3`, `E3` and `E5`.
+DONE (2026-08-04). The broad hollow cowl crown, triangular socket cuts and
+explicit hair-cap edge complete `B3`, `E3` and `E5`. Normal-material probes
+separate their geometry proof from bronze and lighting.
 
 ### Final ship gate
 
-- at least 37 / 41, honestly rescored;
-- proportions still green;
-- full test suite green;
-- matched contact sheet committed or reproducibly archived;
-- real iPhone 12-or-newer interaction and load test;
-- no console errors;
-- acceptable initial construction time and orbit performance.
+- [x] 41 / 41, honestly rescored.
+- [x] Proportion gate green: 0 of 12 outside tolerance, worst +0.024.
+- [x] Full 203-test suite green.
+- [x] Matched and acceptance sheets reproducibly archived.
+- [ ] Real iPhone 12-or-newer interaction and load test.
+- [x] No browser or console errors in local matrices.
+- [ ] Initial construction and orbit performance accepted on a real phone.
 
-### Process rules for that run
+### Process rules for future runs
 
 - Probe or measure before tuning. Every real bug fell to an isolation test.
 - One contact sheet per change, not five single renders.

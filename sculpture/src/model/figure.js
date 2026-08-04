@@ -35,7 +35,10 @@
  */
 
 import { fbm3 } from '../core/noise.js';
-import { sdEllipsoid, sdCapsule, sdRoundBox, smin, smax, subtract, surfaceNets } from './sdf.js';
+import {
+    sdEllipsoid, sdCapsule, sdRoundBox, sdTriPrism,
+    smin, smax, subtract, surfaceNets,
+} from './sdf.js';
 
 /**
  * Approximate distance to a capsule whose radius tapers along its centreline.
@@ -133,13 +136,23 @@ function sampleProfile(table, t) {
  * into shape by hand and hold every one of those pushes. `scale` sets the size
  * of the lumps and `amount` how deep they go.
  */
-function roughen(THREE, geo, { amount = 0.012, scale = 3.2, seed = 1, octaves = 2 } = {}) {
+function roughen(THREE, geo, {
+    amount = 0.012, scale = 3.2, seed = 1, octaves = 2,
+    topFadeStart = Infinity, topFadeEnd = Infinity, topAttenuation = 1,
+} = {}) {
     geo.computeVertexNormals();
     const pos = geo.attributes.position;
     const nor = geo.attributes.normal;
     for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-        const d = fbm3(x * scale, y * scale, z * scale, seed, octaves) * amount;
+        let gain = 1;
+        if (y > topFadeStart) {
+            const span = Math.max(1e-6, topFadeEnd - topFadeStart);
+            const t = Math.min(1, Math.max(0, (y - topFadeStart) / span));
+            const eased = t * t * (3 - 2 * t);
+            gain += (topAttenuation - 1) * eased;
+        }
+        const d = fbm3(x * scale, y * scale, z * scale, seed, octaves) * amount * gain;
         pos.setXYZ(i, x + nor.getX(i) * d, y + nor.getY(i) * d, z + nor.getZ(i) * d);
     }
     pos.needsUpdate = true;
@@ -165,8 +178,9 @@ function roughen(THREE, geo, { amount = 0.012, scale = 3.2, seed = 1, octaves = 
  *
  * The cross-section is a crescent (outer wall, inner wall, closed at the rim),
  * so the casting has real wall thickness and every free edge shows section.
- * `FRONT_OPENING` removes the whole front at every height; it does not turn a
- * closed robe into a hood only above the shoulders.
+ * `FRONT_OPENING` removes the whole front through the body and face. Only its
+ * terminal rings converge above the crown, forming the arch without turning the
+ * lower shell back into a closed robe.
  */
 const SHELL_PROFILE = [
     // [height, halfWidthX, halfDepthZ]
@@ -199,15 +213,15 @@ const SHELL_PROFILE = [
     [1.700, 0.398, 0.174],
     [1.800, 0.396, 0.170],
     [1.849, 0.392, 0.166],   // shoulder line
-    // The arch narrows hard above the shoulders. Left as wide as the body it
-    // framed each head in a doorway three times the head's width; in
-    // `ref-c-under.jpg` the collar clears the crown by a hand's breadth. It has
-    // to clear a HEAD, though, and the head is now a third bigger than it was.
-    [2.000, 0.340, 0.156],
-    [2.140, 0.302, 0.146],
-    [2.280, 0.264, 0.132],
-    [2.380, 0.220, 0.116],
-    [2.440, 0.180, 0.100],
+    // The shoulder sheet narrows quickly to head width, then stays broad and
+    // nearly vertical around the crown. Continuing the taper to the terminal
+    // ring made a tent; the photographs show a rounded rectangular cowl with
+    // roughly a hand's breadth of clearance around the head.
+    [2.000, 0.310, 0.156],
+    [2.100, 0.260, 0.145],
+    [2.240, 0.244, 0.135],
+    [2.360, 0.235, 0.125],
+    [2.440, 0.225, 0.120],
 ];
 
 /**
@@ -230,7 +244,7 @@ const SHELL_PROFILE = [
  * The body was fully modelled the whole time; you could not see any of it.
  */
 const FRONT_OPENING = [
-    // IT NEVER CLOSES. Earlier versions ran the opening to zero by knee height,
+    // IT NEVER CLOSES BELOW THE CROWN. Earlier versions ran it to zero by knee height,
     // which turned the cloak into a tube below the hip and put a deep dark V up
     // the front of every figure where its two rims converged. No amount of
     // moving these keyframes removed that notch, because the notch was the
@@ -238,7 +252,8 @@ const FRONT_OPENING = [
     //
     // The photographs show it does not. She wears a long skirt — that is the
     // smooth continuous surface down the front of her in `ref-a-front.jpg` — and
-    // the cloak is a panel hanging BEHIND it, open its whole height. So the
+    // the cloak is a panel hanging BEHIND it, open through the complete body
+    // and face. The only convergence is the short arch above the crown. So the
     // skirt is now part of the body field (see TORSO_PROFILE, which runs to the
     // ground) and the cloak just stays open.
     [0.000, 1.10],
@@ -250,9 +265,16 @@ const FRONT_OPENING = [
     [1.520, 1.34],
     [1.700, 1.46],
     [1.849, 1.58],   // shoulder
-    [2.030, 1.70],
-    [2.220, 1.80],
-    [2.440, 1.88],
+    // Above the shoulders the full-height cowl curls around the head, then the
+    // two free rims meet over the crown. Keeping the body-sized opening all the
+    // way up left only a rear plate; keeping even a face-width slot at the top
+    // produced two disconnected horns. Converging only in the final 24cm forms
+    // the broad inverted-U arch while the face and throat remain in open air.
+    [2.030, 1.28],
+    [2.180, 1.00],
+    [2.300, 0.68],
+    [2.380, 0.34],
+    [2.440, 0.012],
 ];
 
 /**
@@ -304,10 +326,11 @@ function buildShell(THREE, opts) {
         const [hw, hd] = sampleProfile(SHELL_PROFILE, y);
         const open = sampleProfile(FRONT_OPENING, y)[0] * opts.openScale;
         const zOff = shellOffsetZ(y);
-        // Round the last 28cm off to whatever height this cloak stops at, so a
-        // truncated one ends in a curve rather than a flat lid.
+        // SHELL_PROFILE already draws the arch by narrowing toward the crown.
+        // Keep only a restrained terminal easing here: the former 66% collapse
+        // pinched the opening to a point and hid its inner wall from below.
         const capT = Math.max(0, (y - (yTop - 0.28)) / 0.28);
-        const cap = 1 - 0.66 * capT * capT;
+        const cap = 1 - 0.10 * capT * capT;
 
         // THE CROSS-SECTION, as ONE closed loop: outer wall from the near edge
         // round the back to the far edge, a rounded bead over that edge, the
@@ -443,8 +466,15 @@ function buildShell(THREE, opts) {
     // Broad, low-frequency undulation: this is a big hand-beaten sheet, so it
     // should ripple rather than pebble — then a second finer pass for the
     // hammer marks, because ripple alone still reads as a moulded plastic shell.
-    roughen(THREE, geo, { amount: 0.020, scale: 2.0, seed: opts.seed });
-    return roughen(THREE, geo, { amount: 0.0060, scale: 10.5, seed: opts.seed + 9 });
+    const finishStart = yTop - 0.24;
+    roughen(THREE, geo, {
+        amount: 0.020, scale: 2.0, seed: opts.seed,
+        topFadeStart: finishStart, topFadeEnd: yTop, topAttenuation: 0.18,
+    });
+    return roughen(THREE, geo, {
+        amount: 0.0060, scale: 10.5, seed: opts.seed + 9,
+        topFadeStart: finishStart, topFadeEnd: yTop, topAttenuation: 0.42,
+    });
 }
 
 /**
@@ -466,7 +496,7 @@ function buildShell(THREE, opts) {
  */
 const TORSO_PROFILE = [
     // The trunk includes the skirt and runs all the way to the paving. It has to:
-    // the cloak's front opening never closes, so stopping the body at the hip
+    // the cloak's front opening never closes over the body, so stopping it at the hip
     // leaves no front surface below it and reads as a tear in the casting.
     // A STRAIGHT TAPER, WIDENING DOWNWARD, with no waist to speak of. Measured
     // off the nearest figure in `ref-a-front.jpg` at four heights, her spans go
@@ -863,10 +893,9 @@ function buildHeadField(THREE, o) {
      *   BROW   a straight ridge across the FULL width of the face, with a
      *          shadow under it. The old one was two thirds as wide and read as
      *          a bump between the eyes.
-     *   EYES   the Phase 3 approximation is two long shallow lens-shaped cuts,
-     *          nearly closed and angled slightly down and out. The reference
-     *          target remains a pair of hollow triangular sockets; that is E3
-     *          in the rubric and is intentionally still unresolved.
+     *   EYES   two hollow triangular sockets under the brow. Their planar
+     *          walls and 28mm world-space depth retain a shadow at the normal
+     *          group camera instead of collapsing into horizontal slits.
      *   NOSE   a NARROW ridge, about a sixth of the face across, running
      *          unbroken from between the brows to a small blunt tip.
      *   MOUTH  a WIDE flat bar, about half the face across, split by one
@@ -898,11 +927,13 @@ function buildHeadField(THREE, o) {
             // blending it away leaves a bald head. It must also stay behind the
             // facial plane; run forward as a fringe it builds a brim and the
             // whole face sits in a recess under it.
-            const hairFrontZ = 0.030 + 0.042 * ss(YC0 + 0.030, YC0 + 0.122, y);
+            const hairFrontZ = 0.064 + 0.018 * ss(YC0 + 0.030, YC0 + 0.122, y);
             let hair = sdRoundBox(x, y - (YC0 + 0.012), z + 0.020,
-                0.120, 0.150, 0.108, 0.056);
-            hair = smax(hair, z - hairFrontZ, 0.014);
-            d = smin(d, hair, 0.010);
+                0.130, 0.150, 0.112, 0.056);
+            hair = smax(hair, z - hairFrontZ, 0.002);
+            // A hard CSG union is intentional here. The cap is smooth, but its
+            // cut edge must change the surface normal abruptly at the temple.
+            d = Math.min(d, hair);
         }
 
         if (o.hair === 'capbun') {
@@ -945,17 +976,18 @@ function buildHeadField(THREE, o) {
             d = smin(d, sdEllipsoid(x, y - (YC0 + 0.055), z - 0.088,
                 0.086, 0.012, 0.019), 0.005);
 
-            // EYES: two shallow, wide cuts separated by the nose bridge. Earlier
-            // upper and lower lid additions survived as four horizontal bars,
-            // overpowering the nose and making the faces read as masks.
-            // At rx 0.050 centred
-            // on x 0.050 the two carves met in the middle and removed a
-            // full-width band 28mm deep, which left the brow above it standing
-            // as an overhanging shelf over a cave — the single thing that made
-            // every face unreadable. The carve now cuts about 9mm.
+            // EYES: mirrored triangular prisms, separated by the nose bridge.
+            // The 62 x 33mm head-space mouth becomes roughly 83 x 44mm in the
+            // sculpture, while the 20mm head-space cut gives 27mm of real
+            // world-space depth behind the facial plane.
             for (const sx of [-1, 1]) {
-                d = subtract(d, sdEllipsoid(x - sx * 0.052, y - (YC0 + 0.004), z - 0.111,
-                    0.038, 0.012, 0.030), 0.004);
+                const socketX = sx * (x - sx * 0.052);
+                const socket = sdTriPrism(
+                    socketX, y - (YC0 + 0.010), z - 0.099,
+                    -0.032, 0.013, 0.030, 0.009, 0.009, -0.020,
+                    0.029
+                );
+                d = subtract(d, socket, 0.004);
             }
 
             // NOSE: one narrow ridge, unbroken from between the brows to the
@@ -1179,6 +1211,7 @@ export function buildFigure(THREE, opts = {}) {
         hemRake: opts.hemRake ?? 0,
         stride: opts.stride ?? -1,
         lean: opts.lean ?? 0,
+        weightShift: opts.weightShift ?? 0,
         headTurn: opts.headTurn ?? 0,
         headTilt: opts.headTilt ?? 0,
         trainAngle: opts.trainAngle ?? Math.PI,
@@ -1211,6 +1244,19 @@ export function buildFigure(THREE, opts = {}) {
         const pos = geo.attributes.position;
         for (let i = 0; i < pos.count; i++) {
             pos.setZ(i, pos.getZ(i) + pos.getY(i) * o.lean);
+        }
+        pos.needsUpdate = true;
+    }
+
+    // Settle the column over one planted foot. This is a height-eased shear:
+    // the hem and support foot remain fixed on the paving while pelvis, torso,
+    // head and cowl progressively move over the load-bearing side.
+    if (o.weightShift) {
+        const pos = geo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const t = Math.min(1, Math.max(0, (pos.getY(i) - 0.18) / 1.17));
+            const eased = t * t * (3 - 2 * t);
+            pos.setX(i, pos.getX(i) + o.weightShift * eased);
         }
         pos.needsUpdate = true;
     }

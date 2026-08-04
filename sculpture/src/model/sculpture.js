@@ -37,12 +37,12 @@ const PATINA = {
 /**
  * Where each figure stands. x/z in metres, `turn` in radians about Y.
  *
- * The group faces roughly +Z. Figure 0 is the tall one front-left that anchors
- * `ref-a-front.jpg`; figure 3 is the one turned away whose blank cowl fills the
- * right of `ref-d-wide.jpg`.
+ * The group faces roughly +Z. Figure 0 is the tall front-left anchor. Figure 1
+ * is the turned-away plain head: second from the left in the front photograph,
+ * but nearest and dominant when viewed from the group's right.
  */
 export const FIGURE_LAYOUT = [
-    // Spaced 0.50 apart across a group whose cloaks are 0.80 wide, so every
+    // Spaced 0.40 apart across a group whose cloaks are 0.80 wide, so every
     // neighbour overlaps its predecessor by a third of its own width. That is
     // deliberate and it is what `ref-a-front.jpg` shows: no daylight between any
     // two figures above waist height, and you cannot count them at a glance. The
@@ -74,13 +74,13 @@ export const FIGURE_LAYOUT = [
     // `cowlTop` clears the crown by about 0.05 of figure height on the tall
     // ones. Figure 0's stops at her shoulders and her head stands completely
     // free, which is what `ref-a-front.jpg` shows on the nearest figure.
-    { x: -0.75, z: 0.50, turn: -0.05, scale: 1.030, seed: 11, hair: 'none', faceless: false, armPose: 'open', pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, openScale: 1.06, sweepLean: -0.030, strideAngle: 0.10, hemRake: 0.055, stride: -1, lean: 0.042, headTurn: -0.16, headTilt: 0.035, trainAngle: 3.42, trainAmount: 0.50 },
+    { x: -0.60, z: 0.58, turn: -0.05, scale: 1.030, seed: 11, hair: 'none', faceless: false, armPose: 'open', pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, openScale: 1.06, sweepLean: -0.030, strideAngle: 0.10, hemRake: 0.055, stride: -1, lean: 0.042, weightShift: -0.110, headTurn: -0.16, headTilt: 0.035, trainAngle: 3.42, trainAmount: 0.50 },
     // The pregnant figure is seen from behind in the front reference. Rotate
     // her complete body, cowl and head together; forcing that reading with a 132-degree local
     // neck twist made the torso face forward while the face pointed backward.
-    { x: -0.25, z: 0.06, turn: 2.72, scale: 0.995, seed: 23, hair: 'cap', faceless: false, armPose: 'pregnant', pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, openScale: 0.94, sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038, stride: 1, lean: 0.028, headTurn: 0.06, headTilt: -0.030, trainAngle: 3.10, trainAmount: 0.44 },
-    { x: 0.25, z: -0.38, turn: 0.32, scale: 1.005, seed: 37, hair: 'capbun', faceless: false, armPose: 'cradle', pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, openScale: 1.02, sweepLean: -0.014, strideAngle: 0.22, hemRake: 0.048, stride: -1, lean: 0.036, headTurn: -0.34, headTilt: 0.018, trainAngle: 2.86, trainAmount: 0.58 },
-    { x: 0.75, z: -0.82, turn: 0.50, scale: 1.010, seed: 51, hair: 'capbun', faceless: false, armPose: 'clinical', pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, openScale: 0.98, sweepLean: 0.026, strideAngle: -0.06, hemRake: 0.030, stride: 1, lean: 0.022, headTurn: 0.12, headTilt: -0.042, trainAngle: 2.62, trainAmount: 0.66 },
+    { x: -0.20, z: 0.45, turn: 4.20, scale: 0.995, seed: 23, hair: 'cap', faceless: false, armPose: 'pregnant', pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, openScale: 0.94, sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038, stride: 1, lean: 0.028, headTurn: 0.06, headTilt: -0.030, trainAngle: 3.10, trainAmount: 0.44 },
+    { x: 0.20, z: -0.42, turn: 0.32, scale: 1.005, seed: 37, hair: 'capbun', faceless: false, armPose: 'cradle', pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, openScale: 1.02, sweepLean: -0.014, strideAngle: 0.22, hemRake: 0.048, stride: -1, lean: 0.036, headTurn: -0.34, headTilt: 0.018, trainAngle: 2.86, trainAmount: 0.58 },
+    { x: 0.60, z: -1.15, turn: 0.50, scale: 1.010, seed: 51, hair: 'capbun', faceless: false, armPose: 'clinical', pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, openScale: 0.98, sweepLean: 0.026, strideAngle: -0.06, hemRake: 0.030, stride: 1, lean: 0.022, headTurn: 0.12, headTilt: -0.042, trainAngle: 2.62, trainAmount: 0.66 },
 ];
 
 /**
@@ -183,7 +183,8 @@ export function createSculpture(THREE, opts = {}) {
             folds: L.folds, foldDepth: L.foldDepth, foldPhase: L.foldPhase,
             cowlTop: L.cowlTop, openScale: L.openScale, sweepLean: L.sweepLean,
             strideAngle: L.strideAngle, hemRake: L.hemRake, stride: L.stride,
-            lean: L.lean, headTurn: L.headTurn, headTilt: L.headTilt,
+            lean: L.lean, weightShift: L.weightShift,
+            headTurn: L.headTurn, headTilt: L.headTilt,
             trainAngle: L.trainAngle, trainAmount: L.trainAmount,
         });
         paintPatina(THREE, geo, L.seed);

@@ -146,13 +146,62 @@ export const PHASE4_ACCEPTANCE_VIEWS = [
     },
     {
         id: '08-mobile-full', viewport: [390, 844], fov: 40,
-        target: [0, 1.22, -0.10], yaw: 0, pitch: 4, distance: 5.55,
+        target: [0, 1.22, -0.10], yaw: 0, pitch: 4, distance: 6.50,
         note: 'Full group at the production mobile viewport.',
     },
     {
         id: '09-mobile-detail', viewport: [390, 844], fov: 40,
         target: [0.38, 1.45, -0.46], yaw: 1, pitch: 3, distance: 2.75,
         note: 'Infant, support and instrument at the production mobile viewport.',
+    },
+];
+
+/**
+ * Phase 5 likeness poses. Each diagnostic view isolates one remaining rubric
+ * item at a camera and pixel scale that can expose a false positive. Source
+ * crops are paired with the render wherever the photographs contain evidence.
+ */
+export const PHASE5_ACCEPTANCE_VIEWS = [
+    {
+        id: 'p5-01-weight-front', photo: 'ref-c-under.jpg', crop: [180, 140, 960, 1060],
+        viewport: [1400, 900], fov: 40, target: [-0.60, 1.15, 0.58],
+        yaw: -4, pitch: 0, distance: 3.15,
+        note: 'Nearest figure visibly settles over one support leg without moving the planted foot.',
+    },
+    {
+        id: 'p5-02-arrangement-right', photo: 'ref-d-wide.jpg', crop: [420, 180, 760, 1020],
+        viewport: [1400, 900], fov: 44, target: [0, 1.30, -0.10],
+        yaw: 62, pitch: 3, distance: 4.40,
+        note: 'Turned-away plain head remains behind in front view but dominates the group right side.',
+    },
+    {
+        id: 'p5-03-connected-shadow', photo: 'ref-c-under.jpg', crop: [160, 690, 1120, 510],
+        viewport: [1400, 800], fov: 45, target: [0.15, 0.12, -0.25],
+        yaw: 20, pitch: 35, distance: 4.80,
+        note: 'All four figures read as one connected cast/contact shadow on the plinth.',
+    },
+    {
+        id: 'p5-04-collar-under', photo: 'ref-c-under.jpg', crop: [420, 40, 900, 760],
+        viewport: [1200, 900], fov: 30, target: [-0.20, 2.02, 0.45],
+        yaw: -120, pitch: -4, distance: 2.30,
+        note: 'Cowl terminates as a broad open hollow arch, not a pointed or filled panel.',
+    },
+    {
+        id: 'p5-05-eye-sockets', photo: 'ref-a-front.jpg', crop: [300, 230, 430, 430],
+        viewport: [1100, 900], fov: 16, target: [0.20, 2.05, -0.42],
+        yaw: 0, pitch: 1, distance: 2.05,
+        note: 'Angular hollow eye sockets retain a readable triangular shadow at close range.',
+    },
+    {
+        id: 'p5-06-hair-temple', photo: 'ref-a-front.jpg', crop: [700, 240, 520, 470],
+        viewport: [1100, 900], fov: 18, target: [0.20, 2.05, -0.42],
+        yaw: 34, pitch: 1, distance: 2.05,
+        note: 'Smooth hair cap ends at a deliberate hard temple edge in three-quarter view.',
+    },
+    {
+        id: 'p5-07-mobile-full', viewport: [390, 844], fov: 40,
+        target: [0, 1.22, -0.08], yaw: 0, pitch: 4, distance: 6.50,
+        note: 'Production mobile framing preserves the corrected whole-group read.',
     },
 ];
 

@@ -106,7 +106,10 @@ function findChromium() {
     if (process.env.GAUNTLET_CHROMIUM && fs.existsSync(process.env.GAUNTLET_CHROMIUM)) {
         return process.env.GAUNTLET_CHROMIUM;
     }
-    const root = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers';
+    const root = process.env.PLAYWRIGHT_BROWSERS_PATH
+        || (process.platform === 'win32'
+            ? path.join(process.env.LOCALAPPDATA || '', 'ms-playwright')
+            : '/opt/pw-browsers');
     let entries = [];
     try {
         entries = fs.readdirSync(root);
@@ -118,6 +121,8 @@ function findChromium() {
         .sort()
         .reverse()
         .flatMap((name) => [
+            path.join(root, name, 'chrome-headless-shell-win64', 'chrome-headless-shell.exe'),
+            path.join(root, name, 'chrome-win64', 'chrome.exe'),
             path.join(root, name, 'chrome-linux', 'chrome'),
             path.join(root, name, 'chrome-linux', 'headless_shell'),
         ]);
@@ -205,7 +210,7 @@ async function main() {
     // a visual assertion. Sampling the luminance distribution catches blank,
     // transparent and severely crushed frames without prescribing the artwork.
     const pixelStats = await page.evaluate(() => {
-        const state = window.__SCULPT;
+        const state = window.__SCULPT || window.__PROBE;
         if (!state?.renderer || !state.scene || !state.camera) return null;
         state.renderer.render(state.scene, state.camera);
         const gl = state.renderer.getContext();
