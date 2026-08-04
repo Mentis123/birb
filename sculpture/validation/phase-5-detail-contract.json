@@ -1,123 +1,37 @@
 {
   "version": 1,
-  "project": "birb-sculpture-phase-5",
+  "project": "birb-sculpture-phase-5-reference-reconstruction",
   "details": [
     {
-      "id": "C4-weight-on-one-leg",
-      "semanticRead": "The nearest figure visibly settles her upper-body weight over one planted leading foot instead of standing as a symmetric column.",
-      "referenceAsset": "../reference/ref-c-under.jpg",
+      "id": "six-relief-order-facing",
+      "semanticRead": "An unprompted viewer reads one six-panel casting with three outward narratives alternating with the closed reverse reliefs of three hospital-side narratives, in the photographed physical order.",
+      "referenceAsset": "../reference/ref-a-front.jpg",
       "referenceCrop": [
-        180,
-        140,
-        960,
-        1060
+        240,
+        250,
+        900,
+        950
       ],
       "referenceLandmarks": [
-        "supporting foot projects ahead of hem",
-        "torso axis settles toward support side",
-        "opposite hem remains trailing",
-        "shoulders remain slightly forward"
+        "developing relief leads the outward sequence",
+        "mother and swaddled newborn occupy the outward centre",
+        "visitor closes the outward sequence",
+        "reverse reliefs alternate between every active body",
+        "hospital order reverses to badge, pregnancy and doctor"
       ],
       "physicalBoundsMm": [
-        700,
-        2300,
-        650
+        2850,
+        2440,
+        1450
       ],
-      "smallestSignalMm": 80,
-      "representation": "explicit-geometry",
-      "occlusionContract": "The supporting foot remains robe-rooted and visible; the shift must not detach the arm, head, cowl or opposite foot.",
-      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,head,feet&side=front",
+      "smallestSignalMm": 180,
+      "representation": "hybrid",
+      "voxelMm": 18,
+      "occlusionContract": "Adjacent panels may overlap at shoulders and swept fins, but each active face, role detail and reverse head cavity must remain on only its authored side.",
+      "isolationProbe": "sculpture/index.html?three=local",
       "integratedViews": [
         {
-          "id": "p5-01-weight-front",
-          "purpose": "diagnostic",
-          "viewport": [
-            1400,
-            900
-          ],
-          "dpr": 1,
-          "camera": {
-            "fov": 40,
-            "target": [
-              -0.6,
-              1.15,
-              0.58
-            ],
-            "yaw": -4,
-            "pitch": 0,
-            "distance": 3.15
-          },
-          "objectWidthPx": 430,
-          "smallestSignalPx": 28
-        },
-        {
-          "id": "p5-07-mobile-full",
-          "purpose": "delivery",
-          "viewport": [
-            390,
-            844
-          ],
-          "dpr": 1,
-          "camera": {
-            "fov": 40,
-            "target": [
-              0,
-              1.22,
-              -0.08
-            ],
-            "yaw": 0,
-            "pitch": 4,
-            "distance": 6.5
-          },
-          "objectWidthPx": 120,
-          "smallestSignalPx": 9
-        }
-      ],
-      "meshAssertions": [
-        "upper-body center shifts toward configured support side",
-        "supporting foot root remains connected to robe field",
-        "transformed positions and normals remain finite"
-      ],
-      "renderAssertions": [
-        "foot and shifted torso axis are simultaneously visible",
-        "figure reads load-bearing rather than bent",
-        "desktop and mobile remain opaque and nonuniform"
-      ],
-      "humanAcceptance": {
-        "status": "pending",
-        "unresolved": [
-          "Baseline torso remains centered between the feet."
-        ]
-      }
-    },
-    {
-      "id": "D2-turned-figure-arrangement",
-      "semanticRead": "The plain-headed turned-away figure stands behind the nearest front figure yet becomes the nearest dominant cowl from the group right.",
-      "referenceAsset": "../reference/ref-d-wide.jpg",
-      "referenceCrop": [
-        420,
-        180,
-        760,
-        1020
-      ],
-      "referenceLandmarks": [
-        "turned cowl dominates right foreground",
-        "three forward figures recede behind it",
-        "front view keeps it behind nearest figure",
-        "group remains one crowded diagonal"
-      ],
-      "physicalBoundsMm": [
-        2800,
-        2400,
-        2400
-      ],
-      "smallestSignalMm": 250,
-      "representation": "explicit-geometry",
-      "occlusionContract": "The turned cowl may overlap from the right but must not hide the baby, instrument or all forward faces in delivery views.",
-      "isolationProbe": "sculpture/index.html?three=local with only figure-1 visible",
-      "integratedViews": [
-        {
-          "id": "p5-02-arrangement-right",
+          "id": "p5-01-outward-order",
           "purpose": "diagnostic",
           "viewport": [
             1400,
@@ -127,107 +41,41 @@
           "camera": {
             "fov": 44,
             "target": [
-              0,
-              1.3,
-              -0.1
+              -0.16,
+              1.34,
+              0.04
             ],
-            "yaw": 62,
-            "pitch": 3,
-            "distance": 4.4
+            "yaw": -24,
+            "pitch": 4,
+            "distance": 3.75
           },
-          "objectWidthPx": 1050,
-          "smallestSignalPx": 120
+          "objectWidthPx": 780,
+          "smallestSignalPx": 28
         },
         {
-          "id": "p5-07-mobile-full",
-          "purpose": "delivery",
-          "viewport": [
-            390,
-            844
-          ],
-          "dpr": 1,
-          "camera": {
-            "fov": 40,
-            "target": [
-              0,
-              1.22,
-              -0.08
-            ],
-            "yaw": 0,
-            "pitch": 4,
-            "distance": 6.5
-          },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 40
-        }
-      ],
-      "meshAssertions": [
-        "front depth keeps figure-1 behind figure-0",
-        "right projected depth makes figure-1 nearest",
-        "layout preserves four transforms"
-      ],
-      "renderAssertions": [
-        "right silhouette is led by turned cowl",
-        "front preserves crowded diagonal",
-        "baby and instrument remain readable"
-      ],
-      "humanAcceptance": {
-        "status": "pending",
-        "unresolved": [
-          "Baseline right view is led by the clinician instead of the turned cowl."
-        ]
-      }
-    },
-    {
-      "id": "H3-connected-group-shadow",
-      "semanticRead": "All four figures cast one visually connected group shadow across the receiving ground instead of unrelated dark islands.",
-      "referenceAsset": "../reference/ref-c-under.jpg",
-      "referenceCrop": [
-        160,
-        690,
-        1120,
-        510
-      ],
-      "referenceLandmarks": [
-        "contact shadow joins hems to ground",
-        "cast shadows overlap into one mass",
-        "direction agrees across figures",
-        "feet remain distinct at contact"
-      ],
-      "physicalBoundsMm": [
-        3600,
-        20,
-        4200
-      ],
-      "smallestSignalMm": 120,
-      "representation": "explicit-geometry",
-      "occlusionContract": "Use the closed figures, light and receiver; do not paint a blob or obscure the feet.",
-      "isolationProbe": "sculpture/index.html?three=local with neutral material and only key shadows enabled",
-      "integratedViews": [
-        {
-          "id": "p5-03-connected-shadow",
+          "id": "p5-02-hospital-order",
           "purpose": "diagnostic",
           "viewport": [
             1400,
-            800
+            900
           ],
           "dpr": 1,
           "camera": {
-            "fov": 45,
+            "fov": 49,
             "target": [
-              0.15,
-              0.12,
-              -0.25
+              0.1,
+              1.24,
+              -0.04
             ],
-            "yaw": 20,
-            "pitch": 35,
-            "distance": 4.8
+            "yaw": 214,
+            "pitch": 5,
+            "distance": 3.55
           },
-          "objectWidthPx": 1050,
-          "smallestSignalPx": 32
+          "objectWidthPx": 780,
+          "smallestSignalPx": 28
         },
         {
-          "id": "p5-07-mobile-full",
+          "id": "p5-07-mobile-outward",
           "purpose": "delivery",
           "viewport": [
             390,
@@ -235,65 +83,358 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 40,
+            "fov": 44,
             "target": [
               0,
               1.22,
-              -0.08
+              0
             ],
-            "yaw": 0,
+            "yaw": -20,
             "pitch": 4,
-            "distance": 6.5
+            "distance": 8.2
           },
           "objectWidthPx": 330,
-          "smallestSignalPx": 10
+          "smallestSignalPx": 7
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.22,
+              0
+            ],
+            "yaw": 202,
+            "pitch": 4,
+            "distance": 8.2
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
         }
       ],
       "meshAssertions": [
-        "all figures cast shadows",
-        "ground and base receive shadows",
-        "shadow camera contains figures and receiver"
+        "exactly six production figure meshes",
+        "side values alternate outward and hospital",
+        "whole-body transform and head orientation agree",
+        "all six body fields have zero boundary and non-manifold edges"
       ],
       "renderAssertions": [
-        "one dark component touches all contact regions",
-        "shadow does not clip at light-camera boundary",
-        "feet retain contact edges"
+        "outward view reads developing, newborn and visitor in order",
+        "hospital view reads badge, pregnancy and doctor in reverse order",
+        "no face appears on both sides of one panel",
+        "desktop and mobile framebuffers are opaque and nonuniform"
       ],
       "humanAcceptance": {
-        "status": "pending",
-        "unresolved": [
-          "Baseline shadow has not been isolated or proven connected."
-        ]
+        "status": "pass",
+        "unresolved": []
       }
     },
     {
-      "id": "B3-hollow-collar-arch",
-      "semanticRead": "The cloak rises behind the head as a broad hollow collar arch with a readable inner opening, not a narrow seam or solid pointed panel.",
-      "referenceAsset": "../reference/ref-c-under.jpg",
+      "id": "closed-negative-relief",
+      "semanticRead": "Inactive sides read as deep closed concave body and head impressions in thick bronze, never as transparency, clipped skins or missing front surfaces.",
+      "referenceAsset": "../reference/ref-d-wide.jpg",
       "referenceCrop": [
-        420,
-        40,
-        900,
-        760
+        440,
+        250,
+        620,
+        950
       ],
       "referenceLandmarks": [
-        "outer cowl clears crown",
-        "inner opening stays broad above shoulders",
-        "side rims frame opening",
-        "arch joins trailing cloak"
+        "broad concave head impression",
+        "full-height recessed torso",
+        "thick rim around the reverse relief",
+        "rear sweep reaches the paving",
+        "active front plane remains intact"
       ],
       "physicalBoundsMm": [
-        800,
-        1150,
-        520
+        760,
+        2300,
+        700
       ],
-      "smallestSignalMm": 70,
-      "representation": "explicit-geometry",
-      "occlusionContract": "The arch stays behind head and body, remains open in low and three-quarter views, and does not intersect the crown.",
-      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=shell&side=front",
+      "smallestSignalMm": 108,
+      "representation": "sampled-field",
+      "voxelMm": 18,
+      "occlusionContract": "The recessed surface opens only toward the inactive side, closes below the paving, and leaves enough front wall that an oblique active-side camera cannot see through it.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,head&material=normal&side=rear",
       "integratedViews": [
         {
-          "id": "p5-04-collar-under",
+          "id": "p5-03-negative-relief",
+          "purpose": "diagnostic",
+          "viewport": [
+            1100,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0.3,
+              1.3,
+              0.02
+            ],
+            "yaw": 34,
+            "pitch": 3,
+            "distance": 4.15
+          },
+          "objectWidthPx": 620,
+          "smallestSignalPx": 24
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.22,
+              0
+            ],
+            "yaw": 202,
+            "pitch": 4,
+            "distance": 8.2
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
+        }
+      ],
+      "meshAssertions": [
+        "zero body and head boundary edges",
+        "zero non-manifold edges",
+        "positive signed volume",
+        "rear sweep adds at least 300 mm without moving the front plane more than 25 mm"
+      ],
+      "renderAssertions": [
+        "normal and bronze views show a recessed interior surface",
+        "no sky-coloured front holes or bright above-ground closure rings",
+        "low view retains closed vertical hem edges"
+      ],
+      "humanAcceptance": {
+        "status": "pass",
+        "unresolved": []
+      }
+    },
+    {
+      "id": "role-specific-body-silhouettes",
+      "semanticRead": "The six bodies do not read as copies: developing fullness, full pregnancy, flatter visitor and clinician torsos, lowered breast relief and role-specific arm gestures remain distinguishable.",
+      "referenceAsset": "../reference/ref-b-threequarter.jpg",
+      "referenceCrop": [
+        200,
+        240,
+        900,
+        700
+      ],
+      "referenceLandmarks": [
+        "pregnancy forms one broad integrated rounded profile",
+        "clinician chest remains clear behind the instrument",
+        "breast relief is low and wide rather than spherical",
+        "hanging arms merge into the cast sheet",
+        "developing and newborn-support gestures terminate into their carried forms"
+      ],
+      "physicalBoundsMm": [
+        850,
+        1960,
+        620
+      ],
+      "smallestSignalMm": 90,
+      "representation": "sampled-field",
+      "voxelMm": 18,
+      "occlusionContract": "Arms must remain joined at the shoulder and may merge into torso or carried mass, but may not float, clip through the body, or hide the narrative silhouette.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body&material=normal",
+      "integratedViews": [
+        {
+          "id": "p5-05-pregnancy-instrument",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 32,
+            "target": [
+              -0.15,
+              1.48,
+              -0.04
+            ],
+            "yaw": 214,
+            "pitch": 2,
+            "distance": 2.95
+          },
+          "objectWidthPx": 820,
+          "smallestSignalPx": 22
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.22,
+              0
+            ],
+            "yaw": 202,
+            "pitch": 4,
+            "distance": 8.2
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
+        }
+      ],
+      "meshAssertions": [
+        "one connected manifold body field per role",
+        "pregnancy and developing fullness occupy distinct physical bounds",
+        "arm paths terminate inside body or support geometry",
+        "body triangles remain below 170000 per relief"
+      ],
+      "renderAssertions": [
+        "pregnancy reads without an applied-egg seam",
+        "paired bust reliefs retain a centre valley and blend into the torso",
+        "developing, pregnancy and clinical arms do not read as detached rails",
+        "surface remains visibly hand-worked at diagnostic scale"
+      ],
+      "humanAcceptance": {
+        "status": "pass",
+        "unresolved": []
+      }
+    },
+    {
+      "id": "face-hair-identities",
+      "semanticRead": "Each active head retains its own width, height, jaw, feature spacing, turn and hair treatment; mother has one crown roll, visitor two, and bare heads remain bare.",
+      "referenceAsset": "../reference/ref-a-front.jpg",
+      "referenceCrop": [
+        250,
+        190,
+        1100,
+        500
+      ],
+      "referenceLandmarks": [
+        "developing head is broad and plain",
+        "mother face is long and narrow beneath one roll",
+        "visitor presents a narrower turned profile beneath two rolls",
+        "nose ridge runs continuously from the brow",
+        "mouth remains a restrained horizontal cast line"
+      ],
+      "physicalBoundsMm": [
+        360,
+        490,
+        300
+      ],
+      "smallestSignalMm": 34,
+      "representation": "sampled-field",
+      "voxelMm": 5.607,
+      "occlusionContract": "Features remain on the active face plane, hair stays joined above and behind it, and the opposite side remains a closed negative head impression.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=head&material=normal",
+      "integratedViews": [
+        {
+          "id": "p5-09-outward-identities",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            780
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 30,
+            "target": [
+              -0.24,
+              2.08,
+              0.08
+            ],
+            "yaw": -24,
+            "pitch": 0,
+            "distance": 2.95
+          },
+          "objectWidthPx": 900,
+          "smallestSignalPx": 18
+        },
+        {
+          "id": "p5-10-hospital-identities",
+          "purpose": "delivery",
+          "viewport": [
+            1400,
+            780
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 30,
+            "target": [
+              0.2,
+              2.08,
+              -0.08
+            ],
+            "yaw": 204,
+            "pitch": 0,
+            "distance": 2.95
+          },
+          "objectWidthPx": 900,
+          "smallestSignalPx": 20
+        }
+      ],
+      "meshAssertions": [
+        "each head is closed and outward-wound",
+        "hair rolls remain connected to their authored heads",
+        "identity parameters differ across all six roles",
+        "face and body turns remain within the whole-body orientation contract"
+      ],
+      "renderAssertions": [
+        "all three outward faces remain distinguishable at diagnostic scale",
+        "hair roll count survives three-quarter views",
+        "features remain readable without DoubleSide or transparency",
+        "eight-angle identity sheet contains no impossible face reversal"
+      ],
+      "humanAcceptance": {
+        "status": "pass",
+        "unresolved": []
+      }
+    },
+    {
+      "id": "newborn-and-support",
+      "semanticRead": "The mother carries one broad fully wrapped newborn block on a substantial U-shaped lower forearm, with restrained unequal ends and no invented exposed spherical head.",
+      "referenceAsset": "../reference/ref-a-front.jpg",
+      "referenceCrop": [
+        560,
+        390,
+        500,
+        430
+      ],
+      "referenceLandmarks": [
+        "broad irregular rounded-rectangular wrapped mass",
+        "no separate spherical head",
+        "ends differ subtly in height and fullness",
+        "one U-shaped forearm supports the underside",
+        "upper forearm crosses behind the swaddle"
+      ],
+      "physicalBoundsMm": [
+        479,
+        188,
+        194
+      ],
+      "smallestSignalMm": 35,
+      "representation": "sampled-field",
+      "voxelMm": 5.5,
+      "occlusionContract": "The swaddle overlaps both supports without floating, stays separate enough to retain its silhouette, and does not merge visually into the abdomen.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,baby&material=normal",
+      "integratedViews": [
+        {
+          "id": "p5-04-newborn-support",
           "purpose": "diagnostic",
           "viewport": [
             1200,
@@ -301,21 +442,21 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 30,
+            "fov": 26,
             "target": [
-              -0.2,
-              2.02,
-              0.45
+              -0.24,
+              1.46,
+              0.1
             ],
-            "yaw": -120,
-            "pitch": -4,
-            "distance": 2.3
+            "yaw": -24,
+            "pitch": 2,
+            "distance": 2.45
           },
-          "objectWidthPx": 620,
-          "smallestSignalPx": 54
+          "objectWidthPx": 430,
+          "smallestSignalPx": 34
         },
         {
-          "id": "p5-07-mobile-full",
+          "id": "p5-07-mobile-outward",
           "purpose": "delivery",
           "viewport": [
             390,
@@ -323,88 +464,355 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 40,
+            "fov": 44,
             "target": [
               0,
               1.22,
-              -0.08
+              0
             ],
-            "yaw": 0,
+            "yaw": -20,
             "pitch": 4,
-            "distance": 6.5
+            "distance": 8.2
           },
-          "objectWidthPx": 130,
-          "smallestSignalPx": 10
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
         }
       ],
       "meshAssertions": [
-        "cloak shell has zero boundary and non-manifold edges",
-        "inner arch exceeds minimum opening",
-        "cowl clears head crown"
+        "one closed connected newborn component",
+        "zero boundary and non-manifold edges",
+        "horizontal width exceeds 420 mm",
+        "end-height asymmetry remains between 15 and 45 mm"
       ],
       "renderAssertions": [
-        "low view shows broad background-colored hollow",
-        "inner and outer rims remain distinct under normal material",
-        "opening survives bronze lighting"
+        "swaddle reads as a broad wrapped block rather than a belly or exposed-head doll",
+        "support forearm remains visible below it",
+        "unequal ends remain restrained at matched close scale",
+        "detail remains visible under bronze material"
       ],
       "humanAcceptance": {
-        "status": "pending",
-        "unresolved": [
-          "Baseline collar opening remains ambiguous and too narrow."
-        ]
+        "status": "pass",
+        "unresolved": []
       }
     },
     {
-      "id": "E3-triangular-eye-sockets",
-      "semanticRead": "Each forward face has two hollow triangular eye sockets that retain interior shadow at normal group distance.",
-      "referenceAsset": "../reference/ref-a-front.jpg",
+      "id": "pregnancy-profile",
+      "semanticRead": "The hospital-side pregnancy reads as one broad rounded abdomen integrated into the torso, with a high attachment, full middle and tapered lower attachment.",
+      "referenceAsset": "../reference/ref-b-threequarter.jpg",
       "referenceCrop": [
-        300,
+        200,
+        240,
+        900,
+        700
+      ],
+      "referenceLandmarks": [
+        "high abdominal attachment",
+        "maximum fullness below the bust",
+        "rounded lower pole narrows into the skirt",
+        "side profile projects beyond the bust",
+        "both arms remain shallow flank reliefs"
+      ],
+      "physicalBoundsMm": [
+        470,
+        520,
+        410
+      ],
+      "smallestSignalMm": 110,
+      "representation": "sampled-field",
+      "voxelMm": 18,
+      "occlusionContract": "The abdomen merges smoothly into the torso, remains clear of the stethoscope figure, and is not crossed by an invented supporting arm.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body&pregnant=1&material=normal",
+      "integratedViews": [
+        {
+          "id": "p5-05-pregnancy-instrument",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 32,
+            "target": [
+              -0.15,
+              1.48,
+              -0.04
+            ],
+            "yaw": 214,
+            "pitch": 2,
+            "distance": 2.95
+          },
+          "objectWidthPx": 820,
+          "smallestSignalPx": 22
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.22,
+              0
+            ],
+            "yaw": 202,
+            "pitch": 4,
+            "distance": 8.2
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
+        }
+      ],
+      "meshAssertions": [
+        "pregnancy remains in the same closed body component",
+        "three unequal masses define upper, middle and lower profile",
+        "full pregnancy exists exactly once",
+        "developing abdomen remains below 35 percent fullness"
+      ],
+      "renderAssertions": [
+        "three-quarter hospital view reads pregnancy before inspection",
+        "profile remains broad and rounded with a tapered lower attachment",
+        "torso attachment shows no hard seam"
+      ],
+      "humanAcceptance": {
+        "status": "pass",
+        "unresolved": []
+      }
+    },
+    {
+      "id": "two-ended-stethoscope",
+      "semanticRead": "The doctor carries two narrow curved stethoscope tubes from the neck to two separate ringed chest terminals.",
+      "referenceAsset": "../reference/ref-b-threequarter.jpg",
+      "referenceCrop": [
+        760,
+        240,
+        470,
+        560
+      ],
+      "referenceLandmarks": [
+        "two independent neck origins",
+        "left and right tubes remain separated",
+        "both paths curve over the chest",
+        "two round terminals sit above the breast relief",
+        "no oversized central Y or single bell"
+      ],
+      "physicalBoundsMm": [
+        260,
+        390,
+        65
+      ],
+      "smallestSignalMm": 17,
+      "representation": "explicit-geometry",
+      "occlusionContract": "Both tubes sit just proud of the chest, remain clear of the neck and breasts, and terminate without disappearing inside the body.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,stethoscope&material=normal",
+      "integratedViews": [
+        {
+          "id": "p5-05-pregnancy-instrument",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            900
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 32,
+            "target": [
+              -0.15,
+              1.48,
+              -0.04
+            ],
+            "yaw": 214,
+            "pitch": 2,
+            "distance": 2.95
+          },
+          "objectWidthPx": 820,
+          "smallestSignalPx": 22
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.22,
+              0
+            ],
+            "yaw": 202,
+            "pitch": 4,
+            "distance": 8.2
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
+        }
+      ],
+      "meshAssertions": [
+        "two TubeGeometry paths exist",
+        "each path has four reference-led control points",
+        "two distinct ringed terminals exist",
+        "all control points and normals are finite"
+      ],
+      "renderAssertions": [
+        "both tubes and both terminals read at diagnostic scale",
+        "instrument survives bronze lighting without dark cut-through artifacts",
+        "mobile view retains the clinician narrative"
+      ],
+      "humanAcceptance": {
+        "status": "pass",
+        "unresolved": []
+      }
+    },
+    {
+      "id": "planted-tapered-foot",
+      "semanticRead": "Each active body exposes one long planted cast foot rooted beneath the raised hem, with a broad instep and a restrained tapered toe instead of detached pebbles.",
+      "referenceAsset": "../reference/ref-c-under.jpg",
+      "referenceCrop": [
+        180,
+        690,
+        1000,
+        510
+      ],
+      "referenceLandmarks": [
+        "one foot per active relief",
+        "heel remains buried under the skirt",
+        "instep rises above the paving",
+        "forefoot stays broad",
+        "toe tapers to the photographed point"
+      ],
+      "physicalBoundsMm": [
+        178,
+        169,
+        586
+      ],
+      "smallestSignalMm": 45,
+      "representation": "sampled-field",
+      "voxelMm": 7.5,
+      "occlusionContract": "The root overlaps the body field below the hem, the toe remains above the paving, and the inactive side must not expose a second detached foot.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=feet&material=normal",
+      "integratedViews": [
+        {
+          "id": "p5-06-grounded-feet",
+          "purpose": "diagnostic",
+          "viewport": [
+            1400,
+            800
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 40,
+            "target": [
+              -0.1,
+              0.62,
+              -0.08
+            ],
+            "yaw": 115,
+            "pitch": -7,
+            "distance": 3.6
+          },
+          "objectWidthPx": 820,
+          "smallestSignalPx": 32
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 44,
+            "target": [
+              0,
+              1.22,
+              0
+            ],
+            "yaw": 202,
+            "pitch": 4,
+            "distance": 8.2
+          },
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
+        }
+      ],
+      "meshAssertions": [
+        "one closed connected foot component",
+        "positive signed volume",
+        "length is 480-680 mm and width is 150-200 mm",
+        "stride side selects exactly one foot"
+      ],
+      "renderAssertions": [
+        "valid low camera remains above the paving",
+        "foot reads heel-to-toe rather than as a pebble or paddle",
+        "hem and foot contact without an open ring"
+      ],
+      "humanAcceptance": {
+        "status": "pass",
+        "unresolved": []
+      }
+    },
+    {
+      "id": "hospital-badge",
+      "semanticRead": "The hospital-side badge reads as one small horizontal rectangular relief on the upper chest, not as noise or a body-field wound.",
+      "referenceAsset": "../reference/ref-b-threequarter.jpg",
+      "referenceCrop": [
+        180,
         230,
-        430,
+        350,
         430
       ],
       "referenceLandmarks": [
-        "straight brow is top edge",
-        "socket tapers toward nose",
-        "lower outer corner stays angular",
-        "both cavities hold shadow"
+        "horizontal rectangular silhouette",
+        "slightly rounded corners",
+        "sits high on the left chest",
+        "stands proud of the body",
+        "remains separate from the breast relief"
       ],
       "physicalBoundsMm": [
-        360,
-        430,
-        280
+        116,
+        49,
+        29
       ],
-      "smallestSignalMm": 36,
+      "smallestSignalMm": 26,
       "representation": "sampled-field",
-      "voxelMm": 5.607,
-      "occlusionContract": "Sockets stay below brow and beside nose, do not cut through head, and remain separate from hair edge.",
-      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=head&hair=capbun&material=normal&side=front",
+      "voxelMm": 3.5,
+      "occlusionContract": "The badge overlaps the chest in depth without floating, remains clear of the shoulder and breast, and is present only on the badge role.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,badge&material=normal",
       "integratedViews": [
         {
-          "id": "p5-05-eye-sockets",
+          "id": "p5-02-hospital-order",
           "purpose": "diagnostic",
           "viewport": [
-            1100,
+            1400,
             900
           ],
           "dpr": 1,
           "camera": {
-            "fov": 16,
+            "fov": 49,
             "target": [
-              0.2,
-              2.05,
-              -0.42
+              0.1,
+              1.24,
+              -0.04
             ],
-            "yaw": 0,
-            "pitch": 1,
-            "distance": 2.05
+            "yaw": 214,
+            "pitch": 5,
+            "distance": 3.55
           },
-          "objectWidthPx": 430,
-          "smallestSignalPx": 42
+          "objectWidthPx": 780,
+          "smallestSignalPx": 28
         },
         {
-          "id": "p5-07-mobile-full",
+          "id": "p5-08-mobile-hospital",
           "purpose": "delivery",
           "viewport": [
             390,
@@ -412,123 +820,34 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 40,
+            "fov": 44,
             "target": [
               0,
               1.22,
-              -0.08
+              0
             ],
-            "yaw": 0,
+            "yaw": 202,
             "pitch": 4,
-            "distance": 6.5
+            "distance": 8.2
           },
-          "objectWidthPx": 45,
-          "smallestSignalPx": 8
+          "objectWidthPx": 330,
+          "smallestSignalPx": 7
         }
       ],
       "meshAssertions": [
-        "socket field has triangular extents",
-        "socket signal stays at least six head cells thick",
-        "head remains closed and outward-wound"
+        "one closed badge component",
+        "zero boundary and non-manifold edges",
+        "width remains 110-125 mm",
+        "depth remains 26-32 mm"
       ],
       "renderAssertions": [
-        "normal close view shows angular cavities",
-        "bronze close view retains interior shadow",
-        "one delivery head reads triangular"
+        "badge is visible at the hospital diagnostic scale",
+        "badge remains a rectangle under bronze material",
+        "no duplicate badge appears on another role"
       ],
       "humanAcceptance": {
-        "status": "pending",
-        "unresolved": [
-          "Baseline sockets read as shallow horizontal slits."
-        ]
-      }
-    },
-    {
-      "id": "E5-hard-temple-hair-edge",
-      "semanticRead": "Hair reads as a smooth cap separate from the face through a hard temple edge while the nearest figure remains bare-headed.",
-      "referenceAsset": "../reference/ref-a-front.jpg",
-      "referenceCrop": [
-        700,
-        240,
-        520,
-        470
-      ],
-      "referenceLandmarks": [
-        "cap has smooth crown",
-        "temple boundary descends beside brow",
-        "edge creates distinct normal break",
-        "bun remains attached on two figures"
-      ],
-      "physicalBoundsMm": [
-        380,
-        450,
-        300
-      ],
-      "smallestSignalMm": 20,
-      "representation": "explicit-geometry",
-      "occlusionContract": "The edge stays outside eye cavity and face plane, joins the cap without floating, and is absent from the bare head.",
-      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=head&hair=capbun&material=normal&side=front",
-      "integratedViews": [
-        {
-          "id": "p5-06-hair-temple",
-          "purpose": "diagnostic",
-          "viewport": [
-            1100,
-            900
-          ],
-          "dpr": 1,
-          "camera": {
-            "fov": 18,
-            "target": [
-              0.2,
-              2.05,
-              -0.42
-            ],
-            "yaw": 34,
-            "pitch": 1,
-            "distance": 2.05
-          },
-          "objectWidthPx": 390,
-          "smallestSignalPx": 20
-        },
-        {
-          "id": "p5-07-mobile-full",
-          "purpose": "delivery",
-          "viewport": [
-            390,
-            844
-          ],
-          "dpr": 1,
-          "camera": {
-            "fov": 40,
-            "target": [
-              0,
-              1.22,
-              -0.08
-            ],
-            "yaw": 0,
-            "pitch": 4,
-            "distance": 6.5
-          },
-          "objectWidthPx": 45,
-          "smallestSignalPx": 8
-        }
-      ],
-      "meshAssertions": [
-        "temple edge exists only for cap and capbun",
-        "temple edge remains connected to hair mass",
-        "bare head gets no hair-edge geometry"
-      ],
-      "renderAssertions": [
-        "normal three-quarter view shows hard temple break",
-        "bronze retains edge at group distance",
-        "four heads remain distinguishable"
-      ],
-      "humanAcceptance": {
-        "status": "pending",
-        "unresolved": [
-          "Baseline cap blends into the face without a legible temple boundary."
-        ]
+        "status": "pass",
+        "unresolved": []
       }
     }
   ]

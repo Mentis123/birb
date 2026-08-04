@@ -297,4 +297,188 @@ export function surfaceNets(field, opts) {
     };
 }
 
+/**
+ * Mesh a sampled field with a face-consistent six-tetrahedron cube split.
+ *
+ * Surface nets is smoother and cheaper for uncomplicated blobs, but a compound
+ * field can contain checkerboard cells where several smooth unions nearly touch.
+ * A single cell vertex cannot represent both sheets, so naive surface nets can
+ * produce an edge shared by four triangles. The fixed tetrahedral decomposition
+ * resolves that ambiguity and reuses every crossed lattice edge, yielding a
+ * closed two-manifold mesh for the figure bodies.
+ */
+export function marchingTetrahedra(field, opts) {
+    const [x0, y0, z0] = opts.min;
+    const [x1, y1, z1] = opts.max;
+    const h = opts.voxel;
+
+    const nx = Math.max(1, Math.ceil((x1 - x0) / h));
+    const ny = Math.max(1, Math.ceil((y1 - y0) / h));
+    const nz = Math.max(1, Math.ceil((z1 - z0) / h));
+    const sx = nx + 1, sy = ny + 1, sz = nz + 1;
+    const sampleIndex = (i, j, k) => (k * sy + j) * sx + i;
+
+    const samples = new Float32Array(sx * sy * sz);
+    for (let k = 0; k < sz; k++) {
+        const z = z0 + k * h;
+        for (let j = 0; j < sy; j++) {
+            const y = y0 + j * h;
+            for (let i = 0; i < sx; i++) {
+                samples[sampleIndex(i, j, k)] = field(x0 + i * h, y, z);
+            }
+        }
+    }
+
+    // All cubes use the same body diagonal. Adjacent cube faces therefore use
+    // the same diagonal too, avoiding cracks between tetrahedral patches.
+    const tetrahedra = [
+        [0, 1, 3, 7],
+        [0, 3, 2, 7],
+        [0, 2, 6, 7],
+        [0, 6, 4, 7],
+        [0, 4, 5, 7],
+        [0, 5, 1, 7],
+    ];
+    const tetraEdges = [
+        [0, 1], [0, 2], [0, 3],
+        [1, 2], [1, 3], [2, 3],
+    ];
+
+    const positions = [];
+    const indices = [];
+    const edgeVertices = new Map();
+    const latticeSize = samples.length;
+
+    const vertexFor = (a, b, pa, pb, va, vb) => {
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        const key = lo * latticeSize + hi;
+        const cached = edgeVertices.get(key);
+        if (cached !== undefined) return cached;
+
+        const t = Math.min(1, Math.max(0, va / (va - vb)));
+        const vertex = positions.length / 3;
+        positions.push(
+            pa[0] + (pb[0] - pa[0]) * t,
+            pa[1] + (pb[1] - pa[1]) * t,
+            pa[2] + (pb[2] - pa[2]) * t
+        );
+        edgeVertices.set(key, vertex);
+        return vertex;
+    };
+
+    for (let k = 0; k < nz; k++) {
+        for (let j = 0; j < ny; j++) {
+            for (let i = 0; i < nx; i++) {
+                const globals = new Array(8);
+                const points = new Array(8);
+                for (let corner = 0; corner < 8; corner++) {
+                    const offset = CORNER_OFFSET[corner];
+                    const gx = i + offset[0], gy = j + offset[1], gz = k + offset[2];
+                    globals[corner] = sampleIndex(gx, gy, gz);
+                    points[corner] = [x0 + gx * h, y0 + gy * h, z0 + gz * h];
+                }
+
+                for (const tetra of tetrahedra) {
+                    const inside = [], outside = [];
+                    for (let n = 0; n < 4; n++) {
+                        const corner = tetra[n];
+                        (samples[globals[corner]] < 0 ? inside : outside).push(corner);
+                    }
+                    if (inside.length === 0 || inside.length === 4) continue;
+
+                    const crossings = [];
+                    for (const [ea, eb] of tetraEdges) {
+                        const ca = tetra[ea], cb = tetra[eb];
+                        const ga = globals[ca], gb = globals[cb];
+                        const va = samples[ga], vb = samples[gb];
+                        if ((va < 0) === (vb < 0)) continue;
+                        crossings.push(vertexFor(ga, gb, points[ca], points[cb], va, vb));
+                    }
+                    if (crossings.length < 3) continue;
+
+                    const centroid = [0, 0, 0];
+                    for (const vertex of crossings) {
+                        centroid[0] += positions[vertex * 3];
+                        centroid[1] += positions[vertex * 3 + 1];
+                        centroid[2] += positions[vertex * 3 + 2];
+                    }
+                    centroid[0] /= crossings.length;
+                    centroid[1] /= crossings.length;
+                    centroid[2] /= crossings.length;
+
+                    const average = (corners) => {
+                        const out = [0, 0, 0];
+                        for (const corner of corners) {
+                            out[0] += points[corner][0];
+                            out[1] += points[corner][1];
+                            out[2] += points[corner][2];
+                        }
+                        out[0] /= corners.length;
+                        out[1] /= corners.length;
+                        out[2] /= corners.length;
+                        return out;
+                    };
+                    const insideCentre = average(inside);
+                    const outsideCentre = average(outside);
+                    let nxOut = outsideCentre[0] - insideCentre[0];
+                    let nyOut = outsideCentre[1] - insideCentre[1];
+                    let nzOut = outsideCentre[2] - insideCentre[2];
+                    const nLength = Math.hypot(nxOut, nyOut, nzOut) || 1;
+                    nxOut /= nLength;
+                    nyOut /= nLength;
+                    nzOut /= nLength;
+
+                    const first = crossings[0];
+                    let ux = positions[first * 3] - centroid[0];
+                    let uy = positions[first * 3 + 1] - centroid[1];
+                    let uz = positions[first * 3 + 2] - centroid[2];
+                    const uLength = Math.hypot(ux, uy, uz) || 1;
+                    ux /= uLength;
+                    uy /= uLength;
+                    uz /= uLength;
+
+                    // v = outward normal cross u, so increasing polar angle has
+                    // outward winding when viewed from the positive side.
+                    const vx = nyOut * uz - nzOut * uy;
+                    const vy = nzOut * ux - nxOut * uz;
+                    const vz = nxOut * uy - nyOut * ux;
+                    crossings.sort((a, b) => {
+                        const adx = positions[a * 3] - centroid[0];
+                        const ady = positions[a * 3 + 1] - centroid[1];
+                        const adz = positions[a * 3 + 2] - centroid[2];
+                        const bdx = positions[b * 3] - centroid[0];
+                        const bdy = positions[b * 3 + 1] - centroid[1];
+                        const bdz = positions[b * 3 + 2] - centroid[2];
+                        const aa = Math.atan2(adx * vx + ady * vy + adz * vz,
+                            adx * ux + ady * uy + adz * uz);
+                        const ba = Math.atan2(bdx * vx + bdy * vy + bdz * vz,
+                            bdx * ux + bdy * uy + bdz * uz);
+                        return aa - ba;
+                    });
+
+                    for (let n = 1; n < crossings.length - 1; n++) {
+                        let a = crossings[0], b = crossings[n], c = crossings[n + 1];
+                        const abx = positions[b * 3] - positions[a * 3];
+                        const aby = positions[b * 3 + 1] - positions[a * 3 + 1];
+                        const abz = positions[b * 3 + 2] - positions[a * 3 + 2];
+                        const acx = positions[c * 3] - positions[a * 3];
+                        const acy = positions[c * 3 + 1] - positions[a * 3 + 1];
+                        const acz = positions[c * 3 + 2] - positions[a * 3 + 2];
+                        const tx = aby * acz - abz * acy;
+                        const ty = abz * acx - abx * acz;
+                        const tz = abx * acy - aby * acx;
+                        if (tx * nxOut + ty * nyOut + tz * nzOut < 0) [b, c] = [c, b];
+                        indices.push(a, b, c);
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        positions: new Float32Array(positions),
+        indices: new Uint32Array(indices),
+        samples: samples.length,
+    };
+}
 export default surfaceNets;

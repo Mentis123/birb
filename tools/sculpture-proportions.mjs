@@ -22,10 +22,10 @@
  * height — read off a pixel grid and compared against the same fractions
  * computed from the model's own construction constants.
  *
- * The other half of the gate is `sculpture/LIKENESS.md`, a rubric of the things
- * this cannot measure, scored by eye against the matched-view contact sheet from
- * `tools/sculpture-sheet.mjs`. Neither half is sufficient. This one says so in
- * its own output rather than implying a completeness it does not have.
+ * The other half of the gate is the visual acceptance boundary in
+ * `sculpture/LIKENESS.md` and the active detail contract, judged against exact
+ * views from `tools/sculpture-sheet.mjs`. Neither half is sufficient. This one
+ * says so in its own output rather than implying completeness it does not have.
  */
 
 import { FIGURE_LANDMARKS } from '../sculpture/src/model/figure.js';
@@ -129,8 +129,8 @@ function main() {
     console.log(`tolerance +/-${REFERENCE.tolerance}  |  worst ${worst >= 0 ? '+' : ''}${worst.toFixed(3)}  |  ${fails} of ${rows.length} outside`);
     console.log('');
     console.log('Proportion only. Drapery, pose, face, surface and arrangement are');
-    console.log('not measured here — those are sculpture/LIKENESS.md, scored by eye');
-    console.log('against the matched-view sheet from tools/sculpture-sheet.mjs.');
+    console.log('not measured here — those require the active detail contract and');
+    console.log('human acceptance against exact views from sculpture-sheet.mjs.');
 
     process.exit(fails > 0 ? 1 : 0);
 }

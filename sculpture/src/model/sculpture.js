@@ -1,11 +1,12 @@
 /**
- * model/sculpture.js — the four figures, arranged, patinated and lit.
+ * model/sculpture.js — six alternating reliefs in one connected bronze sheet.
  *
  * ARRANGEMENT. Read off `ref-a-front.jpg` and `ref-c-under.jpg`: the group is
  * not a line-up. The figures are staggered in depth and rotated slightly apart,
- * overlapping so their cowls interleave, which is why the group reads as one
- * mass from the front and as four people from the side. Getting the stagger
- * wrong is the fastest way to lose the likeness even with perfect figures.
+ * overlapping so their sheets interleave. Each side reads as one connected
+ * casting with three positive reliefs and three closed reverse impressions.
+ * Getting the stagger wrong is the fastest way to lose the likeness even with
+ * accurate individual figures.
  *
  * PATINA. Vertex colours, not a texture — the artefact ships no image files.
  * Three signals are combined, and all three come from looking at the photos
@@ -35,52 +36,98 @@ const PATINA = {
 };
 
 /**
- * Where each figure stands. x/z in metres, `turn` in radians about Y.
- *
- * The group faces roughly +Z. Figure 0 is the tall front-left anchor. Figure 1
- * is the turned-away plain head: second from the left in the front photograph,
- * but nearest and dominant when viewed from the group's right.
+ * Physical order along the folded sheet. x/z are metres and `turn` is radians
+ * about Y. `side` names the side carrying that entry's positive relief.
  */
 export const FIGURE_LAYOUT = [
-    // Spaced 0.40 apart across a group whose cloaks are 0.80 wide, so every
-    // neighbour overlaps its predecessor by a third of its own width. That is
-    // deliberate and it is what `ref-a-front.jpg` shows: no daylight between any
-    // two figures above waist height, and you cannot count them at a glance. The
-    // depth stagger is what stops the overlap reading as collision.
+    // The sculpture is one curved sheet carrying SIX alternating reliefs, not
+    // four freestanding bodies. Read from the outward/community side, the
+    // physical sequence is:
     //
-    // A CROWDED DIAGONAL, running back and to the right — read straight off
-    // `ref-a-front.jpg`, where the nearest figure stands front-left and each of
-    // the other three sits further back and further right, shoulders almost
-    // touching. They all face roughly the same way, turning a little more to the
-    // right as they go back, as though walking together.
+    //   developing | doctor(back) | mother/newborn | pregnant(back)
+    //              | visitor/patient | badge/nurse(back)
     //
-    // An earlier pass had them alternating left and right like a folded screen.
-    // That reads as a decorative arrangement of panels; the photographs read as
-    // four women standing close.
-    //
-    // `trainAngle` is the azimuth the cloak's hem drags toward and `trainAmount`
-    // is now how far it drags, IN METRES — the train became a displacement
-    // rather than a radius scale, so the numbers changed meaning. All four point
-    // roughly backward (pi) with a small fan, because cloth trailing off a
-    // walking figure goes behind her, not out to the sides.
-    //
-    // THE WALK. Every figure is mid-step: `strideAngle` is the direction she is
-    // stepping, `hemRake` how far her hem lifts clear of the leading foot,
-    // `stride` which side leads, `lean` how far her column tips forward, and
-    // `headTurn`/`headTilt` where she is looking. No two agree on any of them —
-    // four figures at identical angles is one of the loudest tells that a group
-    // is a render rather than a casting.
-    //
-    // `cowlTop` clears the crown by about 0.05 of figure height on the tall
-    // ones. Figure 0's stops at her shoulders and her head stands completely
-    // free, which is what `ref-a-front.jpg` shows on the nearest figure.
-    { x: -0.60, z: 0.58, turn: -0.05, scale: 1.030, seed: 11, hair: 'none', faceless: false, armPose: 'open', pregnant: false, baby: false, stethoscope: false, folds: 7, foldDepth: 1.00, foldPhase: 0.0, cowlTop: 2.00, openScale: 1.06, sweepLean: -0.030, strideAngle: 0.10, hemRake: 0.055, stride: -1, lean: 0.042, weightShift: -0.110, headTurn: -0.16, headTilt: 0.035, trainAngle: 3.42, trainAmount: 0.50 },
-    // The pregnant figure is seen from behind in the front reference. Rotate
-    // her complete body, cowl and head together; forcing that reading with a 132-degree local
-    // neck twist made the torso face forward while the face pointed backward.
-    { x: -0.20, z: 0.45, turn: 4.20, scale: 0.995, seed: 23, hair: 'cap', faceless: false, armPose: 'pregnant', pregnant: true, baby: false, stethoscope: false, folds: 8, foldDepth: 0.86, foldPhase: 1.7, cowlTop: 2.44, openScale: 0.94, sweepLean: 0.018, strideAngle: -0.14, hemRake: 0.038, stride: 1, lean: 0.028, headTurn: 0.06, headTilt: -0.030, trainAngle: 3.10, trainAmount: 0.44 },
-    { x: 0.20, z: -0.42, turn: 0.32, scale: 1.005, seed: 37, hair: 'capbun', faceless: false, armPose: 'cradle', pregnant: false, baby: true, stethoscope: false, folds: 6, foldDepth: 1.12, foldPhase: 3.1, cowlTop: 2.08, openScale: 1.02, sweepLean: -0.014, strideAngle: 0.22, hemRake: 0.048, stride: -1, lean: 0.036, headTurn: -0.34, headTilt: 0.018, trainAngle: 2.86, trainAmount: 0.58 },
-    { x: 0.60, z: -1.15, turn: 0.50, scale: 1.010, seed: 51, hair: 'capbun', faceless: false, armPose: 'clinical', pregnant: false, baby: false, stethoscope: true, folds: 7, foldDepth: 0.94, foldPhase: 4.6, cowlTop: 2.04, openScale: 0.98, sweepLean: 0.026, strideAngle: -0.06, hemRake: 0.030, stride: 1, lean: 0.022, headTurn: 0.12, headTilt: -0.042, trainAngle: 2.62, trainAmount: 0.66 },
+    // The hospital side reverses that sequence and exposes the badge, full
+    // pregnancy and doctor. Adjacent panels overlap at their shoulder sheets so
+    // the group reads as one connected casting.
+    {
+        id: 'outward-developing', side: 'outward', identity: 'developing',
+        x: -1.20, z: 0.28, turn: 0.16, scale: 0.985, seed: 11,
+        hair: 'none', armPose: 'developing', pregnant: false, belly: 0.18,
+        baby: false, stethoscope: false, badge: false,
+        torsoWidth: 1.02, torsoDepth: 0.80, sheetDepth: 0.44,
+        bustWidth: 1.06, bustHeight: 1.02, bustDepth: 1.02,
+        folds: 6, foldDepth: 0.72, foldPhase: 0.0,
+        cowlTop: 1.965, openScale: 1.04, sweepLean: -0.012,
+        strideAngle: 0.08, hemRake: 0.040, stride: -1,
+        lean: 0.020, weightShift: -0.055, headTurn: 0.02, headTilt: 0.018,
+        trainAngle: 3.26, trainAmount: 0.20,
+    },
+    {
+        id: 'hospital-doctor', side: 'hospital', identity: 'doctor',
+        x: -0.72, z: -0.02, turn: 3.04, scale: 1.000, seed: 23,
+        hair: 'cap', armPose: 'clinical', pregnant: false, belly: 0,
+        baby: false, stethoscope: true, badge: false,
+        torsoWidth: 0.98, torsoDepth: 0.79, sheetDepth: 0.40,
+        bustWidth: 0.98, bustHeight: 0.94, bustDepth: 0.94,
+        folds: 7, foldDepth: 0.78, foldPhase: 1.1,
+        cowlTop: 1.955, openScale: 0.98, sweepLean: 0.006,
+        strideAngle: -0.10, hemRake: 0.032, stride: 1,
+        lean: 0.016, weightShift: 0.040, headTurn: 0.06, headTilt: -0.018,
+        trainAngle: 3.06, trainAmount: 0.18,
+    },
+    {
+        id: 'outward-mother', side: 'outward', identity: 'mother',
+        x: -0.24, z: 0.14, turn: 0.035, scale: 1.015, seed: 37,
+        hair: 'capbun', armPose: 'cradle', pregnant: false, belly: 0,
+        baby: true, stethoscope: false, badge: false,
+        torsoWidth: 0.98, torsoDepth: 0.80, sheetDepth: 0.43,
+        bustWidth: 0.94, bustHeight: 0.94, bustDepth: 0.92,
+        folds: 6, foldDepth: 0.76, foldPhase: 2.2,
+        cowlTop: 1.970, openScale: 1.02, sweepLean: -0.004,
+        strideAngle: 0.06, hemRake: 0.038, stride: -1,
+        lean: 0.018, weightShift: -0.035, headTurn: 0.16, headTilt: 0.012,
+        trainAngle: 3.18, trainAmount: 0.18,
+    },
+    {
+        id: 'hospital-pregnant', side: 'hospital', identity: 'pregnant',
+        x: 0.24, z: -0.14, turn: 3.145, scale: 0.995, seed: 51,
+        hair: 'cap', armPose: 'pregnant', pregnant: true, belly: 1.00,
+        baby: false, stethoscope: false, badge: false,
+        torsoWidth: 1.00, torsoDepth: 0.82, sheetDepth: 0.42,
+        bustWidth: 1.00, bustHeight: 0.98, bustDepth: 1.00,
+        folds: 7, foldDepth: 0.74, foldPhase: 3.3,
+        cowlTop: 1.960, openScale: 0.99, sweepLean: 0.004,
+        strideAngle: -0.06, hemRake: 0.036, stride: 1,
+        lean: 0.020, weightShift: 0.030, headTurn: 0.02, headTilt: -0.012,
+        trainAngle: 3.12, trainAmount: 0.19,
+    },
+    {
+        id: 'outward-visitor', side: 'outward', identity: 'visitor',
+        x: 0.72, z: 0.02, turn: 0.38, scale: 1.005, seed: 67,
+        hair: 'capbun', armPose: 'visitor', pregnant: false, belly: 0,
+        baby: false, stethoscope: false, badge: false,
+        torsoWidth: 1.01, torsoDepth: 0.79, sheetDepth: 0.46,
+        bustWidth: 1.02, bustHeight: 0.98, bustDepth: 0.98,
+        folds: 6, foldDepth: 0.72, foldPhase: 4.4,
+        cowlTop: 1.955, openScale: 1.03, sweepLean: 0.010,
+        strideAngle: 0.10, hemRake: 0.034, stride: -1,
+        lean: 0.014, weightShift: -0.030, headTurn: 0.28, headTilt: 0.016,
+        trainAngle: 3.22, trainAmount: 0.19,
+    },
+    {
+        id: 'hospital-badge', side: 'hospital', identity: 'badge',
+        x: 1.20, z: -0.28, turn: 3.32, scale: 0.975, seed: 79,
+        hair: 'none', armPose: 'badge', pregnant: false, belly: 0,
+        baby: false, stethoscope: false, badge: true,
+        torsoWidth: 0.98, torsoDepth: 0.78, sheetDepth: 0.41,
+        bustWidth: 0.98, bustHeight: 0.94, bustDepth: 0.94,
+        folds: 7, foldDepth: 0.76, foldPhase: 5.5,
+        cowlTop: 1.965, openScale: 0.97, sweepLean: 0.012,
+        strideAngle: -0.08, hemRake: 0.030, stride: 1,
+        lean: 0.014, weightShift: 0.040, headTurn: -0.04, headTilt: -0.016,
+        trainAngle: 3.02, trainAmount: 0.20,
+    },
 ];
 
 /**
@@ -98,7 +145,7 @@ function paintPatina(THREE, geo, seed) {
 
     for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-        const ny = nor.getY(i);
+        const ny = nor.getY(i), nz = nor.getZ(i);
 
         // 1. up-facing wash
         const up = Math.max(0, ny);
@@ -135,6 +182,10 @@ function paintPatina(THREE, geo, seed) {
         // Keep the vertical runoff visible without letting its dark end become
         // a second shadow system. Lighting should describe the form; the patina
         // only modulates it.
+        // The inactive side of each alternating relief is a deep hammered
+        // recess. Directional back darkening preserves that read without a
+        // view-dependent material or painted silhouette.
+        c = mix(c, PATINA.deep, Math.pow(Math.max(0, -nz), 1.35) * 0.34);
         const s = 0.88 + runoff * 0.22;
         col[i * 3] = c[0] * s;
         col[i * 3 + 1] = c[1] * s;
@@ -178,8 +229,13 @@ export function createSculpture(THREE, opts = {}) {
     for (let i = 0; i < FIGURE_LAYOUT.length; i++) {
         const L = FIGURE_LAYOUT[i];
         const geo = buildFigure(THREE, {
-            seed: L.seed, hair: L.hair, faceless: L.faceless, armPose: L.armPose, scale: L.scale,
-            pregnant: L.pregnant, baby: L.baby, stethoscope: L.stethoscope,
+            seed: L.seed, identity: L.identity, shell: L.shell ?? false,
+            hair: L.hair, faceless: false,
+            armPose: L.armPose, scale: L.scale,
+            pregnant: L.pregnant, belly: L.belly, baby: L.baby,
+            stethoscope: L.stethoscope, badge: L.badge,
+            torsoWidth: L.torsoWidth, torsoDepth: L.torsoDepth, sheetDepth: L.sheetDepth,
+            bustWidth: L.bustWidth, bustHeight: L.bustHeight, bustDepth: L.bustDepth,
             folds: L.folds, foldDepth: L.foldDepth, foldPhase: L.foldPhase,
             cowlTop: L.cowlTop, openScale: L.openScale, sweepLean: L.sweepLean,
             strideAngle: L.strideAngle, hemRake: L.hemRake, stride: L.stride,
@@ -200,9 +256,9 @@ export function createSculpture(THREE, opts = {}) {
 
     // The low bronze base plate the group stands on. In the photos it is barely
     // a step — a shallow irregular slab that reads as part of the casting.
-    const baseGeo = new THREE.CylinderGeometry(1.62, 1.66, 0.030, 48, 1);
-    baseGeo.scale(1.16, 1, 0.74);
-    baseGeo.translate(0.10, 0.016, -0.14);
+    const baseGeo = new THREE.CylinderGeometry(1.48, 1.49, 0.008, 48, 1);
+    baseGeo.scale(1.02, 1, 0.39);
+    baseGeo.translate(0, 0.004, 0);
     const baseCol = new Float32Array(baseGeo.attributes.position.count * 3);
     for (let i = 0; i < baseCol.length; i += 3) {
         baseCol[i] = 0.108; baseCol[i + 1] = 0.112; baseCol[i + 2] = 0.100;
@@ -210,6 +266,7 @@ export function createSculpture(THREE, opts = {}) {
     baseGeo.setAttribute('color', new THREE.Float32BufferAttribute(baseCol, 3));
     const base = new THREE.Mesh(baseGeo, material);
     base.receiveShadow = true;
+    base.visible = false;
     base.name = 'base';
     group.add(base);
 

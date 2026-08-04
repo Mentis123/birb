@@ -1,5 +1,7 @@
 # Bronze — the likeness rubric
 
+> **2026-08-04 reconstruction notice:** the former 41/41 Phase 5 closeout is invalid. Full-resolution review established six alternating reliefs, not four freestanding figures. The checklist below is retained as development history; current acceptance is the nine-detail contract in `validation/phase-5-detail-contract.json`.
+
 Forty-one things that either read or do not, each with the photograph that
 settles it. **90% is 37 of 41.**
 
@@ -90,22 +92,22 @@ regressions on this model were caused by fixing one thing.
       separate mass from the face.
 - [x] **E6** Two figures carry a coiled top-knot; it sits ON the crown and is
       unmistakable in silhouette.
-- [x] **E7** The four heads are individually distinguishable at group distance.
+- [ ] **E7** The six active heads are individually distinguishable at group distance.
 
 ## F · The stories each figure carries — `ref-b`, `ref-c`, `ref-d`
 
 - [x] **F1** One figure is heavily pregnant and reads as pregnant, not as stout.
-- [x] **F2** One carries a swaddled newborn, distinguishable from a pregnancy:
+- [ ] **F2** One carries a swaddled newborn, distinguishable from a pregnancy:
       held at the forearms, oblong across the body, with a hard seam.
 - [x] **F3** One wears a stethoscope, cord round the neck and bell standing clear
       of the chest.
-- [x] **F4** Each figure's arms do something different, and the difference is
+- [ ] **F4** Each figure's arms do something different, and the difference is
       legible.
 
-## G · Surface, patina and light — all four
+## G · Surface, patina and light — all six reliefs
 
 - [x] **G1** The bronze is dark. Sunlit faces read mid-grey-green, not plaster.
-- [x] **G2** The surface is hand-worked. Every panel holds pushes and hollows;
+- [ ] **G2** The surface is hand-worked. Every panel holds pushes and hollows;
       nothing reads as a lathe or a moulded shell.
 - [x] **G3** Vertical run-off streaks mark the standing surfaces.
 - [x] **G4** Up-facing edges are washed pale; crevices go black.
@@ -122,31 +124,19 @@ regressions on this model were caused by fixing one thing.
 
 ## Score
 
-**41 / 41**, rescored after the Phase 5 visual closeout on 2026-08-04.
+**Unscored after the six-relief reconstruction.** The former 41/41 result was
+based on the wrong object structure and cannot be carried forward.
 
-Phase 5 evidence is `validation/phase-5-final.png`, paired with the broader
-reference matrix in `validation/phase-5-matched-final.png`. The isolated
-geometry proofs are `phase-5-weight-normal.png`,
-`phase-5-collar-normal-final.png`, `phase-5-hair-normal.png` and
-`phase-5-shadow-mask.png`. All seven integrated views passed live-framebuffer
-checks with complete opacity and non-uniform pixels.
+Current deterministic evidence is
+`validation/phase-5-reference-reconstruction.png` and
+`validation/phase-5-identity-audit.png`. All ten matched/detail/mobile
+frames and all eight neutral orbit frames are opaque and non-uniform, but those
+checks establish render health and observability, not likeness.
 
-Score progression: 10 before phased work, 19 after Phase 1, 26 after Phase 2,
-30 after Phase 3, 35 after Phase 4 and 41 after Phase 5.
-
-The former six non-passes now have direct evidence:
-
-- `C4`: a height-eased lateral shear settles one upper column over a planted side.
-- `D2`: the turned figure remains behind from the front and dominates from group right.
-- `B3`: the full cowl wraps the head, closes over a broad crown and retains a dark rimmed recess.
-- `E3`: mirrored triangular prism cuts retain 27-28mm of cavity depth.
-- `E5`: an explicit smooth cap projects past the skull with a hard temple edge.
-- `H3`: the neutral shadow diagnostic shows one connected projected footprint.
-
-This is rubric completion, not unconditional device ship approval. The real
-iPhone 12-or-newer load and orbit test remains open, and SwiftShader frame rate
-is recorded only as local render evidence, not as a phone-performance result.
-
+The nine-detail contract records nine passes at the reference-faithful
+major-landmark and contour threshold. Phase 5 is closed at that boundary; see
+`validation/phase-5-closeout.md`. This is an auditable contract result, not a
+measured perceptual-likeness percentage.
 > The denominator was wrong when this file was written: the header said 32 and
 > the list has 41. Counted, not estimated, from this point on. A score over a
 > made-up denominator is precisely the kind of lying number the gate beside this
@@ -282,36 +272,34 @@ recorded in the closeout file. The scene reports 514,780 triangles, 6 draw calls
 and 4 figures. A real iPhone 12-or-newer load and orbit test is still
 outstanding; SwiftShader performance is not a phone result.
 
-#### Phase 5A — arrangement, weight and shadow
+#### Phase 5 reconstruction — six alternating reliefs
 
-Implemented and visually accepted on 2026-08-04.
+Reopened on 2026-08-04 after the reference images disproved the four-figure
+model. The implementation now encodes the physical outward sequence
+`developing | doctor(back) | mother/newborn | pregnant(back) | visitor |
+badge(back)`, with the reverse hospital sequence on the opposite side.
 
-- `C4` uses a height-eased weight shift that leaves the hem and support foot fixed.
-- `D2` is enforced by world layout, projected-depth margin and whole-body turn.
-- `H3` is confirmed by the integrated view and a neutral shadow-only diagnostic.
+The body uses a closed 18 mm marching-tetrahedra field with a full-height
+negative relief, the heads and role details retain finer or explicit
+representations, and all six production body fields have zero boundary and
+non-manifold edges.
 
-Evidence: `validation/phase-5-final.png`,
-`validation/phase-5-weight-normal.png` and
-`validation/phase-5-shadow-mask.png`.
+#### Current acceptance boundary
 
-#### Phase 5B — remaining form and facial refinements
-
-Implemented and visually accepted on 2026-08-04.
-
-- `B3` now has a broad crown, converging upper rim and readable inner recess.
-- `E3` uses deep mirrored triangular-prism cavities in the head field.
-- `E5` uses an explicit smooth cap with a hard CSG temple transition.
-
-Evidence: `validation/phase-5-final.png`,
-`validation/phase-5-collar-normal-final.png` and
-`validation/phase-5-hair-normal.png`.
-
-#### Final ship gate
-
-- [x] 41 / 41, honestly rescored.
+- [x] Six-relief order, alternating side and whole-body facing.
+- [x] Closed positive/reverse surfaces with no read-through in the full orbit.
+- [x] Stethoscope and badge semantic contracts.
+- [x] Role-specific body contours, hands and arm transitions accepted at the major-landmark threshold.
+- [x] Face/hair direction, proportions and crown count accepted in matched identity views.
+- [x] Fully wrapped newborn and one U-shaped support accepted in a matched close view.
+- [x] Pregnancy projection and flank-arm relationship accepted against the source contour.
+- [x] Foot instep/toe asymmetry accepted in low and front-orbit views.
 - [x] Proportion gate: 0 of 12 outside tolerance, worst error +0.024.
-- [x] Full 203-test suite green.
-- [x] Matched and acceptance contact sheets reproducibly archived.
-- [ ] Real iPhone 12-or-newer interaction and load test.
-- [x] No browser or console errors in the complete local matrices.
-- [ ] Initial construction and orbit performance accepted on a real phone.
+- [x] Full 208-test suite green.
+- [x] Ten-view desktop/mobile matrix and eight-angle orbit archived.
+- [ ] Real iPhone 12-or-newer interaction, construction time and sustained orbit accepted.
+
+All nine detail contracts pass closeout at the major-landmark and contour
+threshold. This does not restore a numeric perceptual-likeness score. Phase 6
+has not started. The real-iPhone item remains a final ship/performance gate,
+not a capability implied by local SwiftShader evidence.

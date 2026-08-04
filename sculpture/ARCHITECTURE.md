@@ -1,5 +1,7 @@
 # Bronze — architecture and working notes
 
+> **2026-08-04 reconstruction notice:** Phase 5 has been rebuilt and closed at the major-landmark and contour threshold. The former four-figure architecture and 41/41 closeout were based on a structural misread of the references. Production now models six alternating positive/negative reliefs; current status is in `validation/phase-5-closeout.md`.
+
 A 3D study of the bronze group outside **The Women's** (Royal Women's Hospital,
 Parkville, Melbourne). Michael Meszaros, 2008, commissioned via the Harold
 Mitchell Foundation for the hospital's opening; Google Maps lists it as
@@ -17,13 +19,13 @@ that caused them.
 
 ## What it is, in one paragraph
 
-Four bronze women standing close in a crowded diagonal. Each is generated in
-code from profile tables and signed distance fields — the running page loads no
-model, image, font or texture assets. The repository's reference and validation
-images are development evidence only. You drag to orbit, pinch to zoom, two
-fingers to pan, double-tap to reset, and hold three fingers to raise a QR of the
-production URL.
-
+Six alternating bronze reliefs form one folded casting: three active figures on
+the outward/community side and three different figures on the hospital side.
+Each relief is generated from profile tables, sampled fields and explicit detail
+geometry; the running page loads no model, image, font or texture assets. The
+repository's reference and validation images are development evidence only. You
+drag to orbit, pinch to zoom, use two fingers to pan, double-tap to reset, and
+hold three fingers to raise a QR of the production URL.
 ## Hard rules
 
 1. **Zero production assets.** The running page imports no images, meshes, fonts
@@ -50,7 +52,7 @@ production URL.
 sculpture/
   index.html            scene, renderer, ground, boot, harness hooks
   ARCHITECTURE.md       this file
-  LIKENESS.md           the 41-check rubric and the current score
+  LIKENESS.md           historical rubric and current acceptance boundary
   reference/            Mentis's four photos, EXIF-transposed only
   validation/           committed closeout records and render evidence; not runtime
   dev/probe-parts.html  render any subset of ONE figure in isolation
@@ -58,16 +60,16 @@ sculpture/
     core/three-loader.js   CDN or local Three, per ?three=local
     core/noise.js          value noise + fbm3, deterministic
     core/rng.js            seeded RNG (shared shape with Gauntlet)
-    model/sdf.js           sdEllipsoid/sdCapsule/sdRoundBox, smin/smax/subtract,
-                           surfaceNets
-    model/figure.js        ONE figure: shell, body field, head field, integrated stride
-    model/sculpture.js     the four of them, arranged, patinated, lit
+    model/sdf.js           SDF primitives, smooth booleans, surfaceNets,
+                           marchingTetrahedra
+    model/figure.js        ONE relief: body/reverse fields, head, roles and foot
+    model/sculpture.js     six alternating reliefs, ordered, patinated and lit
     view/orbit.js          orbit / pinch / two-finger pan, hand-rolled
     ui/qr.js               QR encoder, byte mode, ECC M, versions 1-10
     ui/qr-overlay.js       three-finger gesture, Birb Labs convention
 tools/
   sculpture-shot.mjs        one view, one browser boot
-  sculpture-sheet.mjs       seven general or nine Phase 4 views, one browser boot
+  sculpture-sheet.mjs       general, Phase 4, Phase 5 and identity matrices
   sculpture-views.mjs       the reference camera poses
   sculpture-proportions.mjs the measurable half of the likeness gate
 tests/sculpture-orbit.test.js   panBasis
@@ -75,57 +77,58 @@ tests/sculpture-orbit.test.js   panBasis
 
 ## The build pipeline
 
-One figure, in order, all in model/figure.js:
+One relief, in production order:
 
-    SHELL_PROFILE + FRONT_OPENING + shellOffsetZ
-      -> buildShell(): swept crescent, closed wall and hem
-      -> roughen() twice: broad ripple, then hammer marks
+    TORSO_PROFILE + bust/shoulder/arm/narrative primitives
+      -> buildBodyField(): front relief, long rear sweep, full negative relief,
+         role gesture and pregnancy when authored
+      -> marchingTetrahedra at 18 mm
 
-    TORSO_PROFILE + ellipsoid/capsule primitives
-      -> buildBodyField(): one smooth-union field
-      -> surfaceNets at 14.5 mm
+    planted foot
+      -> buildFeet(): separate closed field at 7.5 mm, rooted beneath the hem
+
+    skull, jaw, hair, crown rolls and facial relief
+      -> buildHeadField(): separate closed field at 5.607 mm
 
     carried newborn
       -> buildBabyField(): separate closed field at 5.5 mm
 
-    skull, jaw, hair, bun and face primitives
-      -> buildHeadField(): separate field at about 5.6 mm
+    hospital badge
+      -> buildBadgeField(): separate closed field at 3.5 mm
 
     clinician instrument
       -> buildStethoscopeGeometry(): two Catmull-Rom TubeGeometry paths
          with independent ringed terminals
 
-    buildFeet(): isolation/topology probe for the body-field foot
+    mergeGeometries() -> one BufferGeometry per relief
 
-    mergeGeometries() -> one BufferGeometry per figure
+`model/sculpture.js` builds six meshes in the exact alternating physical order,
+applies one vertex-coloured `MeshStandardMaterial`, and adds the light/ground
+scene. The acceptance matrices measure **2,070,904 triangles and 7 draw calls**
+for six reliefs plus the ground draw. Do not restore the obsolete 525,912 / six
+draw-call or four-figure figures.
 
-Then in model/sculpture.js: `paintPatina()` writes vertex colours, four meshes
-share one `MeshStandardMaterial`, plus a base slab and the light rig.
-
-The current Phase 5 scene measures **525,912 triangles and 6 draw calls**
-in the acceptance matrices. The Phase 4 increase was deliberate: the infant
-has its own 5.5 mm closed field and the instrument uses actual curved tube
-geometry instead of being erased into the coarse torso field. Phase 5 adds the
-deeper triangular head cavities and revised cap/cowl surfaces without
-adding draw calls. Do not restore the old ~75k-per-figure / ~302k-total estimate
-or PR #412's 494,596 count. The figures are not identical enough for a useful
-per-figure average. The historical simulated-mobile timing remains in
-validation/phase-3-closeout.md; it is a CI/SwiftShader result, not an iPhone
-measurement.
-
+The 18 mm body field is the deliberate cost centre. Fine role details stay in
+smaller sampled fields or explicit geometry because they do not survive that
+sampling scale. The historical simulated-mobile timings remain useful only as
+software-renderer comparisons; they are not iPhone measurements.
 The page still renders **on demand**: `orbit.update()` returns whether anything
 moved and no additional renderer pass is issued while the sculpture is still.
 `renderer.info.render.calls` therefore remains the cost of the most recent
 render, not a claim that the last frame contained zero draw calls.
 
-### Why surface nets and not marching cubes
+### Why two meshing paths
 
-Marching cubes needs a 256-entry edge table and a 256×16 triangle table — a
-screenful of magic numbers with no way to review them. Surface nets is sixty
-readable lines, and on organic blobby fields it is smoother because each cell
-contributes ONE vertex at the mean of its edge crossings rather than up to five
-triangles pinned to the edges.
+The compound body field previously used surface nets. Its ambiguous saddle
+cells produced edges shared by four triangles even when the field and bounds
+were correct. Production bodies now use a face-consistent six-tetrahedra split
+with lattice-edge vertex reuse; all six report zero boundary and non-manifold
+edges.
 
+Surface nets remains appropriate for isolated fine fields whose sampling ratio
+is stable: heads, newborn, foot probe and badge. Narrow continuous paths such as
+the stethoscope use explicit geometry. Representation is chosen per signal
+scale, not globally.
 ### Why a distance field and not a union of primitives
 
 A union of surfaces has a crease wherever two surfaces meet. Cast bronze has no
@@ -142,7 +145,7 @@ Each cost at least one full pass to find.
 material culls an inward-wound near surface and exposes the far interior, which
 looks like clipping, transparency or missing bronze. The Phase 4 integrity
 repair found negative signed volume in the body, head and cloak, plus open cloak
-and head boundary rings. Keep the surface-nets and cloak winding outward, cap
+and head boundary rings. Keep body tetrahedra, fine-field and swept-surface winding outward; cap
 both ends of the cloak wall, and preserve Three's normal closed-solid shadow
 pass. Do not use `material.shadowSide` to mask broken topology.
 
@@ -210,38 +213,33 @@ letting go of a pinch snapped the view back to default.
 
 ## What the sculpture actually looks like
 
-Written down because the first version of this model described a completely
-different object. **The four reference photos arrive with EXIF orientation 3.**
-`ImageOps.exif_transpose` alone is the correct fix; an extra flip
-double-corrects and mirrors the signage, which is how you can tell you have got
-it wrong. The original plan was written against un-rotated images and described
-hooded figures with flared cloaks.
+Written down because two accepted implementations described the wrong object.
+**The four reference photos arrive with EXIF orientation 3.**
+`ImageOps.exif_transpose` alone is the correct fix; an extra flip mirrors the
+signage and reverses the physical order.
 
-- **The cloak stands BEHIND the woman and the whole front is open.** It covers
-  her back, curls a little round her sides, rises into a hollow collar-arch
-  behind her head, and that is all it does. Her face, throat, shoulders, breasts
-  and belly are in open air in front of it. Modelled with a 0.55 rad opening and
-  a shared axis, the shell is a near-complete tube with a slot in it: the body
-  was fully and correctly modelled the whole time and not one square millimetre
-  was visible. The group rendered as four ghosts for four passes.
-- **The figures are flat slabs.** Depth is about half the width; the cloak is a
-  PANEL, and a thick cast one — every free edge shows section.
-- **The group is a crowded diagonal**, nearest figure front-left, each of the
-  others further back and further right, all facing roughly the same way and
-  turning a little more right as they go back. Not a zigzag, not a rank.
-- **They are WALKING.** Hems raked back off a planted forward foot.
-- **They are heavy and big-headed** — about five and a half heads tall, shoulder,
-  bust and waist spans all within 0.03 of each other. A column, not an hourglass.
-- **Every figure carries a story**, and this is the subject of the piece: one
-  heavily pregnant, one cradling a swaddled newborn on her forearms, one a
-  clinician with a stethoscope round her neck. Building them is not the same as
-  their reading — see `LIKENESS.md` F2 and F3 for how each one failed to read
-  while being measurably present in the mesh.
-- **The heads are intentionally non-uniform.** The nearest is bare/plain, the
-  turned-away head presents its back while retaining a complete face on the far
-  side, and two carry a coiled top-knot. Faces are planar with a long nose ridge
-  from the brow, shallow eye sockets and a wide flat mouth. Do not restore one
-  identical cap to all four.
+- **This is one folded sheet carrying six alternating reliefs**, not four
+  freestanding women. From the outward side the physical sequence is
+  `developing | doctor(back) | mother/newborn | pregnant(back) | visitor |
+  badge(back)`. The hospital side reverses it.
+- **Each inactive side is a real negative relief.** It has a broad closed head
+  and torso impression, thick surrounding wall and long swept fin. It is not
+  transparency, a missing backface or an empty shell.
+- **The active bodies are heavy, columnar reliefs.** Heads are large, shoulders
+  broad, breasts low and wide, and hems widen into planted cast sheets.
+- **The six roles are specific.** Developing fullness, badge, swaddled newborn,
+  full pregnancy, visitor and doctor/stethoscope each occur exactly once on
+  their authored side.
+- **The three outward and three hospital faces are not interchangeable.** Head
+  width/height, jaw, feature spacing, turn and hair differ. Mother has one crown
+  roll, visitor two; the authored bare heads remain bare.
+- **One tapered planted foot belongs to each body field.** Its root stays under
+  the hem and the inactive side never invents a detached second shoe.
+- **Phase 5 is closed at reference-faithful major landmarks and contours.**
+  Body contours, gestures, structural face/hair identities, the fully wrapped
+  newborn and support, pregnancy profile and planted feet pass the nine-detail
+  contract. Portrait-level likeness and hand-beaten micro-surface are not
+  claimed.
 
 ### Reference set
 
@@ -254,7 +252,7 @@ them feed the model. Everything they changed is written down above.
 
 ## Verification protocol
 
-**Nothing is claimed without a captured frame.** These three tools exist because
+**Nothing is claimed without a captured frame.** These tools exist because
 every real bug in this model fell to an isolation test and none fell to tuning.
 The feature-scale limits, detail observation contract, measured feedback budget
 and closeout criteria are in [DETAIL-QA.md](DETAIL-QA.md). Apply that protocol
@@ -266,6 +264,12 @@ node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png
 
 # The Phase 4 defect loop. Nine desktop/mobile/detail views, one boot.
 node tools/sculpture-sheet.mjs --phase4 --out shots/sculpt/phase4.png
+
+# The Phase 5 semantic loop. Eight detail/scene views plus two mobile views.
+node tools/sculpture-sheet.mjs --phase5 --out shots/sculpt/phase5.png
+
+# Whole-object side/facing audit at eight neutral orbit angles.
+node tools/sculpture-sheet.mjs --identity --out shots/sculpt/identity.png
 
 # The measurable half of the gate. Exits non-zero when a proportion is off.
 node tools/sculpture-proportions.mjs
@@ -306,7 +310,7 @@ evidence by itself.
   looks like evidence. Pass a real function.
 - The page keeps damping and, after nine idle seconds, starts a slow idle spin.
   A multi-view sheet takes longer than that, so re-park after the settle.
-- The ~515k-triangle mesh can make a software-rendered Chromium screenshot
+- The ~2.07M-triangle mesh can make a software-rendered Chromium screenshot
   exceed Playwright's 30-second default even after `__SCULPT_READY` is true.
   Readiness and PNG readback are separate deadlines; use the sheet harness's
   `--screenshot-timeout` rather than misreporting a slow readback as a model
@@ -324,15 +328,20 @@ evidence by itself.
 
 ## Where the model is
 
-**LIKENESS.md is the scorecard: 41 binary checks, 90% is 37 of them.
-Phase 5 is locally complete at 41 / 41.** The proportion gate is GREEN at 0 of
-12 outside tolerance, worst +0.024 - necessary and not sufficient, since this
-gate has been green while the visual result was wrong. The current closeout is
-in `validation/phase-5-closeout.md`; the seven-view acceptance sheet, broader
-reference matrix and six-detail contract are in the same directory.
+**Phase 5 is complete after the six-relief reference reconstruction.** The
+proportion gate is green at 0 of 12 outside tolerance, worst +0.024, but that is
+necessary and not sufficient. The full project suite is 208/208 and all six
+production body fields are closed manifolds.
 
-The Phase 4 closeout and correction artifacts remain historical provenance.
-The real iPhone performance and interaction gate is still open.
+Current evidence is `validation/phase-5-reference-reconstruction.png`, the
+eight-angle `validation/phase-5-identity-audit.png`, and the nine-detail
+`validation/phase-5-detail-contract.json`. All nine detail contracts pass at
+the declared major-landmark and contour threshold; the body-silhouette field
+retains one documented fragile-scale warning with close visual evidence.
+
+The Phase 3-5 historical artifacts remain provenance for earlier decisions,
+not current closeout evidence. Phase 6 has not started and the real iPhone
+performance/interaction gate remains open.
 
 Phase closeout history:
 
@@ -350,27 +359,27 @@ SKIRT is part of the body field running to the paving. Every free edge carries
 a rounded bead built into one closed cross-section. Hems rake off a leading
 stride and no two figures agree on rake, lean or head angle.
 
-The first closeout still modeled a planted foot as a separate closed object.
-Low-angle mobile evidence showed the join and bulbous instep. The current foot
-belongs to the same field as the skirt: a buried root, instep and narrower
-forefoot overlap the hem deeply, while a restrained toe edge interrupts the
-front silhouette without detached pebbles or a paddle. Do not restore detached
-heel/toe primitives or exposed legs; ref-c-under shows a smooth robe-to-ground
-extension. Phase 5 retained this foot while adding the visible load-bearing
-shift required by C4 and completing the crown arch required by B3.
+The first closeout modeled a coarse detached foot, then the reconstruction
+folded the foot into the 18 mm body field. Low-angle evidence showed that the
+fine 7.5 mm probe looked correct while the production foot still collapsed into
+a pointed wedge. Production now uses that same fine closed foot field, with its
+root buried beneath and intersecting the closed skirt. Do not restore detached
+heel/toe primitives, the coarse body-field toe or exposed legs. Instep and toe
+asymmetry now pass the Phase 5 low and front-orbit views.
 
 **Phase 3 — Heads. DONE (2026-08-02; acceptance corrected 2026-08-03).**
 The head is a rounded BLOCK, not an ovoid — flat front, flat sides, domed top.
 The nearest is bare/plain. The rear-facing figure now rotates as one body,
 cowl and head, retaining a complete face on the opposite side without an
-impossible local neck twist. Two figures carry coiled top-knots. Phase 5
+impossible local neck twist. Mother carries one flattened crown roll and visitor
+two. Phase 5
 replaced the shallow sockets with triangular cavities and made the smooth hair
 cap terminate at a hard temple edge, completing E3 and E5.
 
 **Phase 4A — Arms and negative space. DONE (2026-08-03; acceptance
-corrected 2026-08-03).** Four reference-led paths replace the generic vertical
+corrected 2026-08-03).** Six role-specific arm definitions replace the generic vertical
 pair. Their radii taper from shoulder to reduced cast tips. The infant is a
-separate fine closed swaddle supported by a curved forearm, and the clinician's
+separate fine closed fully wrapped block supported by one curved forearm, and the clinician's
 instrument is two independent curved tubes with two small ringed terminals.
 The chest remains one shallow shelf with restrained lobes rather than attached
 spheres. A7 and F4 remain passes.
@@ -386,27 +395,32 @@ validation/phase-4-closeout.md. The simulated browser uses SwiftShader; a real
 iPhone 12-or-newer load and orbit test remains part of the final ship gate.
 Do not optimize geometry from software-rendered timings alone.
 
-### Phase 5A — arrangement, weight and shadow
+### Phase 5 reconstruction — current status
 
-DONE (2026-08-04). The upper-column weight shift, right-side projected-depth
-arrangement and connected-shadow diagnostic complete `C4`, `D2` and `H3`.
-Exact cameras and mesh assertions live in the Phase 5 contract and closeout.
+Reopened on 2026-08-04. The structural reconstruction, topology and role order
+are implemented and reproducibly rendered in ten matched desktop/mobile views
+and eight neutral orbit angles. All nine detail contracts pass closeout
+validation. The 18 mm role-silhouette field retains one fragile-scale warning
+and its required close visual evidence.
 
-### Phase 5B — remaining form and facial refinements
+### Phase 5 closeout gate
 
-DONE (2026-08-04). The broad hollow cowl crown, triangular socket cuts and
-explicit hair-cap edge complete `B3`, `E3` and `E5`. Normal-material probes
-separate their geometry proof from bronze and lighting.
+- [x] Six alternating reliefs in exact physical order.
+- [x] Whole-body side/facing contract and eight-angle occlusion audit.
+- [x] Zero boundary and non-manifold edges on all six production body fields.
+- [x] Stethoscope and badge semantic contracts.
+- [x] Body contours, hands and arm transitions accepted at the major-landmark threshold.
+- [x] Face/hair direction, proportions and crown count accepted in matched identity views.
+- [x] Fully wrapped newborn and one U-shaped support accepted in matched close view.
+- [x] Pregnancy projection and flank-arm relationship accepted against the source contour.
+- [x] Foot instep/toe asymmetry accepted in the low and front-orbit views.
+- [x] Proportion gate: 0 of 12 outside tolerance, worst +0.024.
+- [x] Full 208-test suite and 10+8 render matrices green.
+- [ ] Real iPhone 12-or-newer construction, interaction and sustained orbit accepted.
 
-### Final ship gate
-
-- [x] 41 / 41, honestly rescored.
-- [x] Proportion gate green: 0 of 12 outside tolerance, worst +0.024.
-- [x] Full 203-test suite green.
-- [x] Matched and acceptance sheets reproducibly archived.
-- [ ] Real iPhone 12-or-newer interaction and load test.
-- [x] No browser or console errors in local matrices.
-- [ ] Initial construction and orbit performance accepted on a real phone.
+Phase 5 may merge at this declared threshold. Do not start Phase 6 or restore a
+numeric perceptual-likeness score. The real-device item remains a final
+ship/performance gate and is not implied by the SwiftShader results.
 
 ### Process rules for future runs
 
