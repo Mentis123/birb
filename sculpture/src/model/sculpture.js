@@ -26,13 +26,13 @@ import { fbm3 } from '../core/noise.js';
 
 /** Patina end points, sampled off the sunlit faces in `ref-a-front.jpg`. */
 const PATINA = {
-    // The bronze stays dark, but its broad planes must remain readable in sky
-    // light. Crevices carry the near-black values; using them as the body colour
-    // crushes the whole group into a silhouette on real mobile displays.
-    deep: [0.060, 0.058, 0.050],      // dirt held in the deepest crevices
-    body: [0.215, 0.205, 0.175],      // weathered olive-brown bronze
-    lit: [0.390, 0.365, 0.300],       // pale rain-washed shelves and ridges
-    verdigris: [0.150, 0.215, 0.185], // restrained green bloom in sheltered runs
+    // The photographs are a near-black casting with narrow grey-bronze wash,
+    // not a mid-value olive object. Keep the body dark and let the light rig
+    // reveal form; only genuinely up-facing shelves reach the washed endpoint.
+    deep: [0.016, 0.017, 0.016],      // dirt held in the deepest crevices
+    body: [0.072, 0.075, 0.070],      // near-black weathered bronze
+    lit: [0.245, 0.235, 0.205],       // rain-washed shelves and ridges
+    verdigris: [0.050, 0.075, 0.068], // restrained green bloom in sheltered runs
 };
 
 /**
@@ -52,79 +52,79 @@ export const FIGURE_LAYOUT = [
     // the group reads as one connected casting.
     {
         id: 'outward-developing', side: 'outward', identity: 'developing',
-        x: -1.20, z: 0.28, turn: 0.16, scale: 0.985, seed: 11,
+        x: -1.20, z: 0.28, turn: 0.16, scale: 0.985, seed: 11, shell: true,
         hair: 'none', armPose: 'developing', pregnant: false, belly: 0.18,
         baby: false, stethoscope: false, badge: false,
         torsoWidth: 1.02, torsoDepth: 0.80, sheetDepth: 0.44,
         bustWidth: 1.06, bustHeight: 1.02, bustDepth: 1.02,
         folds: 6, foldDepth: 0.72, foldPhase: 0.0,
-        cowlTop: 1.965, openScale: 1.04, sweepLean: -0.012,
+        cowlTop: 2.420, openScale: 1.04, sweepLean: -0.012,
         strideAngle: 0.08, hemRake: 0.040, stride: -1,
         lean: 0.020, weightShift: -0.055, headTurn: 0.02, headTilt: 0.018,
         trainAngle: 3.26, trainAmount: 0.20,
     },
     {
         id: 'hospital-doctor', side: 'hospital', identity: 'doctor',
-        x: -0.72, z: -0.02, turn: 3.04, scale: 1.000, seed: 23,
+        x: -0.72, z: -0.02, turn: 3.04, scale: 1.000, seed: 23, shell: true,
         hair: 'cap', armPose: 'clinical', pregnant: false, belly: 0,
         baby: false, stethoscope: true, badge: false,
         torsoWidth: 0.98, torsoDepth: 0.79, sheetDepth: 0.40,
         bustWidth: 0.98, bustHeight: 0.94, bustDepth: 0.94,
         folds: 7, foldDepth: 0.78, foldPhase: 1.1,
-        cowlTop: 1.955, openScale: 0.98, sweepLean: 0.006,
-        strideAngle: -0.10, hemRake: 0.032, stride: 1,
+        cowlTop: 2.390, openScale: 0.98, sweepLean: 0.006,
+        strideAngle: -0.38, hemRake: 0.032, stride: 1,
         lean: 0.016, weightShift: 0.040, headTurn: 0.06, headTilt: -0.018,
         trainAngle: 3.06, trainAmount: 0.18,
     },
     {
         id: 'outward-mother', side: 'outward', identity: 'mother',
-        x: -0.24, z: 0.14, turn: 0.035, scale: 1.015, seed: 37,
+        x: -0.24, z: 0.14, turn: 0.035, scale: 1.015, seed: 37, shell: true,
         hair: 'capbun', armPose: 'cradle', pregnant: false, belly: 0,
         baby: true, stethoscope: false, badge: false,
         torsoWidth: 0.98, torsoDepth: 0.80, sheetDepth: 0.43,
         bustWidth: 0.94, bustHeight: 0.94, bustDepth: 0.92,
         folds: 6, foldDepth: 0.76, foldPhase: 2.2,
-        cowlTop: 1.970, openScale: 1.02, sweepLean: -0.004,
+        cowlTop: 2.440, openScale: 1.02, sweepLean: -0.004,
         strideAngle: 0.06, hemRake: 0.038, stride: -1,
-        lean: 0.018, weightShift: -0.035, headTurn: 0.16, headTilt: 0.012,
+        lean: 0.018, weightShift: -0.035, headTurn: 0.68, headTilt: 0.012,
         trainAngle: 3.18, trainAmount: 0.18,
     },
     {
         id: 'hospital-pregnant', side: 'hospital', identity: 'pregnant',
-        x: 0.24, z: -0.14, turn: 3.145, scale: 0.995, seed: 51,
+        x: 0.24, z: -0.14, turn: 3.145, scale: 0.995, seed: 51, shell: true,
         hair: 'cap', armPose: 'pregnant', pregnant: true, belly: 1.00,
         baby: false, stethoscope: false, badge: false,
         torsoWidth: 1.00, torsoDepth: 0.82, sheetDepth: 0.42,
         bustWidth: 1.00, bustHeight: 0.98, bustDepth: 1.00,
         folds: 7, foldDepth: 0.74, foldPhase: 3.3,
-        cowlTop: 1.960, openScale: 0.99, sweepLean: 0.004,
-        strideAngle: -0.06, hemRake: 0.036, stride: 1,
+        cowlTop: 2.410, openScale: 0.99, sweepLean: 0.004,
+        strideAngle: -0.42, hemRake: 0.036, stride: 1,
         lean: 0.020, weightShift: 0.030, headTurn: 0.02, headTilt: -0.012,
         trainAngle: 3.12, trainAmount: 0.19,
     },
     {
         id: 'outward-visitor', side: 'outward', identity: 'visitor',
-        x: 0.72, z: 0.02, turn: 0.38, scale: 1.005, seed: 67,
+        x: 0.72, z: 0.02, turn: 0.38, scale: 1.005, seed: 67, shell: true,
         hair: 'capbun', armPose: 'visitor', pregnant: false, belly: 0,
         baby: false, stethoscope: false, badge: false,
         torsoWidth: 1.01, torsoDepth: 0.79, sheetDepth: 0.46,
         bustWidth: 1.02, bustHeight: 0.98, bustDepth: 0.98,
         folds: 6, foldDepth: 0.72, foldPhase: 4.4,
-        cowlTop: 1.955, openScale: 1.03, sweepLean: 0.010,
+        cowlTop: 2.425, openScale: 1.03, sweepLean: 0.010,
         strideAngle: 0.10, hemRake: 0.034, stride: -1,
         lean: 0.014, weightShift: -0.030, headTurn: 0.28, headTilt: 0.016,
         trainAngle: 3.22, trainAmount: 0.19,
     },
     {
         id: 'hospital-badge', side: 'hospital', identity: 'badge',
-        x: 1.20, z: -0.28, turn: 3.32, scale: 0.975, seed: 79,
+        x: 1.20, z: -0.28, turn: 3.32, scale: 0.975, seed: 79, shell: true,
         hair: 'none', armPose: 'badge', pregnant: false, belly: 0,
         baby: false, stethoscope: false, badge: true,
         torsoWidth: 0.98, torsoDepth: 0.78, sheetDepth: 0.41,
         bustWidth: 0.98, bustHeight: 0.94, bustDepth: 0.94,
         folds: 7, foldDepth: 0.76, foldPhase: 5.5,
-        cowlTop: 1.965, openScale: 0.97, sweepLean: 0.012,
-        strideAngle: -0.08, hemRake: 0.030, stride: 1,
+        cowlTop: 2.400, openScale: 0.97, sweepLean: 0.012,
+        strideAngle: -0.48, hemRake: 0.030, stride: 1,
         lean: 0.014, weightShift: 0.040, headTurn: -0.04, headTilt: -0.016,
         trainAngle: 3.02, trainAmount: 0.20,
     },
@@ -199,6 +199,138 @@ function mix(a, b, t) {
     const k = t < 0 ? 0 : t > 1 ? 1 : t;
     return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 }
+/**
+ * Closed vertical ribbon through the six relief centres. It is the shared cast
+ * sheet: active bodies project from alternating sides while the ribbon closes
+ * their buried bases. The overlapping full-height shells and body recesses
+ * supply the visible shoulder-to-crown folds.
+ */
+export function buildFoldedScreen(THREE, layout = FIGURE_LAYOUT) {
+    const bottom = -0.045;
+    // The reference is one folded casting, so the centre ribbon must close the
+    // gaps between reliefs above the waist. Uneven peaks avoid the false flat
+    // shoulder wall produced by a single uniform top edge.
+    const topProfile = [2.05, 1.88, 2.10, 1.90, 2.08, 1.86];
+    const halfThickness = 0.034;
+    const endExtension = 0.10;
+    const rows = 36;
+
+    const centres = layout.map(({ x, z }, index) => ({
+        x, z, top: topProfile[index] ?? 1.92,
+    }));
+    const direction = (a, b) => {
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const length = Math.hypot(dx, dz);
+        return { x: dx / length, z: dz / length };
+    };
+    const firstDirection = direction(centres[0], centres[1]);
+    const lastDirection = direction(centres.at(-2), centres.at(-1));
+    const path = [
+        {
+            x: centres[0].x - firstDirection.x * endExtension,
+            z: centres[0].z - firstDirection.z * endExtension,
+            top: centres[0].top,
+        },
+        ...centres,
+        {
+            x: centres.at(-1).x + lastDirection.x * endExtension,
+            z: centres.at(-1).z + lastDirection.z * endExtension,
+            top: centres.at(-1).top,
+        },
+    ];
+    const offsets = path.map((point, index) => {
+        const previous = index > 0 ? direction(path[index - 1], point) : null;
+        const next = index < path.length - 1 ? direction(point, path[index + 1]) : null;
+        if (!previous) {
+            return { x: -next.z * halfThickness, z: next.x * halfThickness };
+        }
+        if (!next) {
+            return { x: -previous.z * halfThickness, z: previous.x * halfThickness };
+        }
+        const previousNormal = { x: -previous.z, z: previous.x };
+        const nextNormal = { x: -next.z, z: next.x };
+        const mx = previousNormal.x + nextNormal.x;
+        const mz = previousNormal.z + nextNormal.z;
+        const miterLength = Math.hypot(mx, mz);
+        const miter = { x: mx / miterLength, z: mz / miterLength };
+        const denominator = Math.max(0.45,
+            miter.x * nextNormal.x + miter.z * nextNormal.z);
+        return {
+            x: miter.x * halfThickness / denominator,
+            z: miter.z * halfThickness / denominator,
+        };
+    });
+
+    const positions = [];
+    const indices = [];
+    const vertex = (pointIndex, row, side) =>
+        ((pointIndex * (rows + 1) + row) * 2 + side);
+    for (let pointIndex = 0; pointIndex < path.length; pointIndex++) {
+        const point = path[pointIndex];
+        const offset = offsets[pointIndex];
+        for (let row = 0; row <= rows; row++) {
+            const y = bottom + (point.top - bottom) * row / rows;
+            positions.push(point.x + offset.x, y, point.z + offset.z);
+            positions.push(point.x - offset.x, y, point.z - offset.z);
+        }
+    }
+
+    for (let pointIndex = 0; pointIndex < path.length - 1; pointIndex++) {
+        for (let row = 0; row < rows; row++) {
+            const p00 = vertex(pointIndex, row, 0);
+            const p10 = vertex(pointIndex + 1, row, 0);
+            const p01 = vertex(pointIndex, row + 1, 0);
+            const p11 = vertex(pointIndex + 1, row + 1, 0);
+            indices.push(p00, p10, p01, p10, p11, p01);
+
+            const m00 = vertex(pointIndex, row, 1);
+            const m10 = vertex(pointIndex + 1, row, 1);
+            const m01 = vertex(pointIndex, row + 1, 1);
+            const m11 = vertex(pointIndex + 1, row + 1, 1);
+            indices.push(m00, m01, m10, m10, m01, m11);
+        }
+
+        const pBottom = vertex(pointIndex, 0, 0);
+        const mBottom = vertex(pointIndex, 0, 1);
+        const nextPBottom = vertex(pointIndex + 1, 0, 0);
+        const nextMBottom = vertex(pointIndex + 1, 0, 1);
+        indices.push(pBottom, mBottom, nextPBottom,
+            nextPBottom, mBottom, nextMBottom);
+
+        const pTop = vertex(pointIndex, rows, 0);
+        const mTop = vertex(pointIndex, rows, 1);
+        const nextPTop = vertex(pointIndex + 1, rows, 0);
+        const nextMTop = vertex(pointIndex + 1, rows, 1);
+        indices.push(pTop, nextPTop, mTop, nextPTop, nextMTop, mTop);
+    }
+
+    const last = path.length - 1;
+    for (let row = 0; row < rows; row++) {
+        const firstPlus = vertex(0, row, 0);
+        const firstMinus = vertex(0, row, 1);
+        const firstPlusNext = vertex(0, row + 1, 0);
+        const firstMinusNext = vertex(0, row + 1, 1);
+        indices.push(firstPlus, firstPlusNext, firstMinus,
+            firstMinus, firstPlusNext, firstMinusNext);
+
+        const lastPlus = vertex(last, row, 0);
+        const lastMinus = vertex(last, row, 1);
+        const lastPlusNext = vertex(last, row + 1, 0);
+        const lastMinusNext = vertex(last, row + 1, 1);
+        indices.push(lastPlus, lastMinus, lastPlusNext,
+            lastMinus, lastMinusNext, lastPlusNext);
+    }
+
+    const indexed = new THREE.BufferGeometry();
+    indexed.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    indexed.setIndex(indices);
+    const geometry = indexed.toNonIndexed();
+    indexed.dispose();
+    geometry.computeVertexNormals();
+    return geometry;
+}
+
 
 /**
  * Build the whole sculpture.
@@ -225,11 +357,19 @@ export function createSculpture(THREE, opts = {}) {
         envMapIntensity: 1.0,
     });
 
+    const screenGeo = buildFoldedScreen(THREE);
+    paintPatina(THREE, screenGeo, 101);
+    const screen = new THREE.Mesh(screenGeo, material);
+    screen.castShadow = true;
+    screen.receiveShadow = true;
+    screen.name = 'folded-screen';
+    group.add(screen);
+
     const figures = [];
     for (let i = 0; i < FIGURE_LAYOUT.length; i++) {
         const L = FIGURE_LAYOUT[i];
         const geo = buildFigure(THREE, {
-            seed: L.seed, identity: L.identity, shell: L.shell ?? false,
+            seed: L.seed, identity: L.identity, shell: L.shell,
             hair: L.hair, faceless: false,
             armPose: L.armPose, scale: L.scale,
             pregnant: L.pregnant, belly: L.belly, baby: L.baby,
@@ -273,10 +413,12 @@ export function createSculpture(THREE, opts = {}) {
     return {
         group,
         figures,
+        screen,
         material,
         height: 2.33,
         dispose() {
             for (const f of figures) f.geometry.dispose();
+            screenGeo.dispose();
             baseGeo.dispose();
             material.dispose();
         },

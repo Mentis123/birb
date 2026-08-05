@@ -1,0 +1,454 @@
+{
+  "version": 1,
+  "project": "birb-sculpture-zero-asset-reference-reconstruction",
+  "referenceSet": {
+    "viewCount": 4,
+    "hiddenSurfaceFraction": 0.2,
+    "conflictingViews": false,
+    "notes": [
+      "Four full-resolution photographs cover both active sides, oblique negative relief and planted feet.",
+      "Zero production assets is immutable; hidden contact surfaces are bounded procedural inference.",
+      "Portrait-level identity and scan-grade micro-surface are not supported by the available views."
+    ]
+  },
+  "delivery": {
+    "acceptedViews": 14,
+    "mobile": true,
+    "fullOrbit": true,
+    "performanceConstrained": true
+  },
+  "calibration": {
+    "source": "Phase 5 evidence-artifact intervals; implementation and local render time included, deployment/user wait excluded; token telemetry unavailable",
+    "samples": [
+      {
+        "id": "patina",
+        "activeHours": 0.187,
+        "accepted": true
+      },
+      {
+        "id": "first-geometry",
+        "activeHours": 0.103,
+        "accepted": true
+      },
+      {
+        "id": "diagonal-layout",
+        "activeHours": 0.063,
+        "accepted": true
+      },
+      {
+        "id": "form-pass",
+        "activeHours": 0.05,
+        "accepted": true
+      },
+      {
+        "id": "observability-audit",
+        "activeHours": 0.091,
+        "accepted": false
+      },
+      {
+        "id": "close-camera-audit",
+        "activeHours": 0.041,
+        "accepted": false
+      },
+      {
+        "id": "foot-camera-c",
+        "activeHours": 0.059,
+        "accepted": false
+      },
+      {
+        "id": "foot-camera-d",
+        "activeHours": 0.044,
+        "accepted": false
+      },
+      {
+        "id": "foot-form-e",
+        "activeHours": 0.061,
+        "accepted": false
+      },
+      {
+        "id": "foot-form-f",
+        "activeHours": 0.032,
+        "accepted": false
+      },
+      {
+        "id": "foot-form-g",
+        "activeHours": 0.024,
+        "accepted": true
+      },
+      {
+        "id": "foot-group-view",
+        "activeHours": 0.023,
+        "accepted": true
+      },
+      {
+        "id": "critical-review",
+        "activeHours": 0.031,
+        "accepted": false
+      },
+      {
+        "id": "newborn-j",
+        "activeHours": 0.05,
+        "accepted": false
+      },
+      {
+        "id": "newborn-k",
+        "activeHours": 0.026,
+        "accepted": true
+      },
+      {
+        "id": "face-l",
+        "activeHours": 0.082,
+        "accepted": true
+      },
+      {
+        "id": "face-m",
+        "activeHours": 0.027,
+        "accepted": true
+      },
+      {
+        "id": "face-n",
+        "activeHours": 0.027,
+        "accepted": true
+      }
+    ],
+    "fallbackTokensPerCycle": [
+      10000,
+      40000
+    ],
+    "fallbackActiveHoursPerCycle": [
+      0.2,
+      1
+    ],
+    "auditCycles": [
+      3,
+      8
+    ],
+    "closeoutCycles": [
+      2,
+      6
+    ]
+  },
+  "features": [
+    {
+      "id": "assembly-order-facing",
+      "category": "structure",
+      "description": "Six alternating reliefs in exact physical order, active side and whole-body facing.",
+      "count": 1,
+      "reuseFraction": 0,
+      "weight": 15,
+      "critical": true,
+      "currentLevel": 4,
+      "supportedLevel": 4,
+      "supportReason": "Count, sequence and both active sides are visible across all four references and enforced structurally.",
+      "complexity": 4,
+      "representation": "parametric",
+      "referenceQuality": "excellent",
+      "visibility": "clear",
+      "contactRisk": "high",
+      "topologyRisk": "medium",
+      "acceptedViews": 6
+    },
+    {
+      "id": "group-silhouette",
+      "category": "silhouette",
+      "description": "One receding folded casting with matched spacing, overlap, height rhythm and outer contour.",
+      "count": 1,
+      "reuseFraction": 0,
+      "weight": 12,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 4,
+      "supportReason": "The group contour is clear, but exact camera calibration and hidden overlap depths remain inferred.",
+      "complexity": 4,
+      "representation": "hybrid",
+      "referenceQuality": "good",
+      "visibility": "clear",
+      "contactRisk": "high",
+      "topologyRisk": "medium",
+      "acceptedViews": 6,
+      "smallestSignalMm": 176,
+      "voxelMm": 18
+    },
+    {
+      "id": "role-body-shapes",
+      "category": "body",
+      "description": "Six role-specific torso, bust, arm and cloth-relief silhouettes.",
+      "count": 6,
+      "reuseFraction": 0.2,
+      "weight": 12,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 3,
+      "supportReason": "Major contours are visible; exact anatomy, hands and hidden joins are not sufficiently resolved for level 4.",
+      "complexity": 5,
+      "representation": "sampled-field",
+      "referenceQuality": "good",
+      "visibility": "partial",
+      "contactRisk": "high",
+      "topologyRisk": "high",
+      "acceptedViews": 8,
+      "smallestSignalMm": 123,
+      "voxelMm": 18
+    },
+    {
+      "id": "pregnancy-profile",
+      "category": "body",
+      "description": "One integrated high-attached pregnancy with the photographed rounded lower contour.",
+      "count": 1,
+      "reuseFraction": 0,
+      "weight": 5,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 3,
+      "supportReason": "Front and oblique contours support the major profile, not exact hidden attachment anatomy.",
+      "complexity": 4,
+      "representation": "sampled-field",
+      "referenceQuality": "good",
+      "visibility": "clear",
+      "contactRisk": "high",
+      "topologyRisk": "medium",
+      "acceptedViews": 3,
+      "smallestSignalMm": 115,
+      "voxelMm": 18
+    },
+    {
+      "id": "face-identities",
+      "category": "face",
+      "description": "Six active face directions with role-specific head contour, brow, eyes, nose and mouth relief.",
+      "count": 6,
+      "reuseFraction": 0.1,
+      "weight": 13,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 3,
+      "supportReason": "The references support worn landmark placement and facing, but not high-fidelity portrait identity for all six heads.",
+      "complexity": 5,
+      "representation": "sampled-field",
+      "referenceQuality": "good",
+      "visibility": "partial",
+      "contactRisk": "medium",
+      "topologyRisk": "high",
+      "acceptedViews": 5,
+      "smallestSignalMm": 35,
+      "voxelMm": 5.607
+    },
+    {
+      "id": "hair-and-crowns",
+      "category": "hair",
+      "description": "Bare heads, caps and one/two integrated crown rolls in the photographed roles.",
+      "count": 6,
+      "reuseFraction": 0.25,
+      "weight": 5,
+      "critical": false,
+      "currentLevel": 3,
+      "supportedLevel": 3,
+      "supportReason": "Crown count and silhouette are visible; fine hair surface and hidden profiles are not.",
+      "complexity": 3,
+      "representation": "sampled-field",
+      "referenceQuality": "good",
+      "visibility": "partial",
+      "contactRisk": "medium",
+      "topologyRisk": "medium",
+      "acceptedViews": 4,
+      "smallestSignalMm": 35,
+      "voxelMm": 5.607
+    },
+    {
+      "id": "newborn-and-support",
+      "category": "semantic-detail",
+      "description": "One broad wrapped newborn loft with unequal ends seated on a visible shallow U-shaped support.",
+      "count": 1,
+      "reuseFraction": 0,
+      "weight": 8,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 3,
+      "supportReason": "The swaddle silhouette and support are clear; no infant face or limbs are visible to support invented fine anatomy.",
+      "complexity": 4,
+      "representation": "explicit-geometry",
+      "referenceQuality": "good",
+      "visibility": "partial",
+      "contactRisk": "high",
+      "topologyRisk": "medium",
+      "acceptedViews": 2
+    },
+    {
+      "id": "stethoscope",
+      "category": "semantic-detail",
+      "description": "Two cast tubes buried into the collar, seated just proud of the chest and ending in a low shallow U terminal plus a higher solid circular chestpiece.",
+      "count": 1,
+      "reuseFraction": 0,
+      "weight": 4,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 4,
+      "supportReason": "The full path is visible and explicit geometry can support further high-fidelity refinement.",
+      "complexity": 3,
+      "representation": "explicit-geometry",
+      "referenceQuality": "good",
+      "visibility": "clear",
+      "contactRisk": "high",
+      "topologyRisk": "low",
+      "acceptedViews": 3
+    },
+    {
+      "id": "hospital-badge",
+      "category": "semantic-detail",
+      "description": "One separate shallow rectangular hospital badge in the correct role and position.",
+      "count": 1,
+      "reuseFraction": 0,
+      "weight": 2,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 4,
+      "supportReason": "The badge silhouette and placement are visible; its eroded surface could be refined further.",
+      "complexity": 2,
+      "representation": "sampled-field",
+      "referenceQuality": "good",
+      "visibility": "clear",
+      "contactRisk": "low",
+      "topologyRisk": "low",
+      "acceptedViews": 2,
+      "smallestSignalMm": 25,
+      "voxelMm": 3.5
+    },
+    {
+      "id": "planted-feet",
+      "category": "hand-foot",
+      "description": "One closed planted foot per relief, with a compact buried root, visible instep, broad forefoot and grounded blunt tapered toe.",
+      "count": 6,
+      "reuseFraction": 0.45,
+      "weight": 8,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 3,
+      "supportReason": "Several feet expose root, instep and toe contour; hidden plantar surfaces and toe anatomy are unresolved by design.",
+      "complexity": 4,
+      "representation": "explicit-geometry",
+      "referenceQuality": "good",
+      "visibility": "partial",
+      "contactRisk": "high",
+      "topologyRisk": "medium",
+      "acceptedViews": 3
+    },
+    {
+      "id": "closed-negative-relief",
+      "category": "structure",
+      "description": "Closed blank convex head backs, explicit recessed cowl backings and shallow full-height inactive body sheets with thick rims and no read-through.",
+      "count": 6,
+      "reuseFraction": 0.55,
+      "weight": 6,
+      "critical": true,
+      "currentLevel": 3,
+      "supportedLevel": 4,
+      "supportReason": "Oblique and reverse views expose closure and rim depth, with some hidden interior depth inferred.",
+      "complexity": 4,
+      "representation": "hybrid",
+      "referenceQuality": "good",
+      "visibility": "partial",
+      "contactRisk": "high",
+      "topologyRisk": "high",
+      "acceptedViews": 4,
+      "smallestSignalMm": 111,
+      "voxelMm": 18
+    },
+    {
+      "id": "surface-character",
+      "category": "surface",
+      "description": "Hand-worked broad undulation, weathering modulation and local asymmetry.",
+      "count": 6,
+      "reuseFraction": 0.25,
+      "weight": 4,
+      "critical": false,
+      "currentLevel": 2,
+      "supportedLevel": 3,
+      "supportReason": "Photographs reveal broad hand-worked texture, but zero assets and sparse lighting cannot support scan-grade microstructure.",
+      "complexity": 4,
+      "representation": "sampled-field",
+      "referenceQuality": "partial",
+      "visibility": "partial",
+      "contactRisk": "low",
+      "topologyRisk": "medium",
+      "acceptedViews": 6,
+      "smallestSignalMm": 111,
+      "voxelMm": 18
+    },
+    {
+      "id": "material-and-light",
+      "category": "material-lighting",
+      "description": "Near-black weathered bronze with narrow grey wash and readable full-orbit lighting.",
+      "count": 1,
+      "reuseFraction": 1,
+      "weight": 4,
+      "critical": false,
+      "currentLevel": 3,
+      "supportedLevel": 4,
+      "supportReason": "Material range is visible in all references; exact exposure and environment remain camera-dependent.",
+      "complexity": 3,
+      "representation": "parametric",
+      "referenceQuality": "good",
+      "visibility": "clear",
+      "contactRisk": "low",
+      "topologyRisk": "low",
+      "acceptedViews": 14
+    },
+    {
+      "id": "diagnostic-and-mobile-cameras",
+      "category": "camera",
+      "description": "Matched detail diagnostics plus uncropped desktop and mobile delivery framing.",
+      "count": 1,
+      "reuseFraction": 1,
+      "weight": 6,
+      "critical": true,
+      "currentLevel": 4,
+      "supportedLevel": 4,
+      "supportReason": "All camera parameters are explicit and framebuffer-tested at their declared viewports.",
+      "complexity": 3,
+      "representation": "parametric",
+      "referenceQuality": "good",
+      "visibility": "clear",
+      "contactRisk": "low",
+      "topologyRisk": "low",
+      "acceptedViews": 14
+    }
+  ],
+  "thresholds": [
+    {
+      "id": "phase5-major-landmark",
+      "label": "Phase 5 major-landmark and contour",
+      "definition": "Verified assembly structure with every critical visible form at least reference-faithful at the major-landmark boundary; scan-grade surface detail remains outside this phase.",
+      "targetScore": 70,
+      "defaultLevel": 2,
+      "criticalMinimumLevel": 3,
+      "categoryMinimumLevels": {}
+    },
+    {
+      "id": "80-reference-faithful",
+      "label": "80% reference-faithful",
+      "definition": "Exact structure, silhouette and delivery cameras with all other features at least reference-faithful.",
+      "targetScore": 80,
+      "defaultLevel": 3,
+      "criticalMinimumLevel": 3,
+      "categoryMinimumLevels": {
+        "structure": 4,
+        "silhouette": 4,
+        "camera": 4
+      }
+    },
+    {
+      "id": "90-high-fidelity",
+      "label": "90% high-fidelity",
+      "definition": "High-fidelity critical identity, anatomy and semantic geometry across accepted views.",
+      "targetScore": 90,
+      "defaultLevel": 3,
+      "criticalMinimumLevel": 4,
+      "categoryMinimumLevels": {
+        "body": 4,
+        "face": 4,
+        "hand-foot": 4,
+        "hair": 4,
+        "semantic-detail": 4
+      }
+    }
+  ]
+}

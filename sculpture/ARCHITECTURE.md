@@ -104,7 +104,7 @@ One relief, in production order:
 
 `model/sculpture.js` builds six meshes in the exact alternating physical order,
 applies one vertex-coloured `MeshStandardMaterial`, and adds the light/ground
-scene. The acceptance matrices measure **2,070,904 triangles and 7 draw calls**
+scene. The acceptance matrices measure **2,060,504 triangles and 8 draw calls**
 for six reliefs plus the ground draw. Do not restore the obsolete 525,912 / six
 draw-call or four-figure figures.
 
@@ -265,7 +265,7 @@ node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png
 # The Phase 4 defect loop. Nine desktop/mobile/detail views, one boot.
 node tools/sculpture-sheet.mjs --phase4 --out shots/sculpt/phase4.png
 
-# The Phase 5 semantic loop. Eight detail/scene views plus two mobile views.
+# The Phase 5 semantic loop. Twelve matched/detail views plus two mobile views.
 node tools/sculpture-sheet.mjs --phase5 --out shots/sculpt/phase5.png
 
 # Whole-object side/facing audit at eight neutral orbit angles.
@@ -308,8 +308,8 @@ evidence by itself.
   string as an expression. The first contact sheet rendered seven identical
   pictures under seven different labels, which is worse than no sheet because it
   looks like evidence. Pass a real function.
-- The page keeps damping and, after nine idle seconds, starts a slow idle spin.
-  A multi-view sheet takes longer than that, so re-park after the settle.
+- The page keeps damping but idle rotation is disabled. The harness still parks
+  every stored camera explicitly before readback.
 - The ~2.07M-triangle mesh can make a software-rendered Chromium screenshot
   exceed Playwright's 30-second default even after `__SCULPT_READY` is true.
   Readiness and PNG readback are separate deadlines; use the sheet harness's
@@ -330,14 +330,14 @@ evidence by itself.
 
 **Phase 5 is complete after the six-relief reference reconstruction.** The
 proportion gate is green at 0 of 12 outside tolerance, worst +0.024, but that is
-necessary and not sufficient. The full project suite is 208/208 and all six
-production body fields are closed manifolds.
+necessary and not sufficient. The full project suite is 210/210; all six
+production body fields and all six cowl backings are closed manifolds.
 
 Current evidence is `validation/phase-5-reference-reconstruction.png`, the
 eight-angle `validation/phase-5-identity-audit.png`, and the nine-detail
 `validation/phase-5-detail-contract.json`. All nine detail contracts pass at
-the declared major-landmark and contour threshold; the body-silhouette field
-retains one documented fragile-scale warning with close visual evidence.
+the declared major-landmark and contour threshold with zero warnings. The
+fresh independent ten-item visual review also passes with no demotions.
 
 The Phase 3-5 historical artifacts remain provenance for earlier decisions,
 not current closeout evidence. Phase 6 has not started and the real iPhone
@@ -380,7 +380,8 @@ cap terminate at a hard temple edge, completing E3 and E5.
 corrected 2026-08-03).** Six role-specific arm definitions replace the generic vertical
 pair. Their radii taper from shoulder to reduced cast tips. The infant is a
 separate fine closed fully wrapped block supported by one curved forearm, and the clinician's
-instrument is two independent curved tubes with two small ringed terminals.
+instrument is two independent curved tubes ending in a low shallow U terminal
+and a higher solid circular chestpiece.
 The chest remains one shallow shelf with restrained lobes rather than attached
 spheres. A7 and F4 remain passes.
 
@@ -398,10 +399,10 @@ Do not optimize geometry from software-rendered timings alone.
 ### Phase 5 reconstruction — current status
 
 Reopened on 2026-08-04. The structural reconstruction, topology and role order
-are implemented and reproducibly rendered in ten matched desktop/mobile views
+are implemented and reproducibly rendered in fourteen matched/detail/mobile views
 and eight neutral orbit angles. All nine detail contracts pass closeout
-validation. The 18 mm role-silhouette field retains one fragile-scale warning
-and its required close visual evidence.
+validation with zero warnings; the independent ten-item acceptance pass records
+no demotion candidates.
 
 ### Phase 5 closeout gate
 
@@ -415,7 +416,7 @@ and its required close visual evidence.
 - [x] Pregnancy projection and flank-arm relationship accepted against the source contour.
 - [x] Foot instep/toe asymmetry accepted in the low and front-orbit views.
 - [x] Proportion gate: 0 of 12 outside tolerance, worst +0.024.
-- [x] Full 208-test suite and 10+8 render matrices green.
+- [x] Full 210-test suite and 14+8 render matrices green.
 - [ ] Real iPhone 12-or-newer construction, interaction and sustained orbit accepted.
 
 Phase 5 may merge at this declared threshold. Do not start Phase 6 or restore a

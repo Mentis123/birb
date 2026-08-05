@@ -24,10 +24,10 @@
         2440,
         1450
       ],
-      "smallestSignalMm": 180,
+      "smallestSignalMm": 176,
       "representation": "hybrid",
       "voxelMm": 18,
-      "occlusionContract": "Adjacent panels may overlap at shoulders and swept fins, but each active face, role detail and reverse head cavity must remain on only its authored side.",
+      "occlusionContract": "Adjacent panels may overlap at shoulders and swept fins, but each active face and role detail remains on only its authored side while inactive heads stay closed and blank.",
       "isolationProbe": "sculpture/index.html?three=local",
       "integratedViews": [
         {
@@ -47,10 +47,10 @@
             ],
             "yaw": -24,
             "pitch": 4,
-            "distance": 3.75
+            "distance": 3.25
           },
-          "objectWidthPx": 780,
-          "smallestSignalPx": 28
+          "objectWidthPx": 977,
+          "smallestSignalPx": 60
         },
         {
           "id": "p5-02-hospital-order",
@@ -69,10 +69,10 @@
             ],
             "yaw": 214,
             "pitch": 5,
-            "distance": 3.55
+            "distance": 3.1
           },
-          "objectWidthPx": 780,
-          "smallestSignalPx": 28
+          "objectWidthPx": 908,
+          "smallestSignalPx": 56
         },
         {
           "id": "p5-07-mobile-outward",
@@ -83,18 +83,18 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              -0.15,
               1.22,
               0
             ],
-            "yaw": -20,
+            "yaw": -55,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 478,
+          "smallestSignalPx": 29
         },
         {
           "id": "p5-08-mobile-hospital",
@@ -105,40 +105,43 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": 125,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 478,
+          "smallestSignalPx": 29
         }
       ],
       "meshAssertions": [
         "exactly six production figure meshes",
         "side values alternate outward and hospital",
         "whole-body transform and head orientation agree",
-        "all six body fields have zero boundary and non-manifold edges"
+        "all six body fields have zero boundary and non-manifold edges",
+        "the low folded connector is closed and all six thick cast shells remain enabled"
       ],
       "renderAssertions": [
         "outward view reads developing, newborn and visitor in order",
         "hospital view reads badge, pregnancy and doctor in reverse order",
         "no face appears on both sides of one panel",
-        "desktop and mobile framebuffers are opaque and nonuniform"
+        "desktop and mobile framebuffers are opaque and nonuniform",
+        "closed shells and the low connector remove structural sky gaps without covering active relief"
       ],
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-a-front.jpg crop [240,250,900,950]: the 2,440 mm crown-to-paving normalizer spans 858 px (2.84 mm/px); the narrowest order/facing silhouette break used for acceptance spans 62 px = 176 mm."
     },
     {
       "id": "closed-negative-relief",
-      "semanticRead": "Inactive sides read as deep closed concave body and head impressions in thick bronze, never as transparency, clipped skins or missing front surfaces.",
+      "semanticRead": "Inactive sides read as closed blank convex head backs, recessed cowl backings and shallow full-height body sheets in thick bronze, never as transparency, clipped skins or missing surfaces.",
       "referenceAsset": "../reference/ref-d-wide.jpg",
       "referenceCrop": [
         440,
@@ -147,9 +150,10 @@
         950
       ],
       "referenceLandmarks": [
-        "broad concave head impression",
-        "full-height recessed torso",
-        "thick rim around the reverse relief",
+        "blank convex reverse head",
+        "closed recessed backing inside each collar arch",
+        "shallow full-height recessed torso sheet",
+        "thick rim around the reverse body surface",
         "rear sweep reaches the paving",
         "active front plane remains intact"
       ],
@@ -158,11 +162,11 @@
         2300,
         700
       ],
-      "smallestSignalMm": 108,
-      "representation": "sampled-field",
+      "smallestSignalMm": 111,
+      "representation": "hybrid",
       "voxelMm": 18,
-      "occlusionContract": "The recessed surface opens only toward the inactive side, closes below the paving, and leaves enough front wall that an oblique active-side camera cannot see through it.",
-      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,head&material=normal&side=rear",
+      "occlusionContract": "The shallow body recess opens only toward the inactive side and closes below the paving; the blank reverse head stays solid, its cowl backing closes the arch interior behind it, and the active front wall remains intact.",
+      "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=shell,body,head&material=normal",
       "integratedViews": [
         {
           "id": "p5-03-negative-relief",
@@ -175,16 +179,16 @@
           "camera": {
             "fov": 44,
             "target": [
-              0.3,
-              1.3,
-              0.02
+              1.05,
+              1.1,
+              -0.2
             ],
-            "yaw": 34,
-            "pitch": 3,
-            "distance": 4.15
+            "yaw": -28,
+            "pitch": 2,
+            "distance": 2.45
           },
-          "objectWidthPx": 620,
-          "smallestSignalPx": 24
+          "objectWidthPx": 1046,
+          "smallestSignalPx": 50
         },
         {
           "id": "p5-08-mobile-hospital",
@@ -195,35 +199,37 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": 125,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 385,
+          "smallestSignalPx": 19
         }
       ],
       "meshAssertions": [
         "zero body and head boundary edges",
         "zero non-manifold edges",
         "positive signed volume",
+        "six explicit cowl backings are closed with zero boundary and non-manifold edges",
         "rear sweep adds at least 300 mm without moving the front plane more than 25 mm"
       ],
       "renderAssertions": [
-        "normal and bronze views show a recessed interior surface",
-        "no sky-coloured front holes or bright above-ground closure rings",
+        "normal and bronze views show blank convex head backs, recessed cowl backings and a shallow body surface",
+        "no sky-coloured holes inside an inactive sheet, handle-shaped cowl read-through or bright above-ground closure rings",
         "low view retains closed vertical hem edges"
       ],
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-d-wide.jpg crop [440,250,620,950]: the 2,300 mm relief height spans 849 px (2.71 mm/px); the narrowest closed rim section used for acceptance spans 41 px = 111 mm."
     },
     {
       "id": "role-specific-body-silhouettes",
@@ -247,7 +253,7 @@
         1960,
         620
       ],
-      "smallestSignalMm": 90,
+      "smallestSignalMm": 123,
       "representation": "sampled-field",
       "voxelMm": 18,
       "occlusionContract": "Arms must remain joined at the shoulder and may merge into torso or carried mass, but may not float, clip through the body, or hide the narrative silhouette.",
@@ -272,8 +278,8 @@
             "pitch": 2,
             "distance": 2.95
           },
-          "objectWidthPx": 820,
-          "smallestSignalPx": 22
+          "objectWidthPx": 1043,
+          "smallestSignalPx": 65
         },
         {
           "id": "p5-08-mobile-hospital",
@@ -284,25 +290,25 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": 125,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 328,
+          "smallestSignalPx": 21
         }
       ],
       "meshAssertions": [
         "one connected manifold body field per role",
         "pregnancy and developing fullness occupy distinct physical bounds",
         "arm paths terminate inside body or support geometry",
-        "body triangles remain below 170000 per relief"
+        "body triangles remain below 172000 per relief"
       ],
       "renderAssertions": [
         "pregnancy reads without an applied-egg seam",
@@ -313,17 +319,18 @@
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-b-threequarter.jpg crop [200,240,900,700]: the 850 mm shoulder-width normalizer spans 310 px (2.74 mm/px); the narrowest accepted role-contour break spans 45 px = 123 mm."
     },
     {
       "id": "face-hair-identities",
       "semanticRead": "Each active head retains its own width, height, jaw, feature spacing, turn and hair treatment; mother has one crown roll, visitor two, and bare heads remain bare.",
       "referenceAsset": "../reference/ref-a-front.jpg",
       "referenceCrop": [
+        270,
         250,
-        190,
-        1100,
-        500
+        320,
+        320
       ],
       "referenceLandmarks": [
         "developing head is broad and plain",
@@ -337,12 +344,34 @@
         490,
         300
       ],
-      "smallestSignalMm": 34,
+      "smallestSignalMm": 35,
       "representation": "sampled-field",
       "voxelMm": 5.607,
       "occlusionContract": "Features remain on the active face plane, hair stays joined above and behind it, and the opposite side remains a closed negative head impression.",
       "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=head&material=normal",
       "integratedViews": [
+        {
+          "id": "p5-11-developing-face",
+          "purpose": "diagnostic",
+          "viewport": [
+            1000,
+            800
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 22,
+            "target": [
+              -1.2,
+              2.1,
+              0.28
+            ],
+            "yaw": -24,
+            "pitch": 0,
+            "distance": 1.4
+          },
+          "objectWidthPx": 720,
+          "smallestSignalPx": 51
+        },
         {
           "id": "p5-09-outward-identities",
           "purpose": "diagnostic",
@@ -360,14 +389,14 @@
             ],
             "yaw": -24,
             "pitch": 0,
-            "distance": 2.95
+            "distance": 2.75
           },
-          "objectWidthPx": 900,
-          "smallestSignalPx": 18
+          "objectWidthPx": 259,
+          "smallestSignalPx": 19
         },
         {
           "id": "p5-10-hospital-identities",
-          "purpose": "delivery",
+          "purpose": "diagnostic",
           "viewport": [
             1400,
             780
@@ -382,10 +411,54 @@
             ],
             "yaw": 204,
             "pitch": 0,
-            "distance": 2.95
+            "distance": 2.75
           },
-          "objectWidthPx": 900,
-          "smallestSignalPx": 20
+          "objectWidthPx": 259,
+          "smallestSignalPx": 19
+        },
+        {
+          "id": "p5-07-mobile-outward",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 50,
+            "target": [
+              -0.15,
+              1.22,
+              0
+            ],
+            "yaw": -55,
+            "pitch": 4,
+            "distance": 5.4
+          },
+          "objectWidthPx": 82,
+          "smallestSignalPx": 6
+        },
+        {
+          "id": "p5-08-mobile-hospital",
+          "purpose": "delivery",
+          "viewport": [
+            390,
+            844
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 50,
+            "target": [
+              0.15,
+              1.22,
+              0
+            ],
+            "yaw": 125,
+            "pitch": 4,
+            "distance": 5.4
+          },
+          "objectWidthPx": 82,
+          "smallestSignalPx": 6
         }
       ],
       "meshAssertions": [
@@ -403,7 +476,8 @@
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-a-front.jpg crop [270,250,320,320]: the 360 mm developing-head width spans 239 px (1.51 mm/px); the shortest identity-carrying mouth/brow segment used for acceptance spans 23 px = 35 mm."
     },
     {
       "id": "newborn-and-support",
@@ -423,13 +497,12 @@
         "upper forearm crosses behind the swaddle"
       ],
       "physicalBoundsMm": [
-        479,
-        188,
-        194
+        447,
+        170,
+        173
       ],
-      "smallestSignalMm": 35,
-      "representation": "sampled-field",
-      "voxelMm": 5.5,
+      "smallestSignalMm": 37,
+      "representation": "explicit-geometry",
       "occlusionContract": "The swaddle overlaps both supports without floating, stays separate enough to retain its silhouette, and does not merge visually into the abdomen.",
       "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,baby&material=normal",
       "integratedViews": [
@@ -444,16 +517,16 @@
           "camera": {
             "fov": 26,
             "target": [
-              -0.24,
-              1.46,
-              0.1
+              -0.23,
+              1.44,
+              0.42
             ],
             "yaw": -24,
             "pitch": 2,
             "distance": 2.45
           },
-          "objectWidthPx": 430,
-          "smallestSignalPx": 34
+          "objectWidthPx": 356,
+          "smallestSignalPx": 29
         },
         {
           "id": "p5-07-mobile-outward",
@@ -464,40 +537,43 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              -0.15,
               1.22,
               0
             ],
-            "yaw": -20,
+            "yaw": -55,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 75,
+          "smallestSignalPx": 6
         }
       ],
       "meshAssertions": [
         "one closed connected newborn component",
         "zero boundary and non-manifold edges",
-        "horizontal width exceeds 420 mm",
-        "end-height asymmetry remains between 15 and 45 mm"
+        "the explicit 24-sided nine-section loft has both end caps",
+        "production bounds remain 450-480 mm wide, 165-190 mm high and 170-195 mm deep",
+        "end-height asymmetry remains restrained rather than forming an exposed head"
       ],
       "renderAssertions": [
         "swaddle reads as a broad wrapped block rather than a belly or exposed-head doll",
-        "support forearm remains visible below it",
+        "the shallow U-shaped support forearm remains visible beneath and behind it",
         "unequal ends remain restrained at matched close scale",
+        "the swaddle sits on its support without floating or cutting through it",
         "detail remains visible under bronze material"
       ],
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-a-front.jpg crop [560,390,500,430]: the 447 mm swaddle width spans 192 px (2.33 mm/px); the smallest accepted end/corner silhouette offset spans 16 px = 37 mm."
     },
     {
       "id": "pregnancy-profile",
-      "semanticRead": "The hospital-side pregnancy reads as one broad rounded abdomen integrated into the torso, with a high attachment, full middle and tapered lower attachment.",
+      "semanticRead": "The hospital-side pregnancy reads as a localized high-attached pear-shaped abdomen integrated into the torso, with a full middle and tapered lower attachment.",
       "referenceAsset": "../reference/ref-b-threequarter.jpg",
       "referenceCrop": [
         200,
@@ -507,9 +583,9 @@
       ],
       "referenceLandmarks": [
         "high abdominal attachment",
-        "maximum fullness below the bust",
+        "localized upper and lower fullness overlap into one pear profile",
+        "maximum projection sits below the bust",
         "rounded lower pole narrows into the skirt",
-        "side profile projects beyond the bust",
         "both arms remain shallow flank reliefs"
       ],
       "physicalBoundsMm": [
@@ -517,7 +593,7 @@
         520,
         410
       ],
-      "smallestSignalMm": 110,
+      "smallestSignalMm": 115,
       "representation": "sampled-field",
       "voxelMm": 18,
       "occlusionContract": "The abdomen merges smoothly into the torso, remains clear of the stethoscope figure, and is not crossed by an invented supporting arm.",
@@ -542,8 +618,8 @@
             "pitch": 2,
             "distance": 2.95
           },
-          "objectWidthPx": 820,
-          "smallestSignalPx": 22
+          "objectWidthPx": 277,
+          "smallestSignalPx": 61
         },
         {
           "id": "p5-08-mobile-hospital",
@@ -554,63 +630,87 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": 125,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 87,
+          "smallestSignalPx": 19
         }
       ],
       "meshAssertions": [
         "pregnancy remains in the same closed body component",
-        "three unequal masses define upper, middle and lower profile",
+        "two broad overlapping lobes join each other and the trunk with a deep smooth union",
         "full pregnancy exists exactly once",
-        "developing abdomen remains below 35 percent fullness"
+        "developing contour remains distinct from the full pregnancy"
       ],
       "renderAssertions": [
         "three-quarter hospital view reads pregnancy before inspection",
-        "profile remains broad and rounded with a tapered lower attachment",
-        "torso attachment shows no hard seam"
+        "profile remains localized, pear-shaped and high-attached instead of a full-torso egg",
+        "torso and lobe attachments show no hard seam or secondary-ball silhouette"
       ],
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-b-threequarter.jpg crop [200,240,900,700]: the 520 mm abdomen height spans 181 px (2.87 mm/px); the smallest accepted upper/lower contour transition spans 40 px = 115 mm."
     },
     {
       "id": "two-ended-stethoscope",
-      "semanticRead": "The doctor carries two narrow curved stethoscope tubes from the neck to two separate ringed chest terminals.",
+      "semanticRead": "The doctor carries two substantial curved cast tubes seated into the collar and chest, ending asymmetrically in one low shallow U terminal on photo-left and one higher solid circular chestpiece on photo-right.",
       "referenceAsset": "../reference/ref-b-threequarter.jpg",
       "referenceCrop": [
-        760,
-        240,
-        470,
-        560
+        560,
+        365,
+        190,
+        210
       ],
       "referenceLandmarks": [
-        "two independent neck origins",
-        "left and right tubes remain separated",
-        "both paths curve over the chest",
-        "two round terminals sit above the breast relief",
-        "no oversized central Y or single bell"
+        "two upper origins disappear into the neck and collar",
+        "left and right tubes remain separate while lying just proud of the chest",
+        "both paths curve across the breast shelf without floating or cutting through it",
+        "one low shallow U terminal rests photo-left",
+        "one higher solid rimmed circular chestpiece rests photo-right",
+        "no oversized central Y, loose bead or invented open hook"
       ],
       "physicalBoundsMm": [
-        260,
-        390,
-        65
+        225,
+        405,
+        150
       ],
-      "smallestSignalMm": 17,
+      "smallestSignalMm": 18,
       "representation": "explicit-geometry",
-      "occlusionContract": "Both tubes sit just proud of the chest, remain clear of the neck and breasts, and terminate without disappearing inside the body.",
+      "occlusionContract": "The upper origins remain buried in the collar, the mid-tubes stay visible just proud of the torso, and both terminals settle onto the breast shelf without hovering, tunnelling through it or merging together.",
       "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,stethoscope&material=normal",
       "integratedViews": [
+        {
+          "id": "p5-13-stethoscope-close",
+          "purpose": "diagnostic",
+          "viewport": [
+            1000,
+            800
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 18,
+            "target": [
+              -0.7,
+              1.68,
+              -0.2
+            ],
+            "yaw": 214,
+            "pitch": 1,
+            "distance": 1.6
+          },
+          "objectWidthPx": 639,
+          "smallestSignalPx": 28
+        },
         {
           "id": "p5-05-pregnancy-instrument",
           "purpose": "diagnostic",
@@ -630,8 +730,8 @@
             "pitch": 2,
             "distance": 2.95
           },
-          "objectWidthPx": 820,
-          "smallestSignalPx": 22
+          "objectWidthPx": 215,
+          "smallestSignalPx": 10
         },
         {
           "id": "p5-08-mobile-hospital",
@@ -642,45 +742,47 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": 125,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 68,
+          "smallestSignalPx": 3
         }
       ],
       "meshAssertions": [
         "two TubeGeometry paths exist",
-        "each path has four reference-led control points",
-        "two distinct ringed terminals exist",
-        "all control points and normals are finite"
+        "each path has five reference-led control points",
+        "one low shallow U terminal and one higher solid rimmed circular chestpiece exist",
+        "all control points, tube vertices and normals are finite"
       ],
       "renderAssertions": [
-        "both tubes and both terminals read at diagnostic scale",
+        "both collar joins, both tubes and both distinct terminals read at diagnostic scale",
+        "the instrument visibly rests on the chest rather than floating or clipping",
         "instrument survives bronze lighting without dark cut-through artifacts",
         "mobile view retains the clinician narrative"
       ],
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-b-threequarter.jpg crop [560,365,190,210]: the complete 225 mm two-path span covers 75 px (3.00 mm/px); the narrowest visible cast tube spans 6 px = 18 mm."
     },
     {
       "id": "planted-tapered-foot",
-      "semanticRead": "Each active body exposes one long planted cast foot rooted beneath the raised hem, with a broad instep and a restrained tapered toe instead of detached pebbles.",
-      "referenceAsset": "../reference/ref-c-under.jpg",
+      "semanticRead": "Each active body exposes one planted cast foot rooted beneath the raised hem, with a broad instep and restrained tapered toe instead of detached pebbles or an oversized shoe.",
+      "referenceAsset": "../reference/ref-a-front.jpg",
       "referenceCrop": [
-        180,
-        690,
-        1000,
-        510
+        850,
+        760,
+        500,
+        420
       ],
       "referenceLandmarks": [
         "one foot per active relief",
@@ -690,19 +792,40 @@
         "toe tapers to the photographed point"
       ],
       "physicalBoundsMm": [
-        178,
-        169,
-        586
+        184,
+        340,
+        555
       ],
-      "smallestSignalMm": 45,
-      "representation": "sampled-field",
-      "voxelMm": 7.5,
+      "smallestSignalMm": 48,
+      "representation": "explicit-geometry",
       "occlusionContract": "The root overlaps the body field below the hem, the toe remains above the paving, and the inactive side must not expose a second detached foot.",
       "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=feet&material=normal",
       "integratedViews": [
         {
-          "id": "p5-06-grounded-feet",
+          "id": "p5-14-foot-close",
           "purpose": "diagnostic",
+          "viewport": [
+            1000,
+            800
+          ],
+          "dpr": 1,
+          "camera": {
+            "fov": 20,
+            "target": [
+              0.71,
+              0.1,
+              0.39
+            ],
+            "yaw": -24,
+            "pitch": 5,
+            "distance": 1.7
+          },
+          "objectWidthPx": 741,
+          "smallestSignalPx": 64
+        },
+        {
+          "id": "p5-06-grounded-feet",
+          "purpose": "delivery",
           "viewport": [
             1400,
             800
@@ -711,19 +834,19 @@
           "camera": {
             "fov": 40,
             "target": [
-              -0.1,
+              0.1,
               0.62,
-              -0.08
+              -0.1
             ],
-            "yaw": 115,
+            "yaw": 204,
             "pitch": -7,
             "distance": 3.6
           },
-          "objectWidthPx": 820,
-          "smallestSignalPx": 32
+          "objectWidthPx": 169,
+          "smallestSignalPx": 15
         },
         {
-          "id": "p5-08-mobile-hospital",
+          "id": "p5-07-mobile-outward",
           "purpose": "delivery",
           "viewport": [
             390,
@@ -731,45 +854,49 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              -0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": -55,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 93,
+          "smallestSignalPx": 8
         }
       ],
       "meshAssertions": [
         "one closed connected foot component",
         "positive signed volume",
-        "length is 480-680 mm and width is 150-200 mm",
-        "stride side selects exactly one foot"
+        "visible heel-to-toe span is 440-460 mm and width is 175-185 mm",
+        "the reference-scaled root-to-tip geometry is 540-570 mm long",
+        "stride side selects exactly one foot",
+        "the 28-sided 12-section explicit sweep has both end caps and zero boundary edges"
       ],
       "renderAssertions": [
         "valid low camera remains above the paving",
-        "foot reads heel-to-toe rather than as a pebble or paddle",
-        "hem and foot contact without an open ring"
+        "foot reads as an integrated planted form with heel, instep, broad forefoot and blunt tapered toe",
+        "the compact 110 mm rear root remains planted beneath the hem",
+        "hem and foot contact without an open ring or detached-pebble silhouette"
       ],
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-a-front.jpg using the 2,440 mm crown-to-paving span of 858 px (2.84 mm/px): the target root-to-toe span is 187 px = 531 mm and the smallest accepted toe-height taper is 17 px = 48 mm."
     },
     {
       "id": "hospital-badge",
       "semanticRead": "The hospital-side badge reads as one small horizontal rectangular relief on the upper chest, not as noise or a body-field wound.",
       "referenceAsset": "../reference/ref-b-threequarter.jpg",
       "referenceCrop": [
-        180,
-        230,
+        170,
         350,
-        430
+        390,
+        300
       ],
       "referenceLandmarks": [
         "horizontal rectangular silhouette",
@@ -783,33 +910,33 @@
         49,
         29
       ],
-      "smallestSignalMm": 26,
+      "smallestSignalMm": 25,
       "representation": "sampled-field",
       "voxelMm": 3.5,
       "occlusionContract": "The badge overlaps the chest in depth without floating, remains clear of the shoulder and breast, and is present only on the badge role.",
       "isolationProbe": "sculpture/dev/probe-parts.html?three=local&only=body,badge&material=normal",
       "integratedViews": [
         {
-          "id": "p5-02-hospital-order",
+          "id": "p5-12-badge-close",
           "purpose": "diagnostic",
           "viewport": [
-            1400,
-            900
+            1000,
+            800
           ],
           "dpr": 1,
           "camera": {
-            "fov": 49,
+            "fov": 16,
             "target": [
-              0.1,
-              1.24,
-              -0.04
+              1.06,
+              1.7,
+              -0.43
             ],
             "yaw": 214,
-            "pitch": 5,
-            "distance": 3.55
+            "pitch": 1,
+            "distance": 1.45
           },
-          "objectWidthPx": 780,
-          "smallestSignalPx": 28
+          "objectWidthPx": 228,
+          "smallestSignalPx": 49
         },
         {
           "id": "p5-08-mobile-hospital",
@@ -820,18 +947,18 @@
           ],
           "dpr": 1,
           "camera": {
-            "fov": 44,
+            "fov": 50,
             "target": [
-              0,
+              0.15,
               1.22,
               0
             ],
-            "yaw": 202,
+            "yaw": 125,
             "pitch": 4,
-            "distance": 8.2
+            "distance": 5.4
           },
-          "objectWidthPx": 330,
-          "smallestSignalPx": 7
+          "objectWidthPx": 19,
+          "smallestSignalPx": 4
         }
       ],
       "meshAssertions": [
@@ -848,7 +975,9 @@
       "humanAcceptance": {
         "status": "pass",
         "unresolved": []
-      }
+      },
+      "signalProvenance": "Measured on ref-b-threequarter.jpg crop [170,350,390,300]: the 116 mm badge width spans 51 px (2.27 mm/px); the smallest readable badge corner/edge span is 11 px = 25 mm."
     }
-  ]
+  ],
+  "modelMetersPerUnit": 1
 }

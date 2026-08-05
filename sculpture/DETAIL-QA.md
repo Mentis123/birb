@@ -166,7 +166,7 @@ screenshot is useful for exploration but is not reproducible evidence.
    occlusion geometry.
 8. Run only the affected exact view. Compare it with the stored reference crop
    at the same scale.
-9. At a visual checkpoint, run all ten Phase 5 views and the eight-angle
+9. At a visual checkpoint, run all fourteen Phase 5 views and the eight-angle
    identity orbit. Use the nine Phase 4 views as historical regression evidence.
 10. Before closeout, run tests, proportions, the full visual matrix and the
     critical production views. Record both passes and unresolved differences.
@@ -209,18 +209,18 @@ performance result.
 
 | Gate | Current result |
 | --- | --- |
-| Focused sculpture tests | 17/17 pass |
-| Full project suite | 208/208 pass in about 31-33 s |
+| Focused sculpture tests | 19/19 pass |
+| Full project suite | 210/210 pass in about 27 s |
 | Twelve-measure proportion gate | 0/12 outside tolerance; worst +0.024 |
 | Six exact production body fields | zero boundary and non-manifold edges |
-| Ten-view Phase 5 matrix | opaque, non-uniform, no errors; 54-60 reported FPS |
-| Eight-angle identity orbit | opaque, non-uniform, no errors; 51-60 reported FPS |
+| Fourteen-view Phase 5 matrix | opaque, non-uniform, no errors; 50-60 reported FPS |
+| Eight-angle identity orbit | opaque, non-uniform, no errors; 50-60 reported FPS |
 
-The current scene reports 2,070,904 triangles, 7 draw calls and 6 reliefs.
+The current scene reports 2,060,504 triangles, 8 draw calls and 6 reliefs.
 
-Capture wall time was not re-baselined after the final geometry change, so no
-new edit-to-frame timing is claimed. The efficient cadence remains one focused
-test, one exact stored camera, then one browser boot for the complete matrix.
+The final local wall times were about 197 s for the fourteen-view matrix and
+122 s for the eight-angle orbit. These are machine-specific. The efficient
+cadence remains one focused test, one exact camera, then one complete matrix.
 Real-device construction and sustained orbit performance remain unmeasured.
 
 ## What can be verified, and how accurately
@@ -251,8 +251,8 @@ node --test --test-name-pattern="planted foot|stride" tests/sculpture-figure-det
 node tools/sculpture-sheet.mjs --phase5 --only p5-04-newborn-support --out shots/sculpt/newborn.png
 
 # Full local gates before closeout.
-node --test --test-isolation=none tests/sculpture-phase5.test.js tests/sculpture-figure-details.test.js
-node --test --test-isolation=none
+node --test tests/sculpture-phase5.test.js tests/sculpture-figure-details.test.js
+npm test
 node tools/sculpture-proportions.mjs
 node tools/sculpture-sheet.mjs --phase5 --out shots/sculpt/phase5.png
 node tools/sculpture-sheet.mjs --identity --out shots/sculpt/identity.png
