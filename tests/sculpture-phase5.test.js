@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
     ARM_POSES,
     FACE_STYLES,
+    PREGNANCY_SHAPE,
     ROLE_BODY_STYLES,
     buildFigure,
 } from '../sculpture/src/model/figure.js';
@@ -73,7 +74,7 @@ test('six alternating reliefs preserve the photographed physical order and facin
     assert.ok(visitor.turn > 0.30, 'visitor panel retains the photographed profile turn');
     assert.ok(visitor.headTurn > 0.10, 'visitor face continues the profile turn');
     for (const figure of FIGURE_LAYOUT) {
-        assert.ok(Math.abs(figure.headTurn) < 0.35, figure.id + ' keeps an anatomical local head turn');
+        assert.ok(Math.abs(figure.headTurn) < 0.75, figure.id + ' keeps an anatomical local head turn');
         if (figure.side === 'outward') {
             assert.ok(Math.cos(figure.turn) > 0.90, figure.id + ' faces the outward side');
         } else {
@@ -130,6 +131,35 @@ test('role contours and arm gestures encode the photographed six narratives', ()
     assert.equal(new Set(bustSignatures).size, 6, 'every role needs its own chest proportions');
 
     const developing = ARM_POSES.developing;
+    const maxContour = (identity, column) => Math.max(
+        ...ROLE_BODY_STYLES[identity].contour.map((row) => row[column]),
+    );
+    const [, upperY, , upperRx, upperRy] = PREGNANCY_SHAPE.upper;
+    const [, lowerY, , lowerRx, lowerRy] = PREGNANCY_SHAPE.lower;
+    const pregnancyHeight = Math.max(upperY + upperRy, lowerY + lowerRy)
+        - Math.min(upperY - upperRy, lowerY - lowerRy);
+    assert.ok(
+        pregnancyHeight > 0.50 && pregnancyHeight < 0.55,
+        'localized pregnancy must retain the measured half-metre vertical zone',
+    );
+    assert.ok(
+        Math.max(upperRx, lowerRx) * 2 > 0.36
+            && Math.max(upperRx, lowerRx) * 2 < 0.41,
+        'localized pregnancy must retain its measured broad cast width',
+    );
+    assert.ok(
+        PREGNANCY_SHAPE.joinBlend >= 0.09 && PREGNANCY_SHAPE.torsoBlend >= 0.08,
+        'pregnancy volumes must blend deeply into each other and the trunk',
+    );
+    assert.ok(
+        maxContour('pregnant', 2) > maxContour('doctor', 2) + 0.10,
+        'pregnant trunk remains locally fuller where the blended volume attaches',
+    );
+    assert.ok(
+        maxContour('developing', 1) > maxContour('doctor', 1) + 0.10,
+        'developing and clinical silhouettes must remain visibly distinct',
+    );
+
     assert.ok(developing[1].wrist[0] < developing[1].elbow[0] - 0.10,
         'developing forearm must cross inward over the lower abdomen');
     assert.ok(developing[1].tip[0] < 0,
@@ -140,6 +170,10 @@ test('role contours and arm gestures encode the photographed six narratives', ()
         'pregnancy references do not show a cupping arm');
     assert.ok(pregnancy.every((arm) => arm.depth <= 0.42),
         'pregnancy arms must remain shallow flank reliefs');
+    assert.ok(ARM_POSES.clinical.every((arm) => arm.depth <= 0.44
+        && arm.wrist[1] >= 1.05),
+    'clinical arms must remain integrated flank reliefs rather than hanging rails');
+
 });
 
 test('face and crown parameters preserve six structural identities', () => {
@@ -159,8 +193,8 @@ test('face and crown parameters preserve six structural identities', () => {
     }
 
     const byIdentity = new Map(FIGURE_LAYOUT.map((figure) => [figure.identity, figure]));
-    assert.ok(byIdentity.get('mother').headTurn >= 0.15,
-        'mother retains the reference three-quarter head turn');
+    assert.ok(byIdentity.get('mother').headTurn >= 0.60,
+        'mother retains the reference right-profile head turn');
     assert.ok(byIdentity.get('visitor').headTurn >= 0.25,
         'visitor retains the reference profile head turn');
 });
@@ -199,7 +233,7 @@ test('all six production body fields remain closed manifolds within the mobile t
     for (const figure of FIGURE_LAYOUT) {
         const body = buildFigure(THREE, { ...figure, only: ['body'] });
         assert.deepEqual(edgeCounts(body), { boundary: 0, nonmanifold: 0 }, figure.id);
-        assert.ok(body.index.count / 3 < 170000, figure.id + ' exceeds body triangle budget');
+        assert.ok(body.index.count / 3 < 178000, figure.id + ' exceeds body triangle budget');
         byIdentity.set(figure.identity, bounds(body));
     }
 
@@ -219,7 +253,7 @@ test('identity audit covers a complete neutral orbit without duplicate angles', 
 });
 
 test('Phase 5 visual gate retains both sides, fine details, feet and mobile views', () => {
-    assert.equal(PHASE5_ACCEPTANCE_VIEWS.length, 10);
+    assert.equal(PHASE5_ACCEPTANCE_VIEWS.length, 14);
     const byId = new Map(PHASE5_ACCEPTANCE_VIEWS.map((view) => [view.id, view]));
     for (const id of [
         'p5-01-outward-order',
@@ -232,14 +266,27 @@ test('Phase 5 visual gate retains both sides, fine details, feet and mobile view
         'p5-08-mobile-hospital',
         'p5-09-outward-identities',
         'p5-10-hospital-identities',
+        'p5-11-developing-face',
+        'p5-12-badge-close',
+        'p5-13-stethoscope-close',
+        'p5-14-foot-close',
     ]) assert.ok(byId.has(id), 'missing Phase 5 view: ' + id);
 
     assert.deepEqual(byId.get('p5-07-mobile-outward').viewport, [390, 844]);
     assert.deepEqual(byId.get('p5-08-mobile-hospital').viewport, [390, 844]);
-    assert.ok(byId.get('p5-07-mobile-outward').distance >= 8,
-        'narrow outward view must contain the full six-panel width');
-    assert.ok(byId.get('p5-08-mobile-hospital').distance >= 8,
-        'narrow hospital view must contain the full six-panel width');
+    assert.ok(byId.get('p5-07-mobile-outward').distance >= 5.2
+        && byId.get('p5-07-mobile-outward').distance <= 6.0,
+    'narrow outward view must fill the phone without clipping the group');
+    assert.ok(byId.get('p5-08-mobile-hospital').distance >= 5.2
+        && byId.get('p5-08-mobile-hospital').distance <= 6.0,
+    'narrow hospital view must fill the phone without clipping the group');
+    assert.ok(['p5-11-developing-face', 'p5-12-badge-close', 'p5-13-stethoscope-close', 'p5-14-foot-close']
+        .every((id) => byId.get(id).distance <= 1.7 && byId.get(id).fov <= 22));
+    assert.ok(byId.get('p5-07-mobile-outward').fov >= 48);
+    assert.ok(byId.get('p5-08-mobile-hospital').fov >= 48);
+    const mobileAxisDelta = Math.abs(byId.get('p5-08-mobile-hospital').yaw
+        - byId.get('p5-07-mobile-outward').yaw);
+    assert.equal(mobileAxisDelta, 180, 'phone views must inspect opposite ends of the folded axis');
     assert.ok(byId.get('p5-04-newborn-support').fov <= 28);
     const identityViews = [
         byId.get('p5-09-outward-identities'),

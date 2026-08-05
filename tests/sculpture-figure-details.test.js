@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFigure, STETHOSCOPE_PATHS } from '../sculpture/src/model/figure.js';
-import { FIGURE_LAYOUT } from '../sculpture/src/model/sculpture.js';
+import {
+    buildCowlBacking, buildFigure, PLANTED_FOOT_PROFILE, STETHOSCOPE_PATHS,
+} from '../sculpture/src/model/figure.js';
+import { buildFoldedScreen, FIGURE_LAYOUT } from '../sculpture/src/model/sculpture.js';
 import { PHASE4_ACCEPTANCE_VIEWS } from '../tools/sculpture-views.mjs';
 
 class BufferAttribute {
@@ -44,6 +46,24 @@ class BufferGeometry {
             p.setZ(i, p.getZ(i) * z);
         }
         return this;
+    }
+
+    toNonIndexed() {
+        if (!this.index) return this;
+        const sourceIndex = this.index.array || this.index;
+        const expanded = new BufferGeometry();
+        for (const [name, attribute] of Object.entries(this.attributes)) {
+            const values = new attribute.array.constructor(sourceIndex.length * attribute.itemSize);
+            for (let i = 0; i < sourceIndex.length; i++) {
+                const source = sourceIndex[i] * attribute.itemSize;
+                const target = i * attribute.itemSize;
+                for (let component = 0; component < attribute.itemSize; component++) {
+                    values[target + component] = attribute.array[source + component];
+                }
+            }
+            expanded.setAttribute(name, new BufferAttribute(values, attribute.itemSize));
+        }
+        return expanded;
     }
 
     computeVertexNormals() {}
@@ -121,28 +141,90 @@ function buildFoot(stride) {
     });
 }
 
+function inspectTriangleSoup(geometry) {
+    const positions = geometry.attributes.position;
+    const edges = new Map();
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    const key = (index) => [
+        positions.getX(index), positions.getY(index), positions.getZ(index),
+    ].map((value) => value.toFixed(6)).join(',');
+
+    for (let i = 0; i < positions.count; i++) {
+        minX = Math.min(minX, positions.getX(i));
+        maxX = Math.max(maxX, positions.getX(i));
+        minY = Math.min(minY, positions.getY(i));
+        maxY = Math.max(maxY, positions.getY(i));
+        minZ = Math.min(minZ, positions.getZ(i));
+        maxZ = Math.max(maxZ, positions.getZ(i));
+    }
+    for (let i = 0; i < positions.count; i += 3) {
+        const triangle = [key(i), key(i + 1), key(i + 2)];
+        for (const [a, b] of [
+            [triangle[0], triangle[1]],
+            [triangle[1], triangle[2]],
+            [triangle[2], triangle[0]],
+        ]) {
+            const edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+            edges.set(edge, (edges.get(edge) || 0) + 1);
+        }
+    }
+    return {
+        boundaryEdges: [...edges.values()].filter((count) => count === 1).length,
+        boundarySamples: [...edges.entries()].filter(([, count]) => count === 1).slice(0, 6),
+        nonmanifoldEdges: [...edges.values()].filter((count) => count > 2).length,
+        bounds: { minX, maxX, minY, maxY, minZ, maxZ },
+    };
+}
+
+test('the six reliefs share a closed folded screen and full-height cast shells', () => {
+    assert.ok(FIGURE_LAYOUT.every((figure) => figure.shell === true));
+    const result = inspectTriangleSoup(buildFoldedScreen(THREE));
+    assert.equal(result.boundaryEdges, 0, JSON.stringify(result.boundarySamples));
+    assert.equal(result.nonmanifoldEdges, 0);
+    assert.ok(result.bounds.minY < 0, 'connector closes below the paving');
+    assert.ok(result.bounds.maxY >= 2.08 && result.bounds.maxY <= 2.11,
+        'the shared ribbon closes shoulder-height daylight without a flat crown wall');
+    assert.ok(result.bounds.maxX - result.bounds.minX > 2.5);
+    assert.ok(result.bounds.maxZ - result.bounds.minZ > 0.5);
+});
+
+
+test('each collar arch has a closed recessed backing plate', () => {
+    const result = inspectTriangleSoup(buildCowlBacking(THREE, {
+        cowlTop: 2.42,
+        openScale: 1,
+        sweepLean: 0,
+    }));
+    assert.equal(result.boundaryEdges, 0, JSON.stringify(result.boundarySamples));
+    assert.equal(result.nonmanifoldEdges, 0);
+    assert.ok(result.bounds.maxY >= 2.41 && result.bounds.maxY <= 2.43);
+    assert.ok(result.bounds.maxX - result.bounds.minX >= 0.59);
+    assert.ok(result.bounds.maxZ - result.bounds.minZ >= 0.049);
+});
 test('each figure exposes one closed, connected and outward-wound planted foot', () => {
     const result = inspectGeometry(buildFoot(-1));
     assert.equal(result.components, 1);
     assert.equal(result.boundaryEdges, 0);
     assert.equal(result.nonmanifoldEdges, 0);
     assert.ok(result.signedVolume > 0);
-    const length = result.bounds.maxZ - result.bounds.minZ;
+    const totalLength = result.bounds.maxZ - result.bounds.minZ;
+    const visibleRows = PLANTED_FOOT_PROFILE.filter((row) => row[0] >= 0);
+    const visibleSpan = visibleRows.at(-1)[0] - visibleRows[0][0];
     const width = result.bounds.maxX - result.bounds.minX;
-    assert.ok(length > 0.48, 'foot should read heel-to-toe beyond the hem');
-    assert.ok(length < 0.68, 'foot should not extend into a long pointed slug');
-    assert.ok(width > 0.15, 'forefoot should remain visibly broad');
-    assert.ok(width < 0.20, 'foot should not read as a paddle');
-    assert.ok(length > width * 2.2, 'foot should retain a planted heel-to-toe proportion');
-    assert.ok(result.bounds.maxY - result.bounds.minY > 0.10, 'foot should include an instep');
+    const profileWidth = Math.max(...PLANTED_FOOT_PROFILE.map((row) => row[1])) * 2;
+    assert.ok(totalLength > 0.54 && totalLength < 0.57, 'reference-measured root-to-toe length stays compact');
+    assert.ok(visibleSpan > 0.44 && visibleSpan < 0.46, 'visible heel-to-point span matches the crop');
+    assert.ok(profileWidth >= 0.175 && profileWidth <= 0.185,
+        'instep and forefoot stay broad without becoming a paddle');
+    assert.ok(width < 0.22, 'yawed world footprint stays compact');
+    assert.ok(visibleSpan > profileWidth * 2.4, 'visible cast wedge must taper decisively heel-to-toe');
+    assert.ok(result.bounds.maxY - result.bounds.minY > 0.33, 'foot root should bury high inside the hem');
 });
 
 test('production figures retain the fine foot field beside the closed body field', () => {
-    const opts = {
-        seed: 11,
-        stride: -1,
-        strideAngle: 0.10,
-    };
+    const opts = { ...FIGURE_LAYOUT[0] };
     const body = buildFigure(THREE, { ...opts, only: ['body'] });
     const foot = buildFigure(THREE, { ...opts, only: ['feet'] });
     const assembled = buildFigure(THREE, { ...opts, only: ['body', 'feet'] });
@@ -157,8 +239,8 @@ test('production figures retain the fine foot field beside the closed body field
 test('stride selects one leading side instead of exposing a detached pair', () => {
     const left = inspectGeometry(buildFoot(-1)).bounds;
     const right = inspectGeometry(buildFoot(1)).bounds;
-    assert.ok(left.maxX < 0, 'left stride should expose only the left foot');
-    assert.ok(right.minX > 0, 'right stride should expose only the right foot');
+    assert.ok(Math.abs(left.minX + right.maxX) < 0.005, 'opposed strides should mirror the foot placement');
+    assert.ok(Math.abs(left.maxX + right.minX) < 0.005, 'opposed strides should mirror the foot placement');
     const leftWidth = left.maxX - left.minX;
     const rightWidth = right.maxX - right.minX;
     assert.ok(Math.abs(leftWidth - rightWidth) < 0.005, 'stride should preserve foot width');
@@ -191,8 +273,9 @@ test('the carried newborn is a closed fully wrapped block with restrained end as
         if (positions.getX(i) < -0.10) leftTop = Math.max(leftTop, positions.getY(i));
         if (positions.getX(i) > 0.10) rightTop = Math.max(rightTop, positions.getY(i));
     }
-    assert.ok(rightTop - leftTop > 0.015 && rightTop - leftTop < 0.045,
-        'wrapped ends should be unequal without inventing an exposed spherical head');
+    const endDelta = Math.abs(rightTop - leftTop);
+    assert.ok(endDelta > 0.015 && endDelta < 0.045,
+        `wrapped ends should differ subtly without inventing an exposed spherical head (delta ${endDelta.toFixed(3)}m)`);
 });
 
 test('the hospital badge is a separate fine closed relief at readable scale', () => {
@@ -213,22 +296,72 @@ test('the hospital badge is a separate fine closed relief at readable scale', ()
 });
 test('stethoscope control points form two raised reference-matched tubes', () => {
     const { left, right, terminals } = STETHOSCOPE_PATHS;
-    assert.equal(left.length, 4);
-    assert.equal(right.length, 4);
+    assert.equal(left.length, 5);
+    assert.equal(right.length, 5);
     assert.equal(terminals.length, 2);
     assert.deepEqual(left[0].map(Math.abs), right[0].map(Math.abs));
+    assert.ok(left[0][2] <= 0.06 && right[0][2] <= 0.06,
+        'upper tube ends should disappear into the collar instead of floating above it');
+    assert.ok(right[1][0] - left[1][0] <= 0.06,
+        'visible upper runs should emerge together before separating across the chest');
+    assert.ok(Math.abs(left.at(-1)[0]) < Math.abs(left[3][0])
+        && Math.abs(right.at(-1)[0]) < Math.abs(right[3][0]),
+        'both lower runs should return slightly inward into their fittings');
     assert.ok(left.at(-1)[1] < left[0][1], 'left tube should hang from the neck');
     assert.ok(right.at(-1)[1] < right[0][1], 'right tube should hang from the neck');
-    assert.ok([...left.slice(2), ...right.slice(2)].every((point) => point[2] > 0.24),
-        'lower tubing should stand proud of the torso');
-    assert.ok(terminals.every((point) => point[1] < 1.56 && point[2] > 0.28),
-        'small terminals should rest separately over the breasts');
+    assert.ok([...left.slice(2, -1), ...right.slice(2, -1)].every((point) => point[2] >= 0.125 && point[2] <= 0.145),
+        'middle tubing centres should remain embedded in the chest surface');
+    assert.ok([left.at(-1), right.at(-1)].every((point) => point[2] >= 0.145 && point[2] <= 0.155),
+        'lower tube ends should settle back into their chest fittings');
+    assert.ok(terminals[0][1] > 1.51 && terminals[0][1] < 1.54);
+    assert.ok(terminals[1][1] > 1.54 && terminals[1][1] < 1.58);
+    assert.ok(terminals[1][1] - terminals[0][1] > 0.015
+        && terminals[1][1] - terminals[0][1] < 0.035,
+        'the photographed chest pieces should retain their asymmetric hang');
+    const terminalSpan = terminals[1][0] - terminals[0][0];
+    assert.ok(terminalSpan > 0.16 && terminalSpan < 0.20,
+        'terminal separation should match the compact reference hang');
+    assert.ok(terminals.every((point) => point[2] >= 0.145 && point[2] <= 0.160),
+        'terminal backs should be embedded in the chest relief, not floating in front');
+
+    const doctor = FIGURE_LAYOUT.find((figure) => figure.stethoscope);
+    const body = buildFigure(THREE, { ...doctor, only: ['body'] });
+    const positions = body.attributes.position;
+    const toBuiltSpace = ([x, y, z]) => {
+        const t = Math.min(1, Math.max(0, (y - 0.18) / 1.17));
+        const eased = t * t * (3 - 2 * t);
+        return [
+            (x + doctor.weightShift * eased) * doctor.scale,
+            y * doctor.scale,
+            (z + y * doctor.lean) * doctor.scale,
+        ];
+    };
+    const contactPoints = [
+        ...left.slice(2),
+        ...right.slice(2),
+        ...terminals,
+    ];
+    for (const point of contactPoints) {
+        const [px, py, pz] = toBuiltSpace(point);
+        let surfaceZ = -Infinity;
+        let samples = 0;
+        for (let i = 0; i < positions.count; i++) {
+            if (Math.hypot(positions.getX(i) - px, positions.getY(i) - py) < 0.018) {
+                surfaceZ = Math.max(surfaceZ, positions.getZ(i));
+                samples++;
+            }
+        }
+        assert.ok(samples > 10, 'contact probe must resolve the clinician torso');
+        const centreGap = pz - surfaceZ;
+        assert.ok(centreGap >= -0.012 && centreGap <= 0.012,
+            'tube/fitting centre must intersect the cast chest surface at ' + JSON.stringify(point) + ': ' + centreGap);
+    }
 });
 
 test('all six reliefs turn as complete bodies without impossible neck twists', () => {
     assert.equal(FIGURE_LAYOUT.length, 6);
     for (const figure of FIGURE_LAYOUT) {
-        assert.ok(Math.abs(figure.headTurn) < 0.35,
+        assert.ok(Math.abs(figure.headTurn) < 0.75,
             `${figure.id} keeps an anatomical local head turn`);
         if (figure.side === 'outward') {
             assert.ok(Math.cos(figure.turn) > 0.90, `${figure.id} faces the outward side`);

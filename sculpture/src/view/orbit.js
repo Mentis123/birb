@@ -54,12 +54,14 @@ export const ORBIT_DEFAULTS = {
     yaw: 0,
     pitch: 6 * DEG,
     distance: 6.4,
-    minDistance: 2.05,
+    minDistance: 1.25,
     maxDistance: 13.0,
     minPitch: -4 * DEG,
     maxPitch: 62 * DEG,
     /** Height of the point the camera orbits, in metres. */
+    targetX: 0,
     targetY: 1.28,
+    targetZ: 0,
     /** How far the orbit point may be panned from centre, in metres. */
     panRadius: 2.4,
     minTargetY: 0.15,
@@ -77,7 +79,7 @@ export function createOrbit(camera, domElement, opts = {}) {
     let yaw = cfg.yaw, pitch = cfg.pitch, distance = cfg.distance;
     let tYaw = yaw, tPitch = pitch, tDistance = distance;
     // The point the camera orbits, which panning moves.
-    let cx = 0, cy = cfg.targetY, cz = 0;
+    let cx = cfg.targetX, cy = cfg.targetY, cz = cfg.targetZ;
     let tcx = cx, tcy = cy, tcz = cz;
 
     let idle = 0;
@@ -239,7 +241,7 @@ export function createOrbit(camera, domElement, opts = {}) {
         tYaw = cfg.yaw;
         tPitch = cfg.pitch;
         tDistance = cfg.distance;
-        tcx = 0; tcy = cfg.targetY; tcz = 0;
+        tcx = cfg.targetX; tcy = cfg.targetY; tcz = cfg.targetZ;
         markMoved();
     }
 

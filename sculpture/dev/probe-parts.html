@@ -11,6 +11,7 @@
   Query parameters, all optional:
     ?only=shell,body,head,feet   which parts to build   (default: all four)
     &pregnant &baby &steth       which story this figure carries
+    &identity=developing|doctor|mother|pregnant|visitor|badge
     &hair=none|cap|capbun        head treatment                 (default: cap)
     &weightShift=-0.11           settle the column over one foot
     &material=normal             normal diagnostic instead of lit bronze
@@ -57,7 +58,11 @@ const mat = Q.get('material') === 'normal'
     });
 const o = { seed: 37, hair: Q.get('hair') || 'cap', faceless: false,
             pregnant: Q.has('pregnant'), baby: Q.has('baby'), stethoscope: Q.has('steth'),
+            identity: Q.get('identity')
+                || (Q.has('pregnant') ? 'pregnant' : 'visitor'),
             weightShift: Number(Q.get('weightShift') || 0),
+            headTurn: Number(Q.get('headTurn') || 0),
+            headTilt: Number(Q.get('headTilt') || 0),
             folds: 6, foldDepth: 1.12, foldPhase: 3.1, trainAngle: 2.52, trainAmount: 0.38, scale: 1 };
 
 // Rebuild the parts individually via the module's own internals by asking for a

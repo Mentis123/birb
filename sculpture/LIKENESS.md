@@ -129,12 +129,13 @@ based on the wrong object structure and cannot be carried forward.
 
 Current deterministic evidence is
 `validation/phase-5-reference-reconstruction.png` and
-`validation/phase-5-identity-audit.png`. All ten matched/detail/mobile
+`validation/phase-5-identity-audit.png`. All fourteen matched/detail/mobile
 frames and all eight neutral orbit frames are opaque and non-uniform, but those
 checks establish render health and observability, not likeness.
 
 The nine-detail contract records nine passes at the reference-faithful
-major-landmark and contour threshold. Phase 5 is closed at that boundary; see
+major-landmark and contour threshold with zero warnings. A fresh independent
+ten-item visual review also passes with no demotions. Phase 5 is closed; see
 `validation/phase-5-closeout.md`. This is an auditable contract result, not a
 measured perceptual-likeness percentage.
 > The denominator was wrong when this file was written: the header said 32 and
@@ -257,8 +258,8 @@ corrected the remaining structural mismatches:
   forward torso with a 132-degree neck twist.
 - The carried infant is a separate fine closed swaddle with broad folds, an
   integrated head end and a curved supporting forearm.
-- The clinician's instrument is two independent curved tubes with two small
-  ringed terminals, matching the source photos.
+- The clinician's instrument is two independent curved tubes ending in a low
+  shallow U and a higher solid circular chestpiece.
 - Each narrower planted foot is unioned into its robe and has a restrained toe
   edge instead of detached stones or a long paddle.
 
@@ -266,10 +267,10 @@ The rear light floor and all prior closed-surface repairs remain intact. The
 screenshot harness rejects blank, transparent or uniform WebGL framebuffers
 instead of treating any PNG as evidence.
 
-The full 197-test suite and proportion gate are green (0 of 12 outside
-tolerance, worst +0.024). Nine browser views and the current evidence sheet are
-recorded in the closeout file. The scene reports 514,780 triangles, 6 draw calls
-and 4 figures. A real iPhone 12-or-newer load and orbit test is still
+Historical four-figure baseline: the full 197-test suite and proportion gate
+were green, with 514,780 triangles, 6 draw calls and 4 figures. Those figures
+are retained only as provenance and are superseded by the reconstruction below.
+A real iPhone 12-or-newer load and orbit test is still
 outstanding; SwiftShader performance is not a phone result.
 
 #### Phase 5 reconstruction — six alternating reliefs
@@ -295,11 +296,12 @@ non-manifold edges.
 - [x] Pregnancy projection and flank-arm relationship accepted against the source contour.
 - [x] Foot instep/toe asymmetry accepted in low and front-orbit views.
 - [x] Proportion gate: 0 of 12 outside tolerance, worst error +0.024.
-- [x] Full 208-test suite green.
-- [x] Ten-view desktop/mobile matrix and eight-angle orbit archived.
+- [x] Full 210-test suite green.
+- [x] Fourteen-view matched/detail/mobile matrix and eight-angle orbit archived.
+- [x] Fresh independent ten-item visual review passed with no demotions.
 - [ ] Real iPhone 12-or-newer interaction, construction time and sustained orbit accepted.
 
-All nine detail contracts pass closeout at the major-landmark and contour
+All nine detail contracts pass closeout with zero warnings at the major-landmark and contour
 threshold. This does not restore a numeric perceptual-likeness score. Phase 6
 has not started. The real-iPhone item remains a final ship/performance gate,
 not a capability implied by local SwiftShader evidence.

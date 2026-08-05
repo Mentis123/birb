@@ -13,7 +13,7 @@
  *      same scale, a difference of shape is obvious and takes one look.
  *   2. Each `sculpture-shot.mjs` invocation boots a browser, which cost roughly
  *      five seconds a look and, at ninety looks across one session, most of the
- *      iteration budget. The general, nine-view Phase 4, ten-view Phase 5
+ *      iteration budget. The general, nine-view Phase 4, fourteen-view Phase 5
  *      and eight-angle identity sets each run in one browser boot.
  *
  * Exits non-zero on any page or console error, same contract as the shot tool,
@@ -24,7 +24,7 @@
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --only a-front,c-under
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/sheet.png --no-photos   # review poses only
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase4.png --phase4     # nine defect views
- *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase5.png --phase5     # eight detail/scene + two mobile
+ *   node tools/sculpture-sheet.mjs --out shots/sculpt/phase5.png --phase5     # twelve detail/scene + two mobile
  *   node tools/sculpture-sheet.mjs --out shots/sculpt/identity.png --identity # neutral eight-angle audit
  *
  * Flags:
@@ -37,7 +37,7 @@
  *   --screenshot-timeout  max ms per rendered screenshot   (default 120000)
  *   --no-photos  skip the reference column
  *   --phase4  capture the nine desktop/mobile/detail acceptance views
- *   --phase5  capture the ten Phase 5 likeness acceptance views
+ *   --phase5  capture the fourteen Phase 5 likeness acceptance views
  *   --identity  capture the neutral eight-angle identity audit
  *   --allow-console-errors
  */
@@ -354,9 +354,7 @@ async function main() {
         await page.setViewportSize({ width: vw, height: vh });
         await park(page, view);
         await page.waitForTimeout(settle);
-        // Re-park after the settle: the page's own frame loop keeps damping and,
-        // after nine idle seconds, starts the slow idle spin. A multi-view
-        // sheet takes longer than that.
+        // Re-park after the settle so orbit damping cannot shift a matched pose.
         await park(page, view);
 
         const pixels = await framebufferStats(page);

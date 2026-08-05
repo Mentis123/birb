@@ -24,9 +24,9 @@
  *   BREASTS   Bold ellipsoidal relief blended into the chest with a fillet well
  *             smaller than the protrusion. Separate hemispheres and over-large
  *             blends both produced applied lumps or erased the form entirely.
- *   HEAD      A rounded block with flat front and sides, domed crown and broad
- *             jaw. The face is deliberately reduced but its features must be
- *             thick enough to survive the fine head mesher at group distance.
+ *   HEAD      A tapered cast head with a broad planar face, rounded crown and
+ *             distinct jaw. The face is deliberately reduced but its features
+ *             must survive the fine head mesher at group distance.
  *   FEET      One fine closed foot overlaps deeply beneath each raised hem,
  *             broad through the forefoot and seated under the skirt. Keeping it
  *             outside the coarse body field preserves the toe silhouette.
@@ -124,15 +124,15 @@ export const ARM_POSES = Object.freeze({
         // The near forearm curves beneath the newborn as one U-shaped support.
         // The far forearm returns into the wrapped block and disappears there
         // instead of forming a second competing horizontal rail.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [-0.220, 1.305, 0.245], upper: 0.069, fore: 0.064, end: 0.060, support: [[-0.025, 1.255, 0.305], [0.175, 1.305, 0.290]], supportEnd: 0.043 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.346, 1.515, 0.040], wrist: [ 0.205, 1.350, 0.236], upper: 0.064, fore: 0.056, end: 0.046, tip: [ 0.112, 1.322, 0.278], tipEnd: 0.025, depth: 0.68, gestureDepth: 0.68 },
+        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.350, 1.555, 0.044], wrist: [-0.225, 1.310, 0.285], upper: 0.069, fore: 0.060, end: 0.050, support: [[-0.120, 1.285, 0.330], [-0.010, 1.250, 0.345], [0.110, 1.265, 0.350], [0.205, 1.315, 0.330]], supportEnd: 0.040, gestureDepth: 0.74 },
+        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.346, 1.515, 0.040], wrist: [ 0.210, 1.350, 0.242], upper: 0.064, fore: 0.056, end: 0.046, tip: [ 0.125, 1.325, 0.292], tipEnd: 0.030, depth: 0.72, gestureDepth: 0.74 },
     ],
     clinical: [
         // The clinician's near arm hangs straight while the far arm sweeps a
         // little back and out. That leaves the stethoscope and chest unobscured
         // and gives her a different side silhouette from the open figure.
-        { shoulder: [-0.298, 1.820, 0.000], elbow: [-0.338, 1.490, 0.012], wrist: [-0.336, 0.895, 0.055], upper: 0.062, fore: 0.050, end: 0.030, hand: 0.024, depth: 0.64 },
-        { shoulder: [ 0.298, 1.820, 0.000], elbow: [ 0.342, 1.505, -0.004], wrist: [ 0.360, 0.940, -0.012], upper: 0.061, fore: 0.049, end: 0.029, hand: 0.022, depth: 0.62 },
+        { shoulder: [-0.294, 1.812, -0.010], elbow: [-0.320, 1.515, -0.004], wrist: [-0.312, 1.055, 0.018], upper: 0.054, fore: 0.041, end: 0.019, hand: 0.008, depth: 0.44, width: 1.12 },
+        { shoulder: [ 0.294, 1.812, -0.010], elbow: [ 0.322, 1.510, -0.006], wrist: [ 0.318, 1.080, 0.014], upper: 0.053, fore: 0.040, end: 0.018, hand: 0.006, depth: 0.42, width: 1.12 },
     ],
     visitor: [
         // Both arms are mostly swallowed by the folded sheet in the outward
@@ -167,6 +167,44 @@ function sampleProfile(table, t) {
             for (let j = 1; j < a.length; j++) out.push(a[j] + (b[j] - a[j]) * k);
             return out;
         }
+    }
+    return rows[rows.length - 1].slice(1);
+}
+
+/**
+ * Cubic Hermite sampling for sculpted body contours.
+ *
+ * Linear interpolation leaves a visible change of surface slope at every
+ * measured height, especially across the pregnancy. Neighbour-derived slopes
+ * preserve the measured values while keeping the generated surface C1 smooth.
+ */
+function sampleSmoothProfile(table, t) {
+    const asc = table[0][0] < table[table.length - 1][0];
+    const rows = asc ? table : table.slice().reverse();
+    if (t <= rows[0][0]) return rows[0].slice(1);
+    if (t >= rows[rows.length - 1][0]) return rows[rows.length - 1].slice(1);
+    for (let i = 1; i < rows.length; i++) {
+        if (t > rows[i][0]) continue;
+        const p0 = rows[Math.max(0, i - 2)];
+        const p1 = rows[i - 1];
+        const p2 = rows[i];
+        const p3 = rows[Math.min(rows.length - 1, i + 1)];
+        const span = p2[0] - p1[0];
+        const u = (t - p1[0]) / span;
+        const u2 = u * u;
+        const u3 = u2 * u;
+        const h00 = 2 * u3 - 3 * u2 + 1;
+        const h10 = u3 - 2 * u2 + u;
+        const h01 = -2 * u3 + 3 * u2;
+        const h11 = u3 - u2;
+        const out = [];
+        for (let j = 1; j < p1.length; j++) {
+            const m1 = (p2[j] - p0[j]) / (p2[0] - p0[0] || 1);
+            const m2 = (p3[j] - p1[j]) / (p3[0] - p1[0] || 1);
+            out.push(h00 * p1[j] + h10 * span * m1
+                + h01 * p2[j] + h11 * span * m2);
+        }
+        return out;
     }
     return rows[rows.length - 1].slice(1);
 }
@@ -261,11 +299,13 @@ const SHELL_PROFILE = [
     // nearly vertical around the crown. Continuing the taper to the terminal
     // ring made a tent; the photographs show a rounded rectangular cowl with
     // roughly a hand's breadth of clearance around the head.
-    [2.000, 0.310, 0.156],
-    [2.100, 0.260, 0.145],
-    [2.240, 0.244, 0.135],
-    [2.360, 0.235, 0.125],
-    [2.440, 0.225, 0.120],
+    [2.000, 0.280, 0.145],
+    [2.100, 0.250, 0.138],
+    [2.240, 0.235, 0.132],
+    [2.320, 0.230, 0.128],
+    [2.380, 0.225, 0.124],
+    [2.420, 0.220, 0.120],
+    [2.440, 0.215, 0.118],
 ];
 
 /**
@@ -309,16 +349,14 @@ const FRONT_OPENING = [
     [1.520, 1.34],
     [1.700, 1.46],
     [1.849, 1.58],   // shoulder
-    // Above the shoulders the full-height cowl curls around the head, then the
-    // two free rims meet over the crown. Keeping the body-sized opening all the
-    // way up left only a rear plate; keeping even a face-width slot at the top
-    // produced two disconnected horns. Converging only in the final 24cm forms
-    // the broad inverted-U arch while the face and throat remain in open air.
-    [2.030, 1.28],
-    [2.180, 1.00],
-    [2.300, 0.68],
-    [2.380, 0.34],
-    [2.440, 0.012],
+    // Above the shoulders the cowl remains a folded sheet behind the head. Its
+    // front opening narrows only slightly: closing it over every crown creates
+    // six repeated hoops that are absent from the reference silhouettes.
+    [2.030, 1.55],
+    [2.180, 1.50],
+    [2.300, 1.44],
+    [2.380, 1.36],
+    [2.440, 1.30],
 ];
 
 /**
@@ -332,7 +370,10 @@ const FRONT_OPENING = [
  */
 function shellOffsetZ(y) {
     const t = Math.min(1, Math.max(0, (y - 0.55) / 0.95));
-    return -0.150 * t * t * (3 - 2 * t);
+    const shoulderT = Math.min(1, Math.max(0, (y - 1.80) / 0.46));
+    const bodyEase = t * t * (3 - 2 * t);
+    const crownEase = shoulderT * shoulderT * (3 - 2 * shoulderT);
+    return -0.150 * bodyEase - 0.070 * crownEase;
 }
 
 /**
@@ -350,149 +391,125 @@ function shellOffsetZ(y) {
  */
 const WALL = 0.055;
 
-function buildShell(THREE, opts) {
-    const RINGS = 76;
-    const ARC = 30;                       // segments along one wall of the crescent
-    const RIM = 5;                        // segments rounding one free edge
-    // NOT every cloak goes over its wearer's head. In `ref-a-front.jpg` the
-    // nearest figure's stops at her shoulders and her head stands completely
-    // free; two others carry the full arch behind the crown. Building all four
-    // the same height gave a row of identical doorways.
-    const yTop = opts.cowlTop;
 
+/**
+ * Two closed side wings around an exposed reverse relief.
+ *
+ * The original crescent closed across the complete rear of every figure. That
+ * was manifold, but it hid the negative body field and turned the group into
+ * six convex columns. These wings retain the photographed swept rims and cast
+ * thickness while leaving the central rear torso visible.
+ */
+function buildReliefShell(THREE, opts) {
+    const RINGS = 76;
+    const ARC = 22;
+    const RIM = 5;
+    const WINGS = 2;
+    const yTop = Math.min(opts.cowlTop, 2.44);
+    const loop = (ARC + 1) * 2 + (RIM - 1) * 2;
     const positions = [];
     const indices = [];
-    // outer wall + far bead + inner wall + near bead
-    const loop = (ARC + 1) * 2 + (RIM - 1) * 2;
+    const vertex = (wing, ring, section) =>
+        ((wing * (RINGS + 1) + ring) * loop + section);
 
-    for (let r = 0; r <= RINGS; r++) {
-        const y = (r / RINGS) * yTop;
-        const [hw, hd] = sampleProfile(SHELL_PROFILE, y);
-        const open = sampleProfile(FRONT_OPENING, y)[0] * opts.openScale;
-        const zOff = shellOffsetZ(y);
-        // SHELL_PROFILE already draws the arch by narrowing toward the crown.
-        // Keep only a restrained terminal easing here: the former 66% collapse
-        // pinched the opening to a point and hid its inner wall from below.
-        const capT = Math.max(0, (y - (yTop - 0.28)) / 0.28);
-        const cap = 1 - 0.10 * capT * capT;
+    for (let wing = 0; wing < WINGS; wing++) {
+        for (let ring = 0; ring <= RINGS; ring++) {
+            const y = ring / RINGS * yTop;
+            const [hw, hd] = sampleProfile(SHELL_PROFILE, y);
+            const frontOpen = sampleProfile(FRONT_OPENING, y)[0] * opts.openScale;
+            const zOff = shellOffsetZ(y);
+            const capT = Math.max(0, (y - (yTop - 0.28)) / 0.28);
+            const cap = 1 - 0.10 * capT * capT;
+            const closeT = Math.min(1, Math.max(0, (y - (yTop - 0.16)) / 0.16));
+            const closeEase = closeT * closeT * (3 - 2 * closeT);
+            const rearOpen = 0.72 + (0.10 - 0.72) * closeEase;
+            const start = wing === 0 ? frontOpen : Math.PI + rearOpen;
+            const end = wing === 0 ? Math.PI - rearOpen : Math.PI * 2 - frontOpen;
 
-        // THE CROSS-SECTION, as ONE closed loop: outer wall from the near edge
-        // round the back to the far edge, a rounded bead over that edge, the
-        // inner wall back again, and a bead over the near edge. Built as two
-        // separate walls meeting at a fold, which is what it was, the free edges
-        // had no section to show and the cloak read as cut paper.
-        //
-        // The bead sweeps radius from the outer wall to the inner one while
-        // bulging PAST the edge by half the wall thickness, so it is a proper
-        // half-round. `rimRad` converts that half-thickness into radians at this
-        // ring's radius, and fades out as the opening closes — a ring with no
-        // opening has no free edge to round, and bulging past a seam that is not
-        // there just creases the front of the skirt.
-        const kIn = 1 - WALL / Math.max(hw, 0.06);
-        const midR = (1 + kIn) * 0.5;
-        const halfT = (1 - kIn) * 0.5;
-        const far = Math.PI * 2 - open;
-        const rimFade = Math.min(1, Math.max(0, (open - 0.02) / 0.14));
-        const rimRad = (WALL / (2 * Math.max(hw, 0.06))) * rimFade;
+            const kIn = 1 - WALL / Math.max(hw, 0.06);
+            const midR = (1 + kIn) * 0.5;
+            const halfT = (1 - kIn) * 0.5;
+            const rimRad = WALL / (2 * Math.max(hw, 0.06));
+            const section = [];
+            for (let s = 0; s <= ARC; s++) {
+                section.push([start + (end - start) * s / ARC, 1]);
+            }
+            for (let i = 1; i < RIM; i++) {
+                const phase = Math.PI * i / RIM;
+                section.push([
+                    end + rimRad * Math.sin(phase),
+                    midR + halfT * Math.cos(phase),
+                ]);
+            }
+            for (let s = 0; s <= ARC; s++) {
+                section.push([end - (end - start) * s / ARC, kIn]);
+            }
+            for (let i = 1; i < RIM; i++) {
+                const phase = Math.PI * i / RIM;
+                section.push([
+                    start - rimRad * Math.sin(phase),
+                    midR - halfT * Math.cos(phase),
+                ]);
+            }
 
-        const section = [];
-        for (let s = 0; s <= ARC; s++) section.push([open + (far - open) * s / ARC, 1]);
-        for (let i = 1; i < RIM; i++) {
-            const ph = Math.PI * i / RIM;
-            section.push([far + rimRad * Math.sin(ph), midR + halfT * Math.cos(ph)]);
-        }
-        for (let s = 0; s <= ARC; s++) section.push([far - (far - open) * s / ARC, kIn]);
-        for (let i = 1; i < RIM; i++) {
-            const ph = Math.PI * i / RIM;
-            section.push([open - rimRad * Math.sin(ph), midR - halfT * Math.cos(ph)]);
-        }
-
-        {
-            for (const [th, k] of section) {
-                const cs = Math.cos(th), sn = Math.sin(th);
-                // Slight flattening front and back: the robes carry their
-                // fullness at the sides, not as a round tube.
+            for (const [theta, radius] of section) {
+                const cs = Math.cos(theta);
+                const sn = Math.sin(theta);
                 const flat = 1 - 0.09 * Math.pow(Math.abs(cs), 3);
-
-                // THE TRAIN. Each cloak drags out to one side and pools on the
-                // paving — in `ref-b-threequarter.jpg` the nearest figure's
-                // sweeps almost a metre clear of her feet. Without it the hems
-                // are four tidy bells and the group loses the sense of cloth
-                // that has been walked in.
-                // THE TRAIN IS A DISPLACEMENT, NOT A SCALE, and that distinction
-                // is the single biggest silhouette fix in this pass. Multiplying
-                // the ring's radius pushed the hem out in EVERY direction on the
-                // trailing half, including sideways: measured on the first
-                // matched-view sheet the model's hem spanned 0.56 of figure
-                // height against the photograph's 0.39, while the base profile
-                // measured correct to within 0.007. All of that error was this
-                // one line. Real cloth trailing off a walking figure goes
-                // BACKWARD; it does not make her wider.
-                //
-                // So the trailing half of each low ring is translated along
-                // `trainAngle` by up to `trainAmount` METRES, and the leading
-                // half does not move at all.
-                // Concentrated hard at the ground so the tail LIES FLAT on the
-                // paving rather than sweeping up the back of the figure like a
-                // cape. In `ref-c-under.jpg` it is a long low tongue of bronze
-                // on the pavement, and its top edge barely leaves the ground.
-                const trail = Math.max(0, Math.cos(th - opts.trainAngle));
+                const trail = Math.max(0, Math.cos(theta - opts.trainAngle));
                 const low = Math.pow(Math.max(0, 1 - y / 0.58), 2.6);
                 const tail = opts.trainAmount * trail * trail * low;
-
-                // DRAPERY. Every reference photograph is dominated by vertical
-                // fold ridges running the length of the robe, and without them
-                // the shell reads as a smooth cone no amount of surface noise
-                // can rescue. The ridges run down the figure with a slow twist,
-                // and they DEEPEN toward the hem where the cloth gathers —
-                // constant-depth folds look machined, like fluting on a column.
-                // THE RAKE. A walking figure's hem is not a horizontal line: it
-                // is lifted clear of the leading foot and left trailing behind
-                // the other. In `ref-c-under.jpg` you can see straight under the
-                // near figure's hem to her planted foot, and the cloth behind
-                // her is still on the ground. Lift only — dropping the back edge
-                // would push it through the paving.
-                const rake = opts.hemRake * Math.max(0, Math.cos(th - opts.strideAngle))
+                const rake = opts.hemRake
+                    * Math.max(0, Math.cos(theta - opts.strideAngle))
                     * Math.pow(Math.max(0, 1 - y / 0.62), 2.0);
-
                 const gather = Math.pow(Math.max(0, 1 - y / 1.85), 1.35);
                 const depth = (0.026 + 0.058 * gather) * opts.foldDepth;
                 const fold = 1
-                    + depth * Math.cos(th * opts.folds + y * 0.55 + opts.foldPhase)
-                    + depth * 0.42 * Math.cos(th * (opts.folds * 2 + 1) - y * 0.9 + opts.foldPhase * 1.7);
+                    + depth * Math.cos(theta * opts.folds + y * 0.55 + opts.foldPhase)
+                    + depth * 0.42 * Math.cos(
+                        theta * (opts.folds * 2 + 1)
+                        - y * 0.9
+                        + opts.foldPhase * 1.7
+                    );
                 positions.push(
-                    sn * hw * cap * k * fold + Math.sin(opts.trainAngle) * tail
+                    sn * hw * cap * radius * fold
+                        + Math.sin(opts.trainAngle) * tail
                         + y * opts.sweepLean,
                     y + rake,
-                    cs * hd * cap * flat * k * fold + zOff + Math.cos(opts.trainAngle) * tail
+                    cs * hd * cap * flat * radius * fold
+                        + zOff
+                        + Math.cos(opts.trainAngle) * tail
                 );
             }
         }
     }
 
-    for (let r = 0; r < RINGS; r++) {
-        for (let s = 0; s < loop; s++) {
-            const s2 = (s + 1) % loop;
-            const a = r * loop + s, b = r * loop + s2;
-            const c = (r + 1) * loop + s, d = (r + 1) * loop + s2;
-            indices.push(a, b, c, b, d, c);
+    for (let wing = 0; wing < WINGS; wing++) {
+        for (let ring = 0; ring < RINGS; ring++) {
+            for (let section = 0; section < loop; section++) {
+                const next = (section + 1) % loop;
+                const a = vertex(wing, ring, section);
+                const b = vertex(wing, ring, next);
+                const c = vertex(wing, ring + 1, section);
+                const d = vertex(wing, ring + 1, next);
+                indices.push(a, b, c, b, d, c);
+            }
         }
     }
 
-    // Close the complete wall section at both ends. The old hem cap covered
-    // only the straight outer/inner arcs, leaving the rounded beads open, and
-    // the top had no cap at all.
-    const capRing = (ring, outwardY) => {
-        const offset = ring * loop;
+    const capRing = (wing, ring, outwardY) => {
+        const offset = vertex(wing, ring, 0);
         const contour = [];
-        for (let s = 0; s < loop; s++) {
+        for (let section = 0; section < loop; section++) {
             contour.push(new THREE.Vector2(
-                positions[(offset + s) * 3],
-                positions[(offset + s) * 3 + 2]
+                positions[(offset + section) * 3],
+                positions[(offset + section) * 3 + 2]
             ));
         }
         for (const face of THREE.ShapeUtils.triangulateShape(contour, [])) {
-            let a = offset + face[0], b = offset + face[1], c = offset + face[2];
+            let a = offset + face[0];
+            let b = offset + face[1];
+            let c = offset + face[2];
             const ax = positions[a * 3], az = positions[a * 3 + 2];
             const bx = positions[b * 3], bz = positions[b * 3 + 2];
             const cx = positions[c * 3], cz = positions[c * 3 + 2];
@@ -501,25 +518,95 @@ function buildShell(THREE, opts) {
             indices.push(a, b, c);
         }
     };
-    capRing(0, -1);
-    capRing(RINGS, 1);
+    for (let wing = 0; wing < WINGS; wing++) {
+        capRing(wing, 0, -1);
+        capRing(wing, RINGS, 1);
+    }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setIndex(indices);
-    // Broad, low-frequency undulation: this is a big hand-beaten sheet, so it
-    // should ripple rather than pebble — then a second finer pass for the
-    // hammer marks, because ripple alone still reads as a moulded plastic shell.
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(positions, 3)
+    );
+    geometry.setIndex(indices);
     const finishStart = yTop - 0.24;
-    roughen(THREE, geo, {
-        amount: 0.020, scale: 2.0, seed: opts.seed,
-        topFadeStart: finishStart, topFadeEnd: yTop, topAttenuation: 0.18,
+    roughen(THREE, geometry, {
+        amount: 0.020,
+        scale: 2.0,
+        seed: opts.seed,
+        topFadeStart: finishStart,
+        topFadeEnd: yTop,
+        topAttenuation: 0.18,
     });
-    return roughen(THREE, geo, {
-        amount: 0.0060, scale: 10.5, seed: opts.seed + 9,
-        topFadeStart: finishStart, topFadeEnd: yTop, topAttenuation: 0.42,
+    return roughen(THREE, geometry, {
+        amount: 0.0060,
+        scale: 10.5,
+        seed: opts.seed + 9,
+        topFadeStart: finishStart,
+        topFadeEnd: yTop,
+        topAttenuation: 0.42,
     });
 }
+/**
+ * Closed recessed plate inside one collar arch.
+ *
+ * The swept shell deliberately leaves its rear centre open so the negative
+ * body and blank head can project from it. Without a backing surface, however,
+ * the clearance around that head reads as a handle-shaped hole through the
+ * casting. This shallow tapered prism sits behind the reverse relief, overlaps
+ * the shoulder sheet, and closes only the arch interior.
+ */
+export function buildCowlBacking(THREE, opts = {}) {
+    const yTop = Math.min(opts.cowlTop ?? 2.42, 2.44);
+    const widthScale = Math.min(1.06, Math.max(0.94, opts.openScale ?? 1));
+    const xDrift = (y) => (y - 1.78) * (opts.sweepLean ?? 0);
+    const point = (x, y) => [x * widthScale + xDrift(y), y];
+    const outline = [
+        point(-0.300, 1.780),
+        point( 0.300, 1.780),
+        point( 0.286, 1.950),
+        point( 0.238, Math.min(2.230, yTop - 0.150)),
+        point( 0.205, yTop - 0.055),
+        point( 0.118, yTop - 0.012),
+        point( 0.000, yTop),
+        point(-0.118, yTop - 0.012),
+        point(-0.205, yTop - 0.055),
+        point(-0.238, Math.min(2.230, yTop - 0.150)),
+        point(-0.286, 1.950),
+    ];
+    const frontZ = -0.052;
+    const backZ = -0.102;
+    const positions = [];
+    for (const z of [frontZ, backZ]) {
+        for (const [x, y] of outline) positions.push(x, y, z);
+    }
+    const frontCentre = positions.length / 3;
+    positions.push(xDrift(2.08), 2.08, frontZ);
+    const backCentre = positions.length / 3;
+    positions.push(xDrift(2.08), 2.08, backZ);
+
+    const indices = [];
+    const count = outline.length;
+    for (let i = 0; i < count; i++) {
+        const next = (i + 1) % count;
+        indices.push(frontCentre, i, next);
+        indices.push(backCentre, count + next, count + i);
+        indices.push(i, count + i, next);
+        indices.push(next, count + i, count + next);
+    }
+
+    const indexed = new THREE.BufferGeometry();
+    indexed.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(positions, 3)
+    );
+    indexed.setIndex(indices);
+    const geometry = indexed.toNonIndexed();
+    indexed.dispose();
+    geometry.computeVertexNormals();
+    return geometry;
+}
+
 
 /**
  * THE BODY, as one blended distance field.
@@ -589,29 +676,36 @@ const TORSO_PROFILE = [
  */
 export const ROLE_BODY_STYLES = Object.freeze({
     developing: Object.freeze({
-        contour: [[0.00, 1.07, 1.02, -0.010, 0.000], [0.65, 1.06, 1.03, -0.010, 0.002], [1.08, 1.05, 1.07, -0.006, 0.008], [1.34, 1.08, 1.10, -0.002, 0.012], [1.56, 1.05, 1.05, 0.002, 0.008], [1.78, 1.03, 1.01, 0.004, 0.002], [1.96, 1.00, 1.00, 0.000, 0.000]],
+        contour: [[0.00, 1.10, 1.04, -0.012, 0.000], [0.65, 1.09, 1.06, -0.012, 0.004], [1.08, 1.12, 1.16, -0.008, 0.018], [1.34, 1.14, 1.18, -0.004, 0.024], [1.56, 1.08, 1.10, 0.002, 0.014], [1.78, 1.05, 1.03, 0.006, 0.004], [1.96, 1.00, 1.00, 0.000, 0.000]],
         shoulder: [1.04, 1.00], bust: [1.505, 1.07, 1.04, 1.06, -0.004, 0.126, 0.032, 0.035],
     }),
     doctor: Object.freeze({
-        contour: [[0.00, 1.02, 1.00, 0.006, 0.000], [0.65, 1.00, 0.98, 0.006, 0.000], [1.08, 0.98, 0.97, 0.004, 0.000], [1.34, 0.96, 0.96, 0.002, -0.002], [1.56, 0.98, 0.98, 0.000, 0.000], [1.78, 1.01, 1.00, -0.002, 0.000], [1.96, 1.00, 1.00, 0.000, 0.000]],
+        contour: [[0.00, 1.00, 1.00, 0.008, 0.000], [0.65, 0.98, 0.97, 0.008, -0.002], [1.08, 0.94, 0.93, 0.006, -0.004], [1.34, 0.92, 0.92, 0.004, -0.004], [1.56, 0.97, 0.98, 0.000, 0.000], [1.78, 1.02, 1.01, -0.004, 0.002], [1.96, 1.00, 1.00, 0.000, 0.000]],
         shoulder: [1.01, 0.96], bust: [1.515, 0.96, 0.95, 0.94, 0.003, 0.118, 0.027, -0.025],
     }),
     mother: Object.freeze({
-        contour: [[0.00, 1.04, 1.01, -0.004, 0.000], [0.65, 1.03, 1.00, -0.004, 0.000], [1.08, 1.01, 1.00, -0.002, 0.002], [1.34, 0.98, 0.99, 0.000, 0.002], [1.56, 1.01, 1.01, 0.002, 0.004], [1.78, 1.02, 1.00, 0.004, 0.000], [1.96, 1.00, 1.00, 0.000, 0.000]],
+        contour: [[0.00, 1.05, 1.02, -0.006, 0.000], [0.65, 1.02, 0.99, -0.006, -0.002], [1.08, 0.96, 0.95, -0.004, 0.000], [1.34, 0.93, 0.94, 0.000, 0.000], [1.56, 0.98, 1.00, 0.004, 0.004], [1.78, 1.03, 1.01, 0.006, 0.002], [1.96, 1.00, 1.00, 0.000, 0.000]],
         shoulder: [1.02, 0.98], bust: [1.500, 0.94, 0.95, 0.94, -0.006, 0.118, 0.030, 0.030],
     }),
     pregnant: Object.freeze({
-        contour: [[0.00, 1.04, 1.02, 0.000, 0.000], [0.65, 1.04, 1.03, 0.002, 0.002], [1.08, 1.07, 1.09, 0.004, 0.010], [1.34, 1.08, 1.12, 0.006, 0.014], [1.56, 1.03, 1.04, 0.004, 0.006], [1.78, 1.01, 1.00, 0.002, 0.000], [1.96, 1.00, 1.00, 0.000, 0.000]],
+        contour: [[0.00, 1.03, 1.00, 0.000, 0.000], [0.65, 1.04, 1.02, 0.002, 0.000], [1.00, 1.04, 1.04, 0.003, 0.002], [1.18, 1.06, 1.08, 0.004, 0.008], [1.36, 1.08, 1.15, 0.006, 0.015], [1.52, 1.07, 1.12, 0.005, 0.012], [1.68, 1.04, 1.05, 0.003, 0.004], [1.82, 1.01, 1.02, 0.002, 0.002], [1.96, 1.00, 1.00, 0.000, 0.000]],
         shoulder: [1.01, 0.99], bust: [1.515, 0.99, 0.99, 0.99, 0.004, 0.120, 0.030, -0.020],
     }),
     visitor: Object.freeze({
-        contour: [[0.00, 1.03, 1.00, 0.008, 0.000], [0.65, 1.02, 0.99, 0.008, 0.000], [1.08, 1.00, 0.98, 0.006, 0.000], [1.34, 0.99, 0.98, 0.004, 0.000], [1.56, 1.04, 1.03, 0.002, 0.006], [1.78, 1.04, 1.01, 0.000, 0.002], [1.96, 1.00, 1.00, 0.000, 0.000]],
+        contour: [[0.00, 0.99, 1.00, 0.010, 0.000], [0.65, 0.97, 0.97, 0.010, -0.002], [1.08, 0.95, 0.95, 0.008, -0.002], [1.34, 0.98, 0.98, 0.006, 0.000], [1.56, 1.09, 1.08, 0.002, 0.012], [1.78, 1.08, 1.03, -0.002, 0.004], [1.96, 1.00, 1.00, 0.000, 0.000]],
         shoulder: [1.03, 1.00], bust: [1.510, 1.04, 1.00, 1.03, 0.006, 0.124, 0.034, 0.028],
     }),
     badge: Object.freeze({
-        contour: [[0.00, 1.01, 1.00, -0.006, 0.000], [0.65, 1.01, 1.00, -0.006, 0.000], [1.08, 1.03, 1.04, -0.004, 0.004], [1.34, 1.01, 1.02, -0.002, 0.004], [1.56, 0.98, 0.98, 0.000, 0.000], [1.78, 1.00, 0.99, 0.002, 0.000], [1.96, 1.00, 1.00, 0.000, 0.000]],
+        contour: [[0.00, 0.97, 0.99, -0.008, 0.000], [0.65, 0.96, 0.97, -0.008, -0.002], [1.08, 0.98, 1.00, -0.006, 0.000], [1.34, 0.94, 0.96, -0.004, -0.002], [1.56, 0.96, 0.97, 0.000, 0.000], [1.78, 1.02, 1.00, 0.004, 0.002], [1.96, 1.00, 1.00, 0.000, 0.000]],
         shoulder: [1.00, 0.97], bust: [1.515, 0.97, 0.95, 0.96, 0.002, 0.118, 0.028, -0.020],
     }),
+});
+
+export const PREGNANCY_SHAPE = Object.freeze({
+    upper: Object.freeze([0.000, 1.405, 0.195, 0.180, 0.185, 0.120]),
+    lower: Object.freeze([-0.004, 1.255, 0.210, 0.195, 0.190, 0.140]),
+    joinBlend: 0.100,
+    torsoBlend: 0.085,
 });
 
 /**
@@ -622,22 +716,19 @@ export const ROLE_BODY_STYLES = Object.freeze({
  * cross-section at every height.
  */
 function sdTrunk(x, y, z, y0, y1, o, crossScale = 1) {
-    if (y < y0) {
-        const d = sdTrunkAt(x, y0, z, o, crossScale);
-        return Math.hypot(Math.max(d, 0), y0 - y) + Math.min(d, 0) * 0;
-    }
-    if (y > y1) {
-        const d = sdTrunkAt(x, y1, z, o, crossScale);
-        return Math.hypot(Math.max(d, 0), y - y1);
-    }
-    return sdTrunkAt(x, y, z, o, crossScale);
+    const sampledY = Math.min(y1, Math.max(y0, y));
+    const radial = sdTrunkAt(x, sampledY, z, o, crossScale);
+    const slab = Math.max(y0 - y, y - y1);
+    const outside = Math.hypot(Math.max(radial, 0), Math.max(slab, 0));
+    const inside = Math.min(Math.max(radial, slab), 0);
+    return outside + inside;
 }
 
 function sdTrunkAt(x, y, z, o, crossScale = 1) {
-    const [baseWidth, baseDepth] = sampleProfile(TORSO_PROFILE, y);
+    const [baseWidth, baseDepth] = sampleSmoothProfile(TORSO_PROFILE, y);
     const bodyStyle = ROLE_BODY_STYLES[o.identity] || ROLE_BODY_STYLES.visitor;
     const [roleWidth, roleDepth, lateralOffset, frontOffset]
-        = sampleProfile(bodyStyle.contour, y);
+        = sampleSmoothProfile(bodyStyle.contour, y);
     const hw = baseWidth * o.torsoWidth * roleWidth * crossScale;
     const frontDepth = baseDepth * o.torsoDepth * roleDepth * crossScale;
 
@@ -663,36 +754,24 @@ function sdTrunkAt(x, y, z, o, crossScale = 1) {
 }
 
 /**
- * Distance to the reference's planted bare foot. The ankle is buried under the
- * hem, the instep settles into a broad forefoot, and a restrained tapered toe
- * extends the front edge without turning the casting into a separate pebble.
+ * Explicit foot sections: forward, half-width, half-height, centre-Y, drift.
+ * The buried root opens into a broad instep before the long cast wedge tapers.
  */
-function sdPlantedFoot(x, y, z, o) {
-    const yaw = o.stride * o.strideAngle * 0.65;
-    const c = Math.cos(yaw), s = Math.sin(yaw);
-    const dx = x - o.stride * 0.145;
-    const dz = z - 0.090;
-    const fx = dx * c - dz * s;
-    const fz = dx * s + dz * c;
-    const toeX = -o.stride * 0.024;
+export const PLANTED_FOOT_PROFILE = Object.freeze([
+    Object.freeze([-0.110, 0.070, 0.170, 0.170, 0.000]),
+    Object.freeze([-0.060, 0.080, 0.160, 0.160, 0.000]),
+    Object.freeze([ 0.000, 0.090, 0.140, 0.140, 0.001]),
+    Object.freeze([ 0.060, 0.092, 0.115, 0.115, 0.004]),
+    Object.freeze([ 0.120, 0.092, 0.092, 0.094, 0.007]),
+    Object.freeze([ 0.185, 0.089, 0.074, 0.077, 0.010]),
+    Object.freeze([ 0.250, 0.084, 0.059, 0.062, 0.013]),
+    Object.freeze([ 0.310, 0.075, 0.047, 0.050, 0.016]),
+    Object.freeze([ 0.360, 0.064, 0.037, 0.040, 0.019]),
+    Object.freeze([ 0.400, 0.058, 0.034, 0.037, 0.022]),
+    Object.freeze([ 0.435, 0.042, 0.027, 0.032, 0.024]),
+    Object.freeze([ 0.455, 0.025, 0.019, 0.029, 0.025]),
+]);
 
-    // Unequal overlapping sections create the source foot's buried heel,
-    // raised instep, broad forefoot and lateral toe break. Keeping the toe
-    // slightly off the ankle axis avoids the old uniformly pointed wedge.
-    let d = sdEllipsoid(fx + o.stride * 0.004, y - 0.078, fz - 0.070,
-        0.082, 0.071, 0.135);
-    d = smin(d, sdEllipsoid(fx - o.stride * 0.010, y - 0.064, fz - 0.205,
-        0.086, 0.058, 0.150), 0.030);
-    d = smin(d, sdEllipsoid(fx - o.stride * 0.019, y - 0.043, fz - 0.350,
-        0.073, 0.043, 0.142), 0.022);
-    d = smin(d, sdTaperedCapsule(
-        fx, y, fz,
-        -o.stride * 0.012, 0.055, 0.285,
-        toeX, 0.024, 0.515,
-        0.071, 0.018
-    ), 0.020);
-    return d;
-}
 function buildBodyField(THREE, o) {
     const seed = o.seed;
     const arms = ARM_POSES[o.armPose] || ARM_POSES.open;
@@ -703,11 +782,12 @@ function buildBodyField(THREE, o) {
         bustSpacing, bustDrop, bustAsymmetry,
     ]
         = bodyStyle.bust;
-    const [, , shoulderOffset] = sampleProfile(bodyStyle.contour, 1.805);
+    const [, , shoulderOffset] = sampleSmoothProfile(bodyStyle.contour, 1.805);
     const rearProfile = {
         ...o,
-        torsoWidth: o.torsoWidth * 0.79,
-        torsoDepth: o.torsoDepth * 0.72,
+        torsoWidth: o.torsoWidth * 0.72,
+        torsoDepth: o.torsoDepth * 0.92,
+        sheetDepth: o.sheetDepth * 0.70,
     };
 
     function field(x, y, z) {
@@ -720,7 +800,7 @@ function buildBodyField(THREE, o) {
         // Close the deep trunk below the paving. A cap at visible hem height
         // produced a broad horizontal crescent in every low camera; the source
         // presents a thin vertical cast edge with the foot projecting beyond it.
-        const trunkFloor = -0.035 + hemLift * 0.20;
+        const trunkFloor = -0.200 + hemLift * 0.20;
         let d = sdTrunk(x, y, z, trunkFloor, 1.960, o);
         // The foot is a separate 7.5 mm closed field whose root overlaps this
         // trunk beneath the hem. Sampling it here at 18 mm produced a pointed
@@ -729,18 +809,17 @@ function buildBodyField(THREE, o) {
         // Follow the complete torso profile rather than punching an oval into it:
         // this produces the broad, full-height concave panels visible between
         // every active figure while leaving a closed inner surface and thick rim.
-        const cavityFloor = trunkFloor - 0.120;
-        const cavityT = Math.min(1, Math.max(0, (y - cavityFloor) / 0.210));
+        const cavityFloor = trunkFloor + 0.055;
+        const cavityT = Math.min(1, Math.max(0, (y - cavityFloor) / 0.065));
         const cavityEase = cavityT * cavityT * (3 - 2 * cavityT);
-        const cavityScale = 0.04 + 0.96 * cavityEase;
+        const cavityScale = 0.02 + 0.98 * cavityEase;
         const rearCavity = sdTrunk(
-            x, y, z + 0.270,
+            x, y, z + 0.240,
             cavityFloor,
-            1.905,
+            1.915,
             rearProfile,
             cavityScale
         );
-        d = subtract(d, rearCavity, 0.026);
         // A low rounded shoulder shelf removes the machined rectangular corners
         // while keeping the broad, almost horizontal cast shoulder line.
         d = smin(d, sdEllipsoid(
@@ -752,34 +831,34 @@ function buildBodyField(THREE, o) {
             0.145 * o.torsoDepth * shoulderDepth
         ), 0.052);
 
-        // Build each breast as its own shallow root plus lower relief lobe, then
-        // union the pair to the torso in one operation. Smooth-unioning the two
-        // lobes sequentially bridged the centre gap and produced the horizontal
-        // chest bar visible in the rejected renders.
-        let chest = Infinity;
+        // The source is one broad, low cast shelf with only a restrained
+        // bilateral break. A pair of detached ellipsoids reads as applied
+        // spheres even when their depth is correct, so start with the complete
+        // shelf and use the lower lobes only to shape its irregular underside.
+        const shelfCenterX = shoulderOffset * 0.35;
+        let chest = sdEllipsoid(
+            x - shelfCenterX,
+            y - (bustY + 0.005),
+            z - 0.110,
+            0.250 * o.bustWidth * roleBustWidth,
+            0.082 * o.bustHeight * roleBustHeight,
+            0.052 * o.bustDepth * roleBustDepth
+        );
         for (const sx of [-1, 1]) {
             const sideScale = 1 + sx * bustAsymmetry;
             const centreX = sx * bustSpacing * o.bustWidth * roleBustWidth;
             const centreY = bustY + sx * bustTilt;
-            const root = sdEllipsoid(
-                x - centreX,
-                y - (centreY + 0.042),
-                z - 0.108,
-                0.106 * o.bustWidth * roleBustWidth * sideScale,
-                0.069 * o.bustHeight * roleBustHeight,
-                0.061 * o.bustDepth * roleBustDepth
-            );
-            const lower = sdEllipsoid(
+            const lobe = sdEllipsoid(
                 x - (centreX + sx * 0.006),
                 y - (centreY - bustDrop),
-                z - 0.153,
-                0.112 * o.bustWidth * roleBustWidth * sideScale,
-                0.076 * o.bustHeight * roleBustHeight * (1 - sx * bustAsymmetry * 0.6),
-                0.094 * o.bustDepth * roleBustDepth
+                z - 0.124,
+                0.118 * o.bustWidth * roleBustWidth * sideScale,
+                0.060 * o.bustHeight * roleBustHeight * (1 - sx * bustAsymmetry * 0.6),
+                0.050 * o.bustDepth * roleBustDepth
             );
-            chest = Math.min(chest, smin(root, lower, 0.040));
+            chest = smin(chest, lobe, 0.026);
         }
-        d = smin(d, chest, 0.052);
+        d = smin(d, chest, 0.045);
 
         // Per-figure arms taper continuously from the shoulder into a reduced
         // wrist. The reference does not show bulbous hands: hanging limbs end in
@@ -855,7 +934,7 @@ function buildBodyField(THREE, o) {
                         x, y, z,
                         wx, wy, wz,
                         htx, hty, htz,
-                        wristRadius, 0.014,
+                        wristRadius, Math.max(0.020, wristRadius * 0.60),
                         armWidthScale, armDepthScale
                     ), 0.008);
                 }
@@ -866,47 +945,26 @@ function buildBodyField(THREE, o) {
         // any higher and its cap pushes a bare dome up through the face.
         d = smin(d, sdCapsule(x, y, z, 0, 1.812, 0.006, 0, 1.906, 0.010, 0.068), 0.055);
 
-        if (o.belly > 0) {
-            // The source pregnancy is a broad integrated pear, not one applied
-            // oval. Three overlapping masses establish the high attachment,
-            // full middle and tapered lower pole; the developing abdomen uses
-            // the same construction at a restrained fraction.
-            const fullness = Math.min(1, Math.max(0, o.belly));
-            const rx = 0.145 + 0.105 * fullness;
-            const ry = 0.125 + 0.080 * fullness;
-            const rz = 0.070 + 0.145 * fullness;
-            const cy = 1.330 - 0.030 * fullness;
-            const cz = 0.045 + 0.090 * fullness;
-            const blend = 0.055 + 0.040 * fullness;
-
-            d = smin(d, sdEllipsoid(
-                x + 0.010 * fullness,
-                y - cy,
-                z - cz,
-                rx,
-                ry,
-                rz
-            ), blend);
-            d = smin(d, sdEllipsoid(
-                x - 0.012 * fullness,
-                y - (cy + 0.105),
-                z - (cz - 0.016),
-                rx * 0.86,
-                ry * 0.60,
-                rz * 0.72
-            ), blend * 0.88);
-            d = smin(d, sdEllipsoid(
-                x + 0.018 * fullness,
-                y - (cy - 0.090),
-                z - (cz - 0.014),
-                rx * 0.68,
-                ry * 0.42,
-                rz * 0.70
-            ), blend * 0.82);
+        // A localized pear-shaped volume carries the measured half-metre
+        // pregnancy zone; the surrounding trunk remains one continuous cast.
+        if (o.identity === 'pregnant') {
+            const [ux, uy, uz, urx, ury, urz] = PREGNANCY_SHAPE.upper;
+            const [lx, ly, lz, lrx, lry, lrz] = PREGNANCY_SHAPE.lower;
+            let pregnancy = sdEllipsoid(
+                x - ux, y - uy, z - uz, urx, ury, urz
+            );
+            pregnancy = smin(pregnancy, sdEllipsoid(
+                x - lx, y - ly, z - lz, lrx, lry, lrz
+            ), PREGNANCY_SHAPE.joinBlend);
+            d = smin(d, pregnancy, PREGNANCY_SHAPE.torsoBlend);
         }
         // Baby and stethoscope are deliberately separate, finer geometries.
         // Blending either into this 18mm body field erased their identity and
         // made the tubing look like wounds cut into the chest.
+
+        // Cut the reverse only after every positive relief has been unioned;
+        // otherwise those later unions silently fill the negative panel back in.
+        d = subtract(d, rearCavity, 0.018);
 
         // Hand-worked surface, in the FIELD rather than as a post-pass vertex
         // push: displacing a meshed surface along its normals re-creases the
@@ -930,7 +988,7 @@ function buildBodyField(THREE, o) {
     // lighting bug, a shadow bug and a facial-geometry bug; one
     // MeshNormalMaterial render found it.
     const mesh = marchingTetrahedra(field, {
-        min: [-0.60, -0.08, -0.82],
+        min: [-0.60, -0.26, -0.82],
         max: [0.60, 2.06, 0.55],
         voxel: 0.0180,
     });
@@ -940,12 +998,7 @@ function buildBodyField(THREE, o) {
     return geo;
 }
 
-/**
- * The newborn is a separate, fine field resting on one curved U-shaped support.
- * Keeping it out of the coarse body field preserves a contact crease, a fully
- * wrapped broad block and shallow end asymmetry that read as a carried bundle
- * rather than a second pregnancy.
- */
+/** A separate fine field keeps the small hospital badge legible and closed. */
 function buildBadgeField(THREE, o) {
     const field = (x, y, z) => {
         let d = sdRoundBox(
@@ -966,80 +1019,111 @@ function buildBadgeField(THREE, o) {
     return geo;
 }
 
-function buildBabyField(THREE, o) {
-    const angle = 0.075;
+/**
+ * The newborn is an explicit capped loft resting on one curved U-shaped
+ * support. Keeping it separate from the coarse body field preserves the broad
+ * wrapped-block contour and restrained unequal ends without inventing a head.
+ */
+
+export const BABY_LOFT_PROFILE = Object.freeze([
+    Object.freeze([-0.215, -0.004,  0.006, 0.035, 0.045]),
+    Object.freeze([-0.190, -0.003,  0.005, 0.060, 0.074]),
+    Object.freeze([-0.145, -0.001,  0.004, 0.074, 0.084]),
+    Object.freeze([-0.075,  0.002,  0.002, 0.080, 0.089]),
+    Object.freeze([ 0.000,  0.004,  0.000, 0.082, 0.091]),
+    Object.freeze([ 0.075,  0.003, -0.001, 0.080, 0.090]),
+    Object.freeze([ 0.145,  0.000, -0.003, 0.077, 0.087]),
+    Object.freeze([ 0.190, -0.005, -0.006, 0.064, 0.080]),
+    Object.freeze([ 0.215, -0.010, -0.010, 0.032, 0.050]),
+]);
+
+function buildBabyGeometry(THREE, o) {
+    const SIDES = 24;
+    const angle = 0.100;
     const c = Math.cos(angle), s = Math.sin(angle);
+    const positions = [];
+    const indices = [];
+    const point = (u, v, z) => [
+        -0.004 + u * c - v * s,
+        1.385 + u * s + v * c,
+        0.305 + z,
+    ];
 
-    function field(x, y, z) {
-        const dx = x + 0.002;
-        const dy = y - 1.370;
-        const u = dx * c + dy * s;
-        const v = -dx * s + dy * c;
-
-        // The photograph reads as a broad, irregular wrapped block supported by
-        // one U-shaped forearm. No exposed spherical head is visible in the
-        // matched crop; the newborn remains fully swaddled with only a restrained
-        // raised end. Unequal masses preserve the hand-worked silhouette.
-        let d = sdRoundBox(
-            u + 0.018, v + 0.004, z - 0.296,
-            0.205, 0.072, 0.092, 0.045
-        );
-        d = smin(d, sdEllipsoid(
-            u - 0.190, v - 0.012, z - 0.305,
-            0.050, 0.055, 0.072
-        ), 0.040);
-        d = smin(d, sdEllipsoid(
-            u + 0.176, v + 0.026, z - 0.286,
-            0.070, 0.050, 0.062
-        ), 0.018);
-        d = smin(d, sdEllipsoid(
-            u + 0.030, v + 0.052, z - 0.304,
-            0.118, 0.044, 0.073
-        ), 0.018);
-        d = smin(d, sdEllipsoid(
-            u - 0.055, v - 0.048, z - 0.310,
-            0.105, 0.040, 0.070
-        ), 0.016);
-
-        d += fbm3(x * 7.0, y * 7.0, z * 7.0, o.seed + 31, 2) * 0.0050;
-        d += fbm3(x * 19, y * 19, z * 19, o.seed + 39, 2) * 0.0015;
-        return d;
+    for (const [u, centerV, centerZ, halfHeight, halfDepth] of BABY_LOFT_PROFILE) {
+        for (let side = 0; side < SIDES; side++) {
+            const theta = side / SIDES * Math.PI * 2;
+            const cv = Math.sign(Math.cos(theta))
+                * Math.pow(Math.abs(Math.cos(theta)), 0.72);
+            const cz = Math.sign(Math.sin(theta))
+                * Math.pow(Math.abs(Math.sin(theta)), 0.72);
+            const wobble = fbm3(u * 11, theta * 0.9, centerZ * 19, o.seed + 31, 2) * 0.0032;
+            positions.push(...point(
+                u,
+                centerV + cv * (halfHeight + wobble),
+                centerZ + cz * (halfDepth + wobble * 0.8)
+            ));
+        }
     }
 
-    const mesh = surfaceNets(field, {
-        min: [-0.330, 1.205, 0.145],
-        max: [0.330, 1.585, 0.450],
-        voxel: 0.0055,
-    });
+    for (let ring = 0; ring < BABY_LOFT_PROFILE.length - 1; ring++) {
+        for (let side = 0; side < SIDES; side++) {
+            const next = (side + 1) % SIDES;
+            const a = ring * SIDES + side;
+            const b = ring * SIDES + next;
+            const c0 = (ring + 1) * SIDES + side;
+            const d = (ring + 1) * SIDES + next;
+            indices.push(a, b, c0, b, d, c0);
+        }
+    }
+
+    const addTip = (u, centerV, centerZ, ring, outward) => {
+        const tip = positions.length / 3;
+        positions.push(...point(u, centerV, centerZ));
+        for (let side = 0; side < SIDES; side++) {
+            const next = (side + 1) % SIDES;
+            const a = ring * SIDES + side;
+            const b = ring * SIDES + next;
+            if (outward < 0) indices.push(tip, b, a);
+            else indices.push(tip, a, b);
+        }
+    };
+    const first = BABY_LOFT_PROFILE[0];
+    const last = BABY_LOFT_PROFILE.at(-1);
+    addTip(-0.232, first[1], first[2], 0, -1);
+    addTip(0.234, last[1], last[2], BABY_LOFT_PROFILE.length - 1, 1);
+
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
-    geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(indices, 1));
     return geo;
 }
 /** Reference-led control points for the clinician's stethoscope. */
 export const STETHOSCOPE_PATHS = Object.freeze({
     left: Object.freeze([
-        Object.freeze([-0.054, 1.902, 0.112]),
-        Object.freeze([-0.112, 1.828, 0.184]),
-        Object.freeze([-0.104, 1.702, 0.244]),
-        Object.freeze([-0.076, 1.574, 0.279]),
+        Object.freeze([-0.024, 1.940, 0.010]),
+        Object.freeze([-0.030, 1.875, 0.096]),
+        Object.freeze([-0.076, 1.790, 0.137]),
+        Object.freeze([-0.112, 1.690, 0.131]),
+        Object.freeze([-0.104, 1.535, 0.149]),
     ]),
     right: Object.freeze([
-        Object.freeze([0.054, 1.902, 0.112]),
-        Object.freeze([0.116, 1.828, 0.184]),
-        Object.freeze([0.120, 1.700, 0.244]),
-        Object.freeze([0.090, 1.564, 0.279]),
+        Object.freeze([0.024, 1.940, 0.010]),
+        Object.freeze([0.030, 1.875, 0.096]),
+        Object.freeze([0.074, 1.800, 0.136]),
+        Object.freeze([0.110, 1.690, 0.133]),
+        Object.freeze([0.078, 1.558, 0.148]),
     ]),
     terminals: Object.freeze([
-        Object.freeze([-0.076, 1.552, 0.286]),
-        Object.freeze([ 0.090, 1.542, 0.286]),
+        Object.freeze([-0.104, 1.525, 0.154]),
+        Object.freeze([ 0.078, 1.550, 0.148]),
     ]),
 });
 
 /**
- * Two independent curved tubes standing just proud of the torso, matching the
- * reference casting. They end in small flat terminals over the breasts; there
- * is no joined Y, oversized central loop or ball-shaped bell.
+ * Two curved tubes seated into the torso, matching the reference casting. The
+ * lower fittings are deliberately asymmetric and ordered as photographed: a
+ * low shallow U fitting on the left and a higher circular chestpiece on the
+ * right. Both are broad enough to survive the delivery lighting.
  */
 function buildStethoscopeGeometry(THREE) {
     const parts = [];
@@ -1047,24 +1131,40 @@ function buildStethoscopeGeometry(THREE) {
     for (const path of paths) {
         const points = path.map(([x, y, z]) => new THREE.Vector3(x, y, z));
         const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
-        parts.push(new THREE.TubeGeometry(curve, 30, 0.0085, 8, false));
-
-        for (const point of [path[0], path.at(-1)]) {
-            const cap = new THREE.SphereGeometry(0.010, 10, 7);
-            cap.translate(...point);
-            parts.push(cap);
-        }
+        parts.push(new THREE.TubeGeometry(curve, 30, 0.0140, 10, false));
     }
 
-    for (const [tx, ty, tz] of STETHOSCOPE_PATHS.terminals) {
-        const terminal = new THREE.CylinderGeometry(0.021, 0.024, 0.012, 18, 1, false);
-        terminal.rotateX(Math.PI / 2);
-        terminal.translate(tx, ty, tz);
-        parts.push(terminal);
-        const rim = new THREE.TorusGeometry(0.021, 0.004, 7, 18);
-        rim.translate(tx, ty, tz + 0.007);
-        parts.push(rim);
+    const [leftTerminal, rightTerminal] = STETHOSCOPE_PATHS.terminals;
+    const [lx, ly, lz] = leftTerminal;
+    const yokePoints = [
+        [lx - 0.028, ly + 0.014, lz + 0.007],
+        [lx - 0.022, ly - 0.003, lz + 0.009],
+        [lx, ly - 0.014, lz + 0.011],
+        [lx + 0.022, ly - 0.003, lz + 0.009],
+        [lx + 0.028, ly + 0.014, lz + 0.007],
+    ].map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    const yokeCurve = new THREE.CatmullRomCurve3(yokePoints, false, 'catmullrom', 0.5);
+    parts.push(new THREE.TubeGeometry(yokeCurve, 18, 0.0075, 8, false));
+    for (const point of [yokePoints[0], yokePoints.at(-1)]) {
+        const knob = new THREE.SphereGeometry(0.0120, 12, 8);
+        knob.translate(point.x, point.y, point.z);
+        parts.push(knob);
     }
+
+    const [rx, ry, rz] = rightTerminal;
+    const chestpiece = new THREE.CylinderGeometry(0.030, 0.031, 0.016, 24, 1, false);
+    chestpiece.rotateX(Math.PI / 2);
+    chestpiece.scale(1.08, 0.90, 1.0);
+    chestpiece.translate(rx, ry, rz + 0.008);
+    parts.push(chestpiece);
+    const chestpieceRim = new THREE.TorusGeometry(0.0275, 0.0035, 7, 24);
+    chestpieceRim.scale(1.08, 0.90, 1.0);
+    chestpieceRim.translate(rx, ry, rz + 0.0170);
+    parts.push(chestpieceRim);
+    const diaphragm = new THREE.SphereGeometry(0.0215, 20, 12);
+    diaphragm.scale(1.0, 0.90, 0.34);
+    diaphragm.translate(rx, ry, rz + 0.0205);
+    parts.push(diaphragm);
 
     const geo = mergeGeometries(THREE, parts);
     return roughen(THREE, geo, { amount: 0.0005, scale: 38, seed: 73, octaves: 1 });
@@ -1075,12 +1175,12 @@ function buildStethoscopeGeometry(THREE) {
  * unscaled head field and are tuned against the isolated reference crops.
  */
 export const FACE_STYLES = Object.freeze({
-    developing: Object.freeze({ headWidth: 1.12, headHeight: 0.97, headDepth: 1.00, faceWidth: 1.06, nose: 0.94, noseWidth: 1.10, noseLean: -0.004, mouth: 1.10, mouthTilt: -0.004, browWidth: 1.05, browTilt: 0.015, eyeSpacing: 1.05, eyeAsym: 0.004, noseX: -0.004, mouthY: -0.002, jaw: 1.10, cheek: 1.08, cheekAsym: 0.010, rolls: 0 }),
-    doctor:     Object.freeze({ headWidth: 0.96, headHeight: 1.08, headDepth: 0.99, faceWidth: 0.92, nose: 1.14, noseWidth: 0.92, noseLean: 0.004, mouth: 0.88, mouthTilt: 0.003, browWidth: 0.94, browTilt: -0.018, eyeSpacing: 0.96, eyeAsym: -0.004, noseX: 0.002, mouthY: -0.005, jaw: 0.94, cheek: 0.94, cheekAsym: -0.008, rolls: 0 }),
-    mother:     Object.freeze({ headWidth: 0.90, headHeight: 1.11, headDepth: 0.97, faceWidth: 0.87, nose: 1.12, noseWidth: 0.88, noseLean: -0.004, mouth: 0.84, mouthTilt: -0.002, browWidth: 0.89, browTilt: 0.020, eyeSpacing: 0.92, eyeAsym: 0.005, noseX: -0.004, mouthY: 0.002, jaw: 0.88, cheek: 0.90, cheekAsym: 0.009, rolls: 1 }),
-    pregnant:   Object.freeze({ headWidth: 1.04, headHeight: 1.03, headDepth: 1.00, faceWidth: 0.99, nose: 1.00, noseWidth: 1.04, noseLean: 0.001, mouth: 0.98, mouthTilt: 0.002, browWidth: 1.00, browTilt: -0.010, eyeSpacing: 1.01, eyeAsym: -0.003, noseX: 0.003, mouthY: 0.000, jaw: 1.03, cheek: 1.06, cheekAsym: -0.006, rolls: 0 }),
-    visitor:    Object.freeze({ headWidth: 0.91, headHeight: 1.12, headDepth: 0.96, faceWidth: 0.87, nose: 1.15, noseWidth: 0.86, noseLean: 0.008, mouth: 0.82, mouthTilt: 0.004, browWidth: 0.90, browTilt: 0.025, eyeSpacing: 0.93, eyeAsym: 0.006, noseX: 0.004, mouthY: -0.004, jaw: 0.89, cheek: 0.88, cheekAsym: 0.012, rolls: 2 }),
-    badge:      Object.freeze({ headWidth: 0.95, headHeight: 1.06, headDepth: 0.97, faceWidth: 0.90, nose: 0.94, noseWidth: 1.02, noseLean: -0.005, mouth: 0.90, mouthTilt: -0.003, browWidth: 0.92, browTilt: -0.022, eyeSpacing: 0.92, eyeAsym: -0.005, noseX: -0.003, mouthY: 0.002, jaw: 0.94, cheek: 0.96, cheekAsym: -0.010, rolls: 0 }),
+    developing: Object.freeze({ headWidth: 1.08, headHeight: 1.00, headDepth: 1.02, faceWidth: 1.06, nose: 0.90, noseWidth: 1.08, noseLean: -0.006, mouth: 1.08, mouthTilt: -0.006, browWidth: 1.06, browTilt: 0.012, eyeSpacing: 1.04, eyeAsym: 0.006, noseX: -0.006, mouthY: -0.004, jaw: 1.08, cheek: 1.05, cheekAsym: 0.014, rolls: 0 }),
+    doctor:     Object.freeze({ headWidth: 0.90, headHeight: 1.12, headDepth: 0.97, faceWidth: 0.87, nose: 1.22, noseWidth: 0.85, noseLean: 0.006, mouth: 0.82, mouthTilt: 0.004, browWidth: 0.90, browTilt: -0.022, eyeSpacing: 0.94, eyeAsym: -0.006, noseX: 0.003, mouthY: -0.006, jaw: 0.88, cheek: 0.90, cheekAsym: -0.010, rolls: 0 }),
+    mother:     Object.freeze({ headWidth: 0.84, headHeight: 1.17, headDepth: 0.94, faceWidth: 0.78, nose: 1.17, noseWidth: 0.82, noseLean: -0.005, mouth: 0.78, mouthTilt: -0.003, browWidth: 0.84, browTilt: 0.024, eyeSpacing: 0.90, eyeAsym: 0.007, noseX: -0.005, mouthY: 0.003, jaw: 0.82, cheek: 0.84, cheekAsym: 0.012, rolls: 1 }),
+    pregnant:   Object.freeze({ headWidth: 1.07, headHeight: 1.02, headDepth: 1.01, faceWidth: 1.03, nose: 0.96, noseWidth: 1.07, noseLean: 0.001, mouth: 1.03, mouthTilt: 0.002, browWidth: 1.05, browTilt: -0.012, eyeSpacing: 1.03, eyeAsym: -0.004, noseX: 0.004, mouthY: 0.000, jaw: 1.08, cheek: 1.09, cheekAsym: -0.008, rolls: 0 }),
+    visitor:    Object.freeze({ headWidth: 0.82, headHeight: 1.19, headDepth: 0.92, faceWidth: 0.77, nose: 1.24, noseWidth: 0.80, noseLean: 0.010, mouth: 0.76, mouthTilt: 0.006, browWidth: 0.82, browTilt: 0.030, eyeSpacing: 0.88, eyeAsym: 0.008, noseX: 0.006, mouthY: -0.005, jaw: 0.80, cheek: 0.82, cheekAsym: 0.015, rolls: 2 }),
+    badge:      Object.freeze({ headWidth: 0.94, headHeight: 1.07, headDepth: 0.97, faceWidth: 0.90, nose: 0.92, noseWidth: 1.04, noseLean: -0.006, mouth: 0.92, mouthTilt: -0.004, browWidth: 0.94, browTilt: -0.026, eyeSpacing: 0.92, eyeAsym: -0.006, noseX: -0.004, mouthY: 0.003, jaw: 0.95, cheek: 0.97, cheekAsym: -0.012, rolls: 0 }),
 });
 
 /**
@@ -1135,7 +1235,7 @@ function buildHeadField(THREE, o) {
      * missed one is a feature that silently stops matching its neighbours.
      */
     /**
-     * THE HEAD IS A ROUNDED BLOCK, not an ovoid.
+     * THE HEAD IS A TAPERED CAST BLOCK, not an ovoid.
      *
      * Read off the nearest figure in `ref-a-front.jpg` at 4x: flat front, flat
      * sides, a domed top and a broad flat jaw — a loaf standing on end. Built as
@@ -1145,9 +1245,8 @@ function buildHeadField(THREE, o) {
      *
      * The features are just as specific and none of them was right:
      *
-     *   BROW   a straight ridge across the FULL width of the face, with a
-     *          shadow under it. The old one was two thirds as wide and read as
-     *          a bump between the eyes.
+     *   BROW   two broad cast ridges over the eye hollows, separated at the
+     *          nose root so the expression does not collapse into a T-mask.
      *   EYES   two hollow triangular sockets under the brow. Their planar
      *          walls and 28mm world-space depth retain a shadow at the normal
      *          group camera instead of collapsing into horizontal slits.
@@ -1164,23 +1263,27 @@ function buildHeadField(THREE, o) {
 
     function headField(x, y, z) {
         const facePlane = 0.084 * face.headDepth;
+        const lowerHeadT = 1 - ss(YC0 - 0.145, YC0 - 0.015, y);
+        const upperHeadT = ss(YC0 + 0.075, YC0 + 0.158, y);
+        const headX = (x - face.browTilt * 0.22)
+            / (1 - 0.28 * lowerHeadT - 0.10 * upperHeadT);
         let d = sdRoundBox(
-            x,
+            headX,
             y - (YC0 + 0.004),
             z - 0.002,
-            0.106 * face.headWidth,
-            0.149 * face.headHeight,
+            0.104 * face.headWidth,
+            0.154 * face.headHeight,
             0.086 * face.headDepth,
-            0.050
+            0.073
         );
         d = smin(d, sdEllipsoid(
-            x,
+            x - face.cheekAsym * 0.80,
             y - (YC0 - 0.092),
             z,
-            0.094 * face.headWidth,
-            0.068 * face.headHeight,
-            0.076 * face.headDepth
-        ), 0.044);
+            0.074 * face.headWidth * face.jaw,
+            0.055 * face.headHeight,
+            0.068 * face.headDepth
+        ), 0.035);
 
         // The original faces are shallow relief on a broad, nearly planar
         // front. The back remains a complete blank rounded head.
@@ -1192,10 +1295,10 @@ function buildHeadField(THREE, o) {
                 x,
                 y - (YC0 + 0.010),
                 z + 0.018,
-                0.117 * face.headWidth,
-                0.147 * face.headHeight,
+                0.115 * face.headWidth,
+                0.152 * face.headHeight,
                 0.100 * face.headDepth,
-                0.052
+                0.061
             );
             hair = smax(hair, z - hairFrontZ, 0.002);
             d = Math.min(d, hair);
@@ -1206,45 +1309,23 @@ function buildHeadField(THREE, o) {
             // the visitor's second roll sits behind it instead of forming a hat.
             d = smin(d, sdEllipsoid(
                 x + 0.004,
-                y - (YC0 + 0.198),
+                y - (YC0 + 0.188),
                 z - 0.010,
-                0.105 * face.headWidth,
-                0.034,
-                0.060
+                0.090 * face.headWidth,
+                0.032,
+                0.055
             ), 0.015);
             if (face.rolls > 1) {
                 d = smin(d, sdEllipsoid(
                     x - 0.006,
-                    y - (YC0 + 0.242),
-                    z + 0.025,
-                    0.095 * face.headWidth,
-                    0.027,
-                    0.052
+                    y - (YC0 + 0.222),
+                    z + 0.020,
+                    0.080 * face.headWidth,
+                    0.029,
+                    0.050
                 ), 0.014);
             }
         }
-        // Matching negative head relief on the inactive side. The broad rounded
-        // rectangle follows the outer head and joins a lower jaw impression,
-        // leaving a real closed surface rather than a small oval void.
-        let headCavity = sdRoundBox(
-            x,
-            y - (YC0 + 0.002),
-            z + 0.076,
-            0.089 * face.headWidth,
-            0.132 * face.headHeight,
-            0.061 * face.headDepth,
-            0.037
-        );
-        headCavity = smin(headCavity, sdEllipsoid(
-            x,
-            y - (YC0 - 0.092),
-            z + 0.066,
-            0.081 * face.headWidth,
-            0.056 * face.headHeight,
-            0.058 * face.headDepth
-        ), 0.022);
-        d = subtract(d, headCavity, 0.018);
-
         {
             // Unequal shallow cheek planes keep the face integrated with the
             // block while giving each identity a different lower-face rhythm.
@@ -1254,48 +1335,36 @@ function buildHeadField(THREE, o) {
                 d = smin(d, sdEllipsoid(
                     x - cheekX,
                     y - cheekY,
-                    z - (facePlane - 0.004),
-                    0.050 * face.cheek,
-                    0.041,
-                    0.018
-                ), 0.010);
+                    z - (facePlane - 0.007),
+                    0.034 * face.cheek,
+                    0.026,
+                    0.007
+                ), 0.004);
             }
 
-            // Separate brows, sockets and upper lids replace the single T-shaped
-            // shelf that made all six heads read as one robotic mask.
+            // Separate worn brows avoid one mask-like bar across every face.
+            const browHalf = 0.023 * face.faceWidth * face.browWidth;
+            const browY = YC0 + 0.050;
             for (const sx of [-1, 1]) {
                 const eyeX = face.noseX
                     + sx * 0.047 * face.faceWidth * face.eyeSpacing;
                 const eyeY = YC0 + 0.010 + sx * face.eyeAsym;
-                const browY = YC0 + 0.050
-                    + face.browTilt * eyeX
-                    + sx * face.eyeAsym;
-                const browHalf = 0.026 * face.faceWidth * face.browWidth;
                 d = smin(d, sdCapsule(
                     x, y, z,
-                    eyeX - browHalf, browY + face.browTilt * browHalf, facePlane + 0.003,
-                    eyeX + browHalf, browY - face.browTilt * browHalf, facePlane + 0.004,
-                    0.0054
-                ), 0.0028);
-                const socketX = sx * (
-                    x - eyeX
-                );
-                const socket = sdTriPrism(
-                    socketX,
-                    y - eyeY,
-                    z - (facePlane + 0.006),
-                    -0.025, 0.006,
-                    0.024, 0.004,
-                    0.007, -0.011,
-                    0.014
-                );
-                d = subtract(d, socket, 0.0025);
-                d = smin(d, sdCapsule(
+                    eyeX - browHalf, browY - sx * face.browTilt * 0.5,
+                    facePlane + 0.003,
+                    eyeX + browHalf, browY + sx * face.browTilt * 0.5,
+                    facePlane + 0.004,
+                    0.0037
+                ), 0.0018);
+                const socketHalf = 0.018 * face.faceWidth;
+                const socket = sdCapsule(
                     x, y, z,
-                    eyeX - 0.018 * face.faceWidth, eyeY + 0.001, facePlane + 0.007,
-                    eyeX + 0.018 * face.faceWidth, eyeY - 0.001, facePlane + 0.008,
-                    0.0032
-                ), 0.0015);
+                    eyeX - socketHalf, eyeY + 0.001, facePlane + 0.002,
+                    eyeX + socketHalf, eyeY - 0.001, facePlane + 0.002,
+                    0.0065
+                );
+                d = subtract(d, socket, 0.0012);
             }
 
             // Narrow ridge and compact tip. Projection stays readable at group
@@ -1305,17 +1374,17 @@ function buildHeadField(THREE, o) {
             d = smin(d, sdTaperedCapsule(
                 x, y, z,
                 noseTopX, YC0 + 0.044, facePlane - 0.001,
-                noseTipX, YC0 - 0.040, facePlane + 0.021 * face.nose,
-                0.0065 * face.noseWidth, 0.0105 * face.noseWidth
-            ), 0.0045);
+                noseTipX, YC0 - 0.040, facePlane + 0.014 * face.nose,
+                0.0048 * face.noseWidth, 0.0075 * face.noseWidth
+            ), 0.0030);
             d = smin(d, sdEllipsoid(
                 x - noseTipX,
                 y - (YC0 - 0.041),
-                z - (facePlane + 0.018 * face.nose),
-                0.017 * face.noseWidth,
-                0.010,
-                0.014
-            ), 0.004);
+                z - (facePlane + 0.014 * face.nose),
+                0.011 * face.noseWidth,
+                0.007,
+                0.009
+            ), 0.0025);
             d = subtract(d, sdEllipsoid(
                 x - noseTipX,
                 y - (YC0 - 0.050),
@@ -1325,38 +1394,32 @@ function buildHeadField(THREE, o) {
                 0.007
             ), 0.0015);
 
-            // Two individually tilted lip ridges and a narrow cast line.
-            const mouthWidth = 0.043 * face.mouth;
+            // One restrained worn lip ridge and a narrow cast line.
+            const mouthWidth = 0.034 * face.mouth;
             const mouthY = YC0 - 0.082 + face.mouthY;
             const leftY = mouthY - face.mouthTilt * 0.5;
             const rightY = mouthY + face.mouthTilt * 0.5;
             d = smin(d, sdCapsule(
                 x, y, z,
-                -mouthWidth, leftY + 0.003, facePlane + 0.005,
-                mouthWidth, rightY + 0.003, facePlane + 0.005,
-                0.0042
-            ), 0.0020);
-            d = smin(d, sdCapsule(
-                x, y, z,
-                -mouthWidth * 0.90, leftY - 0.004, facePlane + 0.0045,
-                mouthWidth * 0.90, rightY - 0.004, facePlane + 0.0045,
-                0.0035
-            ), 0.0018);
+                -mouthWidth, leftY + 0.002, facePlane + 0.002,
+                mouthWidth, rightY + 0.002, facePlane + 0.002,
+                0.0030
+            ), 0.0010);
             d = subtract(d, sdCapsule(
                 x, y, z,
-                -mouthWidth * 0.82, leftY - 0.001, facePlane + 0.009,
-                mouthWidth * 0.82, rightY - 0.001, facePlane + 0.009,
-                0.0015
-            ), 0.0012);
+                -mouthWidth * 0.84, leftY - 0.002, facePlane + 0.004,
+                mouthWidth * 0.84, rightY - 0.002, facePlane + 0.004,
+                0.0010
+            ), 0.0007);
 
             d = smin(d, sdEllipsoid(
-                x - face.cheekAsym * 0.25,
+                x - face.cheekAsym * 0.85,
                 y - (YC0 - 0.126),
-                z - (facePlane - 0.013),
-                0.045 * face.faceWidth * face.jaw,
-                0.023,
-                0.025
-            ), 0.018);
+                z - (facePlane - 0.016),
+                0.036 * face.faceWidth * face.jaw,
+                0.018,
+                0.010
+            ), 0.006);
         }
 
         d = smin(d, sdCapsule(
@@ -1415,33 +1478,66 @@ function buildHeadField(THREE, o) {
     return geo;
 }
 
-/**
- * One planted bare foot peeping from under the leading hem.
- *
- * Its rear overlaps the skirt while the low tapered toe reaches forward. The
- * reference hides the trailing foot; exposing both sides made the group look as
- * though pairs of loose stones had been placed in front of every robe.
- */
+/** One explicit, closed planted foot peeping from under the leading hem. */
 function buildFeet(THREE, opts) {
-    // Production and isolation use this same fine field. Its root is buried
-    // beneath and intersects the closed body field, so it reads as one casting
-    // without asking the 18 mm body lattice to preserve the toe.
-    const field = (x, y, z) => {
-        let d = sdPlantedFoot(x, y, z, opts);
-        d += fbm3(x * 12, y * 12, z * 12, opts.seed + 21, 2) * 0.0015;
-        return d;
+    const SIDES = 28;
+    const positions = [];
+    const indices = [];
+    const yaw = opts.stride * opts.strideAngle * 0.65;
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+
+    const worldPoint = (fx, y, fz) => {
+        const dx = fx * c + fz * s;
+        const dz = -fx * s + fz * c;
+        return [-opts.stride * 0.130 + dx, y, 0.055 + dz];
     };
 
-    const mesh = surfaceNets(field, {
-        min: [-0.32, -0.08, -0.05],
-        max: [0.32, 0.20, 0.70],
-        voxel: 0.0075,
-    });
+    for (const [fz, halfWidth, halfHeight, centreY, lateralDrift]
+        of PLANTED_FOOT_PROFILE) {
+        for (let side = 0; side < SIDES; side++) {
+            const theta = side / SIDES * Math.PI * 2;
+            const crossX = Math.sign(Math.cos(theta))
+                * Math.pow(Math.abs(Math.cos(theta)), 0.82);
+            const crossY = Math.sign(Math.sin(theta))
+                * Math.pow(Math.abs(Math.sin(theta)), 0.82);
+            const fx = crossX * halfWidth
+                + opts.stride * lateralDrift;
+            const y = centreY + crossY * halfHeight;
+            positions.push(...worldPoint(fx, y, fz));
+        }
+    }
+
+    for (let ring = 0; ring < PLANTED_FOOT_PROFILE.length - 1; ring++) {
+        for (let side = 0; side < SIDES; side++) {
+            const next = (side + 1) % SIDES;
+            const a = ring * SIDES + side;
+            const b = ring * SIDES + next;
+            const c0 = (ring + 1) * SIDES + side;
+            const d = (ring + 1) * SIDES + next;
+            indices.push(a, b, c0, b, d, c0);
+        }
+    }
+
+    const addCap = (ring, outward) => {
+        const [fz, , , centreY, lateralDrift] = PLANTED_FOOT_PROFILE[ring];
+        const centre = positions.length / 3;
+        positions.push(...worldPoint(opts.stride * lateralDrift, centreY, fz));
+        const offset = ring * SIDES;
+        for (let side = 0; side < SIDES; side++) {
+            const next = (side + 1) % SIDES;
+            if (outward > 0) indices.push(centre, offset + side, offset + next);
+            else indices.push(centre, offset + next, offset + side);
+        }
+    };
+    addCap(0, -1);
+    addCap(PLANTED_FOOT_PROFILE.length - 1, 1);
+
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(mesh.positions, 3));
-    geo.setIndex(new THREE.Uint32BufferAttribute(mesh.indices, 1));
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(new THREE.Uint32BufferAttribute(indices, 1));
     return geo;
 }
+
 /**
  * Merge a list of BufferGeometries into one.
  *
@@ -1590,11 +1686,14 @@ export function buildFigure(THREE, opts = {}) {
     const want = (name) => !only || only.includes(name);
 
     const parts = [];
-    if (o.shell && want('shell')) parts.push(buildShell(THREE, o));
+    if (o.shell && want('shell')) {
+        parts.push(buildReliefShell(THREE, o));
+        parts.push(buildCowlBacking(THREE, o));
+    }
     if (want('body')) parts.push(buildBodyField(THREE, o));
     if (want('feet')) parts.push(buildFeet(THREE, o));
     if (want('head')) parts.push(buildHeadField(THREE, o));
-    if (o.baby && want('baby')) parts.push(buildBabyField(THREE, o));
+    if (o.baby && want('baby')) parts.push(buildBabyGeometry(THREE, o));
     if (o.stethoscope && want('stethoscope')) parts.push(buildStethoscopeGeometry(THREE));
     if (o.badge && want('badge')) parts.push(buildBadgeField(THREE, o));
 
