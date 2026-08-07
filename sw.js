@@ -3,14 +3,16 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-const CACHE_VERSION = 'v13-2026-08-02';
+// Bumped for the /AR bypass below: the version change evicts CORE_CACHE on
+// activate, which is what heals a shell already overwritten by an AR page.
+const CACHE_VERSION = 'v14-2026-08-07';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
  * See the bypass in the fetch handler for why this is a correctness issue and
  * not housekeeping.
  */
-const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture'];
+const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture', '/AR', '/ar'];
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
@@ -130,6 +132,13 @@ self.addEventListener('fetch', (event) => {
   //
   // Add every new sibling to this list BEFORE it ships, not after someone
   // reports the main game booting the wrong thing.
+  //
+  // /AR (and the /ar redirect that feeds it) was the "after someone reports it"
+  // case: the AR pages shipped inside this origin without a bypass, so every
+  // visit to /AR/game.html wrote the shooter's HTML over './index.html' and the
+  // next flaky-network launch of Birb Mobile served the wrong game — or served
+  // Birb Mobile's shell AT the /AR/ URL, where its relative ./src/ imports all
+  // 404 and the page renders blank. Both directions look like "it doesn't load".
   if (sameOrigin && SIBLING_ARTEFACTS.some((p) => url.pathname.startsWith(p))) return;
 
   const cdnCacheable = RUNTIME_CACHEABLE_HOSTS.has(url.host);
