@@ -385,6 +385,67 @@ reason to rewrite the geometry blindly. An iPhone 12-or-newer load and orbit tes
 is still outstanding; if the real device also struggles, test a lower mobile
 renderer-DPR cap before changing mesh resolution.
 
+### Birb AR — unlisted sibling at `/ar` (2026-08-07)
+
+**Birb AR** is a "magic window" AR prototype: point your phone at the room, a
+Birb Mobile screen appears floating in it, you drag/pinch it into place, tap
+**GO!**, and Gauntlet's free-flight game plays on that screen while the
+thumbstick and BOOST pill sit on the phone glass over the camera feed.
+
+`/ar` is a **redirect** (`vercel.json`) to the pre-existing capital-`AR/`
+directory, which is now a hub linking Birb AR, the original 2025 **AR Shooter**
+(preserved untouched at `/AR/game.html`) and its camera/gyro/3D test pages.
+**Never create a lowercase `ar/` directory** — it collides with `AR/` on
+case-insensitive filesystems and breaks checkout on macOS and Windows.
+
+The app itself lives at `gauntlet/ar/` and is routed to from the hub. It is
+inside `gauntlet/` deliberately: it imports planet, sky, bird, flight, chase
+camera, feathers and the joystick from `/gauntlet/src/`, and ARCHITECTURE.md
+rule 1 forbids anything OUTSIDE `gauntlet/` importing from inside it. Putting
+the page in there keeps the invariant instead of relaxing it.
+
+Things that cost a debugging round and must not be undone:
+
+- **`/AR` and `/ar` are in `sw.js`'s `SIBLING_ARTEFACTS` bypass.** They were not,
+  and that was a live bug: `networkFirst()` writes EVERY navigation response to
+  the cache key `./index.html`, so visiting `/AR/game.html` overwrote Birb
+  Mobile's offline shell with the shooter — and a flaky load of `/AR/*` served
+  Birb Mobile's HTML at the `/AR/` URL, where its relative `./src/` imports all
+  404 and the page renders blank. Both directions read as "it doesn't load".
+- **The screen spawns where the phone is ALREADY pointing, on the first frame
+  that has a real gyro reading.** Azimuth 0 is a fixed world direction and the
+  device's heading at launch is arbitrary, so a fixed spawn puts the screen
+  anywhere in the room — including behind you. Computing it in `startAR()` does
+  not work either: that runs before the first rAF and before the first
+  `deviceorientation` event, so the quaternion is still identity. It is deferred
+  via `pendingFace`.
+- **Default distance is solved from the field of view, not hardcoded.** The same
+  0.95m screen subtends ~24° on a portrait phone (hFOV ~31°) and ~12° in
+  landscape (~55°). The first hardcoded pair (1.6m wide at 2.2m = 40° across)
+  hung off both edges with no way to see the whole thing.
+- **`renderer.info.render` resets on every `render()` call.** The AR page renders
+  twice — game into a `WebGLRenderTarget`, then the composite over the camera
+  feed — so reading it after the composite reports 3 draw calls for a frame that
+  really costs 23. `gameView.frameStats` is captured between the passes.
+- **The render target's texture needs `SRGBColorSpace`** or the game renders
+  visibly darker through the screen than it does at `/gauntlet`.
+- **Each pass sets its own clear colour.** The composite clears transparent so
+  the camera shows through; the game pass must clear opaque sky or the room
+  shows through its own horizon seam.
+
+**Platform ceiling, not a TODO:** iOS Safari still exposes no WebXR `immersive-ar`
+and no ARKit, so tracking is **rotation-only** — the screen holds its direction
+as you look around but does not respond to you walking. Android Chrome does have
+`immersive-ar` + hit-test, and an ARKit-backed web shell (App Clip style) would
+convert this exact codebase to true 6-DoF anchoring. See `docs/AR-SPEC.md` §7 for
+the native-port ladder.
+
+Verify with `node tools/ar-shot.mjs [--go]`. It fakes a camera
+(`--use-fake-device-for-media-stream`), grants the permission, synthesises
+`deviceorientation`, clicks through the gate, and asserts on `window.__AR_STATS`
+— a zero exit means the gyro produced a reading, the stream went live and
+something actually rendered, not just that a PNG appeared.
+
 ## What This Is
 
 A mobile-first 3D bird flight game built with Three.js. A bird flies on a spherical world — you control it with touch (virtual joystick), collect rings, shoot rockets from nests, and fight drones. Four game modes: Casual free flight, Ring Rush (timed collection), Drone Hunter (60s survival), Turret Defense (wave-based).

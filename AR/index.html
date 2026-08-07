@@ -2,15 +2,64 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <title>AR Shooter Game</title>
+    <title>Birb AR</title>
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Hub-only additions. The shared stylesheet still owns the check list,
+           buttons and layout so the classic shooter pages keep their look. */
+        .hub-card {
+            border: 2px solid #d8dee8; border-radius: 14px;
+            padding: 16px; margin: 0 0 16px;
+            background: #fff;
+        }
+        .hub-card h2 { margin: 0 0 4px; font-size: 1.15em; }
+        .hub-card .tagline { margin: 0 0 12px; font-size: 0.88em; color: #667; line-height: 1.5; }
+        .hub-card .btn { margin: 0; }
+        .badge {
+            display: inline-block; font-size: 0.68em; font-weight: 700;
+            letter-spacing: 0.08em; text-transform: uppercase;
+            padding: 3px 8px; border-radius: 999px; vertical-align: middle;
+            margin-left: 8px;
+        }
+        .badge-new { background: #00d4ff; color: #0f1c33; }
+        .badge-classic { background: #e8ecf2; color: #566; }
+        .note {
+            font-size: 0.8em; color: #778; line-height: 1.6;
+            border-left: 3px solid #d8dee8; padding-left: 12px; margin-top: 6px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>AR Shooter Game</h1>
+        <h1>Birb AR</h1>
+
+        <div class="hub-card">
+            <h2>Birb AR <span class="badge badge-new">New</span></h2>
+            <p class="tagline">
+                Pin a Birb Mobile screen in your room, then fly on it. Drag to
+                position, pinch to push it away, tap GO! and steer with the
+                thumbstick on the glass.
+            </p>
+            <a href="/gauntlet/ar/" class="btn btn-primary" id="birb-ar-btn">Launch Birb AR</a>
+            <p class="note">
+                Rotation-only tracking: the screen holds its place as you look
+                around, but does not respond to you walking. iOS Safari exposes
+                no WebXR, so this is the honest browser ceiling.
+            </p>
+        </div>
+
+        <div class="hub-card">
+            <h2>AR Shooter <span class="badge badge-classic">Classic</span></h2>
+            <p class="tagline">
+                The original 2025 prototype — floating targets, gyro aiming,
+                tap FIRE. Kept exactly as it shipped.
+            </p>
+            <a href="game.html" class="btn btn-primary" id="play-btn">Play AR Shooter</a>
+        </div>
 
         <div id="device-check" class="status-section">
             <h2>Device Compatibility</h2>
@@ -22,10 +71,6 @@
             <a href="test-camera.html" class="btn btn-test">Test Camera</a>
             <a href="test-gyro.html" class="btn btn-test">Test Gyroscope</a>
             <a href="test-3d.html" class="btn btn-test">Test 3D Rendering</a>
-        </div>
-
-        <div class="button-group">
-            <a href="game.html" class="btn btn-primary" id="play-btn">Play Game</a>
         </div>
 
         <div class="info-section">
@@ -43,6 +88,7 @@
         // Device compatibility checks
         const results = document.getElementById('check-results');
         const playBtn = document.getElementById('play-btn');
+        const birbArBtn = document.getElementById('birb-ar-btn');
         let allChecksPass = true;
 
         function addCheck(name, passed, message = '') {
@@ -84,13 +130,17 @@
             addCheck('iOS Device', true, 'Will require permission prompts');
         }
 
-        // Enable/disable play button
+        // Enable/disable the play buttons. Both experiences need the same
+        // camera + motion + WebGL stack, so one gate covers both.
         if (!allChecksPass) {
-            playBtn.classList.add('disabled');
-            playBtn.onclick = (e) => {
-                e.preventDefault();
-                alert('Please resolve compatibility issues before playing');
-            };
+            [playBtn, birbArBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.classList.add('disabled');
+                btn.onclick = (e) => {
+                    e.preventDefault();
+                    alert('Please resolve compatibility issues before playing');
+                };
+            });
         }
 
         // Show browser info

@@ -1,7 +1,18 @@
 # Birb AR — High-Level Specification
 
-> Status: **planning approved artefact spec — no implementation yet.**
-> Owner: Mentis. Written 2026-08-07 on branch `claude/birb-mobile-ar-prototype-jria7e`.
+> Status: **prototype shipped 2026-08-07** — phases 1-3 complete and verified
+> headlessly; phase 4's real-iPhone pass is the outstanding gate. Owner: Mentis.
+>
+> **What shipped:** `/ar` redirect + `AR/` hub (shooter preserved), `sw.js`
+> bypass, `gauntlet/ar/` app (camera passthrough, gyro pinning, drag/pinch
+> placement, GO!, Gauntlet free-flight rendered to a texture on the screen,
+> joystick + BOOST on glass, reposition, wake lock), and `tools/ar-shot.mjs`.
+> Measured at 23 draw calls / 23.9k triangles for both passes — inside the
+> <100 / <80k budget.
+>
+> **Not yet done:** real-device performance pass; three-finger QR; audio; modes
+> beyond free flight (rings, drones, nesting); Android WebXR hit-test path.
+> Deviations from the plan below are recorded in §11.
 
 ## 1. Product summary
 
@@ -228,3 +239,29 @@ it converts this exact codebase from rotation-only to true anchoring.
 | Two passes + camera decode too heavy on older iPhones | Fixed small RTT; drop composite DPR before touching game quality |
 | cdnjs r128 disappears | Vendor `three.min.js` into `AR/js/` |
 | Gauntlet module changes silently break `/ar` boot | Boot lives inside `gauntlet/`; add `/ar` capture to the gauntlet harness run |
+
+## 11. Deviations from this plan, and why
+
+Recorded during the build so the plan and the code do not silently disagree.
+
+1. **`/ar` is a redirect, not a rewrite.** The plan proposed rewriting `/ar/*` →
+   `/AR/*` to keep the lowercase URL in the bar. A rewrite breaks the
+   no-trailing-slash case: at `birbmobile.vercel.app/ar`, the hub's relative
+   `game.html` resolves to `/game.html`. A 307 redirect lands the browser on the
+   canonical path and every relative link then works natively.
+2. **The AR page is the hub's child, not the hub.** `/ar` opens the reworked
+   `AR/index.html` hub; Birb AR itself is at `/gauntlet/ar/`. This is what lets
+   the original shooter stay reachable and untouched alongside the new work,
+   which was the explicit requirement.
+3. **The game view is slimmer than "Casual".** Nesting, drones, rings, the race
+   course, rival AI, the HUD and the minimap are not built. On a screen
+   subtending ~20° at 2.7m none of them resolve, and each costs draw calls the
+   composite pass now needs. What ships is planet + sky + bird + flight + chase
+   camera + feathers, driven by the real joystick.
+4. **Pinch changes distance, not scale.** Scaling a "screen" up to 3m wide at 1m
+   away reads as a billboard glued to the lens; pushing it away keeps apparent
+   size honest. The splash copy was corrected to match the gesture.
+5. **The screen faces the viewer and lives in spherical coordinates.** With no
+   positional tracking every reachable placement is a point on a sphere around a
+   stationary viewer anyway, which makes dragging a two-angle problem instead of
+   a raycast-and-project one.

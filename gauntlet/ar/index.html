@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a1324">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<title>Birb AR — magic window prototype</title>
+<style>
+  :root {
+    --ink: #0f1c33;
+    --panel: #0a1324;
+    --cream: #fff6dc;
+    --cyan: #00d4ff;
+    --gold: #ffdd44;
+    --font: ui-rounded, "Arial Rounded MT Bold", "Nunito", "Trebuchet MS", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #000; color: var(--cream); font-family: var(--font);
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #ar-root { position: fixed; inset: 0; overflow: hidden; }
+
+  /* Camera feed. object-fit:cover so the aspect mismatch between a 16:9 stream
+     and a 19.5:9 phone crops rather than letterboxes — black bars around a live
+     camera feed destroy the illusion instantly. */
+  #feed {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: #000; z-index: 0;
+  }
+  #scene { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
+
+  /* Gesture surface, only live while placing. */
+  #placeLayer { position: absolute; inset: 0; z-index: 7; touch-action: none; }
+  #placeLayer[hidden] { display: none; }
+
+  /* --- UI ---------------------------------------------------------------- */
+  #ui { position: absolute; inset: 0; z-index: 12; pointer-events: none; }
+  #ui > * { pointer-events: auto; }
+
+  .card {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(92vw, 420px); padding: 26px 24px 24px;
+    background: rgba(10, 19, 36, 0.93);
+    border: 3px solid var(--ink); border-radius: 20px;
+    box-shadow: 0 10px 0 var(--ink), 0 24px 50px rgba(0,0,0,0.55);
+    text-align: center;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .card h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: 0.02em; }
+  .card .sub { margin: 0 0 16px; font-size: 14px; color: var(--cyan); letter-spacing: 0.18em; font-weight: 800; }
+  .card p { margin: 0 0 14px; font-size: 15px; line-height: 1.5; color: #d8e4f2; }
+  .card ul { text-align: left; margin: 0 0 18px; padding-left: 20px; font-size: 14px; color: #d8e4f2; line-height: 1.7; }
+
+  .btn {
+    display: inline-block; border: 3px solid var(--ink); border-radius: 999px;
+    background: var(--cream); color: var(--ink);
+    font-family: var(--font); font-weight: 900; font-size: 16px; letter-spacing: 0.06em;
+    padding: 13px 26px 15px; cursor: pointer;
+    box-shadow: 0 5px 0 var(--ink); transition: transform 70ms, box-shadow 70ms;
+  }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink); }
+  .btn[disabled] { opacity: 0.55; }
+  .btn.cyan { background: var(--cyan); }
+  .btn.gold { background: var(--gold); }
+  .btn.small { font-size: 13px; padding: 9px 16px 11px; box-shadow: 0 4px 0 var(--ink); }
+
+  .err {
+    display: none; margin: 0 0 14px; padding: 10px 12px;
+    background: rgba(220, 70, 70, 0.16); border: 2px solid #d9534f;
+    border-radius: 12px; font-size: 13.5px; color: #ffd7d5; text-align: left;
+  }
+  .err.show { display: block; }
+
+  /* Placement chrome */
+  #placeBar {
+    position: absolute; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+  }
+  #placeHint {
+    background: rgba(10, 19, 36, 0.82); border: 2px solid var(--ink);
+    border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  #topBar {
+    position: absolute; top: max(14px, env(safe-area-inset-top)); left: 14px; right: 14px;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  }
+  #stat {
+    background: rgba(10, 19, 36, 0.72); border: 2px solid var(--ink);
+    border-radius: 12px; padding: 6px 10px; font-size: 11px;
+    font-weight: 700; letter-spacing: 0.04em; opacity: 0.9;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="ar-root">
+  <video id="feed" playsinline muted autoplay></video>
+  <canvas id="scene"></canvas>
+  <div id="placeLayer" hidden></div>
+
+  <div id="ui">
+    <!-- 1. permission -->
+    <div class="card" id="cardPerm">
+      <h1>Birb AR</h1>
+      <p class="sub">M A G I C &nbsp; W I N D O W</p>
+      <p>Put a Birb Mobile screen in your room, then fly on it.</p>
+      <div class="err" id="permErr"></div>
+      <ul>
+        <li>Rear camera — the room behind the screen</li>
+        <li>Motion sensors — pins the screen in place</li>
+        <li>Hold the phone up like a window</li>
+      </ul>
+      <button class="btn cyan" id="btnEnable">Enable camera &amp; motion</button>
+    </div>
+
+    <!-- 2. unsupported -->
+    <div class="card" id="cardDead" hidden>
+      <h1>Not supported</h1>
+      <div class="err show" id="deadErr"></div>
+      <a class="btn small" href="/AR/">← Back to AR menu</a>
+    </div>
+
+    <!-- 3. placing -->
+    <div id="placeBar" hidden>
+      <div id="placeHint">Drag to move · Pinch to push away</div>
+      <button class="btn gold" id="btnGo">GO!</button>
+    </div>
+
+    <!-- 4. flying -->
+    <div id="topBar" hidden>
+      <button class="btn small" id="btnReplace">↺ Reposition</button>
+      <div id="stat">—</div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { createARCamera, isCameraSupported, isSecure } from '/gauntlet/ar/src/ar-camera.js';
+import { createARGyro, isGyroSupported } from '/gauntlet/ar/src/ar-gyro.js';
+import { createARScreen, SCREEN_BASE_WIDTH } from '/gauntlet/ar/src/ar-screen.js';
+import { createPlacementControls } from '/gauntlet/ar/src/ar-placement.js';
+import { createGameView } from '/gauntlet/ar/src/game-view.js';
+
+const el = (id) => document.getElementById(id);
+const root = el('ar-root');
+const feed = el('feed');
+const placeLayer = el('placeLayer');
+
+const cardPerm = el('cardPerm');
+const cardDead = el('cardDead');
+const placeBar = el('placeBar');
+const topBar = el('topBar');
+const statEl = el('stat');
+const permErr = el('permErr');
+
+/** 'perm' | 'placing' | 'flying' | 'dead' */
+let phase = 'perm';
+
+// --- capability gate -------------------------------------------------------
+// Checked before the button rather than after, so a device that cannot do this
+// says so instead of failing inside a permission prompt.
+(function gate() {
+    if (!isSecure()) return die('This page needs HTTPS for camera access. Open it at birbmobile.vercel.app/ar.');
+    if (!isCameraSupported()) return die('This browser has no camera API.');
+    if (!isGyroSupported()) return die('This device reports no motion sensors, so the screen cannot be pinned in place.');
+})();
+
+function die(msg) {
+    phase = 'dead';
+    cardPerm.hidden = true;
+    cardDead.hidden = false;
+    el('deadErr').textContent = msg;
+}
+
+function fail(msg) {
+    permErr.textContent = msg;
+    permErr.classList.add('show');
+    const b = el('btnEnable');
+    b.disabled = false;
+    b.textContent = 'Try again';
+}
+
+// --- boot ------------------------------------------------------------------
+let THREE, renderer, scene, camera, arCam, gyro, arScreen, placement, input, gameView;
+let wakeLock = null;
+
+el('btnEnable').addEventListener('click', async () => {
+    const btn = el('btnEnable');
+    btn.disabled = true;
+    btn.textContent = 'Starting…';
+    permErr.classList.remove('show');
+
+    // Motion FIRST. On iOS both prompts must originate from this gesture, and
+    // awaiting the camera before requesting motion has been observed to lose
+    // the gesture context — motion then throws NotAllowedError with no prompt
+    // ever shown, which is indistinguishable from the user declining.
+    THREE = await loadThree();
+    gyro = createARGyro(THREE);
+    const perm = await gyro.requestPermission();
+    if (!perm.granted) {
+        return fail(perm.message || 'Motion access was denied. It is required to pin the screen in place.');
+    }
+    gyro.start();
+
+    arCam = createARCamera(feed);
+    const cam = await arCam.start();
+    if (!cam.success) return fail(cam.message || 'The camera could not be started.');
+
+    try { await startAR(); }
+    catch (err) {
+        console.error(err);
+        return fail('Failed to start the AR scene: ' + (err && err.message ? err.message : err));
+    }
+});
+
+async function startAR() {
+    const canvas = el('scene');
+    // alpha:true + a transparent clear is what lets the camera feed show
+    // through. Without it the canvas paints an opaque sky over the room and
+    // this is just the game with extra steps.
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 0);
+
+    scene = new THREE.Scene();
+    // The viewer never translates — gyro AR has no positional tracking — so the
+    // camera sits at the origin permanently and only ever rotates.
+    camera = new THREE.PerspectiveCamera(estimateFov(), 1, 0.05, 100);
+
+    arScreen = createARScreen(THREE, { quality: pickQuality(), distance: 2.2 });
+    scene.add(arScreen.group);
+    arScreen.setPlacement({ azimuth: 0, elevation: -0.05, distance: 2.2, scale: 1 });
+    arScreen.setPlacing(true);
+
+    placement = createPlacementControls(placeLayer, {
+        getPlacement: () => arScreen.getPlacement(),
+        setPlacement: (p) => arScreen.setPlacement(p),
+        getViewYaw: () => 0,
+    });
+
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', () => setTimeout(resize, 250));
+
+    // Snap once so the first frame is already aligned with how the phone is
+    // actually held, rather than easing in from identity.
+    gyro.snap();
+
+    toPlacing();
+    requestAnimationFrame(frame);
+    window.__AR_READY = true;
+}
+
+/**
+ * A phone camera is roughly 60-70 degrees vertical. Matching the render camera
+ * to the FEED's field of view is what makes the screen sit IN the room instead
+ * of sliding against it as you turn — a mismatch reads exactly like drift and
+ * is the first thing people blame the gyro for.
+ */
+function estimateFov() {
+    const portrait = window.innerHeight >= window.innerWidth;
+    return portrait ? 63 : 46;
+}
+
+function pickQuality() {
+    const mem = navigator.deviceMemory || 4;
+    const cores = navigator.hardwareConcurrency || 4;
+    if (mem <= 3 || cores <= 4) return 'low';
+    return /iPhone|iPad|Android/i.test(navigator.userAgent) ? 'mid' : 'high';
+}
+
+function resize() {
+    const w = window.innerWidth, h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.fov = estimateFov();
+    camera.updateProjectionMatrix();
+}
+
+// --- phases ----------------------------------------------------------------
+
+/**
+ * Convert the current view direction into the screen's spherical frame.
+ * Inverse of ar-screen.js's placement maths:
+ *   f = (sin(az)cos(el), sin(el), -cos(az)cos(el))
+ */
+let pendingFace = false;
+let _viewFwd = null;
+function currentViewAngles() {
+    if (!_viewFwd) _viewFwd = new THREE.Vector3();
+    _viewFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const y = Math.max(-1, Math.min(1, _viewFwd.y));
+    return {
+        azimuth: Math.atan2(_viewFwd.x, -_viewFwd.z),
+        elevation: Math.asin(y),
+    };
+}
+
+/**
+ * Distance at which the screen fills ~62% of the view's WIDTH.
+ *
+ * A hardcoded default cannot work: the same 0.95m screen subtends 24 degrees on
+ * a portrait phone (horizontal FOV ~31) and 12 on a landscape one (~55), so one
+ * number is either overflowing the edges or a postage stamp. Solving for the
+ * distance keeps the framing identical across phones, tablets and orientation.
+ */
+function framingDistance() {
+    const vFov = camera.fov * Math.PI / 180;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const want = hFov * 0.62;
+    const half = (SCREEN_BASE_WIDTH * arScreen.getPlacement().scale) / 2;
+    return half / Math.tan(want / 2);
+}
+
+function toPlacing() {
+    phase = 'placing';
+    cardPerm.hidden = true;
+    placeBar.hidden = false;
+    topBar.hidden = true;
+    placeLayer.hidden = false;
+
+    // Put the screen where the phone is ALREADY pointing. Azimuth 0 is a fixed
+    // world direction and the gyro's heading at launch is arbitrary, so a fixed
+    // spawn means the screen can be anywhere — including directly behind you,
+    // which reads as "the app opened to an empty room and did nothing".
+    // Reposition uses the same path, so the button also means "bring it back".
+    // Deferred to the first frame that has a real attitude. Doing it here would
+    // read an identity quaternion on the initial call — startAR() runs before
+    // the first rAF, and on a real device the first `deviceorientation` event
+    // has usually not landed yet either. Both cases silently place the screen
+    // at world azimuth 0, i.e. somewhere arbitrary in the room.
+    pendingFace = true;
+
+    placement.setEnabled(true);
+    arScreen.setPlacing(true);
+    arScreen.showSplash();
+    if (input) input.setVisible(false);
+    if (gameView) gameView.stop();
+}
+
+async function toFlying() {
+    placeBar.hidden = true;
+    placeLayer.hidden = true;
+    placement.setEnabled(false);
+    arScreen.setPlacing(false);
+
+    if (!gameView) {
+        el('btnGo').textContent = 'Loading…';
+        gameView = await createGameView(THREE, renderer, { quality: pickQuality() });
+        arScreen.setTexture(gameView.texture);
+        const { createInput } = await import('/gauntlet/src/input/touch.js');
+        input = createInput(root, {});
+        el('btnGo').textContent = 'GO!';
+    } else {
+        arScreen.setTexture(gameView.texture);
+    }
+
+    input.setVisible(true);
+    gameView.start();
+    topBar.hidden = false;
+    phase = 'flying';
+    requestWakeLock();
+}
+
+el('btnGo').addEventListener('click', () => {
+    if (phase !== 'placing') return;
+    toFlying().catch((err) => {
+        console.error(err);
+        el('btnGo').textContent = 'GO!';
+        alert('Could not start the game: ' + (err && err.message ? err.message : err));
+    });
+});
+
+el('btnReplace').addEventListener('click', () => {
+    if (phase !== 'flying') return;
+    toPlacing();
+});
+
+// --- wake lock -------------------------------------------------------------
+async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (_) { /* denied or unsupported — the demo still works */ }
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (phase === 'flying') requestWakeLock();
+    if (arCam) arCam.retryPlay();
+});
+
+// --- loop ------------------------------------------------------------------
+let last = performance.now();
+let fpsAccum = 0, frames = 0, fps = 0;
+let statTimer = 0;
+
+function frame(now) {
+    // A throw inside rAF does not propagate anywhere useful — the frame simply
+    // stops rescheduling and the page sits there with a live camera and a dead
+    // canvas, which is indistinguishable from a hang.
+    try { frameBody(now); }
+    catch (err) {
+        console.error(err);
+        statEl.textContent = 'ERROR — see console';
+        return;
+    }
+    requestAnimationFrame(frame);
+}
+
+function frameBody(now) {
+    const rawDt = (now - last) / 1000;
+    last = now;
+    const dt = Math.min(Math.max(rawDt, 0), 0.05);
+
+    fpsAccum += rawDt; frames++;
+    if (fpsAccum >= 0.5) { fps = frames / fpsAccum; frames = 0; fpsAccum = 0; }
+
+    // 1. attitude -> camera. Position stays at the origin, always.
+    camera.quaternion.copy(gyro.update(dt));
+
+    // 1b. First real attitude after entering placement: drop the screen in
+    //     front of wherever the phone is actually pointing.
+    if (pendingFace && gyro.hasReading) {
+        pendingFace = false;
+        const a = currentViewAngles();
+        arScreen.setPlacement({
+            azimuth: a.azimuth,
+            // A touch below the eyeline: people hold a phone slightly above
+            // what they are looking at, and dead-centre reads as pasted on.
+            elevation: a.elevation - 0.06,
+            distance: framingDistance(),
+        });
+    }
+
+    // 2. the screen object
+    arScreen.update(dt);
+
+    // 3. the game, into its own texture (pass 1)
+    if (phase === 'flying' && gameView) {
+        input.update(dt);
+        gameView.tick(dt, input.value);
+    }
+
+    // 4. composite over the camera feed (pass 2). Clear colour is restored here
+    //    because pass 1 sets its own opaque sky.
+    renderer.setClearColor(0x000000, 0);
+    renderer.render(scene, camera);
+
+    statTimer += rawDt;
+    if (statTimer > 0.5) {
+        statTimer = 0;
+        const t = totalCost();
+        statEl.textContent = `${fps.toFixed(0)}fps · ${t.calls} calls · ${(t.triangles / 1000).toFixed(1)}k tris`;
+    }
+}
+
+/**
+ * Both passes, summed. `renderer.info.render` only ever holds the LAST render()
+ * call's numbers, which for this page is the 3-draw-call composite — reporting
+ * that alone would claim the AR mode is nearly free.
+ */
+function totalCost() {
+    const ar = renderer ? renderer.info.render : { calls: 0, triangles: 0 };
+    const g = gameView ? gameView.frameStats : { calls: 0, triangles: 0 };
+    return { calls: ar.calls + g.calls, triangles: ar.triangles + g.triangles };
+}
+
+// --- harness hook ----------------------------------------------------------
+// Mirrors gauntlet's __GAUNTLET_STATS so a capture is evidence of what the AR
+// page actually did, not just that a PNG appeared.
+window.__AR_STATS = () => ({
+    phase,
+    fps,
+    drawCalls: renderer ? totalCost().calls : 0,
+    triangles: renderer ? totalCost().triangles : 0,
+    arPassCalls: renderer ? renderer.info.render.calls : 0,
+    gamePassCalls: gameView ? gameView.frameStats.calls : 0,
+    gyro: gyro ? gyro.raw : null,
+    hasReading: gyro ? gyro.hasReading : false,
+    placement: arScreen ? arScreen.getPlacement() : null,
+    cameraActive: arCam ? arCam.active : false,
+    gameRunning: Boolean(gameView),
+});
+</script>
+</body>
+</html>
