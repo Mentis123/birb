@@ -448,6 +448,34 @@ Things that cost a debugging round and must not be undone:
   the camera shows through; the game pass must clear opaque sky or the room
   shows through its own horizon seam.
 
+**Birb AR Shooter** (`/gauntlet/ar/shooter/`) is the second app on the hub: drones
+close in on your room from every bearing, you aim by moving the phone and tap to
+launch rockets. It reuses `ar-camera.js` / `ar-gyro.js` and adds `drones.js`
+(room-space swarm, 2 InstancedMeshes), `weapons.js` (rockets + explosion
+particles, 2 more) and a fully synthesised `audio.js`. Four draw calls total.
+Its own hard-won details:
+
+- **Gauntlet's `nesting/drones.js` is NOT reusable here** and trying is a trap:
+  those drones orbit a planet, take up from `normalize(pos)` and are placed
+  against nests and terrain. Here the world is a living room and the player is
+  a fixed point. Same silhouette, new module.
+- **Rockets home, gently (15° cone, capped turn rate), on purpose.** You are
+  aiming by waving a phone at a weaving target with no stick and no mouse. Pure
+  ballistics tested as frustrating rather than skilful — every near miss read as
+  the game's fault.
+- **Wave 1 spawns within ±0.55 rad of where you are already looking**, widening
+  ~0.6 rad per wave. At the first value (±0.95) most of wave one spawned outside
+  a portrait phone's ~31° horizontal FOV, so the game opened on an empty wall
+  and read as broken. The off-screen gold arrow that points at the nearest drone
+  exists for the same reason and is not optional in a 360° shooter.
+- **`SVGElement` has no `hidden` IDL property** — it does not inherit from
+  `HTMLElement`. `svg.hidden = false` sets a stray JS property, leaves the
+  attribute (and `display:none`) alone, and the reticle never appears. It is
+  wrapped in a div.
+- Verify play, not just paint: `node tools/ar-shot.mjs --page
+  gauntlet/ar/shooter/index.html --fire 14` taps the trigger for 14s and reports
+  the score, which is the only way to prove rocket → hit → kill → score works.
+
 **Platform ceiling, not a TODO:** iOS Safari still exposes no WebXR `immersive-ar`
 and no ARKit, so tracking is **rotation-only** — the screen holds its direction
 as you look around but does not respond to you walking. Android Chrome does have

@@ -53,6 +53,15 @@
         </div>
 
         <div class="hub-card">
+            <h2>Birb AR Shooter <span class="badge badge-new">New</span></h2>
+            <p class="tagline">
+                Drones close in on your room from every direction. Move the
+                phone to aim, tap to launch rockets, survive the waves.
+            </p>
+            <a href="/gauntlet/ar/shooter/" class="btn btn-primary" id="birb-shooter-btn">Launch Birb AR Shooter</a>
+        </div>
+
+        <div class="hub-card">
             <h2>AR Shooter <span class="badge badge-classic">Classic</span></h2>
             <p class="tagline">
                 The original 2025 prototype — floating targets, gyro aiming,
@@ -89,6 +98,7 @@
         const results = document.getElementById('check-results');
         const playBtn = document.getElementById('play-btn');
         const birbArBtn = document.getElementById('birb-ar-btn');
+        const birbShooterBtn = document.getElementById('birb-shooter-btn');
         let allChecksPass = true;
 
         function addCheck(name, passed, message = '') {
@@ -133,7 +143,7 @@
         // Enable/disable the play buttons. Both experiences need the same
         // camera + motion + WebGL stack, so one gate covers both.
         if (!allChecksPass) {
-            [playBtn, birbArBtn].forEach((btn) => {
+            [playBtn, birbArBtn, birbShooterBtn].forEach((btn) => {
                 if (!btn) return;
                 btn.classList.add('disabled');
                 btn.onclick = (e) => {

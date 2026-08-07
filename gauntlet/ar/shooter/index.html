@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a1324">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<title>Birb AR Shooter</title>
+<style>
+  :root {
+    --ink: #0f1c33;
+    --cream: #fff6dc;
+    --cyan: #00d4ff;
+    --gold: #ffdd44;
+    --red: #ff5d52;
+    --font: ui-rounded, "Arial Rounded MT Bold", "Nunito", "Trebuchet MS", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #000;
+    color: var(--cream); font-family: var(--font);
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; overscroll-behavior: none;
+  }
+  #root { position: fixed; inset: 0; overflow: hidden; }
+  #feed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; z-index: 0; }
+  #scene { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
+
+  /* Whole screen is the trigger while playing. A dedicated FIRE button is
+     also provided, because a screen-wide tap target and a visible button
+     teach different things: the button says "you can shoot". */
+  #tapLayer { position: absolute; inset: 0; z-index: 5; touch-action: none; }
+  #tapLayer[hidden] { display: none; }
+
+  #ui { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+  #ui > * { pointer-events: auto; }
+
+  /* --- reticle ---------------------------------------------------------- */
+  #reticleWrap {
+    position: absolute; left: 50%; top: 50%; width: 74px; height: 74px;
+    margin: -37px 0 0 -37px; pointer-events: none;
+  }
+  #reticle {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    transition: transform 90ms ease-out;
+  }
+  /* Off-screen target pointer. Centre-anchored; JS writes one transform that
+     pushes it out along the bearing and spins it to face the target. */
+  #arrow {
+    position: absolute; left: 50%; top: 50%; width: 54px; height: 54px;
+    margin: -27px 0 0 -27px; pointer-events: none;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+  }
+  #arrow svg { width: 100%; height: 100%; }
+  #reticle.locked { transform: scale(1.18); }
+  #reticle .r-ring { stroke: var(--cream); opacity: 0.85; }
+  #reticle.locked .r-ring { stroke: var(--gold); opacity: 1; }
+  #reticle .r-dot { fill: var(--cyan); }
+  #reticle.locked .r-dot { fill: var(--gold); }
+  #reticle.cooling { opacity: 0.4; }
+
+  /* --- HUD -------------------------------------------------------------- */
+  #hud {
+    position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+    pointer-events: none;
+  }
+  .chip {
+    background: rgba(10,19,36,0.78); border: 2px solid var(--ink);
+    border-radius: 12px; padding: 7px 11px; font-size: 13px; font-weight: 800;
+    letter-spacing: 0.04em; line-height: 1.35;
+  }
+  .chip .big { font-size: 19px; }
+  #lives { color: var(--red); letter-spacing: 0.12em; }
+  #combo { color: var(--gold); font-size: 12px; }
+
+  #fireBtn {
+    position: absolute; right: max(20px, env(safe-area-inset-right));
+    bottom: max(30px, env(safe-area-inset-bottom));
+    width: 92px; height: 92px; border-radius: 50%;
+    border: 4px solid var(--ink); background: var(--cream); color: var(--ink);
+    font-family: var(--font); font-weight: 900; font-size: 17px; letter-spacing: 0.08em;
+    box-shadow: 0 6px 0 var(--ink); cursor: pointer;
+  }
+  #fireBtn:active { transform: translateY(5px); box-shadow: 0 1px 0 var(--ink); }
+  #fireBtn.cooling { filter: grayscale(0.7) brightness(0.85); }
+
+  /* --- damage flash ----------------------------------------------------- */
+  #flash {
+    position: absolute; inset: 0; z-index: 9; pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, rgba(255,60,50,0) 40%, rgba(255,60,50,0.55) 100%);
+    opacity: 0; transition: opacity 140ms ease-out;
+  }
+  #flash.on { opacity: 1; }
+
+  /* --- cards ------------------------------------------------------------ */
+  .card {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: min(92vw, 400px); padding: 26px 24px 24px;
+    background: rgba(10,19,36,0.94); border: 3px solid var(--ink); border-radius: 20px;
+    box-shadow: 0 10px 0 var(--ink), 0 24px 50px rgba(0,0,0,0.55); text-align: center;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .card h1 { margin: 0 0 4px; font-size: 29px; }
+  .card .sub { margin: 0 0 16px; font-size: 13px; color: var(--cyan); letter-spacing: 0.18em; font-weight: 800; }
+  .card p { margin: 0 0 14px; font-size: 15px; line-height: 1.55; color: #d8e4f2; }
+  .card ul { text-align: left; margin: 0 0 18px; padding-left: 20px; font-size: 14px; color: #d8e4f2; line-height: 1.7; }
+  .score-big { font-size: 46px; font-weight: 900; color: var(--gold); margin: 6px 0 2px; }
+  .btn {
+    display: inline-block; border: 3px solid var(--ink); border-radius: 999px;
+    background: var(--cream); color: var(--ink); font-family: var(--font);
+    font-weight: 900; font-size: 16px; letter-spacing: 0.06em; padding: 13px 26px 15px;
+    cursor: pointer; box-shadow: 0 5px 0 var(--ink); margin: 4px;
+  }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink); }
+  .btn.cyan { background: var(--cyan); }
+  .btn.small { font-size: 13px; padding: 9px 16px 11px; box-shadow: 0 4px 0 var(--ink); }
+  .err {
+    display: none; margin: 0 0 14px; padding: 10px 12px; text-align: left;
+    background: rgba(220,70,70,0.16); border: 2px solid #d9534f;
+    border-radius: 12px; font-size: 13.5px; color: #ffd7d5;
+  }
+  .err.show { display: block; }
+  #banner {
+    position: absolute; left: 0; right: 0; top: 38%; text-align: center;
+    font-size: 34px; font-weight: 900; letter-spacing: 0.06em;
+    text-shadow: 0 3px 0 var(--ink); pointer-events: none; opacity: 0;
+    transition: opacity 200ms;
+  }
+  #banner.on { opacity: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="root">
+  <video id="feed" playsinline muted autoplay></video>
+  <canvas id="scene"></canvas>
+  <div id="tapLayer" hidden></div>
+  <div id="flash"></div>
+
+  <div id="ui">
+    <!-- Wrapped in a div on purpose: SVGElement does not inherit HTMLElement,
+         so it has no `hidden` IDL property and `svg.hidden = false` silently
+         sets a stray JS property while the attribute — and display:none —
+         stay exactly where they were. The reticle never appeared. -->
+    <div id="reticleWrap" hidden>
+      <svg id="reticle" viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="r-ring" cx="50" cy="50" r="30" fill="none" stroke-width="4"/>
+        <circle class="r-dot" cx="50" cy="50" r="5"/>
+        <path class="r-ring" d="M50 6 v14 M50 80 v14 M6 50 h14 M80 50 h14"
+              fill="none" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <!-- Points at the nearest drone whenever it is off-screen. Without this a
+         360-degree shooter opens on an empty wall and reads as broken. -->
+    <div id="arrow" hidden><svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M84 50 L34 24 L46 50 L34 76 Z" fill="#ffdd44" stroke="#0f1c33" stroke-width="6" stroke-linejoin="round"/>
+    </svg></div>
+
+    <div id="hud" hidden>
+      <div class="chip"><span class="big" id="score">0</span> pts<div id="combo">&nbsp;</div></div>
+      <div class="chip" style="text-align:right">Wave <span id="wave">1</span><div id="lives">♥♥♥</div></div>
+    </div>
+
+    <div id="banner"></div>
+    <button id="fireBtn" hidden>FIRE</button>
+
+    <!-- start -->
+    <div class="card" id="cardStart">
+      <h1>Birb AR Shooter</h1>
+      <p class="sub">D R O N E &nbsp; D E F E N C E</p>
+      <p>Drones are closing in on your room. Turn around, line them up, shoot them down.</p>
+      <div class="err" id="startErr"></div>
+      <ul>
+        <li>Move your phone to aim — the crosshair is your gun</li>
+        <li>Tap anywhere (or FIRE) to launch a rocket</li>
+        <li>Three hits and you're down. They come from every direction.</li>
+      </ul>
+      <button class="btn cyan" id="btnStart">Enable camera &amp; motion</button>
+    </div>
+
+    <!-- unsupported -->
+    <div class="card" id="cardDead" hidden>
+      <h1>Not supported</h1>
+      <div class="err show" id="deadErr"></div>
+      <a class="btn small" href="/AR/">← Back to AR menu</a>
+    </div>
+
+    <!-- game over -->
+    <div class="card" id="cardOver" hidden>
+      <h1>Overrun</h1>
+      <div class="score-big" id="finalScore">0</div>
+      <p id="finalLine">&nbsp;</p>
+      <button class="btn cyan" id="btnAgain">Play again</button>
+      <a class="btn small" href="/AR/">AR menu</a>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { createARCamera, isCameraSupported, isSecure } from '/gauntlet/ar/src/ar-camera.js';
+import { createARGyro, isGyroSupported } from '/gauntlet/ar/src/ar-gyro.js';
+import { createDroneSwarm } from '/gauntlet/ar/shooter/src/drones.js';
+import { createWeapons } from '/gauntlet/ar/shooter/src/weapons.js';
+import { createShooterAudio } from '/gauntlet/ar/shooter/src/audio.js';
+import { createLightRig } from '/gauntlet/src/core/toon.js';
+
+const el = (id) => document.getElementById(id);
+const feed = el('feed');
+const tapLayer = el('tapLayer');
+
+/** 'start' | 'playing' | 'over' | 'dead' */
+let phase = 'start';
+
+const RULES = Object.freeze({
+    lives: 3,
+    /** Drones on the field at once, by wave. */
+    concurrent: (w) => Math.min(3 + Math.floor(w * 0.8), 9),
+    /** Kills needed to clear a wave. */
+    quota: (w) => 5 + w * 2,
+    killPoints: 100,
+    comboWindow: 2.4,
+});
+
+(function gate() {
+    if (!isSecure()) return die('This page needs HTTPS for camera access.');
+    if (!isCameraSupported()) return die('This browser has no camera API.');
+    if (!isGyroSupported()) return die('This device reports no motion sensors, so aiming by moving the phone is not possible.');
+})();
+
+function die(msg) {
+    phase = 'dead';
+    el('cardStart').hidden = true;
+    el('cardDead').hidden = false;
+    el('deadErr').textContent = msg;
+}
+
+function failStart(msg) {
+    const e = el('startErr');
+    e.textContent = msg;
+    e.classList.add('show');
+    const b = el('btnStart');
+    b.disabled = false;
+    b.textContent = 'Try again';
+}
+
+let THREE, renderer, scene, camera, arCam, gyro, swarm, weapons, audio;
+let wakeLock = null;
+
+// --- run state -------------------------------------------------------------
+const run = {
+    score: 0, lives: RULES.lives, wave: 1, killsThisWave: 0,
+    combo: 0, comboTimer: 0, spawnTimer: 0, over: false,
+};
+
+el('btnStart').addEventListener('click', async () => {
+    const b = el('btnStart');
+    b.disabled = true;
+    b.textContent = 'Starting…';
+    el('startErr').classList.remove('show');
+
+    // Motion first, camera second — both must originate from THIS gesture, and
+    // awaiting the camera first has been seen to lose the gesture context on
+    // iOS, after which requestPermission throws with no prompt ever shown.
+    THREE = await loadThree();
+    gyro = createARGyro(THREE);
+    const perm = await gyro.requestPermission();
+    if (!perm.granted) return failStart(perm.message || 'Motion access was denied. It is required to aim.');
+    gyro.start();
+
+    arCam = createARCamera(feed);
+    const cam = await arCam.start();
+    if (!cam.success) return failStart(cam.message || 'The camera could not be started.');
+
+    audio = createShooterAudio();
+    audio.unlock();
+
+    try { await startGame(); }
+    catch (err) {
+        console.error(err);
+        failStart('Failed to start: ' + (err && err.message ? err.message : err));
+    }
+});
+
+async function startGame() {
+    const canvas = el('scene');
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 0);
+
+    scene = new THREE.Scene();
+    // The player never translates; only the phone's attitude moves the camera.
+    camera = new THREE.PerspectiveCamera(fovForView(), 1, 0.05, 200);
+    createLightRig(THREE, scene);
+
+    swarm = createDroneSwarm(THREE, { capacity: 16, seed: 0xd0e5 });
+    scene.add(swarm.group);
+
+    weapons = createWeapons(THREE, {});
+    scene.add(weapons.group);
+
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', () => setTimeout(resize, 250));
+
+    gyro.snap();
+    beginRun();
+    requestAnimationFrame(frame);
+    window.__AR_READY = true;
+}
+
+function fovForView() {
+    return window.innerHeight >= window.innerWidth ? 63 : 46;
+}
+
+function resize() {
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.fov = fovForView();
+    camera.updateProjectionMatrix();
+}
+
+function beginRun() {
+    run.score = 0; run.lives = RULES.lives; run.wave = 1;
+    run.killsThisWave = 0; run.combo = 0; run.comboTimer = 0;
+    run.spawnTimer = 0; run.over = false;
+    swarm.reset();
+    weapons.reset();
+    swarm.setWave(1);
+
+    phase = 'playing';
+    el('cardStart').hidden = true;
+    el('cardOver').hidden = true;
+    el('hud').hidden = false;
+    el('reticleWrap').hidden = false;
+    el('fireBtn').hidden = false;
+    tapLayer.hidden = false;
+    syncHud();
+    banner('WAVE 1');
+    requestWakeLock();
+}
+
+// --- firing ----------------------------------------------------------------
+// Allocated lazily rather than at module scope: THREE does not exist until the
+// start button's handler has awaited loadThree().
+let _fwd = null, _muzzle = null;
+
+function shoot() {
+    if (phase !== 'playing' || !weapons.canFire()) return;
+    if (!_fwd) { _fwd = new THREE.Vector3(); _muzzle = new THREE.Vector3(); }
+    _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    // Spawn slightly ahead of the eye so the rocket is not born inside the near
+    // plane, which makes the first frame of every shot a full-screen smear.
+    _muzzle.copy(_fwd).multiplyScalar(0.55);
+    if (weapons.fire(_muzzle, _fwd)) audio.fire();
+}
+
+tapLayer.addEventListener('pointerdown', (e) => { shoot(); if (e.cancelable) e.preventDefault(); }, { passive: false });
+el('fireBtn').addEventListener('pointerdown', (e) => { shoot(); e.stopPropagation(); if (e.cancelable) e.preventDefault(); }, { passive: false });
+window.addEventListener('keydown', (e) => { if (e.code === 'Space') { shoot(); e.preventDefault(); } });
+el('btnAgain').addEventListener('click', beginRun);
+
+// --- hud -------------------------------------------------------------------
+let lastScore = -1, lastLives = -1, lastWave = -1, lastCombo = -1;
+function syncHud() {
+    if (run.score !== lastScore) { el('score').textContent = run.score; lastScore = run.score; }
+    if (run.wave !== lastWave) { el('wave').textContent = run.wave; lastWave = run.wave; }
+    if (run.lives !== lastLives) {
+        el('lives').textContent = '♥'.repeat(Math.max(0, run.lives)) + '·'.repeat(Math.max(0, RULES.lives - run.lives));
+        lastLives = run.lives;
+    }
+    const c = run.combo >= 2 ? run.combo : 0;
+    if (c !== lastCombo) { el('combo').innerHTML = c ? `×${c} COMBO` : '&nbsp;'; lastCombo = c; }
+}
+
+let bannerTimer = 0;
+function banner(text) {
+    const b = el('banner');
+    b.textContent = text;
+    b.classList.add('on');
+    bannerTimer = 1.5;
+}
+
+function damageFlash() {
+    const f = el('flash');
+    f.classList.add('on');
+    setTimeout(() => f.classList.remove('on'), 170);
+    if (navigator.vibrate) { try { navigator.vibrate(90); } catch (_) { /* unsupported */ } }
+}
+
+// --- wake lock -------------------------------------------------------------
+async function requestWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (_) { /* denied — the game still works */ }
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (phase === 'playing') requestWakeLock();
+    if (arCam) arCam.retryPlay();
+});
+
+// --- loop ------------------------------------------------------------------
+let last = performance.now();
+let fps = 0, fpsAccum = 0, frames = 0;
+let _aimFwd = null, _eye = null;
+
+function frame(now) {
+    try { frameBody(now); }
+    catch (err) { console.error(err); return; }   // stop rescheduling, keep the error
+    requestAnimationFrame(frame);
+}
+
+function frameBody(now) {
+    const rawDt = (now - last) / 1000;
+    last = now;
+    const dt = Math.min(Math.max(rawDt, 0), 0.05);
+
+    fpsAccum += rawDt; frames++;
+    if (fpsAccum >= 0.5) { fps = frames / fpsAccum; frames = 0; fpsAccum = 0; }
+
+    camera.quaternion.copy(gyro.update(dt));
+
+    if (phase === 'playing') {
+        // --- spawning ---------------------------------------------------
+        const want = RULES.concurrent(run.wave);
+        run.spawnTimer -= dt;
+        if (swarm.alive < want && run.spawnTimer <= 0) {
+            // Spawn arc widens with the wave. Wave 1 is 0.55 rad either side —
+            // matched to a portrait phone's ~31 degree horizontal FOV, so the
+            // opening drone is actually ON SCREEN. At the first value (0.95)
+            // roughly two thirds of wave one spawned outside the view and the
+            // game opened on an empty wall.
+            aimForward();
+            const viewAz = Math.atan2(_aimFwd.x, -_aimFwd.z);
+            swarm.spawn(viewAz, 0.55 + (run.wave - 1) * 0.62);
+            run.spawnTimer = Math.max(0.35, 1.5 - run.wave * 0.09);
+        }
+
+        // --- drones ------------------------------------------------------
+        const sw = swarm.update(dt);
+        if (sw.strikes > 0) {
+            run.lives -= sw.strikes;
+            run.combo = 0; run.comboTimer = 0;
+            damageFlash();
+            audio.damage();
+            if (run.lives <= 0) endRun();
+        }
+
+        // --- weapons -----------------------------------------------------
+        const wr = weapons.update(dt, swarm);
+        if (wr.kills > 0) {
+            run.comboTimer = RULES.comboWindow;
+            for (let k = 0; k < wr.kills; k++) {
+                run.combo++;
+                // Combo multiplies, capped so a lucky cluster cannot end the
+                // scoreboard. Multiplier is the combo count, max 5x.
+                run.score += RULES.killPoints * Math.min(run.combo, 5);
+                run.killsThisWave++;
+            }
+            audio.explode();
+            audio.kill(run.combo);
+            if (navigator.vibrate) { try { navigator.vibrate(28); } catch (_) { /* unsupported */ } }
+
+            if (run.killsThisWave >= RULES.quota(run.wave)) {
+                run.wave++;
+                run.killsThisWave = 0;
+                swarm.setWave(run.wave);
+                banner('WAVE ' + run.wave);
+                audio.wave();
+            }
+        }
+
+        if (run.comboTimer > 0) {
+            run.comboTimer -= dt;
+            if (run.comboTimer <= 0) run.combo = 0;
+        }
+
+        updateReticle();
+        updateArrow();
+        syncHud();
+    } else {
+        // Keep the swarm animating behind the game-over card so the scene is
+        // alive rather than frozen, but nothing can score or hurt you.
+        weapons.update(dt, null);
+    }
+
+    if (bannerTimer > 0) {
+        bannerTimer -= rawDt;
+        if (bannerTimer <= 0) el('banner').classList.remove('on');
+    }
+
+    renderer.setClearColor(0x000000, 0);
+    renderer.render(scene, camera);
+}
+
+/** Refresh `_aimFwd` from the camera. Zero allocation after the first call. */
+function aimForward() {
+    if (!_aimFwd) { _aimFwd = new THREE.Vector3(); _eye = new THREE.Vector3(0, 0, 0); }
+    _aimFwd.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    return _aimFwd;
+}
+
+function updateReticle() {
+    aimForward();
+    const locked = swarm.nearestInCone(_eye, _aimFwd, 30, 0.985) >= 0;
+    const r = el('reticle');
+    r.classList.toggle('locked', locked);
+    const cooling = !weapons.canFire();
+    r.classList.toggle('cooling', cooling);
+    el('fireBtn').classList.toggle('cooling', cooling);
+}
+
+let _proj = null, _camSpace = null;
+const ARROW_RADIUS = 0.34;   // fraction of the shorter viewport axis
+
+/**
+ * Point at the nearest drone while it is off-screen, and hide the pointer once
+ * it is in view. Uses camera space rather than only `project()`, because a
+ * point BEHIND the camera projects to coordinates that look perfectly valid
+ * and would swing the arrow to exactly the wrong side.
+ */
+function updateArrow() {
+    const arrow = el('arrow');
+    if (!swarm.alive) { arrow.hidden = true; return; }
+    if (!_proj) { _proj = new THREE.Vector3(); _camSpace = new THREE.Vector3(); }
+
+    // Nearest live drone by angle to the view, then by distance.
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < swarm.capacity; i++) {
+        if (!swarm.isAlive(i)) continue;
+        swarm.positionOf(i, _proj);
+        const d = _proj.lengthSq();
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best < 0) { arrow.hidden = true; return; }
+
+    swarm.positionOf(best, _proj);
+    _camSpace.copy(_proj).applyMatrix4(camera.matrixWorldInverse);
+    const inFront = _camSpace.z < 0;
+    _proj.project(camera);
+
+    let sx = _proj.x, sy = _proj.y;
+    if (!inFront) { sx = -sx; sy = -sy; }
+
+    if (inFront && Math.abs(sx) <= 0.88 && Math.abs(sy) <= 0.88) {
+        arrow.hidden = true;
+        return;
+    }
+
+    const len = Math.hypot(sx, sy) || 1e-4;
+    const nx = sx / len, ny = sy / len;
+    const px = window.innerWidth, py = window.innerHeight;
+    const rad = Math.min(px, py) * ARROW_RADIUS;
+    // NDC y is up, CSS y is down — hence the sign flip on both the offset and
+    // the rotation.
+    const deg = -Math.atan2(ny, nx) * 180 / Math.PI;
+    arrow.hidden = false;
+    arrow.style.transform = `translate(${(nx * rad).toFixed(1)}px, ${(-ny * rad).toFixed(1)}px) rotate(${deg.toFixed(1)}deg)`;
+}
+
+function endRun() {
+    phase = 'over';
+    run.lives = 0;
+    run.over = true;
+    audio.over();
+    el('hud').hidden = true;
+    el('reticleWrap').hidden = true;
+    el('arrow').hidden = true;
+    el('fireBtn').hidden = true;
+    tapLayer.hidden = true;
+    el('finalScore').textContent = run.score;
+    el('finalLine').textContent = `You held out to wave ${run.wave}.`;
+    el('cardOver').hidden = false;
+}
+
+// --- harness hook ----------------------------------------------------------
+window.__AR_STATS = () => ({
+    phase, fps,
+    drawCalls: renderer ? renderer.info.render.calls : 0,
+    triangles: renderer ? renderer.info.render.triangles : 0,
+    hasReading: gyro ? gyro.hasReading : false,
+    cameraActive: arCam ? arCam.active : false,
+    gameRunning: phase === 'playing',
+    score: run.score, lives: run.lives, wave: run.wave,
+    dronesAlive: swarm ? swarm.alive : 0,
+});
+</script>
+</body>
+</html>

@@ -53,6 +53,7 @@ function parseArgs(argv) {
         w: 390, h: 844, dpr: 3,
         wait: 25000,
         go: false,
+        fire: 0,
         settle: 1200,
     };
     for (let i = 2; i < argv.length; i++) {
@@ -61,7 +62,7 @@ function parseArgs(argv) {
         const key = a.replace(/^--/, '');
         if (key in out) out[key] = a.startsWith('--') ? argv[++i] : out[key];
     }
-    ['w', 'h', 'dpr', 'wait', 'settle'].forEach((k) => { out[k] = Number(out[k]); });
+    ['w', 'h', 'dpr', 'wait', 'settle', 'fire'].forEach((k) => { out[k] = Number(out[k]); });
     return out;
 }
 
@@ -170,9 +171,12 @@ try {
 
     await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-    // Cross the permission gate with a real tap.
-    await page.waitForSelector('#btnEnable', { timeout: 10000 });
-    await page.click('#btnEnable');
+    // Cross the permission gate with a real tap. Birb AR labels the gate
+    // #btnEnable and the shooter #btnStart; accept either so one harness
+    // covers both pages.
+    const gate = '#btnEnable, #btnStart';
+    await page.waitForSelector(gate, { timeout: 10000 });
+    await page.click(gate);
 
     await page.waitForFunction(() => window.__AR_READY === true, null, { timeout: args.wait });
 
@@ -186,6 +190,18 @@ try {
             null, { timeout: args.wait }
         );
         await page.waitForTimeout(2500);
+    }
+
+    // --fire: play the shooter for a few seconds, tapping the trigger. This is
+    // the only way to prove the rocket -> hit -> kill -> score path actually
+    // works; a still capture only proves something rendered.
+    if (args.fire > 0) {
+        const until = args.fire * 1000;
+        const step = 260;
+        for (let t = 0; t < until; t += step) {
+            await page.click('#fireBtn', { force: true }).catch(() => {});
+            await page.waitForTimeout(step);
+        }
     }
 
     await page.waitForTimeout(args.settle);
