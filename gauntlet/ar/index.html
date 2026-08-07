@@ -147,7 +147,7 @@
 import { loadThree } from '/gauntlet/src/core/three-loader.js';
 import { createARCamera, isCameraSupported, isSecure } from '/gauntlet/ar/src/ar-camera.js';
 import { createARGyro, isGyroSupported } from '/gauntlet/ar/src/ar-gyro.js';
-import { createARScreen, SCREEN_BASE_WIDTH } from '/gauntlet/ar/src/ar-screen.js';
+import { createARScreen, SCREEN_BASE_WIDTH, SCREEN_ASPECT } from '/gauntlet/ar/src/ar-screen.js';
 import { createPlacementControls } from '/gauntlet/ar/src/ar-placement.js';
 import { createGameView } from '/gauntlet/ar/src/game-view.js';
 
@@ -307,19 +307,32 @@ function currentViewAngles() {
 }
 
 /**
- * Distance at which the screen fills ~62% of the view's WIDTH.
+ * Distance at which the screen sits comfortably inside the view.
  *
- * A hardcoded default cannot work: the same 0.95m screen subtends 24 degrees on
- * a portrait phone (horizontal FOV ~31) and 12 on a landscape one (~55), so one
- * number is either overflowing the edges or a postage stamp. Solving for the
- * distance keeps the framing identical across phones, tablets and orientation.
+ * A hardcoded default cannot work: the same screen subtends very different
+ * angles on a portrait phone (horizontal FOV ~31 degrees) and a landscape one
+ * (~55), so one number either overflows the edges or is a postage stamp.
+ *
+ * BOTH axes are solved and the FURTHER distance wins. Fitting width alone was
+ * right only while the screen was landscape; a portrait screen on a portrait
+ * phone is height-constrained, and a width-only fit put its top and bottom off
+ * the ends of the view. The height budget is tighter than the width one because
+ * the bottom of the phone belongs to the stick and the boost pill.
  */
+const FIT_WIDTH = 0.62;
+const FIT_HEIGHT = 0.52;
+
 function framingDistance() {
+    const scale = arScreen.getPlacement().scale;
+    const halfW = (SCREEN_BASE_WIDTH * scale) / 2;
+    const halfH = (SCREEN_BASE_WIDTH / SCREEN_ASPECT * scale) / 2;
+
     const vFov = camera.fov * Math.PI / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const want = hFov * 0.62;
-    const half = (SCREEN_BASE_WIDTH * arScreen.getPlacement().scale) / 2;
-    return half / Math.tan(want / 2);
+
+    const byWidth = halfW / Math.tan((hFov * FIT_WIDTH) / 2);
+    const byHeight = halfH / Math.tan((vFov * FIT_HEIGHT) / 2);
+    return Math.max(byWidth, byHeight);
 }
 
 function toPlacing() {
@@ -436,9 +449,11 @@ function frameBody(now) {
         const a = currentViewAngles();
         arScreen.setPlacement({
             azimuth: a.azimuth,
-            // A touch below the eyeline: people hold a phone slightly above
-            // what they are looking at, and dead-centre reads as pasted on.
-            elevation: a.elevation - 0.06,
+            // A touch ABOVE the view centre. A portrait screen is tall, and the
+            // bottom of the phone belongs to the stick and the boost pill —
+            // biasing it up keeps the game clear of both thumbs. (It was biased
+            // down while the screen was landscape and had height to spare.)
+            elevation: a.elevation + 0.05,
             distance: framingDistance(),
         });
     }

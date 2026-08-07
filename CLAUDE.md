@@ -419,10 +419,25 @@ Things that cost a debugging round and must not be undone:
   not work either: that runs before the first rAF and before the first
   `deviceorientation` event, so the quaternion is still identity. It is deferred
   via `pendingFace`.
-- **Default distance is solved from the field of view, not hardcoded.** The same
-  0.95m screen subtends ~24° on a portrait phone (hFOV ~31°) and ~12° in
-  landscape (~55°). The first hardcoded pair (1.6m wide at 2.2m = 40° across)
-  hung off both edges with no way to see the whole thing.
+- **The screen is PORTRAIT (9:16), and so is the render target.** It shipped
+  16:10 landscape first and that was wrong three ways. The AR illusion needs the
+  room visible AROUND the screen, so it can only occupy ~62% of the view — on a
+  portrait phone that is 242 CSS px of width, and a 16:10 plane inside it is
+  151px tall, a postage stamp you cannot fly on. Portrait buys ~430px of height
+  from the same width, near 3x the area. It also frees the bottom third of the
+  phone for the stick and boost pill, which in landscape had nowhere to sit but
+  on top of the game. And Gauntlet is itself composed for portrait (its captures
+  are 390x844), so a landscape render target was off-design as well.
+- **Default distance is solved from the field of view, not hardcoded, on BOTH
+  axes.** The same screen subtends very different angles portrait vs landscape.
+  Fitting width alone was right only while the screen was landscape; a portrait
+  screen on a portrait phone is height-constrained, and a width-only fit put its
+  top and bottom off the ends of the view. `framingDistance()` solves both and
+  takes the further.
+- **The bezel is two textures, swapped — not one texture tinted.** The corner
+  ticks are painted cyan into the bitmap, so the old "not placing" state (tint
+  the material white) left them at full strength and the placement affordance
+  was on permanently, including mid-flight.
 - **`renderer.info.render` resets on every `render()` call.** The AR page renders
   twice — game into a `WebGLRenderTarget`, then the composite over the camera
   feed — so reading it after the composite reports 3 draw calls for a frame that

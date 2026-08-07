@@ -265,3 +265,10 @@ Recorded during the build so the plan and the code do not silently disagree.
    positional tracking every reachable placement is a point on a sphere around a
    stationary viewer anyway, which makes dragging a two-angle problem instead of
    a raycast-and-project one.
+6. **Portrait, not landscape** (changed after the first build). The plan's 16:10
+   screen assumed a TV mental model. Three things overrule it: the AR illusion
+   caps the screen at ~62% of the view, and inside a portrait phone's 242px of
+   width a 16:10 plane is only 151px tall — unplayable; the on-glass stick and
+   boost pill need vertical space the landscape layout does not have; and Birb
+   Mobile is itself a portrait game, so a portrait screen reads as *its* screen
+   rather than as a television. The render target followed to 9:16.

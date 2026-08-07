@@ -20,18 +20,31 @@
 
 import { PALETTE, CSS } from '/gauntlet/src/core/palette.js';
 
-/** 16:10, the shape of the game canvas it will end up showing. */
-export const SCREEN_ASPECT = 16 / 10;
+/**
+ * PORTRAIT, 9:16 — the shape of a phone, because that is what this object is:
+ * a Birb Mobile screen hanging in the room. Width / height, so < 1.
+ *
+ * This was 16:10 landscape for one build and that was wrong three ways. The AR
+ * illusion needs the room visible AROUND the screen, so the screen can only
+ * occupy ~62% of the view; on a portrait phone that is 242 CSS px of width, and
+ * a 16:10 plane inside it is 151px tall — a postage stamp you cannot play on.
+ * Turned portrait the same width buys ~430px of height, near 3x the area. It
+ * also frees the bottom third of the phone for the stick and boost pill, which
+ * in landscape had nowhere to sit except on top of the game. And Birb Mobile is
+ * itself a portrait game, so this reads as its screen rather than as a TV.
+ */
+export const SCREEN_ASPECT = 9 / 16;
 
 /**
- * Metres-ish at scale 1. Sized against the PHONE'S FIELD OF VIEW, not picked
- * for realism: a portrait phone has a horizontal FOV around 31 degrees, so the
- * first value tried here (1.6, a 63-inch TV) subtended 40 degrees at the
- * default 2.2m and hung off both edges of the screen with no way to see the
- * whole thing. At 0.95 it subtends ~23 degrees — framed, with room around it,
- * and still fills the view if you pinch it in to 1m.
+ * Metres-ish at scale 1. Physical size barely matters on its own because the
+ * page SOLVES the distance to frame it (see framingDistance in ar/index.html);
+ * what this really sets is how far away the screen ends up. 0.62 wide (so ~1.1
+ * tall) lands it about 1.8m away — an object across a room, not across a hall.
  */
-export const SCREEN_BASE_WIDTH = 0.95;
+export const SCREEN_BASE_WIDTH = 0.62;
+
+/** Frame thickness as a fraction of the screen's width. */
+const BEZEL_MARGIN = 0.055;
 
 export function createARScreen(THREE, opts = {}) {
     const quality = opts.quality || 'mid';
@@ -44,10 +57,18 @@ export function createARScreen(THREE, opts = {}) {
     const w = SCREEN_BASE_WIDTH;
     const h = SCREEN_BASE_WIDTH / SCREEN_ASPECT;
 
+    // The frame is a UNIFORM band around the display, so its plane is the
+    // screen plus the same margin on every side. The previous form scaled each
+    // axis by a different factor, which on a portrait screen produced a frame
+    // noticeably fatter on the short sides than the long ones.
+    const m = w * BEZEL_MARGIN;
+    const bw = w + m * 2;
+    const bh = h + m * 2;
+
     // --- glow (furthest back) ---------------------------------------------
     const glowTex = makeGlowTexture(THREE);
     const glow = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 1.9, h * 2.1),
+        new THREE.PlaneGeometry(bw * 1.85, bh * 1.55),
         new THREE.MeshBasicMaterial({
             map: glowTex,
             transparent: true,
@@ -61,11 +82,18 @@ export function createARScreen(THREE, opts = {}) {
     group.add(glow);
 
     // --- bezel -------------------------------------------------------------
-    const bezelTex = makeBezelTexture(THREE);
+    // Texture matches the frame plane's aspect so a uniform pad in canvas
+    // pixels maps to a uniform margin in the world.
+    // TWO textures, swapped — not one texture tinted. The corner ticks are
+    // painted cyan into the bitmap, so tinting the material white (the old
+    // "not placing" state) left them at full strength and the placement
+    // affordance was on permanently, including mid-flight.
+    const bezelPlacingTex = makeBezelTexture(THREE, bw, bh, m, true);
+    const bezelPlainTex = makeBezelTexture(THREE, bw, bh, m, false);
     const bezel = new THREE.Mesh(
-        new THREE.PlaneGeometry(w * 1.075, h * 1.115),
+        new THREE.PlaneGeometry(bw, bh),
         new THREE.MeshBasicMaterial({
-            map: bezelTex,
+            map: bezelPlacingTex,
             transparent: true,
             depthWrite: false,
             toneMapped: false,
@@ -138,10 +166,12 @@ export function createARScreen(THREE, opts = {}) {
 
     function showSplash() { setTexture(splashTex); }
 
-    /** Placement mode tints the bezel and lifts the glow so it reads as "armed". */
+    /** Placement mode shows the corner ticks and lifts the glow: "armed". */
+    let placing = true;
     function setPlacing(on) {
-        bezel.material.color.set(on ? CSS.uiCyan : '#ffffff');
-        glow.material.opacity = on ? 0.85 : 0.55;
+        placing = Boolean(on);
+        bezel.material.map = placing ? bezelPlacingTex : bezelPlainTex;
+        bezel.material.needsUpdate = true;
     }
 
     let t = 0;
@@ -149,8 +179,7 @@ export function createARScreen(THREE, opts = {}) {
         // A slow breath on the glow. Static geometry on a live camera feed reads
         // as a decal stuck to the lens; a little motion sells it as an object.
         t += dt;
-        const base = bezel.material.color.getHex() === 0xffffff ? 0.55 : 0.85;
-        glow.material.opacity = base + Math.sin(t * 1.4) * 0.06;
+        glow.material.opacity = (placing ? 0.85 : 0.55) + Math.sin(t * 1.4) * 0.06;
     }
 
     function dispose() {
@@ -159,7 +188,8 @@ export function createARScreen(THREE, opts = {}) {
             m.material.dispose();
         });
         glowTex.dispose();
-        bezelTex.dispose();
+        bezelPlacingTex.dispose();
+        bezelPlainTex.dispose();
         splashTex.dispose();
     }
 
@@ -202,41 +232,56 @@ function makeGlowTexture(THREE) {
     return finishTexture(THREE, c);
 }
 
-/** Rounded ink frame with corner ticks, in the Birb Labs cel language. */
-function makeBezelTexture(THREE) {
-    const W = 512, H = 320;
+/**
+ * Rounded ink frame with corner ticks, in the Birb Labs cel language.
+ * @param {number} bw frame width in world units
+ * @param {number} bh frame height in world units
+ * @param {number} margin band thickness in world units
+ */
+function makeBezelTexture(THREE, bw, bh, margin, withTicks) {
+    // Match the plane's aspect, so one pad value in pixels is one uniform band.
+    const W = 512;
+    const H = Math.round(W * (bh / bw));
     const c = canvasOf(W, H);
     const g = c.getContext('2d');
     g.clearRect(0, 0, W, H);
 
-    const r = 26, pad = 8;
-    roundRect(g, pad, pad, W - pad * 2, H - pad * 2, r);
+    const pad = (margin / bw) * W;      // the band, in canvas pixels
+    const r = pad * 2.4;
+
+    roundRect(g, 1, 1, W - 2, H - 2, r);
     g.fillStyle = CSS.ink || '#0d1b2a';
     g.fill();
 
     // Inner cream hairline so the frame reads as a moulded edge, not a slab.
-    g.lineWidth = 3;
+    g.lineWidth = Math.max(2, pad * 0.16);
     g.strokeStyle = 'rgba(245, 240, 225, 0.55)';
-    roundRect(g, pad + 7, pad + 7, W - (pad + 7) * 2, H - (pad + 7) * 2, r - 7);
+    roundRect(g, pad * 0.34, pad * 0.34, W - pad * 0.68, H - pad * 0.68, r * 0.8);
     g.stroke();
 
-    // Corner ticks — the visual grammar of "this thing is placeable".
-    g.strokeStyle = CSS.uiCyan || '#78f0ff';
-    g.lineWidth = 5;
-    g.lineCap = 'round';
-    const t = 34, m = pad + 15;
-    const corners = [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]];
-    for (const [x, y, sx, sy] of corners) {
-        g.beginPath();
-        g.moveTo(x + sx * t, y);
-        g.lineTo(x, y);
-        g.lineTo(x, y + sy * t);
-        g.stroke();
+    // Corner ticks — the visual grammar of "this thing is placeable". Only on
+    // the placing variant; once the run starts they are noise around the game.
+    if (withTicks) {
+        g.strokeStyle = CSS.uiCyan || '#78f0ff';
+        g.lineWidth = Math.max(3, pad * 0.26);
+        g.lineCap = 'round';
+        const t = pad * 1.9, off = pad * 0.5;
+        const corners = [
+            [off, off, 1, 1], [W - off, off, -1, 1],
+            [off, H - off, 1, -1], [W - off, H - off, -1, -1],
+        ];
+        for (const [x, y, sx, sy] of corners) {
+            g.beginPath();
+            g.moveTo(x + sx * t, y);
+            g.lineTo(x, y);
+            g.lineTo(x, y + sy * t);
+            g.stroke();
+        }
     }
 
     // Punch the middle out so the display shows through the frame.
     g.globalCompositeOperation = 'destination-out';
-    roundRect(g, pad + 12, pad + 12, W - (pad + 12) * 2, H - (pad + 12) * 2, r - 12);
+    roundRect(g, pad, pad, W - pad * 2, H - pad * 2, r * 0.55);
     g.fill();
 
     return finishTexture(THREE, c);
@@ -248,7 +293,10 @@ function makeBezelTexture(THREE) {
  * would break the artefact's zero-asset rule for the sake of one still frame.
  */
 function makeSplashTexture(THREE, quality) {
-    const W = 1024, H = 640;
+    // Portrait, matching SCREEN_ASPECT. Laid out top-down: sky and title in the
+    // upper half where the eye lands first, the planet's shoulder anchoring the
+    // bottom, bird between them.
+    const W = 576, H = 1024;
     const c = canvasOf(W, H);
     const g = c.getContext('2d');
 
@@ -263,55 +311,60 @@ function makeSplashTexture(THREE, quality) {
 
     // Sun disc + halo, matching sky.js's graphic treatment.
     g.fillStyle = 'rgba(255, 240, 190, 0.30)';
-    g.beginPath(); g.arc(W * 0.76, H * 0.24, 118, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(W * 0.78, H * 0.13, 92, 0, Math.PI * 2); g.fill();
     g.fillStyle = '#fff3c4';
-    g.beginPath(); g.arc(W * 0.76, H * 0.24, 62, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(W * 0.78, H * 0.13, 48, 0, Math.PI * 2); g.fill();
 
     // Cel clouds.
     g.fillStyle = 'rgba(255,255,255,0.9)';
-    cloud(g, W * 0.18, H * 0.26, 62);
-    cloud(g, W * 0.52, H * 0.15, 44);
-    cloud(g, W * 0.86, H * 0.46, 38);
+    cloud(g, W * 0.20, H * 0.11, 46);
+    cloud(g, W * 0.62, H * 0.235, 34);
+    // Kept clear of the title block below. At H*0.40 this one sat directly
+    // behind "MOBILE" and only a sliver escaped past the letters, which read as
+    // a rendering artefact rather than a cloud.
+    cloud(g, W * 0.16, H * 0.235, 28);
 
     // The planet's shoulder across the bottom — the signature of the game.
-    const ground = g.createLinearGradient(0, H * 0.6, 0, H);
+    const ground = g.createLinearGradient(0, H * 0.66, 0, H);
     ground.addColorStop(0, hex(PALETTE.meadowMid, '#54ac47'));
     ground.addColorStop(1, hex(PALETTE.meadowDeep, '#2f7a3f'));
     g.fillStyle = ground;
     g.beginPath();
-    g.ellipse(W * 0.5, H * 1.42, W * 0.95, H * 0.78, 0, 0, Math.PI * 2);
+    g.ellipse(W * 0.5, H * 1.30, W * 1.15, H * 0.56, 0, 0, Math.PI * 2);
     g.fill();
     g.lineWidth = 7;
     g.strokeStyle = hex(PALETTE.ink, '#0d1b2a');
     g.stroke();
 
     // A bird in silhouette, facing left, mid-flap.
-    drawBird(g, W * 0.30, H * 0.58, 1.25, hex(PALETTE.ink, '#0d1b2a'));
+    drawBird(g, W * 0.46, H * 0.585, 1.05, hex(PALETTE.ink, '#0d1b2a'));
 
-    // Title block.
+    // Title block. Two lines, because "BIRB MOBILE" on one line at 576px wide
+    // has to shrink to ~52px to fit and stops reading as a title.
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = '900 92px ui-rounded, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif';
-    g.lineWidth = 14;
     g.lineJoin = 'round';
-    g.strokeStyle = hex(PALETTE.ink, '#0d1b2a');
-    g.strokeText('BIRB MOBILE', W / 2, H * 0.35);
-    g.fillStyle = '#f7f1de';
-    g.fillText('BIRB MOBILE', W / 2, H * 0.35);
 
-    g.font = '800 34px ui-rounded, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif';
-    g.lineWidth = 9;
-    g.strokeStyle = hex(PALETTE.ink, '#0d1b2a');
-    g.strokeText('A R   M O D E', W / 2, H * 0.35 + 76);
-    g.fillStyle = hex(PALETTE.uiCyan, '#78f0ff');
-    g.fillText('A R   M O D E', W / 2, H * 0.35 + 76);
+    const titleAt = (text, y, size, fill) => {
+        g.font = `900 ${size}px ui-rounded, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif`;
+        g.lineWidth = size * 0.17;
+        g.strokeStyle = hex(PALETTE.ink, '#0d1b2a');
+        g.strokeText(text, W / 2, y);
+        g.fillStyle = fill;
+        g.fillText(text, W / 2, y);
+    };
 
-    g.font = '700 26px ui-rounded, "Trebuchet MS", system-ui, sans-serif';
-    g.fillStyle = 'rgba(255,255,255,0.86)';
+    titleAt('BIRB', H * 0.335, 104, '#f7f1de');
+    titleAt('MOBILE', H * 0.425, 104, '#f7f1de');
+    titleAt('A R   M O D E', H * 0.495, 34, hex(PALETTE.uiCyan, '#78f0ff'));
+
+    g.font = '700 23px ui-rounded, "Trebuchet MS", system-ui, sans-serif';
+    g.fillStyle = 'rgba(255,255,255,0.9)';
     // Must match the on-glass hint bar in ar/index.html. Pinch changes DISTANCE,
     // not scale — telling the player "resize" and then moving the screen away
     // from them is a small lie that makes the control feel broken.
-    g.fillText('Drag to move  ·  Pinch to push away', W / 2, H * 0.90);
+    g.fillText('Drag to move', W / 2, H * 0.885);
+    g.fillText('Pinch to push away', W / 2, H * 0.925);
 
     return finishTexture(THREE, c);
 }

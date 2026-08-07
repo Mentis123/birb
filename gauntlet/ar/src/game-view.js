@@ -24,8 +24,13 @@ import { PLANET_RADIUS, continentalHeight } from '/gauntlet/src/core/terrain.js'
 import { PALETTE, birdColorById } from '/gauntlet/src/core/palette.js';
 import { createLightRig } from '/gauntlet/src/core/toon.js';
 
-/** Fixed, modest, and 16:10 to match ar-screen.js's plane. */
-export const RT_SIZE = Object.freeze({ low: [640, 400], mid: [896, 560], high: [1152, 720] });
+/**
+ * Fixed, modest, and PORTRAIT 9:16 to match ar-screen.js's plane. Portrait is
+ * also the aspect Gauntlet is composed for — its chase camera and framing were
+ * tuned against 390x844 phone captures — so rendering it landscape for the AR
+ * screen was doubly off-design.
+ */
+export const RT_SIZE = Object.freeze({ low: [360, 640], mid: [504, 896], high: [648, 1152] });
 
 const BIRD_SCALE = 2.0;
 
