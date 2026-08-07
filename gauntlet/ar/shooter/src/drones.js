@@ -24,11 +24,18 @@ export const DRONE_TUNING = Object.freeze({
     radius: 0.40,           // visual size, metres
     hitRadius: 0.62,        // generous on purpose: you are aiming by waving a
                             // phone around a room, not with a mouse
-    // Room scale, not field scale. At the first values (7.5-13m) a drone
-    // subtended about 2.4 degrees — a speck you cannot pick out against real
-    // furniture, and 8 seconds of drifting before it was any threat.
-    spawnMin: 5.0,
-    spawnMax: 9.0,
+    // These set the REACTION TIME, which is what difficulty in this game
+    // actually is. At 5-9m and 0.95 m/s a wave-1 drone reached you in about 6
+    // seconds, and only 3.8 at the near end — not enough to sweep 360 degrees,
+    // find it, and line up a shot, so the whole game read as frantic.
+    //
+    // 9-15m gives ~10-17s at the wave-1 speed below. It was pulled IN to 5-9m
+    // during the first build on the theory that distant drones were too small
+    // to see; that was measured wrong. The body alone subtends ~3 degrees at
+    // 12m, but the bright ring is 1.75x the body radius and spans ~7 degrees,
+    // or about 85px on a portrait phone. They stay perfectly readable out here.
+    spawnMin: 9.0,
+    spawnMax: 15.0,
     /** How close a drone gets before it hits you. */
     strikeRange: 1.35,
     /** Vertical spawn window, radians. Kept inside a portrait phone's ~31.5
@@ -36,8 +43,12 @@ export const DRONE_TUNING = Object.freeze({
      *  are asking the player to point at their own ceiling. */
     elevMin: -0.25,
     elevMax: 0.45,
-    baseSpeed: 0.95,
-    speedPerWave: 0.14,
+    // Closing speed. Lowered with the spawn distance rather than instead of it:
+    // distance alone buys reaction time once, while speed governs how fast that
+    // margin erodes as the waves climb. The per-wave step is gentler too, so
+    // wave 6 escalates rather than spikes.
+    baseSpeed: 0.78,
+    speedPerWave: 0.10,
     weaveAmp: 0.55,
 });
 

@@ -219,8 +219,13 @@ let phase = 'start';
 
 const RULES = Object.freeze({
     lives: 3,
-    /** Drones on the field at once, by wave. */
-    concurrent: (w) => Math.min(3 + Math.floor(w * 0.8), 9),
+    /**
+     * Drones on the field at once, by wave. Ramps from wave 1 rather than
+     * FROM ZERO at wave 1: the old `3 + floor(w * 0.8)` had already added a
+     * drone by wave 2 and was at 7 by wave 5, which stacked on top of the
+     * closing speed and made the mid-game unmanageable. Now 3,3,4,5,5,6...
+     */
+    concurrent: (w) => Math.min(3 + Math.floor((w - 1) * 0.7), 8),
     /** Kills needed to clear a wave. */
     quota: (w) => 5 + w * 2,
     killPoints: 100,
@@ -433,15 +438,31 @@ function frameBody(now) {
         const want = RULES.concurrent(run.wave);
         run.spawnTimer -= dt;
         if (swarm.alive < want && run.spawnTimer <= 0) {
-            // Spawn arc widens with the wave. Wave 1 is 0.55 rad either side —
-            // matched to a portrait phone's ~31 degree horizontal FOV, so the
-            // opening drone is actually ON SCREEN. At the first value (0.95)
-            // roughly two thirds of wave one spawned outside the view and the
-            // game opened on an empty wall.
+            // Spawn arc widens with the wave, and wave 1 is deliberately inside
+            // the view so the game opens on a visible target.
+            //
+            // The arc is a HALF-width, so it must be compared against the
+            // HALF-FOV. A portrait phone's horizontal FOV is ~31 degrees, i.e.
+            // ~0.28 rad either side of centre — the previous 0.55 was the full
+            // FOV used as a half-width, so wave one still spawned over an arc
+            // twice as wide as the screen and half of it landed off-view.
             aimForward();
             const viewAz = Math.atan2(_aimFwd.x, -_aimFwd.z);
-            swarm.spawn(viewAz, 0.55 + (run.wave - 1) * 0.62);
-            run.spawnTimer = Math.max(0.35, 1.5 - run.wave * 0.09);
+            const halfFov = Math.atan(Math.tan(camera.fov * Math.PI / 360) * camera.aspect);
+            swarm.spawn(viewAz, halfFov * 0.9 + (run.wave - 1) * 0.62);
+            // FILL fast, REPLACE slow — two different jobs from one timer.
+            // The franticness came from replacement: at 1.41s a kill was
+            // replaced before you had finished turning to find the next one, so
+            // the field never thinned and the pressure never let up. But using
+            // that slow rate for the initial fill too made the opening limp,
+            // with one lonely drone at three seconds. So while the field is
+            // well short of its target it tops up briskly, and only the last
+            // slot in — the one that replaces something you just killed —
+            // takes its time.
+            const deficit = RULES.concurrent(run.wave) - swarm.alive;
+            run.spawnTimer = deficit >= 2
+                ? 0.65
+                : Math.max(0.6, 2.3 - run.wave * 0.13);
         }
 
         // --- drones ------------------------------------------------------
