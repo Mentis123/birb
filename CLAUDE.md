@@ -459,10 +459,18 @@ Its own hard-won details:
   those drones orbit a planet, take up from `normalize(pos)` and are placed
   against nests and terrain. Here the world is a living room and the player is
   a fixed point. Same silhouette, new module.
-- **Rockets home, gently (15° cone, capped turn rate), on purpose.** You are
+- **Rockets home, gently (7.6° cone, capped turn rate), on purpose.** You are
   aiming by waving a phone at a weaving target with no stick and no mouse. Pure
   ballistics tested as frustrating rather than skilful — every near miss read as
-  the game's fault.
+  the game's fault. It shipped at 15.2° and that was too generous (playtest:
+  "the homing helps too much"), so it was halved. Note the two scales when
+  tuning it: halving the cone halves the AIM ACCURACY demanded of the player,
+  but quarters the hit rate of an unaimed shot, because solid angle goes as the
+  square. The blind-fire harness score fell 4x for a 2x change.
+- **The reticle's lock light reads `WEAPON_TUNING.homingCone`, never a
+  literal.** It promises "a rocket fired now will steer onto that drone", so a
+  hardcoded threshold silently becomes a lie the moment the cone is retuned —
+  as it did, going gold ~2° wider than the homing would actually assist.
 - **Wave 1 spawns within ±0.55 rad of where you are already looking**, widening
   ~0.6 rad per wave. At the first value (±0.95) most of wave one spawned outside
   a portrait phone's ~31° horizontal FOV, so the game opened on an empty wall

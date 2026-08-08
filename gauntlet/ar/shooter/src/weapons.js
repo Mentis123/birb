@@ -26,9 +26,24 @@ export const WEAPON_TUNING = Object.freeze({
     rocketSpeed: 26,
     rocketLife: 1.6,
     rocketRadius: 0.16,
-    /** cos of the homing half-angle. 0.965 ~= 15 degrees. */
-    homingCone: 0.965,
-    homingRate: 3.4,          // radians/sec of course correction
+    /**
+     * cos of the homing HALF-angle. 0.991 ~= 7.6 degrees.
+     *
+     * This is the real measure of how much the game is helping: it is the
+     * angular error a shot can carry and still be saved. It started at 0.965
+     * (~15.2 degrees), which at 10m is a 2.7m forgiveness radius — wide enough
+     * that shots which plainly deserved to miss were landing, and the assist
+     * stopped feeling like assistance and started feeling like aimbot. Halved.
+     * A clean shot is still rescued from hand tremor; a lazy one is not.
+     */
+    homingCone: 0.991,
+    /**
+     * Radians/sec of course correction, halved alongside the cone so the pull
+     * stays proportionate to the window. Still ample: the worst case is now
+     * nulling 0.133 rad, which takes 0.078s — under a fifth of a metre of a
+     * typical 12m flight — so an acquired target is still reliably hit.
+     */
+    homingRate: 1.7,
     homingRange: 26,
     cooldown: 0.28,           // seconds between shots
     particleCount: 96,

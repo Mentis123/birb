@@ -206,7 +206,7 @@ import { loadThree } from '/gauntlet/src/core/three-loader.js';
 import { createARCamera, isCameraSupported, isSecure } from '/gauntlet/ar/src/ar-camera.js';
 import { createARGyro, isGyroSupported } from '/gauntlet/ar/src/ar-gyro.js';
 import { createDroneSwarm } from '/gauntlet/ar/shooter/src/drones.js';
-import { createWeapons } from '/gauntlet/ar/shooter/src/weapons.js';
+import { createWeapons, WEAPON_TUNING } from '/gauntlet/ar/shooter/src/weapons.js';
 import { createShooterAudio } from '/gauntlet/ar/shooter/src/audio.js';
 import { createLightRig } from '/gauntlet/src/core/toon.js';
 
@@ -531,7 +531,12 @@ function aimForward() {
 
 function updateReticle() {
     aimForward();
-    const locked = swarm.nearestInCone(_eye, _aimFwd, 30, 0.985) >= 0;
+    // Read from the weapon, never a literal. The lock light means exactly one
+    // thing — "a rocket fired now will steer onto that drone" — so it has to
+    // use the same cone the homing does. It was hardcoded to 0.985 (~9.9deg),
+    // which is now WIDER than the cone, and a reticle that goes gold on shots
+    // the game will not actually assist is worse than no reticle at all.
+    const locked = swarm.nearestInCone(_eye, _aimFwd, 30, WEAPON_TUNING.homingCone) >= 0;
     const r = el('reticle');
     r.classList.toggle('locked', locked);
     const cooling = !weapons.canFire();
