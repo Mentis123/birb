@@ -5,8 +5,8 @@ Unlisted browser-only procedural FPS dungeon crawler served at
 
 This directory contains the verified production bundle built by Grok Build
 from [`Mentis123/procedural-line-dungeon`](https://github.com/Mentis123/procedural-line-dungeon)
-at commit `6d97e83`, including corrected Neo Mac trackpad controls and the
-film-faithful, downward Matrix wall treatment.
+at commit `075dd52`, including corrected Neo Mac trackpad controls, dense
+downward Matrix walls, and lower varied mob silhouettes.
 
 The bundle is self-contained under this directory and uses relative asset
 paths so it can be hosted safely as a sibling Birb artefact. The root service
