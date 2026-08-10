@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Procedural Line Dungeon — first-person vector dungeon crawler" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Procedural Line Dungeon</title>
+    <script type="module" crossorigin src="./assets/index-NrBH8uYc.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-C0N2CFbO.css">
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas" aria-label="Dungeon game view"></canvas>
+
+      <div id="hud" class="overlay-layer hidden" aria-live="polite">
+        <div class="hud-top">
+          <div class="hud-block">
+            <span class="label">HP</span>
+            <div class="bar" id="hp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+              <div class="bar-fill" id="hp-fill"></div>
+            </div>
+            <span id="hp-text">100</span>
+          </div>
+          <div class="hud-block">
+            <span class="label">FLOOR</span>
+            <span id="floor-text">1</span>
+          </div>
+          <div class="hud-block">
+            <span class="label">SCORE</span>
+            <span id="score-text">0</span>
+          </div>
+          <div class="hud-block">
+            <span class="label">SEED</span>
+            <span id="seed-text">—</span>
+          </div>
+        </div>
+        <div class="crosshair" aria-hidden="true"></div>
+        <div id="message-toast" class="toast hidden" role="status"></div>
+        <div class="hud-bottom">
+          <span id="weapon-text">PULSE RIFLE</span>
+          <span id="ammo-hint">LMB FIRE · SHIFT SPRINT · ESC PAUSE</span>
+        </div>
+      </div>
+
+      <div id="screen-title" class="panel-screen" role="dialog" aria-labelledby="title-heading">
+        <div class="panel">
+          <p class="eyebrow">VECTOR PROTOCOL // v1.0</p>
+          <h1 id="title-heading">PROCEDURAL<br />LINE DUNGEON</h1>
+          <p class="tagline">
+            Descend seeded wireframe catacombs. Hunt phosphor specters.
+            Collect relics. Find the exit. Survive the next floor.
+          </p>
+          <div class="controls-box" aria-label="Controls">
+            <h2>CONTROLS</h2>
+            <ul>
+              <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</li>
+              <li><kbd>Mouse</kbd> Look (pointer lock)</li>
+              <li><kbd>LMB</kbd> Fire pulse</li>
+              <li><kbd>Shift</kbd> Sprint</li>
+              <li><kbd>Esc</kbd> Pause / unlock mouse</li>
+            </ul>
+          </div>
+          <label class="seed-field">
+            <span>SEED</span>
+            <input id="seed-input" type="text" spellcheck="false" autocomplete="off" aria-label="Dungeon seed" />
+          </label>
+          <div class="btn-row">
+            <button type="button" id="btn-start" class="btn primary">ENTER DUNGEON</button>
+            <button type="button" id="btn-random-seed" class="btn ghost">NEW SEED</button>
+          </div>
+          <p id="boot-error" class="error hidden" role="alert"></p>
+        </div>
+      </div>
+
+      <div id="screen-pause" class="panel-screen hidden" role="dialog" aria-labelledby="pause-heading">
+        <div class="panel compact">
+          <h2 id="pause-heading">PAUSED</h2>
+          <p>Pointer unlocked. Click resume to re-enter the dungeon.</p>
+          <div class="btn-row">
+            <button type="button" id="btn-resume" class="btn primary">RESUME</button>
+            <button type="button" id="btn-quit-title" class="btn ghost">TITLE</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="screen-death" class="panel-screen hidden" role="dialog" aria-labelledby="death-heading">
+        <div class="panel compact">
+          <h2 id="death-heading">SIGNAL LOST</h2>
+          <p id="death-summary">You fell on floor 1 with score 0.</p>
+          <div class="btn-row">
+            <button type="button" id="btn-retry" class="btn primary">RETRY SEED</button>
+            <button type="button" id="btn-death-new" class="btn ghost">NEW SEED</button>
+            <button type="button" id="btn-death-title" class="btn ghost">TITLE</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="screen-level" class="panel-screen hidden" role="dialog" aria-labelledby="level-heading">
+        <div class="panel compact">
+          <h2 id="level-heading">FLOOR CLEARED</h2>
+          <p id="level-summary">Descending deeper…</p>
+          <div class="btn-row">
+            <button type="button" id="btn-next-floor" class="btn primary">DESCEND</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

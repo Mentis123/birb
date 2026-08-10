@@ -3,16 +3,16 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-// Bumped for the /AR bypass below: the version change evicts CORE_CACHE on
-// activate, which is what heals a shell already overwritten by an AR page.
-const CACHE_VERSION = 'v14-2026-08-07';
+// Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
+// on activate so the new sibling route cannot inherit stale shell handling.
+const CACHE_VERSION = 'v15-2026-08-10';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
  * See the bypass in the fetch handler for why this is a correctness issue and
  * not housekeeping.
  */
-const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture', '/AR', '/ar'];
+const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture', '/grokrogue', '/AR', '/ar'];
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
