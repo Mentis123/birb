@@ -184,9 +184,9 @@
   }
 
   function createStarField() {
-    const count = window.innerWidth < 700 ? 420 : 760;
-    const positions = new Float32Array(count * 6);
-    const colors = new Float32Array(count * 6);
+    const count = window.innerWidth < 700 ? 620 : 980;
+    const positions = new Float32Array(count * 18);
+    const colors = new Float32Array(count * 18);
     const palette = [0x54efff, 0xffffff, 0xa475ff, 0x5d8dff];
 
     starData = [];
@@ -195,33 +195,29 @@
         angle: Math.random() * Math.PI * 2,
         radius: 3 + Math.pow(Math.random(), 0.58) * 21,
         z: -8 - Math.random() * 164,
-        length: 1.6 + Math.random() * 7,
-        speed: 0.72 + Math.random() * 0.75,
+        length: 4 + Math.pow(Math.random(), 0.65) * 16,
+        speed: 0.45 + Math.random() * 1.55,
+        width: 0.022 + Math.pow(Math.random(), 1.8) * 0.12,
+        brightness: 0.48 + Math.random() * 0.52,
         color: palette[Math.floor(Math.random() * palette.length)],
       };
       starData.push(star);
       writeStar(index, star, positions);
-
-      scratch.color.setHex(star.color);
-      for (let vertex = 0; vertex < 2; vertex += 1) {
-        const offset = index * 6 + vertex * 3;
-        colors[offset] = scratch.color.r;
-        colors[offset + 1] = scratch.color.g;
-        colors[offset + 2] = scratch.color.b;
-      }
+      writeStarColor(index, star, colors);
     }
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const material = new THREE.LineBasicMaterial({
+    const material = new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.82,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
-    starField = new THREE.LineSegments(geometry, material);
+    starField = new THREE.Mesh(geometry, material);
     starField.frustumCulled = false;
     scene.add(starField);
   }
@@ -229,13 +225,53 @@
   function writeStar(index, star, positions) {
     const x = Math.cos(star.angle) * star.radius;
     const y = Math.sin(star.angle) * star.radius;
-    const offset = index * 6;
-    positions[offset] = x;
-    positions[offset + 1] = y;
+    const acrossX = -Math.sin(star.angle);
+    const acrossY = Math.cos(star.angle);
+    const headWidth = star.width;
+    const tailWidth = star.width * 0.24;
+    const headLeftX = x + acrossX * headWidth;
+    const headLeftY = y + acrossY * headWidth;
+    const headRightX = x - acrossX * headWidth;
+    const headRightY = y - acrossY * headWidth;
+    const tailLeftX = x + acrossX * tailWidth;
+    const tailLeftY = y + acrossY * tailWidth;
+    const tailRightX = x - acrossX * tailWidth;
+    const tailRightY = y - acrossY * tailWidth;
+    const tailZ = star.z - star.length;
+    const offset = index * 18;
+
+    positions[offset] = headLeftX;
+    positions[offset + 1] = headLeftY;
     positions[offset + 2] = star.z;
-    positions[offset + 3] = x;
-    positions[offset + 4] = y;
-    positions[offset + 5] = star.z - star.length;
+    positions[offset + 3] = headRightX;
+    positions[offset + 4] = headRightY;
+    positions[offset + 5] = star.z;
+    positions[offset + 6] = tailLeftX;
+    positions[offset + 7] = tailLeftY;
+    positions[offset + 8] = tailZ;
+    positions[offset + 9] = headRightX;
+    positions[offset + 10] = headRightY;
+    positions[offset + 11] = star.z;
+    positions[offset + 12] = tailRightX;
+    positions[offset + 13] = tailRightY;
+    positions[offset + 14] = tailZ;
+    positions[offset + 15] = tailLeftX;
+    positions[offset + 16] = tailLeftY;
+    positions[offset + 17] = tailZ;
+  }
+
+  function writeStarColor(index, star, colors) {
+    scratch.color.setHex(star.color);
+    const head = star.brightness;
+    const tail = star.brightness * 0.16;
+    const brightnessByVertex = [head, head, tail, head, tail, tail];
+    let offset = index * 18;
+    brightnessByVertex.forEach((brightness) => {
+      colors[offset] = scratch.color.r * brightness;
+      colors[offset + 1] = scratch.color.g * brightness;
+      colors[offset + 2] = scratch.color.b * brightness;
+      offset += 3;
+    });
   }
 
   function createTunnelRings() {
@@ -263,8 +299,9 @@
     star.angle = Math.random() * Math.PI * 2;
     star.radius = 3 + Math.pow(Math.random(), 0.58) * 21;
     star.z = -155 - Math.random() * 22;
-    star.length = 1.6 + Math.random() * 7;
-    star.speed = 0.72 + Math.random() * 0.75;
+    star.length = 4 + Math.pow(Math.random(), 0.65) * 16;
+    star.speed = 0.45 + Math.random() * 1.55;
+    star.width = 0.022 + Math.pow(Math.random(), 1.8) * 0.12;
   }
 
   function updateTunnel(delta) {
@@ -792,7 +829,7 @@
     const pitch = THREE.MathUtils.clamp(scratch.relativeEuler.x, -CONFIG.maxAimRadians, CONFIG.maxAimRadians);
     state.aimTarget.set(
       THREE.MathUtils.clamp(-yaw / CONFIG.maxAimRadians, -0.94, 0.94),
-      THREE.MathUtils.clamp(-pitch / CONFIG.maxAimRadians, -0.9, 0.9)
+      THREE.MathUtils.clamp(pitch / CONFIG.maxAimRadians, -0.9, 0.9)
     );
   }
 
