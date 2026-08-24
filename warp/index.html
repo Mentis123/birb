@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#03030a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Warp Harvester</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main id="app">
+    <section id="startScreen" class="screen start-screen">
+      <div class="start-grid" aria-hidden="true"></div>
+      <div class="start-card">
+        <p class="eyebrow">SALVAGE LANE // 01</p>
+        <h1>WARP<br><span>HARVESTER</span></h1>
+        <p class="lede">Read the flow. Make the call. Keep the good stuff and blast the junk.</p>
+
+        <div class="rules" aria-label="Game rules">
+          <div class="rule rule-fire">
+            <div class="rule-object hazard-icon"><span></span></div>
+            <div><strong>RED = FIRE</strong><small>Destroy unstable debris</small></div>
+          </div>
+          <div class="rule rule-catch">
+            <div class="rule-object resource-icon"></div>
+            <div><strong>GREEN = CATCH</strong><small>Harvest clean fuel</small></div>
+          </div>
+        </div>
+
+        <p class="instruction">Point your phone to aim. On desktop, use the mouse. Your launch direction becomes the centre of the tunnel.</p>
+        <div id="startError" class="start-error" role="alert" hidden></div>
+        <button id="startButton" class="primary-button" type="button">
+          <span>ENTER THE LANE</span><b aria-hidden="true">&gt;&gt;</b>
+        </button>
+        <p class="microcopy">Best in landscape &middot; headphones recommended</p>
+      </div>
+    </section>
+
+    <section id="gameView" class="game-view" hidden>
+      <canvas id="gameCanvas" aria-label="Warp tunnel game"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+      <div class="scanlines" aria-hidden="true"></div>
+
+      <header class="hud">
+        <div class="hud-block identity">
+          <span class="hud-kicker">SALVAGE RUN</span>
+          <strong id="scoreDisplay">000000</strong>
+          <span id="comboDisplay" class="combo">CLEAN x1</span>
+        </div>
+
+        <div class="lane-status">
+          <span class="status-dot"></span>
+          <span id="laneStatus">LANE STABLE</span>
+        </div>
+
+        <div class="cargo-panel">
+          <div class="meter-row fuel-row">
+            <span>FUEL</span>
+            <div class="meter"><i id="fuelMeter"></i></div>
+            <b id="fuelDisplay">20</b>
+          </div>
+          <div class="meter-row junk-row">
+            <span>JUNK</span>
+            <div class="meter"><i id="junkMeter"></i></div>
+            <b id="junkDisplay">0</b>
+          </div>
+        </div>
+      </header>
+
+      <button id="calibrateButton" class="calibrate-button" type="button" aria-label="Recalibrate aiming">CAL</button>
+
+      <div id="reticle" class="reticle" aria-hidden="true">
+        <span class="reticle-ring"></span>
+        <span class="reticle-line line-top"></span>
+        <span class="reticle-line line-right"></span>
+        <span class="reticle-line line-bottom"></span>
+        <span class="reticle-line line-left"></span>
+        <em id="lockLabel">SEARCH</em>
+      </div>
+
+      <div id="feedback" class="feedback" role="status" aria-live="polite"></div>
+      <div id="speedReadout" class="speed-readout">WARP <b>1.0</b></div>
+
+      <div class="controls" aria-label="Actions">
+        <button id="fireButton" class="action-button fire-button" type="button">
+          <span class="button-glyph">&#9650;</span>
+          <strong>FIRE</strong>
+          <small>DESTROY RED</small>
+        </button>
+        <button id="catchButton" class="action-button catch-button" type="button">
+          <span class="button-glyph">&#9671;</span>
+          <strong>CATCH</strong>
+          <small>HARVEST GREEN</small>
+        </button>
+      </div>
+
+      <button id="pauseButton" class="pause-button" type="button" aria-label="Pause game">II</button>
+
+      <div id="pauseScreen" class="modal-screen" hidden>
+        <div class="modal-card">
+          <p class="eyebrow">LANE SUSPENDED</p>
+          <h2>PAUSED</h2>
+          <button id="resumeButton" class="primary-button" type="button">RESUME</button>
+        </div>
+      </div>
+
+      <div id="gameOverScreen" class="modal-screen" hidden>
+        <div class="modal-card game-over-card">
+          <p class="eyebrow">CARGO BAY CLOGGED</p>
+          <h2>RUN OVER</h2>
+          <div class="final-stats">
+            <div><span>SCORE</span><strong id="finalScore">0</strong></div>
+            <div><span>FUEL</span><strong id="finalFuel">0</strong></div>
+            <div><span>BEST CLEAN STREAK</span><strong id="finalCombo">0</strong></div>
+          </div>
+          <button id="restartButton" class="primary-button" type="button">RUN IT AGAIN</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/warp-game.js"></script>
+</body>
+</html>
