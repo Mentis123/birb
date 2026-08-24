@@ -252,6 +252,33 @@ h1 span {
   inset: 0;
   display: block;
   cursor: crosshair;
+  transition: filter 280ms ease;
+}
+
+.game-view::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 26%, rgba(66, 255, 158, 0.12) 64%, rgba(77, 232, 255, 0.24) 100%),
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(77, 232, 255, 0.07) 0deg 0.2deg, transparent 0.2deg 8deg);
+  mix-blend-mode: screen;
+}
+
+.game-view.overdrive #gameCanvas {
+  filter: saturate(1.35) brightness(1.12);
+}
+
+.game-view.overdrive::after {
+  animation: overdrive-pulse 760ms ease-in-out infinite alternate;
+}
+
+.game-view.overdrive .status-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 14px 4px var(--cyan);
 }
 
 .vignette,
@@ -344,6 +371,45 @@ h1 span {
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.1em;
+}
+
+.fuel-row {
+  grid-template-columns: 62px 1fr 31px;
+}
+
+.warp-cells {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  height: 8px;
+}
+
+.warp-cell {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(66, 255, 158, 0.34);
+  background: rgba(255, 255, 255, 0.08);
+  transform: skewX(-10deg);
+}
+
+.warp-cell b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: linear-gradient(90deg, #22d77b, var(--green));
+  box-shadow: 0 0 10px var(--green);
+  transition: width 220ms ease;
+}
+
+.game-view.overdrive .warp-cell {
+  border-color: var(--cyan);
+  box-shadow: 0 0 8px rgba(77, 232, 255, 0.6);
+}
+
+.game-view.overdrive .warp-cell b {
+  width: 100% !important;
+  background: linear-gradient(90deg, var(--green), var(--cyan));
+  animation: cell-thrum 420ms ease-in-out infinite alternate;
 }
 
 .meter-row + .meter-row {
@@ -691,6 +757,16 @@ body.flash-bad::after { background: rgba(255, 45, 85, 0.24); }
   to { opacity: 0; }
 }
 
+@keyframes overdrive-pulse {
+  from { opacity: 0.32; transform: scale(1); }
+  to { opacity: 0.72; transform: scale(1.025); }
+}
+
+@keyframes cell-thrum {
+  from { opacity: 0.7; }
+  to { opacity: 1; box-shadow: 0 0 14px 3px var(--cyan); }
+}
+
 @media (max-width: 620px) {
   .start-card {
     padding: 24px;
@@ -715,6 +791,14 @@ body.flash-bad::after { background: rgba(255, 45, 85, 0.24); }
   .meter-row {
     grid-template-columns: 31px 1fr 22px;
     gap: 5px;
+  }
+
+  .fuel-row {
+    grid-template-columns: 42px 1fr 25px;
+  }
+
+  .warp-cells {
+    gap: 2px;
   }
 
   .controls {

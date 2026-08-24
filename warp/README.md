@@ -4,14 +4,14 @@ An on-rails Three.js salvage game built as a separate sibling to `/AR`.
 
 ## Core loop
 
-- Aim at incoming objects with device orientation or the desktop pointer.
-- `FIRE` red hazards to destroy them.
-- `CATCH` green resources to add clean fuel.
-- Firing on green burns fuel.
-- Catching red adds junk to the cargo bay.
-- Unstopped red hazards also add junk; the run ends at 100 junk.
+- Aim at slow mining formations as they arc outward and stream past the cockpit.
+- `FIRE` red ore to crack it into three harvestable green cores.
+- `CATCH` green cores to charge three Warp Cells.
+- Filling all three cells triggers an eight-second Overdrive: x2 yield, wider lock-on, faster warp visuals, and an 18-junk cargo purge.
+- Firing on green vaporises charge; catching raw red ore adds junk.
+- Ignoring an object is safe. The run ends only when mistakes fill the cargo bay to 100 junk.
 
-Targets use both colour and silhouette: hazards are spiked and unstable, while resources are crystalline and ringed.
+Targets use both colour and silhouette: ore is red, spiked, and unstable, while resource cores are green, crystalline, and ringed. Consecutive correct decisions build the Refine streak and raise the score multiplier.
 
 ## Run locally
 

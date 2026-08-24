@@ -16,20 +16,20 @@
       <div class="start-card">
         <p class="eyebrow">SALVAGE LANE // 01</p>
         <h1>WARP<br><span>HARVESTER</span></h1>
-        <p class="lede">Read the flow. Make the call. Keep the good stuff and blast the junk.</p>
+        <p class="lede">Crack volatile ore, catch the clean cores, and light all three Warp Cells.</p>
 
         <div class="rules" aria-label="Game rules">
           <div class="rule rule-fire">
             <div class="rule-object hazard-icon"><span></span></div>
-            <div><strong>RED = FIRE</strong><small>Destroy unstable debris</small></div>
+            <div><strong>RED = CRACK</strong><small>Break ore into harvestable cores</small></div>
           </div>
           <div class="rule rule-catch">
             <div class="rule-object resource-icon"></div>
-            <div><strong>GREEN = CATCH</strong><small>Harvest clean fuel</small></div>
+            <div><strong>GREEN = CATCH</strong><small>Harvest cores before they stream past</small></div>
           </div>
         </div>
 
-        <p class="instruction">Point your phone to aim. On desktop, use the mouse. Your launch direction becomes the centre of the tunnel.</p>
+        <p class="instruction">Aim into the stream. Objects arc safely past you, so choose your moments. On desktop, use the mouse.</p>
         <div id="startError" class="start-error" role="alert" hidden></div>
         <button id="startButton" class="primary-button" type="button">
           <span>ENTER THE LANE</span><b aria-hidden="true">&gt;&gt;</b>
@@ -47,19 +47,23 @@
         <div class="hud-block identity">
           <span class="hud-kicker">SALVAGE RUN</span>
           <strong id="scoreDisplay">000000</strong>
-          <span id="comboDisplay" class="combo">CLEAN x1</span>
+          <span id="comboDisplay" class="combo">REFINE x1</span>
         </div>
 
         <div class="lane-status">
           <span class="status-dot"></span>
-          <span id="laneStatus">LANE STABLE</span>
+          <span id="laneStatus">MINING STREAM</span>
         </div>
 
         <div class="cargo-panel">
           <div class="meter-row fuel-row">
-            <span>FUEL</span>
-            <div class="meter"><i id="fuelMeter"></i></div>
-            <b id="fuelDisplay">20</b>
+            <span>WARP CELLS</span>
+            <div class="warp-cells" aria-label="Warp cell charge">
+              <i class="warp-cell"><b></b></i>
+              <i class="warp-cell"><b></b></i>
+              <i class="warp-cell"><b></b></i>
+            </div>
+            <b id="fuelDisplay">0%</b>
           </div>
           <div class="meter-row junk-row">
             <span>JUNK</span>
@@ -87,12 +91,12 @@
         <button id="fireButton" class="action-button fire-button" type="button">
           <span class="button-glyph">&#9650;</span>
           <strong>FIRE</strong>
-          <small>DESTROY RED</small>
+          <small>CRACK RED ORE</small>
         </button>
         <button id="catchButton" class="action-button catch-button" type="button">
           <span class="button-glyph">&#9671;</span>
           <strong>CATCH</strong>
-          <small>HARVEST GREEN</small>
+          <small>HARVEST GREEN CORE</small>
         </button>
       </div>
 
@@ -112,8 +116,8 @@
           <h2>RUN OVER</h2>
           <div class="final-stats">
             <div><span>SCORE</span><strong id="finalScore">0</strong></div>
-            <div><span>FUEL</span><strong id="finalFuel">0</strong></div>
-            <div><span>BEST CLEAN STREAK</span><strong id="finalCombo">0</strong></div>
+            <div><span>OVERDRIVES</span><strong id="finalFuel">0</strong></div>
+            <div><span>BEST REFINE STREAK</span><strong id="finalCombo">0</strong></div>
           </div>
           <button id="restartButton" class="primary-button" type="button">RUN IT AGAIN</button>
         </div>

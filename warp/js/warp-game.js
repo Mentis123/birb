@@ -7,13 +7,15 @@
     initialSpeed: 18,
     maximumSpeed: 34,
     speedRamp: 0.13,
-    targetCount: 6,
-    initialFuel: 20,
-    catchFuel: 12,
-    caughtJunk: 20,
-    impactJunk: 12,
-    burnedFuel: 7,
+    targetCount: 12,
+    initialFuel: 0,
+    catchFuel: 10,
+    fragmentFuel: 13,
+    caughtJunk: 24,
+    burnedFuel: 10,
     maxJunk: 100,
+    overdriveDuration: 8,
+    overdriveJunkPurge: 18,
     actionCooldown: 180,
     maxAimRadians: THREE.MathUtils.degToRad(45),
   });
@@ -27,7 +29,7 @@
     score: document.getElementById('scoreDisplay'),
     combo: document.getElementById('comboDisplay'),
     fuel: document.getElementById('fuelDisplay'),
-    fuelMeter: document.getElementById('fuelMeter'),
+    warpCells: [...document.querySelectorAll('.warp-cell b')],
     junk: document.getElementById('junkDisplay'),
     junkMeter: document.getElementById('junkMeter'),
     laneStatus: document.getElementById('laneStatus'),
@@ -60,6 +62,8 @@
     elapsed: 0,
     speed: CONFIG.initialSpeed,
     spawnTimer: 0,
+    overdriveTimer: 0,
+    overdrives: 0,
     lastActionAt: 0,
     aim: new THREE.Vector2(),
     aimTarget: new THREE.Vector2(),
@@ -390,32 +394,80 @@
     return group;
   }
 
-  function spawnTarget(zOverride, typeOverride, laneOverride) {
-    if (!state.playing || targets.length >= CONFIG.targetCount) return;
-    const type = typeOverride || (Math.random() < 0.5 ? 'red' : 'green');
-    const target = type === 'red' ? createHazard() : createResource();
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 0.18 + Math.pow(Math.random(), 0.75) * 0.48;
-    const laneX = laneOverride ? laneOverride.x : Math.cos(angle) * radius;
-    const laneY = laneOverride ? laneOverride.y : Math.sin(angle) * radius * 0.72;
+  function spawnTarget(options = {}) {
+    const isFragment = Boolean(options.isFragment);
+    const targetLimit = CONFIG.targetCount + (isFragment ? 5 : 0);
+    if (!state.playing || targets.length >= targetLimit) return null;
 
-    target.position.z = zOverride ?? (-82 - Math.random() * 28);
-    target.scale.setScalar(0.92 + Math.random() * 0.25);
+    const type = options.type || (Math.random() < 0.54 ? 'red' : 'green');
+    const target = type === 'red' ? createHazard() : createResource();
+    const exitAngle = options.exitAngle ?? Math.random() * Math.PI * 2;
+    const startRadius = options.startRadius ?? (0.04 + Math.random() * 0.12);
+    const endRadius = options.endRadius ?? (1.18 + Math.random() * 0.2);
+    const startLaneX = options.startLaneX ?? Math.cos(exitAngle) * startRadius;
+    const startLaneY = options.startLaneY ?? Math.sin(exitAngle) * startRadius * 0.72;
+    const endLaneX = options.endLaneX ?? Math.cos(exitAngle) * endRadius;
+    const endLaneY = options.endLaneY ?? Math.sin(exitAngle) * endRadius * 0.76;
+    const scale = options.scale ?? (0.88 + Math.random() * 0.22);
+
+    target.scale.setScalar(scale);
     target.userData.isWarpTarget = true;
     target.userData.type = type;
-    target.userData.laneX = laneX;
-    target.userData.laneY = laneY;
+    target.userData.isFragment = isFragment;
+    target.userData.fuelValue = options.fuelValue ?? CONFIG.catchFuel;
+    target.userData.age = options.age ?? 0;
+    target.userData.duration = options.duration ?? (5.7 + Math.random() * 1.35);
+    target.userData.startZ = options.startZ ?? (-62 - Math.random() * 10);
+    target.userData.endZ = options.endZ ?? -4.5;
+    target.userData.exitAngle = exitAngle;
+    target.userData.startLaneX = startLaneX;
+    target.userData.startLaneY = startLaneY;
+    target.userData.endLaneX = endLaneX;
+    target.userData.endLaneY = endLaneY;
+    target.userData.currentLaneX = startLaneX;
+    target.userData.currentLaneY = startLaneY;
+    target.userData.curve = options.curve ?? ((Math.random() - 0.5) * 0.16);
     target.userData.phase = Math.random() * Math.PI * 2;
-    target.userData.drift = 0.008 + Math.random() * 0.018;
+    target.userData.drift = isFragment ? 0.006 : 0.012 + Math.random() * 0.012;
     target.userData.spin = new THREE.Vector3(
       (Math.random() - 0.5) * 1.5,
       (Math.random() - 0.5) * 1.7,
       (Math.random() - 0.5) * 1.2
     );
+    target.position.z = target.userData.startZ;
     positionTargetInLane(target);
 
     scene.add(target);
     targets.push(target);
+    return target;
+  }
+
+  function spawnFormation() {
+    if (targets.length >= CONFIG.targetCount - 2) return;
+    const exitAngle = Math.random() * Math.PI * 2;
+    const count = Math.random() < 0.58 ? 3 : 2;
+    const radialX = Math.cos(exitAngle);
+    const radialY = Math.sin(exitAngle) * 0.76;
+    const tangentX = -Math.sin(exitAngle);
+    const tangentY = Math.cos(exitAngle) * 0.76;
+    const firstType = Math.random() < 0.62 ? 'red' : 'green';
+
+    for (let index = 0; index < count; index += 1) {
+      const offset = (index - (count - 1) * 0.5);
+      const type = index === 0 ? firstType : (Math.random() < 0.52 ? 'red' : 'green');
+      spawnTarget({
+        type,
+        exitAngle,
+        age: -index * 0.24,
+        startZ: -58 - index * 2.5,
+        startLaneX: radialX * (0.04 + index * 0.018) + tangentX * offset * 0.055,
+        startLaneY: radialY * (0.04 + index * 0.018) + tangentY * offset * 0.055,
+        endLaneX: radialX * (1.2 + index * 0.045) + tangentX * offset * 0.17,
+        endLaneY: radialY * (1.2 + index * 0.045) + tangentY * offset * 0.17,
+        duration: 6.1 + index * 0.32 + Math.random() * 0.55,
+        curve: offset * 0.075,
+      });
+    }
   }
 
   function positionTargetInLane(target) {
@@ -424,8 +476,8 @@
     const halfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) * depth;
     const driftX = Math.sin(state.elapsed * 1.45 + data.phase) * data.drift;
     const driftY = Math.cos(state.elapsed * 1.18 + data.phase) * data.drift * 0.7;
-    target.position.x = (data.laneX + driftX) * halfHeight * camera.aspect;
-    target.position.y = (data.laneY + driftY) * halfHeight;
+    target.position.x = (data.currentLaneX + driftX) * halfHeight * camera.aspect;
+    target.position.y = (data.currentLaneY + driftY) * halfHeight;
   }
 
   function removeTarget(target) {
@@ -451,7 +503,16 @@
     for (let index = targets.length - 1; index >= 0; index -= 1) {
       const target = targets[index];
       const data = target.userData;
-      target.position.z += state.speed * delta;
+      data.age += delta;
+      const progress = THREE.MathUtils.clamp(data.age / data.duration, 0, 1);
+      const laneProgress = progress * progress * (3 - 2 * progress);
+      const depthProgress = Math.pow(progress, 1.28);
+      const curvePulse = Math.sin(progress * Math.PI) * data.curve;
+      data.currentLaneX = THREE.MathUtils.lerp(data.startLaneX, data.endLaneX, laneProgress)
+        - Math.sin(data.exitAngle) * curvePulse;
+      data.currentLaneY = THREE.MathUtils.lerp(data.startLaneY, data.endLaneY, laneProgress)
+        + Math.cos(data.exitAngle) * curvePulse * 0.72;
+      target.position.z = THREE.MathUtils.lerp(data.startZ, data.endZ, depthProgress);
       positionTargetInLane(target);
       target.rotation.x += data.spin.x * delta;
       target.rotation.y += data.spin.y * delta;
@@ -467,27 +528,42 @@
         data.pulseMaterials[0].emissiveIntensity = (data.type === 'red' ? 1.8 : 0.72) * pulse;
       }
 
-      if (target.position.z > -2.5) {
+      if (progress >= 1) {
         handlePass(target);
       }
     }
   }
 
   function handlePass(target) {
-    if (target.userData.type === 'red') {
-      state.junk = Math.min(CONFIG.maxJunk, state.junk + CONFIG.impactJunk);
-      resetCombo();
-      showFeedback(`JUNK IMPACT +${CONFIG.impactJunk}`, 'bad');
-      flash('bad');
-      audio.mistake();
-      vibrate([80, 45, 80]);
-    } else {
-      resetCombo();
-      showFeedback('RESOURCE LOST', 'neutral');
-    }
     removeTarget(target);
-    updateHud();
-    checkGameOver();
+  }
+
+  function releaseResourceFragments(target) {
+    const data = target.userData;
+    const startX = data.currentLaneX;
+    const startY = data.currentLaneY;
+    const startZ = target.position.z;
+    const baseAngle = data.exitAngle;
+
+    [-1, 0, 1].forEach((offset, index) => {
+      const angle = baseAngle + offset * 0.24;
+      const endRadius = 1.22 + index * 0.06;
+      spawnTarget({
+        type: 'green',
+        isFragment: true,
+        fuelValue: CONFIG.fragmentFuel,
+        exitAngle: angle,
+        startZ,
+        endZ: -3.5,
+        startLaneX: startX + offset * 0.018,
+        startLaneY: startY - Math.abs(offset) * 0.012,
+        endLaneX: Math.cos(angle) * endRadius,
+        endLaneY: Math.sin(angle) * endRadius * 0.76,
+        duration: 3.65 + index * 0.28,
+        scale: 0.54 + Math.random() * 0.08,
+        curve: offset * 0.12,
+      });
+    });
   }
 
   function findLockedTarget() {
@@ -499,8 +575,10 @@
       scratch.projected.copy(target.position).project(camera);
       if (scratch.projected.z < -1 || scratch.projected.z > 1) return;
       const distance = Math.hypot(scratch.projected.x - state.aim.x, scratch.projected.y - state.aim.y);
-      const depthAssist = THREE.MathUtils.clamp((target.position.z + 90) / 80, 0, 1);
-      const lockRadius = 0.105 + depthAssist * 0.085;
+      const progress = THREE.MathUtils.clamp(target.userData.age / target.userData.duration, 0, 1);
+      const fragmentAssist = target.userData.isFragment ? 0.035 : 0;
+      const overdriveAssist = state.overdriveTimer > 0 ? 0.075 : 0;
+      const lockRadius = 0.105 + progress * 0.09 + fragmentAssist + overdriveAssist;
       if (distance < lockRadius && distance < bestDistance) {
         best = target;
         bestDistance = distance;
@@ -522,7 +600,7 @@
     if (state.lockedTarget) {
       const type = state.lockedTarget.userData.type;
       dom.reticle.classList.add(type === 'red' ? 'lock-red' : 'lock-green');
-      dom.lockLabel.textContent = type === 'red' ? 'HAZARD // FIRE' : 'RESOURCE // CATCH';
+      dom.lockLabel.textContent = type === 'red' ? 'ORE // FIRE' : 'CORE // CATCH';
     } else {
       dom.lockLabel.textContent = 'SEARCH';
     }
@@ -546,8 +624,6 @@
     if (!target) {
       createTracer(action, null);
       showFeedback(action === 'fire' ? 'SHOT WIDE' : 'NO LOCK', 'neutral');
-      resetCombo();
-      updateHud();
       return;
     }
 
@@ -559,16 +635,20 @@
       state.combo += 1;
       state.bestCombo = Math.max(state.bestCombo, state.combo);
       const multiplier = Math.min(5, 1 + Math.floor(state.combo / 4));
-      const points = 100 * multiplier;
+      const overdriveMultiplier = state.overdriveTimer > 0 ? 2 : 1;
+      const points = (type === 'red' ? 75 : 100) * multiplier * overdriveMultiplier;
       state.score += points;
 
       if (type === 'green') {
-        state.fuel = Math.min(100, state.fuel + CONFIG.catchFuel);
+        const fuelValue = target.userData.fuelValue;
+        state.fuel = Math.min(100, state.fuel + fuelValue);
         createCaptureEffect(target);
-        showFeedback(`CLEAN CATCH +${CONFIG.catchFuel} FUEL`, 'good');
+        showFeedback(`CORE BANKED +${fuelValue}%`, 'good');
+        if (state.fuel >= 100) activateOverdrive();
       } else {
         createExplosion(target.position.clone(), 0xff3157);
-        showFeedback(`HAZARD CLEARED +${points}`, 'good');
+        releaseResourceFragments(target);
+        showFeedback('ORE CRACKED // 3 CORES', 'good');
       }
       flash('good');
       audio.success(type);
@@ -578,11 +658,11 @@
       if (action === 'fire') {
         state.fuel = Math.max(0, state.fuel - CONFIG.burnedFuel);
         createExplosion(target.position.clone(), 0x42ff9e);
-        showFeedback(`RESOURCE BURNED -${CONFIG.burnedFuel} FUEL`, 'bad');
+        showFeedback(`CORE VAPORISED -${CONFIG.burnedFuel}%`, 'bad');
       } else {
         state.junk = Math.min(CONFIG.maxJunk, state.junk + CONFIG.caughtJunk);
         createCaptureEffect(target, true);
-        showFeedback(`JUNK CAPTURED +${CONFIG.caughtJunk}`, 'bad');
+        showFeedback(`RAW ORE IN CARGO +${CONFIG.caughtJunk} JUNK`, 'bad');
       }
       flash('bad');
       audio.mistake();
@@ -592,6 +672,29 @@
     removeTarget(target);
     updateHud();
     checkGameOver();
+  }
+
+  function activateOverdrive() {
+    state.fuel = 0;
+    state.overdrives += 1;
+    state.overdriveTimer = CONFIG.overdriveDuration;
+    state.junk = Math.max(0, state.junk - CONFIG.overdriveJunkPurge);
+    state.score += 500;
+    dom.gameView.classList.add('overdrive');
+    showFeedback(`OVERDRIVE // x2 YIELD // -${CONFIG.overdriveJunkPurge} JUNK`, 'good');
+    flash('good');
+    audio.catch();
+    window.setTimeout(() => audio.success('green'), 120);
+    vibrate([45, 30, 45, 30, 100]);
+  }
+
+  function updateOverdrive(delta) {
+    if (state.overdriveTimer <= 0) return;
+    state.overdriveTimer = Math.max(0, state.overdriveTimer - delta);
+    if (state.overdriveTimer === 0) {
+      dom.gameView.classList.remove('overdrive');
+      showFeedback('OVERDRIVE COOLED', 'neutral');
+    }
   }
 
   function createTracer(action, targetPosition) {
@@ -715,13 +818,24 @@
   function updateHud() {
     const multiplier = Math.min(5, 1 + Math.floor(state.combo / 4));
     dom.score.textContent = String(Math.max(0, state.score)).padStart(6, '0');
-    dom.combo.textContent = state.combo > 0 ? `CLEAN ${state.combo} // x${multiplier}` : 'CLEAN x1';
-    dom.fuel.textContent = Math.round(state.fuel);
-    dom.fuelMeter.style.width = `${state.fuel}%`;
+    const yieldLabel = state.overdriveTimer > 0 ? ` // YIELD x${multiplier * 2}` : ` // x${multiplier}`;
+    dom.combo.textContent = state.combo > 0 ? `REFINE ${state.combo}${yieldLabel}` : 'REFINE x1';
+    dom.fuel.textContent = `${Math.round(state.fuel)}%`;
+    const cellCapacity = 100 / dom.warpCells.length;
+    dom.warpCells.forEach((cell, index) => {
+      const fill = THREE.MathUtils.clamp((state.fuel - index * cellCapacity) / cellCapacity, 0, 1) * 100;
+      cell.style.width = `${fill}%`;
+    });
     dom.junk.textContent = Math.round(state.junk);
     dom.junkMeter.style.width = `${state.junk}%`;
     dom.speed.textContent = (state.speed / CONFIG.initialSpeed).toFixed(1);
-    dom.laneStatus.textContent = state.junk >= 75 ? 'CARGO CRITICAL' : state.junk >= 45 ? 'CONTAMINATION RISING' : 'LANE STABLE';
+    dom.laneStatus.textContent = state.overdriveTimer > 0
+      ? `OVERDRIVE ${state.overdriveTimer.toFixed(1)} // x2`
+      : state.junk >= 75
+        ? 'CARGO CRITICAL'
+        : state.junk >= 45
+          ? 'CONTAMINATION RISING'
+          : 'MINING STREAM';
   }
 
   function showFeedback(message, tone) {
@@ -746,8 +860,10 @@
   function checkGameOver() {
     if (state.junk < CONFIG.maxJunk) return;
     state.playing = false;
+    state.overdriveTimer = 0;
+    dom.gameView.classList.remove('overdrive');
     dom.finalScore.textContent = state.score;
-    dom.finalFuel.textContent = Math.round(state.fuel);
+    dom.finalFuel.textContent = state.overdrives;
     dom.finalCombo.textContent = state.bestCombo;
     dom.gameOverScreen.hidden = false;
     showFeedback('CARGO BAY CLOGGED', 'bad');
@@ -764,6 +880,8 @@
     state.elapsed = 0;
     state.speed = CONFIG.initialSpeed;
     state.spawnTimer = 0;
+    state.overdriveTimer = 0;
+    state.overdrives = 0;
     state.lastActionAt = 0;
     state.aim.set(0, 0);
     state.aimTarget.set(0, 0);
@@ -773,16 +891,16 @@
     state.paused = false;
     dom.pauseScreen.hidden = true;
     dom.gameOverScreen.hidden = true;
+    dom.gameView.classList.remove('overdrive');
 
     const openingRun = [
-      { z: -52, type: 'red', x: -0.28, y: 0.08 },
-      { z: -72, type: 'green', x: 0.3, y: -0.07 },
-      { z: -92, type: 'red', x: 0.5, y: 0.25 },
-      { z: -112, type: 'green', x: -0.52, y: -0.24 },
+      { type: 'red', exitAngle: 3.05, age: 1.2, duration: 6.5, endRadius: 1.28 },
+      { type: 'green', exitAngle: 0.15, age: 0.35, duration: 6.8, endRadius: 1.24 },
+      { type: 'red', exitAngle: 2.1, age: -0.8, duration: 6.7, endRadius: 1.3 },
     ];
-    openingRun.forEach((target) => spawnTarget(target.z, target.type, target));
+    openingRun.forEach((target) => spawnTarget(target));
     updateHud();
-    showFeedback('LANE OPEN', 'neutral');
+    showFeedback('STREAM OPEN // CRACK RED FIRST', 'neutral');
   }
 
   async function requestOrientationPermission() {
@@ -905,11 +1023,13 @@
 
       if (state.playing) {
         state.elapsed += delta;
-        state.speed = Math.min(CONFIG.maximumSpeed, CONFIG.initialSpeed + state.elapsed * CONFIG.speedRamp);
+        updateOverdrive(delta);
+        const baseSpeed = Math.min(CONFIG.maximumSpeed, CONFIG.initialSpeed + state.elapsed * CONFIG.speedRamp);
+        state.speed = Math.min(CONFIG.maximumSpeed * 1.2, baseSpeed * (state.overdriveTimer > 0 ? 1.22 : 1));
         state.spawnTimer -= delta;
-        if (state.spawnTimer <= 0 && targets.length < CONFIG.targetCount) {
-          spawnTarget();
-          state.spawnTimer = Math.max(0.58, 1.25 - state.elapsed * 0.006);
+        if (state.spawnTimer <= 0 && targets.length < CONFIG.targetCount - 2) {
+          spawnFormation();
+          state.spawnTimer = Math.max(2.05, 2.85 - state.elapsed * 0.004);
         }
         updateTargets(delta);
         updateHud();
