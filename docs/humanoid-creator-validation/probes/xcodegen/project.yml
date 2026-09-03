@@ -1,0 +1,10 @@
+name: Humanoid
+options: { bundleIdPrefix: com.mentis, deploymentTarget: { iOS: "17.0" } }
+packages: { HumanoidProbe: { path: ../probe } }
+targets:
+  HumanoidApp:
+    type: application
+    platform: iOS
+    sources: [HumanoidApp]
+    dependencies: [ { package: HumanoidProbe, product: HumanoidCore } ]
+    settings: { base: { TARGETED_DEVICE_FAMILY: "2", SWIFT_OBJC_INTEROP_MODE: objcxx } }

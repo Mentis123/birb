@@ -31,5 +31,12 @@ blender --background --python blender/check_import_ufbx_cpp.py -- $S/ufbxw_limb.
 cd swift-headless && swift test
 ```
 
+Also included (from the research agents' own probes, same container):
+
+- `gltf-vrm/` — ~80-line Python skinned-GLB writer + Khronos `gltf-validator` runner (`npm i` then `node val.js spike.glb`; expect 0 errors / 0 warnings).
+- `swift-cxx-interop/` — SwiftPM package proving Swift ↔ C (ufbx) and Swift ↔ C++ (tiny_bvh.h via `.interoperabilityMode(.Cxx)`) on Linux with XCTest + Swift Testing. Copy `ufbx.c` into `Sources/UFBX/` and `tiny_bvh.h` into `Sources/GeometryBridge/` first. With Swift 6.3.3 set `SWIFT_FORCE_MODULE_LOADING=prefer-interface`.
+- `xcodegen/` — the `project.yml` that XcodeGen (built from source on Linux) turned into an iOS application `.xcodeproj` depending on the local package. Needs `USER`/`LOGNAME` set. Opening in Xcode 26 is unverified.
+- `autodesk-pkg-check/analyze_pkg.py` — parses every Mach-O member of an Autodesk FBX SDK `.pkg.tgz` and prints its `LC_BUILD_VERSION` platform. This is how the mis-built 2020.3.7/.9/.10 "iOS" packages were detected (platform=1 = macOS).
+
 Results are summarised in `RESULTS.md`. Unity itself cannot run here; every file that passes all three
 oracles still needs the Unity 2022.3.22f1 Humanoid import on the Mac.
