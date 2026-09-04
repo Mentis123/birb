@@ -28,8 +28,9 @@ public enum Mannequin {
     public static func build(skeleton: Skeleton = .defaultHumanoid(),
                              options: Options = Options()) -> MeshData {
         var builder = Builder(skeleton: skeleton, options: options)
-        for (i, chain) in chains(for: skeleton).enumerated() {
-            builder.sweep(chain, row: i, rowCount: chains(for: skeleton).count)
+        let allChains = chains(for: skeleton)
+        for (i, chain) in allChains.enumerated() {
+            builder.sweep(chain, row: i, rowCount: allChains.count)
         }
         var mesh = builder.finish()
         mesh.recomputeNormals()
@@ -66,8 +67,15 @@ public enum Mannequin {
         let capEnd: Bool
     }
 
+    /// Chains whose bones are all present. A skeleton missing bones is a
+    /// programming error rather than user input, but degrading to "skip that
+    /// limb" beats trapping: callers such as the negative corpus cases hand in
+    /// deliberately broken rigs, and the rig gate is what should report them.
     static func chains(for s: Skeleton) -> [Chain] {
-        func p(_ b: HumanBone) -> Vec3 { s.restPosition(of: b)! }
+        func p(_ b: HumanBone) -> Vec3 { s.restPosition(of: b) ?? .zero }
+        func complete(_ chain: Chain) -> Bool {
+            chain.bones.allSatisfy { s.index(of: $0) != nil }
+        }
         var out: [Chain] = [
             Chain(bones: [.hips, .spine, .chest],
                   joints: [p(.hips), p(.spine), p(.chest), p(.neck)],
@@ -92,7 +100,7 @@ public enum Mannequin {
                 radii: [0.098, 0.062, 0.052, 0.042, 0.030],
                 sides: 28, stepsPerSegment: 7, capStart: true, capEnd: true))
         }
-        return out
+        return out.filter(complete)
     }
 
     // MARK: - Sweep
@@ -106,7 +114,7 @@ public enum Mannequin {
         var influences = [[MeshData.Influence]]()
 
         mutating func sweep(_ chain: Chain, row: Int, rowCount: Int) {
-            let stations = Self.stations(of: chain)
+            let stations = Self.stations(of: chain, skeleton: skeleton)
             guard stations.count >= 2 else { return }
 
             // Parallel transport a reference vector so consecutive rings stay
@@ -186,7 +194,7 @@ public enum Mannequin {
         }
 
         /// Samples the chain, assigning each station its blended bone weights.
-        static func stations(of chain: Chain) -> [Station] {
+        static func stations(of chain: Chain, skeleton: Skeleton) -> [Station] {
             var out = [Station]()
             let segmentCount = chain.bones.count
             for seg in 0..<segmentCount {
@@ -201,7 +209,8 @@ public enum Mannequin {
                     out.append(Station(position: a + (b - a) * t,
                                        radius: radius,
                                        influences: blend(chain: chain, segment: seg, t: t,
-                                                         segmentLength: segLength, radius: radius)))
+                                                         segmentLength: segLength, radius: radius,
+                                                         skeleton: skeleton)))
                 }
             }
             return out
@@ -214,7 +223,8 @@ public enum Mannequin {
         /// reaching an even split exactly at the joint. The window scales with
         /// the local radius, which is what keeps an elbow from creasing.
         static func blend(chain: Chain, segment: Int, t: Double,
-                          segmentLength: Double, radius: Double) -> [MeshData.Influence] {
+                          segmentLength: Double, radius: Double,
+                          skeleton: Skeleton) -> [MeshData.Influence] {
             let window = max(1e-6, min(1.2 * radius, segmentLength))
             var weights = [HumanBone: Double]()
             weights[chain.bones[segment], default: 0] += 1.0
@@ -231,11 +241,14 @@ public enum Mannequin {
                 weights[chain.bones[segment], default: 0] -= s
                 weights[chain.bones[segment - 1], default: 0] += s
             }
-            return normalise(weights)
+            return normalise(weights, skeleton: skeleton)
         }
 
-        static func normalise(_ weights: [HumanBone: Double]) -> [MeshData.Influence] {
-            let skeleton = Skeleton.defaultHumanoid()
+        /// Resolves bone indices against the skeleton actually being built.
+        /// Looking them up in a fresh default rig would silently mis-address
+        /// weights for any skeleton whose bone set or order differs.
+        static func normalise(_ weights: [HumanBone: Double],
+                              skeleton: Skeleton) -> [MeshData.Influence] {
             var pairs = weights.compactMap { bone, w -> (Int, Double)? in
                 guard w > 1e-6, let idx = skeleton.index(of: bone) else { return nil }
                 return (idx, w)

@@ -1,6 +1,7 @@
 import Foundation
 import HumanoidCore
 import ExporterVRM
+import ExporterFBX
 
 // Command line front end used by CI and by the Phase 0 export gate.
 //
@@ -115,13 +116,20 @@ case "corpus":
 
         if report.passes {
             do {
-                let data = try VRMExporter.export(snapshot)
-                let url = root.appendingPathComponent("\(c.name).vrm")
-                try data.write(to: url)
-                entry["file"] = url.lastPathComponent
-                entry["bytes"] = data.count
-                print(String(format: "  %-20s %6d tris  %7d bytes  %@", (c.name as NSString).utf8String!,
-                             mesh.triangleCount, data.count, "written"))
+                let vrmData = try VRMExporter.export(snapshot)
+                let vrmURL = root.appendingPathComponent("\(c.name).vrm")
+                try vrmData.write(to: vrmURL)
+                entry["vrm"] = vrmURL.lastPathComponent
+                entry["vrmBytes"] = vrmData.count
+
+                let fbxURL = root.appendingPathComponent("\(c.name).fbx")
+                try FBXExporter.export(snapshot, to: fbxURL)
+                let fbxBytes = (try? Data(contentsOf: fbxURL).count) ?? 0
+                entry["fbx"] = fbxURL.lastPathComponent
+                entry["fbxBytes"] = fbxBytes
+
+                print(String(format: "  %-20@  %5d tris   vrm %7d B   fbx %7d B",
+                             c.name as NSString, mesh.triangleCount, vrmData.count, fbxBytes))
             } catch {
                 problems.append("\(c.name): export threw — \(error)")
             }

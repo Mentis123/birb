@@ -15,6 +15,7 @@ let package = Package(
     products: [
         .library(name: "HumanoidCore", targets: ["HumanoidCore"]),
         .library(name: "ExporterVRM", targets: ["ExporterVRM"]),
+        .library(name: "ExporterFBX", targets: ["ExporterFBX"]),
     ],
     targets: [
         // zlib lives in both the Linux and iOS SDKs. A shim keeps the Swift side
@@ -25,9 +26,15 @@ let package = Package(
         .target(name: "HumanoidCore", dependencies: ["CZlibShim"]),
         .target(name: "ExporterVRM", dependencies: ["HumanoidCore"]),
 
-        .executableTarget(name: "humanoid-cli", dependencies: ["HumanoidCore", "ExporterVRM"]),
+        // Vendored at pinned commits; see VENDORED.md beside each.
+        .target(name: "UfbxWriteC", cSettings: [.headerSearchPath("include")]),
+        .target(name: "UfbxC", cSettings: [.headerSearchPath("include")]),
+        .target(name: "ExporterFBX", dependencies: ["HumanoidCore", "UfbxWriteC", "UfbxC"]),
+
+        .executableTarget(name: "humanoid-cli", dependencies: ["HumanoidCore", "ExporterVRM", "ExporterFBX"]),
 
         .testTarget(name: "HumanoidCoreTests", dependencies: ["HumanoidCore"]),
         .testTarget(name: "ExporterVRMTests", dependencies: ["ExporterVRM", "HumanoidCore"]),
+        .testTarget(name: "ExporterFBXTests", dependencies: ["ExporterFBX", "HumanoidCore"]),
     ]
 )
