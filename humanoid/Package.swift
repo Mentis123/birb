@@ -25,6 +25,8 @@ let package = Package(
         .target(name: "HumanoidCore", dependencies: ["CZlibShim"]),
         .target(name: "ExporterVRM", dependencies: ["HumanoidCore"]),
 
+        .executableTarget(name: "humanoid-cli", dependencies: ["HumanoidCore", "ExporterVRM"]),
+
         .testTarget(name: "HumanoidCoreTests", dependencies: ["HumanoidCore"]),
         .testTarget(name: "ExporterVRMTests", dependencies: ["ExporterVRM", "HumanoidCore"]),
     ]

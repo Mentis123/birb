@@ -35,8 +35,21 @@ public enum HumanBone: String, CaseIterable, Sendable, Codable {
         return s.prefix(1).uppercased() + s.dropFirst()
     }
 
-    /// VRM 1.0 `humanoid.humanBones` key — already lowerCamelCase.
-    public var vrmKey: String { rawValue }
+    /// VRM 1.0 `humanoid.humanBones` key.
+    ///
+    /// Mostly identical to the enum spelling, but VRM 1.0 renamed the thumb
+    /// chain: Unity's Proximal/Intermediate/Distal is VRM's
+    /// Metacarpal/Proximal/Distal. Emitting Unity's spelling produces a file
+    /// UniVRM rejects or maps thumbs wrongly, and nothing upstream catches it.
+    public var vrmKey: String {
+        switch self {
+        case .leftThumbProximal: return "leftThumbMetacarpal"
+        case .leftThumbIntermediate: return "leftThumbProximal"
+        case .rightThumbProximal: return "rightThumbMetacarpal"
+        case .rightThumbIntermediate: return "rightThumbProximal"
+        default: return rawValue
+        }
+    }
 
     /// Unity's 15 required bones. Missing any of these means no Avatar at all.
     public static let unityRequired: Set<HumanBone> = [

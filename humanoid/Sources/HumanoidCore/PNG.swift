@@ -110,23 +110,26 @@ public enum PNG {
     }
 }
 
+/// Byte-order helpers shared by the PNG writer and the GLB writer. Both formats
+/// are explicit about endianness (PNG big, glTF little) and getting one wrong
+/// produces a file that fails far away from the mistake.
 extension Data {
-    mutating func appendBigEndian(_ value: UInt32) {
+    public mutating func appendBigEndian(_ value: UInt32) {
         append(contentsOf: [
             UInt8((value >> 24) & 0xFF), UInt8((value >> 16) & 0xFF),
             UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF),
         ])
     }
-    mutating func appendLittleEndian(_ value: UInt32) {
+    public mutating func appendLittleEndian(_ value: UInt32) {
         append(contentsOf: [
             UInt8(value & 0xFF), UInt8((value >> 8) & 0xFF),
             UInt8((value >> 16) & 0xFF), UInt8((value >> 24) & 0xFF),
         ])
     }
-    mutating func appendLittleEndian(_ value: Float) {
+    public mutating func appendLittleEndian(_ value: Float) {
         appendLittleEndian(value.bitPattern)
     }
-    mutating func appendLittleEndian(_ value: UInt16) {
+    public mutating func appendLittleEndian(_ value: UInt16) {
         append(contentsOf: [UInt8(value & 0xFF), UInt8((value >> 8) & 0xFF)])
     }
 }
