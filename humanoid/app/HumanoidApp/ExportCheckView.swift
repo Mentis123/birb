@@ -113,7 +113,19 @@ struct ExportCheckView: View {
         shareURLs = []
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let snapshot = Mannequin.snapshot(avatarName: "DeviceCheck")
+                // The shipped body, not the placeholder. The point of the device
+                // check is that the file the iPad writes is byte-identical to the
+                // one CI verified, and that only means something if it is the
+                // same body a user would export.
+                let template = try TemplateFile.bundled()
+                let snapshot = ExportSnapshot(
+                    avatarName: "DeviceCheck",
+                    templateID: TemplateFile.bundledID,
+                    templateVersion: TemplateFile.bundledVersion,
+                    skeleton: template.skeleton,
+                    mesh: template.mesh,
+                    albedo: PNG.Image.solid(width: 512, height: 512, r: 214, g: 176, b: 150),
+                    albedoRelativePath: "Textures/DeviceCheck_Albedo.png")
                 let report = snapshot.validate()
 
                 let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

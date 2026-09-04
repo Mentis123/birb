@@ -50,9 +50,11 @@ and the user picks.
    **Avatar** field is populated. Click it: the Configure view should show a fully
    mapped humanoid with no red bones.
 4. Drag the prefab into the scene. Add Component → **VRC Avatar Descriptor**.
-5. Set **View Position** to roughly between the eyes (about `0, 1.60, 0.08` on the
-   neutral avatar; the scene view shows a small sphere).
-6. Leave **Lip Sync** on `Default` and **Eye Look** disabled. The mannequin has no
+5. Set **View Position** to roughly between the eyes. On the neutral body that is
+   about `0, 1.55, 0.09`: the crown sits at 1.665 m and the nose tip at
+   `0, 1.508, 0.168`, so the sphere the scene view draws should land just behind
+   the bridge of the nose. Nudge it rather than trusting the number.
+6. Leave **Lip Sync** on `Default` and **Eye Look** disabled. The body has no
    blendshapes, and selecting `Viseme Blend Shape` with none present gives silently
    broken lip sync rather than an error.
 7. Open the VRChat SDK panel (VRChat SDK → Show Control Panel), sign in, and look
@@ -99,9 +101,11 @@ me what you see, and guessing it would be worse than asking.
 
 - **"This avatar is not imported as a humanoid rig"** on the FBX before you set the
   Rig tab. That is step 3, not a failure.
-- The mannequin is a **placeholder**: swept tubes, no face, mitten hands. It is
-  built to exercise the pipeline, not to look like anything. The real body
-  (retopologised from the MakeHuman CC0 base) is Phase 1.
+- **The corpus now carries the real body**, not the Phase 0 mannequin: 7,500
+  triangles, 4,078 vertices, 51 bones, retopologised from MakeHuman's CC0 base
+  mesh and posed into a T. Every case is that one body with its joints moved,
+  which is exactly what the editor does. It has a face and separated fingers,
+  and it is untextured beyond a flat skin fill.
 - **Finger bones exist but carry no geometry.** That is intentional; Unity maps
   fingers even when unweighted because both hand passes treat dummy bones as
   real.

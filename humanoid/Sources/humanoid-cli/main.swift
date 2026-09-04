@@ -38,8 +38,7 @@ func moved(_ s: Skeleton, _ bone: HumanBone, by delta: Vec3) -> Skeleton {
     })
 }
 
-func corpusCases() -> [Case] {
-    let base = Skeleton.defaultHumanoid()
+func corpusCases(_ base: Skeleton) -> [Case] {
     return [
         Case(name: "neutral", detail: "frozen rig, unedited T-pose",
              skeleton: base, expectPass: true),
@@ -72,8 +71,9 @@ func corpusCases() -> [Case] {
 
 switch arguments.dropFirst().first {
 case "gate":
-    let report = RigGate.check(skeleton: .defaultHumanoid(),
-                               mesh: Mannequin.build().rigGateBinding(boneCount: Skeleton.defaultHumanoid().count))
+    let template = try TemplateFile.bundled()
+    let report = RigGate.check(skeleton: template.skeleton,
+                               mesh: template.mesh.rigGateBinding(boneCount: template.skeleton.count))
     print(report.summary)
     exit(report.passes ? 0 : 1)
 
@@ -85,15 +85,19 @@ case "corpus":
     var manifest = [[String: Any]]()
     var problems = [String]()
 
-    for c in corpusCases() {
-        var options = Mannequin.Options()
-        options.textureSize = 512   // corpus files stay small; the app ships 1024/2048
-        let mesh = Mannequin.build(skeleton: c.skeleton, options: options)
-        let albedo = PNG.Image.solid(width: options.textureSize, height: options.textureSize,
+    // Every case is the ONE shipped body with its joints moved, which is exactly
+    // what the editor does. Generating each case from a fresh procedural mesh
+    // would test a mesh no user will ever export.
+    let template = try TemplateFile.bundled()
+    let textureSize = 512   // corpus files stay small; the app ships 1024/2048
+
+    for c in corpusCases(template.skeleton) {
+        let mesh = Skinning.deform(template.mesh, from: template.skeleton, to: c.skeleton)
+        let albedo = PNG.Image.solid(width: textureSize, height: textureSize,
                                      r: c.albedo.r, g: c.albedo.g, b: c.albedo.b)
         let snapshot = ExportSnapshot(
-            avatarName: c.name, templateID: Mannequin.templateID,
-            templateVersion: Mannequin.templateVersion, skeleton: c.skeleton,
+            avatarName: c.name, templateID: TemplateFile.bundledID,
+            templateVersion: TemplateFile.bundledVersion, skeleton: c.skeleton,
             mesh: mesh, albedo: albedo, albedoRelativePath: "Textures/\(c.name)_Albedo.png")
 
         let report = snapshot.validate()
@@ -140,8 +144,8 @@ case "corpus":
     }
 
     let manifestData = try JSONSerialization.data(
-        withJSONObject: ["cases": manifest, "templateID": Mannequin.templateID,
-                         "templateVersion": Mannequin.templateVersion],
+        withJSONObject: ["cases": manifest, "templateID": TemplateFile.bundledID,
+                         "templateVersion": TemplateFile.bundledVersion],
         options: [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes])
     try manifestData.write(to: root.appendingPathComponent("corpus.json"))
 

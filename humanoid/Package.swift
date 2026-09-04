@@ -23,7 +23,12 @@ let package = Package(
         // (Foundation's .zlib emits RFC 1951 raw deflate, which PNG rejects).
         .target(name: "CZlibShim", linkerSettings: [.linkedLibrary("z")]),
 
-        .target(name: "HumanoidCore", dependencies: ["CZlibShim"]),
+        // The body template is a build artefact of tools/build_template.py, not
+        // something the app can derive: bone-heat weighting is a sparse solve
+        // over the whole mesh and its answer never changes. Shipped as a
+        // resource so the tests and the iPad app read the identical bytes.
+        .target(name: "HumanoidCore", dependencies: ["CZlibShim"],
+                resources: [.copy("Resources/body-v1.bin")]),
         .target(name: "ExporterVRM", dependencies: ["HumanoidCore"]),
 
         // Vendored at pinned commits; see VENDORED.md beside each.

@@ -95,3 +95,30 @@ final class FBXExporterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), try Data(contentsOf: second))
     }
 }
+
+extension FBXExporterTests {
+    /// The shipped body, which is what a user actually exports. The mannequin
+    /// exercises the writers against a synthetic mesh; this exercises them
+    /// against the real one, whose vertex count, weight distribution and UV
+    /// layout are all different in kind.
+    func shippedBodySnapshot(_ name: String) throws -> ExportSnapshot {
+        let template = try TemplateFile.bundled()
+        return ExportSnapshot(
+            avatarName: name,
+            templateID: TemplateFile.bundledID,
+            templateVersion: TemplateFile.bundledVersion,
+            skeleton: template.skeleton,
+            mesh: template.mesh,
+            albedo: PNG.Image.solid(width: 64, height: 64, r: 214, g: 176, b: 150),
+            albedoRelativePath: "Textures/\(name)_Albedo.png")
+    }
+
+    func testShippedBodyExportsAndReopensIntact() throws {
+        let snapshot = try shippedBodySnapshot("ShippedBody")
+        XCTAssertTrue(snapshot.validate().passes)
+        let url = directory.appendingPathComponent("ShippedBody.fbx")
+        try FBXExporter.export(snapshot, to: url)
+        let reopened = FBXValidator.validate(url, against: snapshot)
+        XCTAssertTrue(reopened.passes, reopened.summary)
+    }
+}
