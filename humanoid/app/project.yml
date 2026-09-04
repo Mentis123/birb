@@ -1,0 +1,49 @@
+# Xcode project spec. The .xcodeproj is generated, never committed:
+#
+#   cd humanoid/app && xcodegen generate && open Humanoid.xcodeproj
+#
+# XcodeGen builds and runs on Linux too, so the agent can regenerate and
+# sanity-check this spec without a Mac. Whether the generated project opens
+# cleanly in Xcode is confirmed by the macOS CI job, not assumed.
+name: Humanoid
+options:
+  bundleIdPrefix: com.mentis.birb
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  HumanoidPackage:
+    path: ..
+
+targets:
+  HumanoidApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: HumanoidApp
+    dependencies:
+      - package: HumanoidPackage
+        product: HumanoidCore
+      - package: HumanoidPackage
+        product: ExporterVRM
+      - package: HumanoidPackage
+        product: ExporterFBX
+    info:
+      path: HumanoidApp/Info.plist
+      properties:
+        CFBundleDisplayName: Humanoid
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        # iPad only: this is a Pencil-driven tool.
+        TARGETED_DEVICE_FAMILY: "2"
+        # Needed once the Metal viewport and the C++ geometry bridge land.
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        GENERATE_INFOPLIST_FILE: NO
