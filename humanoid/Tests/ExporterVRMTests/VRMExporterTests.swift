@@ -5,7 +5,7 @@ import Foundation
 
 /// These lock down the file-format decisions that are expensive to discover
 /// later: a wrong one produces a file that opens somewhere and is subtly wrong
-/// in Unity, which costs a Mac session to find.
+/// in Unity, which costs a Unity session to find.
 final class VRMExporterTests: XCTestCase {
     private var glb: Data!
     private var json: [String: Any]!

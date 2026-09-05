@@ -6,7 +6,7 @@ and exports an avatar Unity accepts as a Humanoid for VRChat.
 **This directory is Phase 0: the export gate, not the editor.** The PRD's own rule
 is that the format question gets settled before any editor code exists, because
 every alternative was either broken or unproven. That question is now answered as
-far as it can be answered without a Mac.
+far as it can be answered without Unity.
 
 Background and evidence: [`../docs/humanoid-creator-validation/REPORT.md`](../docs/humanoid-creator-validation/REPORT.md).
 The original product spec: [`../docs/PRD-humanoid-creator-v0.1.md`](../docs/PRD-humanoid-creator-v0.1.md).
@@ -35,7 +35,7 @@ glTF importer, and both of Blender's FBX importers.
 | `Sources/humanoid-cli` | Corpus generator and gate runner, used by CI. |
 | `app/` | Thin iPad shell and the XcodeGen spec. The only Apple-framework code. |
 | `tools/` | The oracles: Blender import checks, PNG decode, `verify.sh`. |
-| `docs/Import_into_Unity.md` | **The Mac session instructions.** |
+| `docs/Import_into_Unity.md` | **The Windows/Unity session instructions.** |
 
 ## Why two export formats
 
@@ -94,6 +94,9 @@ Unity and the VRChat SDK. Neither runs on this box — Unity Personal cannot be
 activated headlessly, since offline activation is Enterprise-only and command-line
 activation needs a serial that Personal seats do not have.
 
-So the corpus goes to a Mac once. See [`docs/Import_into_Unity.md`](docs/Import_into_Unity.md).
+So the corpus goes to a Windows box once — VRChat supports the SDK there and
+nowhere else. See [`docs/Import_into_Unity.md`](docs/Import_into_Unity.md). The
+Mac is a separate errand: Xcode and the iPad device check, which never touches
+Unity or the corpus.
 Every verdict from that session, pass or fail, gets recorded so the rig gate can
 be tested against reality from then on.

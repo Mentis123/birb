@@ -38,7 +38,7 @@ public enum VRMExporter {
     }
 
     /// Encodes the snapshot as a GLB. Runs the rig gate first and refuses on any
-    /// error: shipping a file the gate rejects would burn a Mac session.
+    /// error: shipping a file the gate rejects would burn a Unity session.
     public static func export(_ snapshot: ExportSnapshot, metadata: Metadata = Metadata()) throws -> Data {
         let report = snapshot.validate()
         guard report.passes else { throw Failure.preflightFailed(report) }

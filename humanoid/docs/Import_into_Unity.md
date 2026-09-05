@@ -1,13 +1,21 @@
 # The Unity session (M1)
 
-**Time: about an hour. You need a Mac, a Unity ID and a VRChat account at New User trust or above.**
+**Time: about an hour. You need the Windows box, a Unity ID and a VRChat account
+at New User trust or above.**
 
-This is the one gate no machine here can pass for you. Everything else in Phase 0
-has been checked on Linux: the container, accessors and skin by the Khronos
-validator, the rig by two independent Blender importers, the FBX by a ufbx
-reopen, and the pixels by a real PNG inflate. What none of those can tell us is
-whether **Unity's importer and the VRChat SDK accept the result**. That is what
-this session answers.
+> **This is the Windows session.** The Mac has nothing to do with it — no Unity
+> install there, and the corpus never touches it. The Mac's job is the separate
+> iPad session (M2: Xcode, build to device, run the export check). Doing Unity on
+> Windows is the easier half of that split: VRChat officially supports Windows
+> only, so you get the Creator Companion GUI instead of the VPM command line, and
+> **Build & Test actually launches VRChat**, which was not possible on macOS.
+
+This is the one gate no machine here can pass for you. Everything else has been
+checked on Linux: the container, accessors and skin by the Khronos validator, the
+rig by two independent Blender importers, the FBX by a ufbx reopen, the pixels by
+a real PNG inflate, and the body itself by an oracle that re-derives it from its
+own bytes. What none of those can tell us is whether **Unity's importer and the
+VRChat SDK accept the result**. That is what this session answers.
 
 There are two files per avatar because they hedge each other:
 
@@ -23,21 +31,32 @@ and the user picks.
 
 ## Before you start
 
-1. **Unity Hub**, then add **Unity 2022.3.22f1** through it. VRChat accepts no
-   other version, and uploads from newer editors are rejected server-side.
-2. **The VRChat SDK.** The Creator Companion GUI is Windows-only, so on macOS use
-   either:
-   - the **VPM command line tool** (`vpm check hub`, `vpm check unity`, then
-     `vpm new MyAvatars Avatar`), or
-   - **ALCOM**, the community cross-platform VCC client.
-3. **UniVRM**, for the `.vrm` half. In the Unity project: Window → Package Manager
+1. **Creator Companion.** Download from <https://vrchat.com/download/vcc> and run
+   the installer (it wants admin rights, and lands in
+   `%LOCALAPPDATA%\Programs`).
+2. **Let VCC install Unity.** It checks for Unity on launch and offers a button
+   that installs Unity Hub and the correct editor for you. Take it. The version
+   is **2022.3.22f1** and it is not negotiable — uploading from any other editor
+   can leave content that simply will not load. Activate your Unity licence when
+   Hub asks.
+3. **No extra Unity modules.** On Windows the base editor already builds
+   Windows standalone, which is what a PC avatar upload targets. You only need
+   **Android Build Support** if you later want a Quest version, and Hub can add
+   it afterwards (gear icon next to the version → Add Modules). Skip iOS, tvOS,
+   WebGL, Linux and the rest.
+4. **Make the project.** In VCC press **New**, choose the **Avatar** template,
+   name it, and open it. That gives you Avatar 3.0 and the SDK already wired in.
+5. **UniVRM**, for the `.vrm` half. In the Unity project: Window → Package Manager
    → + → Add package from git URL, twice:
    ```
    https://github.com/vrm-c/UniVRM.git?path=/Assets/UniGLTF#v0.131.2
    https://github.com/vrm-c/UniVRM.git?path=/Assets/VRM10#v0.131.2
    ```
-4. The corpus folder from this repo (`humanoid-cli corpus <dir>`, or whatever was
-   attached for you).
+6. **The corpus.** Copy it onto the Windows box — whatever was attached for you,
+   or `humanoid/.build/corpus` after running `./tools/verify.sh`. Six `.vrm`, six
+   `.fbx`, `corpus.json`, and two reference renders. (Use `verify.sh` rather than
+   `humanoid-cli corpus` on its own: the CLI writes the models, and the renders
+   come from the last verification stage.)
 
 ---
 
@@ -57,14 +76,15 @@ and the user picks.
 6. Leave **Lip Sync** on `Default` and **Eye Look** disabled. The body has no
    blendshapes, and selecting `Viseme Blend Shape` with none present gives silently
    broken lip sync rather than an error.
-7. Open the VRChat SDK panel (VRChat SDK → Show Control Panel), sign in, and look
-   at the **Builder** tab.
+7. Open the VRChat SDK panel (VRChat SDK → Show Control Panel), sign in on the
+   **Authentication** tab, and look at the **Builder** tab.
 
 **Copy back:** the full contents of the Builder tab (every row, including the
 green ones) and anything in the Console. That text is the deliverable.
 
 8. If the panel shows no blocking errors, press **Build & Test**. VRChat should
-   launch and put you in a room wearing the avatar.
+   launch on this machine and put you in a room wearing the avatar. This is the
+   step the Mac could never have done, so it is worth reaching.
 
 ---
 
@@ -75,7 +95,8 @@ green ones) and anything in the Console. That text is the deliverable.
 3. Animation Type → **Humanoid**, Avatar Definition → **Create From This Model**,
    then **Apply**.
 4. Press **Configure…**. Expect every required bone mapped and no red.
-5. Repeat steps 4–7 from Part A (descriptor, view position, SDK panel).
+5. Repeat steps 4–8 from Part A (descriptor, view position, SDK panel, Build &
+   Test).
 
 ---
 
@@ -95,13 +116,18 @@ files are written right-handed, Y-up, facing +Z, and Unity is left-handed. I hav
 deliberately not guessed the conversion — it is a one-line change once you tell
 me what you see, and guessing it would be worse than asking.
 
+There are two renders in the corpus folder, `neutral_front.png` and
+`neutral_threequarter.png`, made by Blender's own glTF importer reading the
+exported file. Compare what Unity shows against those. If they disagree, the
+disagreement is the finding.
+
 ---
 
 ## Things I already expect, so don't be alarmed
 
 - **"This avatar is not imported as a humanoid rig"** on the FBX before you set the
   Rig tab. That is step 3, not a failure.
-- **The corpus now carries the real body**, not the Phase 0 mannequin: 7,500
+- **The corpus carries the real body**, not the old placeholder mannequin: 7,500
   triangles, 4,078 vertices, 51 bones, retopologised from MakeHuman's CC0 base
   mesh and posed into a T. Every case is that one body with its joints moved,
   which is exactly what the editor does. It has a face and separated fingers,
@@ -111,6 +137,10 @@ me what you see, and guessing it would be worse than asking.
   real.
 - Texture is a flat colour fill at 512 px in the corpus. The app ships 1024 with a
   2048 option.
+- **Three of the twelve files are missing on purpose.** The corpus also contains
+  three cases the Linux gate rejected (`neg-a-pose`, `neg-collapsed-neck`,
+  `neg-doll-scale`) and those are deliberately never exported. If you see only
+  six of each, that is correct.
 
 ## Things that WOULD be real problems
 
@@ -129,7 +159,7 @@ Tell me immediately if you see any of these, and stop:
 ## If it fails
 
 Send the errors and stop; do not try to fix it in Unity. A file that needs
-hand-fixing on the Mac is a file the app would ship broken. The whole design is
+hand-fixing on Windows is a file the app would ship broken. The whole design is
 that this session either confirms the Linux gate or tells me exactly which rule I
 transcribed wrongly, and the second outcome is nearly as useful as the first.
 
