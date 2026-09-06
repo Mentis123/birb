@@ -4772,6 +4772,10 @@
     // rewritten when the tier actually changes rather than every frame.
     let mistBudgetTier = -1;
 
+    // Set once the nest launch handler is defined, so the ?debug=1 harness can
+    // fire through the same path the on-screen button uses.
+    let handleNestLaunch = () => {};
+
     // Pose snapshot for comparison captures; ?debug=1 harness only.
     let __birbSavedPose = null;
 
@@ -7153,7 +7157,7 @@
 
       // Synchronous launch handler (data3-cisco-live pattern)
       // Keep everything in the gesture call stack for iOS audio to work
-      const handleLaunch = () => {
+      const handleLaunch = handleNestLaunch = () => {
         // CRITICAL: Initialize audio synchronously within gesture context
         // This unlocks audio AND pre-generates buffers for instant playback
         unlockAudio();
@@ -8677,6 +8681,19 @@
           nesting: nestingSystem ? nestingSystem.getState() : null,
         }),
         modes: () => Object.values(GAME_MODES),
+        // Fires through the real launch handler — the same path the on-screen
+        // button takes, including aim assist and the cooldown gate. A rocket
+        // system that constructs correctly and never actually launches from a
+        // perch is the kind of thing only firing can reveal.
+        fire: () => {
+          const before = rocketSystem ? rocketSystem.getRocketCount() : -1;
+          handleNestLaunch();
+          return { before, after: rocketSystem ? rocketSystem.getRocketCount() : -1 };
+        },
+        rockets: () => ({
+          active: rocketSystem ? rocketSystem.getRocketCount() : null,
+          canFire: rocketSystem ? rocketSystem.canFire() : null,
+        }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
         // Lighting overrides for side-by-side comparison captures. The brief
         // asks for palette tuning on physical phones against FIXED views; this
