@@ -3,7 +3,9 @@
 An iPad app that reshapes, sculpts and paints one protected humanoid mannequin
 and exports an avatar Unity accepts as a Humanoid for VRChat.
 
-> **Scope note (2026-09-05).** The product now starts from one of two templates: **Clay** (unrigged) or **Humanoid** (rigged). Everything in this directory is the Humanoid path — the rig gate, the skeleton, the VRM humanBones map and the Unity/VRChat oracles all exist to serve it. Clay reuses the mesh half (`MeshData`, `Skinning` untouched, the exporters minus the skin) and skips the rig half entirely. See §4.2 and §14 of [the PRD](../docs/PRD-humanoid-creator-v0.1.md).
+> **Scope and build order (2026-09-05).** The product starts from one of two templates: **Clay** (unrigged) or **Humanoid** (rigged). Everything in this directory is the Humanoid path — the rig gate, the skeleton, the VRM humanBones map and the Unity/VRChat oracles all exist to serve it.
+>
+> **Clay ships first**, so this directory is now *ahead* of the build: it is finished work waiting for a Phase 3 that layers the rig back on. That is deliberate — Phase 0 retired the export unknowns, leaving the editor as the unproven half, and the editor needs no skeleton. **Keep every stage of `tools/verify.sh` green in CI while Clay is built.** This code cannot rot while unattended, or Phase 3 starts from something last seen working in September instead of something known-good. See §9 and §14 of [the PRD](../docs/PRD-humanoid-creator-v0.1.md).
 
 **This directory is Phase 0: the export gate, not the editor.** The PRD's own rule
 is that the format question gets settled before any editor code exists, because

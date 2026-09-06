@@ -5,7 +5,9 @@
 **Platform:** iPadOS first; SwiftUI, MetalKit, Objective-C++/C++  
 **Product promise:** Reshape, lightly sculpt, and paint a protected fixed-topology model on iPad, starting from either a rigged humanoid or an unrigged lump of clay; preview deformations on the humanoid; export a package Unity or any DCC can open — for the humanoid, one Unity configures as a Humanoid for the normal VRChat publishing step.
 
-**Amended 2026-09-05 (Mentis).** Two changes, both recorded in full below: (1) a **New Project** screen offering **Clay** or **Humanoid**, so the app is no longer VRChat-only; (2) **pinned reference cards** — draggable, resizable, zoomable image panels — restored to scope after the recut had deferred them as "floating boards". §14 is the amendment log and states what these cost.
+**Amended 2026-09-05 (Mentis).** Three changes, all recorded in full below: (1) a **New Project** screen offering **Clay** or **Humanoid**, so the app is no longer VRChat-only; (2) **pinned reference cards** — draggable, resizable, zoomable image panels — restored to scope after the recut had deferred them as "floating boards"; (3) **Clay ships first**, with the humanoid layered on after, reversing the original build order. §14 is the amendment log and states what these cost.
+
+**Build order: Clay, then Humanoid.** §9 carries the phases. The short version is that Phase 0 retired the export unknowns — both writers work and Unity builds a Humanoid Avatar from our FBX — so the unproven half is now the editor, and the editor does not need a skeleton.
 
 ## 1. Executive decision
 
@@ -380,41 +382,61 @@ Do not begin a custom FBX writer during v0.1. It is a separate format-engineerin
 
 **Gate:** one provider passes neutral and modified samples on physical iPad and current VCC-selected Unity.
 
-### Phase 1 — Golden vertical slice: 2–3 weeks
+### Phase 1 — Clay vertical slice: 2–3 weeks
 
-- Freeze draft 8–10k humanoid template and offline-generated tables.
-- SwiftUI document shell and Metal viewport.
+The whole editor, proved against the simplest possible content.
+
+- Author and freeze the Clay template and its offline tables, using the **same generator** that will later produce the humanoid's.
+- SwiftUI document shell, document browser, autosave and reopen.
+- Metal viewport: orbit, pan, pinch zoom, frame, orthographic views.
+- Apple Pencil input; Grab brush with X symmetry.
+- Base fill plus a round paint brush; ray hit to UV.
 - Front/side/back reference scene planes.
-- Height and Shoulders morphs with joint fitting.
-- Grab brush with symmetry.
-- Base fill plus basic round paint brush.
-- Four pose previews, hard invariants, ZIP package export.
+- Clay export: static FBX and GLB plus the albedo PNG, mesh-only pre-flight, **Export Model** wording.
 
-**Gate:** a user can complete the entire journey and locally test the avatar in VRChat.
+**Gate:** on a physical iPad, sculpt the cube, paint it, export it, and open the result in both Blender and Unity with correct UVs and texture.
 
-The slice stays **Humanoid-only** on purpose. It is the path with every hard unknown in it — skinning, joint fitting, the rig gate, Unity, the SDK. Clay removes constraints rather than adding them, so proving it first would prove the easy half and tell us nothing.
+**Why Clay and not the Humanoid.** Reversed 2026-09-05, and the reversal is a consequence of Phase 0 landing. The original ordering put the Humanoid first because it carried every hard unknown — but those unknowns are now retired: both writers work, three independent readers agree, and Unity has built a Humanoid Avatar from the FBX. What has never been built is the editor. Metal, Pencil, a brush that holds frame rate on fixed topology, UV-seam painting and bounded undo are the unproven half now, and none of them need a skeleton. Proving them against Clay means that when a stroke looks wrong it is the brush, because there is no skinning in the picture to blame.
 
-### Phase 1b — Clay and the New Project screen: +1 week
+There is also a shippable product at the end of it, which there is not halfway through a humanoid.
 
-- Author and freeze the Clay template: subdivided rounded cube, box unwrap, offline adjacency and symmetry tables, same generator as the humanoid tables.
-- `templateKind` through the document model; make `rig` optional and confirm the rig-shaped code is unreachable for Clay rather than merely skipped.
-- New Project screen with the two live rotating cards.
-- Clay export path: static FBX and GLB, mesh-only pre-flight, **Export Model** wording.
-- Extend the golden corpus and the pass matrix with the two Clay cases.
+### Phase 2 — Clay completion: 2–3 weeks
 
-**Gate:** a Clay document sculpts, paints, exports, and opens as a static mesh in both Unity and Blender, and no rig check ever fires on it.
-
-### Phase 2 — v0.1 completion: 3–5 additional weeks
-
-- Complete all eight proportion controls.
 - Inflate/Deflate and Smooth.
 - Pinned reference cards: drag, corner snap, frame resize, in-card zoom and pan, opacity, lock, collapse, persistence.
 - Seam partner paint stamping, eraser, eyedropper, bounded undo.
-- Autosave/reopen, resets, warnings, export progress/cancellation.
-- Import guide, manifest hashes, error reporting, regression corpus.
+- Resets, warnings, export progress and cancellation.
+- Manifest hashes, error reporting, regression corpus.
 - Device QA and TestFlight hardening.
 
-**Total:** approximately **7.5–11 weeks including the export spike** — the 2026-09-05 amendment adds roughly **1 week for Clay and the New Project screen** and **half a week for pinned reference cards** on top of the original 6–9 for one strong iOS/Metal engineer with part-time character technical-art support. A solo developer learning Metal, skinning, and FBX should budget roughly **3–5 months**. The 10–16 week estimate in the broader PRD remains plausible for its larger paint, history, reference, validation, and polish scope; it is not the v0.1 described here.
+**Gate:** Clay is a complete, releasable app. No chooser screen yet — a new document is a Clay document, because a picker with one option is furniture.
+
+### Phase 3 — The Humanoid layer: 2–3 weeks
+
+Additive. Most of the expensive parts already exist and are under test from Phase 0.
+
+| Piece | State |
+|---|---|
+| Humanoid template, 51 bones, T-posed, mirror-exact | **Built** (`body-v1.bin`, its own oracle, 8 verify stages green) |
+| Skeleton, rig gate transcribed from Unity + VRChat sources | **Built and tested** |
+| VRM 1.0 and FBX 7400 writers, skinned | **Built**, three readers agree, Unity accepts the FBX |
+| Joint-move-drives-the-skin deformation | **Built** (`Skinning.deform`, tested) |
+| Eight proportion controls | To build — authored deltas plus joint-fitting rules |
+| Pose preview, four poses, GPU skinning | To build |
+| New Project chooser, two live cards | To build |
+| Rig checks surfaced in the export pre-flight | Gate exists; needs the UI |
+
+**Gate:** the original Humanoid journey end to end — proportions, sculpt, paint, poses, export, Unity Humanoid, VRChat SDK, Build & Test.
+
+### Keeping the retrofit honest
+
+Clay-first has exactly one failure mode: building a Clay-shaped app that the Humanoid cannot slot into. Three things prevent it, and all three cost nothing now.
+
+1. **`templateKind` and optional `rig` exist from the first commit of Phase 1**, even though nothing reads `rig` until Phase 3. Retrofitting a document format is expensive; declaring a field nobody uses yet is free.
+2. **One table generator, two templates.** Adjacency, symmetry pairs and seam partners for Clay come out of the same offline tool that will produce the humanoid's, so the runtime only ever learns one layout.
+3. **The Phase 0 humanoid work stays in CI.** The template, the gate, both writers and all eight verify stages keep running on every commit through Phases 1 and 2. It cannot rot while unattended, and Phase 3 starts from something known-green rather than something last seen working in September.
+
+**Total:** approximately **6–9 weeks** for a complete Humanoid-capable v0.1 — but now with a **releasable Clay app at roughly 5–6 weeks** and the humanoid layered on after, rather than nothing shippable until the end. Phase 0 is already spent. For one strong iOS/Metal engineer with part-time character technical-art support; a solo developer learning Metal, skinning and FBX should budget roughly **3–5 months**. The 10–16 week estimate in the broader PRD remains plausible for its larger paint, history, reference, validation, and polish scope; it is not the v0.1 described here.
 
 ### Codex/Sol Extra High planning budget
 
@@ -430,19 +452,32 @@ Use one lead coding agent and short, bounded review/test passes. More parallel a
 
 ## 10. Definition of done
 
-v0.1 is done only when all of the following are true:
+Two gates now, in build order.
 
-- **Two** canonical templates have frozen IDs, vertices, indices, UVs and adjacency tables; the Humanoid template additionally has frozen weights, skeleton, morphs, landmarks, and validation poses.
+### Clay release (Phases 1–2)
+
+- The Clay template has frozen IDs, vertices, indices, UVs and adjacency tables, generated by the same offline tool that will produce the humanoid's.
+- Documents carry `templateKind` and an optional `rig`, even though nothing reads `rig` yet.
+- Every edit preserves vertex/index/UV array sizes and ordering.
+- Sculpt, paint, symmetry, undo, autosave and reopen all work on a physical iPad; a force quit loses no more than the active stroke.
+- Reference scene planes and pinned cards work, persist, and never enter export content or metadata.
+- Clay neutral and Clay sculpted samples export and open in Unity and Blender as static meshes with correct UVs and texture, carrying no skeleton or skin node.
+- The app ships no chooser screen, no rig control, no pose preview and no proportion slider, and never reports a rig error.
+- The Phase 0 humanoid template, rig gate and both writers are still green in CI.
+
+### Humanoid layer (Phase 3)
+
+v0.1 is complete only when all of the following are additionally true:
+
+- The Humanoid template has frozen weights, skeleton, morphs, landmarks, and validation poses on top of the shared mesh contract.
 - New Project offers exactly Clay and Humanoid, states that the choice is permanent, and opens either without a loading pause.
-- A Clay document never surfaces a rig control, a pose preview, a proportion slider, or a rig validation message.
+- A Clay document still never surfaces a rig control, a pose preview, a proportion slider, or a rig validation message.
 - Every edit preserves vertex/index/UV/weight array sizes and ordering.
 - All eight proportion extremes and representative sculpt cases pass authored in-app pose tests.
 - Documents survive force quit with no more than the active stroke lost.
-- Reference assets never enter export content or metadata, from either scene planes or pinned cards.
 - Pinned cards drag, snap, resize, zoom, pan, lock and collapse; their state survives close and reopen; and Pencil strokes pass through them to the model.
 - Export succeeds on the baseline physical iPad and reopens with ufbx.
 - Neutral, proportion-extreme, elbow/knee sculpt, finger, and painted samples import into current VCC-selected Unity as accepted Humanoids.
-- Clay neutral and Clay sculpted samples open in Unity and Blender as static meshes with correct UVs and texture, carrying no skeleton or skin node.
 - The VRChat SDK reports no rig-related blocker for the golden samples.
 - Counts are shown as guidance; the app does not claim a VRChat performance rank.
 - Onboarding and export instructions state that Unity/VCC remains mandatory.
@@ -501,7 +536,11 @@ The first pull request should contain no sculpting UI. Its only success criterio
 
 2. **Pinned reference cards restored to scope.** §5 of the recut listed "floating boards" among the deferred items, alongside rotation, crop and calibration. On review that was the wrong cut. Scene planes and pinned cards are not two versions of one feature — planes are for tracing silhouette, cards are for reading detail while you work — and shipping only planes means anyone wanting to check a photograph mid-stroke has to orbit the camera away from what they are sculpting. Rotation, crop and calibration stay deferred.
 
-**What this costs:** about 1 week for Clay and the New Project screen, about half a week for the cards. §9 carries the revised totals and a new Phase 1b.
+3. **Clay ships first; the humanoid is layered on after.** Reversed later the same day, after the Unity session. The original ordering built the Humanoid first on the reasoning that it carried every hard unknown. Phase 0 then retired those unknowns: both writers work, three independent readers agree, and Unity built a Humanoid Avatar from our FBX on the first attempt. The unproven half is now the **editor** — Metal, Pencil, a brush that holds frame rate, UV-seam painting, bounded undo — and none of it needs a skeleton. Building it against Clay removes skinning as a confounder when something looks wrong, and produces a releasable app at roughly 5–6 weeks instead of nothing shippable until the end.
+
+   The one failure mode is building a Clay-shaped app the Humanoid cannot slot into. §9 names the three guards: `templateKind` and optional `rig` from the first commit, one table generator for both templates, and the Phase 0 humanoid work staying green in CI throughout.
+
+**What this costs:** about 1 week for Clay and the New Project screen, about half a week for the cards. Re-ordering costs nothing on the total — §9 carries the revised phases and a first release date that arrives earlier.
 
 **What was explicitly *not* added:**
 
