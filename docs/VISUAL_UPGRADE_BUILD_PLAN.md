@@ -471,6 +471,34 @@ phone test list from the brief's §Acceptance item 4 so they can run it.
 | Suspected landing bug | Not a bug | The capture harness indexed into the nest list and picked nests across a 754-unit circumference; landing auto-flies in a straight line at 16 units/s. Landing on the nearest nest, as the player's tap does, succeeds 24/24 across all four biomes. |
 | Sheet captured degraded output | Fixed | With adaptive quality alive, software rendering downshifts to tier 2 within seconds and every art review would have been conducted against output no phone produces. `--tier N` pins it; the sheet pins tier 0 by default. |
 
+### Capture tooling, as it now stands
+
+Install once per session, in ONE command (a second `--no-save` install prunes
+the first), then restore the tracked Three stub:
+
+```
+npm install --no-save playwright https-proxy-agent
+git checkout -- node_modules/three/index.js
+```
+
+| Tool | What it answers |
+|---|---|
+| `node tools/birb-shot.mjs --start --out shot.png` | Does one frame render, with no page or console error? Takes `--env`, `--nest`, `--desktop`, `--eval`. |
+| `node tools/birb-sheet.mjs --out sheet.png` | How do all four biomes look in flight and at a perch? Pins tier 0 by default; `--tier N` to capture a quality level deliberately. |
+| `node tools/birb-lighting.mjs --out l.png` | Which of six lighting candidates looks best, from one fixed viewpoint? Takes `--env`, `--view nest`. |
+
+The `?debug=1` handle (`window.__BIRB`, absent without the flag) drives all
+three: `setEnvironment`, `forceNest`, `takeOff`, `teleport`, `goToLandmark`,
+`setStick`, `setSprint`, `setAltitude`, `pinTier`, `setLighting`,
+`capturePose` / `restorePose`, and `stats`.
+
+Two things about it are load-bearing. `capturePose` / `restorePose` exists
+because zeroing speed does NOT hold the bird — the flight system rewrites it
+every frame — and a comparison sheet whose tiles differ by viewpoint is worse
+than none. `pinTier` exists because adaptive quality now works, and software
+rendering here downshifts within seconds, so an unpinned art review is
+conducted against output no phone produces.
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
