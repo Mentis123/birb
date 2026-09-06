@@ -462,12 +462,24 @@ phone test list from the brief's §Acceptance item 4 so they can run it.
 | G vertex occlusion | Shipped | Sheet before/after | Slope shading and moss zoning on the ground, radial rim term on canopies. Build-time only. |
 | H landmark slice | Shipped | Giant tree visible in the forest flight tile | Giant nesting tree, fallen log, stone arch, placed along the valley's great circle. |
 
+### Second pass (after the first merge)
+
+| Work | Status | Notes |
+|---|---|---|
+| Adaptive quality had never run | Fixed | `updateFpsReadout` returned early on a missing DOM element, and the tier manager's only call site was inside it. Pinned at tier 0 since it was written. `tests/frame-metrics.test.js`. |
+| Landmarks for the other three biomes | Shipped | Leaning monolith, summit arch, broadcast mast. One each: different in kind, not merely bigger. |
+| Suspected landing bug | Not a bug | The capture harness indexed into the nest list and picked nests across a 754-unit circumference; landing auto-flies in a straight line at 16 units/s. Landing on the nearest nest, as the player's tap does, succeeds 24/24 across all four biomes. |
+| Sheet captured degraded output | Fixed | With adaptive quality alive, software rendering downshifts to tier 2 within seconds and every art review would have been conducted against output no phone produces. `--tier N` pins it; the sheet pins tier 0 by default. |
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
 - **Lighting and palette tuning.** Needs a phone. Use the committed sheet.
-- **The mountain biome's first nest sometimes never completes a landing.**
-  Seen once in a sheet run and not reproduced; pre-existing, not from this work.
+- **Adaptive quality thresholds are now live and have never been exercised on
+  hardware.** 55 fps to downshift, 58 to restore, over 2 and 4 second windows.
+  They were tuned against a system that could not run. A phone may now shed
+  DPR where it previously never did, which is the intent, but it is the first
+  thing to watch on a device.
 - **The physical-phone benchmark is still outstanding** and remains the real
   acceptance gate for everything here. Nothing in this session ran on a device.
 

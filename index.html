@@ -6301,6 +6301,7 @@
 
       return {
         sampleFps(fps, time) {
+          if (state.pinned) return;
           if (state.windowStart === 0) state.windowStart = time;
           state.fpsSum += fps;
           state.fpsCount += 1;
@@ -6325,6 +6326,18 @@
           state.windowStart = time;
         },
         getTier() { return state.tier; },
+        /**
+         * Hold the tier and ignore further samples. For the capture harness
+         * only: this sandbox renders through SwiftShader at a few frames per
+         * second, so an honest sampler downshifts immediately and every art
+         * review would then be conducted against degraded output that no real
+         * phone would produce.
+         */
+        pin(tier) {
+          applyTier(tier);
+          state.pinned = true;
+        },
+        isPinned() { return !!state.pinned; },
       };
     })();
 
@@ -8602,6 +8615,7 @@
           return found.id;
         },
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {
