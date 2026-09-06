@@ -8619,9 +8619,23 @@
           radius: contactShadow.mesh.position.length(),
           birdRadius: flightController?.position?.length() ?? null,
         }),
-        forceNest: (index = 0) => {
+        // Lands on the NEAREST nest by default, which is what the player's own
+        // tap does. Indexing into the list instead picked whichever nest was
+        // built first — routinely on the far side of the planet — and the
+        // landing state auto-flies in a straight line, so a capture waited out
+        // a 400-unit crossing and looked like a broken state machine.
+        forceNest: (index = null) => {
           const list = nestPointsSystem?.nests;
           if (!nestingSystem || !list || !list.length) return false;
+          if (index === null || index === true) {
+            return nestingSystem.tryLandOnNest(flightController.position)
+              || nestingSystem.forceNestAt(
+                list.reduce((best, nest) => {
+                  const d = nest.getWorldPosition(new THREE.Vector3()).distanceToSquared(flightController.position);
+                  return (!best || d < best.d) ? { nest, d } : best;
+                }, null).nest,
+              );
+          }
           return nestingSystem.forceNestAt(list[Math.min(index, list.length - 1)]);
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),

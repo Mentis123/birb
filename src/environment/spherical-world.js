@@ -1380,6 +1380,99 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   ];
 }
 
+
+/**
+ * A landmark for each of the other three biomes.
+ *
+ * Same reasoning as the forest's: an evenly scattered world has no
+ * orientation, and one form larger and stranger than its neighbours turns a
+ * direction into a destination. One landmark per biome rather than three,
+ * because each is a distinct silhouette carrying its own draw call and the
+ * budget is tight on desktop.
+ *
+ * Each returns the same {id, position} records the forest's do, so the
+ * capture harness can aim at any of them by name.
+ */
+function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant }) {
+  const anchor = new THREE.Vector3(VALLEY_ANCHOR.x, VALLEY_ANCHOR.y, VALLEY_ANCHOR.z).normalize();
+  const frame = _tangentFrame(THREE, VALLEY_ANCHOR);
+  const forward = new THREE.Vector3(frame.forward.x, frame.forward.y, frame.forward.z).normalize();
+  const dir = new THREE.Vector3()
+    .addScaledVector(anchor, Math.cos(0.26))
+    .addScaledVector(forward, Math.sin(0.26))
+    .normalize();
+  const height = terrainHeightDir(dir.x, dir.y, dir.z);
+  const base = dir.clone().multiplyScalar(sphereRadius + height);
+  const up = dir.clone();
+  const group = new THREE.Group();
+  group.name = `${variant}-landmark`;
+  const orient = (object) => object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+
+  let apexHeight = 0;
+  let id = `${variant}-landmark`;
+
+  if (variant === 'canyons') {
+    // A leaning monolith. The canyon is all vertical needles, so the one
+    // thing that stands out among them is a mass that is NOT vertical.
+    id = 'leaning-monolith';
+    const mat = new THREE.MeshLambertMaterial({ color: 0x9c4a2e, flatShading: true });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 8.5, 54, 7), mat);
+    shaft.position.copy(base).addScaledVector(up, 24);
+    orient(shaft);
+    // Leaned off vertical: a plumb monolith reads as one more spire.
+    shaft.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.22));
+    group.add(shaft);
+    const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(9, 0), mat);
+    cap.position.copy(base).addScaledVector(up, 50);
+    group.add(cap);
+    apexHeight = 50;
+    collisionSystem.addCollider(base.clone().addScaledVector(up, 26), 8, 'rock');
+  } else if (variant === 'mountain') {
+    // A stone arch high on the ridge, wide enough to fly through.
+    id = 'summit-arch';
+    const mat = new THREE.MeshLambertMaterial({ color: 0x8794a4, flatShading: true });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(17, 3.1, 6, 16, Math.PI), mat);
+    ring.position.copy(base).addScaledVector(up, 1);
+    const stand = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+    ring.quaternion.copy(stand).multiply(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2),
+    );
+    group.add(ring);
+    apexHeight = 18;
+    // Legs only. A collider across the opening turns the one thing worth
+    // flying through into a wall.
+    const side = new THREE.Vector3().crossVectors(up, forward).normalize();
+    for (const sign of [-1, 1]) {
+      collisionSystem.addCollider(base.clone().addScaledVector(side, sign * 17).addScaledVector(up, 5), 4, 'rock');
+    }
+  } else {
+    // A broadcast mast, taller than every tower, with a lit crown. The city
+    // is a field of similar boxes; the landmark is the one thing with a
+    // different silhouette rather than simply a taller box.
+    id = 'broadcast-mast';
+    const mat = new THREE.MeshLambertMaterial({ color: 0x3d4a5c, flatShading: true });
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 5.2, 74, 6), mat);
+    mast.position.copy(base).addScaledVector(up, 37);
+    orient(mast);
+    group.add(mast);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(6.5, 1.4, 5, 10), new THREE.MeshBasicMaterial({ color: 0x74e0ff }));
+    collar.position.copy(base).addScaledVector(up, 58);
+    orient(collar);
+    collar.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+    group.add(collar);
+    apexHeight = 74;
+    collisionSystem.addCollider(base.clone().addScaledVector(up, 36), 5, 'tower');
+  }
+
+  root.add(group);
+  proximityTargets.push({
+    position: base.clone().addScaledVector(up, Math.min(apexHeight, 40)),
+    radius: 18,
+    tint: 0xf0e6d0,
+  });
+  return [{ id, position: base.clone().addScaledVector(up, apexHeight) }];
+}
+
 function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {
   const nestablePositions = [];
   const defaultUp = new THREE.Vector3(0, 1, 0);
@@ -1714,6 +1807,10 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     applyInstanceColorJitter(THREE, needleInst, needleCount, 1, 1, 1, 0.16, 0.035);
     root.add(needleInst);
   }
+
+  _landmarks = buildBiomeLandmark({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant: 'canyons',
+  });
 
   return nestablePositions;
 }
@@ -2248,6 +2345,10 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     root.add(cloudInst);
   }
 
+  _landmarks = buildBiomeLandmark({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant: 'mountain',
+  });
+
   return nestablePositions;
 }
 
@@ -2560,6 +2661,10 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     hoverInst.computeBoundingSphere();
     root.add(hoverInst);
   }
+
+  _landmarks = buildBiomeLandmark({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant: 'city',
+  });
 
   return nestablePositions;
 }
