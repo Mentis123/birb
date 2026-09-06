@@ -18,7 +18,7 @@ merge to `main` unless told to.
 ## 0. The goal in one paragraph
 
 Turn the September visual pass into a finished-feeling world without
-touching flight physics, input, or the terrain floor invariant. Seven stages,
+touching flight physics, input, or the terrain floor invariant. Eight stages,
 ordered by risk (safest first) so a partial session still ships value. Every
 stage is gated on the adaptive quality tier, allocation-free in the frame
 loop, disposable on environment switch, precached by the service worker, and
@@ -37,8 +37,8 @@ on mobile.
 
 | Cannot | Consequence |
 |---|---|
-| Phone frame times, thermal, real GPU cost | Every new effect defaults OFF or reduced on mobile tier ≥ 1, and the owner runs the phone pass afterwards using the capture sheet from Stage G. |
-| Judge art direction | Landmark work (Stage F) is a bounded slice, not the full route. |
+| Phone frame times, thermal, real GPU cost | Every new effect defaults OFF or reduced on mobile tier ≥ 1, and the owner runs the phone pass afterwards using the capture sheet from Stage A. |
+| Judge art direction | Landmark work (Stage H) is a bounded slice, not the full route. |
 
 **Playwright setup (once per session):**
 
