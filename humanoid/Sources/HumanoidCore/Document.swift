@@ -32,6 +32,11 @@ public struct Document {
     private var history: [Record] = []
     private var redoStack: [Record] = []
 
+    /// Depth of the open stroke group. While this is non-zero every edit merges
+    /// into one record instead of pushing its own.
+    private var strokeDepth = 0
+    private var openStroke: Record?
+
     /// How many strokes can be undone. The PRD's targets are 30 sculpt and 20
     /// paint; one bound covers both because a record is one stroke either way.
     public var historyLimit: Int = 30
@@ -151,7 +156,71 @@ public struct Document {
         history.append(record)
     }
 
+    /// Opens a stroke group. Everything until `endStroke` becomes one undo step.
+    ///
+    /// Grab needs this. It has to apply live to track the Pencil, so a single
+    /// drag calls `sculpt` dozens of times — and without grouping, undo would
+    /// take back one frame of a gesture at a time. A person means the whole
+    /// drag when they say "undo that".
+    ///
+    /// Nested calls are counted so a caller cannot half-close someone else's
+    /// group.
+    public mutating func beginStroke() { strokeDepth += 1 }
+
+    public mutating func endStroke() {
+        guard strokeDepth > 0 else { return }
+        strokeDepth -= 1
+        guard strokeDepth == 0 else { return }
+        flushStroke()
+    }
+
     private mutating func push(_ record: Record) {
+        guard strokeDepth > 0 else { return commit(record) }
+        guard case .sculpt = record else {
+            // Only sculpt merges. A paint record carries pixel payloads that do
+            // not combine without stitching them, and paint is already one
+            // record per gesture, so grouping it buys nothing. Flushing and
+            // committing separately costs an extra undo step in a case that does
+            // not arise, and never loses data — which the alternative did.
+            flushStroke()
+            return commit(record)
+        }
+        guard let existing = openStroke else { return openStroke = record }
+        guard case .sculpt = existing else {
+            flushStroke()
+            return openStroke = record
+        }
+        openStroke = merge(existing, record)
+    }
+
+    private mutating func flushStroke() {
+        guard let stroke = openStroke else { return }
+        openStroke = nil
+        commit(stroke)
+    }
+
+    /// Merges a later sculpt into an open one.
+    ///
+    /// `before` keeps the value from the FIRST time each vertex was touched and
+    /// `after` takes the most recent, so undoing the group returns to the state
+    /// before the gesture began rather than to the middle of it.
+    private func merge(_ existing: Record, _ next: Record) -> Record {
+        guard case .sculpt(let vA, let bA, let aA) = existing,
+              case .sculpt(let vB, let bB, let aB) = next else { return next }
+        var before = [Int: Vec3](minimumCapacity: vA.count + vB.count)
+        var after = [Int: Vec3](minimumCapacity: vA.count + vB.count)
+        for (i, v) in vA.enumerated() { before[v] = bA[i]; after[v] = aA[i] }
+        for (i, v) in vB.enumerated() {
+            if before[v] == nil { before[v] = bB[i] }
+            after[v] = aB[i]
+        }
+        let vertices = before.keys.sorted()
+        return .sculpt(vertices: vertices,
+                       before: vertices.map { before[$0]! },
+                       after: vertices.map { after[$0]! })
+    }
+
+    private mutating func commit(_ record: Record) {
         history.append(record)
         // A new edit invalidates the redo branch. Keeping it would let undo,
         // edit, redo produce a state that was never reached by any sequence of

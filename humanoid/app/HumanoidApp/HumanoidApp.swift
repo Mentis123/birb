@@ -1,19 +1,15 @@
 import SwiftUI
 
-/// Phase 0 app shell.
+/// Baby Blender.
 ///
-/// This is deliberately NOT the editor. Its only job is the M2 question: does the
-/// export path actually run on a physical iPad? Everything below the UI is the
-/// same package CI tests on Linux, so if the gate passes here and the exported
-/// file matches the one CI produced, the device is running exactly the code that
-/// was verified.
-///
-/// The Metal viewport, Pencil input and the sculpt tools arrive in Phase 2.
+/// The Phase 0 export check is still reachable — it is the only thing that
+/// proves the device runs the same bytes CI verified — but the app opens on the
+/// editor now.
 @main
 struct HumanoidApp: App {
     var body: some Scene {
         WindowGroup {
-            ExportCheckView()
+            EditorView()
         }
     }
 }

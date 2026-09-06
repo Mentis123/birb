@@ -19,8 +19,14 @@ and exports an avatar Unity accepts as a Humanoid for VRChat.
 >
 > The `clay-sculpted` corpus case drives all of it through `Document` and out to
 > FBX and GLB, so the oracles check the path a user takes rather than the
-> template as authored. What is left of Phase 1 is the Metal viewport, Pencil
-> input, the SwiftUI shell and reference planes — the parts that need a device.
+> template as authored.
+>
+> **The iPad app is written but has never been compiled** — there is no Apple
+> SDK on the build box. `app/` holds the Metal renderer, the Pencil/gesture
+> layer and the SwiftUI editor; expect to fix a few small things on the first
+> Xcode build. `Camera` deliberately lives in the tested core rather than in the
+> app, because screen-to-ray and framing are where a viewport's real bugs are.
+> See [`docs/Build_on_the_Mac.md`](docs/Build_on_the_Mac.md).
 >
 > **Scope and build order (2026-09-05).** The product starts from one of two templates: **Clay** (unrigged) or **Humanoid** (rigged). Everything in this directory is the Humanoid path — the rig gate, the skeleton, the VRM humanBones map and the Unity/VRChat oracles all exist to serve it.
 >
