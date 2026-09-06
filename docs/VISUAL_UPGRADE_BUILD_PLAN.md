@@ -528,6 +528,34 @@ Three rules came out of it, and they are worth keeping:
 3. **Test the path the player takes**, not the one the harness finds
    convenient. The convenient path is the one that hides setup bugs.
 
+### Measured budget position, honestly
+
+Captured with `tools/birb-sheet.mjs --views flight`, world plus bird plus HUD,
+at the end of this session. The documented targets are <100 draw calls and
+<80k triangles.
+
+| Variant | Mobile calls | Mobile triangles | Desktop calls | Desktop triangles |
+|---|---|---|---|---|
+| forest | 62 | 69k | 95 | 131k |
+| canyons | 57 | 38k | 89 | 86k |
+| mountain | 60 | 38k | 88 | 91k |
+| city | 72 | 40k | 84 | 108k |
+
+**Mobile, the target platform, is inside both budgets in every biome.**
+
+**Desktop is over the triangle target in every biome and has been since before
+this session** — the September pass recorded 118k for forest and 92.5k for
+city and said not to cite the 80k figure as achieved. It is worse now: this
+session's landmarks add roughly six draw calls and the forest gained a giant
+tree. Sectored instancing was the intended remedy and was measured to make
+draw calls worse (section 7).
+
+This is a deliberate position, not an oversight. The repo is mobile-first by
+its own house rules, desktop is stated to be for testing, and desktop
+hardware absorbs 130k triangles without noticing. But the 80k number should
+not be quoted as met, and if a desktop budget is ever wanted for real, the
+lever is prop density per device tier, not culling.
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
