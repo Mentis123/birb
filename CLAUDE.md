@@ -6,9 +6,21 @@
 > It supersedes older notes below about hiding all props while nested and
 > deliberately placing nests at fractional heights inside champion structures.
 > Nesting now preserves scenery; perches occupy actual modest-height crowns/roofs.
-> The next implementation session follows
-> [docs/VISUAL_UPGRADE_BUILD_PLAN.md](docs/VISUAL_UPGRADE_BUILD_PLAN.md):
-> staged, tier-gated, with a verification tool per stage.
+> That plan was then executed: see
+> [docs/VISUAL_UPGRADE_BUILD_PLAN.md](docs/VISUAL_UPGRADE_BUILD_PLAN.md) §13 for
+> what shipped and what did not. Two things there matter most for future work.
+> **The root game now has a capture harness** — `node tools/birb-shot.mjs
+> --start --out shot.png` for one frame and `node tools/birb-sheet.mjs --out
+> sheet.png` for all four biomes in flight and perch views. Both need
+> `npm install --no-save playwright https-proxy-agent` (in ONE command; a
+> second `--no-save` install prunes the first) followed by `git checkout --
+> node_modules/three/index.js`. **Spatial instance sectors were measured and
+> rejected** — draw calls rose past the 100 budget for a 17-22% triangle
+> saving, because this world's props are deliberately scattered evenly and
+> sector culling only rejects the far hemisphere. Do not rebuild it blind.
+> The perch camera rests at a horizon-derived pitch, not level: on a
+> radius-120 planet a 40-unit crown puts the horizon 41 degrees below level,
+> and every nest in every biome used to open on empty sky.
 
 > Context for AI assistants and Vibe Academy builders. Read this first.
 

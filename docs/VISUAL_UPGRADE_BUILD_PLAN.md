@@ -452,6 +452,29 @@ phone test list from the brief's §Acceptance item 4 so they can run it.
 
 | Stage | Status | Evidence | Notes |
 |---|---|---|---|
+| A tooling | Shipped | `tools/birb-shot.mjs`, `tools/birb-sheet.mjs`, `docs/visual-upgrade/after-mobile.png` | Also needed a CDN cache: Chromium has no NSS store here and cannot verify the proxy CA. Splash clicks must be dispatched on the elements, not at coordinates. |
+| Perch horizon (unplanned) | Shipped | `tests/perch-horizon.test.js`, perch tiles in the sheet | Not in the roadmap. The first sheet showed all four biomes opening their nest view on ~85% empty sky. Level is 41 degrees above the horizon on this planet. |
+| B contact shadow | Shipped | `tests/contact-shadow.test.js`, one extra draw call measured | Falloff retuned from 14 to 34 units after the debug stats exposed that cruising sits 8-15 units over real terrain, not 3. |
+| C VFX + ribbons | Shipped | `tests/ribbon-trail.test.js` (zero-allocation proof), `src/effects/burst-signatures.js` | Ribbons needed three fixes a capture found and no counter could: width axis, bank rather than boost as trigger, and normal rather than additive blending. |
+| D waterfall | Shipped | Shader compiles on both device paths in the sheet run | Specular now follows the key light. Mist bounded within 14 units and first to shed on tier change. |
+| E bird animation | Shipped | `tests/bird-pose.test.js` | Perch fold, asymmetric knockdown tumble, tail as an elevator. |
+| F instance sectors | ATTEMPTED, REVERTED | Measurement table in section 7 | Draw calls rose past the 100 budget for a 17-22% triangle saving. The world's even prop distribution defeats sector culling. |
+| G vertex occlusion | Shipped | Sheet before/after | Slope shading and moss zoning on the ground, radial rim term on canopies. Build-time only. |
+| H landmark slice | Shipped | Giant tree visible in the forest flight tile | Giant nesting tree, fallen log, stone arch, placed along the valley's great circle. |
+
+### Left for the next session
+
+- **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
+- **Lighting and palette tuning.** Needs a phone. Use the committed sheet.
+- **The mountain biome's first nest sometimes never completes a landing.**
+  Seen once in a sheet run and not reproduced; pre-existing, not from this work.
+- **The physical-phone benchmark is still outstanding** and remains the real
+  acceptance gate for everything here. Nothing in this session ran on a device.
+
+### Old empty log
+
+| Stage | Status | Evidence | Notes |
+|---|---|---|---|
 | A tooling | | | |
 | B contact shadow | | | |
 | C VFX + ribbons | | | |
