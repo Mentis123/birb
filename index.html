@@ -4195,7 +4195,18 @@
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     // One art pipeline: highlights roll off consistently on phones and desktop.
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Khronos Neutral, not ACES. Measured side by side from one fixed camera
+    // (tools/birb-lighting.mjs): ACES desaturates as it rolls off, and on a
+    // world made of flat-shaded colour that is most of what you see — greens
+    // go grey-olive and the sky goes to cream. Neutral holds hue into the
+    // highlights, so the same scene reads as gold sky over saturated forest
+    // with no change to a single light, material or vertex colour.
+    //
+    // AgX was measured too and lands very close to ACES here: it earns its
+    // keep on scenes with blown highlights, and this one has none.
+    //
+    // One enum. Zero per-frame cost.
+    renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.12;
 
     const scene = new THREE.Scene();
@@ -8676,8 +8687,36 @@
         // asks for palette tuning on physical phones against FIXED views; this
         // is how those views get generated from one world build, so the only
         // difference between two frames is the setting under test.
-        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog } = {}) => {
+        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog, tone } = {}) => {
           if (Number.isFinite(exposure)) renderer.toneMappingExposure = exposure;
+          if (tone !== undefined) {
+            const map = {
+              aces: THREE.ACESFilmicToneMapping,
+              agx: THREE.AgXToneMapping,
+              neutral: THREE.NeutralToneMapping,
+              reinhard: THREE.ReinhardToneMapping,
+              cineon: THREE.CineonToneMapping,
+              linear: THREE.LinearToneMapping,
+            };
+            // Accept the numeric constant too. The baseline snapshot reads
+            // renderer.toneMapping back as a NUMBER, and a string-only setter
+            // silently ignored it — so the comparison tool never restored the
+            // baseline and every variant after the first inherited the
+            // previous one's tone mapping. A sheet that leaks state between
+            // tiles reports differences that are not there.
+            const resolved = typeof tone === 'number' ? tone : map[tone];
+            if (resolved !== undefined) {
+              renderer.toneMapping = resolved;
+              // Every material's program embeds the tone-mapping function, so
+              // switching it needs a recompile or the change does nothing.
+              scene.traverse((o) => {
+                if (o.material) {
+                  const list = Array.isArray(o.material) ? o.material : [o.material];
+                  for (const m of list) m.needsUpdate = true;
+                }
+              });
+            }
+          }
           if (Number.isFinite(amb)) lightingRig.ambient.intensity = amb;
           if (Number.isFinite(key)) lightingRig.keyLight.intensity = key;
           if (Number.isFinite(rim)) lightingRig.rimLight.intensity = rim;
@@ -8690,6 +8729,7 @@
             rim: lightingRig.rimLight.intensity,
             fill: lightingRig.fillLight.intensity,
             fog: scene.fog ? scene.fog.density : null,
+            tone: renderer.toneMapping,
           };
         },
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
