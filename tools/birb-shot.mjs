@@ -156,7 +156,16 @@ export function fetchThroughProxy(url) {
     });
 }
 
-/** Serve every CDN request from the on-disk cache, filling it on a miss. */
+/**
+ * Serve every CDN request from the on-disk cache, filling it on a miss.
+ *
+ * ONLY for immutable, version-pinned CDN URLs. Never pass the host you are
+ * testing: caching the site under test means the next run verifies a
+ * deployment against a copy of the previous one and reports it healthy. That
+ * happened once here, checking production after a fix and being handed the
+ * pre-fix page from a 102-entry cache. To check a live site, route it through
+ * `fetchThroughProxy` directly with no cache.
+ */
 export async function installCdnCache(context, hosts = ['esm.sh', 'cdn.jsdelivr.net', 'unpkg.com']) {
     fs.mkdirSync(CDN_CACHE, { recursive: true });
     for (const host of hosts) {
