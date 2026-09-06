@@ -3,13 +3,17 @@
 **Status:** Recut proposal  
 **Research date:** 2026-08-27  
 **Platform:** iPadOS first; SwiftUI, MetalKit, Objective-C++/C++  
-**Product promise:** Reshape, lightly sculpt, and paint one protected humanoid mannequin on iPad; preview several deformations; export a skinned FBX package that Unity can configure as a Humanoid for the normal VRChat publishing step.
+**Product promise:** Reshape, lightly sculpt, and paint a protected fixed-topology model on iPad, starting from either a rigged humanoid or an unrigged lump of clay; preview deformations on the humanoid; export a package Unity or any DCC can open — for the humanoid, one Unity configures as a Humanoid for the normal VRChat publishing step.
+
+**Amended 2026-09-05 (Mentis).** Two changes, both recorded in full below: (1) a **New Project** screen offering **Clay** or **Humanoid**, so the app is no longer VRChat-only; (2) **pinned reference cards** — draggable, resizable, zoomable image panels — restored to scope after the recut had deferred them as "floating boards". §14 is the amendment log and states what these cost.
 
 ## 1. Executive decision
 
-The product is feasible, but only if it remains a protected character customizer rather than a small Blender.
+The product is feasible, but only if it remains a protected model customizer rather than a small Blender.
 
-The immutable contract is the product: one versioned mesh, one fixed skeleton, fixed vertex/index/UV order, authored skin weights, authored morphs, and authored joint-fitting rules. Users may move existing vertices and paint the existing UV texture. They may not alter topology, rigs, weights, UVs, materials, or scene structure.
+The immutable contract is the product: **a versioned template with fixed vertex/index/UV order**, authored UVs, and — where the template has one — a fixed skeleton with authored skin weights, morphs, and joint-fitting rules. Users may move existing vertices and paint the existing UV texture. They may not alter topology, rigs, weights, UVs, materials, or scene structure.
+
+**That contract is what makes two starting points cheap.** A Clay document and a Humanoid document are the same engine over different frozen templates; Clay simply has no skeleton, so the rig-shaped features switch off rather than needing new machinery. What Clay is *not* is dynamic-topology sculpting: there is no remeshing, no adaptive subdivision, and no vertex is ever created or destroyed. A literal 8-vertex Blender cube would be unsculptable, so the Clay template ships pre-subdivided (§4).
 
 The first engineering milestone is not the editor. It is a five-day export proof on a physical iPad. The proof must export a neutral and modified mannequin, reopen each with ufbx, import each into the Unity version selected by VRChat Creator Companion, auto-map as Humanoid, and survive elbow, knee, and finger poses. If neither exporter candidate passes, the FBX product promise must change before editor work begins.
 
@@ -34,13 +38,13 @@ The triangle correction is material. VRChat's current mobile thresholds are 7,50
 
 ### In the iPad app
 
-- Open one protected T-pose humanoid.
-- Import aligned front, side, and back reference images.
-- Adjust eight safe proportion controls.
-- Use Grab, Inflate/Deflate, and Smooth without changing topology.
-- Paint one 2048×2048 sRGB albedo texture.
-- Preview four authored poses and receive bounded deformation warnings.
-- Save documents locally and export FBX, PNG, manifest, and instructions in a ZIP.
+- Start a document from one of two frozen templates: **Clay** (unrigged) or **Humanoid** (rigged T-pose).
+- Import reference images, both as aligned front/side/back scene planes and as pinned, resizable, zoomable cards.
+- Use Grab, Inflate/Deflate, and Smooth without changing topology. *(Both templates.)*
+- Paint one 2048×2048 sRGB albedo texture. *(Both templates.)*
+- Adjust eight safe proportion controls. *(Humanoid only.)*
+- Preview four authored poses and receive bounded deformation warnings. *(Humanoid only.)*
+- Save documents locally and export a ZIP containing the model, PNG, manifest, and instructions.
 
 ### Outside the app
 
@@ -50,25 +54,57 @@ The triangle correction is material. VRChat's current mobile thresholds are 7,50
 - Add the VRChat Avatar Descriptor, viewpoint, eye/viseme settings when available, and SDK-specific configuration.
 - Validate, test, and upload through the VRChat SDK.
 
-The export action must be named **Export for VRChat**, never Publish. VRChat's own avatar flow still requires Unity rig configuration, materials, an Avatar Descriptor, validation, and upload; those SDK components are not generic FBX content. See [VRChat Avatars](https://creators.vrchat.com/avatars/) and [VCC Getting Started](https://vcc.docs.vrchat.com/guides/getting-started/).
+A Humanoid document's export action is named **Export for VRChat**, never Publish. A Clay document has no VRChat path at all — it exports as a static mesh for any engine or DCC, and its export button reads **Export Model**. Presenting Clay under VRChat language would be a straightforward lie: without a skeleton there is no avatar.
+
+On the VRChat wording, VRChat's own avatar flow still requires Unity rig configuration, materials, an Avatar Descriptor, validation, and upload; those SDK components are not generic FBX content. See [VRChat Avatars](https://creators.vrchat.com/avatars/) and [VCC Getting Started](https://vcc.docs.vrchat.com/guides/getting-started/).
 
 ## 3. v0.1 user journey
 
-1. Tap **New Humanoid**, name the document, and see the canonical mannequin in T-pose.
-2. Optionally add one front, side, and back image; position, scale, flip, fade, and lock each.
-3. Adjust Height, Head, Shoulders, Torso, Hips, Arms, Legs, and Build.
+### Starting a document
+
+1. Tap **New Project**. Two cards, side by side, nothing else on the screen:
+
+   | | **Clay** | **Humanoid** |
+   |---|---|---|
+   | Shows | A rounded, subdivided cube slowly rotating | The T-pose figure slowly rotating |
+   | Says | "Start from a lump. No rig." | "Start from a body. Rigged and ready." |
+   | Gives you | Sculpt, paint, symmetry | Sculpt, paint, symmetry, proportions, poses |
+   | Exports | A static mesh for any engine | A skinned avatar Unity maps as a Humanoid |
+
+   The choice is made once and is **permanent for that document**. Converting Clay into a Humanoid would mean generating a skeleton and skin weights for arbitrary sculpted geometry — that is automatic rigging, a genuinely hard problem, and it is not in v0.1. The New Project screen must say so in one line rather than letting someone sculpt for an hour and then discover it.
+
+2. Name the document. It opens on the chosen template.
+
+### Then, in either document type
+
+3. Optionally add reference images: front, side and back scene planes, and/or pinned cards you can drag to a corner, resize and zoom (§5).
 4. Use mirrored Grab, Inflate/Deflate, and Smooth brushes.
-5. Fill the body with a base color and optionally paint with a round brush.
-6. Cycle through T-pose, arms-down, elbow/knee bend, and squat.
-7. Resolve blocking checks and review warnings.
-8. Export `AvatarName.zip` containing:
+5. Fill the model with a base colour and optionally paint with a round brush.
+6. Resolve blocking checks and review warnings.
+
+### Humanoid documents also
+
+7. Adjust Height, Head, Shoulders, Torso, Hips, Arms, Legs, and Build.
+8. Cycle through T-pose, arms-down, elbow/knee bend, and squat.
+
+### Export
+
+9. **Humanoid** → `AvatarName.zip`:
    - `AvatarName.fbx`
+   - `AvatarName.vrm`
    - `Textures/AvatarName_Albedo.png`
    - `Import_into_Unity.md`
    - `AvatarName_manifest.json`
-9. Move the ZIP to a Mac or PC and complete the Unity/VCC/VRChat steps.
+10. **Clay** → `ModelName.zip`:
+   - `ModelName.fbx`
+   - `ModelName.glb`
+   - `Textures/ModelName_Albedo.png`
+   - `ModelName_manifest.json`
+11. Move the ZIP to a computer. Humanoid documents then complete the Unity/VCC/VRChat steps; Clay documents are already usable in any engine or DCC.
 
-## 4. Canonical mannequin contract
+## 4. Template contracts
+
+### 4.1 Humanoid template
 
 | Property | v0.1 target |
 |---|---|
@@ -87,11 +123,36 @@ Use MakeHuman's core CC0 assets as reference/source material, then create and fr
 
 The shipping asset still needs deliberate retopology, UVs, weighting, safe morphs, joint landmarks, and Unity pose QA by someone competent in character technical art. That work is not eliminated by open source.
 
+### 4.2 Clay template
+
+| Property | v0.1 target |
+|---|---|
+| Shape | Rounded subdivided cube — recognisably the Blender cube, smoothed enough to sculpt |
+| Geometry | One mesh, no skeleton |
+| Triangle target | 6,000–8,000 |
+| Renderers/materials | One mesh, one material slot |
+| UV | One non-overlapping UV0 set, box-unwrapped with authored seams and mirror correspondence |
+| Texture | One 2048×2048 sRGB albedo PNG; optional 1024 export preset |
+| Skinning | None |
+| Versioning | Immutable `templateID` plus semantic `templateVersion`, same scheme as the humanoid |
+
+**Why a subdivided cube and not a sphere.** The cube reads instantly as "the thing you start from" to anyone who has opened Blender, and its box unwrap gives a UV set a person can actually paint against without a checker texture. A UV sphere's pole pinch is a worse painting surface and a worse sculpting surface.
+
+**The density is a real constraint, not a preference.** Sculpting only moves existing vertices, so resolution is fixed at authoring time: too coarse and a Grab stroke looks like denting a beach ball, too dense and the iPad's per-stroke rebuild misses frame. 6–8k is the same band the humanoid sits in and the same band the brush code is tuned for, which is the point — one engine, two templates.
+
 ## 5. v0.1 functional scope
+
+### New Project
+
+- Two template cards, Clay and Humanoid, as described in §3. No third option, no "advanced" disclosure, no file import.
+- Each card shows its template rotating live in a small Metal view. Both templates are already loaded to draw the cards, so opening a document from either is instant.
+- One line of copy under the pair states that the choice cannot be changed later.
+- The last choice is remembered and pre-selected; it is never auto-confirmed.
 
 ### Documents and viewport
 
-- SwiftUI document browser: create, rename, duplicate, save, reopen, delete.
+- Every document records its `templateKind` (`clay` or `humanoid`) alongside `templateID` and `templateVersion`. Features that need a skeleton read this one field; nothing else in the app branches on document type.
+- SwiftUI document browser: create, rename, duplicate, save, reopen, delete. Document thumbnails distinguish the two kinds at a glance.
 - Autosave flattened current state after meaningful operations; a crash may lose the active stroke only.
 - Metal viewport: orbit, pan, pinch zoom, frame, orthographic front/side/back.
 - Solid, textured, and wireframe-overlay display.
@@ -100,14 +161,31 @@ The shipping asset still needs deliberate retopology, UVs, weighting, safe morph
 
 ### Reference images
 
+Two separate mechanisms, because they answer different questions. **Scene planes** sit in the 3D world behind the model and are for tracing proportion and silhouette. **Pinned cards** float over the interface and are for looking closely at detail — an ear, a hand, a fold of cloth — while your other hand is sculpting. Building only the first is the mistake the recut made; a plane you have to orbit the camera to read is useless as a detail reference.
+
+Common to both:
+
 - Import JPEG, PNG, or HEIC using PhotosPicker or Files.
-- One front, side, and back reference plane.
-- Position, uniform scale, horizontal flip, opacity, visibility, lock, and delete.
 - Copy originals into the document package and make bounded-resolution GPU previews.
 - Never include reference bytes, filenames, or paths in export snapshots.
-- Defer rotation, crop, calibration, floating boards, and six-image support.
 
-### Proportions
+**Scene planes**
+
+- One front, one side, one back plane.
+- Position, uniform scale, horizontal flip, opacity, visibility, lock, and delete.
+- Snap to the matching orthographic view; hidden automatically when the camera faces away from the plane.
+
+**Pinned cards** *(restored to scope 2026-09-05; the recut had deferred these as "floating boards")*
+
+- Up to four cards at once. The cap is deliberate: each is a live texture over the viewport, and the fill-rate cost is what pushes an iPad off frame during a stroke.
+- Drag anywhere; magnetic snap to any of the four corners and to the screen edges.
+- Pinch the card to resize its frame. Pinch **inside** the card to zoom the image within the frame, with two-finger pan to move around a zoomed image. Double-tap to fit.
+- Per-card opacity, lock (ignores all touches so a stroke near it is not stolen), and collapse to a labelled thumbnail tab on the nearest edge.
+- Cards persist with the document: position, size, zoom, pan offset and collapsed state are all saved.
+- Cards never receive Pencil input. The Pencil always reaches the model underneath, so a card resting over the shoulder you are sculpting does not block the stroke; move it with a finger.
+
+Still deferred: rotation, crop, perspective calibration, more than four cards, and per-card colour adjustment.
+### Proportions *(Humanoid documents only)*
 
 Eight authored, reversible controls:
 
@@ -141,11 +219,11 @@ Each control is a sparse vertex delta plus joint-landmark rules. Structural cont
 - Changed-tile snapshots for bounded in-session undo; target 20 paint strokes.
 - Defer hardness, textured brushes, layers, masks, decals, flood-fill regions, 2D UV view, and non-albedo channels.
 
-### Rig preview and validation
+### Rig preview and validation *(Humanoid documents only)*
 
 - GPU skinning for T-pose, arms-down, elbow/knee bend, and squat.
 - Returning to T-pose exactly restores editable rest positions.
-- Blocking checks: finite values; exact array counts; valid indices; required bones; hierarchy; one-to-four influences; normalized weights; valid transforms; texture present; exporter validation passed.
+- Blocking checks split into two sets. **Mesh checks run on every document:** finite values; exact array counts; valid indices; valid transforms; texture present; exporter validation passed. **Rig checks run on Humanoid documents only:** required bones; hierarchy; one-to-four influences; normalized weights; T-pose tolerances; shoulder height. A Clay document is not "missing bones" — it has no rig, and reporting one as an error would train users to ignore the panel.
 - Warnings: flipped/near-zero-area triangles, excessive local stretch, joint-region collapse, mannequin height outside the authored range, and likely body penetration at selected pose samples.
 - Do **not** promise comprehensive continuous self-intersection detection in v0.1.
 
@@ -167,23 +245,31 @@ TinyBVH     FBX writer    ufbx validator
 
 ```text
 CanonicalTemplate (read-only)
+  templateKind                     // clay | humanoid
   positions, normals, indices, uv0
   vertexFaces, oneRingNeighbors
   symmetryPairs, seamPartners
-  morphDeltas, jointLandmarkRules
-  boneHierarchy, restTransforms
-  boneIndices[4], boneWeights[4]
-  validationPoses
+  rig?                             // absent on clay
+    morphDeltas, jointLandmarkRules
+    boneHierarchy, restTransforms
+    boneIndices[4], boneWeights[4]
+    validationPoses
 
-HumanoidDocument
-  templateID, templateVersion
-  morphValues[8]
+Document
+  templateKind, templateID, templateVersion
   sculptDelta[vertex]
   albedoTexture
-  referenceImages[3]
+  scenePlanes[3]                   // front, side, back
+  pinnedCards[0...4]               // frame rect, corner anchor, zoom,
+                                   // pan offset, opacity, locked, collapsed
   cameraState
   flattenedCheckpoint
+  morphValues[8]?                  // humanoid only
 ```
+
+**`rig` is optional, not empty.** Making Clay a humanoid with a zero-bone skeleton would put `if boneCount > 0` branches through the skinning, export and validation paths, and every one of them is a place to get it wrong silently. An absent `rig` makes the rig-shaped code unreachable for Clay by construction, which is the same reasoning that made topology immutable in the first place.
+
+Both templates use this one structure, so the brush, paint, symmetry, undo, autosave and mesh-validation code is written once and neither knows which template it is holding.
 
 Because topology is immutable, all adjacency, vertex-to-face incidence, X-symmetry pairs, joint masks, and UV seam partners should be generated offline and stored in the template. Runtime editing then uses compact arrays, not a half-edge mesh. This removes a large dependency and makes illegal topology operations structurally impossible.
 
@@ -252,6 +338,7 @@ Test two separate integrations:
 - Local vertex displacement near elbow and knee.
 - Joint-rest relocation plus recomputed inverse binds.
 - Finger-weight sample.
+- **Clay neutral and Clay sculpted**, exercising the unrigged export path: no skeleton, no skin, static mesh in FBX and GLB.
 - Deliberately malformed negative cases for validator tests.
 
 ### Pass matrix
@@ -261,7 +348,8 @@ Test two separate integrations:
 | Physical iPad build/export | Succeeds without private APIs or runtime downloads |
 | ufbx reopen | Counts, hierarchy, weights, bind transforms, material path, and finite values match |
 | Unity import | No material transform or FBX hierarchy warnings attributable to exporter |
-| Humanoid Configure | Required mappings resolve and T-pose is accepted |
+| Humanoid Configure | Required mappings resolve and T-pose is accepted *(humanoid cases only)* |
+| Clay import | Opens in Unity and Blender as a static mesh with its UVs and texture, and carries no stray skeleton or skin node |
 | Pose test | Elbows, knees, shoulders, and fingers deform consistently with in-app preview |
 | Scale/axes | Height within 1%; upright, centered, expected handedness |
 | VRChat SDK | Avatar Descriptor can be added; no rig-related blocking validation |
@@ -294,9 +382,9 @@ Do not begin a custom FBX writer during v0.1. It is a separate format-engineerin
 
 ### Phase 1 — Golden vertical slice: 2–3 weeks
 
-- Freeze draft 8–10k template and offline-generated tables.
+- Freeze draft 8–10k humanoid template and offline-generated tables.
 - SwiftUI document shell and Metal viewport.
-- Front/side/back references.
+- Front/side/back reference scene planes.
 - Height and Shoulders morphs with joint fitting.
 - Grab brush with symmetry.
 - Base fill plus basic round paint brush.
@@ -304,16 +392,29 @@ Do not begin a custom FBX writer during v0.1. It is a separate format-engineerin
 
 **Gate:** a user can complete the entire journey and locally test the avatar in VRChat.
 
+The slice stays **Humanoid-only** on purpose. It is the path with every hard unknown in it — skinning, joint fitting, the rig gate, Unity, the SDK. Clay removes constraints rather than adding them, so proving it first would prove the easy half and tell us nothing.
+
+### Phase 1b — Clay and the New Project screen: +1 week
+
+- Author and freeze the Clay template: subdivided rounded cube, box unwrap, offline adjacency and symmetry tables, same generator as the humanoid tables.
+- `templateKind` through the document model; make `rig` optional and confirm the rig-shaped code is unreachable for Clay rather than merely skipped.
+- New Project screen with the two live rotating cards.
+- Clay export path: static FBX and GLB, mesh-only pre-flight, **Export Model** wording.
+- Extend the golden corpus and the pass matrix with the two Clay cases.
+
+**Gate:** a Clay document sculpts, paints, exports, and opens as a static mesh in both Unity and Blender, and no rig check ever fires on it.
+
 ### Phase 2 — v0.1 completion: 3–5 additional weeks
 
 - Complete all eight proportion controls.
 - Inflate/Deflate and Smooth.
+- Pinned reference cards: drag, corner snap, frame resize, in-card zoom and pan, opacity, lock, collapse, persistence.
 - Seam partner paint stamping, eraser, eyedropper, bounded undo.
 - Autosave/reopen, resets, warnings, export progress/cancellation.
 - Import guide, manifest hashes, error reporting, regression corpus.
 - Device QA and TestFlight hardening.
 
-**Total:** approximately **6–9 weeks including the export spike** for one strong iOS/Metal engineer with part-time character technical-art support. A solo developer learning Metal, skinning, and FBX should budget roughly **3–5 months**. The 10–16 week estimate in the broader PRD remains plausible for its larger paint, history, reference, validation, and polish scope; it is not the v0.1 described here.
+**Total:** approximately **7.5–11 weeks including the export spike** — the 2026-09-05 amendment adds roughly **1 week for Clay and the New Project screen** and **half a week for pinned reference cards** on top of the original 6–9 for one strong iOS/Metal engineer with part-time character technical-art support. A solo developer learning Metal, skinning, and FBX should budget roughly **3–5 months**. The 10–16 week estimate in the broader PRD remains plausible for its larger paint, history, reference, validation, and polish scope; it is not the v0.1 described here.
 
 ### Codex/Sol Extra High planning budget
 
@@ -331,13 +432,17 @@ Use one lead coding agent and short, bounded review/test passes. More parallel a
 
 v0.1 is done only when all of the following are true:
 
-- One canonical template has frozen IDs, vertices, indices, UVs, weights, skeleton, morphs, landmarks, and validation poses.
+- **Two** canonical templates have frozen IDs, vertices, indices, UVs and adjacency tables; the Humanoid template additionally has frozen weights, skeleton, morphs, landmarks, and validation poses.
+- New Project offers exactly Clay and Humanoid, states that the choice is permanent, and opens either without a loading pause.
+- A Clay document never surfaces a rig control, a pose preview, a proportion slider, or a rig validation message.
 - Every edit preserves vertex/index/UV/weight array sizes and ordering.
 - All eight proportion extremes and representative sculpt cases pass authored in-app pose tests.
 - Documents survive force quit with no more than the active stroke lost.
-- Reference assets never enter export content or metadata.
+- Reference assets never enter export content or metadata, from either scene planes or pinned cards.
+- Pinned cards drag, snap, resize, zoom, pan, lock and collapse; their state survives close and reopen; and Pencil strokes pass through them to the model.
 - Export succeeds on the baseline physical iPad and reopens with ufbx.
 - Neutral, proportion-extreme, elbow/knee sculpt, finger, and painted samples import into current VCC-selected Unity as accepted Humanoids.
+- Clay neutral and Clay sculpted samples open in Unity and Blender as static meshes with correct UVs and texture, carrying no skeleton or skin node.
 - The VRChat SDK reports no rig-related blocker for the golden samples.
 - Counts are shown as guidance; the app does not claim a VRChat performance rank.
 - Onboarding and export instructions state that Unity/VCC remains mandatory.
@@ -353,6 +458,10 @@ v0.1 is done only when all of the following are true:
 | Users infer “direct VRChat publishing” | Export naming, onboarding, included Unity checklist |
 | Current VRChat thresholds or Unity version changes | Keep target values in documented validation data; verify during releases; never hard-code a marketing guarantee |
 | Template update breaks saved deltas | Immutable template versions; no silent geometry migration |
+| **Clay is read as "a small Blender"** and users expect remeshing, booleans, or adding geometry | The New Project card says "Start from a lump. No rig." and the density is fixed; the app never offers a subdivide or remesh control, so the boundary is visible rather than discovered |
+| **Users pick Clay, sculpt a character, then want it rigged** | The choice screen states in one line that it cannot be changed later. Automatic rigging of arbitrary sculpted geometry is a research problem, not a v0.1 feature; the honest answer is "start a Humanoid document" |
+| **Pinned cards cost frame time during a stroke** | Capped at four; live textures at bounded resolution; measure with four open on the oldest test iPad before the cap is raised |
+| **Scope creep from two document types** | `templateKind` is one field and `rig` is optional; if any feature needs a third branch on document type, that is the signal the split has gone wrong |
 
 ## 12. Recommended first repository milestone
 
@@ -382,3 +491,22 @@ The first pull request should contain no sculpting UI. Its only success criterio
 - [ZIPFoundation](https://github.com/weichsel/ZIPFoundation)
 - [UniVRM](https://github.com/vrm-c/UniVRM)
 
+## 14. Amendment log
+
+### 2026-09-05 — Clay documents and pinned reference cards (Mentis)
+
+**What changed and why.**
+
+1. **A New Project screen with two starting points, Clay or Humanoid.** The original PRD assumed every user wanted a VRChat avatar. Not everyone does, and the engine does not care: sculpt, paint, symmetry, undo and mesh validation are all template-agnostic already. Clay is the same product with the rig switched off, exporting a static mesh instead of an avatar.
+
+2. **Pinned reference cards restored to scope.** §5 of the recut listed "floating boards" among the deferred items, alongside rotation, crop and calibration. On review that was the wrong cut. Scene planes and pinned cards are not two versions of one feature — planes are for tracing silhouette, cards are for reading detail while you work — and shipping only planes means anyone wanting to check a photograph mid-stroke has to orbit the camera away from what they are sculpting. Rotation, crop and calibration stay deferred.
+
+**What this costs:** about 1 week for Clay and the New Project screen, about half a week for the cards. §9 carries the revised totals and a new Phase 1b.
+
+**What was explicitly *not* added:**
+
+- **Converting Clay to Humanoid.** Automatic rigging of arbitrary sculpted geometry is a research problem. The choice is permanent and the UI says so up front.
+- **Dynamic topology.** No remeshing, no subdivide, no adding geometry. The immutable-topology contract is the thing that makes the whole architecture — offline adjacency tables, no half-edge mesh, structurally impossible illegal operations — work at all. Clay is a *pre-subdivided* template, not a dynamic one.
+- **A VRChat path for Clay.** No skeleton means no avatar. Clay exports as a model and its button says so.
+
+**Naming.** "Humanoid Creator for VRChat" no longer describes the product, since half of it is neither humanoid nor for VRChat. The document keeps its filename so existing links survive; the product name is an open question for Mentis.
