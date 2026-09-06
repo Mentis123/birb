@@ -4764,6 +4764,9 @@
     // rewritten when the tier actually changes rather than every frame.
     let mistBudgetTier = -1;
 
+    // Pose snapshot for comparison captures; ?debug=1 harness only.
+    let __birbSavedPose = null;
+
     // Set only by the ?debug=1 capture harness; null in production.
     let __birbStickOverride = null;
 
@@ -8614,7 +8617,61 @@
           if (flightController.setForward) flightController.setForward(found.position.clone().sub(target).normalize());
           return found.id;
         },
+        // Snapshot and restore the bird's exact pose. Zeroing speed is not
+        // enough — the flight system rewrites it — so a comparison sheet has
+        // to put the bird back rather than ask it to stay. The chase camera
+        // damps toward the bird, so restoring the same pose and waiting
+        // reconverges the camera to the same viewpoint every time.
+        capturePose: () => {
+          if (!flightController) return null;
+          __birbSavedPose = {
+            position: flightController.position.clone(),
+            quaternion: flightController.quaternion ? flightController.quaternion.clone() : null,
+          };
+          return __birbSavedPose.position.toArray().map((n) => +n.toFixed(2));
+        },
+        restorePose: () => {
+          if (!__birbSavedPose || !flightController) return false;
+          flightController.position.copy(__birbSavedPose.position);
+          if (__birbSavedPose.quaternion && typeof flightController.setOrientation === 'function') {
+            flightController.setOrientation(__birbSavedPose.quaternion);
+          }
+          if (flightController.velocity) flightController.velocity.set(0, 0, 0);
+          return true;
+        },
+
+        // Zeroes the throttle. NOTE: this does not actually hold the bird in
+        // place — the flight system rewrites speed each frame — which is why
+        // the comparison sheet uses capturePose/restorePose instead. Kept
+        // because it is still the right way to stop a player-driven boost.
+        freeze: (on = true) => {
+          if (!flightController) return null;
+          if (typeof flightController.setSpeed === 'function') flightController.setSpeed(on ? 0 : 11);
+          else flightController.speed = on ? 0 : 11;
+          __birbStickOverride = on ? { x: 0, y: 0, active: false } : null;
+          return flightController.speed;
+        },
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // Lighting overrides for side-by-side comparison captures. The brief
+        // asks for palette tuning on physical phones against FIXED views; this
+        // is how those views get generated from one world build, so the only
+        // difference between two frames is the setting under test.
+        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog } = {}) => {
+          if (Number.isFinite(exposure)) renderer.toneMappingExposure = exposure;
+          if (Number.isFinite(amb)) lightingRig.ambient.intensity = amb;
+          if (Number.isFinite(key)) lightingRig.keyLight.intensity = key;
+          if (Number.isFinite(rim)) lightingRig.rimLight.intensity = rim;
+          if (Number.isFinite(fill)) lightingRig.fillLight.intensity = fill;
+          if (Number.isFinite(fog) && scene.fog) scene.fog.density = fog;
+          return {
+            exposure: renderer.toneMappingExposure,
+            ambient: lightingRig.ambient.intensity,
+            key: lightingRig.keyLight.intensity,
+            rim: lightingRig.rimLight.intensity,
+            fill: lightingRig.fillLight.intensity,
+            fog: scene.fog ? scene.fog.density : null,
+          };
+        },
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
         setSprint: (on) => {
           sprintState.active = !!on;
