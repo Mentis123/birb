@@ -228,6 +228,25 @@ export async function startGame(page, timeout = 30000) {
     await page.waitForFunction(
         'window.__BIRB && window.__BIRB.stats().elapsed > 0.5', null, { timeout },
     );
+
+    // A rendering world is not a WORKING world. Initial environment setup runs
+    // inside a try/catch that logs a warning and continues, so a throw part way
+    // through it leaves the terrain built and looking perfectly normal while
+    // nest points, the collectibles system and the rocket collision targets
+    // were never created. That shipped once, undetected, because every capture
+    // switched environment first and so re-ran the setup successfully. This is
+    // the check that would have caught it: assert the systems a player needs
+    // exist on the path a player actually takes.
+    const health = await page.evaluate(() => ({
+        nesting: window.__BIRB.stats().nesting,
+        rings: window.__BIRB.modeState ? window.__BIRB.modeState().ringsSpawned : null,
+    }));
+    if (health.nesting === null) {
+        throw new Error('initial setup incomplete: no nesting system (check console warnings)');
+    }
+    if (health.rings === null) {
+        throw new Error('initial setup incomplete: no collectibles system (check console warnings)');
+    }
 }
 
 async function main() {
