@@ -12,7 +12,9 @@ import Foundation
 /// bounds-checked reads with no parsing, no compression and no allocation beyond
 /// the arrays themselves.
 ///
-///     magic     8 bytes  "BIRBHUM1"
+///     magic     8 bytes  "BIRBTMP2"
+///     kind      u8       0 = clay, 1 = humanoid
+///     reserved  3 bytes  zero
 ///     header    3 x u32  boneCount, vertexCount, indexCount
 ///     bones     boneCount x { u16 nameLength, utf8 name,
 ///                             i32 parentIndex (-1 for the root),
@@ -21,7 +23,13 @@ import Foundation
 ///     normals   vertexCount x 3 x f32
 ///     uvs       vertexCount x 2 x f32
 ///     indices   indexCount x u32
-///     skin      vertexCount x { u8 count, count x { u16 bone, f32 weight } }
+///     skin      ONLY when boneCount > 0:
+///               vertexCount x { u8 count, count x { u16 bone, f32 weight } }
+///
+/// The rig is an optional SECTION, not a zero-bone one. A Clay template carries
+/// no bone table and no skin block, so code that reads a rig cannot read an
+/// empty one and carry on — the same reasoning that makes `rig` optional in the
+/// document model, applied to the bytes.
 ///
 /// Coordinates are already in the canonical space `Skeleton` documents: metres,
 /// +Y up, ground at y = 0, figure facing +Z, +X the figure's own left. Nothing
@@ -30,13 +38,19 @@ import Foundation
 /// Every failure is thrown rather than trapped. A truncated or renamed template
 /// is a shipping mistake, and the app has to be able to say which one it was.
 public enum TemplateFile {
+    public enum Kind: UInt8, Sendable { case clay = 0, humanoid = 1 }
+
     public struct Loaded: Sendable {
-        public let skeleton: Skeleton
+        public let kind: Kind
+        /// Absent for a Clay template.
+        public let skeleton: Skeleton?
         public let mesh: MeshData
     }
 
     public enum LoadError: Error, CustomStringConvertible, Equatable {
         case badMagic(found: String)
+        case unknownKind(UInt8)
+        case rigMismatch(String)
         case truncated(needed: Int, available: Int)
         case unknownBone(String)
         case duplicateBone(String)
@@ -52,7 +66,11 @@ public enum TemplateFile {
         public var description: String {
             switch self {
             case .badMagic(let found):
-                return "not a BIRBHUM1 template (magic was \"\(found)\")"
+                return "not a BIRBTMP2 template (magic was \"\(found)\")"
+            case .unknownKind(let raw):
+                return "template declares kind \(raw), which this build does not know"
+            case .rigMismatch(let detail):
+                return "template kind and rig disagree: \(detail)"
             case .truncated(let needed, let available):
                 return "template is truncated: needed \(needed) bytes, \(available) remain"
             case .unknownBone(let name):
@@ -89,14 +107,25 @@ public enum TemplateFile {
         var cursor = Cursor(data)
 
         let magic = try cursor.bytes(8)
-        guard magic.elementsEqual("BIRBHUM1".utf8) else {
+        guard magic.elementsEqual("BIRBTMP2".utf8) else {
             throw LoadError.badMagic(found: String(decoding: magic, as: UTF8.self))
         }
+
+        let rawKind = try cursor.u8()
+        guard let kind = Kind(rawValue: rawKind) else { throw LoadError.unknownKind(rawKind) }
+        _ = try cursor.bytes(3)   // reserved
 
         let boneCount = Int(try cursor.u32())
         let vertexCount = Int(try cursor.u32())
         let indexCount = Int(try cursor.u32())
         guard indexCount % 3 == 0 else { throw LoadError.indexCountNotTriangles(indexCount) }
+        switch kind {
+        case .clay where boneCount != 0:
+            throw LoadError.rigMismatch("a clay template carries \(boneCount) bones")
+        case .humanoid where boneCount == 0:
+            throw LoadError.rigMismatch("a humanoid template carries no bones")
+        default: break
+        }
 
         // Bone names are the Unity spelling, which is also what the exporters
         // write as node names, so the mapping back is exact rather than fuzzy.
@@ -128,16 +157,18 @@ public enum TemplateFile {
             heads.append(head)
         }
 
-        let roots = zip(names, parents).filter { $0.1 < 0 }.map(\.0)
-        guard !roots.isEmpty else { throw LoadError.noRoot }
-        guard roots.count == 1 else { throw LoadError.multipleRoots(roots) }
+        var skeleton: Skeleton?
+        if boneCount > 0 {
+            let roots = zip(names, parents).filter { $0.1 < 0 }.map(\.0)
+            guard !roots.isEmpty else { throw LoadError.noRoot }
+            guard roots.count == 1 else { throw LoadError.multipleRoots(roots) }
 
-        let specs = (0..<boneCount).map { index in
-            BoneSpec(byNodeName[names[index]]!,
-                     parent: parents[index] < 0 ? nil : byNodeName[names[parents[index]]]!,
-                     at: heads[index])
+            skeleton = Skeleton(bones: (0..<boneCount).map { index in
+                BoneSpec(byNodeName[names[index]]!,
+                         parent: parents[index] < 0 ? nil : byNodeName[names[parents[index]]]!,
+                         at: heads[index])
+            })
         }
-        let skeleton = Skeleton(bones: specs)
 
         var positions = [Vec3](); positions.reserveCapacity(vertexCount)
         for _ in 0..<vertexCount {
@@ -164,8 +195,12 @@ public enum TemplateFile {
             indices.append(index)
         }
 
-        var influences = [[MeshData.Influence]](); influences.reserveCapacity(vertexCount)
-        for _ in 0..<vertexCount {
+        // No skin block at all when there is no rig, so an unrigged template
+        // gets empty influence sets rather than a block of zeros to interpret.
+        var influences = [[MeshData.Influence]](
+            repeating: [], count: boneCount == 0 ? vertexCount : 0)
+        influences.reserveCapacity(vertexCount)
+        for _ in 0..<(boneCount == 0 ? 0 : vertexCount) {
             let count = Int(try cursor.u8())
             var entry = [MeshData.Influence]()
             entry.reserveCapacity(count)
@@ -184,7 +219,7 @@ public enum TemplateFile {
 
         let mesh = MeshData(positions: positions, normals: normals, uvs: uvs,
                             indices: indices, influences: influences)
-        return Loaded(skeleton: skeleton, mesh: mesh)
+        return Loaded(kind: kind, skeleton: skeleton, mesh: mesh)
     }
 
     /// Bounds-checked forward reader. Every read either advances or throws, so a
@@ -237,19 +272,33 @@ public enum TemplateFile {
 }
 
 extension TemplateFile {
-    /// Identifier and version recorded in every export, so a file can be traced
-    /// back to the exact template it came from.
-    public static let bundledID = "makehuman-hm08-reduced"
-    public static let bundledVersion = "1"
+    /// The templates shipped inside the package, and the identifiers recorded in
+    /// every export so a file can be traced back to the exact template it came
+    /// from.
+    public struct Bundled: Sendable {
+        public let resource: String
+        public let id: String
+        public let version: String
 
-    /// The template shipped inside the package.
-    ///
-    /// Derived from MakeHuman's `base.obj` (hm08 base mesh), which is CC0. See
-    /// `Sources/HumanoidCore/Resources/NOTICE.md`.
-    public static func bundled() throws -> Loaded {
-        guard let url = Bundle.module.url(forResource: "body-v1", withExtension: "bin") else {
-            throw LoadError.badMagic(found: "<body-v1.bin missing from the bundle>")
+        /// Rounded subdivided cube, unrigged. Generated by `tools/build_clay.py`.
+        public static let clay = Bundled(resource: "clay-v1", id: "clay-rounded-cube",
+                                         version: "1")
+        /// Derived from MakeHuman's `base.obj` (hm08 base mesh), which is CC0.
+        /// See `Sources/HumanoidCore/Resources/NOTICE.md`.
+        public static let humanoid = Bundled(resource: "body-v1",
+                                             id: "makehuman-hm08-reduced", version: "1")
+
+        public func load() throws -> Loaded {
+            guard let url = Bundle.module.url(forResource: resource, withExtension: "bin") else {
+                throw LoadError.badMagic(found: "<\(resource).bin missing from the bundle>")
+            }
+            return try TemplateFile.load(contentsOf: url)
         }
-        return try load(contentsOf: url)
     }
+
+    public static let bundledID = Bundled.humanoid.id
+    public static let bundledVersion = Bundled.humanoid.version
+
+    /// The humanoid template. Kept for callers that predate Clay.
+    public static func bundled() throws -> Loaded { try Bundled.humanoid.load() }
 }

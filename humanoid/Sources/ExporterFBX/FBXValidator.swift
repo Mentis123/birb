@@ -56,11 +56,33 @@ public enum FBXValidator {
         result.materialCount = Int(scene.materials.count)
         result.textureCount = Int(scene.textures.count)
 
-        let skeleton = snapshot.skeleton
-
         if result.meshCount != 1 {
             result.problems.append("expected exactly 1 mesh, found \(result.meshCount); VRChat's mobile Good tier allows one skinned mesh")
         }
+
+        // An unrigged export is checked for the ABSENCE of rig structure, not
+        // waved through. A stray armature or a zero-influence skin deformer is
+        // exactly the kind of thing that writes without complaint and then
+        // shows up in someone's scene hierarchy.
+        guard let skeleton = snapshot.skeleton else {
+            if result.boneCount != 0 {
+                result.problems.append("unrigged export carries \(result.boneCount) bones; it must carry none")
+            }
+            if result.clusterCount != 0 {
+                result.problems.append("unrigged export carries \(result.clusterCount) skin clusters; it must carry none")
+            }
+            if result.poseCount != 0 {
+                result.problems.append("unrigged export carries \(result.poseCount) bind poses; it must carry none")
+            }
+            if result.materialCount != 1 {
+                result.problems.append("expected 1 material, found \(result.materialCount)")
+            }
+            if result.textureCount != 1 {
+                result.problems.append("expected 1 texture, found \(result.textureCount)")
+            }
+            return result
+        }
+
         if result.boneCount != skeleton.count {
             result.problems.append("expected \(skeleton.count) bones, found \(result.boneCount)")
         }

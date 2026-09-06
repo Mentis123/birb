@@ -42,7 +42,9 @@ public enum VRMExporter {
     public static func export(_ snapshot: ExportSnapshot, metadata: Metadata = Metadata()) throws -> Data {
         let report = snapshot.validate()
         guard report.passes else { throw Failure.preflightFailed(report) }
-        guard snapshot.skeleton.count <= 255 else { throw Failure.tooManyJoints(snapshot.skeleton.count) }
+        if let skeleton = snapshot.skeleton, skeleton.count > 255 {
+            throw Failure.tooManyJoints(skeleton.count)
+        }
         return try encode(snapshot, metadata: metadata)
     }
 
@@ -116,24 +118,32 @@ public enum VRMExporter {
         let uvAccessor = addAccessor(view: addBufferView(uvBytes, target: arrayBuffer),
                                      componentType: float, count: mesh.vertexCount, type: "VEC2")
 
-        var jointBytes = Data()
-        var weightBytes = Data()
-        for influences in mesh.influences {
-            for slot in 0..<4 {
-                // Unused slots must be joint 0 with weight 0; a non-zero joint
-                // index paired with a zero weight trips the validator.
-                let inf = slot < influences.count ? influences[slot] : nil
-                jointBytes.append(UInt8(inf?.bone ?? 0))
+        // Skin attributes exist only when there is a rig. Writing JOINTS_0 and
+        // WEIGHTS_0 full of zeros for an unrigged mesh would be a validator
+        // error (a zero-weight joint reference) and would make every consumer
+        // treat a static prop as a broken skinned mesh.
+        var jointAccessor: Int?
+        var weightAccessor: Int?
+        if skeleton != nil {
+            var jointBytes = Data()
+            var weightBytes = Data()
+            for influences in mesh.influences {
+                for slot in 0..<4 {
+                    // Unused slots must be joint 0 with weight 0; a non-zero joint
+                    // index paired with a zero weight trips the validator.
+                    let inf = slot < influences.count ? influences[slot] : nil
+                    jointBytes.append(UInt8(inf?.bone ?? 0))
+                }
+                for slot in 0..<4 {
+                    let inf = slot < influences.count ? influences[slot] : nil
+                    weightBytes.appendLittleEndian(Float(inf?.weight ?? 0))
+                }
             }
-            for slot in 0..<4 {
-                let inf = slot < influences.count ? influences[slot] : nil
-                weightBytes.appendLittleEndian(Float(inf?.weight ?? 0))
-            }
-        }
-        let jointAccessor = addAccessor(view: addBufferView(jointBytes, target: arrayBuffer),
+            jointAccessor = addAccessor(view: addBufferView(jointBytes, target: arrayBuffer),
                                         componentType: unsignedByte, count: mesh.vertexCount, type: "VEC4")
-        let weightAccessor = addAccessor(view: addBufferView(weightBytes, target: arrayBuffer),
+            weightAccessor = addAccessor(view: addBufferView(weightBytes, target: arrayBuffer),
                                          componentType: float, count: mesh.vertexCount, type: "VEC4")
+        }
 
         var indexBytes = Data()
         for i in mesh.indices { indexBytes.appendLittleEndian(i) }
@@ -141,78 +151,87 @@ public enum VRMExporter {
                                         componentType: unsignedInt, count: mesh.indices.count, type: "SCALAR")
 
         // --- Nodes -------------------------------------------------------------
-        // Node 0 is the armature root. Every joint hangs beneath it, giving the
-        // skin the common root glTF requires, and it keeps Hips from being the
-        // scene root (which Unity rejects outright).
-        var nodes: [[String: Any]] = [["name": "Armature"]]
+        var nodes = [[String: Any]]()
         var nodeIndexByBone = [HumanBone: Int]()
-        for spec in skeleton.bones {
-            let local = skeleton.restLocal(of: spec.bone)!.translation
-            nodes.append([
-                "name": spec.bone.unityNodeName,
-                "translation": [Double(Float(local.x)), Double(Float(local.y)), Double(Float(local.z))],
-            ])
-            nodeIndexByBone[spec.bone] = nodes.count - 1
-        }
-        for spec in skeleton.bones {
-            let parentIndex = spec.parent.flatMap { nodeIndexByBone[$0] } ?? 0
-            var parent = nodes[parentIndex]
-            var children = parent["children"] as? [Int] ?? []
-            children.append(nodeIndexByBone[spec.bone]!)
-            parent["children"] = children
-            nodes[parentIndex] = parent
-        }
+        var inverseBindAccessor: Int?
+        var meshNodeIndex = 0
+        var sceneRoots = [Int]()
 
-        var inverseBindBytes = Data()
-        for spec in skeleton.bones {
-            for value in skeleton.inverseBind(of: spec.bone)!.floats {
-                inverseBindBytes.appendLittleEndian(value)
+        if let skeleton {
+            // Node 0 is the armature root. Every joint hangs beneath it, giving
+            // the skin the common root glTF requires, and it keeps Hips from
+            // being the scene root (which Unity rejects outright).
+            nodes.append(["name": "Armature"])
+            for spec in skeleton.bones {
+                let local = skeleton.restLocal(of: spec.bone)!.translation
+                nodes.append([
+                    "name": spec.bone.unityNodeName,
+                    "translation": [Double(Float(local.x)), Double(Float(local.y)), Double(Float(local.z))],
+                ])
+                nodeIndexByBone[spec.bone] = nodes.count - 1
             }
-        }
-        let inverseBindAccessor = addAccessor(view: addBufferView(inverseBindBytes),
+            for spec in skeleton.bones {
+                let parentIndex = spec.parent.flatMap { nodeIndexByBone[$0] } ?? 0
+                var parent = nodes[parentIndex]
+                var children = parent["children"] as? [Int] ?? []
+                children.append(nodeIndexByBone[spec.bone]!)
+                parent["children"] = children
+                nodes[parentIndex] = parent
+            }
+
+            var inverseBindBytes = Data()
+            for spec in skeleton.bones {
+                for value in skeleton.inverseBind(of: spec.bone)!.floats {
+                    inverseBindBytes.appendLittleEndian(value)
+                }
+            }
+            inverseBindAccessor = addAccessor(view: addBufferView(inverseBindBytes),
                                               componentType: float, count: skeleton.count, type: "MAT4")
 
-        // The skinned mesh node carries no transform: the spec says a skinned
-        // mesh node's own transform must be ignored, and the validator warns
-        // when one is present.
-        let meshNodeIndex = nodes.count
-        nodes.append(["name": "Body", "mesh": 0, "skin": 0])
+            // The skinned mesh node carries no transform: the spec says a skinned
+            // mesh node's own transform must be ignored, and the validator warns
+            // when one is present.
+            meshNodeIndex = nodes.count
+            nodes.append(["name": "Body", "mesh": 0, "skin": 0])
+            sceneRoots = [0, meshNodeIndex]
+        } else {
+            // An unrigged document is one node: the mesh. No armature, because
+            // an empty root is structure a consumer has to explain away.
+            nodes.append(["name": "Model", "mesh": 0])
+            meshNodeIndex = 0
+            sceneRoots = [0]
+        }
 
         // --- Texture and material ---------------------------------------------
         let imageBytes = try PNG.encode(snapshot.albedo)
         let imageView = addBufferView(imageBytes)
 
         // --- JSON --------------------------------------------------------------
-        var humanBones = [String: Any]()
-        for spec in skeleton.bones {
-            humanBones[spec.bone.vrmKey] = ["node": nodeIndexByBone[spec.bone]!]
+        var attributes: [String: Any] = [
+            "POSITION": positionAccessor,
+            "NORMAL": normalAccessor,
+            "TEXCOORD_0": uvAccessor,
+        ]
+        if let jointAccessor, let weightAccessor {
+            attributes["JOINTS_0"] = jointAccessor
+            attributes["WEIGHTS_0"] = weightAccessor
         }
 
-        let gltf: [String: Any] = [
-            "asset": ["version": "2.0", "generator": "Birb Humanoid Creator \(snapshot.templateVersion)"],
-            "extensionsUsed": ["VRMC_vrm"],
+        let primitive: [String: Any] = [
+            "attributes": attributes,
+            "indices": indexAccessor,
+            "material": 0,
+            "mode": 4,
+        ]
+
+        var gltf: [String: Any] = [
+            "asset": ["version": "2.0", "generator": "Baby Blender \(snapshot.templateVersion)"],
             "scene": 0,
-            "scenes": [["nodes": [0, meshNodeIndex]]],
+            "scenes": [["nodes": sceneRoots]],
             "nodes": nodes,
             "meshes": [[
                 "name": snapshot.avatarName,
-                "primitives": [[
-                    "attributes": [
-                        "POSITION": positionAccessor,
-                        "NORMAL": normalAccessor,
-                        "TEXCOORD_0": uvAccessor,
-                        "JOINTS_0": jointAccessor,
-                        "WEIGHTS_0": weightAccessor,
-                    ],
-                    "indices": indexAccessor,
-                    "material": 0,
-                    "mode": 4,
-                ]],
-            ]],
-            "skins": [[
-                "inverseBindMatrices": inverseBindAccessor,
-                "skeleton": 0,
-                "joints": skeleton.bones.map { nodeIndexByBone[$0.bone]! },
+                "primitives": [primitive],
             ]],
             "materials": [[
                 "name": "Skin",
@@ -230,7 +249,24 @@ public enum VRMExporter {
             "accessors": accessors,
             "bufferViews": bufferViews,
             "buffers": [["byteLength": bin.count]],
-            "extensions": [
+        ]
+
+        // VRMC_vrm is a HUMANOID extension: its required `humanoid.humanBones`
+        // map has no meaning without a skeleton. An unrigged document therefore
+        // ships as a plain glTF binary — still a .glb, just not a .vrm — rather
+        // than as a VRM claiming a humanoid it does not have.
+        if let skeleton {
+            var humanBones = [String: Any]()
+            for spec in skeleton.bones {
+                humanBones[spec.bone.vrmKey] = ["node": nodeIndexByBone[spec.bone]!]
+            }
+            gltf["extensionsUsed"] = ["VRMC_vrm"]
+            gltf["skins"] = [[
+                "inverseBindMatrices": inverseBindAccessor!,
+                "skeleton": 0,
+                "joints": skeleton.bones.map { nodeIndexByBone[$0.bone]! },
+            ]]
+            gltf["extensions"] = [
                 "VRMC_vrm": [
                     "specVersion": "1.0",
                     "meta": [
@@ -240,8 +276,8 @@ public enum VRMExporter {
                     ],
                     "humanoid": ["humanBones": humanBones],
                 ],
-            ],
-        ]
+            ]
+        }
 
         // Sorted keys make the output byte-identical run to run, which the
         // export manifest's SHA-256 handshake depends on.

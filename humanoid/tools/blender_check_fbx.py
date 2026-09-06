@@ -38,19 +38,26 @@ def measure(import_call, label):
 
     max_weights, verts, unweighted = 0, 0, 0
     for m in skinned:
-        verts += len(m.data.vertices)
         for v in m.data.vertices:
             n = len([g for g in v.groups if g.weight > 0])
             max_weights = max(max_weights, n)
             if n == 0:
                 unweighted += 1
+    # Counted over ALL meshes, not just skinned ones. Counting only skinned
+    # meshes reported 0 vertices for an unrigged file, which combined with an
+    # absence-only pass condition would have waved through an empty export.
+    for m in meshes:
+        verts += len(m.data.vertices)
+    tris = sum(len(p.vertices) - 2 for m in meshes for p in m.data.polygons)
 
     return {
         "importer": label,
         "armatures": len(armatures),
         "bones": len(bones),
+        "meshes": len(meshes),
         "skinnedMeshes": len(skinned),
         "verts": verts,
+        "tris": tris,
         "maxWeights": max_weights,
         "unweightedVerts": unweighted,
         "missingRequired": [b for b in REQUIRED if b not in bones],
@@ -64,20 +71,35 @@ if hasattr(bpy.ops.wm, "fbx_import"):
     results.append(measure(lambda: bpy.ops.wm.fbx_import(filepath=path), "cxx-ufbx"))
 
 
+# An unrigged export is checked for the absence of a rig rather than waved
+# through: a stray armature or a zero-influence skin deformer writes without
+# complaint and shows up in the importer's hierarchy.
+rigged = "clay-" not in os.path.basename(path)
+
+
 def good(r):
-    return ("error" not in r and r["armatures"] == 1 and r["skinnedMeshes"] == 1
-            and not r["missingRequired"] and r["unweightedVerts"] == 0
-            and r["maxWeights"] <= 4)
+    if "error" in r:
+        return False
+    # Geometry first, in both cases. Everything below is a statement about the
+    # rig, and none of it is worth anything if the file has no mesh in it.
+    if r["meshes"] != 1 or r["verts"] == 0 or r["tris"] == 0:
+        return False
+    if rigged:
+        return (r["armatures"] == 1 and r["skinnedMeshes"] == 1
+                and not r["missingRequired"] and r["unweightedVerts"] == 0
+                and r["maxWeights"] <= 4)
+    return (r["armatures"] == 0 and r["skinnedMeshes"] == 0 and r["bones"] == 0)
 
 
 ok = all(good(r) for r in results)
 # The two importers must also agree, or one of them is reconstructing something
 # different from the same bytes.
 if len(results) == 2 and all("error" not in r for r in results):
-    for key in ("bones", "skinnedMeshes", "verts", "maxWeights"):
+    for key in ("bones", "meshes", "skinnedMeshes", "verts", "tris", "maxWeights"):
         if results[0][key] != results[1][key]:
             ok = False
 
 print("FBX_IMPORT " + json.dumps(
-    {"file": os.path.basename(path), "ok": ok, "results": results}, sort_keys=True))
+    {"file": os.path.basename(path), "rigged": rigged, "ok": ok, "results": results},
+    sort_keys=True))
 sys.exit(0 if ok else 1)

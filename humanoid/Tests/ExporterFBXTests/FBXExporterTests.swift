@@ -35,8 +35,8 @@ final class FBXExporterTests: XCTestCase {
         let result = FBXValidator.validate(file, against: snapshot)
         XCTAssertTrue(result.passes, result.summary)
         XCTAssertEqual(result.meshCount, 1)
-        XCTAssertEqual(result.boneCount, snapshot.skeleton.count)
-        XCTAssertEqual(result.clusterCount, snapshot.skeleton.count)
+        XCTAssertEqual(result.boneCount, snapshot.skeleton!.count)
+        XCTAssertEqual(result.clusterCount, snapshot.skeleton!.count)
         XCTAssertEqual(result.vertexCount, snapshot.mesh.vertexCount)
         XCTAssertLessThanOrEqual(result.maxWeightsPerVertex, 4)
     }
@@ -57,7 +57,7 @@ final class FBXExporterTests: XCTestCase {
         // The failure the reopen gate exists to catch: a file that imports
         // cleanly everywhere and skins incorrectly. Validating the written file
         // against a DIFFERENT skeleton simulates rest and bind drifting apart.
-        let shifted = Skeleton(bones: snapshot.skeleton.bones.map {
+        let shifted = Skeleton(bones: snapshot.skeleton!.bones.map {
             $0.bone == .leftHand
                 ? BoneSpec($0.bone, parent: $0.parent, at: $0.restPosition + Vec3(0.05, 0, 0))
                 : $0

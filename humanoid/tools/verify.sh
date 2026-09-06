@@ -12,7 +12,7 @@
 #   4. PNG decode               the validator reads image headers only
 #   5. Blender glTF import      independent reconstruction of the rig
 #   6. Blender FBX import x2    legacy Python importer and the C++/ufbx one
-#   7. template oracle          independent re-derivation of the shipped body
+#   7. template oracle          independent re-derivation of both templates
 #   8. render                   a picture of the exported file, for human eyes
 #
 # Tool locations are overridable so this works both here and in CI.
@@ -76,7 +76,8 @@ for m in issues['messages']:
 }
 
 if [ -n "${GLTF_VALIDATOR_BIN:-}" ] && [ -x "${GLTF_VALIDATOR_BIN:-}" ]; then
-    for f in "$OUT"/*.vrm; do
+    for f in "$OUT"/*.vrm "$OUT"/*.glb; do
+        [ -e "$f" ] || continue
         report=$(validate_one "$f")
         errors=$(echo "$report" | awk '{print $1}')
         warnings=$(echo "$report" | awk '{print $2}')
@@ -111,7 +112,7 @@ fi
 step "4. embedded PNG decodes"
 # The validator parses image headers and never inflates the data, so a PNG built
 # on raw deflate passes it and opens in nothing. This decodes for real.
-if python3 "$ROOT/tools/check_glb_png.py" "$OUT"/*.vrm; then
+if python3 "$ROOT/tools/check_glb_png.py" "$OUT"/*.vrm "$OUT"/*.glb; then
     ok "PNG payloads inflate to the expected size"
 else
     bad "PNG payload decode"
@@ -119,7 +120,8 @@ fi
 
 step "5. Blender glTF import"
 if command -v "$BLENDER_BIN" >/dev/null 2>&1; then
-    for f in "$OUT"/*.vrm; do
+    for f in "$OUT"/*.vrm "$OUT"/*.glb; do
+        [ -e "$f" ] || continue
         # The exit code, not a grep: the oracle prints its GLTF_IMPORT line
         # whatever it found, so grepping for it passed every file including the
         # ones it had just rejected.
@@ -156,24 +158,30 @@ step "7. shipped body template"
 # tautological — it measures head-to-tail of the bones it just aimed — so this
 # re-derives everything from the bytes and measures head to CHILD head, which is
 # what Unity's mapper scores.
-if python3 "$ROOT/tools/check_template.py" "$ROOT/Sources/HumanoidCore/Resources/body-v1.bin"; then
-    ok "body-v1.bin"
-else
-    bad "body-v1.bin failed its own oracle"
-fi
+for template in clay-v1 body-v1; do
+    if python3 "$ROOT/tools/check_template.py" \
+         "$ROOT/Sources/HumanoidCore/Resources/$template.bin"; then
+        ok "$template.bin"
+    else
+        bad "$template.bin failed its own oracle"
+    fi
+done
 
-step "8. exported body renders as a body"
+step "8. exported models render as models"
 # Stages 3 to 6 prove the file is well formed and reconstructs into a correctly
 # skinned mesh. None of them can tell a body from a bag of valid triangles, and
 # the PNGs are the only artefact a person can check by eye.
 if command -v "$BLENDER_BIN" >/dev/null 2>&1; then
-    if "$BLENDER_BIN" --factory-startup --background \
-         --python "$ROOT/tools/blender_render_vrm.py" -- \
-         "$OUT/neutral.vrm" "$OUT/neutral" 2>/dev/null | grep -q "RENDER_OK"; then
-        ok "renders written to $OUT/neutral_{front,threequarter}.png"
-    else
-        bad "exported VRM did not render"
-    fi
+    for pair in "neutral.vrm:neutral" "clay-neutral.glb:clay-neutral"; do
+        file="${pair%%:*}"; prefix="${pair##*:}"
+        if "$BLENDER_BIN" --factory-startup --background \
+             --python "$ROOT/tools/blender_render_vrm.py" -- \
+             "$OUT/$file" "$OUT/$prefix" 2>/dev/null | grep -q "RENDER_OK"; then
+            ok "$prefix renders written"
+        else
+            bad "$file did not render"
+        fi
+    done
 else
     skip "render (set BLENDER_BIN)"
 fi

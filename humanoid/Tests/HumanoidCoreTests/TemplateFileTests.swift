@@ -11,7 +11,11 @@ import XCTest
 /// conversion worked is to load the baked bytes back and run that gate on them.
 final class TemplateFileTests: XCTestCase {
     private func template() throws -> TemplateFile.Loaded {
-        try TemplateFile.bundled()
+        try TemplateFile.Bundled.humanoid.load()
+    }
+
+    private func humanoidSkeleton() throws -> Skeleton {
+        try XCTUnwrap(template().skeleton, "the humanoid template must carry a rig")
     }
 
     func testBundledTemplateClearsTheFullPreFlight() throws {
@@ -30,7 +34,7 @@ final class TemplateFileTests: XCTestCase {
     }
 
     func testCarriesEveryBoneUnityAndVRChatRequire() throws {
-        let skeleton = try template().skeleton
+        let skeleton = try humanoidSkeleton()
         for bone in HumanBone.required {
             XCTAssertNotNil(skeleton.index(of: bone), "missing \(bone.unityNodeName)")
         }
@@ -40,7 +44,7 @@ final class TemplateFileTests: XCTestCase {
     }
 
     func testParentsPrecedeChildren() throws {
-        let skeleton = try template().skeleton
+        let skeleton = try humanoidSkeleton()
         var placed = Set<HumanBone>()
         for spec in skeleton.bones {
             if let parent = spec.parent {
@@ -54,7 +58,7 @@ final class TemplateFileTests: XCTestCase {
     func testStandsInTheCanonicalSpace() throws {
         let loaded = try template()
         let mesh = loaded.mesh
-        let skeleton = loaded.skeleton
+        let skeleton = try XCTUnwrap(loaded.skeleton)
 
         let lowest = mesh.positions.map(\.y).min()!
         let highest = mesh.positions.map(\.y).max()!
@@ -74,7 +78,7 @@ final class TemplateFileTests: XCTestCase {
     }
 
     func testArmsReachTheTPoseWithinUnitysArmTolerance() throws {
-        let skeleton = try template().skeleton
+        let skeleton = try humanoidSkeleton()
         // AvatarSetupTool.sBonePoses allows 5 degrees on the arm chain. Measured
         // head to child head, which is what the mapper scores.
         let chain: [(HumanBone, HumanBone, Double)] = [

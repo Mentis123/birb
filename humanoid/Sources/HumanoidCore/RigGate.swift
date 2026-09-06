@@ -16,32 +16,11 @@ import Foundation
 /// calibrated against recorded real verdicts — see `tools/unity-verdicts.json`
 /// and REPORT.md §5.4.
 public enum RigGate {
-    public enum Severity: String, Sendable, Codable { case error, warning }
-
-    public struct Finding: Sendable, Codable, CustomStringConvertible {
-        public let severity: Severity
-        public let code: String
-        public let message: String
-        /// The system whose rule this reproduces, so a failure points at the
-        /// right documentation when it needs re-checking.
-        public let source: String
-
-        public var description: String { "[\(severity.rawValue)] \(code): \(message) (\(source))" }
-    }
-
-    public struct Report: Sendable, Codable {
-        public let findings: [Finding]
-        public var errors: [Finding] { findings.filter { $0.severity == .error } }
-        public var warnings: [Finding] { findings.filter { $0.severity == .warning } }
-        public var passes: Bool { errors.isEmpty }
-
-        public var summary: String {
-            if findings.isEmpty { return "rig gate: pass (no findings)" }
-            let head = passes ? "rig gate: pass with \(warnings.count) warning(s)"
-                              : "rig gate: FAIL — \(errors.count) error(s), \(warnings.count) warning(s)"
-            return ([head] + findings.map { "  " + $0.description }).joined(separator: "\n")
-        }
-    }
+    // The finding and report types are shared with `MeshGate`; see Gate.swift
+    // for why the two gates are separate in the first place.
+    public typealias Severity = Gate.Severity
+    public typealias Finding = Gate.Finding
+    public typealias Report = Gate.Report
 
     /// Minimum separation between consecutive mapped bones. Unity flags
     /// "has bone length of zero" on an exact positional match; a 5 mm floor
@@ -62,7 +41,7 @@ public enum RigGate {
         f += checkNames(skeleton)
         f += checkScaleAndCounts(skeleton)
         if let mesh { f += checkWeights(skeleton, mesh) }
-        return Report(findings: f)
+        return Report(label: "rig gate", findings: f)
     }
 
     // MARK: - Bone presence

@@ -63,14 +63,20 @@ public struct ExportSnapshot: Sendable {
     public let avatarName: String
     public let templateID: String
     public let templateVersion: String
-    public let skeleton: Skeleton
+    /// Absent for an unrigged document. Optional rather than a zero-bone
+    /// skeleton on purpose: an empty rig would put `if boneCount > 0` through
+    /// the skinning, export and validation paths, and each of those is a place
+    /// to be silently wrong. Absent makes the rig-shaped code unreachable.
+    public let skeleton: Skeleton?
     public let mesh: MeshData
     public let albedo: PNG.Image
     /// Relative path the material points at inside the export package.
     public let albedoRelativePath: String
 
+    public var isRigged: Bool { skeleton != nil }
+
     public init(avatarName: String, templateID: String, templateVersion: String,
-                skeleton: Skeleton, mesh: MeshData, albedo: PNG.Image,
+                skeleton: Skeleton?, mesh: MeshData, albedo: PNG.Image,
                 albedoRelativePath: String) {
         self.avatarName = avatarName
         self.templateID = templateID
@@ -82,7 +88,16 @@ public struct ExportSnapshot: Sendable {
     }
 
     /// Runs the full pre-flight. Export refuses on any error.
-    public func validate() -> RigGate.Report {
-        RigGate.check(skeleton: skeleton, mesh: mesh.rigGateBinding(boneCount: skeleton.count))
+    ///
+    /// The mesh gate always runs. The rig gate runs only when there is a rig,
+    /// so an unrigged document is never told it is missing bones.
+    public func validate() -> Gate.Report {
+        var reports = [MeshGate.check(mesh, requiresSkin: isRigged)]
+        if let skeleton {
+            reports.append(RigGate.check(skeleton: skeleton,
+                                         mesh: mesh.rigGateBinding(boneCount: skeleton.count)))
+        }
+        return Gate.Report.merge(reports, label: isRigged ? "export pre-flight"
+                                                          : "export pre-flight (unrigged)")
     }
 }

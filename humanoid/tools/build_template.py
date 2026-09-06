@@ -31,10 +31,13 @@ character unwrap, and a generated one would make painting materially worse.
 import bpy
 import bmesh
 import math
-import struct
+import os
 import sys
 from collections import defaultdict
 from mathutils import Vector, Matrix
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import template_format as fmt
 
 # ---------------------------------------------------------------------------
 # Bone table: our Unity-named skeleton mapped onto MakeHuman's landmarks.
@@ -419,7 +422,7 @@ def collect(body, armature, max_influences=4):
 
 
 def write_template(path, body, armature, influences):
-    """Versioned little-endian binary. Layout documented in TemplateFile.swift."""
+    """Emits the shared BIRBTMP2 container. Layout lives in template_format.py."""
     mesh = body.data
     mesh.calc_loop_triangles()
     uv_layer = mesh.uv_layers.active.data
@@ -427,7 +430,6 @@ def write_template(path, body, armature, influences):
     # Split any vertex whose UVs differ between loops, so one vertex carries one
     # UV. Positions and weights are copied to the duplicates, which keeps the
     # skin identical while making the buffers renderable as-is.
-    vertex_uv = {}
     remap = {}
     positions, normals, uvs, out_influences = [], [], [], []
     for tri in mesh.loop_triangles:
@@ -437,11 +439,10 @@ def write_template(path, body, armature, influences):
             if key not in remap:
                 remap[key] = len(positions)
                 v = mesh.vertices[vertex_index]
-                positions.append(v.co.copy())
-                normals.append(v.normal.copy())
+                positions.append(tuple(v.co))
+                normals.append(tuple(v.normal))
                 uvs.append((uv.x, uv.y))
                 out_influences.append(influences[vertex_index])
-            vertex_uv[key] = remap[key]
 
     indices = []
     for tri in mesh.loop_triangles:
@@ -449,34 +450,16 @@ def write_template(path, body, armature, influences):
             uv = uv_layer[loop_index].uv
             indices.append(remap[(vertex_index, round(uv.x, 6), round(uv.y, 6))])
 
-    bones = bone_table()
-    name_to_index = {name: i for i, (name, *_) in enumerate(bones)}
+    rows = bone_table()
+    name_to_index = {name: i for i, (name, *_) in enumerate(rows)}
+    bones = []
+    for name, parent, *_ in rows:
+        head = armature.data.bones[name].head_local
+        bones.append((name, name_to_index[parent] if parent else -1,
+                      (head.x, head.y, head.z)))
 
-    with open(path, 'wb') as f:
-        f.write(b'BIRBHUM1')
-        f.write(struct.pack('<III', len(bones), len(positions), len(indices)))
-
-        for name, parent, *_ in bones:
-            raw = name.encode('utf-8')
-            f.write(struct.pack('<H', len(raw)))
-            f.write(raw)
-            f.write(struct.pack('<i', name_to_index[parent] if parent else -1))
-            head = armature.data.bones[name].head_local
-            f.write(struct.pack('<3f', head.x, head.y, head.z))
-
-        for p in positions:
-            f.write(struct.pack('<3f', p.x, p.y, p.z))
-        for n in normals:
-            f.write(struct.pack('<3f', n.x, n.y, n.z))
-        for u, v in uvs:
-            f.write(struct.pack('<2f', u, v))
-        for i in indices:
-            f.write(struct.pack('<I', i))
-        for inf in out_influences:
-            f.write(struct.pack('<B', len(inf)))
-            for bone, weight in inf:
-                f.write(struct.pack('<Hf', bone, weight))
-
+    fmt.write(path, fmt.HUMANOID, positions, normals, uvs, indices,
+              bones=bones, influences=out_influences)
     return len(bones), len(positions), len(indices) // 3
 
 

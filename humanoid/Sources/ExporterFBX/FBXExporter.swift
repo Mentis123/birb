@@ -75,19 +75,27 @@ public enum FBXExporter {
         ufbxw_scene_set_unit_scale_factor(scene, 100.0)
 
         // --- Skeleton ---------------------------------------------------------
-        let armature = ufbxw_create_node(scene)
-        ufbxw_set_name(scene, armature.id, "Armature")
-
+        // Skipped entirely when the document has no rig. An unrigged export must
+        // carry no armature node, no bones, no skin deformer and no bind pose:
+        // an empty armature is not "harmless extra structure", it is a stray
+        // root that Unity and Blender both surface in the hierarchy and that
+        // some importers treat as a skinned mesh with zero influences.
         var nodeByBone = [HumanBone: ufbxw_node]()
-        for spec in skeleton.bones {
-            let node = ufbxw_create_node(scene)
-            ufbxw_set_name(scene, node.id, spec.bone.unityNodeName)
-            let local = skeleton.restLocal(of: spec.bone)!.translation
-            ufbxw_node_set_translation(scene, node, ufbxw_vec3(x: local.x, y: local.y, z: local.z))
-            ufbxw_node_set_parent(scene, node, spec.parent.map { nodeByBone[$0]! } ?? armature)
-            // LIMB_NODE for every skinned bone. See the note above on BONE_ROOT.
-            ufbxw_create_bone(scene, UFBXW_BONE_LIMB_NODE, node)
-            nodeByBone[spec.bone] = node
+        var armature: ufbxw_node?
+        if let skeleton {
+            let root = ufbxw_create_node(scene)
+            ufbxw_set_name(scene, root.id, "Armature")
+            armature = root
+            for spec in skeleton.bones {
+                let node = ufbxw_create_node(scene)
+                ufbxw_set_name(scene, node.id, spec.bone.unityNodeName)
+                let local = skeleton.restLocal(of: spec.bone)!.translation
+                ufbxw_node_set_translation(scene, node, ufbxw_vec3(x: local.x, y: local.y, z: local.z))
+                ufbxw_node_set_parent(scene, node, spec.parent.map { nodeByBone[$0]! } ?? root)
+                // LIMB_NODE for every skinned bone. See the note above on BONE_ROOT.
+                ufbxw_create_bone(scene, UFBXW_BONE_LIMB_NODE, node)
+                nodeByBone[spec.bone] = node
+            }
         }
 
         // --- Mesh -------------------------------------------------------------
@@ -122,7 +130,8 @@ public enum FBXExporter {
         ufbxw_node_set_material(scene, meshNode, 0, material)
         ufbxw_mesh_set_single_material(scene, fbxMesh, 0)
 
-        // --- Skin -------------------------------------------------------------
+        // --- Skin and bind pose -------------------------------------------------
+        if let skeleton, let armature {
         let skin = ufbxw_create_skin_deformer(scene, fbxMesh)
         ufbxw_skin_deformer_set_skinning_type(scene, skin, UFBXW_SKINNING_TYPE_LINEAR)
 
@@ -169,6 +178,7 @@ public enum FBXExporter {
                                      hc_ufbxw_matrix(&restGlobal))
         }
         ufbxw_skin_deformer_set_bind_pose(scene, skin, pose)
+        }
 
         // --- Save --------------------------------------------------------------
         var prepareOpts = ufbxw_default_prepare_opts

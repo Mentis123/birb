@@ -2,7 +2,12 @@ import XCTest
 @testable import HumanoidCore
 
 final class SkinningTests: XCTestCase {
-    private func template() throws -> TemplateFile.Loaded { try TemplateFile.bundled() }
+    private func template() throws -> TemplateFile.Loaded { try TemplateFile.Bundled.humanoid.load() }
+
+    /// The humanoid template's rig. Skinning is only defined where there is one.
+    private func rig(_ loaded: TemplateFile.Loaded) throws -> Skeleton {
+        try XCTUnwrap(loaded.skeleton, "the humanoid template must carry a rig")
+    }
 
     private func moved(_ s: Skeleton, _ bone: HumanBone, by delta: Vec3) -> Skeleton {
         Skeleton(bones: s.bones.map {
@@ -12,7 +17,7 @@ final class SkinningTests: XCTestCase {
 
     func testDeformingToTheSameSkeletonChangesNothing() throws {
         let loaded = try template()
-        let same = Skinning.deform(loaded.mesh, from: loaded.skeleton, to: loaded.skeleton)
+        let same = Skinning.deform(loaded.mesh, from: try rig(loaded), to: try rig(loaded))
         for (a, b) in zip(same.positions, loaded.mesh.positions) {
             XCTAssertEqual(length(a - b), 0, accuracy: 1e-12)
         }
@@ -21,10 +26,10 @@ final class SkinningTests: XCTestCase {
     func testMovingAJointMovesTheSkinAroundItAndLeavesTheRestAlone() throws {
         let loaded = try template()
         let lift = Vec3(0, 0.06, 0)
-        let posed = moved(loaded.skeleton, .head, by: lift)
-        let deformed = Skinning.deform(loaded.mesh, from: loaded.skeleton, to: posed)
+        let posed = moved(try rig(loaded), .head, by: lift)
+        let deformed = Skinning.deform(loaded.mesh, from: try rig(loaded), to: posed)
 
-        let headIndex = loaded.skeleton.index(of: .head)!
+        let headIndex = try rig(loaded).index(of: .head)!
         var movedAnything = false
         for vertex in 0..<loaded.mesh.vertexCount {
             let weight = loaded.mesh.influences[vertex]
@@ -44,9 +49,9 @@ final class SkinningTests: XCTestCase {
         let loaded = try template()
         // The edit the corpus calls broad-shoulders, which is the shape of every
         // proportion change the editor makes.
-        let posed = moved(moved(loaded.skeleton, .leftShoulder, by: Vec3(0.05, 0, 0)),
+        let posed = moved(moved(try rig(loaded), .leftShoulder, by: Vec3(0.05, 0, 0)),
                           .rightShoulder, by: Vec3(-0.05, 0, 0))
-        let deformed = Skinning.deform(loaded.mesh, from: loaded.skeleton, to: posed)
+        let deformed = Skinning.deform(loaded.mesh, from: try rig(loaded), to: posed)
         let report = RigGate.check(skeleton: posed,
                                    mesh: deformed.rigGateBinding(boneCount: posed.count))
         XCTAssertTrue(report.passes, report.summary)
@@ -54,8 +59,8 @@ final class SkinningTests: XCTestCase {
 
     func testDeformationPreservesTopologyAndSkin() throws {
         let loaded = try template()
-        let posed = moved(loaded.skeleton, .neck, by: Vec3(0, 0.06, 0))
-        let deformed = Skinning.deform(loaded.mesh, from: loaded.skeleton, to: posed)
+        let posed = moved(try rig(loaded), .neck, by: Vec3(0, 0.06, 0))
+        let deformed = Skinning.deform(loaded.mesh, from: try rig(loaded), to: posed)
         // Editing must never renumber anything: an export made after an edit has
         // to line up with the template's UV layout and index buffer.
         XCTAssertEqual(deformed.vertexCount, loaded.mesh.vertexCount)
@@ -68,8 +73,8 @@ final class SkinningTests: XCTestCase {
 
     func testNormalsAreRecomputedAndStayUnit() throws {
         let loaded = try template()
-        let posed = moved(loaded.skeleton, .chest, by: Vec3(0, 0.04, 0.02))
-        let deformed = Skinning.deform(loaded.mesh, from: loaded.skeleton, to: posed)
+        let posed = moved(try rig(loaded), .chest, by: Vec3(0, 0.04, 0.02))
+        let deformed = Skinning.deform(loaded.mesh, from: try rig(loaded), to: posed)
         for (i, n) in deformed.normals.enumerated() {
             XCTAssertEqual(length(n), 1.0, accuracy: 1e-9, "normal \(i) is not unit length")
         }

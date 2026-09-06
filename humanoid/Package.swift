@@ -28,7 +28,7 @@ let package = Package(
         // over the whole mesh and its answer never changes. Shipped as a
         // resource so the tests and the iPad app read the identical bytes.
         .target(name: "HumanoidCore", dependencies: ["CZlibShim"],
-                resources: [.copy("Resources/body-v1.bin")]),
+                resources: [.copy("Resources/body-v1.bin"), .copy("Resources/clay-v1.bin")]),
         .target(name: "ExporterVRM", dependencies: ["HumanoidCore"]),
 
         // Vendored at pinned commits; see VENDORED.md beside each.

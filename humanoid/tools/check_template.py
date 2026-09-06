@@ -14,54 +14,13 @@ number the moment a chain is not perfectly straight. This checks that one.
     python3 tools/check_template.py template.bin
 """
 import math
-import struct
+import os
 import sys
 from collections import defaultdict
 
 
-def read_template(path):
-    data = open(path, 'rb').read()
-    if data[:8] != b'BIRBHUM1':
-        raise SystemExit(f"{path}: bad magic {data[:8]!r}")
-    off = 8
-    bone_count, vertex_count, index_count = struct.unpack_from('<III', data, off)
-    off += 12
-
-    bones = []
-    for _ in range(bone_count):
-        (name_len,) = struct.unpack_from('<H', data, off)
-        off += 2
-        name = data[off:off + name_len].decode('utf-8')
-        off += name_len
-        (parent,) = struct.unpack_from('<i', data, off)
-        off += 4
-        head = struct.unpack_from('<3f', data, off)
-        off += 12
-        bones.append({"name": name, "parent": parent, "head": head})
-
-    positions = [struct.unpack_from('<3f', data, off + i * 12) for i in range(vertex_count)]
-    off += vertex_count * 12
-    normals = [struct.unpack_from('<3f', data, off + i * 12) for i in range(vertex_count)]
-    off += vertex_count * 12
-    uvs = [struct.unpack_from('<2f', data, off + i * 8) for i in range(vertex_count)]
-    off += vertex_count * 8
-    indices = list(struct.unpack_from(f'<{index_count}I', data, off))
-    off += index_count * 4
-
-    influences = []
-    for _ in range(vertex_count):
-        (n,) = struct.unpack_from('<B', data, off)
-        off += 1
-        entry = []
-        for _ in range(n):
-            bone, weight = struct.unpack_from('<Hf', data, off)
-            off += 6
-            entry.append((bone, weight))
-        influences.append(entry)
-
-    if off != len(data):
-        raise SystemExit(f"{path}: {len(data) - off} trailing bytes — layout mismatch")
-    return bones, positions, normals, uvs, indices, influences
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import template_format as fmt
 
 
 # The direction each bone's head->child-head segment must point in a T-pose,
@@ -148,7 +107,7 @@ def check_pose(bones, problems, notes):
     return worst
 
 
-def check_mesh(positions, indices, influences, problems, notes):
+def check_mesh(positions, indices, influences, problems, notes, rigged=True):
     degenerate = 0
     seen = set()
     duplicate = 0
@@ -191,6 +150,9 @@ def check_mesh(positions, indices, influences, problems, notes):
         seen_welded.add(tri)
     if overlapping:
         problems.append(f"{overlapping} overlapping triangles after welding at {cell} m")
+
+    if not rigged:
+        return set(), len(weld)
 
     used = set()
     for entry in influences:
@@ -256,31 +218,46 @@ def check_symmetry(positions, notes, problems):
 
 
 def main(path):
-    bones, positions, normals, uvs, indices, influences = read_template(path)
+    t = fmt.read(path)
+    bones, positions, normals = t["bones"], t["positions"], t["normals"]
+    uvs, indices, influences = t["uvs"], t["indices"], t["influences"]
+    rigged = t["kind"] == fmt.HUMANOID
     problems, notes = [], []
 
-    roots = [b["name"] for b in bones if b["parent"] < 0]
-    if roots != ["Hips"]:
-        problems.append(f"expected a single Hips root, found {roots}")
-    for i, b in enumerate(bones):
-        if b["parent"] >= i:
-            problems.append(f"{b['name']} references a parent that is not earlier in the list")
+    if rigged:
+        roots = [b["name"] for b in bones if b["parent"] < 0]
+        if roots != ["Hips"]:
+            problems.append(f"expected a single Hips root, found {roots}")
+        for i, b in enumerate(bones):
+            if b["parent"] >= i:
+                problems.append(f"{b['name']} references a parent that is not earlier in the list")
+    else:
+        # An unrigged template is checked for the ABSENCE of a rig, not merely
+        # skipped. A stray bone table would mean the baker wrote the wrong kind.
+        if bones:
+            problems.append(f"clay template carries {len(bones)} bones; it must carry none")
+        if influences is not None:
+            problems.append("clay template carries skin weights; it must carry none")
 
-    worst = check_pose(bones, problems, notes)
-    used, welded = check_mesh(positions, indices, influences, problems, notes)
+    worst = check_pose(bones, problems, notes) if rigged else 0.0
+    used, welded = check_mesh(positions, indices, influences, problems, notes,
+                              rigged=rigged)
     check_symmetry(positions, notes, problems)
 
-    unused = [b["name"] for i, b in enumerate(bones) if i not in used]
     height = max(p[1] for p in positions) - min(p[1] for p in positions)
     span = max(p[0] for p in positions) - min(p[0] for p in positions)
 
-    print(f"TEMPLATE {path}")
+    print(f"TEMPLATE {path}  [{t['kindName']}]")
     print(f"  bones {len(bones)}  vertices {len(positions)} ({welded} welded)  "
           f"triangles {len(indices) // 3}")
-    print(f"  height {height:.3f} m  arm span {span:.3f} m  "
-          f"worst T-pose deviation {worst:.2f} deg")
-    if unused:
-        print(f"  bones carrying no weight: {', '.join(unused)}")
+    line = f"  height {height:.3f} m  width {span:.3f} m"
+    if rigged:
+        line += f"  worst T-pose deviation {worst:.2f} deg"
+    print(line)
+    if rigged:
+        unused = [b["name"] for i, b in enumerate(bones) if i not in used]
+        if unused:
+            print(f"  bones carrying no weight: {', '.join(unused)}")
     for note in notes:
         print("  note: " + note)
     for problem in problems:

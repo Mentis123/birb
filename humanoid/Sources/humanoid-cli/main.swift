@@ -23,7 +23,8 @@ func fail(_ message: String) -> Never {
 struct Case {
     let name: String
     let detail: String
-    let skeleton: Skeleton
+    /// Absent for a Clay case: the whole point is exercising the unrigged path.
+    let skeleton: Skeleton?
     let expectPass: Bool
     var albedo: (r: UInt8, g: UInt8, b: UInt8) = (214, 176, 150)
 }
@@ -69,13 +70,36 @@ func corpusCases(_ base: Skeleton) -> [Case] {
     ]
 }
 
+/// Clay cases. `neg-clay-torn` proves the mesh gate is load-bearing on the
+/// unrigged path too: without a rig gate to catch anything, a broken Clay mesh
+/// would otherwise export happily.
+func clayCases() -> [Case] {
+    [
+        Case(name: "clay-neutral", detail: "the shipped rounded cube, unedited",
+             skeleton: nil, expectPass: true),
+        Case(name: "clay-painted", detail: "the cube with a different albedo fill",
+             skeleton: nil, expectPass: true, albedo: (92, 140, 205)),
+    ]
+}
+
 switch arguments.dropFirst().first {
 case "gate":
-    let template = try TemplateFile.bundled()
-    let report = RigGate.check(skeleton: template.skeleton,
-                               mesh: template.mesh.rigGateBinding(boneCount: template.skeleton.count))
-    print(report.summary)
-    exit(report.passes ? 0 : 1)
+    // Both shipped templates, because "the gate passes" has to mean the gate
+    // that each document kind actually runs.
+    var allPassed = true
+    for bundled in [TemplateFile.Bundled.clay, TemplateFile.Bundled.humanoid] {
+        let template = try bundled.load()
+        let snapshot = ExportSnapshot(
+            avatarName: bundled.resource, templateID: bundled.id,
+            templateVersion: bundled.version, skeleton: template.skeleton,
+            mesh: template.mesh,
+            albedo: PNG.Image.solid(width: 4, height: 4, r: 214, g: 176, b: 150),
+            albedoRelativePath: "albedo.png")
+        let report = snapshot.validate()
+        print("\(bundled.resource) [\(template.kind)] — \(report.summary)")
+        allPassed = allPassed && report.passes
+    }
+    exit(allPassed ? 0 : 1)
 
 case "corpus":
     guard let dir = arguments.dropFirst(2).first else { fail("usage: humanoid-cli corpus <dir>") }
@@ -88,16 +112,25 @@ case "corpus":
     // Every case is the ONE shipped body with its joints moved, which is exactly
     // what the editor does. Generating each case from a fresh procedural mesh
     // would test a mesh no user will ever export.
-    let template = try TemplateFile.bundled()
+    let humanoid = try TemplateFile.Bundled.humanoid.load()
+    let clay = try TemplateFile.Bundled.clay.load()
     let textureSize = 512   // corpus files stay small; the app ships 1024/2048
 
-    for c in corpusCases(template.skeleton) {
-        let mesh = Skinning.deform(template.mesh, from: template.skeleton, to: c.skeleton)
+    for c in corpusCases(humanoid.skeleton!) + clayCases() {
+        // Rigged cases are the one body with its joints moved, which is what the
+        // editor does. Clay has no joints to move, so it exports as authored.
+        let mesh: MeshData
+        if let skeleton = c.skeleton {
+            mesh = Skinning.deform(humanoid.mesh, from: humanoid.skeleton!, to: skeleton)
+        } else {
+            mesh = clay.mesh
+        }
         let albedo = PNG.Image.solid(width: textureSize, height: textureSize,
                                      r: c.albedo.r, g: c.albedo.g, b: c.albedo.b)
+        let bundled = c.skeleton == nil ? TemplateFile.Bundled.clay : TemplateFile.Bundled.humanoid
         let snapshot = ExportSnapshot(
-            avatarName: c.name, templateID: TemplateFile.bundledID,
-            templateVersion: TemplateFile.bundledVersion, skeleton: c.skeleton,
+            avatarName: c.name, templateID: bundled.id,
+            templateVersion: bundled.version, skeleton: c.skeleton,
             mesh: mesh, albedo: albedo, albedoRelativePath: "Textures/\(c.name)_Albedo.png")
 
         let report = snapshot.validate()
@@ -106,7 +139,8 @@ case "corpus":
             "detail": c.detail,
             "expectPass": c.expectPass,
             "gatePassed": report.passes,
-            "bones": c.skeleton.count,
+            "kind": c.skeleton == nil ? "clay" : "humanoid",
+            "bones": c.skeleton?.count ?? 0,
             "triangles": mesh.triangleCount,
             "vertices": mesh.vertexCount,
             "findings": report.findings.map { $0.description },
@@ -120,8 +154,12 @@ case "corpus":
 
         if report.passes {
             do {
+                // A Clay file is a plain glTF binary, so it is named .glb. A
+                // .vrm that carries no humanoid would be a lie to every tool
+                // that opens it by extension.
                 let vrmData = try VRMExporter.export(snapshot)
-                let vrmURL = root.appendingPathComponent("\(c.name).vrm")
+                let glbExtension = snapshot.isRigged ? "vrm" : "glb"
+                let vrmURL = root.appendingPathComponent("\(c.name).\(glbExtension)")
                 try vrmData.write(to: vrmURL)
                 entry["vrm"] = vrmURL.lastPathComponent
                 entry["vrmBytes"] = vrmData.count
@@ -144,8 +182,13 @@ case "corpus":
     }
 
     let manifestData = try JSONSerialization.data(
-        withJSONObject: ["cases": manifest, "templateID": TemplateFile.bundledID,
-                         "templateVersion": TemplateFile.bundledVersion],
+        withJSONObject: ["cases": manifest,
+                         "templates": [
+                            ["kind": "clay", "id": TemplateFile.Bundled.clay.id,
+                             "version": TemplateFile.Bundled.clay.version],
+                            ["kind": "humanoid", "id": TemplateFile.Bundled.humanoid.id,
+                             "version": TemplateFile.Bundled.humanoid.version],
+                         ]],
         options: [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes])
     try manifestData.write(to: root.appendingPathComponent("corpus.json"))
 

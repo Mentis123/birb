@@ -19,6 +19,10 @@ import os
 import json
 
 path = sys.argv[sys.argv.index('--') + 1]
+# An unrigged export must be checked for the ABSENCE of a rig, not merely let
+# through: a stray armature is exactly the kind of thing that writes without
+# complaint and turns up in someone's scene.
+rigged = not path.endswith('.glb')
 bpy.ops.wm.read_factory_settings(use_empty=True)
 try:
     bpy.ops.import_scene.gltf(filepath=path)
@@ -30,11 +34,14 @@ armatures = [o for o in bpy.data.objects if o.type == 'ARMATURE']
 all_meshes = [o for o in bpy.data.objects if o.type == 'MESH']
 skinned = [m for m in all_meshes
            if any(md.type == 'ARMATURE' and md.object for md in m.modifiers)]
-helpers = [m.name for m in all_meshes if m not in skinned]
+# With no armature the importer creates no bone-display widget either, so every
+# mesh in an unrigged file is content.
+measured = skinned if rigged else all_meshes
+helpers = [m.name for m in all_meshes if m not in measured]
 
 bones = [b.name for a in armatures for b in a.data.bones]
 max_weights, verts, unweighted, tris = 0, 0, 0, 0
-for m in skinned:
+for m in measured:
     verts += len(m.data.vertices)
     tris += sum(len(p.vertices) - 2 for p in m.data.polygons)
     for v in m.data.vertices:
@@ -48,14 +55,16 @@ REQUIRED = ["Hips", "Spine", "Chest", "Neck", "Head",
             "RightShoulder", "RightUpperArm", "RightLowerArm", "RightHand",
             "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
             "RightUpperLeg", "RightLowerLeg", "RightFoot"]
-missing = [b for b in REQUIRED if b not in bones]
+missing = [b for b in REQUIRED if b not in bones] if rigged else []
 
-materials = {s.material.name for m in skinned for s in m.material_slots if s.material}
+materials = {s.material.name for m in measured for s in m.material_slots if s.material}
 
 result = {
     "file": os.path.basename(path),
     "armatures": len(armatures),
     "bones": len(bones),
+    "rigged": rigged,
+    "meshes": len(measured),
     "skinnedMeshes": len(skinned),
     "verts": verts,
     "tris": tris,
@@ -67,6 +76,10 @@ result = {
 }
 print("GLTF_IMPORT " + json.dumps(result, sort_keys=True))
 
-ok = (len(armatures) == 1 and len(skinned) == 1 and not missing
-      and unweighted == 0 and len(materials) == 1)
+if rigged:
+    ok = (len(armatures) == 1 and len(skinned) == 1 and not missing
+          and unweighted == 0 and len(materials) == 1)
+else:
+    ok = (len(armatures) == 0 and len(skinned) == 0 and len(measured) == 1
+          and len(materials) == 1)
 sys.exit(0 if ok else 1)

@@ -18,10 +18,15 @@ path, prefix = args[0], args[1]
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=path)
 
-meshes = [o for o in bpy.data.objects
-          if o.type == 'MESH' and any(m.type == 'ARMATURE' and m.object for m in o.modifiers)]
+# Skinned meshes when there is a rig, every mesh when there is not. Filtering to
+# skinned only would render an unrigged export as an empty frame and call it a
+# pass, which is the failure this script exists to prevent.
+all_meshes = [o for o in bpy.data.objects if o.type == 'MESH']
+skinned = [o for o in all_meshes
+           if any(m.type == 'ARMATURE' and m.object for m in o.modifiers)]
+meshes = skinned or all_meshes
 if not meshes:
-    print("RENDER_FAIL no skinned mesh in", path)
+    print("RENDER_FAIL no mesh in", path)
     sys.exit(1)
 for obj in list(bpy.data.objects):
     if obj not in meshes:
@@ -55,7 +60,11 @@ corners = [mesh.matrix_world @ Vector(c) for mesh in meshes for c in mesh.bound_
 lo = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
 hi = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
 centre = (lo + hi) / 2
-size = max(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)
+# The bounding RADIUS, not the axis-aligned extent. A cube seen corner-on is
+# sqrt(2) wider than its widest axis, so framing on the extent overflowed the
+# frame for Clay while looking correct for the figure. The radius is the same
+# from every angle.
+size = 2 * max((corner - centre).length for corner in corners)
 # Blender's glTF importer converts Y-up to its own Z-up, so the figure stands
 # along +Z here even though the file describes it standing along +Y.
 up = Vector((0, 0, 1))
@@ -97,4 +106,4 @@ for name, angle in (("front", 0.0), ("threequarter", math.radians(38))):
     bpy.ops.render.render(write_still=True)
 
 print("RENDER_CAM", [tuple(round(v,3) for v in r) for r in camera.matrix_world])
-print(f"RENDER_OK {path} bounds {tuple(round(v, 3) for v in (hi - lo))}")
+print(f"RENDER_OK {path} meshes={len(meshes)} skinned={len(skinned)} bounds {tuple(round(v, 3) for v in (hi - lo))}")
