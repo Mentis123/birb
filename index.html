@@ -3404,6 +3404,7 @@
       CAMERA_MODES = { FOLLOW: 'follow', FPV: 'fpv' },
       createFlightControls,
       AimRig,
+      restingPitchForAltitude,
       createWorldShell,
       ENVIRONMENT_VARIANTS,
       getEnvironmentDefinition,
@@ -3455,6 +3456,7 @@
       var NESTING_STATES = nestingSystemModule.NESTING_STATES;
       const aimRigModule = await import("./src/nesting/aim-rig.js");
       AimRig = aimRigModule.AimRig;
+      restingPitchForAltitude = aimRigModule.restingPitchForAltitude;
       const rocketModule = await import("./src/nesting/rocket.js");
       var createRocketSystem = rocketModule.createRocketSystem;
       const droneModule = await import("./src/nesting/drone-system.js");
@@ -3467,6 +3469,7 @@
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
+      var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -4293,6 +4296,10 @@
 
     // ===== IMPROVEMENT 5: Particle System =====
     const particleSystem = new ParticleSystem(scene);
+    // Added to the SCENE, not the world root: the world is disposed and
+    // rebuilt on every environment switch and the shadow belongs to the bird.
+    const contactShadow = createContactShadow(THREE);
+    scene.add(contactShadow.mesh);
 
     // ===== Proximity cue state =====
     // Pre-allocated working vectors (zero-alloc per frame).
@@ -6932,6 +6939,15 @@
 
           // Use the new method that directly accepts localUp for perfect horizon
           aimRig.setReferenceFromVectors(birdForward, localUp);
+          // Rest the turret on the horizon, not on "level". A radius-120
+          // planet drops the horizon 41° below level at a 40-unit crown, so a
+          // level turret opened every perch on empty sky — the landscape the
+          // player just landed in was entirely behind the bottom of the frame.
+          // Must follow setReferenceFromVectors, which resets pitch to rest.
+          aimRig.setRestPitch(restingPitchForAltitude(
+            sphericalWorld?.sphereRadius ?? 120,
+            Math.max(0, pos.length() - (sphericalWorld?.sphereRadius ?? 120)),
+          ));
           aimRig.setActive(true);
         } else {
           aimRig.setActive(false);
@@ -8029,6 +8045,23 @@
       // IMPROVEMENT 5: Update particles
       if (particleSystem) particleSystem.update(delta, cam?.position);
 
+      // Bird contact shadow. Reads the SAME terrain sampler the flight floor
+      // uses, so the disc sits on the ground the bird would actually land on
+      // rather than on the undisplaced sphere. Dropped at tier 2, where the
+      // budget goes to resolution, and hidden while nested (the bird is in a
+      // crown 40 units up; a disc on the ground below is not its shadow).
+      if (contactShadow) {
+        const shadowOn = !!birdPos && !isNested && adaptiveTier.getTier() < 2
+          && birbAnchor?.visible !== false;
+        let floorRadius = NaN;
+        if (shadowOn && sphericalWorld) {
+          const terrain = (typeof sampleTerrainHeight === 'function')
+            ? sampleTerrainHeight(birdPos.x, birdPos.y, birdPos.z) : 0;
+          floorRadius = sphericalWorld.sphereRadius + terrain;
+        }
+        contactShadow.update(birdPos, floorRadius, shadowOn);
+      }
+
       // ===== Proximity "speed of passage" cue =====
       // Pooled whoosh streak + optional haptic when bird flies close to a giant prop.
       // Squared-distance compare; cooldown per-target; zero allocations in the hot path.
@@ -8417,7 +8450,34 @@
     // are paths the player's own UI already takes.
     if (new URLSearchParams(location.search).has('debug')) {
       window.__BIRB = {
-        setEnvironment: (id) => setEnvironment(id),
+        // Reports whether the switch actually happened. setEnvironment()
+        // returns early on an unknown id, which silently leaves the previous
+        // world standing — a capture harness then photographs the wrong biome
+        // and nothing anywhere says so.
+        setEnvironment: (id) => {
+          if (!getEnvironmentDefinition(id)) return false;
+          setEnvironment(id);
+          return true;
+        },
+        environments: () => ENVIRONMENT_VARIANTS.map((v) => v.id),
+        // Drop the bird to a given height above the real ground. Used by the
+        // capture harness: the chase camera sits close behind the bird, so the
+        // ground directly beneath it leaves the frame above roughly five
+        // units and a low pass is the only view a contact shadow appears in.
+        setAltitude: (aboveGround) => {
+          const p = flightController?.position;
+          if (!p) return null;
+          const terrain = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
+          p.normalize().multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
+          return p.length();
+        },
+        shadow: () => ({
+          visible: contactShadow.mesh.visible,
+          opacity: contactShadow.mesh.material.opacity,
+          scale: contactShadow.mesh.scale.x,
+          radius: contactShadow.mesh.position.length(),
+          birdRadius: flightController?.position?.length() ?? null,
+        }),
         forceNest: (index = 0) => {
           const list = nestPointsSystem?.nests;
           if (!nestingSystem || !list || !list.length) return false;
@@ -8433,8 +8493,16 @@
           recovery: flightRecoveryState,
           nesting: nestingSystem ? nestingSystem.getState() : null,
           environment: sphericalWorld?.root?.name ?? null,
-          altitude: flightController?.position
+          // Above the BASE radius, which is not the ground: the continental
+          // carve puts real terrain up to 46 units lower. Both are reported
+          // because confusing them is how the contact shadow was first
+          // mistuned by a factor of three.
+          altitudeAboveBase: flightController?.position
             ? +(flightController.position.length() - 120).toFixed(2) : null,
+          altitudeAboveGround: (flightController?.position && typeof sampleTerrainHeight === 'function')
+            ? +(flightController.position.length() - 120
+              - sampleTerrainHeight(flightController.position.x, flightController.position.y, flightController.position.z)
+              ).toFixed(2) : null,
           elapsed: +(motionState.elapsed ?? 0).toFixed(2),
         }),
       };

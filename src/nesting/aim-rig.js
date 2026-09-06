@@ -1,3 +1,30 @@
+/**
+ * How far BELOW level the horizon sits, seen from `altitude` above a sphere of
+ * `sphereRadius`. On a real planet this is a rounding error; on a radius-120
+ * one it is the whole problem. From a 40-unit nest crown the horizon is 41°
+ * down, so a turret resting at pitch 0 — "level" — points at nothing but sky,
+ * which is exactly how every perch in the game rendered: ~85% empty gradient.
+ *
+ * Pure, allocation-free, and clamped so a bad altitude can never produce NaN.
+ */
+export function horizonDipAngle(sphereRadius, altitude) {
+  if (!(sphereRadius > 0) || !(altitude > 0)) return 0;
+  const ratio = sphereRadius / (sphereRadius + altitude);
+  return Math.acos(Math.min(1, Math.max(-1, ratio)));
+}
+
+/**
+ * The pitch a perched turret should rest at: aimed a little above the true
+ * horizon so sky still frames the shot, never at the horizon exactly. Returns
+ * a NEGATIVE angle (down) and never exceeds `limit`.
+ */
+export function restingPitchForAltitude(sphereRadius, altitude, limit = (85 * Math.PI) / 180) {
+  const dip = horizonDipAngle(sphereRadius, altitude) * 0.78;
+  // Normalised so a level rest reads as 0, never -0: callers compare against
+  // zero, and Object.is(-0, 0) is false.
+  return dip === 0 ? 0 : -Math.min(dip, limit);
+}
+
 export const AIM_RIG_DEFAULTS = {
   // Rotation speed targets (rad/s at full joystick deflection).
   // These are the GENTLE BASE rates — what a fresh, short push gives you,
@@ -99,6 +126,9 @@ export class AimRig {
     this._smoothedDeltaY = 0;
     this._yaw = 0;
     this._pitch = 0;
+    // Where the turret sits when untouched. Zero is level, which on this
+    // planet is well above the horizon; setRestPitch() lowers it to the view.
+    this._restPitch = 0;
     this._active = false;
 
     // Velocity-driven inertia state
@@ -131,7 +161,7 @@ export class AimRig {
     this._pitchHoldDir = 0;
     if (!next) {
       this._yaw = 0;
-      this._pitch = 0;
+      this._pitch = this._restPitch;
       this._yawVelocity = 0;
       this._pitchVelocity = 0;
       this._smoothedBank = 0;
@@ -142,13 +172,30 @@ export class AimRig {
     return this._active;
   }
 
+  /**
+   * Set the resting pitch (radians, negative looks down) and snap to it.
+   * Call it AFTER setReferenceFromVectors, which resets pitch to the
+   * reference frame. Clamped into the rig's own pitch limits so a caller
+   * cannot park the turret outside the range the player can steer back from.
+   */
+  setRestPitch(radians) {
+    const value = Number.isFinite(radians) ? radians : 0;
+    this._restPitch = Math.min(this.maxPitch, Math.max(this.minPitch, value));
+    this._pitch = this._restPitch;
+    this._pitchVelocity = 0;
+  }
+
+  getRestPitch() {
+    return this._restPitch;
+  }
+
   setReferenceFromQuaternion(quaternion) {
     if (!quaternion) return;
     this._referenceForward.set(0, 0, -1).applyQuaternion(quaternion).normalize();
     this._referenceUp.set(0, 1, 0).applyQuaternion(quaternion).normalize();
     this._referenceRight.crossVectors(this._referenceForward, this._referenceUp).normalize();
     this._yaw = 0;
-    this._pitch = 0;
+    this._pitch = this._restPitch;
     this._yawVelocity = 0;
     this._pitchVelocity = 0;
     this._smoothedX = 0;
@@ -189,7 +236,7 @@ export class AimRig {
 
     // Reset all state
     this._yaw = 0;
-    this._pitch = 0;
+    this._pitch = this._restPitch;
     this._yawVelocity = 0;
     this._pitchVelocity = 0;
     this._smoothedX = 0;

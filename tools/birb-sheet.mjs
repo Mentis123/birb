@@ -26,7 +26,9 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, startServer, findChromium, installCdnCache, CHROMIUM_ARGS, startGame } from './birb-shot.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const BIOMES = ['forest', 'canyon', 'mountain', 'city'];
+// The canyon variant's id is 'canyons', plural. Getting it wrong makes
+// setEnvironment a silent no-op and the sheet quietly renders forest twice.
+const BIOMES = ['forest', 'canyons', 'mountain', 'city'];
 
 async function main() {
     const args = parseArgs(process.argv);
@@ -67,7 +69,8 @@ async function main() {
 
     const tiles = [];
     for (const biome of BIOMES) {
-        await page.evaluate((id) => window.__BIRB.setEnvironment(id), biome);
+        const switched = await page.evaluate((id) => window.__BIRB.setEnvironment(id), biome);
+        if (!switched) { problems.push(`unknown environment id: ${biome}`); continue; }
         await page.waitForTimeout(1100);
         for (const view of views) {
             if (view === 'nest') {
