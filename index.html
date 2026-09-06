@@ -8409,6 +8409,38 @@
     // called from the Tap-to-Start handler on the Title page. Flag is hoisted
     // to the top of the script so the visibility-change listener (defined
     // earlier) can safely read it.
+    // ─── Verification hook ───────────────────────────────────────────────
+    // Exposed ONLY when the page is loaded with ?debug=1, so production never
+    // carries a scriptable handle on the game. tools/birb-shot.mjs drives this
+    // to capture real frames; a screenshot proves the code ran, a description
+    // does not. Read-only apart from setEnvironment / forceNest, both of which
+    // are paths the player's own UI already takes.
+    if (new URLSearchParams(location.search).has('debug')) {
+      window.__BIRB = {
+        setEnvironment: (id) => setEnvironment(id),
+        forceNest: (index = 0) => {
+          const list = nestPointsSystem?.nests;
+          if (!nestingSystem || !list || !list.length) return false;
+          return nestingSystem.forceNestAt(list[Math.min(index, list.length - 1)]);
+        },
+        takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
+        stats: () => ({
+          calls: renderer.info.render.calls,
+          triangles: renderer.info.render.triangles,
+          programs: renderer.info.programs?.length ?? 0,
+          tier: adaptiveTier.getTier(),
+          fps: Math.round(fpsState?.value ?? 0),
+          recovery: flightRecoveryState,
+          nesting: nestingSystem ? nestingSystem.getState() : null,
+          environment: sphericalWorld?.root?.name ?? null,
+          altitude: flightController?.position
+            ? +(flightController.position.length() - 120).toFixed(2) : null,
+          elapsed: +(motionState.elapsed ?? 0).toFixed(2),
+        }),
+      };
+      window.__BIRB_READY = true;
+    }
+
     startGameLoop = () => {
       if (gameLoopStarted) return;
       gameLoopStarted = true;
