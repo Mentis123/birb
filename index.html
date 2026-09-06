@@ -8583,6 +8583,27 @@
           p.multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
           return p.toArray().map((n) => +n.toFixed(1));
         },
+        // Fly to a named landmark and look at it from a sensible distance.
+        goToLandmark: (id, back = 34) => {
+          const found = (sphericalWorld?.landmarks || []).find((l) => l.id === id);
+          if (!found || !flightController?.position) return null;
+          const up = found.position.clone().normalize();
+          // Offset sideways along the surface so the landmark is in front of
+          // the bird rather than inside it.
+          const side = new THREE.Vector3(0, 1, 0).cross(up);
+          if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+          side.normalize();
+          const target = found.position.clone().addScaledVector(side, back);
+          const dir = target.clone().normalize();
+          const terrain = (typeof sampleTerrainHeight === 'function')
+            ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
+          flightController.position.copy(dir).multiplyScalar(sphericalWorld.sphereRadius + terrain + 16);
+          // Face the landmark, so a capture does not depend on which way the
+          // bird happened to be pointing.
+          if (flightController.setForward) flightController.setForward(found.position.clone().sub(target).normalize());
+          return found.id;
+        },
+        landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {

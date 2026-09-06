@@ -16,6 +16,8 @@ const SPHERE_RADIUS = 120;
 // into valleys instead of skating a perfect sphere. Set at the top of
 // createSphericalWorld; null = flat sphere (server/test builds).
 let _activeTerrainProfile = null;
+// Landmarks of the world currently being built, reported on the world object.
+let _landmarks = [];
 
 // Mobile gate — env builders read this to disable heavy fill-rate effects
 // (transparent canopy ceilings, cloud puffs) and trim prop density.
@@ -1218,6 +1220,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     root.add(cloudInst);
   }
 
+  _landmarks = buildForestLandmarks({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions,
+  });
+
   return nestablePositions;
 }
 
@@ -1227,6 +1233,153 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
 // Ridges form walls. Fly BETWEEN ridges through valley corridors.
 // Arches span between ridges for threading challenges.
 // ============================================================
+
+/**
+ * Landmarks: a handful of one-off, hand-placed forms that are NOT instanced.
+ *
+ * The 2026-05-31 distribution pass made the world dense and even, which fixed
+ * emptiness and created a different problem: every direction looks like every
+ * other direction, so there is nothing to fly TOWARD and no way to tell where
+ * you are. A grove of two hundred identical trees is scenery; one tree twice
+ * the height of the others is a destination.
+ *
+ * Deliberately few and deliberately not instanced. Six draw calls buys three
+ * recognisable silhouettes, and an instanced landmark is a contradiction.
+ *
+ * Placed along the great circle running out of the landmark valley, so the
+ * waterfall and these share a route rather than sitting in unrelated corners.
+ */
+function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions }) {
+  const group = new THREE.Group();
+  group.name = 'forest-landmarks';
+
+  // A tangent frame at the valley, so landmarks can be offset along a
+  // consistent bearing rather than at arbitrary latitudes and longitudes.
+  const anchor = new THREE.Vector3(VALLEY_ANCHOR.x, VALLEY_ANCHOR.y, VALLEY_ANCHOR.z).normalize();
+  const frame = _tangentFrame(THREE, VALLEY_ANCHOR);
+  const forward = new THREE.Vector3(frame.forward.x, frame.forward.y, frame.forward.z).normalize();
+  const right = new THREE.Vector3(frame.right.x, frame.right.y, frame.right.z).normalize();
+
+  /** A unit direction `angle` radians from the valley along a bearing. */
+  const along = (angle, bearing) => {
+    const dir = new THREE.Vector3()
+      .addScaledVector(forward, Math.cos(bearing))
+      .addScaledVector(right, Math.sin(bearing))
+      .normalize();
+    return new THREE.Vector3()
+      .addScaledVector(anchor, Math.cos(angle))
+      .addScaledVector(dir, Math.sin(angle))
+      .normalize();
+  };
+
+  /** Ground position and local up for a unit direction. */
+  const groundAt = (dir) => {
+    const height = terrainHeightDir(dir.x, dir.y, dir.z);
+    return { position: dir.clone().multiplyScalar(sphereRadius + height), up: dir.clone() };
+  };
+
+  const orient = (object, up) => {
+    object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+  };
+
+  const barkMat = new THREE.MeshLambertMaterial({ color: 0x4a3520, flatShading: true });
+  const crownMat = new THREE.MeshLambertMaterial({ color: 0x2b7f45, flatShading: true, vertexColors: true });
+  addFoliageWind(crownMat);
+  const stoneMat = new THREE.MeshLambertMaterial({ color: 0x6b6257, flatShading: true });
+
+  // ── The giant nesting tree ──────────────────────────────────────────
+  // A destination, and a nest host. Its crown is kept within the same 30-40
+  // unit band the corrected perches use: a taller one becomes an observation
+  // tower, which is the failure the September pass was fixing.
+  const giantDir = along(0.30, 0.0);
+  const giant = groundAt(giantDir);
+  const trunkHeight = 26;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 3.4, trunkHeight, 9), barkMat);
+  trunk.position.copy(giant.position).addScaledVector(giant.up, trunkHeight / 2);
+  orient(trunk, giant.up);
+  group.add(trunk);
+
+  // Three stacked crowns, widest at the bottom, reusing the shared canopy
+  // profile so the giant reads as the same species as the forest it towers over.
+  const crownGeometry = createCanopyGeometry(THREE, 1);
+  let crownTop = trunkHeight;
+  for (let i = 0; i < 3; i++) {
+    const scale = 13 - i * 3;
+    const crown = new THREE.Mesh(crownGeometry, crownMat);
+    const base = trunkHeight - 6 + i * 6.5;
+    crown.position.copy(giant.position).addScaledVector(giant.up, base);
+    crown.scale.set(scale, scale * 0.92, scale);
+    orient(crown, giant.up);
+    group.add(crown);
+    crownTop = base + scale * 0.92;
+  }
+
+  // Solid at cruise altitude, like every other champion.
+  collisionSystem.addCollider(
+    giant.position.clone().addScaledVector(giant.up, trunkHeight * 0.5), 3.6, 'tree',
+  );
+  collisionSystem.addCollider(
+    giant.position.clone().addScaledVector(giant.up, trunkHeight + 4), 11, 'tree',
+  );
+
+  // hostObject stays NULL. nest-points hides any non-instanced host object
+  // while the player is nested in it, which would erase the very tree they
+  // are sitting in — the one landmark guaranteed to be on screen.
+  nestablePositions.push({
+    position: giant.position.clone().addScaledVector(giant.up, Math.min(crownTop - 2, 38)),
+    surfaceNormal: giant.up.clone(),
+    hostObject: null,
+    hostId: 'forest-giant-tree',
+    groveId: 'forest-landmark',
+  });
+  proximityTargets.push({
+    position: giant.position.clone().addScaledVector(giant.up, trunkHeight),
+    radius: 20,
+    tint: 0xbdf5c8,
+  });
+
+  // ── A fallen log, lying across the approach ─────────────────────────
+  const logDir = along(0.17, 1.15);
+  const log = groundAt(logDir);
+  const logMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.8, 34, 8), barkMat);
+  logMesh.position.copy(log.position).addScaledVector(log.up, 2.2);
+  // Laid ALONG the surface: rotate the cylinder's own axis onto a tangent.
+  const logAxis = new THREE.Vector3().crossVectors(log.up, forward).normalize();
+  logMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), logAxis);
+  group.add(logMesh);
+  proximityTargets.push({ position: logMesh.position.clone(), radius: 12, tint: 0xd8c9a4 });
+
+  // ── A stone arch to fly through ─────────────────────────────────────
+  const archDir = along(0.22, -1.05);
+  const arch = groundAt(archDir);
+  const archMesh = new THREE.Mesh(new THREE.TorusGeometry(13, 2.4, 6, 14, Math.PI), stoneMat);
+  archMesh.position.copy(arch.position).addScaledVector(arch.up, 0.5);
+  // The torus lies in its own XY plane; stand it up so the opening faces
+  // along the route rather than flat against the ground.
+  const archQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), arch.up);
+  const standUp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+  archMesh.quaternion.copy(archQuat).multiply(standUp);
+  group.add(archMesh);
+  // Legs only. The opening is the point of an arch; a collider across it
+  // would make the one thing you want to fly through a wall.
+  const archSide = new THREE.Vector3().crossVectors(arch.up, forward).normalize();
+  for (const sign of [-1, 1]) {
+    collisionSystem.addCollider(
+      arch.position.clone().addScaledVector(archSide, sign * 13).addScaledVector(arch.up, 4), 3.2, 'rock',
+    );
+  }
+  proximityTargets.push({ position: archMesh.position.clone(), radius: 16, tint: 0xe0dcc8 });
+
+  root.add(group);
+  // Reported so the capture harness can aim at a landmark instead of hunting
+  // for one: a landmark that cannot be found in a render is not a landmark.
+  return [
+    { id: 'giant-tree', position: giant.position.clone().addScaledVector(giant.up, trunkHeight) },
+    { id: 'fallen-log', position: logMesh.position.clone() },
+    { id: 'stone-arch', position: archMesh.position.clone() },
+  ];
+}
+
 function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {
   const nestablePositions = [];
   const defaultUp = new THREE.Vector3(0, 1, 0);
@@ -2429,6 +2582,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // placement (placeOnSphere) and ground collision all sample the same rolling
   // displacement. Set before anything is built.
   _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
+  _landmarks = [];
 
   // Carve the landmark valley into the SAME field the mesh & flight floor sample.
   // Must happen BEFORE displaceSphereGeometry so the basin shows in the mesh.
@@ -2539,6 +2693,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
 
   return {
     root,
+    landmarks: _landmarks,
     sphereRadius,
     collisionSystem,
     nestablePositions,
