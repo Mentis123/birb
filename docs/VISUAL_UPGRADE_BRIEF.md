@@ -81,7 +81,10 @@ forest view. Physical-phone performance was not measured during the review.
    now use actual tops <=65 units, mountain hosts use low bare summits or bounded
    pine crowns, and arch nests sit on the torus tube instead of above empty space.
    Tall champion structures remain scenery, rather than hiding them to expose
-   nests placed halfway inside them.
+   nests placed halfway inside them. Actual turret-view testing exposed immediate
+   canopy obstruction; `nest-occlusion.js` now clears only individual instances
+   whose oriented bounds touch a 5-unit neighbourhood of the perch camera.
+   Original matrices restore exactly on takeoff/reset; batch visibility stays on.
 8. **Quality continuity.** Tier-aware DPR computation is shared by tier changes
    and resize/orientation. Original FPS thresholds remain unchanged.
 9. **Offline delivery.** Service-worker cache version bumped; new runtime modules
@@ -98,6 +101,7 @@ forest view. Physical-phone performance was not measured during the review.
 | Sky colour output and radial horizon | `src/environment/sky-dome.js` |
 | Waterfall/pool/river integration | `src/environment/landmark-valley.js` |
 | Pure build-time nest selection | `src/nesting/nest-placement.js` |
+| Reversible clearance of individual nearby prop instances | `src/nesting/nest-occlusion.js` |
 | Woven nest art, proximity and visibility | `src/nesting/nest-points.js` |
 | Landing/takeoff state machine | `src/nesting/nesting-system.js` |
 | Pooled burst effects | `src/effects/particles.js` |
@@ -195,6 +199,9 @@ high tier after target-phone measurements show sufficient headroom.
   target even without player/gameplay; do not cite the old doc budget as achieved.
   Instance sectors/LOD and actual device profiling remain follow-up work.
 * Visually inspected the live game, upgraded root forest and close nest render.
+  The actual Turret Defense flow also confirmed the world-erasure fix and exposed
+  the need for local instance clearance. The browser harness tests nearby-only
+  hiding, unchanged distant instances and exact matrix restoration.
   Production/CI completion is tracked by GitHub deployment/check status after push.
 
 ### References

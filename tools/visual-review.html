@@ -10,6 +10,7 @@ import { createSphericalWorld } from '../src/environment/spherical-world.js';
 import { getEnvironmentDefinition } from '../src/environment/world-shell.js';
 import { createNestPointsSystem } from '../src/nesting/nest-points.js';
 import { createNestingSystem, NESTING_STATES } from '../src/nesting/nesting-system.js';
+import { createNestOcclusion } from '../src/nesting/nest-occlusion.js';
 import { createSkyDome } from '../src/environment/sky-dome.js';
 import { visualUniforms } from '../src/environment/visual-style.js';
 import { ParticleSystem } from '../src/effects/particles.js';
@@ -127,6 +128,19 @@ document.querySelector('#check').onclick = async () => {
     assert(particles.particles[0]===pool[0],'burst buffers reused');
     particles.dispose();
     results.push('Burst pool: PASS; bounded allocation, expiry, suspension, reuse.');
+    const props=new THREE.Group();
+    const prop=new THREE.InstancedMesh(new THREE.BoxGeometry(2,2,2),new THREE.MeshBasicMaterial(),3);
+    prop.name='forest-canopies-test'; props.add(prop);
+    const original=[new THREE.Matrix4(),new THREE.Matrix4().makeTranslation(20,0,0),new THREE.Matrix4().makeTranslation(-20,0,0)];
+    original.forEach((m,i)=>prop.setMatrixAt(i,m));
+    const occlusion=createNestOcclusion(THREE), matrix=new THREE.Matrix4();
+    occlusion.clearNear(props,new THREE.Vector3(),2);
+    assert(prop.visible&&occlusion.count===1,'perch clearance preserves batch and distant instances');
+    prop.getMatrixAt(1,matrix); assert(matrix.equals(original[1]),'distant tree matrix unchanged');
+    occlusion.restore();
+    for(let i=0;i<3;i++) {prop.getMatrixAt(i,matrix);assert(matrix.equals(original[i]),'takeoff restores exact matrix');}
+    prop.geometry.dispose();prop.material.dispose();prop.dispose();
+    results.push('Nest occlusion: PASS; one nearby instance cleared, batch/distant props retained, exact restore.');
     load('forest',true); view('nest');
     status.textContent=results.join('\n')+'\nALL CHECKS PASSED (browser smoke checks, not physical-phone FPS certification).';
   } catch(error) { status.textContent=results.join('\n')+'\nFAIL: '+error.stack; }

@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v16-2026-09-06-visuals';
+const CACHE_VERSION = 'v16-2026-09-06-visuals-perches';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -60,6 +60,7 @@ const CORE_ASSETS = [
   './src/environment/sky-dome.js',
   './src/environment/visual-style.js',
   './src/nesting/nest-placement.js',
+  './src/nesting/nest-occlusion.js',
   './src/environment/collectibles.js',
   './src/environment/collider-grid.js',
   './src/ui/minimap.js',

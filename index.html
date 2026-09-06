@@ -3448,6 +3448,7 @@
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
       var createNestPointsSystem = nestPointsModule.createNestPointsSystem;
+      var { createNestOcclusion } = await import('./src/nesting/nest-occlusion.js');
       var NEST_PROXIMITY_RANGE = nestPointsModule.NEST_PROXIMITY_RANGE;
       const nestingSystemModule = await import("./src/nesting/nesting-system.js");
       var createNestingSystem = nestingSystemModule.createNestingSystem;
@@ -6860,13 +6861,17 @@
 
     // Nesting must preserve the world. An InstancedMesh is a planet-wide
     // batch, not a nearby tree: hiding it stripped ALL forest/city geometry.
-    // Perches are placed above their crown; no scene-wide visibility toggles.
+    // Clear only individual instances touching the immediate perch camera.
+    const nestOcclusion = createNestOcclusion(THREE);
 
     // Initialize nesting system with state change callback
     const handleNestingStateChange = (newState, previousState, currentNest) => {
       const isNested = newState === NESTING_STATES.NESTED;
       const isApproaching = newState === NESTING_STATES.APPROACHING;
       const isLeavingNest = previousState === NESTING_STATES.NESTED && newState !== NESTING_STATES.NESTED;
+
+      if (isNested) nestOcclusion.clearNear(sphericalWorld?.root, flightController.position);
+      else if (isLeavingNest) nestOcclusion.restore();
 
       // Show/hide nest mode UI
       showNestUI(isNested);
