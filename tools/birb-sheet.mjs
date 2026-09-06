@@ -83,7 +83,10 @@ async function main() {
             if (view === 'nest') {
                 const landed = await page.evaluate(() => window.__BIRB.forceNest(0));
                 if (!landed) { problems.push(`${biome}: no landable nest`); continue; }
-                await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 20000 })
+                // The landing auto-flies in a straight line at 16 units per
+                // second and the nearest nest can still be most of a 754-unit
+                // circumference away, so this needs real headroom.
+                await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 90000 })
                     .catch(() => problems.push(`${biome}: landing never reached NESTED`));
             }
             await page.waitForTimeout(settle);

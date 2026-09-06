@@ -556,6 +556,25 @@ hardware absorbs 130k triangles without noticing. But the 80k number should
 not be quoted as met, and if a desktop budget is ever wanted for real, the
 lever is prop density per device tier, not culling.
 
+### Third pass — owner feedback
+
+Two pieces of feedback after playing it: the big tree could not be found, and
+the wingtip ribbons were janky. Both fair; both acted on.
+
+| Change | Why |
+|---|---|
+| Giants 40 -> 130 units, three of them, amber not green | 40 units IS champion-tree height, so it was neither taller nor differently coloured than its neighbours. On this sphere `sqrt(2 * 120 * h)` is the range at which height h clears the horizon: 98 units at 40, 177 at 130. |
+| Minimap chevron to the nearest landmark, with distance, never distance-gated | The map shows 65 units of a 754-unit planet, so a landmark is nearly always off it. A landmark you cannot steer toward is scenery you bump into. |
+| Wingtip ribbons DELETED | They needed three fixes to become visible and still read as janky. An effect that has to be argued for is not earning two draw calls. |
+| Nests within 46 units of a landmark are dropped | Landmarks are not instanced and `nest-occlusion` only clears instanced props, so a nest beside one had its perch view permanently blocked. |
+| The giant's nest moved off the trunk axis onto a bough | Centred, it sat inside the trunk ringed by colliders; the landing auto-fly was pushed back out every frame and hung. |
+| Landing timeouts 15s -> 90s | Auto-fly is 16 units per SIMULATED second and this sandbox renders at 2-9 fps, so the old timeout measured the renderer, not the game. |
+
+**Known, not fixed:** a mountain perch can occasionally land facing a cliff.
+`nest-occlusion`'s 5-unit radius is too small for large instanced geometry.
+Most mountain perches are fine; this is nest-placement variance, and raising
+the radius risks the whole-batch stripping the September pass removed.
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.

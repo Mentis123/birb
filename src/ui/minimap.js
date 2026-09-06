@@ -193,7 +193,7 @@ export function createMinimap({ THREE, canvas, sphereRadius }) {
    * @param mode / modes — current game mode + the GAME_MODES enum (what to draw)
    * @param nestList — array of nest groups (THREE.Object3D) or null
    */
-  function update(birdPos, birdQuat, collectibles, drones, nestPos, delta, mode, modes, nestList) {
+  function update(birdPos, birdQuat, collectibles, drones, nestPos, delta, mode, modes, nestList, landmarks) {
     if (!ctx || !canvas) return;
     minimapPulseTime += (delta || 0.016);
     const size = canvas.width;  // 200 (2x resolution for retina)
@@ -345,6 +345,57 @@ export function createMinimap({ THREE, canvas, sphereRadius }) {
           ctx.strokeStyle = 'rgba(20,0,0,0.75)';
           ctx.lineWidth = 1.5;
           ctx.stroke();
+        }
+      }
+    }
+
+    // ===== Landmarks (pale gold, always arrowed) =====
+    // Drawn BEFORE nests so a nest marker wins where they overlap: the nest is
+    // what you interact with, the landmark is only how you found it.
+    //
+    // Unlike every other marker these are NOT distance-gated. The minimap
+    // shows 65 units of a planet 754 units around, so a landmark is almost
+    // always off the map — and a landmark you cannot navigate to is just
+    // scenery you happen to bump into. That is exactly what happened: three
+    // were placed and the owner never found one. The rim arrow is the feature.
+    if (landmarks && landmarks.length) {
+      const LANDMARK = '#f0d089';
+      let nearest = null;
+      let nearestD2 = Infinity;
+      for (const landmark of landmarks) {
+        if (!landmark || !landmark.position) continue;
+        const d2 = minimapGroundDist2(landmark.position, _up, sphereRadius);
+        if (d2 < nearestD2) { nearestD2 = d2; nearest = landmark; }
+      }
+      if (nearest) {
+        const raw = project(nearest.position, birdPos, half, scale);
+        const p = clampMinimapPoint(raw, half, _edgePoint);
+        if (p.clamped) {
+          // A hollow chevron at the rim, distinct from the solid nest arrows,
+          // plus the great-circle distance so the player knows whether it is
+          // worth the trip.
+          drawEdgeArrow(p, half, LANDMARK);
+          const metres = Math.round(Math.sqrt(nearestD2));
+          ctx.save();
+          ctx.fillStyle = 'rgba(240, 208, 137, 0.85)';
+          ctx.font = '600 9px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          const tx = half + (p.x - half) * 0.76;
+          const ty = half + (p.y - half) * 0.76;
+          ctx.fillText(`${metres}`, tx, ty);
+          ctx.restore();
+        } else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(240, 208, 137, 0.28)';
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y - 5);
+          ctx.lineTo(p.x + 4.5, p.y + 3.5);
+          ctx.lineTo(p.x - 4.5, p.y + 3.5);
+          ctx.closePath();
+          ctx.fillStyle = LANDMARK;
+          ctx.fill();
         }
       }
     }

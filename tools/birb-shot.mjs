@@ -319,8 +319,12 @@ async function main() {
         const landed = await page.evaluate((i) => window.__BIRB.forceNest(i), index);
         if (!landed) { ok = false; failure = 'forceNest returned false — no landable nest'; }
         // The landing is an animated approach, not a teleport; let it complete.
+        // Generous on purpose. The landing auto-flies at 16 units per SIMULATED
+        // second, and headless software rendering here runs at 2-9 fps, so a
+        // four second landing can cost forty seconds of wall clock. A tight
+        // timeout here does not measure the game, it measures the renderer.
         else await page.waitForFunction(
-            'window.__BIRB.stats().nesting === "nested"', null, { timeout: 15000 },
+            'window.__BIRB.stats().nesting === "nested"', null, { timeout: 90000 },
         ).catch(() => { consoleErrors.push('landing did not reach NESTED'); });
     }
     if (ok && args.eval) {
