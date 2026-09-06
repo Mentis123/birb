@@ -191,3 +191,91 @@ final class DocumentTests: XCTestCase {
         XCTAssertTrue(document.validate().passes)
     }
 }
+
+/// Stroke grouping. Grab has to apply live to track the Pencil, so one drag
+/// calls `sculpt` dozens of times; without grouping, undo would take back a
+/// single frame of a gesture.
+final class StrokeGroupingTests: XCTestCase {
+    private func clay() throws -> Document { try Document.clay(textureSize: 64) }
+
+    private func dragGrab(_ document: inout Document, steps: Int) {
+        document.beginStroke()
+        for i in 0..<steps {
+            document.sculpt(.grab(Vec3(0, 0.001, 0.001)),
+                            at: [Vec3(0, 0.01 * Double(i), 0.11)],
+                            settings: .init(radius: 0.04, strength: 0.8, symmetric: false))
+        }
+        document.endStroke()
+    }
+
+    func testAWholeDragIsOneUndoStep() throws {
+        var document = try clay()
+        dragGrab(&document, steps: 12)
+        XCTAssertEqual(document.undoDepth, 1, "a drag became \(document.undoDepth) undo steps")
+    }
+
+    func testUndoingAGroupReturnsToBeforeTheGestureNotIntoTheMiddleOfIt() throws {
+        var document = try clay()
+        let before = document.mesh.positions
+        dragGrab(&document, steps: 12)
+        XCTAssertTrue(zip(document.mesh.positions, before).contains { length($0 - $1) > 1e-9 })
+
+        document.undo()
+        for (a, b) in zip(document.mesh.positions, before) {
+            XCTAssertEqual(length(a - b), 0, accuracy: 1e-12,
+                           "undo landed part-way through the gesture")
+        }
+    }
+
+    func testRedoingAGroupReplaysAllOfIt() throws {
+        var document = try clay()
+        dragGrab(&document, steps: 12)
+        let after = document.mesh.positions
+        document.undo()
+        document.redo()
+        for (a, b) in zip(document.mesh.positions, after) {
+            XCTAssertEqual(length(a - b), 0, accuracy: 1e-12)
+        }
+    }
+
+    func testUngroupedEditsStillRecordSeparately() throws {
+        var document = try clay()
+        for i in 0..<3 {
+            document.sculpt(.inflate(0.002), at: [Vec3(0, 0.02 * Double(i), 0.11)],
+                            settings: .init(radius: 0.03, strength: 0.5, symmetric: false))
+        }
+        XCTAssertEqual(document.undoDepth, 3)
+    }
+
+    func testPaintInsideAGroupIsStillFullyUndoable() throws {
+        // Paint records carry pixel payloads that do not merge. An earlier
+        // version dropped them and produced a paint stroke that could not be
+        // undone; it commits separately now.
+        var document = try clay()
+        let pristine = document.albedo.rgba
+        document.beginStroke()
+        document.sculpt(.inflate(0.003), at: [Vec3(0, 0, 0.11)],
+                        settings: .init(radius: 0.04, strength: 0.6, symmetric: false))
+        document.paint(.init(radius: 0.2, opacity: 1, colour: (0, 0, 0)), along: [Vec2(0.5, 0.5)])
+        document.endStroke()
+
+        XCTAssertNotEqual(document.albedo.rgba, pristine)
+        while document.canUndo { document.undo() }
+        XCTAssertEqual(document.albedo.rgba, pristine, "a grouped paint stroke could not be undone")
+        for (a, b) in zip(document.mesh.positions, document.template.positions) {
+            XCTAssertEqual(length(a - b), 0, accuracy: 1e-12)
+        }
+    }
+
+    func testNestedGroupsCloseOnlyOnce() throws {
+        var document = try clay()
+        document.beginStroke()
+        document.beginStroke()
+        document.sculpt(.inflate(0.002), at: [Vec3(0, 0, 0.11)],
+                        settings: .init(radius: 0.03, strength: 0.5, symmetric: false))
+        document.endStroke()
+        XCTAssertEqual(document.undoDepth, 0, "an inner endStroke closed the outer group")
+        document.endStroke()
+        XCTAssertEqual(document.undoDepth, 1)
+    }
+}

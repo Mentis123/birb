@@ -40,10 +40,17 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # The editor is a Pencil tool; the viewport wants the whole screen.
+        UIStatusBarHidden: true
+        UIRequiredDeviceCapabilities:
+          - metal
     settings:
       base:
         # iPad only: this is a Pencil-driven tool.
         TARGETED_DEVICE_FAMILY: "2"
+        # Shaders.metal is picked up automatically by the sources glob; this
+        # keeps the compiler strict about the ones we write.
+        MTL_FAST_MATH: NO
         # Needed once the Metal viewport and the C++ geometry bridge land.
         SWIFT_OBJC_INTEROP_MODE: objcxx
         GENERATE_INFOPLIST_FILE: NO
