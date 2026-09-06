@@ -3471,6 +3471,14 @@
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       var { createFrameSampler } = await import("./src/game/frame-metrics.js");
+      // Constructed HERE, not beside its first read. setEnvironment resets the
+      // sampler and is called during initial setup, hundreds of lines before
+      // that read — so a `const` declared there sat in its temporal dead zone
+      // and threw. The throw was caught by the initial-setup handler, which
+      // then skipped everything after it: nest points, the collectibles
+      // system and the rocket collision targets. The world still rendered, so
+      // the game looked fine and simply had no nests and no rings.
+      var frameSampler = createFrameSampler();
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset } = await import("./src/flight/bird-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
@@ -6195,9 +6203,10 @@
     };
 
     // Only the last measured value is kept here now; the windowing lives in
-    // frame-metrics.js so it can be tested away from the DOM.
+    // frame-metrics.js so it can be tested away from the DOM. The sampler
+    // itself is created up with the module imports, because setEnvironment
+    // resets it and runs long before this line does.
     const fpsState = { value: 0 };
-    const frameSampler = createFrameSampler();
 
     let previousTime = null;
 
@@ -8651,6 +8660,23 @@
           __birbStickOverride = on ? { x: 0, y: 0, active: false } : null;
           return flightController.speed;
         },
+        // Game modes. The root game has never had an end-to-end check that a
+        // mode can be entered, reports sane state and can be left again; the
+        // sibling repo shipped a Ring Rush whose win condition could not be
+        // met, so this is a class of bug worth a net under it.
+        startMode: (mode) => { startGameMode(mode); return miniGameState.active; },
+        endMode: (completed = false) => { endGameMode(completed); return miniGameState.active; },
+        modeState: () => ({
+          mode: currentGameMode,
+          active: miniGameState.active,
+          ringsTotal: miniGameState.ringsTotal,
+          ringsSpawned: collectiblesSystem?.rings?.length ?? null,
+          lives: miniGameState.lives,
+          wave: miniGameState.wave,
+          time: +miniGameState.time.toFixed(2),
+          nesting: nestingSystem ? nestingSystem.getState() : null,
+        }),
+        modes: () => Object.values(GAME_MODES),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
         // Lighting overrides for side-by-side comparison captures. The brief
         // asks for palette tuning on physical phones against FIXED views; this
