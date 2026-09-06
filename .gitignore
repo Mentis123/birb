@@ -10,3 +10,4 @@ npm-debug.log*
 # captures are throwaway evidence for one change, regenerated on demand, and
 # they are large. The harness exiting zero is the durable result, not the PNG.
 shots/
+.cdn-cache/
