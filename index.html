@@ -3470,6 +3470,7 @@
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
+      var { createFrameSampler } = await import("./src/game/frame-metrics.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset } = await import("./src/flight/bird-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
@@ -5490,6 +5491,11 @@
       }
 
       sphericalWorld = nextWorld;
+      // Building a world is hundreds of milliseconds of synchronous work.
+      // Charging that to the frame rate would downshift quality on every
+      // environment switch, permanently, since the tier only recovers after
+      // four seconds of good frames it would then be measuring at low DPR.
+      frameSampler.reset();
       glideTrail = null; // No glide trail on spherical world
 
       // Set sphere center for camera and flight controller to handle spherical up vector
@@ -6185,11 +6191,10 @@
       elapsed: 0,
     };
 
-    const fpsState = {
-      lastSampleTime: null,
-      frames: 0,
-      value: 0,
-    };
+    // Only the last measured value is kept here now; the windowing lives in
+    // frame-metrics.js so it can be tested away from the DOM.
+    const fpsState = { value: 0 };
+    const frameSampler = createFrameSampler();
 
     let previousTime = null;
 
@@ -6234,28 +6239,19 @@
     };
 
     function updateFpsReadout(time) {
-      if (!fpsMetric) return;
-
-      if (fpsState.lastSampleTime === null) {
-        fpsState.lastSampleTime = time;
-        fpsState.frames = 0;
-        return;
-      }
-
-      fpsState.frames += 1;
-      const elapsed = time - fpsState.lastSampleTime;
-      if (elapsed < 250) {
-        return;
-      }
-
-      const fps = (fpsState.frames / elapsed) * 1000;
+      // Sample FIRST, unconditionally. This function used to open with
+      // `if (!fpsMetric) return;` — and `[data-metric="fps"]` is not in the
+      // document, so it returned on every frame the game has ever rendered
+      // and the adaptive quality tier was never given a single sample. DPR
+      // never dropped, no optional effect was ever shed, and a phone that
+      // could not hold 60fps just kept not holding it. Drawing the number is
+      // optional; measuring it is what the game acts on.
+      const fps = frameSampler.sample(time);
+      if (fps === null) return;
       fpsState.value = fps;
-      fpsState.frames = 0;
-      fpsState.lastSampleTime = time;
-      const formatted = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
-      fpsMetric.textContent = formatted;
-
-      // Feed the adaptive quality tier manager with the sampled FPS.
+      if (fpsMetric) {
+        fpsMetric.textContent = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
+      }
       adaptiveTier.sampleFps(fps, time);
     }
 
@@ -6305,6 +6301,7 @@
 
       return {
         sampleFps(fps, time) {
+          if (state.pinned) return;
           if (state.windowStart === 0) state.windowStart = time;
           state.fpsSum += fps;
           state.fpsCount += 1;
@@ -6329,6 +6326,18 @@
           state.windowStart = time;
         },
         getTier() { return state.tier; },
+        /**
+         * Hold the tier and ignore further samples. For the capture harness
+         * only: this sandbox renders through SwiftShader at a few frames per
+         * second, so an honest sampler downshifts immediately and every art
+         * review would then be conducted against degraded output that no real
+         * phone would produce.
+         */
+        pin(tier) {
+          applyTier(tier);
+          state.pinned = true;
+        },
+        isPinned() { return !!state.pinned; },
       };
     })();
 
@@ -8337,8 +8346,10 @@
       if (document.hidden) {
         previousTime = null;
         flightControls.reset({ releasePointerLock: true });
-        fpsState.lastSampleTime = null;
-        fpsState.frames = 0;
+        // The gap across a backgrounded tab is not a frame rate. Without this
+        // the first sample after returning reads as a handful of frames per
+        // second and drops the quality tier on a device that is fine.
+        frameSampler.reset();
         if (fpsMetric) {
           fpsMetric.textContent = "--";
         }
@@ -8604,6 +8615,7 @@
           return found.id;
         },
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {
@@ -8621,9 +8633,23 @@
           radius: contactShadow.mesh.position.length(),
           birdRadius: flightController?.position?.length() ?? null,
         }),
-        forceNest: (index = 0) => {
+        // Lands on the NEAREST nest by default, which is what the player's own
+        // tap does. Indexing into the list instead picked whichever nest was
+        // built first — routinely on the far side of the planet — and the
+        // landing state auto-flies in a straight line, so a capture waited out
+        // a 400-unit crossing and looked like a broken state machine.
+        forceNest: (index = null) => {
           const list = nestPointsSystem?.nests;
           if (!nestingSystem || !list || !list.length) return false;
+          if (index === null || index === true) {
+            return nestingSystem.tryLandOnNest(flightController.position)
+              || nestingSystem.forceNestAt(
+                list.reduce((best, nest) => {
+                  const d = nest.getWorldPosition(new THREE.Vector3()).distanceToSquared(flightController.position);
+                  return (!best || d < best.d) ? { nest, d } : best;
+                }, null).nest,
+              );
+          }
           return nestingSystem.forceNestAt(list[Math.min(index, list.length - 1)]);
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
