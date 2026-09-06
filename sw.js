@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v27-2026-09-06-findable-landmarks';
+const CACHE_VERSION = 'v28-2026-09-06-neutral-tonemap';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

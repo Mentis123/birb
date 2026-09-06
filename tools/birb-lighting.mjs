@@ -32,12 +32,16 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  * the status quo in it cannot tell you whether a change is an improvement.
  */
 const VARIANTS = [
-  { name: 'current', note: 'shipped today', settings: {} },
-  { name: 'warmer sun', note: 'key +25%, ambient -15%', settings: { key: 1.56, ambient: 0.89 } },
+  { name: 'current (ACES)', note: 'shipped today', settings: {} },
+  // Tone mapping is the cheapest cinematic lever there is: one enum, zero
+  // per-frame cost, and it decides how the whole frame rolls off into
+  // highlight. AgX (Three r160+) holds saturation in bright areas where ACES
+  // pushes toward white; Neutral is the flattest of the three.
+  { name: 'AgX', note: 'r160+ filmic, softer highlights', settings: { tone: 'agx' } },
+  { name: 'AgX brighter', note: 'AgX + exposure 1.35', settings: { tone: 'agx', exposure: 1.35 } },
+  { name: 'Neutral', note: 'Khronos neutral tonemap', settings: { tone: 'neutral' } },
   { name: 'deeper air', note: 'fog 0.006 to 0.0095', settings: { fog: 0.0095 } },
-  { name: 'brighter', note: 'exposure 1.12 to 1.32', settings: { exposure: 1.32 } },
   { name: 'moodier', note: 'exposure 0.96, rim +50%', settings: { exposure: 0.96, rim: 0.72 } },
-  { name: 'flat light', note: 'ambient +40%, key -30%', settings: { ambient: 1.47, key: 0.88 } },
 ];
 
 async function main() {

@@ -575,6 +575,40 @@ the wingtip ribbons were janky. Both fair; both acted on.
 Most mountain perches are fine; this is nest-placement variance, and raising
 the radius risks the whole-batch stripping the September pass removed.
 
+### Fourth pass — "cutting edge, mobile first"
+
+Two candidates from current Three.js practice were measured. One shipped, one
+was rejected on evidence.
+
+**Tone mapping ACES -> Khronos Neutral. SHIPPED.** One enum, zero per-frame
+cost. ACES desaturates as it rolls off, and on a world made of flat-shaded
+colour that is most of what you see. Neutral holds hue into the highlights.
+Measured across all four biomes from fixed cameras; every one reads richer.
+AgX (r160+) was measured in the same pass and lands very close to ACES here —
+it earns its keep on scenes with blown highlights and this one has none.
+
+**Sky-derived ambient via `PMREMGenerator.fromScene` -> `scene.environment`.
+BUILT, MEASURED, REVERTED.** The usual advice is that `scene.environment` is
+PBR-only; it is not — `WebGLPrograms.js` applies it to Lambert and Phong too,
+which is worth knowing since all 36 of this world's materials are Lambert. So
+the lever exists. It just does nothing here: an A/B from one pinned camera at
+intensity 0, 0.45 and 1.0 produced three visually identical frames, because
+the non-PBR env path is a `combine`-based reflection rather than an
+irradiance term. Making it work would mean converting every material to
+`MeshStandardMaterial`, and PBR is materially more expensive than Lambert —
+the wrong trade for a stylised low-poly game on a phone.
+
+**Not attempted, and why.** SSAO/GTAO, SSR, depth of field and volumetrics
+are fill-rate bound, and this game is already fill-rate bound at DPR 1.4 on
+the device it targets. Half-resolution selective bloom is the one
+post-processing effect with a real mobile case (roughly 75% fewer fragment
+invocations than full res) but it needs a phone measurement first, which is
+still outstanding. WebGPU is genuinely production-ready now — Safari 26 ships
+it, `WebGPURenderer` is close to a one-line swap — but this game has three
+`onBeforeCompile` GLSL injections (foliage wind, water ripple, water
+specular) that do not port and would need TSL rewrites, and the migration on
+its own changes nothing a player can see.
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
