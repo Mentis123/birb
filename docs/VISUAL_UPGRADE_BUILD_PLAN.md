@@ -633,3 +633,154 @@ its own changes nothing a player can see.
 | F instance sectors | | | |
 | G vertex occlusion | | | |
 | H landmark slice | | | |
+
+---
+
+## 14. Next round — planned, not built
+
+Written 2026-09-06 at the end of the session, after the owner played it and
+pushed back. Ranked by visual impact per unit of mobile cost, using what this
+session actually measured rather than what sounded good. Nothing below has
+been started. Each item says how to prove it worked, because three things this
+session were built, reported healthy by every counter, and invisible on
+screen.
+
+What the evidence says about where the payoff is: the single largest visual
+change of the whole session was one enum (tone mapping). Colour pipeline and
+light beat geometry on this art style, every time. The things that failed
+were all geometry or overlays (sectors, ribbons, a same-height "giant" tree).
+Plan accordingly.
+
+### Ranked
+
+| # | Item | Impact | Mobile cost | Effort | Gate |
+|---|---|---|---|---|---|
+| 1 | Ground shader pass: valley mist, cloud shadows, macro noise | 5/5 | one fragment term on the ground only | 1 day | none |
+| 2 | Sun drift (slow time of day) | 4/5 | one light position per frame | half a day | none |
+| 3 | Bird flap realism | 4/5 | zero | half a day | none |
+| 4 | Per-biome grade with the lighting tool | 4/5 | zero | tuning only | owner's phone |
+| 5 | Emissive rings/drones, then half-res bloom | 4/5 | half-res pass, tier 0 only | 1-2 days | **phone benchmark** |
+| 6 | Perch placement quality (mountain cliffs) | 3/5 | build-time | half a day | none |
+| 7 | Desktop density tier | 2/5 | desktop only | half a day | none |
+
+### 1. Ground shader pass — the highest-value item left
+
+Three effects, ONE `onBeforeCompile` on the ground material (and the cloud
+term on canopies), sharing one time uniform. The pattern already exists in
+`visual-style.js` (`addFoliageWind`, `addWaterHighlights`); this is the same
+mechanism on the biggest surface in the frame.
+
+- **Height fog / valley mist.** Fog is a single density everywhere. Make it
+  thicker below the base radius so the carved valleys fill with mist and the
+  ridge tops stay clear. The owner singled out the fog as the thing that
+  worked; this is that, aimed at the terrain the world already carves. Term:
+  extra fog factor from `max(0, baseRadius - length(worldPos))`, clamped.
+- **Cloud shadows.** A slow-scrolling, low-frequency darkening across the
+  ground and canopies. Cheap noise (two sines or a 2-octave value noise) in
+  world-space tangent coordinates, scrolled by time, multiplied into the
+  diffuse. This is the classic trick that reads as expensive lighting and
+  costs one noise evaluation. It makes the world move without moving a
+  single vertex.
+- **Macro noise.** The ground is flat colour at low altitude and the contact
+  shadow made that more visible, not less. A low-amplitude tint variation at
+  ~8-unit scale breaks it up.
+
+Verify: `birb-lighting.mjs` with the pass on/off as variants, from a pinned
+camera, mobile path. Draw calls must not change. If the shader compiles on
+both device paths the sheet run already proves it. **Do not** put the cloud
+term on the sky dome or clouds themselves; it is a ground effect.
+
+Risk: fog colour in valleys must come from the sky palette or it reads as
+grey soup. Use `sky.getMidColor()` as the mist tint, per biome.
+
+### 2. Sun drift
+
+The key light and sky palette are static per biome. A slow cycle — eight to
+twelve minutes, elevation clamped to stay above 20 degrees so it never goes
+dark — changes the mood over a session for the cost of one light position
+update and one `setSunDirection` call per frame. Water specular and the sky
+disc already follow the key light, so they come for free. The rim light
+should counter-rotate a little so silhouettes keep an edge at every angle.
+
+Verify: `birb-shot --eval` with a time override, four captures across the
+cycle from one pinned pose. Confirm the perch camera still reads landscape
+at the darkest point.
+
+### 3. Bird flap realism
+
+The owner's "not much realism" is most cheaply answered on the bird, not on
+the world. The flap is a symmetric sine at 6.8 Hz, only while climbing. Real
+birds do not do that. Add to `src/flight/bird-pose.js` (pure, tested):
+
+- **Asymmetric stroke:** fast power downstroke, slower recovery upstroke.
+  A skewed waveform, not a sine.
+- **Wing fold on the upstroke:** `scale.z` pulls in ~15% on recovery, so the
+  wing does not fight the air on the way up.
+- **Burst-and-glide cadence:** three or four flaps, then a glide, gated on
+  climb input and throttle. A continuous flap reads as a machine.
+- **Body bob synced to the stroke:** the bird rises on the downstroke. Small,
+  ~0.04 units, at the flap frequency.
+
+Mirror rule still applies: the right wing has `scale.z = -1`, so every
+symmetric term is applied with opposite signs.
+
+Verify: `birb-shot` cannot capture motion. Add a test that samples one full
+cycle and asserts downstroke duration < upstroke duration, and capture two
+frames at known phases for the pose.
+
+### 4. Per-biome grade
+
+Now that Neutral holds hue, per-biome exposure and fog colour will compound.
+The tool exists: `birb-lighting.mjs --env <biome>`. This is tuning, not code,
+and it needs the owner's eyes on a phone. Candidates worth generating: fog
+density per biome (canyon thinner, mountain thicker), exposure ±0.15.
+
+### 5. Emissives, then bloom — the only post effect worth its cost
+
+Rings, drones, the city mast collar and the rocket trail should be emissive
+first; that alone improves them with zero cost. THEN half-resolution
+selective bloom, tier 0 only, in a single merged pass (pmndrs/postprocessing
+merges effects into one fragment shader; Three's own EffectComposer stacks
+passes, which is the difference between viable and not on a phone). Half
+res is ~75% fewer fragment invocations than full.
+
+**Gated on the phone benchmark.** It is a fill-rate cost on a fill-rate-bound
+device and no number exists yet. Do not ship it blind. When it does ship,
+it is the first thing tier 1 drops.
+
+### 6. Perch placement quality
+
+A mountain perch can land facing a cliff wall. Raising the occlusion radius
+risks the whole-batch stripping the September pass removed. The right fix is
+at build time: reject a nest candidate whose forward hemisphere at perch
+height is blocked within ~12 units by a peak or cliff instance. The collider
+list already exists for this query.
+
+### 7. Desktop density tier
+
+Desktop is over the 80k triangle target in every biome and sectoring does not
+help (section 7). The lever is prop density per device tier: desktop can
+afford more DPR, not more instances. Reduce the scatter counts on the desktop
+path to mobile levels and spend the headroom on resolution.
+
+### Not on this list, and why
+
+- **Environment maps** — measured, invisible on Lambert (section 13, fourth
+  pass). Do not rebuild.
+- **Instance sectors** — measured, draw calls up 40% (section 7).
+- **Wingtip ribbons** — shipped, played, removed.
+- **SSAO / GTAO, SSR, DOF, volumetrics** — fill-rate on a fill-rate-bound
+  device. Not until a phone number exists, and probably not then.
+- **WebGPU** — production-ready and a real option, but three
+  `onBeforeCompile` GLSL injections need TSL rewrites, and the migration
+  changes nothing a player sees. An enabler, not an upgrade. Item 1 above
+  adds a fourth injection; note it.
+- **Texture atlas / KTX2** — not authorised; the game generates every texture.
+
+### The gate that has not moved
+
+Every item that costs fill rate is waiting on the same thing it was waiting
+on at the start of the session: a frame-time measurement on the reference
+phone. Adaptive quality is now live for the first time, so that measurement
+will also show whether the 55/58 fps thresholds are right. Nothing in items
+1-4 needs it. Item 5 does. Get the number.
