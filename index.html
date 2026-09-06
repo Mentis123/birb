@@ -3470,6 +3470,7 @@
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
+      var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -4300,6 +4301,12 @@
     // rebuilt on every environment switch and the shadow belongs to the bird.
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
+    // One ribbon per wingtip. Scene-parented for the same reason as the
+    // shadow: they belong to the bird, not to a world that gets rebuilt.
+    const wingRibbons = [createRibbonTrail(THREE), createRibbonTrail(THREE)];
+    for (const ribbon of wingRibbons) scene.add(ribbon.mesh);
+    const _ribbonAnchor = new THREE.Vector3();
+    const _ribbonSide = new THREE.Vector3();
 
     // ===== Proximity cue state =====
     // Pre-allocated working vectors (zero-alloc per frame).
@@ -4746,6 +4753,9 @@
 
     // Sprint state (second finger touch = sprint)
     // Base bumped 8 -> 11 to match new traversal speed; sprint scaled proportionally.
+    // Set only by the ?debug=1 capture harness; null in production.
+    let __birbStickOverride = null;
+
     const sprintState = {
       active: false,
       baseSpeed: 11,
@@ -7217,6 +7227,11 @@
 
       if (shouldSprint !== sprintState.active) {
         sprintState.active = shouldSprint;
+        // A distinct signature for boost: short cyan flare, no expanding ring,
+        // so it cannot sit in front of whatever the player just accelerated at.
+        if (shouldSprint && particleSystem && flightController?.position) {
+          particleSystem.createBoost(flightController.position);
+        }
         if (flightController && flightController.speed !== undefined) {
           flightController.speed = shouldSprint ? sprintState.sprintSpeed : sprintState.baseSpeed;
           console.log('Sprint:', shouldSprint ? `ON (speed ${sprintState.sprintSpeed})` : `OFF (speed ${sprintState.baseSpeed})`);
@@ -7382,6 +7397,9 @@
       // Get input state early (needed for both flight and aim rig when nested).
       // In Zen mode, apply additional smoothing for a floatier feel.
       let inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
+      // Capture-harness stick override (?debug=1 only). A screenshot cannot
+      // hold a turn, and the wingtip ribbons only exist during one.
+      if (__birbStickOverride) inputState = __birbStickOverride;
       // Shape every mode's stick (deadzone + expo) before it drives flight.
       _shapedInput.x = shapeAxis(inputState.x, INPUT_SHAPE);
       _shapedInput.y = shapeAxis(inputState.y, INPUT_SHAPE);
@@ -7536,7 +7554,7 @@
               // Haptic: ring collected (20ms)
               triggerHaptic(20);
               // ===== IMPROVEMENT 5: Ring sparkle particles =====
-              if (particleSystem) particleSystem.createSparkle(flightController.position);
+              if (particleSystem) particleSystem.createCollect(flightController.position);
               // ===== IMPROVEMENT 6: FOV kick on ring collect =====
               screenShake.ringCollected();
               // Start timer on first ring
@@ -7678,7 +7696,7 @@
           const collected = collectiblesSystem.checkCollection(flightController.position, 1.8);
           if (collected.length > 0) {
             playRingCollectSound();
-            if (particleSystem) particleSystem.createSparkle(flightController.position);
+            if (particleSystem) particleSystem.createCollect(flightController.position);
             // Respawn collected rings after a short delay so the world stays full.
             setTimeout(() => {
               if (currentGameMode !== GAME_MODES.ZEN) return;
@@ -8044,6 +8062,44 @@
 
       // IMPROVEMENT 5: Update particles
       if (particleSystem) particleSystem.update(delta, cam?.position);
+
+      // Wingtip ribbons. Shown only while boosting or banking hard, and only
+      // in the air — a strip trailing a walking bird reads as a bug. Dropped
+      // at tier 1: an optional overlay goes before distant detail, which goes
+      // before resolution. Reduced motion removes them outright.
+      if (wingRibbons.length) {
+        const bankAmount = Math.abs(wingInputState?.x ?? 0);
+        const airborne = flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
+        const ribbonsAllowed = airborne && !isNested
+          && !reducedMotionState.enabled && adaptiveTier.getTier() < 1;
+        // Boost is the loud case; a hard bank earns a fainter ribbon so a
+        // tight turn still reads as fast without shouting.
+        // Banking is the real trigger. A ribbon trailing straight back from a
+        // wingtip points almost exactly at a chase camera and foreshortens to
+        // nothing, so boost alone shows the player no ribbon at all; it only
+        // sweeps into view when the bird turns. Boost therefore amplifies a
+        // turn rather than triggering the effect on its own.
+        const turn = Math.max(0, (bankAmount - 0.3) / 0.5);
+        const ribbonTarget = !ribbonsAllowed ? 0
+          : Math.min(1, turn * (sprintState.active ? 1.35 : 0.85));
+        const wings = [birbAnchor?.getObjectByName('leftWing'), birbAnchor?.getObjectByName('rightWing')];
+        for (let i = 0; i < wingRibbons.length; i++) {
+          const tip = wings[i]?.userData?.tipFeather;
+          if (!tip || ribbonTarget <= 0) {
+            wingRibbons[i].update(null, null, delta, 0);
+            continue;
+          }
+          tip.getWorldPosition(_ribbonAnchor);
+          // Width runs along the bird's RIGHT axis, making the ribbon
+          // horizontal. Along the up axis instead, the ribbon's plane
+          // contains the flight direction — and a chase camera looks straight
+          // down that direction, so it saw two perfectly edge-on ribbons and
+          // rendered nothing while every counter said they were visible.
+          _ribbonSide.set(1, 0, 0);
+          if (birdQuat) _ribbonSide.applyQuaternion(birdQuat);
+          wingRibbons[i].update(_ribbonAnchor, _ribbonSide, delta, ribbonTarget);
+        }
+      }
 
       // Bird contact shadow. Reads the SAME terrain sampler the flight floor
       // uses, so the disc sits on the ground the bird would actually land on
@@ -8471,6 +8527,22 @@
           p.normalize().multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
           return p.length();
         },
+        // Drives the ribbons from a capture: they only appear while boosting
+        // or banking hard, neither of which a screenshot can hold on its own.
+        setStick: (x, y) => {
+          __birbStickOverride = (x === null) ? null : { x, y: y || 0, active: true };
+          return __birbStickOverride;
+        },
+        setSprint: (on) => {
+          sprintState.active = !!on;
+          if (flightController && flightController.speed !== undefined) {
+            flightController.speed = on ? sprintState.sprintSpeed : sprintState.baseSpeed;
+          }
+          return sprintState.active;
+        },
+        ribbons: () => wingRibbons.map((r) => ({
+          visible: r.mesh.visible, intensity: +r.intensity.toFixed(3), rungs: r.length,
+        })),
         shadow: () => ({
           visible: contactShadow.mesh.visible,
           opacity: contactShadow.mesh.material.opacity,

@@ -1,6 +1,8 @@
 import * as THREE from "https://esm.sh/three@0.183.2";
+import { BURST_SIGNATURES } from "./burst-signatures.js";
 
 const AMBIENT_COUNT = 80;
+
 
 /**
  * Lightweight GPU particle system using THREE.Points
@@ -198,30 +200,41 @@ export class ParticleSystem {
 
   _emitBurst(position, color, type) {
     if (this.suspended) return;
+    const sig = BURST_SIGNATURES[type] || BURST_SIGNATURES.explosion;
     let slot = null;
     for (const p of this.particles) { if (!p.active) { slot = p; break; } }
+    // A full pool DROPS the burst. It never grows: an explosion during a
+    // firefight is exactly when a heap allocation would be felt.
     if (!slot) return;
     slot.active = true;
     slot.type = type;
+    slot.sig = sig;
     slot.age = 0;
-    slot.maxAge = type === 'sparkle' ? 0.65 : 0.9;
+    slot.maxAge = sig.maxAge;
     slot.points.visible = true;
     slot.material.color.set(color);
     slot.material.opacity = 1;
-    slot.material.size = type === 'sparkle' ? 0.4 : 0.85;
+    slot.material.size = sig.size;
+
     this._burstNormal.copy(position).normalize();
     if (this._burstNormal.lengthSq() < 0.5) this._burstNormal.copy(this._up);
     this._burstTangent.set(1, 0, 0);
     if (Math.abs(this._burstNormal.x) > 0.9) this._burstTangent.set(0, 0, 1);
     this._burstTangent.cross(this._burstNormal).normalize();
     this._burstSide.crossVectors(this._burstNormal, this._burstTangent);
-    slot.gravity.copy(this._burstNormal).multiplyScalar(type === 'explosion' ? -4 : 0);
+    slot.gravity.copy(this._burstNormal).multiplyScalar(sig.gravity);
+
     const positions = slot.geometry.attributes.position.array;
+    const [speedMin, speedMax] = sig.speed;
+    const [liftMin, liftMax] = sig.lift;
     for (let i = 0; i < 24; i++) {
-      const angle = i / 24 * Math.PI * 2;
-      const speed = type === 'sparkle' ? 3 + Math.random() * 2 : 3 + Math.random() * 8;
-      const lift = type === 'sparkle' ? 1 : (Math.random() - 0.3) * 7;
-      const x = Math.cos(angle) * speed, z = Math.sin(angle) * speed;
+      // The spiral term twists successive particles around the ring, which is
+      // what makes a collect read as drawn INTO the bird rather than sprayed.
+      const angle = (i / 24) * Math.PI * 2 + (sig.spiral ? (i / 24) * sig.spiral : 0);
+      const speed = speedMin + Math.random() * (speedMax - speedMin);
+      const lift = liftMin + Math.random() * (liftMax - liftMin);
+      const x = Math.cos(angle) * speed;
+      const z = Math.sin(angle) * speed;
       positions[i * 3] = position.x;
       positions[i * 3 + 1] = position.y;
       positions[i * 3 + 2] = position.z;
@@ -230,18 +243,27 @@ export class ParticleSystem {
       slot.velocities[i * 3 + 2] = this._burstTangent.z * x + this._burstSide.z * z + this._burstNormal.z * lift;
     }
     slot.geometry.attributes.position.needsUpdate = true;
-    slot.arc.position.copy(position);
-    // RingGeometry faces local +Z; align to the radial surface normal.
-    this._burstSide.set(0, 0, 1);
-    slot.arc.quaternion.setFromUnitVectors(this._burstSide, this._burstNormal);
-    slot.arc.scale.setScalar(0.2);
-    slot.arc.material.color.set(color);
-    slot.arc.material.opacity = 0.65;
-    slot.arc.visible = true;
+
+    if (sig.arc > 0) {
+      slot.arc.position.copy(position);
+      // RingGeometry faces local +Z; align to the radial surface normal.
+      this._burstSide.set(0, 0, 1);
+      slot.arc.quaternion.setFromUnitVectors(this._burstSide, this._burstNormal);
+      slot.arc.scale.setScalar(0.2);
+      slot.arc.material.color.set(color);
+      slot.arc.material.opacity = 0.65;
+      slot.arc.visible = true;
+    } else {
+      slot.arc.visible = false;
+    }
   }
 
   createExplosion(position, color = 0xffb05c) { this._emitBurst(position, color, 'explosion'); }
   createSparkle(position) { this._emitBurst(position, 0xffdf8c, 'sparkle'); }
+  /** A ring was collected: rising gold spiral. */
+  createCollect(position, color = 0xffe27a) { this._emitBurst(position, color, 'collect'); }
+  /** Boost engaged: short cyan flare, no ring to sit in front of the target. */
+  createBoost(position, color = 0x8fe9ff) { this._emitBurst(position, color, 'boost'); }
 
   /**
    * Set ambient particle type based on environment
@@ -362,9 +384,18 @@ export class ParticleSystem {
       p.geometry.attributes.position.needsUpdate = true;
       const life = p.age / p.maxAge;
       p.material.opacity = (1 - life) * (1 - life);
-      p.arc.visible = life < 0.45;
-      p.arc.scale.setScalar(0.4 + life * (p.type === 'sparkle' ? 5 : 9));
-      p.arc.material.opacity = Math.max(0, 0.65 * (1 - life / 0.45));
+      const sig = p.sig || BURST_SIGNATURES.explosion;
+      if (sig.arc > 0) {
+        p.arc.visible = life < 0.45;
+        p.arc.scale.setScalar(0.4 + life * sig.arc);
+        // Two pulses for a kill: the ring reaches full fade at the halfway
+        // point and immediately runs again, which reads as a concussion
+        // rather than as one slow hoop. One shared mesh, no extra draw call.
+        const phase = sig.arcPulses > 1 ? (life * 2) % 1 : life / 0.45;
+        p.arc.material.opacity = Math.max(0, 0.65 * (1 - Math.min(1, phase)));
+      } else {
+        p.arc.visible = false;
+      }
     }
 
     // Update ambient particles
