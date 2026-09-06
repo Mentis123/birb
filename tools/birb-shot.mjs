@@ -195,18 +195,32 @@ export const CHROMIUM_ARGS = [
 ];
 
 /** Click through Splash -> Vibe -> Title -> Tap-to-Start and wait for frames. */
-export async function startGame(page, timeout) {
-    // Splash and Vibe are whole-screen tap targets; the Title has a real button.
-    for (const selector of ['[data-splash-screen]', '[data-vibe-splash]']) {
-        const el = page.locator(selector);
-        if (await el.count() && await el.isVisible().catch(() => false)) {
-            await el.click({ timeout: 5000 }).catch(() => {});
-            await page.waitForTimeout(250);
-        }
+export async function startGame(page, timeout = 30000) {
+    // The splash chain is time-driven: the Vibe page only becomes clickable
+    // once the first splash has finished fading, so a fixed pair of clicks
+    // races it and lands on nothing. Poll instead — click whichever splash is
+    // currently up until the Title's own button is actually visible.
+    const deadline = Date.now() + timeout;
+    for (;;) {
+        const ready = await page.evaluate(() => {
+            const start = document.querySelector('[data-title-start]');
+            const screen = document.querySelector('[data-title-screen]');
+            return !!start && !screen?.hidden;
+        });
+        if (ready) break;
+        if (Date.now() > deadline) throw new Error('title screen never appeared');
+        // Dispatched on the elements themselves, not at coordinates. The Vibe
+        // page sits over the first splash as a full-screen div at opacity 0,
+        // so a positional click — force:true included — is delivered to the
+        // topmost element and the splash underneath never hears it.
+        await page.evaluate(() => {
+            document.querySelector('[data-splash-screen]')?.click();
+            document.querySelector('[data-vibe-splash]')?.click();
+        });
+        await page.waitForTimeout(250);
     }
-    await page.waitForSelector('[data-title-start]', { state: 'visible', timeout });
-    // The button self-disables and reads "Loading…" if the scene module has not
-    // finished importing. Waiting for __BIRB_READY avoids that race entirely.
+    // The button self-disables and reads "Loading…" if the scene module has
+    // not finished importing. Waiting for __BIRB_READY avoids that race.
     await page.waitForFunction('window.__BIRB_READY === true', null, { timeout });
     await page.click('[data-title-start]', { timeout: 5000 });
     // A revealed <main> is not a rendered frame. The elapsed clock only

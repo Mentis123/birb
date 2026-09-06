@@ -254,7 +254,37 @@ a new `birdPose` object created once. No `new` in the loop.
 extracted (the perch blend easing is a good candidate: put it in
 `src/flight/bird-pose.js` with no THREE and test it).
 
-## 7. Stage F — spatial instance sectors
+## 7. Stage F — spatial instance sectors — ATTEMPTED AND REVERTED
+
+**Do not re-attempt this without new evidence.** It was built, measured on
+all four biomes at desktop scale, and reverted because the measurement
+contradicted the assumption behind it. The numbers, from
+`tools/birb-sheet.mjs --desktop --views flight`:
+
+| Variant | Draw calls | Triangles |
+|---|---|---|
+| One mesh per layer (baseline) | 93 / 87 / 88 / 74 | 131k / 87k / 90k / 106k |
+| Six cube-face sectors | 113 / 100 / 102 / 104 | 109k / 84k / 83k / 101k |
+| 24 sectors, heavy layers only | 133 / 89 / 109 / 135 | 102k / 87k / 84k / 95k |
+
+Order is forest / canyons / mountain / city.
+
+Draw calls rose 20 to 60 per biome — straight through the 100 budget — for a
+triangle saving of 17 to 22 percent. The reason is the world's own shape. The
+camera sits ON a radius-120 sphere with a horizon around 44 units, and the
+2026-05-31 distribution pass deliberately scattered the primary prop of every
+biome evenly across the whole planet. So every sector holds instances, and a
+view toward the horizon crosses many sectors at once. Frustum culling rejects
+the hemisphere behind the camera and very little else, while each surviving
+sector costs its own call.
+
+Sectoring pays off when props are clustered and the far side is genuinely
+empty. Here they are deliberately not. If this is revisited, the thing to
+measure first is whether draw calls or vertex throughput is actually the
+binding constraint on the target phone — which is exactly the profiling the
+brief asks for and which no desktop or software-rendered run can answer.
+
+## 7b. Stage F (original plan, for reference) — spatial instance sectors
 
 Brief item: enabler, "profile first". This is the one performance stage, and
 it is measurable here because the harness reports **rendered** triangles from
