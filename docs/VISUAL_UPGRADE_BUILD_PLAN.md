@@ -499,6 +499,35 @@ than none. `pinTier` exists because adaptive quality now works, and software
 rendering here downshifts within seconds, so an unpinned art review is
 conducted against output no phone produces.
 
+### The one regression this session shipped, and what it taught
+
+The adaptive-quality fix added `frameSampler.reset()` to `setEnvironment`.
+`setEnvironment` runs during initial setup, hundreds of lines before the
+`const frameSampler` it refers to, so it read a const in its temporal dead
+zone and threw. Initial setup catches its own throw and only logs a warning,
+so the rest of that function — nest points, the collectibles system, the
+rocket collision targets — was silently skipped. The world still built and
+the frame still looked completely normal. The game just had no nests and no
+rings, and it was live in production for about half an hour.
+
+Every check in place at the time passed it. Unit tests do not run
+`index.html`. The screenshot harness exited 0 because a frame rendered. The
+contact sheet looked right because it switches environment first, which
+re-runs `setEnvironment` successfully — so the harness only ever exercised
+the path a player does NOT take.
+
+Three rules came out of it, and they are worth keeping:
+
+1. **A rendering world is not a working world.** `birb-shot` now asserts the
+   nesting and collectibles systems exist before reporting success, on the
+   plain-start path. Verified by reintroducing the bug: exit 1 on the broken
+   build, exit 0 on the fixed one.
+2. **A caught-and-warned exception is a silent failure.** `birb-modes` treats
+   console warnings as failures, because that is the exact channel this bug
+   used to announce itself.
+3. **Test the path the player takes**, not the one the harness finds
+   convenient. The convenient path is the one that hides setup bugs.
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
