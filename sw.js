@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v22-2026-09-06-landmarks';
+const CACHE_VERSION = 'v23-2026-09-06-fps-sampler';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -47,6 +47,7 @@ const CORE_ASSETS = [
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
   './src/game/game-modes.js',
+  './src/game/frame-metrics.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
   './src/camera/fpv-camera.js',
