@@ -497,6 +497,49 @@ Verify with `node tools/ar-shot.mjs [--go]`. It fakes a camera
 — a zero exit means the gyro produced a reading, the stream went live and
 something actually rendered, not just that a PNG appeared.
 
+### Baby Blender — the iPad app, not a web artefact (2026-09-05)
+
+**Baby Blender** is the one thing in this repo that is not a web page. It is a
+native iPadOS app: sculpt and paint a protected fixed-topology model with the
+Pencil, then export something a game engine can open. It lives in
+`humanoid/` (Swift package, builds and tests on Linux) and `humanoid/app`
+(XcodeGen spec for the iPad shell).
+
+**Read `docs/PRD-humanoid-creator-v0.1.md` before touching any of it**, and
+`docs/humanoid-creator-validation/REPORT.md` for the research the plan rests on.
+Both keep their old filenames; the product was named Baby Blender on 2026-09-05.
+
+Two document types, one engine:
+
+- **Clay** — a pre-subdivided rounded cube, no rig, exports a static mesh.
+  **Ships first.**
+- **Humanoid** — 51 bones, T-posed, exports an avatar Unity maps as a Humanoid
+  for the normal VRChat flow.
+
+Things that will cost a round if you undo them:
+
+- **Topology is immutable.** No remeshing, no subdivide, no vertex is ever
+  created or destroyed. That is what lets every adjacency, symmetry-pair and
+  seam-partner table be generated offline and the runtime use flat arrays
+  instead of a half-edge mesh. Clay being *pre*-subdivided is the whole trick;
+  a literal 8-vertex cube would be unsculptable.
+- **`rig` is optional, not empty.** A zero-bone skeleton for Clay would put
+  `if boneCount > 0` through the skinning, export and validation paths, and
+  every one of those is a silent failure waiting to happen.
+- **`build_template.py`'s T-pose report is tautological** — it measures
+  head-to-tail of bones it just aimed, so it reads 0.00 degrees whatever the
+  body did. `tools/check_template.py` is the real oracle: it shares no code with
+  the baker, re-derives from the written bytes, and measures head to CHILD head,
+  which is what Unity's `AvatarAutoMapper` actually scores. It found four
+  defects the report structurally could not see.
+- **Keep all eight stages of `tools/verify.sh` green while Clay is built.** The
+  humanoid work is finished and unattended, which is exactly how code rots.
+
+Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
+on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
+tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror
+handedness and the SDK panel are still unverified.
+
 ## What This Is
 
 A mobile-first 3D bird flight game built with Three.js. A bird flies on a spherical world — you control it with touch (virtual joystick), collect rings, shoot rockets from nests, and fight drones. Four game modes: Casual free flight, Ring Rush (timed collection), Drone Hunter (60s survival), Turret Defense (wave-based).

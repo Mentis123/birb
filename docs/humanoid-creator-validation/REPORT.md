@@ -1,4 +1,6 @@
-# Humanoid Creator for VRChat — PRD Validation Report
+# Baby Blender — PRD Validation Report
+
+*(Researched under the working title "Humanoid Creator for VRChat"; the product was named Baby Blender on 2026-09-05.)*
 
 **Date:** 2026-09-03
 **Subject:** `docs/PRD-humanoid-creator-v0.1.md` (2026-08-27)

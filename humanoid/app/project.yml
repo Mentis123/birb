@@ -32,7 +32,7 @@ targets:
     info:
       path: HumanoidApp/Info.plist
       properties:
-        CFBundleDisplayName: Humanoid
+        CFBundleDisplayName: Baby Blender
         UILaunchScreen: {}
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait

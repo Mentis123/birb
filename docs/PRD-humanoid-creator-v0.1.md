@@ -1,4 +1,6 @@
-# Humanoid Creator for VRChat — v0.1 Research PRD and Build Plan
+# Baby Blender — v0.1 Research PRD and Build Plan
+
+*(Formerly "Humanoid Creator for VRChat". Filenames keep the old slug so existing links survive.)*
 
 **Status:** Recut proposal  
 **Research date:** 2026-08-27  
@@ -548,4 +550,10 @@ The first pull request should contain no sculpting UI. Its only success criterio
 - **Dynamic topology.** No remeshing, no subdivide, no adding geometry. The immutable-topology contract is the thing that makes the whole architecture — offline adjacency tables, no half-edge mesh, structurally impossible illegal operations — work at all. Clay is a *pre-subdivided* template, not a dynamic one.
 - **A VRChat path for Clay.** No skeleton means no avatar. Clay exports as a model and its button says so.
 
-**Naming.** "Humanoid Creator for VRChat" no longer describes the product, since half of it is neither humanoid nor for VRChat. The document keeps its filename so existing links survive; the product name is an open question for Mentis.
+**Naming — settled 2026-09-05.** The product is **Baby Blender**. "Humanoid Creator for VRChat" described neither half of it once Clay existed and Clay went first.
+
+Paths and identifiers deliberately do **not** follow yet. `docs/PRD-humanoid-creator-v0.1.md`, `docs/humanoid-creator-validation/` and the `humanoid/` package keep their names, because renaming them now would churn every link, CI path and doc reference mid-project for no functional gain. The natural moment is the start of Phase 1, when a real app target gets created and the export core is separated from the humanoid layer; do it then, in one commit, or not at all. `humanoid/` is an accurate name for what it holds today.
+
+**One thing to know before it goes on the App Store.** "Blender" is a registered trademark of the Blender Foundation in the EU and USA, and their published guidelines ask third parties not to use it in a product name — "especially not as the beginning of the name". Baby Blender puts it second, which is better, but it is still the mark in the name of a 3D modelling app.
+
+The Foundation states it does not intend to pursue legal or public action over this, so the practical risk is low; the real precedent is Blender Market voluntarily rebranding to Superhive to comply. Apple's App Store review is a separate gate that can take its own view of third-party marks. Baby Blender is a great working name, a great repo name and a great name to build in public under. If it ships to the App Store, the safe shape is a distinct product name with the association in a tagline — which is exactly what the Foundation's policy permits. Mentis's call, flagged once, not a blocker.

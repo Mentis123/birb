@@ -1,4 +1,6 @@
-# Humanoid Creator — Phase 0
+# Baby Blender — the export core and humanoid layer
+
+*The directory is called `humanoid/` because it began as the humanoid export gate. It now also holds the export core Clay shares. Renaming waits for Phase 1's restructure — see §14 of the PRD.*
 
 An iPad app that reshapes, sculpts and paints one protected humanoid mannequin
 and exports an avatar Unity accepts as a Humanoid for VRChat.
