@@ -6,6 +6,9 @@
 > It supersedes older notes below about hiding all props while nested and
 > deliberately placing nests at fractional heights inside champion structures.
 > Nesting now preserves scenery; perches occupy actual modest-height crowns/roofs.
+> The next implementation session follows
+> [docs/VISUAL_UPGRADE_BUILD_PLAN.md](docs/VISUAL_UPGRADE_BUILD_PLAN.md):
+> staged, tier-gated, with a verification tool per stage.
 
 > Context for AI assistants and Vibe Academy builders. Read this first.
 
