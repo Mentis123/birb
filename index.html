@@ -3471,6 +3471,7 @@
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
+      var { blendToward, perchPose, tumbleFlap, tailPitchOffset } = await import("./src/flight/bird-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -4753,6 +4754,11 @@
 
     // Sprint state (second finger touch = sprint)
     // Base bumped 8 -> 11 to match new traversal speed; sprint scaled proportionally.
+    // How folded the bird currently is, 0 flying and 1 fully perched. Eased
+    // rather than snapped: switching pose on the frame the nesting state flips
+    // reads as a dropped frame, not as a bird settling onto a nest.
+    let perchBlend = 0;
+
     // Last tier the mist budget was applied for, so the draw range is only
     // rewritten when the tier actually changes rather than every frame.
     let mistBudgetTier = -1;
@@ -7972,10 +7978,19 @@
           ? Math.sin(motionState.elapsed * 1.7) * 0.035
           : 0;
 
+        // Perch fold and knockdown tumble. Both mix into the SAME formula
+        // rather than running as a parallel animation path, so the mirror
+        // rule above still holds for every term.
+        perchBlend = blendToward(perchBlend, isNested ? 1 : 0, delta, 5);
+        const perch = perchPose(perchBlend);
+        const tumble = isFallingVisual ? tumbleFlap(motionState.elapsed) : null;
+
         leftWing.rotation.x = leftWing.userData.baseRotation.x
-          + leftDip + glideSweep + flapOffset + idleFlutter;
+          + leftDip + glideSweep + flapOffset + idleFlutter
+          + perch.fold + (tumble ? tumble.left : 0);
         rightWing.rotation.x = rightWing.userData.baseRotation.x
-          + rightDip - glideSweep - flapOffset - idleFlutter;
+          + rightDip - glideSweep - flapOffset - idleFlutter
+          - perch.fold - (tumble ? tumble.right : 0);
         // Feather follow-through lags the shoulder. Both wings use the same
         // local offset because the right group mirrors its geometry in Z.
         const flex = reducedMotionState.enabled ? 0 : (isAirborneVisual
@@ -7984,7 +7999,7 @@
         if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = flex;
         if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = flex * 1.5;
         if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = flex * 1.5;
-        const wingStretch = sprintState.active && isAirborneVisual ? 0.88 : 1;
+        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span;
         const wingBlend = 1 - Math.exp(-delta * 8);
         leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
@@ -8000,10 +8015,15 @@
         const tailSwayY = -yawInputTail * 0.32
           + Math.sin(motionState.elapsed * 1.3) * 0.04;
         const baseRot = tail.userData.baseRotation;
-        tail.rotation.x = baseRot.x;
+        // The tail is an elevator: it drops on a climb and lifts on a dive.
+        // It only ever swayed sideways before, so a hard climb and a hard
+        // dive produced the same silhouette.
+        tail.rotation.x = baseRot.x
+          + tailPitchOffset(wingInputState?.y ?? 0)
+          + perchPose(perchBlend).tailPitch;
         tail.rotation.y += (tailSwayY - tail.rotation.y) * Math.min(1, delta * 8);
         tail.rotation.z = baseRot.z;
-        const fanSpread = 1 + Math.abs(yawInputTail) * 0.20;
+        const fanSpread = (1 + Math.abs(yawInputTail) * 0.20) * perchPose(perchBlend).tailSpread;
         tail.scale.z += (fanSpread - tail.scale.z) * (1 - Math.exp(-delta * 8));
       }
 
