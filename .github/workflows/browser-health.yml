@@ -1,0 +1,76 @@
+name: Browser Health
+
+# The unit suite never loads index.html, so it cannot tell whether the GAME
+# works — only whether the extracted modules do. A regression shipped to
+# production on 2026-09-06 that left the world rendering perfectly while the
+# nesting and collectibles systems were never created: initial environment
+# setup caught its own exception and logged a warning, and nothing was
+# watching for warnings. Every check in place at the time passed it.
+#
+# This job runs the real page in a real browser and asserts the game is
+# working, not merely painting. It is deliberately short: one start, one
+# nested landing, and all five game modes.
+
+on:
+  pull_request:
+  push:
+    # Only the root game. The siblings have their own harnesses and their own
+    # rules, and rebuilding a browser for a change to humanoid/ is waste.
+    paths:
+      - 'index.html'
+      - 'src/**'
+      - 'sw.js'
+      - 'tools/birb-*.mjs'
+      - '.github/workflows/browser-health.yml'
+
+concurrency:
+  group: browser-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser harness
+        # --no-save keeps these out of package.json: the game itself has no
+        # dependencies and that is a property worth preserving. Both packages
+        # go in ONE command — a second --no-save install prunes the first.
+        run: npm install --no-save playwright https-proxy-agent
+
+      - name: Restore the tracked Three stub
+        # Any npm install prunes the hand-written stub this repo tracks in
+        # node_modules/three, which silently breaks the unit suite.
+        run: git checkout -- node_modules/three/index.js
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Game starts and is actually playable
+        # Asserts a rendered frame AND that the nesting and collectibles
+        # systems exist, on the plain-start path a player takes. Exits
+        # non-zero on any page error or console error.
+        run: node tools/birb-shot.mjs --out /tmp/start.png --start
+
+      - name: A nest can be landed on
+        run: node tools/birb-shot.mjs --out /tmp/nest.png --start --nest
+
+      - name: Every game mode enters, reports sane state and exits
+        # Ring Rush's win condition must equal the spawner's ring count, and
+        # Turret Defense must put the player on the gun. Console warnings
+        # count as failures: that is how the setup bug announced itself.
+        run: node tools/birb-modes.mjs
+
+      - name: Upload frames on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-frames
+          path: /tmp/*.png
+          if-no-files-found: ignore
