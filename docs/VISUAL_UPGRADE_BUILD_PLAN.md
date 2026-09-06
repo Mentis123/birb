@@ -784,3 +784,5 @@ on at the start of the session: a frame-time measurement on the reference
 phone. Adaptive quality is now live for the first time, so that measurement
 will also show whether the 55/58 fps thresholds are right. Nothing in items
 1-4 needs it. Item 5 does. Get the number.
+
+See also `docs/CUTTING_EDGE_2026.md`: what the platform actually offers in September 2026, ranked for this game. Two findings there touch shipped code — iOS caps rAF at 60 Hz, and iOS 26.5 reduced the switch-based haptics trick to single ticks.

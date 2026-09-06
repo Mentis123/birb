@@ -50,6 +50,9 @@
 > was the largest visual change of the whole session, and every geometry or
 > overlay effort failed. Item 1 (a ground shader pass: valley mist, cloud
 > shadows, macro noise) is the highest-value thing left and needs no phone.
+> Platform research for September 2026 is in `docs/CUTTING_EDGE_2026.md`:
+> WebGPU is real but an enabler not an upgrade; iOS caps rAF at 60 Hz; and
+> iOS 26.5 cut the switch-based haptics trick to single ticks.
 
 > Context for AI assistants and Vibe Academy builders. Read this first.
 
