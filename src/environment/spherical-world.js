@@ -1235,26 +1235,40 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
 // ============================================================
 
 /**
- * Landmarks: a handful of one-off, hand-placed forms that are NOT instanced.
+ * Landmarks: hand-placed forms you can navigate BY.
  *
- * The 2026-05-31 distribution pass made the world dense and even, which fixed
- * emptiness and created a different problem: every direction looks like every
- * other direction, so there is nothing to fly TOWARD and no way to tell where
- * you are. A grove of two hundred identical trees is scenery; one tree twice
- * the height of the others is a destination.
+ * The 2026-05-31 distribution pass fixed emptiness by scattering props evenly,
+ * and created the opposite problem: every direction looks like every other, so
+ * there is nothing to fly toward and no way to tell where you are.
  *
- * Deliberately few and deliberately not instanced. Six draw calls buys three
- * recognisable silhouettes, and an instanced landmark is a contradiction.
+ * The first attempt at this failed and it is worth recording why, because the
+ * mistake is easy to repeat. A "giant" tree was built at ~40 units — which is
+ * exactly the height of the champion trees already in every grove — and given
+ * the same green as the forest around it. It was neither taller than its
+ * neighbours nor a different colour, and the owner could not find it.
  *
- * Placed along the great circle running out of the landmark valley, so the
- * waterfall and these share a route rather than sitting in unrelated corners.
+ * A landmark on a sphere has to clear the HORIZON, and that is a hard number,
+ * not a matter of taste. On this radius-120 planet an object of height h is
+ * visible from roughly sqrt(2 * 120 * h) units away:
+ *
+ *     40 units  ->  98 units   (13% of the way round — and invisible among
+ *                               champion trees of the same height)
+ *    130 units  -> 177 units   (23% of the way round, over a 754-unit
+ *                               circumference)
+ *
+ * So they are now 130 units tall, three of them spread a third of the planet
+ * apart, and pale gold against a green forest. Height is what makes them
+ * reachable; colour is what makes them legible once reached.
+ *
+ * Their NESTS still sit at ~34 units, in the same band as every corrected
+ * perch. A nest at the crown of a 130-unit tree is the aerial observation
+ * tower the September pass existed to remove — the tree is tall so you can
+ * SEE it, not so you can sit on top of it.
  */
 function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions }) {
   const group = new THREE.Group();
   group.name = 'forest-landmarks';
 
-  // A tangent frame at the valley, so landmarks can be offset along a
-  // consistent bearing rather than at arbitrary latitudes and longitudes.
   const anchor = new THREE.Vector3(VALLEY_ANCHOR.x, VALLEY_ANCHOR.y, VALLEY_ANCHOR.z).normalize();
   const frame = _tangentFrame(THREE, VALLEY_ANCHOR);
   const forward = new THREE.Vector3(frame.forward.x, frame.forward.y, frame.forward.z).normalize();
@@ -1271,97 +1285,129 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
       .addScaledVector(dir, Math.sin(angle))
       .normalize();
   };
+  const groundAt = (dir) => ({
+    position: dir.clone().multiplyScalar(sphereRadius + terrainHeightDir(dir.x, dir.y, dir.z)),
+    up: dir.clone(),
+  });
+  const orient = (object, up) => object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
 
-  /** Ground position and local up for a unit direction. */
-  const groundAt = (dir) => {
-    const height = terrainHeightDir(dir.x, dir.y, dir.z);
-    return { position: dir.clone().multiplyScalar(sphereRadius + height), up: dir.clone() };
-  };
-
-  const orient = (object, up) => {
-    object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-  };
-
-  const barkMat = new THREE.MeshLambertMaterial({ color: 0x4a3520, flatShading: true });
-  const crownMat = new THREE.MeshLambertMaterial({ color: 0x2b7f45, flatShading: true, vertexColors: true });
+  // Lighter than ordinary bark. At 0x5a4028 the trunk of a 88-unit tree read
+  // as a black slab against the sky — the shaded side of a big flat cylinder
+  // gets almost no light, and the eye reads that as a hole, not a tree.
+  const barkMat = new THREE.MeshLambertMaterial({ color: 0x8a6440, flatShading: true });
+  // Pale gold, deliberately NOT the forest's green: a landmark the same colour
+  // as its surroundings is camouflage however tall it is.
+  //
+  // vertexColors is OFF here, unlike every other canopy in the world. The
+  // shared crown geometry bakes interior shade down to about 0.25, which is
+  // right for reading branch pockets on a tree you fly past and wrong for a
+  // navigation beacon: multiplied through, the gold came out near-black from
+  // below, which is the angle you approach it from. Lambert's directional
+  // term still gives it form. Legibility beats texture on a landmark.
+  const crownMat = new THREE.MeshLambertMaterial({ color: 0xf0b83c, flatShading: true });
   addFoliageWind(crownMat);
   const stoneMat = new THREE.MeshLambertMaterial({ color: 0x6b6257, flatShading: true });
-
-  // ── The giant nesting tree ──────────────────────────────────────────
-  // A destination, and a nest host. Its crown is kept within the same 30-40
-  // unit band the corrected perches use: a taller one becomes an observation
-  // tower, which is the failure the September pass was fixing.
-  const giantDir = along(0.30, 0.0);
-  const giant = groundAt(giantDir);
-  const trunkHeight = 26;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 3.4, trunkHeight, 9), barkMat);
-  trunk.position.copy(giant.position).addScaledVector(giant.up, trunkHeight / 2);
-  orient(trunk, giant.up);
-  group.add(trunk);
-
-  // Three stacked crowns, widest at the bottom, reusing the shared canopy
-  // profile so the giant reads as the same species as the forest it towers over.
   const crownGeometry = createCanopyGeometry(THREE, 1);
-  let crownTop = trunkHeight;
-  for (let i = 0; i < 3; i++) {
-    const scale = 13 - i * 3;
-    const crown = new THREE.Mesh(crownGeometry, crownMat);
-    const base = trunkHeight - 6 + i * 6.5;
-    crown.position.copy(giant.position).addScaledVector(giant.up, base);
-    crown.scale.set(scale, scale * 0.92, scale);
-    orient(crown, giant.up);
-    group.add(crown);
-    crownTop = base + scale * 0.92;
+
+  const landmarks = [];
+  const TRUNK_HEIGHT = 88;
+  const NEST_HEIGHT = 34; // Same perch band as every other nest in the game.
+
+  // Three of them, spread roughly a third of the planet apart, so no matter
+  // where the player is at least one is within its horizon range.
+  const SITES = [
+    { angle: 0.30, bearing: 0.0, id: 'giant-tree' },
+    { angle: 1.95, bearing: 1.9, id: 'giant-tree-north' },
+    { angle: 2.30, bearing: -1.7, id: 'giant-tree-far' },
+  ];
+
+  for (const site of SITES) {
+    const dir = along(site.angle, site.bearing);
+    const { position: base, up } = groundAt(dir);
+
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 7.5, TRUNK_HEIGHT, 9), barkMat);
+    trunk.position.copy(base).addScaledVector(up, TRUNK_HEIGHT / 2);
+    orient(trunk, up);
+    group.add(trunk);
+
+    // Four crowns stacked up the top half, widest low, so the silhouette
+    // reads as one enormous tree rather than a pole with a hat.
+    let top = TRUNK_HEIGHT;
+    for (let i = 0; i < 4; i++) {
+      const scale = 26 - i * 5;
+      const crown = new THREE.Mesh(crownGeometry, crownMat);
+      const height = TRUNK_HEIGHT * 0.52 + i * 15;
+      crown.position.copy(base).addScaledVector(up, height);
+      crown.scale.set(scale, scale * 0.95, scale);
+      orient(crown, up);
+      group.add(crown);
+      top = height + scale * 0.95;
+    }
+
+    // A bough at nest height, so the perch has something to sit on and the
+    // trunk is not a bare pole where the player lands.
+    const bough = new THREE.Mesh(crownGeometry, crownMat);
+    bough.position.copy(base).addScaledVector(up, NEST_HEIGHT - 6);
+    bough.scale.set(15, 9, 15);
+    orient(bough, up);
+    group.add(bough);
+
+    // Solid the whole way up: the trunk crosses the cruise band, and a
+    // landmark you fly straight through is not a landmark. The band around
+    // nest height is left CLEAR — a collider there sits on the landing
+    // approach and shoves the bird back out every frame, so the auto-fly
+    // never converges and the landing hangs forever. (It did. The startup
+    // health check caught it, which is what that check is for.)
+    for (let h = 6; h < TRUNK_HEIGHT; h += 14) {
+      if (Math.abs(h - NEST_HEIGHT) < 16) continue;
+      collisionSystem.addCollider(base.clone().addScaledVector(up, h), 5.5, 'tree');
+    }
+    collisionSystem.addCollider(base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.78), 19, 'tree');
+
+    // On the BOUGH, not on the trunk axis. Centred, the nest sits inside the
+    // trunk cylinder, so the bird lands in solid wood and the perch camera
+    // opens on bark.
+    const boughOut = new THREE.Vector3().crossVectors(up, forward).normalize();
+    const nestPos = base.clone().addScaledVector(up, NEST_HEIGHT).addScaledVector(boughOut, 8.5);
+
+    // hostObject stays NULL: nest-points hides any non-instanced host while
+    // the player is nested in it, which would erase the landmark they are
+    // sitting in — the one object guaranteed to be on screen at that moment.
+    nestablePositions.push({
+      position: nestPos,
+      surfaceNormal: up.clone(),
+      hostObject: null,
+      hostId: site.id,
+      groveId: `forest-landmark-${site.id}`,
+    });
+    proximityTargets.push({
+      position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.5),
+      radius: 26,
+      tint: 0xf0dda0,
+    });
+    landmarks.push({ id: site.id, position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.6) });
   }
 
-  // Solid at cruise altitude, like every other champion.
-  collisionSystem.addCollider(
-    giant.position.clone().addScaledVector(giant.up, trunkHeight * 0.5), 3.6, 'tree',
-  );
-  collisionSystem.addCollider(
-    giant.position.clone().addScaledVector(giant.up, trunkHeight + 4), 11, 'tree',
-  );
-
-  // hostObject stays NULL. nest-points hides any non-instanced host object
-  // while the player is nested in it, which would erase the very tree they
-  // are sitting in — the one landmark guaranteed to be on screen.
-  nestablePositions.push({
-    position: giant.position.clone().addScaledVector(giant.up, Math.min(crownTop - 2, 38)),
-    surfaceNormal: giant.up.clone(),
-    hostObject: null,
-    hostId: 'forest-giant-tree',
-    groveId: 'forest-landmark',
-  });
-  proximityTargets.push({
-    position: giant.position.clone().addScaledVector(giant.up, trunkHeight),
-    radius: 20,
-    tint: 0xbdf5c8,
-  });
-
-  // ── A fallen log, lying across the approach ─────────────────────────
+  // Two smaller silhouettes near the valley, for close-range orientation.
   const logDir = along(0.17, 1.15);
   const log = groundAt(logDir);
   const logMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.8, 34, 8), barkMat);
   logMesh.position.copy(log.position).addScaledVector(log.up, 2.2);
-  // Laid ALONG the surface: rotate the cylinder's own axis onto a tangent.
   const logAxis = new THREE.Vector3().crossVectors(log.up, forward).normalize();
   logMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), logAxis);
   group.add(logMesh);
   proximityTargets.push({ position: logMesh.position.clone(), radius: 12, tint: 0xd8c9a4 });
 
-  // ── A stone arch to fly through ─────────────────────────────────────
   const archDir = along(0.22, -1.05);
   const arch = groundAt(archDir);
   const archMesh = new THREE.Mesh(new THREE.TorusGeometry(13, 2.4, 6, 14, Math.PI), stoneMat);
   archMesh.position.copy(arch.position).addScaledVector(arch.up, 0.5);
-  // The torus lies in its own XY plane; stand it up so the opening faces
-  // along the route rather than flat against the ground.
-  const archQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), arch.up);
-  const standUp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-  archMesh.quaternion.copy(archQuat).multiply(standUp);
+  archMesh.quaternion
+    .setFromUnitVectors(new THREE.Vector3(0, 1, 0), arch.up)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
   group.add(archMesh);
-  // Legs only. The opening is the point of an arch; a collider across it
-  // would make the one thing you want to fly through a wall.
+  // Legs only. A collider across the opening turns the one thing worth flying
+  // through into a wall.
   const archSide = new THREE.Vector3().crossVectors(arch.up, forward).normalize();
   for (const sign of [-1, 1]) {
     collisionSystem.addCollider(
@@ -1371,28 +1417,13 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   proximityTargets.push({ position: archMesh.position.clone(), radius: 16, tint: 0xe0dcc8 });
 
   root.add(group);
-  // Reported so the capture harness can aim at a landmark instead of hunting
-  // for one: a landmark that cannot be found in a render is not a landmark.
-  return [
-    { id: 'giant-tree', position: giant.position.clone().addScaledVector(giant.up, trunkHeight) },
+  landmarks.push(
     { id: 'fallen-log', position: logMesh.position.clone() },
     { id: 'stone-arch', position: archMesh.position.clone() },
-  ];
+  );
+  return landmarks;
 }
 
-
-/**
- * A landmark for each of the other three biomes.
- *
- * Same reasoning as the forest's: an evenly scattered world has no
- * orientation, and one form larger and stranger than its neighbours turns a
- * direction into a destination. One landmark per biome rather than three,
- * because each is a distinct silhouette carrying its own draw call and the
- * budget is tight on desktop.
- *
- * Each returns the same {id, position} records the forest's do, so the
- * capture harness can aim at any of them by name.
- */
 function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant }) {
   const anchor = new THREE.Vector3(VALLEY_ANCHOR.x, VALLEY_ANCHOR.y, VALLEY_ANCHOR.z).normalize();
   const frame = _tangentFrame(THREE, VALLEY_ANCHOR);
@@ -2747,6 +2778,40 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       proximityTargets,
     }) || [];
   }
+  // Landmarks are big, hand-placed and NOT instanced, and nest occlusion only
+  // clears instanced props — so a nest that happens to sit inside or behind a
+  // landmark has its perch view permanently blocked by it. The canyon and
+  // mountain perches both opened on the inside of one. Rather than hand-tune
+  // placements against a scattered nest field, drop any nest that lands too
+  // close to a landmark; there are dozens of nests and only a handful of
+  // landmarks, so losing one costs nothing.
+  if (_landmarks.length && nestablePositions.length) {
+    const MIN_SEPARATION = 46;
+    const minAngle = MIN_SEPARATION / sphereRadius;
+    const landmarkDirs = _landmarks.map((l) => {
+      const d = l.position.clone().normalize();
+      return { id: l.id, x: d.x, y: d.y, z: d.z };
+    });
+    const before = nestablePositions.length;
+    nestablePositions = nestablePositions.filter((candidate) => {
+      // A landmark's OWN nest is the point of it and is exempt.
+      if (candidate.hostId && landmarkDirs.some((l) => l.id === candidate.hostId)) return true;
+      const p = candidate.position;
+      const len = Math.hypot(p.x, p.y, p.z);
+      if (!(len > 1e-6)) return true;
+      const nx = p.x / len, ny = p.y / len, nz = p.z / len;
+      for (const l of landmarkDirs) {
+        // Great-circle separation: a nest 30 units up a tower is metres from
+        // the tower in 3D but directly inside it from any viewing angle.
+        const dot = Math.min(1, Math.max(-1, nx * l.x + ny * l.y + nz * l.z));
+        if (Math.acos(dot) < minAngle) return false;
+      }
+      return true;
+    });
+    const dropped = before - nestablePositions.length;
+    if (dropped) console.log(`[SphericalWorld] dropped ${dropped} nest(s) sitting inside a landmark`);
+  }
+
   bakeGroundContacts(THREE, sphereGeometry, root);
 
   console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions, ${proximityTargets.length} proximity targets`);
