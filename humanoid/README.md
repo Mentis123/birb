@@ -5,11 +5,22 @@
 An iPad app that reshapes, sculpts and paints one protected humanoid mannequin
 and exports an avatar Unity accepts as a Humanoid for VRChat.
 
-> **Phase 1 in progress (2026-09-06).** The export core is now template-kind
-> aware: `clay-v1.bin` ships alongside `body-v1.bin`, `ExportSnapshot.skeleton`
-> is optional, and the pre-flight splits into a `MeshGate` that always runs and
-> a `RigGate` that runs only when there is a rig. An unrigged document exports a
-> static FBX + GLB and is never told it is missing bones.
+> **Phase 1 in progress (2026-09-06).** The whole editor engine now exists and
+> is tested headless — everything except rendering and input:
+>
+> | | |
+> |---|---|
+> | `MeshTables` | welded positions, one-ring adjacency, mirror pairs, seam partners |
+> | `Sculpt` | Grab, Inflate/Deflate, Smooth, smoothstep falloff, X symmetry |
+> | `Picking` | ray to triangle to barycentric to UV, back-face culled |
+> | `Paint` | dabs, distance-resampled strokes, seam stamping, fill, eyedropper |
+> | `Document` | template + deltas, bounded undo/redo, export snapshot |
+> | `MeshGate` / `RigGate` | mesh checks always, rig checks only when rigged |
+>
+> The `clay-sculpted` corpus case drives all of it through `Document` and out to
+> FBX and GLB, so the oracles check the path a user takes rather than the
+> template as authored. What is left of Phase 1 is the Metal viewport, Pencil
+> input, the SwiftUI shell and reference planes — the parts that need a device.
 >
 > **Scope and build order (2026-09-05).** The product starts from one of two templates: **Clay** (unrigged) or **Humanoid** (rigged). Everything in this directory is the Humanoid path — the rig gate, the skeleton, the VRM humanBones map and the Unity/VRChat oracles all exist to serve it.
 >

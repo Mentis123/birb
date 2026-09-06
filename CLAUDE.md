@@ -535,6 +535,17 @@ Things that will cost a round if you undo them:
 - **Keep all eight stages of `tools/verify.sh` green while Clay is built.** The
   humanoid work is finished and unattended, which is exactly how code rots.
 
+**Engine state (2026-09-06):** sculpt, paint, picking, tables and the document
+with undo are all built and tested headless — 133 tests, eight verify stages.
+Three things in there are non-obvious and were each found by a failing test:
+brushes address WELDED positions (a UV seam stores one point two or three times,
+and moving one copy tears the surface); a paint stroke carries its leftover
+distance ACROSS segments (resampling each segment alone double-stamps the joins,
+so a stroke delivered as 50 events came out 10x darker than the same path as 2);
+and `MeshTables` keys its weld map on the quantised coordinate TRIPLE, never a
+hash of it (a hash welded 3,750 vertices down to 2,024, fusing unrelated parts
+of the surface).
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror

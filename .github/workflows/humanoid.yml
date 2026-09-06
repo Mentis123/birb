@@ -105,6 +105,9 @@ jobs:
           /tmp/blender/blender --factory-startup --background \
             --python tools/blender_render_vrm.py -- \
             .build/corpus/clay-neutral.glb .build/corpus/clay-neutral
+          /tmp/blender/blender --factory-startup --background \
+            --python tools/blender_render_vrm.py -- \
+            .build/corpus/clay-sculpted.glb .build/corpus/clay-sculpted
 
       - uses: actions/upload-artifact@v4
         if: always()

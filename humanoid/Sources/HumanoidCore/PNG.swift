@@ -19,7 +19,11 @@ public enum PNG {
         public let width: Int
         public let height: Int
         /// Row-major RGBA8, `width * height * 4` bytes.
-        public let rgba: [UInt8]
+        ///
+        /// Mutable because painting writes into it in place. The dimensions stay
+        /// immutable: a texture that could be resized under the UV mapping would
+        /// invalidate every stroke already recorded against it.
+        public var rgba: [UInt8]
 
         public init(width: Int, height: Int, rgba: [UInt8]) {
             precondition(width > 0 && height > 0, "PNG needs a non-empty image")

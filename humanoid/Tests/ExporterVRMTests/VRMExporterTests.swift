@@ -212,3 +212,40 @@ extension VRMExporterTests {
         XCTAssertEqual(a.prefix(4), Data("glTF".utf8))
     }
 }
+
+/// A document, sculpted and painted, all the way out to bytes. The unit tests
+/// above take a snapshot as given; this proves the editing path produces one an
+/// exporter accepts.
+final class DocumentExportTests: XCTestCase {
+    func testASculptedClayDocumentExportsAsAStaticGLB() throws {
+        var document = try Document.clay(textureSize: 128)
+        for i in 0..<4 {
+            document.sculpt(.inflate(0.004), at: [Vec3(0.06 * Double(i - 2), 0.03, 0.10)],
+                            settings: .init(radius: 0.05, strength: 0.7, symmetric: true))
+        }
+        document.paint(.init(radius: 0.08, opacity: 0.9, colour: (30, 90, 160)),
+                       along: [Vec2(0.2, 0.3), Vec2(0.5, 0.6), Vec2(0.8, 0.4)])
+
+        let snapshot = document.exportSnapshot(named: "Lump")
+        XCTAssertTrue(snapshot.validate().passes, snapshot.validate().summary)
+
+        let glb = try VRMExporter.export(snapshot)
+        XCTAssertEqual(Array(glb.prefix(4)), Array("glTF".utf8))
+
+        // Unrigged, so the container must carry no skin and no humanoid claim.
+        let json = String(decoding: glb, as: UTF8.self)
+        XCTAssertFalse(json.contains("VRMC_vrm"), "an unrigged export claimed to be a VRM")
+        XCTAssertFalse(json.contains("JOINTS_0"))
+        XCTAssertFalse(json.contains("\"skins\""))
+    }
+
+    func testAnEditedHumanoidDocumentStillExportsAsAVRM() throws {
+        var document = try Document.humanoid(textureSize: 64)
+        document.sculpt(.inflate(0.005), at: [Vec3(0, 1.3, 0.1)],
+                        settings: .init(radius: 0.08, strength: 0.6, symmetric: true))
+        let glb = try VRMExporter.export(document.exportSnapshot(named: "Body"))
+        let json = String(decoding: glb, as: UTF8.self)
+        XCTAssertTrue(json.contains("VRMC_vrm"))
+        XCTAssertTrue(json.contains("JOINTS_0"))
+    }
+}

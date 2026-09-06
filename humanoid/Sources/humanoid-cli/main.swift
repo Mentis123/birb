@@ -27,6 +27,9 @@ struct Case {
     let skeleton: Skeleton?
     let expectPass: Bool
     var albedo: (r: UInt8, g: UInt8, b: UInt8) = (214, 176, 150)
+    /// Clay only. Runs real editing through `Document` so the corpus exercises
+    /// the path a user takes, not just the template as authored.
+    var edit: ((inout Document) -> Void)?
 }
 
 func scaled(_ s: Skeleton, by factor: Double) -> Skeleton {
@@ -79,6 +82,27 @@ func clayCases() -> [Case] {
              skeleton: nil, expectPass: true),
         Case(name: "clay-painted", detail: "the cube with a different albedo fill",
              skeleton: nil, expectPass: true, albedo: (92, 140, 205)),
+        Case(name: "clay-sculpted",
+             detail: "sculpted and painted through Document — the path a user takes",
+             skeleton: nil, expectPass: true, edit: { document in
+                 // A ring of mirrored inflates, a grab, and a smooth pass: one
+                 // of each brush, so an export can only pass if all three
+                 // preserve the invariants they claim to.
+                 for i in 0..<6 {
+                     let angle = Double(i) * 1.05
+                     document.sculpt(.inflate(0.010),
+                                     at: [Vec3(cos(angle) * 0.09, sin(angle) * 0.07, 0.10)],
+                                     settings: .init(radius: 0.055, strength: 0.9, symmetric: true))
+                 }
+                 document.sculpt(.grab(Vec3(0, 0.02, 0.012)), at: [Vec3(0, 0.10, 0.06)],
+                                 settings: .init(radius: 0.07, strength: 1.0, symmetric: true))
+                 document.sculpt(.smooth, at: [Vec3(0, 0, 0.12)],
+                                 settings: .init(radius: 0.06, strength: 0.6, symmetric: true))
+                 document.fill((196, 176, 210))
+                 document.paint(.init(radius: 0.05, opacity: 0.85, colour: (40, 60, 120)),
+                                along: [Vec2(0.20, 0.30), Vec2(0.45, 0.42),
+                                        Vec2(0.70, 0.35), Vec2(0.85, 0.60)])
+             }),
     ]
 }
 
@@ -120,13 +144,21 @@ case "corpus":
         // Rigged cases are the one body with its joints moved, which is what the
         // editor does. Clay has no joints to move, so it exports as authored.
         let mesh: MeshData
+        var painted: PNG.Image?
         if let skeleton = c.skeleton {
             mesh = Skinning.deform(humanoid.mesh, from: humanoid.skeleton!, to: skeleton)
+        } else if let edit = c.edit {
+            var document = Document(clay, id: TemplateFile.Bundled.clay.id,
+                                    version: TemplateFile.Bundled.clay.version,
+                                    textureSize: textureSize)
+            edit(&document)
+            mesh = document.mesh
+            painted = document.albedo
         } else {
             mesh = clay.mesh
         }
-        let albedo = PNG.Image.solid(width: textureSize, height: textureSize,
-                                     r: c.albedo.r, g: c.albedo.g, b: c.albedo.b)
+        let albedo = painted ?? PNG.Image.solid(width: textureSize, height: textureSize,
+                                                r: c.albedo.r, g: c.albedo.g, b: c.albedo.b)
         let bundled = c.skeleton == nil ? TemplateFile.Bundled.clay : TemplateFile.Bundled.humanoid
         let snapshot = ExportSnapshot(
             avatarName: c.name, templateID: bundled.id,

@@ -172,7 +172,7 @@ step "8. exported models render as models"
 # skinned mesh. None of them can tell a body from a bag of valid triangles, and
 # the PNGs are the only artefact a person can check by eye.
 if command -v "$BLENDER_BIN" >/dev/null 2>&1; then
-    for pair in "neutral.vrm:neutral" "clay-neutral.glb:clay-neutral"; do
+    for pair in "neutral.vrm:neutral" "clay-neutral.glb:clay-neutral" "clay-sculpted.glb:clay-sculpted"; do
         file="${pair%%:*}"; prefix="${pair##*:}"
         if "$BLENDER_BIN" --factory-startup --background \
              --python "$ROOT/tools/blender_render_vrm.py" -- \
