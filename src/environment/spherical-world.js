@@ -1,3 +1,4 @@
+import { createCanopyGeometry, addFoliageWind, bakeGroundContacts } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
@@ -798,11 +799,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
           break;
         }
       }
-      if (!accepted && placedAngles.length > 0) {
-        const fallback = placedAngles[Math.floor(Math.random() * placedAngles.length)];
-        jitterTheta = fallback.theta + randomInRange(-clusterSpread * 0.45, clusterSpread * 0.45);
-        jitterPhi = fallback.phi + randomInRange(-clusterSpread * 0.35, clusterSpread * 0.35);
-      }
+      if (!accepted) continue; // Never force overlapping crowns after exhausted retries.
       placedAngles.push({ theta: jitterTheta, phi: jitterPhi });
       const pos = placeOnSphere(THREE, sphereRadius, jitterTheta, jitterPhi, 0);
       const up = pos.clone().normalize();
@@ -817,13 +814,15 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       let scale;
       const isChampion = championSet.has(t);
       // A tree hosts a nest if it's a champion OR lands on the nest interval. Nest
-      // trees are promoted to emergent height so the nest crowns the grove and is
-      // never buried in a neighbour's canopy (restores the "nests on the tallest
-      // trees" intent). A nest tree is therefore never a shrimp.
+      // trees have a bounded crown height. One well-spaced crown is selected
+      // per grove by the nest system; taller scenery stays around the perch.
+      // A nest tree is therefore never a shrimp.
       const isNestTree = isChampion || (treeIndex % nestInterval === 0);
       const isShrimp = shrimpSet.has(t) && !isNestTree;
       if (isNestTree) {
-        scale = randomInRange(2.6, 3.6); // Towering emergent giant — eye reference / nest host
+        // A canopy perch, not an observation tower above the entire planet.
+        // Old 2.6–3.6x trees put nests up to ~110u above a radius-120 world.
+        scale = randomInRange(30, 40) / (trunkHeight + canopyHeight * 0.9);
       } else if (isShrimp) {
         scale = randomInRange(0.5, 0.7); // Undergrowth
       } else {
@@ -855,12 +854,14 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       // reads in the open and the approach from above is clear. Champions are
       // included as hosts, which also lifts the overall nest count.
       if (isNestTree) {
-        const nestHeight = (trunkHeight + canopyHeight) * scale + 3.0; // clear of the crown
+        const nestHeight = (trunkHeight + canopyHeight * 0.9) * scale + 0.2; // clear of the crown
         const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
         nestablePositions.push({
           position: nestPos,
           surfaceNormal: up.clone(),
           hostObject: null,
+          hostId: `forest-tree-${groveIdx}-${t}`,
+          groveId: `forest-grove-${groveIdx}`,
         });
         // Champions also fire the proximity whoosh cue.
         if (isChampion && proximityTargets) {
@@ -990,13 +991,12 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // foliage cone (build-time, zero runtime cost). The gradient MULTIPLIES the
   // per-bucket canopy material color, so leave the gradient near-white and let
   // the material + per-instance jitter carry the hue.
-  const canopyUnitGeom = new THREE.ConeGeometry(1, 1, 7);
-  canopyUnitGeom.translate(0, 0.5, 0);
-  bakeVerticalGradient(THREE, canopyUnitGeom, [0.62, 0.62, 0.62], [1.08, 1.08, 1.08]);
   const localUp = new THREE.Vector3();
   for (let c = 0; c < canopyPlacementsByColor.length; c++) {
     const bucket = canopyPlacementsByColor[c];
     if (bucket.length === 0) continue;
+    const canopyUnitGeom = createCanopyGeometry(THREE, c);
+    addFoliageWind(canopyMats[c]);
     const canopyInst = new THREE.InstancedMesh(canopyUnitGeom, canopyMats[c], bucket.length);
     canopyInst.name = `forest-canopies-${c}`;
     const dummy = new THREE.Object3D();
@@ -1285,15 +1285,14 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const spireMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
       collisionSystem.addCollider(spireMid, baseRadius * scale * 0.65, 'spire');
 
-      // Nests on spires — every 6th spire for reliable coverage.
-      // Champion spires (scale 2.2-2.9) place the nest at 0.6× height so it's
-      // visible from below without being unreachable. hostObject = null since
-      // spires are rendered via InstancedMesh; nest system uses world position.
-      if (spireIndex % 4 === 0 && height > 24) {
-        const isChamp = s === championIdx;
-        const nestHeight = isChamp ? (height * scale) * 0.6 + 1 : height * scale + 1;
-        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
+      // Use actual, modest spire tops. Mid-height nests were INSIDE the
+      // champion spire and only looked usable because nesting hid all spires.
+      if (spireIndex % 4 === 0 && height * scale <= 65) {
+        const host = spirePlacementsByMat[matIdx].at(-1);
+        host.rotX = 0; host.rotZ = 0; // Nest-bearing top stays level and aligned.
+        const nestPos = pos.clone().addScaledVector(up, height * scale + 0.2);
+        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(),
+          hostObject: null, hostId: `canyon-spire-${spireIndex}` });
       }
 
       if (s === championIdx && proximityTargets) {
@@ -1491,9 +1490,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       dummy.updateMatrix();
       archInst.setMatrixAt(i, dummy.matrix);
       collisionSystem.addCollider(pos, 6 * s, 'arch');
-      // Nest atop each arch — landmark nests in flyable mid-airspace.
-      const archNestPos = pos.clone().add(up.clone().multiplyScalar(8 * s));
-      nestablePositions.push({ position: archNestPos, surfaceNormal: up.clone(), hostObject: null });
+      // This torus lies in the tangent plane: its 8u major radius extends
+      // SIDEWAYS, not upward. Seat the bowl on the tube instead of floating
+      // 8*s above the ring's empty centre.
+      const archNestPos = new THREE.Vector3(8 * s, 0, 0).applyQuaternion(orientQ)
+        .add(pos).addScaledVector(up, 1.2 * s + 0.2);
+      nestablePositions.push({ position: archNestPos, surfaceNormal: up.clone(),
+        hostObject: null, hostId: `canyon-arch-${i}` });
     }
     archInst.instanceMatrix.needsUpdate = true;
     archInst.computeBoundingSphere();
@@ -1639,17 +1642,14 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const mtnMid = pos.clone().add(up.clone().multiplyScalar(height * scale * 0.5));
       collisionSystem.addCollider(mtnMid, baseRadius * scale * 0.55, 'mountain');
 
-      // Nest on peaks. Baseline: every 4th peak. Champions get a nest only ~1/3
-      // of the time and sit at 0.55× scaled height so they're reachable rather
-      // than floating at the unreachable apex. hostObject = null (instanced).
-      const wantsBaselineNest = peakIndex % 3 === 0 && height > 28;
-      const wantsChampionNest = isChampion && Math.random() < 0.55;
-      if (wantsBaselineNest || wantsChampionNest) {
-        const nestHeight = wantsChampionNest
-          ? (height * scale) * 0.55 + 2
-          : (height + 2) * scale;
-        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
+      // Low bare summits only; a fractional-height nest intersects the
+      // mountain, and the tall snow peaks are scenery rather than perches.
+      if (peakIndex % 3 === 0 && height <= 35 && height * scale <= 55) {
+        const host = peakPlacements.at(-1);
+        host.rotX = 0; host.rotZ = 0;
+        const nestPos = pos.clone().addScaledVector(up, height * scale + 0.2);
+        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(),
+          hostObject: null, hostId: `mountain-peak-${peakIndex}` });
       }
 
       if (isChampion && proximityTargets) {
@@ -1829,7 +1829,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   const pineGroveCount = _isMobile() ? 6 : 8;
   const pineGroveCenters = fibonacciSpherePoints(pineGroveCount, sphereRadius);
 
-  pineGroveCenters.forEach((grove) => {
+  pineGroveCenters.forEach((grove, groveIdx) => {
     const pinesInGrove = Math.floor(randomInRange(_isMobile() ? 6 : 9, _isMobile() ? 10 : 14));
     const groveSpread = randomInRange(0.05, 0.09);
     const minPineAngularSpacing = randomInRange(0.026, 0.038);
@@ -1856,7 +1856,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const canopyH = randomInRange(6, 12);
       const canopyR = randomInRange(2, 4);
       const scale = (t === championIdx)
-        ? randomInRange(2.4, 3.0)
+        ? randomInRange(28, 38) / (trunkH + canopyH * 0.85)
         : randomInRange(1.0, 1.8);
 
       pineTrunkPlacements.push({ pos, up, trunkH, scale });
@@ -1872,9 +1872,10 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       // Champion pine hosts a nest — sat above the canopy crown (+ clearance) so it
       // crowns the pine instead of hiding inside the needles.
       if (t === championIdx) {
-        const pineNestHeight = (trunkH + canopyH) * scale + 2.5;
+        const pineNestHeight = (trunkH + canopyH * 0.85) * scale + 0.2;
         const pineNestPos = pos.clone().add(up.clone().multiplyScalar(pineNestHeight));
-        nestablePositions.push({ position: pineNestPos, surfaceNormal: up.clone(), hostObject: null });
+        nestablePositions.push({ position: pineNestPos, surfaceNormal: up.clone(), hostObject: null,
+          hostId: `mountain-pine-${groveIdx}-${t}`, groveId: `mountain-grove-${groveIdx}` });
       }
     }
     if (maxTopOffset > 8) {
@@ -2181,15 +2182,12 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
       const towerMid = pos.clone().add(up.clone().multiplyScalar(height * 0.5));
       collisionSystem.addCollider(towerMid, Math.max(width, depth) * 0.65, 'tower');
 
-      // Nest on buildings. Baseline: every 6th building. Champion towers
-      // (140-190u) get a nest only ~1/3 of the time and sit at 0.5× height so
-      // they're approachable. hostObject = null (instanced).
-      const wantsBaselineNest = buildingIndex % 4 === 0 && height > 30;
-      const wantsChampionNest = b === championIdx && Math.random() < 0.34;
-      if (wantsBaselineNest || wantsChampionNest) {
-        const nestHeight = wantsChampionNest ? height * 0.5 + 1 : height + 1;
-        const nestPos = pos.clone().add(up.clone().multiplyScalar(nestHeight));
-        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(), hostObject: null });
+      // Roof perches on mid-rise buildings. Never put a nest halfway inside
+      // a skyscraper or erase the city to expose it when occupied.
+      if (buildingIndex % 4 === 0 && height > 25 && height <= 65) {
+        const nestPos = pos.clone().addScaledVector(up, height + 0.2);
+        nestablePositions.push({ position: nestPos, surfaceNormal: up.clone(),
+          hostObject: null, hostId: `city-building-${buildingIndex}` });
       }
 
       if (b === championIdx && proximityTargets) {
@@ -2468,50 +2466,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   sphereGround.raycast = () => {};
   root.add(sphereGround);
 
-  // Multiple light sources to eliminate dark areas.
-  // PERF: on mobile, index.html already adds a separate 5-light scene rig, so
-  // stacking this 7-light world rig pushes the per-fragment lighting loop to 12
-  // lights. Gate the directional + point lights out on mobile and keep only the
-  // ambient hemisphere fill — index.html's lights still illuminate the world.
-  // Key light - main directional
-  const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
-  keyLight.position.set(50, 80, 50);
-
-  // Fill light - opposite side
-  const fillLight = new THREE.DirectionalLight(0xaaccff, 0.6);
-  fillLight.position.set(-50, -30, -50);
-
-  // Rim light - from below
-  const rimLight = new THREE.DirectionalLight(0xffc9a4, 0.4);
-  rimLight.position.set(0, -80, 30);
-
-  // Additional fill from another angle
-  const fillLight2 = new THREE.DirectionalLight(0xd4f1ff, 0.5);
-  fillLight2.position.set(60, -40, -60);
-
-  // Another directional to cover remaining dark spots
-  const fillLight3 = new THREE.DirectionalLight(0xffeedd, 0.4);
-  fillLight3.position.set(-60, 40, 60);
-
-  // Strong ambient hemisphere light for overall illumination
-  const hemiLight = new THREE.HemisphereLight(0xd4f1ff, 0x1a4f32, 0.9);
-
-  // Point light at center for inner glow
-  const centerLight = new THREE.PointLight(0x63d0ff, 0.8, sphereRadius * 3);
-  centerLight.position.set(0, 0, 0);
-
-  if (_isMobile()) {
-    // Mobile: hemisphere ambient only (at most one world light).
-    root.add(hemiLight);
-  } else {
-    root.add(keyLight);
-    root.add(fillLight);
-    root.add(rimLight);
-    root.add(fillLight2);
-    root.add(fillLight3);
-    root.add(hemiLight);
-    root.add(centerLight);
-  }
+  // index.html owns the single biome light rig on every device.
 
   // NOTE: the full-screen BackSide sky sphere that used to be built here has
   // been removed. It enclosed the camera (skyRadius = sphereRadius * 6) and
@@ -2533,6 +2488,8 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       proximityTargets,
     }) || [];
   }
+  bakeGroundContacts(THREE, sphereGeometry, root);
+
   console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions, ${proximityTargets.length} proximity targets`);
 
   // ── Landmark valley water + slalom Run (added to EVERY environment) ──

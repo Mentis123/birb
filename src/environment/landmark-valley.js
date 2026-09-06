@@ -1,3 +1,4 @@
+import { addWaterHighlights } from './visual-style.js';
 // Landmark valley — the dramatic carved feature's WATER, rebuilt for volume.
 //
 // The basin + canyon are carved into the terrain by valleyCarveAt() in
@@ -336,6 +337,7 @@ export function createValleyFeature({
     vertexColors: true, transparent: true, opacity: 0.9,
     depthWrite: false, side: THREE.DoubleSide,
   });
+  addWaterHighlights(poolMat, THREE, A);
   const pool = new THREE.Mesh(poolGeo, poolMat);
   pool.position.copy(poolCenter);
   pool.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), A);

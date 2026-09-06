@@ -40,6 +40,7 @@ export function createSkyDome(options = {}) {
     uniform vec3 uSunDirection;
     uniform vec3 uSunColor;
     uniform vec3 uCenter;
+    uniform vec3 uSkyUp;
     uniform float uOffset;
     uniform float uTime;
     uniform float uRadius;
@@ -47,7 +48,7 @@ export function createSkyDome(options = {}) {
 
     void main() {
       vec3 dir = normalize(vWorldPosition - uCenter);
-      float h = clamp(dir.y + uOffset, -1.0, 1.0);
+      float h = clamp(dot(dir, uSkyUp) + uOffset, -1.0, 1.0);
 
       vec3 color;
       if (h < 0.0) {
@@ -81,6 +82,8 @@ export function createSkyDome(options = {}) {
       color += vec3(starMask);
 
       gl_FragColor = vec4(color, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
     }
   `;
 
@@ -98,6 +101,7 @@ export function createSkyDome(options = {}) {
       uSunDirection: { value: new THREE.Vector3(7.5, 8.2, 5.2).normalize() },
       uSunColor: { value: new THREE.Color(1.0, 0.92, 0.74) },
       uCenter: { value: new THREE.Vector3() },
+      uSkyUp: { value: new THREE.Vector3(0, 1, 0) },
       uOffset: { value: offset },
       uTime: { value: 0 },
       uRadius: { value: radius },
@@ -177,6 +181,9 @@ export function createSkyDome(options = {}) {
     followCamera(cameraPosition, elapsedTime) {
       mesh.position.copy(cameraPosition);
       material.uniforms.uCenter.value.copy(cameraPosition);
+      // Radial up keeps the blue sky above the local horizon all around the
+      // planet, including nests on the equator and southern hemisphere.
+      material.uniforms.uSkyUp.value.copy(cameraPosition).normalize();
       if (elapsedTime !== undefined) {
         material.uniforms.uTime.value = elapsedTime;
       }

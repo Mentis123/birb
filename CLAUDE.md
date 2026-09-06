@@ -1,5 +1,12 @@
 # CLAUDE.md — Birb Mobile
 
+> **2026-09-06 visual/nesting update:** Read
+> [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
+> direction, implementation map, mobile constraints and unfinished roadmap.
+> It supersedes older notes below about hiding all props while nested and
+> deliberately placing nests at fractional heights inside champion structures.
+> Nesting now preserves scenery; perches occupy actual modest-height crowns/roofs.
+
 > Context for AI assistants and Vibe Academy builders. Read this first.
 
 ## This Is a Birb Labs Artefact

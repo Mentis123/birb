@@ -624,7 +624,7 @@ const ENVIRONMENT_VARIANTS = [
     fogColor: 0x0a1b2e,
     fogNear: 110,
     fogFar: 720,
-    sky: { top: 0x4d80c0, bottom: 0x071323, glow: 0.28 },
+    sky: { top: 0x397da7, mid: 0x91bdb9, horizon: 0xffe0a1, bottom: 0x3c665d, glow: 0.28 },
     hazeColor: 0x112a3f,
     hazeLayers: [
       { radius: 176, height: 104, opacity: 0.2 },
@@ -636,8 +636,8 @@ const ENVIRONMENT_VARIANTS = [
     trail: { color: 0x49b088, opacity: 0.46 },
     anchor: { color: 0x2c556e, opacity: 0.94 },
     lighting: {
-      ambient: { sky: 0xd4f1ff, ground: 0x1a2f32, intensity: 0.92 },
-      key: { color: 0xf3f0d2, intensity: 1.2, position: [7.5, 8.2, 5.2] },
+      ambient: { sky: 0xd4f1ff, ground: 0x647b70, intensity: 1.12 },
+      key: { color: 0xffdfab, intensity: 1.6, position: [7.5, 8.2, 5.2] },
       rim: { color: 0x78b6ff, intensity: 0.48, position: [-6.2, 5.1, -5.4] },
       fill: { color: 0x9fc8ff, intensity: 0.38, position: [1.2, 3.1, -6.2] },
       glow: { color: 0x63d0ff, intensity: 1.35, distance: 12, decay: 2.1, position: [0.3, 1.6, 0.8] },
@@ -654,7 +654,7 @@ const ENVIRONMENT_VARIANTS = [
     fogColor: 0x2b150f,
     fogNear: 120,
     fogFar: 780,
-    sky: { top: 0xf8b274, bottom: 0x2a080a, glow: 0.34 },
+    sky: { top: 0x756eaa, mid: 0xdca68e, horizon: 0xffd4a1, bottom: 0x644959, glow: 0.34 },
     hazeColor: 0x3c1b12,
     hazeLayers: [
       { radius: 192, height: 104, opacity: 0.22 },
@@ -684,7 +684,7 @@ const ENVIRONMENT_VARIANTS = [
     fogColor: 0x0f1f2f,
     fogNear: 110,
     fogFar: 760,
-    sky: { top: 0x6da0df, bottom: 0x08121f, glow: 0.32 },
+    sky: { top: 0x4e84b9, mid: 0xb2cedb, horizon: 0xf3e9ce, bottom: 0x506e89, glow: 0.32 },
     hazeColor: 0x1a2f42,
     hazeLayers: [
       { radius: 184, height: 104, opacity: 0.19 },
@@ -714,7 +714,7 @@ const ENVIRONMENT_VARIANTS = [
     fogColor: 0x0b1524,
     fogNear: 105,
     fogFar: 740,
-    sky: { top: 0x6b96ff, bottom: 0x040910, glow: 0.36 },
+    sky: { top: 0x283a75, mid: 0x748da9, horizon: 0xe5b7a0, bottom: 0x283c55, glow: 0.36 },
     hazeColor: 0x162740,
     hazeLayers: [
       { radius: 184, height: 104, opacity: 0.18 },

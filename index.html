@@ -3462,6 +3462,7 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
+      var { visualUniforms, getQualityPixelRatio } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
@@ -4179,21 +4180,15 @@
     }
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    // Tone mapping cost: ACESFilmic = per-pixel curve (expensive on mobile).
-    // On mobile the scene is already saturated/colourful so cheaper Linear
-    // tone mapping looks nearly identical — tuned exposure compensates.
-    renderer.toneMapping = isMobile ? THREE.LinearToneMapping : THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = isMobile ? 1.08 : 1.22;
+    // One art pipeline: highlights roll off consistently on phones and desktop.
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
 
     const scene = new THREE.Scene();
     scene.background = null; // Replaced by sky dome
-    // Atmospheric distance haze: exponential fog for painterly depth.
-    // Density tuned so near objects (<30u) are essentially unaffected
-    // (~0.6% fog at 30u) and far geometry dissolves softly into the sky's
-    // mid band by the world horizon. Color is updated per-environment.
-    // On mobile we lower density slightly — every surface does a fog lookup,
-    // and a denser fog forces more shader work; minor cut adds up.
-    scene.fog = new THREE.FogExp2(0x6d9ed0, isMobile ? 0.0022 : 0.0028);
+    // Depth separation over the short sightlines of a miniature planet.
+    // Changing density does not change the number of shader operations.
+    scene.fog = new THREE.FogExp2(0x9bbab5, 0.006);
 
     // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
     const skyDome = createSkyDome({
@@ -5988,6 +5983,7 @@
         secondaryGeom.translate(-0.07, -0.05, 0.32);
         const secondary = new THREE.Mesh(secondaryGeom, wingMaterial);
         wingGroup.add(secondary);
+        wingGroup.userData.secondaryFeather = secondary;
 
         // Cyan tip accent — small cone sitting at the wingtip
         const tipGeom = new THREE.ConeGeometry(0.12, 0.26, 4, 1, false);
@@ -5996,6 +5992,7 @@
         tipGeom.translate(0.02, 0.02, 0.88);
         const tip = new THREE.Mesh(tipGeom, wingTipMaterial);
         wingGroup.add(tip);
+        wingGroup.userData.tipFeather = tip;
 
         // Larger rounded covert at the shoulder — a touch beefier than
         // before so the seam between body and wing reads as a feathered
@@ -6259,13 +6256,13 @@
         // Tier 1+: drop DPR to 1.0.
         // Tier 2+: drop DPR below 1.0 (0.85) and hide haze layers if any.
         if (newTier === 0) {
-          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
+          renderer.setPixelRatio(getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, newTier));
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = true;
         } else if (newTier === 1) {
-          renderer.setPixelRatio(1.0);
+          renderer.setPixelRatio(getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, newTier));
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
         } else if (newTier >= 2) {
-          renderer.setPixelRatio(0.85);
+          renderer.setPixelRatio(getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, newTier));
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
         }
 
@@ -6510,7 +6507,7 @@
 
       const nextWidth = Math.floor(clientWidth);
       const nextHeight = Math.floor(clientHeight);
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+      const pixelRatio = getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, adaptiveTier.getTier());
 
       if (
         !force &&
@@ -6861,46 +6858,15 @@
       },
     });
 
-    // Names of world prop meshes to hide while nested so the horizon is clear.
-    // Ground sphere, sky, clouds, water stay visible — only tall obstructions go.
-    const NEST_OBSTRUCTION_NAME_PATTERNS = [
-      /^forest-(trunks|canopies|canopy-ceilings|shrubs)/,
-      /^canyon-(spires|walls|arches|archs)/,
-      /^mountain-/,
-      /^city-(towers|buildings)/,
-    ];
-    const hiddenObstructions = [];
-    function hideObstructionsForNest() {
-      if (!sphericalWorld?.root || hiddenObstructions.length > 0) return;
-      sphericalWorld.root.traverse((child) => {
-        if (!child?.name) return;
-        for (const pat of NEST_OBSTRUCTION_NAME_PATTERNS) {
-          if (pat.test(child.name) && child.visible) {
-            hiddenObstructions.push(child);
-            child.visible = false;
-            break;
-          }
-        }
-      });
-    }
-    function restoreObstructionsFromNest() {
-      for (const child of hiddenObstructions) {
-        child.visible = true;
-      }
-      hiddenObstructions.length = 0;
-    }
+    // Nesting must preserve the world. An InstancedMesh is a planet-wide
+    // batch, not a nearby tree: hiding it stripped ALL forest/city geometry.
+    // Perches are placed above their crown; no scene-wide visibility toggles.
 
     // Initialize nesting system with state change callback
     const handleNestingStateChange = (newState, previousState, currentNest) => {
       const isNested = newState === NESTING_STATES.NESTED;
       const isApproaching = newState === NESTING_STATES.APPROACHING;
       const isLeavingNest = previousState === NESTING_STATES.NESTED && newState !== NESTING_STATES.NESTED;
-
-      if (isNested) {
-        hideObstructionsForNest();
-      } else if (isLeavingNest) {
-        restoreObstructionsFromNest();
-      }
 
       // Show/hide nest mode UI
       showNestUI(isNested);
@@ -7963,6 +7929,18 @@
           + leftDip + glideSweep + flapOffset + idleFlutter;
         rightWing.rotation.x = rightWing.userData.baseRotation.x
           + rightDip - glideSweep - flapOffset - idleFlutter;
+        // Feather follow-through lags the shoulder. Both wings use the same
+        // local offset because the right group mirrors its geometry in Z.
+        const flex = reducedMotionState.enabled ? 0 : (isAirborneVisual
+          ? Math.sin(motionState.elapsed * (climbing ? 6.8 : 2.2) - 0.6) * (climbing ? 0.06 : 0.025) : 0);
+        if (leftWing.userData.secondaryFeather) leftWing.userData.secondaryFeather.position.y = flex;
+        if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = flex;
+        if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = flex * 1.5;
+        if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = flex * 1.5;
+        const wingStretch = sprintState.active && isAirborneVisual ? 0.88 : 1;
+        const wingBlend = 1 - Math.exp(-delta * 8);
+        leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
+        rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
       }
 
       // Tail steering + idle sway — yaw input rotates the tail fan around Y
@@ -7978,6 +7956,8 @@
         tail.rotation.x = baseRot.x;
         tail.rotation.y += (tailSwayY - tail.rotation.y) * Math.min(1, delta * 8);
         tail.rotation.z = baseRot.z;
+        const fanSpread = 1 + Math.abs(yawInputTail) * 0.20;
+        tail.scale.z += (fanSpread - tail.scale.z) * (1 - Math.exp(-delta * 8));
       }
 
       // Walk cycle — body bob + alternating foot tilt while grounded & moving.
@@ -7997,6 +7977,10 @@
         if (leftFoot) leftFoot.rotation.x = 0;
         if (rightFoot) rightFoot.rotation.x = 0;
       }
+
+      const footTuck = !isGroundedVisual && flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING ? -0.85 : 0;
+      if (leftFoot) leftFoot.rotation.z += (footTuck - leftFoot.rotation.z) * (1 - Math.exp(-delta * 7));
+      if (rightFoot) rightFoot.rotation.z += (footTuck - rightFoot.rotation.z) * (1 - Math.exp(-delta * 7));
 
       if (glideTrail && glideTrail.rotation) {
         glideTrail.rotation.z = motionState.elapsed * 0.32;
@@ -8027,6 +8011,8 @@
       const birdQuat = flightController?.quaternion || (flightController && typeof flightController.getQuaternion === 'function' ? flightController.getQuaternion() : null);
 
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
+      visualUniforms.time.value = motionState.elapsed;
+      visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
       if (skyDome && cam) skyDome.followCamera(cam.position, motionState.elapsed);
 
       // IMPROVEMENT 1b: Cloud shell — slow drift + follow camera
