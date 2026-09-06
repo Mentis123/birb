@@ -44,6 +44,12 @@
 > path, plus `tools/birb-modes.mjs`, which drives all five modes and treats
 > console **warnings** as failures. Never add a check that only proves
 > something painted.
+>
+> **Next round is planned, not built:** `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §14.
+> Ranked by what this session measured. The headline: one enum (tone mapping)
+> was the largest visual change of the whole session, and every geometry or
+> overlay effort failed. Item 1 (a ground shader pass: valley mist, cloud
+> shadows, macro noise) is the highest-value thing left and needs no phone.
 
 > Context for AI assistants and Vibe Academy builders. Read this first.
 
