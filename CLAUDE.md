@@ -21,6 +21,29 @@
 > The perch camera rests at a horizon-derived pitch, not level: on a
 > radius-120 planet a 40-unit crown puts the horizon 41 degrees below level,
 > and every nest in every biome used to open on empty sky.
+>
+> **Adaptive quality now actually runs.** It never had: the FPS sampler sat
+> behind `if (!fpsMetric) return;` and `[data-metric="fps"]` is not in the
+> document, so the tier manager's only call site was unreachable and DPR never
+> dropped on a struggling phone. The thresholds (55 to downshift, 58 to
+> restore) were tuned against a system that could not run, so a device may now
+> shed resolution where it never did — watch for that before assuming a
+> regression. `tools/birb-sheet.mjs` pins tier 0 so art review is not done
+> against degraded output.
+>
+> **A rendering world is not a working world**, and this repo has now proved
+> it the expensive way. Initial environment setup catches its own exception
+> and only `console.warn`s, so a throw part way through it leaves the terrain
+> built and looking completely normal while nest points, collectibles and
+> rocket collision targets were never created. That shipped to production on
+> 2026-09-06 and no check caught it: unit tests do not load `index.html`, the
+> screenshot harness exited zero because a frame rendered, and the contact
+> sheet switches environment first, which re-runs the failed setup
+> successfully. Hence `.github/workflows/browser-health.yml`, which runs the
+> real page on every push and asserts the systems exist on the plain-start
+> path, plus `tools/birb-modes.mjs`, which drives all five modes and treats
+> console **warnings** as failures. Never add a check that only proves
+> something painted.
 
 > Context for AI assistants and Vibe Academy builders. Read this first.
 

@@ -448,7 +448,7 @@ The session is done when:
 Then stop and report to the owner what shipped, what did not, and the exact
 phone test list from the brief's §Acceptance item 4 so they can run it.
 
-## 13. Implementation log (fill in as you go)
+## 13. Implementation log
 
 | Stage | Status | Evidence | Notes |
 |---|---|---|---|
