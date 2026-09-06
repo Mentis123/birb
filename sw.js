@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v15-2026-08-10';
+const CACHE_VERSION = 'v22-2026-09-06-landmarks';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -45,6 +45,7 @@ const CORE_ASSETS = [
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
+  './src/flight/bird-pose.js',
   './src/game/game-modes.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
@@ -58,6 +59,9 @@ const CORE_ASSETS = [
   './src/environment/landmark-valley.js',
   './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
+  './src/environment/visual-style.js',
+  './src/nesting/nest-placement.js',
+  './src/nesting/nest-occlusion.js',
   './src/environment/collectibles.js',
   './src/environment/collider-grid.js',
   './src/ui/minimap.js',
@@ -66,6 +70,9 @@ const CORE_ASSETS = [
   './src/nesting/aim-rig.js',
   './src/nesting/rocket.js',
   './src/nesting/drone-system.js',
+  './src/effects/contact-shadow.js',
+  './src/effects/ribbon-trail.js',
+  './src/effects/burst-signatures.js',
   './src/effects/particles.js',
   './src/effects/screen-shake.js',
 ];

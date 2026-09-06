@@ -1,3 +1,4 @@
+import { addWaterHighlights } from './visual-style.js';
 // Landmark valley — the dramatic carved feature's WATER, rebuilt for volume.
 //
 // The basin + canyon are carved into the terrain by valleyCarveAt() in
@@ -336,6 +337,7 @@ export function createValleyFeature({
     vertexColors: true, transparent: true, opacity: 0.9,
     depthWrite: false, side: THREE.DoubleSide,
   });
+  addWaterHighlights(poolMat, THREE, A);
   const pool = new THREE.Mesh(poolGeo, poolMat);
   pool.position.copy(poolCenter);
   pool.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), A);
@@ -439,7 +441,7 @@ export function createValleyFeature({
   scroll(outTex, 0, -0.32);
 
   // ── Per-frame ─────────────────────────────────────────────────
-  const update = (delta, timeMs) => {
+  const update = (delta, timeMs, birdPosition) => {
     const t = (timeMs || 0) * 0.001;
     const dt = Math.min(Math.max(delta || 0, 0), 0.05);
     for (const a of animated) {
@@ -447,6 +449,18 @@ export function createValleyFeature({
       if (a.sy) a.tex.offset.y = (t * a.sy) % 1;
     }
     if (foamRingMat) foamRingMat.opacity = 0.7 + Math.sin(t * 1.6) * 0.15;
+    // Close-range fill-rate guard. Additive point sprites are cheap far away
+    // and ruinous when each one covers a quarter of the screen, which is
+    // exactly what happens when the bird flies into the falls. Shrink and
+    // fade them instead of letting the mist white out the viewport.
+    if (birdPosition && mistMat) {
+      const dx = birdPosition.x - poolCenter.x;
+      const dy = birdPosition.y - poolCenter.y;
+      const dz = birdPosition.z - poolCenter.z;
+      const near = Math.min(1, Math.sqrt(dx * dx + dy * dy + dz * dz) / 14);
+      mistMat.size = 1.0 + 1.2 * near;
+      mistMat.opacity = 0.35 + 0.65 * near;
+    }
     // integrate mist (in-place, zero alloc)
     for (let k = 0; k < mistCount; k++) {
       mLife[k] -= dt;
@@ -463,5 +477,24 @@ export function createValleyFeature({
     mistGeo.getAttribute('color').needsUpdate = true;
   };
 
-  return { group, update };
+  return {
+    group,
+    update,
+    /**
+     * Point the water's specular at this environment's key light. Called on
+     * every environment switch, after the light rig has been positioned.
+     */
+    setSunDirection(vector) {
+      const sun = poolMat?.userData?.birbSun;
+      if (sun && vector) sun.value.copy(vector).normalize();
+    },
+    /**
+     * Drop the mist particle count at reduced quality. The buffer stays
+     * allocated and nothing is rebuilt — only the draw range shrinks.
+     */
+    setMistBudget(fraction) {
+      const n = Math.max(0, Math.min(mistCount, Math.round(mistCount * fraction)));
+      mistGeo.setDrawRange(0, n);
+    },
+  };
 }

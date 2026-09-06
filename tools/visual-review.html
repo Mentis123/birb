@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Birb visual regression review</title>
+<style>body{margin:0;background:#101b29;color:#edf5fa;font:14px system-ui}nav{padding:12px;display:flex;gap:8px;flex-wrap:wrap}button,select{padding:10px;background:#264559;color:white;border:1px solid #578598;border-radius:7px}#status{white-space:pre-wrap;padding:12px}canvas{display:block;width:100%;height:65vh}</style>
+<nav><button id="check">Run mobile + desktop checks</button><select id="biome"><option>forest</option><option>canyons</option><option>mountain</option><option>city</option></select><button id="nest">Inspect nest</button><button id="flight">Inspect world</button><button id="water">Inspect water</button></nav>
+<div id="status">Loading…</div><canvas></canvas>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.183.2';
+import { createSphericalWorld } from '../src/environment/spherical-world.js';
+import { getEnvironmentDefinition } from '../src/environment/world-shell.js';
+import { createNestPointsSystem } from '../src/nesting/nest-points.js';
+import { createNestingSystem, NESTING_STATES } from '../src/nesting/nesting-system.js';
+import { createNestOcclusion } from '../src/nesting/nest-occlusion.js';
+import { createSkyDome } from '../src/environment/sky-dome.js';
+import { visualUniforms } from '../src/environment/visual-style.js';
+import { ParticleSystem } from '../src/effects/particles.js';
+
+const status = document.querySelector('#status');
+const renderer = new THREE.WebGLRenderer({canvas:document.querySelector('canvas'), antialias:false});
+renderer.setPixelRatio(1.2);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x91bdb9, .006);
+const camera = new THREE.PerspectiveCamera(55, 1, .1, 1000);
+const sky = createSkyDome(); scene.add(sky.mesh);
+const ambient = new THREE.HemisphereLight(); scene.add(ambient);
+const key = new THREE.DirectionalLight(); scene.add(key);
+const rim = new THREE.DirectionalLight(); scene.add(rim);
+const fill = new THREE.DirectionalLight(); scene.add(fill);
+let world, nests, shaderErrors = 0, running = false;
+renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
+  shaderErrors++;
+  status.textContent += '\nSHADER FAIL: ' + gl.getProgramInfoLog(program) + gl.getShaderInfoLog(vertex) + gl.getShaderInfoLog(fragment);
+};
+function assert(value, message) { if (!value) throw new Error(message); }
+function load(biome, mobile = true) {
+  nests?.dispose(); world?.dispose();
+  window.__birbIsMobile = mobile;
+  const definition = getEnvironmentDefinition(biome);
+  const preset = definition.lighting;
+  ambient.color.set(preset.ambient.sky); ambient.groundColor.set(preset.ambient.ground); ambient.intensity = preset.ambient.intensity;
+  for (const [light, value] of [[key,preset.key],[rim,preset.rim],[fill,preset.fill]]) {
+    light.color.set(value.color); light.intensity=value.intensity; light.position.set(...value.position);
+  }
+  sky.setColors(definition.sky); sky.setSunDirection(key.position); scene.fog.color.copy(sky.getMidColor());
+  const originalRandom = Math.random;
+  let seed = 4606;
+  Math.random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  try { world = createSphericalWorld(scene, {three:THREE, variant:biome, definition}); }
+  finally { Math.random = originalRandom; }
+  nests = createNestPointsSystem(THREE, world.root, biome, world.sphereRadius, world.nestablePositions);
+  view('flight');
+}
+function view(kind) {
+  const target = new THREE.Vector3();
+  if (kind === 'nest') {
+    target.copy(nests.nests[0].position);
+    const up = target.clone().normalize();
+    const side = new THREE.Vector3(1,0,0).cross(up).normalize();
+    if (side.lengthSq() < .1) side.set(0,0,1);
+    camera.position.copy(target).addScaledVector(up, 3).addScaledVector(side, 5);
+    camera.up.copy(up);
+  } else if (kind === 'water') {
+    // Actual pool mesh selected by its named material hook, no guessed coordinates.
+    let pool;
+    world.root.traverse(o => { if (o.material?.customProgramCacheKey?.() === 'birb-water-v1') pool = o; });
+    assert(pool, 'water pool exists');
+    pool.getWorldPosition(target);
+    const up = target.clone().normalize();
+    const side = new THREE.Vector3(1,0,0).cross(up).normalize();
+    camera.position.copy(target).addScaledVector(up, 12).addScaledVector(side, 18);
+    camera.up.copy(up);
+  } else {
+    camera.position.set(0, 149, 20); camera.up.set(0,1,0); target.set(0,130,-45);
+  }
+  camera.lookAt(target); render();
+}
+function render() {
+  const canvas = renderer.domElement;
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  camera.aspect = canvas.clientWidth / canvas.clientHeight; camera.updateProjectionMatrix();
+  sky.followCamera(camera.position, visualUniforms.time.value);
+  renderer.render(scene,camera);
+}
+document.querySelector('#biome').onchange = e => { load(e.target.value); status.textContent='Inspecting '+e.target.value+' (mobile geometry)'; };
+for (const id of ['nest','flight','water']) document.querySelector('#'+id).onclick=()=>view(id);
+document.querySelector('#check').onclick = async () => {
+  if (running) return; running=true; shaderErrors=0;
+  const results=[];
+  try {
+    for (const mobile of [true,false]) for (const biome of ['forest','canyons','mountain','city']) {
+      load(biome,mobile);
+      renderer.compile(scene,camera);
+      assert(world.features, biome+' landmark feature builds');
+      assert(nests.nests.length>0, biome+' has reachable nests');
+      const groveIds = nests.nests.map(n=>n.userData.groveId).filter(x=>x!=null);
+      assert(new Set(groveIds).size===groveIds.length, 'one nest per grove');
+      for (let i=0;i<nests.nests.length;i++) for(let j=0;j<i;j++) {
+        const a=nests.nests[i].position.clone().normalize(), b=nests.nests[j].position.clone().normalize();
+        assert(world.sphereRadius*Math.acos(Math.min(1,a.dot(b)))>=17.99,'nest surface spacing');
+      }
+      const fc={position:nests.nests[0].position.clone().addScalar(.1),quaternion:new THREE.Quaternion(),lookQuaternion:new THREE.Quaternion(),velocity:new THREE.Vector3(),setSpeed(){},setOrientation(q){this.quaternion.copy(q);this.lookQuaternion.copy(q);}};
+      const system=createNestingSystem(THREE,{flightController:fc,nestPointsSystem:nests});
+      assert(system.forceNestAt(nests.nests[0]),'force landing starts');
+      for(let i=0;i<300;i++) system.update(1/60,fc.position);
+      assert(system.getState()===NESTING_STATES.NESTED,'landing completes');
+      system.reset(); nests.reset();
+      let maxCalls=0,maxTriangles=0;
+      for(const angle of ['flight','nest','water']) {
+        view(angle); maxCalls=Math.max(maxCalls,renderer.info.render.calls); maxTriangles=Math.max(maxTriangles,renderer.info.render.triangles);
+      }
+      assert(shaderErrors===0,'all shaders compile');
+      results.push(`${mobile?'mobile':'desktop'} ${biome}: PASS; ${nests.nests.length} nests; sampled max ${maxCalls} calls / ${maxTriangles} triangles`);
+      status.textContent=results.join('\n');
+      await new Promise(requestAnimationFrame);
+    }
+    const particles=new ParticleSystem(scene);
+    const pool=particles.particles.slice();
+    const children=scene.children.length;
+    for(let i=0;i<40;i++) particles.createExplosion(camera.position);
+    assert(particles.particles.length===pool.length && scene.children.length===children,'bursts remain bounded');
+    for(let i=0;i<120;i++) particles.update(1/60,camera.position);
+    assert(particles.particles.every(p=>!p.active),'bursts expire');
+    particles.createSparkle(camera.position); particles.setSuspended(true);
+    assert(particles.particles.every(p=>!p.points.visible&&!p.arc.visible),'suspend hides effects');
+    particles.setSuspended(false); particles.createSparkle(camera.position);
+    assert(particles.particles[0]===pool[0],'burst buffers reused');
+    particles.dispose();
+    results.push('Burst pool: PASS; bounded allocation, expiry, suspension, reuse.');
+    const props=new THREE.Group();
+    const prop=new THREE.InstancedMesh(new THREE.BoxGeometry(2,2,2),new THREE.MeshBasicMaterial(),3);
+    prop.name='forest-canopies-test'; props.add(prop);
+    const original=[new THREE.Matrix4(),new THREE.Matrix4().makeTranslation(20,0,0),new THREE.Matrix4().makeTranslation(-20,0,0)];
+    original.forEach((m,i)=>prop.setMatrixAt(i,m));
+    const occlusion=createNestOcclusion(THREE), matrix=new THREE.Matrix4();
+    occlusion.clearNear(props,new THREE.Vector3(),2);
+    assert(prop.visible&&occlusion.count===1,'perch clearance preserves batch and distant instances');
+    prop.getMatrixAt(1,matrix); assert(matrix.equals(original[1]),'distant tree matrix unchanged');
+    occlusion.restore();
+    for(let i=0;i<3;i++) {prop.getMatrixAt(i,matrix);assert(matrix.equals(original[i]),'takeoff restores exact matrix');}
+    prop.geometry.dispose();prop.material.dispose();prop.dispose();
+    results.push('Nest occlusion: PASS; one nearby instance cleared, batch/distant props retained, exact restore.');
+    load('forest',true); view('nest');
+    status.textContent=results.join('\n')+'\nALL CHECKS PASSED (browser smoke checks, not physical-phone FPS certification).';
+  } catch(error) { status.textContent=results.join('\n')+'\nFAIL: '+error.stack; }
+  finally { running=false; }
+};
+load('forest',true); status.textContent='Ready. This harness uses the real Three.js renderer and fixed world seeds.';
+let last=0;
+function tick(time) {
+  const dt=Math.min((time-last)/1000,.05);last=time;
+  visualUniforms.time.value=time/1000;
+  if(!running) { world.features?.update(camera.position,dt,time);nests.update(dt,camera.position);render(); }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script></html>

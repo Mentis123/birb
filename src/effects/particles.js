@@ -1,7 +1,8 @@
 import * as THREE from "https://esm.sh/three@0.183.2";
+import { BURST_SIGNATURES } from "./burst-signatures.js";
 
-const MAX_PARTICLES = 600;
 const AMBIENT_COUNT = 80;
+
 
 /**
  * Lightweight GPU particle system using THREE.Points
@@ -24,6 +25,7 @@ export class ParticleSystem {
     this._whooshPool = [];
     this._whooshPerStreak = 10;
     this._initWhooshPool();
+    this._initBurstPool();
   }
 
   _initWhooshPool() {
@@ -165,118 +167,103 @@ export class ParticleSystem {
     return tex;
   }
 
-  /**
-   * Create an explosion burst at a position (drone destruction)
-   */
-  createExplosion(position, color = 0xff6633) {
-    if (this.suspended) return;
-    const count = 24;
-    const positions = new Float32Array(count * 3);
-    const velocities = [];
-    const lifetimes = [];
+  // All burst buffers and scene objects live for the system lifetime.
+  // A full pool drops a decorative burst instead of causing combat GC spikes.
+  _initBurstPool() {
+    this._up = new THREE.Vector3(0, 1, 0);
+    this._burstNormal = new THREE.Vector3();
+    this._burstTangent = new THREE.Vector3();
+    this._burstSide = new THREE.Vector3();
+    const slots = typeof window !== 'undefined' && window.__birbIsMobile ? 6 : 10;
+    for (let i = 0; i < slots; i++) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(24 * 3), 3));
+      const material = new THREE.PointsMaterial({
+        color: 0xffc677, size: 0.8, map: this.texture, transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+      });
+      const points = new THREE.Points(geometry, material);
+      points.frustumCulled = false;
+      points.visible = false;
+      this.scene.add(points);
+      const arc = new THREE.Mesh(new THREE.RingGeometry(0.85, 1, 24), new THREE.MeshBasicMaterial({
+        color: 0xffdfaa, transparent: true, opacity: 0, depthWrite: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      }));
+      arc.visible = false;
+      this.scene.add(arc);
+      this.particles.push({ points, geometry, material, arc, active: false,
+        velocities: new Float32Array(72), gravity: new THREE.Vector3(),
+        age: 0, maxAge: 0.8, type: 'explosion' });
+    }
+  }
 
-    for (let i = 0; i < count; i++) {
+  _emitBurst(position, color, type) {
+    if (this.suspended) return;
+    const sig = BURST_SIGNATURES[type] || BURST_SIGNATURES.explosion;
+    let slot = null;
+    for (const p of this.particles) { if (!p.active) { slot = p; break; } }
+    // A full pool DROPS the burst. It never grows: an explosion during a
+    // firefight is exactly when a heap allocation would be felt.
+    if (!slot) return;
+    slot.active = true;
+    slot.type = type;
+    slot.sig = sig;
+    slot.age = 0;
+    slot.maxAge = sig.maxAge;
+    slot.points.visible = true;
+    slot.material.color.set(color);
+    slot.material.opacity = 1;
+    slot.material.size = sig.size;
+
+    this._burstNormal.copy(position).normalize();
+    if (this._burstNormal.lengthSq() < 0.5) this._burstNormal.copy(this._up);
+    this._burstTangent.set(1, 0, 0);
+    if (Math.abs(this._burstNormal.x) > 0.9) this._burstTangent.set(0, 0, 1);
+    this._burstTangent.cross(this._burstNormal).normalize();
+    this._burstSide.crossVectors(this._burstNormal, this._burstTangent);
+    slot.gravity.copy(this._burstNormal).multiplyScalar(sig.gravity);
+
+    const positions = slot.geometry.attributes.position.array;
+    const [speedMin, speedMax] = sig.speed;
+    const [liftMin, liftMax] = sig.lift;
+    for (let i = 0; i < 24; i++) {
+      // The spiral term twists successive particles around the ring, which is
+      // what makes a collect read as drawn INTO the bird rather than sprayed.
+      const angle = (i / 24) * Math.PI * 2 + (sig.spiral ? (i / 24) * sig.spiral : 0);
+      const speed = speedMin + Math.random() * (speedMax - speedMin);
+      const lift = liftMin + Math.random() * (liftMax - liftMin);
+      const x = Math.cos(angle) * speed;
+      const z = Math.sin(angle) * speed;
       positions[i * 3] = position.x;
       positions[i * 3 + 1] = position.y;
       positions[i * 3 + 2] = position.z;
-
-      // Random direction burst
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      const speed = 3 + Math.random() * 8;
-      velocities.push(
-        Math.sin(phi) * Math.cos(theta) * speed,
-        Math.sin(phi) * Math.sin(theta) * speed,
-        Math.cos(phi) * speed
-      );
-      lifetimes.push(0.4 + Math.random() * 0.6);
+      slot.velocities[i * 3] = this._burstTangent.x * x + this._burstSide.x * z + this._burstNormal.x * lift;
+      slot.velocities[i * 3 + 1] = this._burstTangent.y * x + this._burstSide.y * z + this._burstNormal.y * lift;
+      slot.velocities[i * 3 + 2] = this._burstTangent.z * x + this._burstSide.z * z + this._burstNormal.z * lift;
     }
+    slot.geometry.attributes.position.needsUpdate = true;
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const material = new THREE.PointsMaterial({
-      color: color,
-      size: 0.8,
-      map: this.texture,
-      transparent: true,
-      opacity: 1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    });
-
-    const points = new THREE.Points(geometry, material);
-    this.scene.add(points);
-
-    this.particles.push({
-      type: 'explosion',
-      points,
-      geometry,
-      material,
-      velocities,
-      lifetimes,
-      maxLifetimes: [...lifetimes],
-      age: 0,
-      maxAge: Math.max(...lifetimes),
-    });
+    if (sig.arc > 0) {
+      slot.arc.position.copy(position);
+      // RingGeometry faces local +Z; align to the radial surface normal.
+      this._burstSide.set(0, 0, 1);
+      slot.arc.quaternion.setFromUnitVectors(this._burstSide, this._burstNormal);
+      slot.arc.scale.setScalar(0.2);
+      slot.arc.material.color.set(color);
+      slot.arc.material.opacity = 0.65;
+      slot.arc.visible = true;
+    } else {
+      slot.arc.visible = false;
+    }
   }
 
-  /**
-   * Create sparkle burst at position (ring collection)
-   */
-  createSparkle(position) {
-    if (this.suspended) return;
-    const count = 16;
-    const positions = new Float32Array(count * 3);
-    const velocities = [];
-    const lifetimes = [];
-
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = position.x;
-      positions[i * 3 + 1] = position.y;
-      positions[i * 3 + 2] = position.z;
-
-      const angle = (i / count) * Math.PI * 2;
-      const speed = 2 + Math.random() * 4;
-      const upward = 1 + Math.random() * 3;
-      velocities.push(
-        Math.cos(angle) * speed,
-        upward,
-        Math.sin(angle) * speed
-      );
-      lifetimes.push(0.5 + Math.random() * 0.5);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const material = new THREE.PointsMaterial({
-      color: 0xffd700,
-      size: 0.5,
-      map: this.texture,
-      transparent: true,
-      opacity: 1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    });
-
-    const points = new THREE.Points(geometry, material);
-    this.scene.add(points);
-
-    this.particles.push({
-      type: 'sparkle',
-      points,
-      geometry,
-      material,
-      velocities,
-      lifetimes,
-      maxLifetimes: [...lifetimes],
-      age: 0,
-      maxAge: Math.max(...lifetimes),
-    });
-  }
+  createExplosion(position, color = 0xffb05c) { this._emitBurst(position, color, 'explosion'); }
+  createSparkle(position) { this._emitBurst(position, 0xffdf8c, 'sparkle'); }
+  /** A ring was collected: rising gold spiral. */
+  createCollect(position, color = 0xffe27a) { this._emitBurst(position, color, 'collect'); }
+  /** Boost engaged: short cyan flare, no ring to sit in front of the target. */
+  createBoost(position, color = 0x8fe9ff) { this._emitBurst(position, color, 'boost'); }
 
   /**
    * Set ambient particle type based on environment
@@ -354,13 +341,11 @@ export class ParticleSystem {
     }
 
     if (next) {
-      for (let i = this.particles.length - 1; i >= 0; i--) {
-        const p = this.particles[i];
-        this.scene.remove(p.points);
-        p.geometry.dispose();
-        p.material.dispose();
+      for (const p of this.particles) {
+        p.active = false;
+        p.points.visible = false;
+        p.arc.visible = false;
       }
-      this.particles.length = 0;
     }
 
     for (let i = 0; i < this._whooshPool.length; i++) {
@@ -375,49 +360,42 @@ export class ParticleSystem {
    */
   update(delta, cameraPosition) {
     if (this.suspended) return;
-    // Update burst particles (explosions, sparkles)
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.age += delta;
-
+    // Update pooled bursts, radial gravity works on every side of the planet.
+    const dt = Math.min(Math.max(delta, 0), 0.05);
+    const drag = Math.pow(0.96, dt * 60);
+    for (const p of this.particles) {
+      if (!p.active) continue;
+      p.age += dt;
       if (p.age >= p.maxAge) {
-        this.scene.remove(p.points);
-        p.geometry.dispose();
-        p.material.dispose();
-        this.particles.splice(i, 1);
+        p.active = false;
+        p.points.visible = false;
+        p.arc.visible = false;
         continue;
       }
-
-      const posAttr = p.geometry.getAttribute('position');
-      const count = posAttr.count;
-
-      for (let j = 0; j < count; j++) {
-        const lifeProgress = p.age / p.maxLifetimes[j];
-        if (lifeProgress >= 1) continue;
-
-        const vx = p.velocities[j * 3];
-        const vy = p.velocities[j * 3 + 1];
-        const vz = p.velocities[j * 3 + 2];
-
-        // Apply velocity with drag
-        const drag = Math.pow(0.96, delta * 60);
-        p.velocities[j * 3] *= drag;
-        p.velocities[j * 3 + 1] *= drag;
-        p.velocities[j * 3 + 2] *= drag;
-
-        posAttr.array[j * 3] += p.velocities[j * 3] * delta;
-        posAttr.array[j * 3 + 1] += p.velocities[j * 3 + 1] * delta;
-        posAttr.array[j * 3 + 2] += p.velocities[j * 3 + 2] * delta;
-
-        // Gravity for explosions
-        if (p.type === 'explosion') {
-          p.velocities[j * 3 + 1] -= 4 * delta;
-        }
+      const positions = p.geometry.attributes.position.array;
+      for (let j = 0; j < 24; j++) {
+        p.velocities[j * 3] = p.velocities[j * 3] * drag + p.gravity.x * dt;
+        p.velocities[j * 3 + 1] = p.velocities[j * 3 + 1] * drag + p.gravity.y * dt;
+        p.velocities[j * 3 + 2] = p.velocities[j * 3 + 2] * drag + p.gravity.z * dt;
+        positions[j * 3] += p.velocities[j * 3] * dt;
+        positions[j * 3 + 1] += p.velocities[j * 3 + 1] * dt;
+        positions[j * 3 + 2] += p.velocities[j * 3 + 2] * dt;
       }
-
-      posAttr.needsUpdate = true;
-      p.material.opacity = Math.max(0, 1 - (p.age / p.maxAge));
-      p.material.size *= (1 - delta * 0.5);
+      p.geometry.attributes.position.needsUpdate = true;
+      const life = p.age / p.maxAge;
+      p.material.opacity = (1 - life) * (1 - life);
+      const sig = p.sig || BURST_SIGNATURES.explosion;
+      if (sig.arc > 0) {
+        p.arc.visible = life < 0.45;
+        p.arc.scale.setScalar(0.4 + life * sig.arc);
+        // Two pulses for a kill: the ring reaches full fade at the halfway
+        // point and immediately runs again, which reads as a concussion
+        // rather than as one slow hoop. One shared mesh, no extra draw call.
+        const phase = sig.arcPulses > 1 ? (life * 2) % 1 : life / 0.45;
+        p.arc.material.opacity = Math.max(0, 0.65 * (1 - Math.min(1, phase)));
+      } else {
+        p.arc.visible = false;
+      }
     }
 
     // Update ambient particles
@@ -445,14 +423,6 @@ export class ParticleSystem {
       ap.material.opacity = 0.4 + Math.sin(this.ambientTime * 1.5) * 0.2;
     }
 
-    // Cap active particle systems
-    while (this.particles.length > 20) {
-      const oldest = this.particles.shift();
-      this.scene.remove(oldest.points);
-      oldest.geometry.dispose();
-      oldest.material.dispose();
-    }
-
     // Pooled whoosh streaks (proximity cue)
     this._updateWhooshes(delta);
   }
@@ -462,6 +432,9 @@ export class ParticleSystem {
       this.scene.remove(p.points);
       p.geometry.dispose();
       p.material.dispose();
+      this.scene.remove(p.arc);
+      p.arc.geometry.dispose();
+      p.arc.material.dispose();
     }
     this.particles = [];
 

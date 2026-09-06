@@ -1,5 +1,13 @@
 # Flight Quality & Regression Guidance
 
+## Visual direction and nesting
+
+Read [the standalone visual upgrade brief](docs/VISUAL_UPGRADE_BRIEF.md) before
+changing rendering, scenery or nests. It records intent, shipped work, remaining
+recommendations, mobile constraints, acceptance checks and research sources.
+Never hide a planet-wide InstancedMesh batch to clear a nest camera. Keep nests
+on actual modest-height crowns/roofs and preserve the surrounding landscape.
+
 ## Priorities
 - **Mobile-first flight feel:** Optimize for touch devices before desktop; interactions should remain responsive at 60fps on midrange phones.
 - **Smooth touch controls:** Thumbstick/touch drag should have no dead jitter, predictable centering, and stable acceleration curves with consistent input scaling across pixel densities.

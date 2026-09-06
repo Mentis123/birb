@@ -1,3 +1,5 @@
+import { selectNestPlacements } from './nest-placement.js';
+
 /**
  * Nest Points System
  * Creates glowing red/orange nest markers at the tops of environment objects
@@ -51,41 +53,46 @@ function createNestMarker(THREE, config) {
   const group = new THREE.Group();
   group.name = 'nest-marker';
 
-  // Main nest platform - a soft glowing disc/bowl shape (increased size for visibility)
-  const nestGeometry = new THREE.CylinderGeometry(1.2, 0.8, 0.4, 16);
-  // Use MeshBasicMaterial for guaranteed visibility (not affected by lighting)
-  const nestMaterial = new THREE.MeshBasicMaterial({
-    color: config.color,
-    transparent: true,
-    opacity: 0.95,
+  // Open woven bowl: opaque facets carry the material; one subtle rim is
+  // the interaction cue. The old three neon blobs read as stacked markers.
+  const nestGeometry = new THREE.LatheGeometry([
+    new THREE.Vector2(0, -0.18), new THREE.Vector2(0.72, -0.18),
+    new THREE.Vector2(1.16, 0.12), new THREE.Vector2(1.22, 0.46),
+    new THREE.Vector2(0.98, 0.48), new THREE.Vector2(0.88, 0.14),
+    new THREE.Vector2(0, 0.08),
+  ], 16);
+  const positions = nestGeometry.attributes.position;
+  const colours = new Float32Array(positions.count * 3);
+  for (let i = 0; i < positions.count; i++) {
+    const angle = Math.atan2(positions.getZ(i), positions.getX(i));
+    const weave = 0.72 + 0.20 * Math.sin(angle * 12 + positions.getY(i) * 28);
+    colours[i * 3] = weave;
+    colours[i * 3 + 1] = weave * 0.80;
+    colours[i * 3 + 2] = weave * 0.55;
+  }
+  nestGeometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  const nestMaterial = new THREE.MeshLambertMaterial({
+    color: 0xb88b52, vertexColors: true, flatShading: true,
+    emissive: 0x43270d, emissiveIntensity: 0.15,
   });
   const nest = new THREE.Mesh(nestGeometry, nestMaterial);
   group.add(nest);
 
-  // Outer glow ring (increased size)
-  const glowGeometry = new THREE.TorusGeometry(1.4, 0.2, 12, 32);
+  const glowGeometry = new THREE.TorusGeometry(1.26, 0.045, 4, 24);
   const glowMaterial = new THREE.MeshBasicMaterial({
-    color: config.glowColor,
-    transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide,
-    depthWrite: false,
+    color: 0xffd58c, transparent: true, opacity: 0.28, depthWrite: false,
   });
   const glow = new THREE.Mesh(glowGeometry, glowMaterial);
   glow.rotation.x = Math.PI / 2;
-  glow.position.y = 0.2;
+  glow.position.y = 0.46;
   group.add(glow);
 
-  // Inner bright core (sits inside the bowl)
-  const coreGeometry = new THREE.SphereGeometry(0.5, 16, 12);
-  const coreMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffaa88,
-    transparent: true,
-    opacity: 0.9,
-    depthWrite: false,
-  });
+  const coreGeometry = new THREE.SphereGeometry(0.28, 8, 6);
+  const coreMaterial = new THREE.MeshLambertMaterial({ color: 0xf4e4c3 });
   const core = new THREE.Mesh(coreGeometry, coreMaterial);
-  core.position.y = 0.15;
+  core.scale.set(0.86, 1.2, 0.86);
+  core.rotation.z = 0.22;
+  core.position.y = 0.31;
   group.add(core);
 
   // Store references for animation and interaction
@@ -95,8 +102,8 @@ function createNestMarker(THREE, config) {
   group.userData.glowMaterial = glowMaterial;
   group.userData.core = core;
   group.userData.coreMaterial = coreMaterial;
-  group.userData.baseEmissiveIntensity = config.emissiveIntensity;
-  group.userData.baseGlowOpacity = 0.5;
+  group.userData.baseEmissiveIntensity = 0.15;
+  group.userData.baseGlowOpacity = 0.28;
   group.userData.baseCoreOpacity = 0.7;
   group.userData.isNest = true;
   group.userData.isActive = false; // True when birb is in range
@@ -143,7 +150,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
 
   const hideHostObject = (nestGroup) => {
     const hostObject = nestGroup?.userData?.hostObject;
-    if (!hostObject) return;
+    if (!hostObject || hostObject.isInstancedMesh) return;
 
     if (hostObject.userData.__nestOriginalVisibility === undefined) {
       hostObject.userData.__nestOriginalVisibility = hostObject.visible;
@@ -153,7 +160,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
 
   const restoreHostObjectVisibility = (nestGroup) => {
     const hostObject = nestGroup?.userData?.hostObject;
-    if (!hostObject) return;
+    if (!hostObject || hostObject.isInstancedMesh) return;
 
     if (hostObject.userData.__nestOriginalVisibility !== undefined) {
       hostObject.visible = hostObject.userData.__nestOriginalVisibility;
@@ -170,7 +177,7 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
   let currentlyOccupiedNest = null;
 
   // Create nest markers at the positions provided by the environment
-  nestablePositions.forEach((placement, index) => {
+  selectNestPlacements(nestablePositions, sphereRadius).forEach((placement, index) => {
     const nestGroup = createNestMarker(THREE, config);
 
     // Position nest at the environment object's top
@@ -194,6 +201,8 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
     // can be derived via the nest's world quaternion.
     nestGroup.userData.surfaceNormal = new THREE.Vector3(0, 1, 0);
     nestGroup.userData.hostObject = placement.hostObject;
+    nestGroup.userData.hostId = placement.hostId;
+    nestGroup.userData.groveId = placement.groveId;
     nestGroup.userData.hostClearance = computeHostClearance(placement.hostObject, up);
 
     container.add(nestGroup);
@@ -246,22 +255,10 @@ export function createNestPointsSystem(THREE, parentContainer, environmentId, sp
         nestMaterial.emissiveIntensity = baseEmissive * (0.8 + pulse * 0.4) * intensityMultiplier * activePulse;
 
         // Glow ring opacity
-        glowMaterial.opacity = nestGroup.userData.baseGlowOpacity * (0.6 + pulse * 0.4) * intensityMultiplier;
+        glowMaterial.opacity = Math.min(0.85, nestGroup.userData.baseGlowOpacity * (0.8 + pulse * 0.2) * intensityMultiplier);
 
-        // Core glow
-        coreMaterial.opacity = nestGroup.userData.baseCoreOpacity * (0.5 + pulse * 0.5) * intensityMultiplier * activePulse;
+        // Egg and woven bowl stay physically still. Only the landing cue pulses.
 
-        // Slight bobbing animation for the core
-        const core = nestGroup.userData.core;
-        if (core) {
-          core.position.y = 0.15 + Math.sin(animationTime * 2 + index) * 0.05;
-        }
-
-        // Rotate glow ring slowly
-        const glow = nestGroup.userData.glow;
-        if (glow) {
-          glow.rotation.z = animationTime * 0.5 + index;
-        }
       });
     },
 
