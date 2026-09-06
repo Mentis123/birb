@@ -4753,6 +4753,10 @@
 
     // Sprint state (second finger touch = sprint)
     // Base bumped 8 -> 11 to match new traversal speed; sprint scaled proportionally.
+    // Last tier the mist budget was applied for, so the draw range is only
+    // rewritten when the tier actually changes rather than every frame.
+    let mistBudgetTier = -1;
+
     // Set only by the ?debug=1 capture harness; null in production.
     let __birbStickOverride = null;
 
@@ -5562,6 +5566,10 @@
       // the scene's directional lighting always agree.
       if (skyDome && typeof skyDome.setSunDirection === 'function' && lightingRig?.keyLight) {
         skyDome.setSunDirection(lightingRig.keyLight.position);
+        // The pool's specular follows the same light as the sky's sun disc.
+        // Aimed at a fixed direction instead, the glint sat on the wrong side
+        // of the water in three of the four biomes.
+        sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
       }
       // Atmospheric haze: tint fog toward the sky's mid band so far geometry
       // dissolves softly into the painterly sky instead of a flat slate color.
@@ -8052,6 +8060,15 @@
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
       visualUniforms.time.value = motionState.elapsed;
       visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
+      // Optional detail sheds before resolution does: the waterfall mist is
+      // the largest transparent surface in the scene and the first thing a
+      // fill-rate-bound phone should stop paying for.
+      if (mistBudgetTier !== adaptiveTier.getTier()) {
+        mistBudgetTier = adaptiveTier.getTier();
+        sphericalWorld?.features?.valley?.setMistBudget?.(
+          mistBudgetTier >= 2 ? 0.35 : mistBudgetTier === 1 ? 0.65 : 1,
+        );
+      }
       if (skyDome && cam) skyDome.followCamera(cam.position, motionState.elapsed);
 
       // IMPROVEMENT 1b: Cloud shell — slow drift + follow camera
@@ -8532,6 +8549,19 @@
         setStick: (x, y) => {
           __birbStickOverride = (x === null) ? null : { x, y: y || 0, active: true };
           return __birbStickOverride;
+        },
+        // Teleport to a world direction at a given height above ground.
+        // The landmark valley is the only place the water shader is visible
+        // and spawn is nowhere near it.
+        teleport: (x, y, z, aboveGround = 6) => {
+          const p = flightController?.position;
+          if (!p || !sphericalWorld) return null;
+          const len = Math.hypot(x, y, z) || 1;
+          p.set(x / len, y / len, z / len);
+          const terrain = (typeof sampleTerrainHeight === 'function')
+            ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
+          p.multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
+          return p.toArray().map((n) => +n.toFixed(1));
         },
         setSprint: (on) => {
           sprintState.active = !!on;

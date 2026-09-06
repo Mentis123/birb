@@ -2527,8 +2527,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     valley.group.traverse((o) => { o.raycast = _noRaycast; });
     slalom.group.traverse((o) => { o.raycast = _noRaycast; });
     features = {
+      valley,
       update(birdPos, delta, timeMs) {
-        valley.update(delta, timeMs);
+        valley.update(delta, timeMs, birdPos);
         slalom.update(birdPos, delta, timeMs);
       },
     };

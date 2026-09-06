@@ -133,15 +133,22 @@ export function bakeGroundContacts(THREE, geometry, root, options = {}) {
 /** Small analytic ripples and sky glints on the existing pool, without a
  * reflection render, normal-map download, transparency layer or scene copy. */
 export function addWaterHighlights(material, THREE, normal) {
+  // Where the sun is. Set from the environment's key light so the glint lands
+  // where the light actually comes from; the first version reflected an
+  // arbitrary fixed direction, which put the highlight on the wrong side of
+  // the pool in three of the four biomes.
+  const sunUniform = { value: new THREE.Vector3(0.55, 0.62, 0.38).normalize() };
+  material.userData.birbSun = sunUniform;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uBirbTime = visualUniforms.time;
+    shader.uniforms.uBirbSun = sunUniform;
     shader.uniforms.uWaterUp = { value: normal.clone() };
     shader.vertexShader = 'varying vec3 vWaterWorld;\n' + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
       #include <begin_vertex>
       vWaterWorld = (modelMatrix * vec4(position, 1.0)).xyz;
     `);
-    shader.fragmentShader = 'uniform float uBirbTime; uniform vec3 uWaterUp; varying vec3 vWaterWorld;\n' + shader.fragmentShader;
+    shader.fragmentShader = 'uniform float uBirbTime; uniform vec3 uWaterUp; uniform vec3 uBirbSun; varying vec3 vWaterWorld;\n' + shader.fragmentShader;
     shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
       vec3 helper = abs(uWaterUp.y) > 0.9 ? vec3(1.,0.,0.) : vec3(0.,1.,0.);
       vec3 tangent = normalize(cross(helper, uWaterUp));
@@ -152,9 +159,15 @@ export function addWaterHighlights(material, THREE, normal) {
       vec3 waterNormal = normalize(uWaterUp + .11 * (tangent * ripple.x + bitangent * ripple.y));
       vec3 viewDir = normalize(cameraPosition - vWaterWorld);
       float fresnel = pow(1.0 - abs(dot(viewDir, waterNormal)), 3.0);
-      float glint = pow(max(0., dot(reflect(-viewDir, waterNormal), normalize(uWaterUp + tangent * .4))), 64.0);
+      // Specular against the REAL sun direction, plus a broader sheen so the
+      // highlight has a body rather than a single hot pixel that strobes as
+      // the ripples move under it.
+      vec3 sun = normalize(uBirbSun);
+      vec3 mirrored = reflect(-viewDir, waterNormal);
+      float glint = pow(max(0., dot(mirrored, sun)), 96.0);
+      float sheen = pow(max(0., dot(mirrored, sun)), 12.0);
       outgoingLight = mix(outgoingLight, vec3(.32,.62,.68), fresnel * .48);
-      outgoingLight += vec3(1.,.86,.57) * glint * .65;
+      outgoingLight += vec3(1.,.86,.57) * (glint * .70 + sheen * .16);
       #include <opaque_fragment>
     `);
   };
