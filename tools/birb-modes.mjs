@@ -75,7 +75,26 @@ async function main() {
         if (mode === 'turret_defense' && state.nesting !== 'nested' && state.nesting !== 'landing') {
             failures.push(`turret_defense: player is ${state.nesting}, not on the gun`);
         }
-        console.log(`  ${mode}: ${state.active ? 'ok' : 'FAILED'} — ${detail}`);
+        // Turret Defense's whole loop is aim and fire. A rocket system that
+        // constructs correctly and never launches from a perch is invisible to
+        // every other check, so fire through the real launch handler — aim
+        // assist, cooldown gate and all — and require a rocket to appear.
+        let fired = '';
+        if (mode === 'turret_defense') {
+            await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 20000 })
+                .catch(() => failures.push('turret_defense: never reached the nest to fire from'));
+            let launches = 0;
+            for (let shot = 0; shot < 3; shot++) {
+                const r = await page.evaluate(() => window.__BIRB.fire());
+                if (r.after > r.before) launches++;
+                // The launcher has a two second cooldown; firing faster than
+                // that is correctly refused and would read as a failure.
+                await page.waitForTimeout(2200);
+            }
+            if (!launches) failures.push('turret_defense: fired three times, no rocket launched');
+            fired = `, launched ${launches}/3`;
+        }
+        console.log(`  ${mode}: ${state.active ? 'ok' : 'FAILED'} — ${detail}${fired}`);
 
         await page.evaluate(() => window.__BIRB.endMode(false));
         await page.waitForTimeout(900);
