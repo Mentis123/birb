@@ -76,6 +76,76 @@ export function shapesFromPath(THREE, d, fillRule = 'nonzero') {
     });
 }
 
+/**
+ * Pull every vertex that strayed outside the outline back onto it.
+ *
+ * ExtrudeGeometry offsets the cap contour along a per-vertex bevel vector, and
+ * at a CUSP — two edges meeting at ~0°, which is exactly what the artwork's
+ * razor-tipped band corners are (the inner diagonal arrives tangent to the end
+ * edge) — that vector is an arbitrary clamped direction, not an inset. The
+ * band_blue cap grew a 0.35-unit burr above its own top edge; at the icon's
+ * on-screen size that is a six-pixel spike. Snapping the offenders to the
+ * nearest outline point costs nothing visible and makes "no vertex outside the
+ * outline" an invariant the probe can assert.
+ *
+ * @returns {number} how many vertices were moved
+ */
+export function clampToOutline(geometry, shapes, curveSegments) {
+    const rings = [];
+    for (const shape of shapes) {
+        const pts = shape.extractPoints(curveSegments);
+        rings.push({ pts: pts.shape, hole: false });
+        for (const h of pts.holes) rings.push({ pts: h, hole: true });
+    }
+    const inRing = (ring, x, y) => {
+        let inside = false;
+        const p = ring.pts;
+        for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+            const xi = p[i].x, yi = p[i].y, xj = p[j].x, yj = p[j].y;
+            if ((yi > y) !== (yj > y) && x < xi + (y - yi) * (xj - xi) / (yj - yi)) inside = !inside;
+        }
+        return inside;
+    };
+    const insideOutline = (x, y) => {
+        let solid = false, hole = false;
+        for (const r of rings) {
+            if (r.hole) { if (inRing(r, x, y)) hole = true; } else if (inRing(r, x, y)) solid = true;
+        }
+        return solid && !hole;
+    };
+    // Positions are float32: a point snapped onto an edge lands a few ulps off
+    // it after rounding, and an ulp scales with the coordinate magnitude (a
+    // 513-unit viewBox rounds ~10x coarser than a 48-unit one). Anything
+    // within a millionth of the outline's extent IS on the outline.
+    let ex0 = Infinity, ex1 = -Infinity, ey0 = Infinity, ey1 = -Infinity;
+    for (const r of rings) for (const q of r.pts) {
+        if (q.x < ex0) ex0 = q.x; if (q.x > ex1) ex1 = q.x; if (q.y < ey0) ey0 = q.y; if (q.y > ey1) ey1 = q.y;
+    }
+    const eps2 = Math.pow(1e-6 * Math.max(ex1 - ex0, ey1 - ey0, 1), 2);
+    const pos = geometry.getAttribute('position');
+    let moved = 0;
+    for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i), y = pos.getY(i);
+        if (insideOutline(x, y)) continue;
+        // nearest point on any ring edge
+        let best = Infinity, bx = x, by = y;
+        for (const r of rings) {
+            const p = r.pts;
+            for (let a = 0, b = p.length - 1; a < p.length; b = a++) {
+                const ax = p[b].x, ay = p[b].y, dx = p[a].x - ax, dy = p[a].y - ay;
+                const len2 = dx * dx + dy * dy || 1;
+                const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2));
+                const px = ax + t * dx, py = ay + t * dy;
+                const d = (x - px) * (x - px) + (y - py) * (y - py);
+                if (d < best) { best = d; bx = px; by = py; }
+            }
+        }
+        if (best > eps2) { pos.setXY(i, bx, by); moved++; }
+    }
+    if (moved) pos.needsUpdate = true;
+    return moved;
+}
+
 /** Inject the piece's SVG gradient as the material's albedo, evaluated per fragment. */
 export function applyGradient(material, glsl, cacheKey) {
     material.onBeforeCompile = (shader) => {
@@ -129,6 +199,7 @@ export function buildIcon(THREE, icon, opts = {}) {
             bevelSegments: cfg.bevelSegments,
             curveSegments: cfg.curveSegments,
         });
+        clampToOutline(geometry, shapes, cfg.curveSegments);
         // Centre the plate on its own z so a layer index maps to a plane.
         geometry.translate(0, 0, -depth / 2);
         geometry.computeVertexNormals();
