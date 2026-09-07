@@ -551,6 +551,51 @@ Verify with `node tools/ar-shot.mjs [--go]`. It fakes a camera
 — a zero exit means the gyro produced a reading, the stream went live and
 something actually rendered, not just that a PNG appeared.
 
+### Icon3D — unlisted sibling at `/icon3d` (2026-09-07)
+
+**Icon3D** turns an SVG icon into a 3D extruded object in code, the way
+Blender's SVG importer plus an extrude does, and lives at `icon3d/`, deployed
+to **birbmobile.vercel.app/icon3d**. Unlisted: `noindex`, linked from nowhere.
+It started as "the Copilot icon, like the Blender build, but code only" and
+ships two marks: the September 2023 rainbow ribbon (the one with the folds)
+and the flatter August 2026 redesign. Drag to orbit, pinch to zoom, pills for
+Colour/Clay, 2023/2026, and a **GLB** button that bakes the gradients to
+textures and downloads a file Blender opens directly. Three-finger QR as usual.
+
+> **Read `icon3d/ARCHITECTURE.md` before touching it.** Same house rules as
+> Gauntlet and Bronze: airtight against the rest of the repo, core Three only
+> and pinned, zero assets. An icon is a JS table of `d` strings and gradient
+> definitions transcribed verbatim from the source vector, not an SVG file.
+
+Things that cost a round, or would have:
+
+- **The reference was the 2023 mark, not the current one.** Every icon
+  library still serves the 2023 sash shape; Wikipedia serves its exact Figma
+  export, and the 2026 vector is only on Commons. Confirmed by rendering both,
+  not by name — the 2026 one has no folds.
+- **Gradients are evaluated per pixel in the fragment shader**, from the SVG's
+  own `gradientTransform`, stops and stop-opacity. Vertex colours on an
+  extruded cap's few big triangles cannot reproduce a radial sweep. The GLSL is
+  emitted from the same table the JS reference evaluator reads, and the gate
+  measures them against each other: 0.25/255 mean error.
+- **`bevelOffset = -bevelSize`**, or the bevel grows the plate outside its
+  outline and pieces that share an edge in the SVG collide.
+- **Each piece needs its own `customProgramCacheKey`**; identical
+  `onBeforeCompile` closures share a compiled program and every plate gets the
+  first gradient.
+- **Holes are decided by nesting depth and orientation, for both fill rules.**
+  Three's `ShapePath.toShapes` decides by winding alone and fills in the hole
+  of an evenodd export whose rings run the same way.
+- **The gate has an independent oracle.** Silhouette IoU is measured against
+  the browser's own `Path2D` fill of the same path data (0.9985–0.9995 per
+  piece); the export bake is rendered and compared too, which is the only
+  check that can see a vertically mirrored texture.
+
+Verify with `node tools/icon3d-shot.mjs --page icon3d/index.html --out shot.png
+--query three=local --gate` (needs `npm install --no-save playwright
+three-real@npm:three@0.183.2` then `git checkout -- node_modules/three/index.js`).
+`/icon3d` is in `sw.js`'s `SIBLING_ARTEFACTS`; the reason is under Gauntlet.
+
 ### Baby Blender — the iPad app, not a web artefact (2026-09-05)
 
 **Baby Blender** is the one thing in this repo that is not a web page. It is a

@@ -12,7 +12,7 @@ const CACHE_VERSION = 'v28-2026-09-06-neutral-tonemap';
  * See the bypass in the fetch handler for why this is a correctness issue and
  * not housekeeping.
  */
-const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture', '/grokrogue', '/AR', '/ar'];
+const SIBLING_ARTEFACTS = ['/gauntlet', '/sculpture', '/grokrogue', '/icon3d', '/AR', '/ar'];
 const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 

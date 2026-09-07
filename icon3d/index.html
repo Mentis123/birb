@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#e4e7ec">
+<title>Icon3D — a Birb Labs study</title>
+<style>
+  :root {
+    --paper: #e4e7ec;
+    --ink: #1b2130;
+    --dim: #6b7280;
+    --line: rgba(27, 33, 48, 0.14);
+    --pill: rgba(255, 255, 255, 0.72);
+    --pill-on: #1b2130;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--paper); color: var(--ink);
+    overflow: hidden;
+    font-family: ui-rounded, "Avenir Next", "Nunito", "Trebuchet MS", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #stage { position: fixed; inset: 0; }
+
+  .chrome {
+    position: fixed; inset: 0; pointer-events: none;
+    padding: max(env(safe-area-inset-top, 0px), 14px) 16px
+             max(env(safe-area-inset-bottom, 0px), 14px);
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .title {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.34em;
+    text-transform: uppercase; opacity: 0.62;
+  }
+  .title b { display: block; font-size: 17px; letter-spacing: 0.16em; opacity: 1; margin-top: 3px; }
+  .foot { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .pills {
+    display: flex; gap: 6px; align-items: center; pointer-events: auto;
+    padding: 5px; border-radius: 999px; background: var(--pill);
+    backdrop-filter: blur(8px); border: 1px solid var(--line);
+  }
+  .pills button {
+    appearance: none; border: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 8px 12px; border-radius: 999px;
+    cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+  }
+  .pills button.on { background: var(--pill-on); color: #fff; }
+  .pills button:disabled { opacity: 0.45; cursor: default; }
+  .pills .sep { width: 1px; height: 18px; background: var(--line); }
+  .hint {
+    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--dim); text-align: center;
+    transition: opacity 0.6s ease;
+  }
+  .hint.gone { opacity: 0; }
+
+  .loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--paper); z-index: 10;
+    font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--dim);
+    transition: opacity 0.5s ease;
+  }
+  .loading.gone { opacity: 0; pointer-events: none; }
+
+  .fatal {
+    position: fixed; inset: 0; z-index: 500; display: none;
+    align-items: center; justify-content: center; padding: 2rem; text-align: center;
+    background: var(--paper); font-size: 13px; line-height: 1.6;
+  }
+  .fatal.on { display: flex; }
+
+  .toast {
+    position: fixed; left: 50%; top: 18%; transform: translateX(-50%);
+    padding: 10px 16px; border-radius: 12px; background: var(--ink); color: #fff;
+    font-size: 12px; letter-spacing: 0.08em; opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease; z-index: 20; max-width: 80vw; text-align: center;
+  }
+  .toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="scene"></canvas></div>
+
+<div class="chrome">
+  <div class="title">Birb Labs · study<b>Icon3D</b></div>
+  <div class="foot">
+    <div class="pills" data-pills>
+      <button data-mode="colour" class="on">Colour</button>
+      <button data-mode="clay">Clay</button>
+      <span class="sep"></span>
+      <button data-icon="copilot-2023" class="on">2023</button>
+      <button data-icon="copilot-2026">2026</button>
+      <span class="sep"></span>
+      <button data-export title="Download as GLB">GLB</button>
+    </div>
+    <div class="hint" data-hint>Drag · pinch · double-tap resets</div>
+  </div>
+</div>
+
+<div class="loading" data-loading>Extruding…</div>
+<div class="fatal" data-fatal></div>
+<div class="toast" data-toast></div>
+
+<script>
+// Harness escape hatch, see core/three-loader.js: with ?three=local the page
+// runs on a locally installed Three, and the one addon it can fetch on demand
+// (GLTFExporter, from Three's examples) imports the bare specifier `three`.
+// An import map is the only way a browser resolves that without a bundler. It
+// has to exist before the first module script is parsed, hence a classic
+// script here rather than a line in the module below.
+if (new URLSearchParams(location.search).get('three') === 'local') {
+    const map = document.createElement('script');
+    map.type = 'importmap';
+    map.textContent = JSON.stringify({ imports: { three: '/node_modules/three-real/build/three.module.js' } });
+    document.currentScript.after(map);
+}
+</script>
+<script type="module">
+import { loadThree, THREE_VERSION } from '/icon3d/src/core/three-loader.js';
+import { buildIcon } from '/icon3d/src/model/icon-mesh.js';
+import { runGate, runBakeCheck } from '/icon3d/src/model/gate.js';
+import { exportGLB, downloadGLB, buildExportScene } from '/icon3d/src/model/export.js';
+import { createStudio } from '/icon3d/src/view/studio.js';
+import { createOrbit } from '/icon3d/src/view/orbit.js';
+import { createQrOverlay } from '/icon3d/src/ui/qr-overlay.js';
+import { getIcon, ICONS, DEFAULT_ICON } from '/icon3d/src/icons/index.js';
+
+const DEG = Math.PI / 180;
+const params = new URLSearchParams(location.search);
+const fatalEl = document.querySelector('[data-fatal]');
+const toastEl = document.querySelector('[data-toast]');
+let toastTimer = 0;
+
+function fatal(err) {
+    fatalEl.textContent = 'This icon could not be extruded. ' + (err && err.message ? err.message : err);
+    fatalEl.classList.add('on');
+    // eslint-disable-next-line no-console
+    console.error(err);
+}
+function toast(msg, ms = 2200) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('on');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('on'), ms);
+}
+
+// Three-finger QR, the Birb Labs convention, pinned to production.
+createQrOverlay({
+    url: 'https://birbmobile.vercel.app/icon3d',
+    label: 'birbmobile.vercel.app/icon3d',
+    kicker: 'Scan to view',
+});
+
+(async function boot() {
+    const THREE = await loadThree();
+
+    const canvas = document.getElementById('scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Neutral keeps the brand hues where the SVG put them; ACES pushes a
+    // saturated yellow towards orange and the purple towards blue.
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(36, 1, 0.05, 120);
+
+    const ICON_SIZE = 2;
+    const showTile = params.get('tile') !== '0';
+    let iconId = ICONS[params.get('icon')] ? params.get('icon') : DEFAULT_ICON;
+    let mode = params.get('mode') === 'clay' ? 'clay' : 'colour';
+
+    let built = buildIcon(THREE, getIcon(iconId), { size: ICON_SIZE });
+    built.setMode(mode);
+    scene.add(built.group);
+
+    const studio = createStudio(THREE, renderer, scene, built.width, { tile: showTile });
+    scene.fog = new THREE.Fog(scene.background, 9, 34);
+
+    const narrow = () => innerWidth / innerHeight < 0.75;
+    const orbit = createOrbit(camera, canvas, {
+        yaw: 30 * DEG,
+        pitch: 15 * DEG,
+        targetY: built.height * 0.5,
+        distance: 5,
+        minDistance: 1.4,
+        maxDistance: 18,
+        minPitch: -3 * DEG,
+        maxPitch: 75 * DEG,
+        minTargetY: 0.1,
+        maxTargetY: 3,
+        panRadius: 2.5,
+        idleSpin: params.get('spin') === '0' ? 0 : 0.10,
+        idleDelay: 2.5,
+    });
+
+    /**
+     * Camera distance that fits the icon's bounding sphere on BOTH axes. A
+     * portrait phone is limited by its horizontal field of view, a desktop by
+     * its vertical one; fitting one axis alone crops the other. The sphere is
+     * already generous for a slab, so the margin is small.
+     */
+    function fitDistance() {
+        const r = Math.hypot(built.width / 2, built.height / 2) * 1.04;
+        const v = camera.fov * DEG;
+        const hFov = 2 * Math.atan(Math.tan(v / 2) * camera.aspect);
+        return r / Math.sin(Math.min(v, hFov) / 2);
+    }
+    /** The orbit point sits a little under the icon's middle on a phone so the
+     *  icon rises clear of the control pills. */
+    function targetHeight() {
+        return built.height * (narrow() ? 0.42 : 0.5);
+    }
+    let userZoomed = false;
+    function resize() {
+        const w = innerWidth, h = innerHeight;
+        renderer.setSize(w, h, false);
+        camera.fov = narrow() ? 48 : 36;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        if (!userZoomed) {
+            orbit.setView(orbit.yaw, orbit.pitch, fitDistance(), true);
+            orbit.targetY = targetHeight();
+        }
+        orbit.invalidate();
+    }
+    addEventListener('resize', resize);
+    resize();
+    canvas.addEventListener('wheel', () => { userZoomed = true; }, { passive: true });
+    canvas.addEventListener('pointerdown', (e) => { if (e.isPrimary === false) userZoomed = true; });
+
+    // --- UI -----------------------------------------------------------------
+    const pills = document.querySelector('[data-pills]');
+    function markOn(attr, value) {
+        pills.querySelectorAll(`[${attr}]`).forEach((b) => b.classList.toggle('on', b.getAttribute(attr) === value));
+    }
+    function setMode(next) {
+        mode = next === 'clay' ? 'clay' : 'colour';
+        built.setMode(mode);
+        markOn('data-mode', mode);
+        orbit.invalidate();
+    }
+    function setIcon(id) {
+        if (!ICONS[id]) return;
+        iconId = id;
+        scene.remove(built.group);
+        built.dispose();
+        built = buildIcon(THREE, getIcon(iconId), { size: ICON_SIZE });
+        built.setMode(mode);
+        scene.add(built.group);
+        orbit.targetY = targetHeight();
+        markOn('data-icon', iconId);
+        orbit.invalidate();
+    }
+    pills.addEventListener('click', async (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.mode) setMode(b.dataset.mode);
+        else if (b.dataset.icon) setIcon(b.dataset.icon);
+        else if ('export' in b.dataset) {
+            b.disabled = true;
+            toast('Baking…', 6000);
+            try {
+                const bytes = await exportGLB(THREE, THREE_VERSION, built, { tile: studio.tile });
+                downloadGLB(bytes, `${iconId}.glb`);
+                toast(`${iconId}.glb · ${(bytes.byteLength / 1024).toFixed(0)} KB`);
+            } catch (err) {
+                console.warn('GLB export failed', err);
+                toast('Export needs the CDN — try again online');
+            } finally {
+                b.disabled = false;
+            }
+        }
+    });
+    markOn('data-mode', mode);
+    markOn('data-icon', iconId);
+
+    const hint = document.querySelector('[data-hint]');
+    let touched = false;
+    canvas.addEventListener('pointerdown', () => {
+        if (touched) return;
+        touched = true;
+        setTimeout(() => hint.classList.add('gone'), 900);
+    });
+
+    document.querySelector('[data-loading]').classList.add('gone');
+
+    // --- loop ---------------------------------------------------------------
+    let last = performance.now();
+    let frames = 0, fpsAccum = 0, fps = 60;
+    function stats() {
+        return {
+            drawCalls: renderer.info.render.calls,
+            triangles: renderer.info.render.triangles,
+            fps: Math.round(fps),
+            icon: iconId,
+            mode,
+            pieces: built.pieces.length,
+            yaw: Math.round(orbit.yaw / DEG),
+            pitch: Math.round(orbit.pitch / DEG),
+            distance: Math.round(orbit.distance * 100) / 100,
+        };
+    }
+    function frame(now) {
+        const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+        last = now;
+        fpsAccum += dt; frames++;
+        if (fpsAccum >= 0.5) { fps = frames / fpsAccum; frames = 0; fpsAccum = 0; }
+        if (orbit.update(dt)) {
+            renderer.render(scene, camera);
+            document.documentElement.dataset.icon3dCamera = JSON.stringify(stats());
+        }
+        requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    // --- harness hooks --------------------------------------------------------
+    window.__ICON3D = {
+        THREE, renderer, scene, camera, orbit, studio,
+        get icon() { return built; },
+        setMode,
+        setIcon,
+        /** Park the camera at an exact view and render it immediately. */
+        setView(yawDeg, pitchDeg, distance) {
+            userZoomed = true;
+            orbit.setView(yawDeg * DEG, pitchDeg * DEG, distance ?? orbit.distance, true);
+            orbit.update(0);
+            renderer.render(scene, camera);
+        },
+        /** Silhouette + colour gate against the browser's own rasteriser. */
+        gate(px = 512) {
+            const result = runGate(THREE, renderer, getIcon(iconId), built, px);
+            result.bake = runBakeCheck(THREE, renderer, built, px);
+            orbit.invalidate();
+            renderer.render(scene, camera);
+            return result;
+        },
+        /** Full GLB export without the download; returns size and magic for the harness. */
+        async exportGLB() {
+            const bytes = await exportGLB(THREE, THREE_VERSION, built, { tile: studio.tile });
+            return { bytes: bytes.byteLength, magic: String.fromCharCode(...new Uint8Array(bytes, 0, 4)) };
+        },
+        /** Bake the export scene without downloading; returns what was baked. */
+        bake(px = 128) {
+            const { scene: s, textures } = buildExportScene(THREE, built, { px, tile: studio.tile });
+            let meshes = 0;
+            s.traverse((o) => { if (o.isMesh) meshes++; });
+            const sizes = textures.map((t) => [t.image.width, t.image.height]);
+            textures.forEach((t) => t.dispose());
+            return { meshes, textures: sizes };
+        },
+    };
+    window.__ICON3D_STATS = stats;
+    document.documentElement.dataset.icon3dCamera = JSON.stringify(stats());
+    window.__ICON3D_READY = true;
+})().catch(fatal);
+</script>
+</body>
+</html>
