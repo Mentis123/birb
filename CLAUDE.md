@@ -554,8 +554,12 @@ something actually rendered, not just that a PNG appeared.
 ### Icon3D — unlisted sibling at `/icon3d` (2026-09-07)
 
 **Icon3D** turns an SVG icon into a 3D extruded object in code, the way
-Blender's SVG importer plus an extrude does, and lives at `icon3d/`, deployed
-to **birbmobile.vercel.app/icon3d**. Unlisted: `noindex`, linked from nowhere.
+Blender's SVG importer plus an extrude does. Files live at `icon3d/`; it is
+served at **birbmobile.vercel.app/svg** (a `vercel.json` REWRITE, so the short
+URL stays in the address bar) and at `/icon3d`. Both paths are in `sw.js`'s
+`SIBLING_ARTEFACTS` — the rewrite means the browser navigates to `/svg`, so
+listing only `/icon3d` would leave the QR's own URL unprotected. Unlisted:
+`noindex`, linked from nowhere.
 It started as "the Copilot icon, like the Blender build, but code only" and
 ships two marks: the September 2023 rainbow ribbon (the one with the folds)
 and the flatter August 2026 redesign. Drag to orbit, pinch to zoom, pills for

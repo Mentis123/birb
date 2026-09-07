@@ -1,9 +1,16 @@
 # Icon3D — architecture
 
-An SVG icon, extruded into a 3D object, in code. Lives at `/icon3d`, unlisted
-(`noindex`, linked from nowhere). The first icon is the Microsoft Copilot mark —
-the 2023 rainbow ribbon and the flatter 2026 one — because the study started as
-"do what Blender's SVG importer does to this icon, without Blender".
+An SVG icon, extruded into a 3D object, in code. Served at **`/svg`**, the
+short URL this is demoed from; the files live at `/icon3d` and that path works
+too. Unlisted either way (`noindex`, linked from nowhere). The first icon is the
+Microsoft Copilot mark — the 2023 rainbow ribbon and the flatter 2026 one —
+because the study started as "do what Blender's SVG importer does to this icon,
+without Blender".
+
+`/svg` is a **rewrite** in `vercel.json`, not a redirect, so the pretty URL
+stays in the address bar. That is only safe because every import on the page is
+absolute (`/icon3d/src/...`): a rewrite serves this HTML at a path one level
+shallower, and relative imports would 404 there — the mistake `/AR` made.
 
 Read this before touching any of it.
 
@@ -22,9 +29,12 @@ Read this before touching any of it.
    verbatim from the source vector, with the source URL in the header — so every
    number is diffable against the original. The studio environment map is a
    PMREM capture of a scene of unlit boxes, not an HDRI.
-4. **The bypass in `sw.js`.** `/icon3d` is in `SIBLING_ARTEFACTS`. The root
-   game's service worker caches every navigation response under one key, so a
-   sibling that is not bypassed overwrites Birb Mobile's offline shell.
+4. **The bypass in `sw.js` covers BOTH paths.** `/icon3d` and `/svg` are in
+   `SIBLING_ARTEFACTS`. The root game's service worker caches every navigation
+   response under one key, so a sibling that is not bypassed overwrites Birb
+   Mobile's offline shell. A rewrite does not help here: the browser navigates
+   to `/svg`, so that is the path the worker sees, and listing only `/icon3d`
+   would leave the short URL — the one on the QR code — unprotected.
 
 ## Module map
 
