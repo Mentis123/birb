@@ -3481,7 +3481,7 @@
       // system and the rocket collision targets. The world still rendered, so
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
-      var { blendToward, perchPose, tumbleFlap, tailPitchOffset } = await import("./src/flight/bird-pose.js");
+      var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -8066,11 +8066,23 @@
 
         // Subtle downward wing sweep during glide, stronger while banking.
         const glideSweep = gliding ? 0.18 + Math.min(Math.abs(yawInput), 1) * 0.14 : 0;
+        // Wing beat: asymmetric power stroke, wing folding on recovery, and a
+        // burst-then-glide cadence. A constant sine is the single most
+        // artificial thing a procedural bird can do, and that is what this
+        // was. Beats while climbing, and idles a slow beat otherwise so the
+        // bird is never completely inert in the air.
         let flapOffset = 0;
-        if (isAirborneVisual && climbing && !bankingHard) {
-          const flapFreq = 6.8;
-          const flapAmp = 0.34;
-          flapOffset = Math.sin(motionState.elapsed * flapFreq) * flapAmp;
+        let beatSpan = 1;
+        if (isAirborneVisual && !bankingHard) {
+          const drive = climbing ? 1 : 0.35;
+          const envelope = beatEnvelope(motionState.elapsed) * drive;
+          if (envelope > 0.001) {
+            // Beat rate rises with effort: a climbing bird works harder.
+            const rate = climbing ? 4.4 : 2.6;
+            const beat = wingBeat(motionState.elapsed * rate);
+            flapOffset = beat.angle * envelope;
+            beatSpan = 1 - (1 - beat.span) * envelope;
+          }
         }
 
         // Idle wing flutter — soft breathing-style oscillation when the bird
@@ -8101,7 +8113,7 @@
         if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = flex;
         if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = flex * 1.5;
         if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = flex * 1.5;
-        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span;
+        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span * beatSpan;
         const wingBlend = 1 - Math.exp(-delta * 8);
         leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { blendToward, perchPose, tumbleFlap, tailPitchOffset } from '../src/flight/bird-pose.js';
+import { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } from '../src/flight/bird-pose.js';
 
 test('a blend approaches its target without ever passing it', () => {
   let value = 0;
@@ -89,4 +89,59 @@ test('tail pitch stays inside a readable range at full deflection', () => {
   for (const input of [-5, -1, 0, 1, 5]) {
     assert.ok(Math.abs(tailPitchOffset(input)) <= 0.16);
   }
+});
+
+test('the downstroke is faster than the recovery, which is what makes it a bird', () => {
+  // A sine spends equal time going down and coming up, and reads as a
+  // machine. Power stroke fast, recovery slow.
+  let down = 0;
+  let up = 0;
+  for (let p = 0; p < 1; p += 0.001) {
+    const angle = wingBeat(p).angle;
+    if (angle < -1e-9) down++;
+    else if (angle > 1e-9) up++;
+  }
+  assert.ok(down > 0 && up > 0, 'the beat must have both halves');
+  assert.ok(up > down * 1.3, `recovery (${up}) should be clearly longer than the power stroke (${down})`);
+});
+
+test('the wing folds in on the recovery and is fully out on the power stroke', () => {
+  // A wing held fully extended on the upstroke pushes the bird back down.
+  assert.ok(wingBeat(0.19).span > 0.99, 'span must be full mid-downstroke');
+  assert.ok(wingBeat(0.69).span < 0.85, 'span must pull in mid-recovery');
+  for (let p = 0; p < 1; p += 0.01) {
+    const span = wingBeat(p).span;
+    assert.ok(span > 0.6 && span <= 1.0, `span ${span} left the sane range at phase ${p}`);
+  }
+});
+
+test('the beat is continuous across the wrap, so a cycle has no snap', () => {
+  const before = wingBeat(0.999);
+  const after = wingBeat(1.001);
+  assert.ok(Math.abs(before.angle - after.angle) < 0.05, 'angle jumped across the wrap');
+  assert.ok(Math.abs(before.span - after.span) < 0.05, 'span jumped across the wrap');
+});
+
+test('a non-finite phase does not produce NaN wings', () => {
+  for (const bad of [NaN, Infinity, undefined, null]) {
+    const beat = wingBeat(bad);
+    assert.ok(Number.isFinite(beat.angle) && Number.isFinite(beat.span));
+  }
+});
+
+test('the bird flaps in bursts and then glides', () => {
+  // Continuous flapping at a constant rate is the artificial thing. Over one
+  // full cadence there must be real glide time AND real burst time.
+  let beating = 0;
+  let gliding = 0;
+  for (let t = 0; t < 27; t += 0.01) {
+    if (beatEnvelope(t) > 0.5) beating++; else if (beatEnvelope(t) === 0) gliding++;
+  }
+  assert.ok(beating > 200, `expected substantial burst time, got ${beating}`);
+  assert.ok(gliding > 200, `expected substantial glide time, got ${gliding}`);
+});
+
+test('bursts ramp rather than switching on for a single frame', () => {
+  const envelope = beatEnvelope(0.02);
+  assert.ok(envelope > 0 && envelope < 1, `expected a ramp, got ${envelope}`);
 });
