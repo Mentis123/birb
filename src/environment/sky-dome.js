@@ -64,9 +64,21 @@ export function createSkyDome(options = {}) {
         color = mix(uMidColor, uTopColor, t);
       }
 
+      // ── Self-limiting glows ──────────────────────────────────────────
+      // How much room the sky still has before it clips. Both the horizon
+      // band and the sun's broad halo are ADDITIVE, and additive light onto a
+      // sky that is already near white does not glow — it clips, and a wide
+      // soft term clips over a wide soft area. The mountain's pale cream
+      // horizon (0xf3e9ce is 0.89 in linear) plus a 0.18 band plus the sun's
+      // outer lobe turned the upper third of that world into a flat white
+      // slab. Scaling by the remaining headroom keeps the forest's deep
+      // sunset glow at full strength and lets the pale skies keep their
+      // gradient.
+      float skyRoom = 1.0 - clamp(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+
       // Subtle warm horizon glow peak (non-photoreal golden-hour bloom).
-      float horizonBand = exp(-pow((h - 0.02) * 8.0, 2.0)) * 0.18;
-      color += uHorizonColor * horizonBand;
+      float horizonBand = exp(-pow((h - 0.02) * 8.0, 2.0)) * 0.22;
+      color += uHorizonColor * horizonBand * skyRoom;
 
       // Sun: soft disc + two-lobe atmospheric halo. Pure shader math on the
       // existing dome — a golden-hour anchor with zero extra draw calls.
@@ -75,7 +87,10 @@ export function createSkyDome(options = {}) {
       // a physically-sized disc is 20 pixels on a phone and reads as a stuck
       // dead pixel rather than as the light source the whole scene is lit by.
       float disc = smoothstep(0.99880, 0.99962, sd);
-      float halo = pow(sd, 160.0) * 0.55 + pow(sd, 18.0) * 0.18;
+      // The tight lobe is the sun's own corona and stays; the broad one is
+      // atmospheric scatter and is what smears across a pale sky, so it is
+      // both narrower than it was and pays the headroom tax.
+      float halo = pow(sd, 160.0) * 0.55 + pow(sd, 30.0) * 0.20 * skyRoom;
       // The disc is deliberately HDR — over 1.0 in scene-linear, before tone
       // mapping. It has to be: the bloom pass thresholds the TONE-MAPPED
       // frame, and Neutral tone mapping rolls anything near 1.0 back under

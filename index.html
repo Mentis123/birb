@@ -3476,6 +3476,7 @@
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
+      var { createWake } = await import("./src/effects/wake.js");
       var { createFlock } = await import("./src/environment/flock.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
@@ -4352,6 +4353,12 @@
     // dust in the canyons, drizzle in the city.
     let weather = null;
     const _weatherUp = new THREE.Vector3(0, 1, 0);
+    // Ripples under a bird flying low over a lake. Built once and reused
+    // across environments — it is one InstancedMesh with no world knowledge.
+    let wake = null;
+    const wakeState = { cooldown: 0 };
+    const _wakePoint = new THREE.Vector3();
+    const _wakeNormal = new THREE.Vector3();
     // Scratch for projecting the sun to screen space for the light shafts.
     const _sunDir = new THREE.Vector3();
     const _sunView = new THREE.Vector3();
@@ -4387,6 +4394,14 @@
     // the moment a device cannot hold the frame rate, which is a measurement
     // rather than a guess — see the isLowEnd note above for what the guess
     // cost.
+    try {
+      wake = createWake(THREE);
+      scene.add(wake.mesh);
+    } catch (wakeError) {
+      console.warn('Wake unavailable:', wakeError);
+      wake = null;
+    }
+
     let bloomEnabled = true;
     // Eased 0..1 boost strength for the composite pass.
     let boostVisual = 0;
@@ -5620,6 +5635,8 @@
         weather.dispose();
         weather = null;
       }
+      // Ripples belong to a lake that no longer exists.
+      wake?.clear();
       try {
         const profile = WEATHER_PROFILES[definition.id];
         if (profile) {
@@ -8312,6 +8329,35 @@
         bloomPass.setSpeed(boostVisual);
       }
 
+      // ===== Wake =====
+      // A bird skimming a lake leaves rings on it. Cheap, and it is what turns
+      // the water from a blue floor into a surface: the ripple gives it a
+      // plane, a scale, and a reaction to the player.
+      if (wake) {
+        wakeState.cooldown -= delta;
+        const level = sphericalWorld?.waterLevel ?? 0;
+        if (level < 0 && birdPos && !isNested && typeof sampleTerrainMeshHeight === 'function') {
+          const surfaceRadius = sphericalWorld.sphereRadius + level;
+          const height = birdPos.length() - surfaceRadius;
+          // Over water only: the flight floor is clamped at sea level, so
+          // being low is not enough — the BED has to be under it too, or the
+          // bird leaves ripples across dry hilltops.
+          const overWater = height >= -0.5 && height <= wake.config.reach
+            && sampleTerrainMeshHeight(birdPos.x, birdPos.y, birdPos.z) < level;
+          if (overWater && wakeState.cooldown <= 0) {
+            _wakeNormal.copy(birdPos).normalize();
+            // Dropped straight down onto the surface. No lateral offset: the
+            // bird has already moved several units between one ripple and the
+            // next, so the trail is a trail without help.
+            _wakePoint.copy(_wakeNormal).multiplyScalar(surfaceRadius);
+            wake.spawn(_wakePoint, _wakeNormal);
+            // Closer to the water means a busier wake.
+            wakeState.cooldown = 0.10 + 0.16 * Math.max(0, height / wake.config.reach);
+          }
+        }
+        wake.update(delta);
+      }
+
       // Weather. Four uniform writes; the motion is all in the vertex shader.
       if (weather && birdPos) {
         const tier = adaptiveTier.getTier();
@@ -8912,6 +8958,20 @@
             __birbWaterRealMat = null;
           }
           return w.mesh.material.type;
+        },
+        // Force a ripple under the bird, so the wake can be photographed
+        // without waiting for a lake to arrive.
+        wake: (spawn = 0) => {
+          if (!wake || !flightController?.position) return null;
+          const level = sphericalWorld?.waterLevel ?? 0;
+          if (spawn > 0 && level < 0) {
+            const n = flightController.position.clone().normalize();
+            for (let i = 0; i < spawn; i++) {
+              wake.spawn(n.clone().multiplyScalar(sphericalWorld.sphereRadius + level), n);
+              wake.update(0.18);
+            }
+          }
+          return { present: true, visible: wake.mesh.visible, reach: wake.config.reach };
         },
         weather: () => (weather ? {
           count: weather.count,
