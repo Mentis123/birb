@@ -5601,6 +5601,11 @@
         // Aimed at a fixed direction instead, the glint sat on the wrong side
         // of the water in three of the four biomes.
         sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+        // Valley mist takes the sky's own mid tone. Grey mist in a golden
+        // world reads as fog on a lens; sky-coloured mist reads as air.
+        if (visualUniforms.mistColor.value && skyDome.getMidColor) {
+          visualUniforms.mistColor.value.copy(skyDome.getMidColor()).lerp(new THREE.Color(0xffffff), 0.18);
+        }
       }
       // Atmospheric haze: tint fog toward the sky's mid band so far geometry
       // dissolves softly into the painterly sky instead of a flat slate color.
