@@ -152,9 +152,11 @@ export function createWake(THREE, options = {}) {
     /** Advance every live ripple. Returns how many are still alive. */
     update(delta) {
       let live = 0;
+      let touched = false;
       for (let i = 0; i < count; i++) {
         const age = ages[i];
         if (!Number.isFinite(age)) continue;
+        touched = true;
         const nextAge = age + delta;
         ages[i] = nextAge;
         const state = rippleAt(nextAge, config);
@@ -170,8 +172,13 @@ export function createWake(THREE, options = {}) {
         const a = state.alpha;
         mesh.instanceColor.setXYZ(i, a, a, a);
       }
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.instanceColor.needsUpdate = true;
+      // Only re-upload when something actually moved. The bird spends most of
+      // a session nowhere near water, and flagging two instance buffers dirty
+      // every frame is a GPU upload per frame to say nothing changed.
+      if (touched) {
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.instanceColor.needsUpdate = true;
+      }
       mesh.visible = live > 0;
       return live;
     },
