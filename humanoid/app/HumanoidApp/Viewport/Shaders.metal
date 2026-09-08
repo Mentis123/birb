@@ -65,3 +65,31 @@ fragment float4 model_fragment(VertexOut in [[stage_in]],
                   + float3(0.30, 0.44, 0.55) * rim;
     return float4(colour, 1.0);
 }
+
+// MARK: - Brush cursor
+
+// Matches CursorUniforms in Renderer.swift.
+struct CursorUniforms {
+    float4x4 modelViewProjection;
+    float4   colour;
+};
+
+struct CursorIn {
+    float3 position [[attribute(0)]];
+};
+
+struct CursorOut {
+    float4 clipPosition [[position]];
+};
+
+vertex CursorOut cursor_vertex(CursorIn in [[stage_in]],
+                               constant CursorUniforms &uniforms [[buffer(1)]]) {
+    CursorOut out;
+    out.clipPosition = uniforms.modelViewProjection * float4(in.position, 1.0);
+    return out;
+}
+
+fragment float4 cursor_fragment(CursorOut in [[stage_in]],
+                                constant CursorUniforms &uniforms [[buffer(1)]]) {
+    return uniforms.colour;
+}

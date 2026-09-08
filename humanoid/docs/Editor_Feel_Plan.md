@@ -341,3 +341,96 @@ and a crown of spikes. Three things in it are diagnostic beyond the table above.
 
 Symmetry was on and the face came out symmetric, so the mirrored dab path is
 right on hardware too.
+
+---
+
+## 10. What shipped (2026-09-08)
+
+All seven steps, plus the two core fixes they rested on. 189 → 193 tests, the
+eight-stage gate green, and `humanoid-cli bench` added as the release-mode
+authority for anything per-texel.
+
+### The three device findings, and what each turned out to be
+
+**"Sometimes it goes inside out."** Not winding, not culling. Inflate, Deflate,
+Smooth and Paint applied nothing until pen-up and then stamped **one dab per
+Pencil event** at a per-*gesture* amount. `SculptStrokeTests` reproduces it
+headless: a hundred and twenty samples of a Pencil held still, with the brush
+re-raycast each time as the editor does, extrudes a spike and then **stops being
+raycastable at all** — the surface has folded through itself and back-face
+culling finds no front face on the axis. Strokes are now resampled to a dab
+every quarter radius and the per-dab amount is 0.04 rather than 0.35.
+
+One thing that only appeared once the resampler existed: a stroke must advance
+by **pointer** travel, not by how far the surface moved, or Inflate partly
+measures its own output. The loop gain is `inflatePerDab / spacing` — 0.16 today,
+and a test pins it below 1.
+
+**"Painting onto a side has it show up someplace else."** A disc stamped in UV
+space, on an atlas whose six face tiles touch. Not tunable: replaced with a
+world-space sphere. Bleed is now impossible by construction and seams need no
+special case in any orientation.
+
+**"How would I know?"** Three-finger tap shows fps, frame time with its worst
+case, GPU milliseconds from the command buffer's own clock, draw calls,
+triangles, brush size in millimetres and dabs per frame.
+
+### Numbers, measured
+
+Build box, release, `humanoid-cli bench`. A control loop of comparable float
+work runs at 3 ns an iteration, so these are calibrated rather than asserted.
+
+| | 1024² | 2048² |
+|---|---|---|
+| Paint map build (once, at load) | 27 ms | 68 ms |
+| Albedo snapshot for undo (once per **stroke**) | 0.36 ms | 5.1 ms |
+| Paint, default brush, per **frame** | 0.57 ms | 1.08 ms |
+| Paint, largest brush (r = 0.06), per frame | 1.2 ms | 3.9 ms |
+| Sculpt, any brush, per frame | < 0.55 ms | — |
+| `Picking.raycast`, 6,912 triangles | 0.072 ms | — |
+
+The painter went from 71 ms to 27 ms at the widest setting on 2048² over four
+measured passes. What actually moved it, in order of size, and none of it
+guessable:
+
+1. **Dilating every triangle** to cover bilinear filtering made the map own
+   **195% of the texture**. Only island-edge triangles need a gutter — 103%.
+   Before this the "optimised" painter was *slower* than the naive one.
+2. **Three signed `Int` divisions by 255** in the blend cost more than all the
+   geometry above them.
+3. **Four nested `withUnsafeBufferPointer` closures** defeated the type checker,
+   and a body the compiler cannot type is one it does not optimise either.
+   Lifting the loop into a function taking raw pointers was worth a third.
+4. Strength reduction along the row; scalar `Float` instead of `SIMD3<Float>`,
+   whose `.sum()` does not lower to a horizontal add.
+
+And one measurement about measurement: **`@testable import` numbers are not
+release numbers.** It compiles the library with `-enable-testing`, which cost
+this loop several fold. The paint bench moved out of XCTest into the CLI.
+
+### Decisions the measurements settled
+
+- **The texture stays at 1024.** The PRD asks for 2048 and the per-frame cost
+  would be fine, but the undo snapshot is a copy-on-write charged to the first
+  texel of every stroke: 5.1 ms, a dropped frame each time the Pencil lands.
+  2048 is gated on making undo sparse (record each texel's original on first
+  touch, rather than snapshotting the whole albedo), which is the next
+  optimisation and now has a number attached.
+- **The brush maximum is 0.06, not 0.12.** Clay is a 24 cm cube, so the old
+  maximum was a brush as wide as the model's half-width. At 0.06 the largest
+  brush meets the 4 ms target even at 2048².
+- **The vertex buffer is uploaded whole, not partially.** Converting all 3,750
+  vertices costs 0.026 ms; tracking which normals the one-ring dirtied, in two
+  places, to save a fortieth of a frame is a stale-normal bug waiting to happen.
+  What mattered was not *allocating* to do it — three buffers in rotation now.
+- **Clay stays at 24 divisions.** The faceting in the first screenshot is real,
+  but picking is linear over triangles at 0.072 ms per ray, so 48 divisions puts
+  ~1.2 ms per frame into raycasting alone. Density wants a BVH first.
+
+### Still open
+
+- Sparse undo, which unlocks 2048.
+- A BVH for picking, which unlocks a denser Clay.
+- Pencil Pro squeeze → tool palette at the tip (`UIPencilInteraction`,
+  iOS 18); the double tap is wired, squeeze is not.
+- The `lockWorldSize` toggle exists on the model but has no control in the UI.

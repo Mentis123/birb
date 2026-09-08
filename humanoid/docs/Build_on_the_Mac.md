@@ -63,6 +63,28 @@ size and strength. **Export** runs the real pre-flight and shows the checks.
 
 ---
 
+## What changed since the first device run
+
+The editor loop was rebuilt against what that run found. Everything below is new
+and none of it has been compiled against an Apple SDK, so expect the first build
+to want small fixes — that is the expected outcome, not a failure.
+
+| | |
+|---|---|
+| Every tool applies **live** | Only Grab did; the rest waited for pen-up |
+| Strokes resample by distance | One dab per Pencil event — the spikes |
+| Brush size in **screen points** | Was world metres, so right at one zoom only |
+| Paint is a sphere on the model | Was a disc in UV space, which bled across faces |
+| Pencil **hover ring** on the surface | Nothing until you touched |
+| Coalesced touches | Three of four Pencil samples were thrown away |
+| Input drained once per **frame** | The whole chain ran per event, up to 240 Hz |
+| Orbit and pan are separate gestures | One recogniser counting fingers — it jumped |
+| Pinch and pan run together | They blocked each other |
+| Orbit coasts after a flick | Stopped dead on lift |
+| Pencil double tap swaps Paint/Erase | — |
+| Three-finger tap shows the readout | No way to know the frame rate |
+| MSAA 4x | Aliased edges |
+
 ## What to look at first, in this order
 
 These are the things most likely to be wrong, and each one is diagnostic.
@@ -73,18 +95,22 @@ These are the things most likely to be wrong, and each one is diagnostic.
 2. **Is it inside out?** Front-facing winding is set to counter-clockwise and
    culling to back. If you can see the inside of the cube, one of those two
    disagrees with the template — which the Linux tests say winds outward.
-3. **Does the Pencil paint where you touch it?** Screen-to-ray is tested,
+3. **Does the hover ring appear before you touch, and sit ON the surface?** It
+   needs an Apple Pencil 2 on an M2-or-later iPad, or a Pencil Pro; older
+   hardware reports no hover and the ring simply never shows, which is not a
+   bug. It should fade in as the tip approaches and vanish while you draw.
+4. **Does the Pencil paint where you touch it?** Screen-to-ray is tested,
    including the top-left origin flip, so if the stroke lands somewhere else the
    suspect is `contentScaleFactor` — the code multiplies the touch location by
    it to get drawable pixels, and if the view's scale and the drawable's size
    ever disagree, that is where.
-4. **Does one drag make one undo step?** Grab applies live, so it calls `sculpt`
+5. **Does one drag make one undo step?** Grab applies live, so it calls `sculpt`
    dozens of times per gesture; `beginStroke`/`endStroke` merge them. If undo
    takes back a single frame, the group is not being opened or closed.
-5. **Does it hold 60 fps?** The whole vertex buffer is re-uploaded after every
-   stroke — 4,000 vertices, 128 KB. That should be free. If it is not, that is
-   the first thing to make incremental, and `Sculpt.apply` already returns
-   exactly which vertices moved.
+6. **Does it hold 120 fps?** Three-finger tap and read it off. Budget: under
+   2 ms of CPU per frame for input plus sculpt at the default brush. If it is
+   over, the readout says whether the time is CPU or GPU before you start
+   guessing.
 
 ## What I would not chase yet
 

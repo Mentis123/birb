@@ -20,6 +20,7 @@ struct EditorView: View {
 
             VStack(spacing: 0) {
                 topBar
+                if editor.showStats { statsOverlay }
                 Spacer()
                 bottomBar
             }
@@ -48,6 +49,12 @@ struct EditorView: View {
             .toggleStyle(.button)
             .help("Mirror every stroke")
 
+            Toggle(isOn: $editor.stabilise) {
+                Image(systemName: "scribble.variable")
+            }
+            .toggleStyle(.button)
+            .help("Steady the stroke")
+
             Button { editor.frameModel() } label: { Image(systemName: "viewfinder") }
 
             Button { showingExport = true } label: {
@@ -61,6 +68,22 @@ struct EditorView: View {
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
         .tint(Self.accent)
+    }
+
+    /// Three-finger tap toggles this.
+    ///
+    /// It exists because the honest answer to "does it hold 60 fps?" was "there
+    /// is no way for you to know". A device report without numbers is an
+    /// impression; this is the on-device counterpart of the build-box bench.
+    private var statsOverlay: some View {
+        Text(editor.hud)
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(8)
+            .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 18)
     }
 
     private var bottomBar: some View {
@@ -87,8 +110,11 @@ struct EditorView: View {
             }
 
             HStack(spacing: 18) {
+                // Size is in SCREEN points, converted to metres at whatever
+                // depth the brush lands on. A brush fixed in world units is the
+                // right size at exactly one zoom.
                 labelled("Size") {
-                    Slider(value: $editor.radius, in: 0.005...0.12)
+                    Slider(value: $editor.radiusPoints, in: 8...140)
                 }
                 labelled("Strength") {
                     Slider(value: $editor.strength, in: 0.05...1.0)

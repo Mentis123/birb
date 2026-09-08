@@ -159,8 +159,23 @@ public struct Camera: Sendable {
     /// Grab needs this: the finger travels in pixels and the vertex has to
     /// travel in metres, or dragging feels wrong at every zoom but one.
     public func worldDelta(screenDelta: Vec2, viewport: Vec2, depth: Double) -> Vec3 {
-        let visibleHeight = 2 * tan(fieldOfView / 2) * depth
-        let perPixel = visibleHeight / viewport.y
+        let perPixel = metresPerPixel(depth: depth, viewportHeight: viewport.y)
         return right * (screenDelta.x * perPixel) - up * (screenDelta.y * perPixel)
+    }
+
+    /// How many metres one screen pixel covers at a given depth.
+    ///
+    /// This is what makes a brush size in **screen pixels** possible, which is
+    /// what ZBrush and Nomad both default to and what the app now does. A brush
+    /// fixed in world metres is the wrong size at every zoom but one: zoom in to
+    /// work on a detail and the brush swallows it. Fixed on screen, zooming in
+    /// buys finer detail for free, and the hover ring stays the size the finger
+    /// expects.
+    ///
+    /// Depth is the distance from the eye to the surface being worked, so a
+    /// brush stays the same size on screen wherever it lands on the model.
+    public func metresPerPixel(depth: Double, viewportHeight: Double) -> Double {
+        guard viewportHeight > 0 else { return 0 }
+        return 2 * tan(fieldOfView / 2) * depth / viewportHeight
     }
 }

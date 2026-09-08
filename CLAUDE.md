@@ -770,16 +770,41 @@ and `MeshTables` keys its weld map on the quantised coordinate TRIPLE, never a
 hash of it (a hash welded 3,750 vertices down to 2,024, fusing unrelated parts
 of the surface).
 
-**First device run (2026-09-08):** the app compiled and ran on the iPad first
-time; everything the Linux tests covered worked. What did not was diagnosed in
-`humanoid/docs/Editor_Feel_Plan.md` (inflate/smooth/paint applied only at pen-up
-with one dab per Pencil event — the "inside-out" spikes; UV-space paint bleeding
-across atlas tiles; input-paced rendering) and researched in
-`humanoid/docs/Performance_Research.md` (sourced platform facts + a measured
-core bench: every sculpt op < 0.2 ms, so the lag is scheduling, not maths; naive
-projection paint 6.3 ms at the largest brush, so it is built Blender-style).
-Read both before touching the editor loop. Bench:
-`BABY_BLENDER_BENCH=1 swift test -c release --filter BenchmarkTests`.
+**First device run, and the editor rebuild (2026-09-08):** the app compiled and
+ran on the iPad first time; everything the Linux tests covered worked. The three
+things that did not are now fixed, and the whole story — diagnosis, sourced
+platform research, measured numbers, what shipped — is in
+`humanoid/docs/Editor_Feel_Plan.md` and `humanoid/docs/Performance_Research.md`.
+**Read both before touching the editor loop.** The short version:
+
+- **"Sometimes it goes inside out" was never winding.** Inflate, Deflate, Smooth
+  and Paint did nothing until pen-up and then stamped ONE DAB PER PENCIL EVENT at
+  a per-gesture amount, so a held pen extruded a spike that folded through
+  itself. Reproduced headless in `SculptStrokeTests`, where the surface stops
+  being raycastable. Strokes are resampled to a dab per quarter radius now, and
+  a stroke advances by POINTER travel — measured by the surface instead, Inflate
+  partly measures its own output.
+- **Paint bled across the atlas because a disc in UV space always will.** The
+  brush is a sphere in world space now (`SurfacePaint`), with the texels each
+  triangle owns precomputed — legal because topology and UVs are immutable.
+- **The lag was scheduling, not maths.** Every sculpt op is under 0.2 ms; the
+  whole chain simply ran per event at up to 240 Hz. Input is queued and drained
+  once per frame now.
+
+Four performance traps recorded there, each of which cost a measured pass:
+dilating every triangle's texel footprint (not just island edges) made the paint
+map own 195% of the texture and was SLOWER than the naive painter; three signed
+`Int` divisions by 255 cost more than all the geometry above them; four nested
+`withUnsafeBufferPointer` closures defeated the type checker, and a body the
+compiler cannot type is one it does not optimise; and **`@testable import`
+numbers are not release numbers** — it compiles the library with
+`-enable-testing`, which hid several fold of this loop's cost.
+
+Benching: `swift build -c release && ./.build/release/humanoid-cli bench` is the
+authority (it opens with a control loop that calibrates the machine, so nothing
+gets called slow without a baseline). `BABY_BLENDER_BENCH=1 swift test -c release
+--filter BenchmarkTests` still covers the sculpt path, where the difference does
+not signify. Three-finger tap in the app shows the on-device readout.
 
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity

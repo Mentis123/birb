@@ -207,3 +207,46 @@ final class CameraTests: XCTestCase {
         XCTAssertLessThan(dot(camera.target - before, camera.right), 0)
     }
 }
+
+/// Screen-space brush sizing.
+extension CameraTests {
+    func testOnePixelCoversLessGroundWhenTheCameraIsCloser() {
+        let camera = Camera(fieldOfView: 50 * .pi / 180)
+        let near = camera.metresPerPixel(depth: 0.2, viewportHeight: 1000)
+        let far = camera.metresPerPixel(depth: 2.0, viewportHeight: 1000)
+        XCTAssertEqual(far / near, 10, accuracy: 1e-9,
+                       "ten times as far away, a pixel must cover ten times as much")
+    }
+
+    func testAPixelBrushKeepsItsScreenSizeAtEveryZoom() {
+        // The property the whole convention rests on: convert a fixed pixel
+        // radius at the hit depth and the brush projects to the same number of
+        // pixels however far away the surface is.
+        let camera = Camera(fieldOfView: 50 * .pi / 180)
+        let viewportHeight = 1200.0
+        let pixels = 44.0
+        for depth in [0.1, 0.35, 1.0, 4.0] {
+            let metres = pixels * camera.metresPerPixel(depth: depth,
+                                                        viewportHeight: viewportHeight)
+            // Project it back: half-angle subtended, over the half-angle of the
+            // whole view, times half the viewport.
+            let backToPixels = metres / (2 * tan(camera.fieldOfView / 2) * depth) * viewportHeight
+            XCTAssertEqual(backToPixels, pixels, accuracy: 1e-9)
+        }
+    }
+
+    func testMetresPerPixelAgreesWithWorldDelta() {
+        // Two entry points, one number. If they drift, a drag and a brush
+        // disagree about how big a pixel is.
+        let camera = Camera(distance: 0.6, azimuth: 0.4, elevation: 0.3)
+        let viewport = Vec2(900, 1400)
+        let delta = camera.worldDelta(screenDelta: Vec2(37, 0), viewport: viewport, depth: 0.5)
+        XCTAssertEqual(length(delta),
+                       37 * camera.metresPerPixel(depth: 0.5, viewportHeight: viewport.y),
+                       accuracy: 1e-12)
+    }
+
+    func testAZeroHeightViewportDoesNotDivideByZero() {
+        XCTAssertEqual(Camera().metresPerPixel(depth: 1, viewportHeight: 0), 0)
+    }
+}

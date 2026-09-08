@@ -156,6 +156,12 @@ case "bench":
     benchMesh.recomputeNormals(benchTables)
     print("BENCH clay \(benchMesh.vertexCount) verts / \(benchMesh.triangleCount) tris")
 
+    // Picking is linear over triangles and runs once per queued sample plus
+    // once per hover event, so it sets the ceiling on how dense Clay can get.
+    time("Picking.raycast over \(benchMesh.triangleCount) triangles", iterations: 200) {
+        _ = Picking.raycast(benchMesh, origin: Vec3(0.01, 0.02, 5), direction: Vec3(0, 0, -1))
+    }
+
     for size in [1024, 2048] {
         var canvas = PNG.Image.solid(width: size, height: size, r: 200, g: 200, b: 200)
         var map: SurfacePaint.Map!
