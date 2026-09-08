@@ -3472,6 +3472,7 @@
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       var { createFrameSampler } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
+      var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
       // that read — so a `const` declared there sat in its temporal dead zone
@@ -4323,6 +4324,49 @@
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
 
+    // Bloom. The one post-processing effect in the game, and the only thing
+    // in this session gated on the owner's ten-minute phone playtest coming
+    // back clean. Hand-written as ONE merged pass (bright + two half-res
+    // blurs + a composite that also does the vignette) rather than an
+    // EffectComposer stack, because a stack costs a full-screen pass per
+    // effect and this device is fill-rate bound.
+    //
+    // Dropped entirely at tier 1: an optional overlay goes before distant
+    // detail, which goes before resolution.
+    let bloomPass = null;
+    try {
+      bloomPass = createBloomPass(THREE, renderer, {
+        // Rings, drone cores and the city mast collar are the emissives worth
+        // blooming; the sky and lit terrain must stay below the knee or the
+        // whole frame glows and reads as a smeared lens.
+        threshold: 0.78,
+        softness: 0.24,
+        strength: 0.78,
+        vignette: 0.42,
+      });
+    } catch (bloomError) {
+      console.warn('Bloom unavailable; rendering without it', bloomError);
+      bloomPass = null;
+    }
+    let bloomEnabled = !isLowEnd;
+
+    /**
+     * The single place a frame reaches the screen.
+     *
+     * Both the game loop and the share-screenshot path go through here, so a
+     * shared image and the live frame can never differ — and the render
+     * target is always returned to the canvas, which a bloom pass otherwise
+     * leaves pointing at an offscreen buffer.
+     */
+    function presentFrame() {
+      if (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1) {
+        bloomPass.render(scene, cameraState.camera);
+        return;
+      }
+      renderer.setRenderTarget(null);
+      renderer.render(scene, cameraState.camera);
+    }
+
     // ===== Proximity cue state =====
     // Pre-allocated working vectors (zero-alloc per frame).
     // proxState.targets is rebuilt on environment change (a plain array of
@@ -5121,7 +5165,7 @@
           let files = null;
           try {
             if (renderer && scene && cameraState?.camera) {
-              renderer.render(scene, cameraState.camera);
+              presentFrame();
               const blob = await new Promise((resolve) =>
                 renderer.domElement.toBlob(resolve, 'image/jpeg', 0.85));
               if (blob) {
@@ -6612,6 +6656,10 @@
 
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(nextWidth, nextHeight, false);
+      // The offscreen targets are sized in DEVICE pixels; a rotation that
+      // changes either the CSS size or the DPR leaves them stale, and a stale
+      // bloom target shows last orientation's frame stretched over this one.
+      if (bloomPass) bloomPass.setSize(nextWidth, nextHeight, pixelRatio);
       if (cameraState) {
         const camera = cameraState.camera;
         camera.aspect = nextWidth / nextHeight;
@@ -8339,7 +8387,7 @@
         }
       }
 
-      renderer.render(scene, cameraState.camera);
+      presentFrame();
     };
 
     function handleContextLost(event) {

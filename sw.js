@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v29-2026-09-06-atmosphere';
+const CACHE_VERSION = 'v30-2026-09-06-bloom';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -72,6 +72,7 @@ const CORE_ASSETS = [
   './src/nesting/aim-rig.js',
   './src/nesting/rocket.js',
   './src/nesting/drone-system.js',
+  './src/effects/bloom-pass.js',
   './src/effects/contact-shadow.js',
   './src/effects/burst-signatures.js',
   './src/effects/particles.js',
