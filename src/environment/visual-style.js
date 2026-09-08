@@ -431,3 +431,49 @@ export function addRimLight(material, THREE, { color = 0x9fe8ff, power = 3.0, st
   material.userData.birbRim = uniforms;
   return uniforms;
 }
+
+/**
+ * Cap how large a Points material may draw a single particle.
+ *
+ * `sizeAttenuation` scales a point by `scale / -mvPosition.z`, with no upper
+ * bound at all — so a particle that drifts within a metre of the camera is
+ * drawn hundreds of pixels across. On a phone that is a soft disc covering a
+ * quarter of the screen, appearing and vanishing for no reason the player can
+ * see, and it was reported from a real device as exactly that: pale circles
+ * showing up sporadically over the trees.
+ *
+ * The fix cannot be a smaller `size`, because that shrinks the particle at
+ * every distance and the effect is tuned for the distance it is normally seen
+ * at. It has to be a clamp, and PointsMaterial has no option for one — so the
+ * clamp is injected straight after Three sets gl_PointSize, before the depth
+ * and clipping chunks that read it.
+ *
+ * @param maxPixels ceiling in DEVICE pixels, so it is a real fraction of the
+ *                  screen rather than of a CSS layout that varies by DPR.
+ */
+export function clampPointSize(material, THREE, maxPixels = 46) {
+  if (!material || material.userData?.birbPointClamp) return material;
+  material.userData = material.userData || {};
+  material.userData.birbPointClamp = true;
+
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    shader.uniforms.uBirbMaxPoint = { value: maxPixels };
+    shader.vertexShader = 'uniform float uBirbMaxPoint;\n' + shader.vertexShader;
+    // logdepthbuf_vertex is the first chunk after gl_PointSize is assigned and
+    // scaled by the attenuation, so this is the earliest point the final value
+    // exists to be clamped.
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <logdepthbuf_vertex>',
+      'gl_PointSize = min(gl_PointSize, uBirbMaxPoint);\n\t#include <logdepthbuf_vertex>',
+    );
+  };
+
+  const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => `${base}-pointclamp-${maxPixels}`;
+  material.needsUpdate = true;
+  return material;
+}
