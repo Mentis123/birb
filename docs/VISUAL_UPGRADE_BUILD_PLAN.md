@@ -1066,3 +1066,38 @@ have to remember it, and one of them would not.
   watch for the tier dropping DPR where it never used to.
 - **Desktop density tier.** Still over the triangle budget, still low value
   for a phone demo.
+
+### 16.11 Follow-on: the wake, and a sky that was clipping
+
+**Ripples under a bird flying low over a lake** (`src/effects/wake.js`). One
+InstancedMesh, a fixed pool reused round robin, nothing allocated at runtime.
+It is what turns the water from a blue floor into a surface — the ripple
+gives it a plane, a scale, and a reaction to the player.
+
+The fade has to ride in `instanceColor`, because one InstancedMesh has a
+single material opacity for every instance and the alternative is a draw call
+per ripple. **`instanceColor` tints; it does not set alpha.** Under normal
+blending a half-faded ripple is a fully opaque dark grey ring, and the first
+build drew a stack of charcoal hoops on a pale lake. Additive blending makes
+a dark instance colour contribute nothing, which is exactly a fade — and
+light added to water is what a ripple catching the sun actually is.
+
+Then it was far too bright, twice: additive onto an already-pale lake clips,
+and once it clips the bloom pass finds it and the ripple becomes a
+searchlight. 0.34 clipped, 0.17 could not be found, shipped at 0.26. That one
+is worth re-judging on a phone.
+
+**The sky's glows are now self-limiting.** The horizon band and the sun's
+broad halo are additive, and additive light onto a sky that is already near
+white does not glow — it clips, and a wide soft term clips over a wide soft
+area. The mountain's pale cream horizon (`0xf3e9ce` is 0.89 in linear) plus a
+0.18 band plus the sun's outer lobe turned the upper third of that world into
+a flat white slab. Both terms are now scaled by the sky's remaining headroom,
+which keeps the forest's deep sunset glow at full strength and gives the pale
+skies their gradient back.
+
+The mountain palette was deepened to match, and its lighting rebalanced from
+ambient 1.02 / key 1.32 to ambient 0.62 / key 1.72. **Snow reads by contrast,
+and high ambient of a near-white sky colour is exactly what destroys it** —
+every face lands on the same value and the terrain loses its form. The direct
+light does the work now and the shadows are allowed to go blue.
