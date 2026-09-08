@@ -1,5 +1,6 @@
 import * as THREE from "https://esm.sh/three@0.183.2";
 import { BURST_SIGNATURES } from "./burst-signatures.js";
+import { clampPointSize } from "../environment/visual-style.js";
 
 const AMBIENT_COUNT = 80;
 
@@ -182,6 +183,9 @@ export class ParticleSystem {
         color: 0xffc677, size: 0.8, map: this.texture, transparent: true,
         blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
       });
+      // A spark at size 0.8 that spawns a metre from the camera is drawn
+      // hundreds of pixels across; see clampPointSize.
+      clampPointSize(material, THREE, 64);
       const points = new THREE.Points(geometry, material);
       points.frustumCulled = false;
       points.visible = false;
@@ -314,6 +318,11 @@ export class ParticleSystem {
       depthWrite: false,
       sizeAttenuation: true,
     });
+    // These drift freely and the camera flies through them, so without a cap
+    // one lands in front of the lens every so often as a screen-filling pale
+    // disc. Tighter than the spark clamp: an ambient mote has no business
+    // being large at all.
+    clampPointSize(material, THREE, 40);
 
     const points = new THREE.Points(geometry, material);
     this.scene.add(points);

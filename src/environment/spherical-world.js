@@ -2872,8 +2872,14 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // Create the sphere ground with terrain displacement + vertex coloring
   // Desktop 128×96 = ~24K tris; mobile 96×64 trims vertex/raster cost while
   // keeping the silhouette readable under flat shading.
-  const groundWidthSeg = _isMobile() ? 96 : 128;
-  const groundHeightSeg = _isMobile() ? 64 : 96;
+  // Mobile raised from 96x64. At the old resolution a vertex fell every eight
+  // units of arc, which is coarser than the detail noise displacing it — so
+  // the ground read as large flat facets and the horizon silhouette stepped.
+  // 120x76 was tried first and put the city at 79.7k against an 80k budget,
+  // which is not headroom, it is luck. 112x72 costs about four thousand
+  // triangles and leaves every biome a real margin.
+  const groundWidthSeg = _isMobile() ? 112 : 128;
+  const groundHeightSeg = _isMobile() ? 72 : 96;
   const sphereGeometry = new THREE.SphereGeometry(sphereRadius, groundWidthSeg, groundHeightSeg);
   const terrainData = displaceSphereGeometry(sphereGeometry, sphereRadius, variant);
 

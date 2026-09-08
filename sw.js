@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v38-2026-09-08-nest-light-and-mist';
+const CACHE_VERSION = 'v39-2026-09-08-sharper-no-flock';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -61,7 +61,6 @@ const CORE_ASSETS = [
   './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
   './src/environment/sun-cycle.js',
-  './src/environment/flock.js',
   './src/environment/water.js',
   './src/environment/city-windows.js',
   './src/environment/weather.js',

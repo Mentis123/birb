@@ -1210,3 +1210,51 @@ subject entirely. Now 0.58 capped at 0.56.
 Both were found by looking at the eight-tile contact sheet, and neither would
 have been found any other way: every automated gate was green, the game was
 playable, and the frames were rendering exactly what they were told to.
+
+### 16.15 First real-device pass
+
+An iPhone, running the shipped build, reported smooth with everything on.
+Three things came out of it.
+
+**The flock is gone.** Verbatim: *"not sure what the little bird arrow things
+in the sky are... don't want."* Two rounds went into making it read — a V
+formation, a span-only wingbeat, a sweep anchored to the player's own facing
+(16.13) — and at the distance it has to sit to be a flock rather than air
+traffic, it still read as marks on the sky. `src/environment/flock.js` is
+deleted rather than flag-disabled: a dead flag is one more thing the next
+person has to work out the status of.
+
+**Pale discs appearing over the scenery were the particle system.**
+`PointsMaterial` with `sizeAttenuation` scales a point by `scale / -mvPosition.z`
+with **no upper bound**, so an ambient mote or an impact spark that drifts
+within a metre of the camera is drawn hundreds of pixels across. It is in
+several of this session's own captures, noted at the time as "a lovely glowing
+green orb" and not recognised.
+
+The fix cannot be a smaller `size` — that shrinks the particle at every
+distance, and the effect is tuned for the distance it is normally seen at. It
+has to be a clamp, and `PointsMaterial` has no option for one, so
+`clampPointSize` injects `gl_PointSize = min(gl_PointSize, uBirbMaxPoint)`
+immediately after Three assigns and attenuates it, before the chunks that read
+it. Ambient motes cap at 40 device pixels, sparks at 64.
+
+**The mobile DPR cap went from 1.2 to 1.7.** On a phone reporting
+`devicePixelRatio` 3, a 1.2 cap renders at 40% of the panel's linear
+resolution, and every edge in the world is visibly stepped. It is the single
+largest thing between this and "sharp", and no amount of shading work
+compensates for it. Safe to raise because it is a CEILING, not a setting:
+`getQualityPixelRatio` drops to 1.0 at tier 1 and 0.85 at tier 2, driven by
+measured frame rate, so a device that cannot hold it sheds it within seconds.
+
+Ground mesh also raised on mobile, 96x64 to 112x72 — at the old resolution a
+vertex fell every eight units of arc, coarser than the detail noise displacing
+it, so the ground read as large flat facets. 120x76 was tried first and put
+the city at 79.7k against an 80k budget, which is not headroom, it is luck.
+
+All four biomes now measure 62-65 draw calls and 76-77k triangles at tier 0.
+
+**Next lever, deliberately NOT taken:** MSAA on the bloom pass's scene target.
+It would fix edge quality directly, and at DPR 1.7 with a half-float target it
+is roughly 30MB and four times the bandwidth of the scene pass — too large a
+bet to place without a frame-time measurement on the device itself. Raising
+DPR was chosen instead because it is self-correcting and MSAA is not.

@@ -115,6 +115,20 @@
 > dark material far more than a bright one, which is how a sun rim turned the
 > city's 0.09-linear asphalt into pale snow.
 
+> **First real-device pass** (§16.15). Three findings from an iPhone running
+> the shipped build. **The flock is deleted** — playtest could not tell what
+> the chevrons in the sky were, after two rounds of trying to make them read.
+> **`PointsMaterial` with `sizeAttenuation` has no upper size bound**, so an
+> ambient mote or spark drifting within a metre of the camera draws hundreds
+> of pixels across as a pale disc over the scenery; `clampPointSize` injects
+> `gl_PointSize = min(...)` after Three attenuates it, because a smaller
+> `size` would shrink the particle at every distance instead. **The mobile DPR
+> cap is 1.7, up from 1.2** — on a `devicePixelRatio` 3 phone the old cap
+> rendered at 40% of the panel's linear resolution, and no amount of shading
+> work compensates for that. It is safe to raise because it is a ceiling the
+> adaptive tier still drops to 1.0 and 0.85 on measured frame rate. Budgets
+> after all of it: 62-65 draw calls, 76-77k triangles, every biome.
+
 > **Next round is planned, not built:** `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §14.
 > Ranked by what this session measured. The headline: one enum (tone mapping)
 > was the largest visual change of the whole session, and every geometry or
