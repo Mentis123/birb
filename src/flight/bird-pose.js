@@ -74,3 +74,68 @@ export function tailPitchOffset(pitchInput) {
   const p = Number.isFinite(pitchInput) ? Math.max(-1, Math.min(1, pitchInput)) : 0;
   return (p >= 0 ? -p * 0.16 : -p * 0.12) || 0;
 }
+
+/**
+ * The wing-beat cycle.
+ *
+ * The old flap was a symmetric sine at a fixed 6.8 Hz that ran only while
+ * climbing. Nothing alive moves like that. Three things separate a bird from
+ * an oscillator, and all three are cheap:
+ *
+ *  1. **The stroke is asymmetric.** The downstroke is the power stroke and is
+ *     FAST; the upstroke is a slower recovery. A sine spends equal time in
+ *     both and reads as a machine.
+ *  2. **The wing folds on the way up.** A bird that kept its wing fully
+ *     extended on the upstroke would push itself back down. Span pulls in on
+ *     recovery and extends again for the next beat.
+ *  3. **Birds flap in BURSTS.** A few beats, then a glide. Continuous
+ *     flapping at a constant rate is the single most artificial thing a
+ *     procedural bird can do.
+ *
+ * `phase01` is where we are in one beat, 0 at the top of the downstroke.
+ * Returns the wing angle offset and a span multiplier.
+ */
+export function wingBeat(phase01) {
+  const p = Number.isFinite(phase01) ? phase01 - Math.floor(phase01) : 0;
+  // Downstroke occupies the first 38% of the beat and covers the full sweep;
+  // the remaining 62% returns the wing more gently.
+  const DOWN = 0.38;
+  let sweep;
+  let folding;
+  if (p < DOWN) {
+    // Fast power stroke, eased so it starts and ends smoothly rather than
+    // snapping at the turnaround.
+    const t = p / DOWN;
+    sweep = -Math.sin(t * Math.PI) * 1.0;
+    folding = 0;
+  } else {
+    // Slow recovery, and the wing draws in while it rises.
+    const t = (p - DOWN) / (1 - DOWN);
+    sweep = Math.sin(t * Math.PI) * 0.55;
+    folding = Math.sin(t * Math.PI);
+  }
+  return {
+    // Radians, added to the wing's base rotation with the mirror sign rule.
+    angle: sweep * 0.52,
+    // Multiplier on wing span: pulled in during recovery.
+    span: 1 - folding * 0.22,
+  };
+}
+
+/**
+ * Burst-and-glide cadence: how hard the bird should be beating right now.
+ *
+ * Returns 0 during a glide and 1 mid-burst, with short ramps so a burst does
+ * not start or stop on a single frame. Deterministic in `elapsed` so it needs
+ * no state and cannot drift between the two wings.
+ */
+export function beatEnvelope(elapsed, { burst = 1.55, glide = 1.15, ramp = 0.22 } = {}) {
+  const t = Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
+  const period = burst + glide;
+  const inCycle = t % period;
+  if (inCycle >= burst) return 0;
+  // Ramp in at the start of the burst and out at its end.
+  const up = Math.min(1, inCycle / ramp);
+  const down = Math.min(1, (burst - inCycle) / ramp);
+  return Math.max(0, Math.min(up, down));
+}

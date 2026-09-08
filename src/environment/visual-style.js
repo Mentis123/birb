@@ -1,6 +1,122 @@
 // Shared, bounded WebGL art tools. THREE is injected to keep geometry testable
 // in Node without changing the game's pinned CDN dependency.
-export const visualUniforms = { time: { value: 0 }, wind: { value: 1 } };
+export const visualUniforms = {
+  time: { value: 0 },
+  wind: { value: 1 },
+  // Colour the valley mist takes. Set per environment from the sky's own mid
+  // tone — grey mist in a golden world reads as fog on a camera lens, not as
+  // air. Mutated in place so every material shares one uniform object.
+  mistColor: { value: null },
+  // 0 disables cloud shadows and mist without recompiling anything.
+  atmosphere: { value: 1 },
+};
+
+/**
+ * Atmosphere: drifting cloud shadows, valley mist, macro tint variation.
+ *
+ * The most expensive-looking thing you can do to a stylised world is also one
+ * of the cheapest: large, slow, low-frequency variation in VALUE across the
+ * ground. Real outdoor space is never uniformly lit, and a flat-shaded world
+ * with one directional light is uniformly lit everywhere the sun reaches.
+ *
+ * Three terms, one fragment injection, no extra pass and no extra draw call:
+ *
+ *  - Cloud shadows. A slow-scrolling noise multiplied into the outgoing light.
+ *    This is the single biggest one, because it puts the whole world in MOTION
+ *    without moving a vertex, and motion is what the eye reads as alive.
+ *  - Valley mist. Fog is one global density, so the carved valleys — 24 to 46
+ *    units deep — have exactly the same air in them as the ridge tops. Adding
+ *    depth-driven mist below the base radius is aerial perspective, which is
+ *    the strongest depth cue there is at this scale.
+ *  - Macro tint. A very low-amplitude hue drift so a large flat surface is
+ *    never one colour across the whole screen.
+ *
+ * Chains onto any existing onBeforeCompile (the canopies already carry the
+ * wind injection) rather than replacing it.
+ */
+export function addAtmosphere(material, THREE, { baseRadius = 120, cloudStrength = 0.42 } = {}) {
+  if (!material || material.userData.birbAtmosphere) return material;
+  material.userData.birbAtmosphere = true;
+  if (!visualUniforms.mistColor.value) visualUniforms.mistColor.value = new THREE.Color(0x9fb8bd);
+
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+
+    shader.uniforms.uBirbTime = visualUniforms.time;
+    shader.uniforms.uBirbMist = visualUniforms.mistColor;
+    shader.uniforms.uBirbAtmos = visualUniforms.atmosphere;
+    shader.uniforms.uBirbBase = { value: baseRadius };
+    shader.uniforms.uBirbCloud = { value: cloudStrength };
+
+    // The world position varying may already exist from another injection;
+    // a distinct name avoids redeclaring it.
+    shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       // The instance transform is applied in <project_vertex>, AFTER this
+       // chunk, so modelMatrix alone gives every instance the position of the
+       // unit geometry at the world origin. That made length(worldPos) ~0 for
+       // every tree in the world, so the mist term saw them all as 120 units
+       // below the base radius and painted the entire forest flat grey.
+       vec4 birbWorldPos = vec4(transformed, 1.0);
+       #ifdef USE_INSTANCING
+         birbWorldPos = instanceMatrix * birbWorldPos;
+       #endif
+       vBirbWorld = (modelMatrix * birbWorldPos).xyz;`,
+    );
+
+    shader.fragmentShader =
+      'uniform float uBirbTime; uniform vec3 uBirbMist; uniform float uBirbAtmos;\n'
+      + 'uniform float uBirbBase; uniform float uBirbCloud;\n'
+      + 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
+
+    shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+      // ── Cloud shadows ────────────────────────────────────────────────
+      // Two crossed sine fields at different scales and drift rates. Cheaper
+      // than value noise and, at this size on screen, indistinguishable from
+      // it: what matters is that the pattern is large, soft and never repeats
+      // visibly within one view. Sampled in 3D world space so it wraps around
+      // the planet without seams and needs no UV parameterisation.
+      vec3 cp = vBirbWorld * 0.0135;
+      float drift = uBirbTime * 0.021;
+      float c1 = sin(cp.x + drift) * sin(cp.z * 1.17 - drift * 0.8) * sin(cp.y * 0.83);
+      float c2 = sin(cp.x * 2.3 - drift * 1.4) * sin(cp.z * 1.9 + drift) ;
+      float clouds = smoothstep(-0.15, 0.55, c1 * 0.65 + c2 * 0.35);
+      outgoingLight *= mix(1.0, 1.0 - uBirbCloud, clouds * uBirbAtmos);
+
+      // ── Macro tint ───────────────────────────────────────────────────
+      float macro = sin(vBirbWorld.x * 0.037) * sin(vBirbWorld.z * 0.041) * sin(vBirbWorld.y * 0.033);
+      outgoingLight *= 1.0 + macro * 0.05 * uBirbAtmos;
+
+      // ── Valley mist ──────────────────────────────────────────────────
+      // Terrain carves DOWNWARD only (see spherical-world.js), so depth below
+      // the base radius is exactly "how far into a valley this fragment is".
+      //
+      // But depth ALONE is not aerial perspective, and the first version got
+      // this wrong in a way that was obvious the moment it rendered: the bird
+      // spends most of its time inside a valley, so every tree beside it was
+      // fully misted and the near field washed out to flat grey-green. Air
+      // only accumulates over DISTANCE. Both factors, multiplied: how deep
+      // the fragment sits, and how much air is between it and the eye.
+      float below = max(0.0, uBirbBase - length(vBirbWorld));
+      float depthFactor = 1.0 - exp(-below * 0.045);
+      float viewDist = length(cameraPosition - vBirbWorld);
+      float distFactor = 1.0 - exp(-viewDist * 0.022);
+      float mist = depthFactor * distFactor * 0.70 * uBirbAtmos;
+      outgoingLight = mix(outgoingLight, uBirbMist, clamp(mist, 0.0, 0.72));
+
+      #include <opaque_fragment>
+    `);
+  };
+
+  const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => base + '-atmos-v1';
+  return material;
+}
 
 export function createCanopyGeometry(THREE, kind = 0) {
   // All variants retain the old envelope: radius <= 1, base y=0, crown y=1.

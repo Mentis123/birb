@@ -1,4 +1,4 @@
-import { createCanopyGeometry, addFoliageWind, bakeGroundContacts } from './visual-style.js';
+import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
@@ -2813,6 +2813,21 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   }
 
   bakeGroundContacts(THREE, sphereGeometry, root);
+
+  // Atmosphere on every opaque surface in the world. It has to be EVERY
+  // surface, not just the ground: a cloud shadow that darkens the terrain and
+  // leaves the trees standing in it at full brightness reads as a texture bug
+  // rather than as weather. Transparent layers (clouds, canopy ceilings, the
+  // water) are skipped — mist over glass is fog on a lens.
+  root.traverse((object) => {
+    const material = object.material;
+    if (!material) return;
+    const list = Array.isArray(material) ? material : [material];
+    for (const m of list) {
+      if (!m || m.transparent || m.isMeshBasicMaterial) continue;
+      addAtmosphere(m, THREE, { baseRadius: sphereRadius });
+    }
+  });
 
   console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions, ${proximityTargets.length} proximity targets`);
 

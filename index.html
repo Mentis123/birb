@@ -3471,6 +3471,9 @@
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       var { createFrameSampler } = await import("./src/game/frame-metrics.js");
+      var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
+      var { createBloomPass } = await import("./src/effects/bloom-pass.js");
+      var { createFlock } = await import("./src/environment/flock.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
       // that read — so a `const` declared there sat in its temporal dead zone
@@ -3479,7 +3482,7 @@
       // system and the rocket collision targets. The world still rendered, so
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
-      var { blendToward, perchPose, tumbleFlap, tailPitchOffset } = await import("./src/flight/bird-pose.js");
+      var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -4322,6 +4325,56 @@
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
 
+    // A distant flock. One draw call for fourteen birds, and the only thing
+    // in the world that moves of its own accord and is not trying to kill
+    // you. Scene-parented so it survives environment switches.
+    const flock = createFlock(THREE, { sphereRadius: 120 });
+    scene.add(flock.mesh);
+    const _flockCenter = new THREE.Vector3(0, 0, 0);
+
+    // Bloom. The one post-processing effect in the game, and the only thing
+    // in this session gated on the owner's ten-minute phone playtest coming
+    // back clean. Hand-written as ONE merged pass (bright + two half-res
+    // blurs + a composite that also does the vignette) rather than an
+    // EffectComposer stack, because a stack costs a full-screen pass per
+    // effect and this device is fill-rate bound.
+    //
+    // Dropped entirely at tier 1: an optional overlay goes before distant
+    // detail, which goes before resolution.
+    let bloomPass = null;
+    try {
+      bloomPass = createBloomPass(THREE, renderer, {
+        // Rings, drone cores and the city mast collar are the emissives worth
+        // blooming; the sky and lit terrain must stay below the knee or the
+        // whole frame glows and reads as a smeared lens.
+        threshold: 0.78,
+        softness: 0.24,
+        strength: 0.78,
+        vignette: 0.42,
+      });
+    } catch (bloomError) {
+      console.warn('Bloom unavailable; rendering without it', bloomError);
+      bloomPass = null;
+    }
+    let bloomEnabled = !isLowEnd;
+
+    /**
+     * The single place a frame reaches the screen.
+     *
+     * Both the game loop and the share-screenshot path go through here, so a
+     * shared image and the live frame can never differ — and the render
+     * target is always returned to the canvas, which a bloom pass otherwise
+     * leaves pointing at an offscreen buffer.
+     */
+    function presentFrame() {
+      if (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1) {
+        bloomPass.render(scene, cameraState.camera);
+        return;
+      }
+      renderer.setRenderTarget(null);
+      renderer.render(scene, cameraState.camera);
+    }
+
     // ===== Proximity cue state =====
     // Pre-allocated working vectors (zero-alloc per frame).
     // proxState.targets is rebuilt on environment change (a plain array of
@@ -4480,6 +4533,20 @@
     scene.add(glowLight);
 
     const lightingRig = { ambient, keyLight, rimLight, fillLight, glowLight };
+
+    // Sun cycle. The biome's own key position and colour are captured as the
+    // BASE when the environment loads; the cycle rotates and tints around
+    // that, so each biome keeps its identity while the light moves.
+    const sunState = {
+      enabled: true,
+      seconds: Math.random() * 600,   // Two sessions do not start at the same hour.
+      baseKeyColor: new THREE.Color(0xffe4b5),
+      baseKeyIntensity: 1.25,
+      baseRimIntensity: 0.48,
+      distance: 12,
+      _dir: new THREE.Vector3(),
+      _color: new THREE.Color(),
+    };
 
     const debugVectorState = (() => {
       const hasDebugVectors = new URLSearchParams(window.location.search).has("debugVectors");
@@ -5106,7 +5173,7 @@
           let files = null;
           try {
             if (renderer && scene && cameraState?.camera) {
-              renderer.render(scene, cameraState.camera);
+              presentFrame();
               const blob = await new Promise((resolve) =>
                 renderer.domElement.toBlob(resolve, 'image/jpeg', 0.85));
               if (blob) {
@@ -5600,7 +5667,17 @@
         // The pool's specular follows the same light as the sky's sun disc.
         // Aimed at a fixed direction instead, the glint sat on the wrong side
         // of the water in three of the four biomes.
+        // Remember what this biome asked for; the cycle rotates around it.
+        sunState.baseKeyColor.copy(lightingRig.keyLight.color);
+        sunState.baseKeyIntensity = lightingRig.keyLight.intensity;
+        sunState.baseRimIntensity = lightingRig.rimLight.intensity;
+        sunState.distance = lightingRig.keyLight.position.length() || 12;
         sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+        // Valley mist takes the sky's own mid tone. Grey mist in a golden
+        // world reads as fog on a lens; sky-coloured mist reads as air.
+        if (visualUniforms.mistColor.value && skyDome.getMidColor) {
+          visualUniforms.mistColor.value.copy(skyDome.getMidColor()).lerp(new THREE.Color(0xffffff), 0.18);
+        }
       }
       // Atmospheric haze: tint fog toward the sky's mid band so far geometry
       // dissolves softly into the painterly sky instead of a flat slate color.
@@ -6587,6 +6664,10 @@
 
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(nextWidth, nextHeight, false);
+      // The offscreen targets are sized in DEVICE pixels; a rotation that
+      // changes either the CSS size or the DPR leaves them stale, and a stale
+      // bloom target shows last orientation's frame stretched over this one.
+      if (bloomPass) bloomPass.setSize(nextWidth, nextHeight, pixelRatio);
       if (cameraState) {
         const camera = cameraState.camera;
         camera.aspect = nextWidth / nextHeight;
@@ -7993,11 +8074,23 @@
 
         // Subtle downward wing sweep during glide, stronger while banking.
         const glideSweep = gliding ? 0.18 + Math.min(Math.abs(yawInput), 1) * 0.14 : 0;
+        // Wing beat: asymmetric power stroke, wing folding on recovery, and a
+        // burst-then-glide cadence. A constant sine is the single most
+        // artificial thing a procedural bird can do, and that is what this
+        // was. Beats while climbing, and idles a slow beat otherwise so the
+        // bird is never completely inert in the air.
         let flapOffset = 0;
-        if (isAirborneVisual && climbing && !bankingHard) {
-          const flapFreq = 6.8;
-          const flapAmp = 0.34;
-          flapOffset = Math.sin(motionState.elapsed * flapFreq) * flapAmp;
+        let beatSpan = 1;
+        if (isAirborneVisual && !bankingHard) {
+          const drive = climbing ? 1 : 0.35;
+          const envelope = beatEnvelope(motionState.elapsed) * drive;
+          if (envelope > 0.001) {
+            // Beat rate rises with effort: a climbing bird works harder.
+            const rate = climbing ? 4.4 : 2.6;
+            const beat = wingBeat(motionState.elapsed * rate);
+            flapOffset = beat.angle * envelope;
+            beatSpan = 1 - (1 - beat.span) * envelope;
+          }
         }
 
         // Idle wing flutter — soft breathing-style oscillation when the bird
@@ -8028,7 +8121,7 @@
         if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = flex;
         if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = flex * 1.5;
         if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = flex * 1.5;
-        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span;
+        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span * beatSpan;
         const wingBlend = 1 - Math.exp(-delta * 8);
         leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
@@ -8109,6 +8202,41 @@
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
       visualUniforms.time.value = motionState.elapsed;
       visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
+
+      // Flock. Dropped at tier 2 with the other optional decoration.
+      if (flock) {
+        const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
+        flock.mesh.visible = showFlock;
+        if (showFlock) flock.update(motionState.elapsed, birdPos, _flockCenter);
+      }
+
+      // ===== Sun cycle =====
+      // One light position and one colour per frame. Everything that already
+      // follows the key light — the sky's sun disc, the water specular, the
+      // mist tint — moves with it for free. Reduced motion holds it still.
+      if (sunState.enabled && !reducedMotionState.enabled && lightingRig.keyLight) {
+        sunState.seconds += delta;
+        const sun = sunDirectionAt(sunState.seconds);
+        sunState._dir.set(sun.x, sun.y, sun.z).multiplyScalar(sunState.distance);
+        lightingRig.keyLight.position.copy(sunState._dir);
+        const warmth = sunWarmth(sun.height);
+        sunState._color.copy(sunState.baseKeyColor);
+        sunState._color.r *= warmth.r;
+        sunState._color.g *= warmth.g;
+        sunState._color.b *= warmth.b;
+        lightingRig.keyLight.color.copy(sunState._color);
+        lightingRig.keyLight.intensity = sunState.baseKeyIntensity * warmth.intensity;
+        // The rim counter-rotates a little so a silhouette keeps an edge at
+        // every point of the cycle rather than going flat when the sun is
+        // behind the camera.
+        if (lightingRig.rimLight) {
+          lightingRig.rimLight.position.set(-sun.x, Math.max(0.35, sun.y * 0.7), -sun.z)
+            .multiplyScalar(sunState.distance * 0.85);
+          lightingRig.rimLight.intensity = sunState.baseRimIntensity * (1.25 - sun.height * 0.4);
+        }
+        if (skyDome?.setSunDirection) skyDome.setSunDirection(lightingRig.keyLight.position);
+        sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+      }
       // Optional detail sheds before resolution does: the waterfall mist is
       // the largest transparent surface in the scene and the first thing a
       // fill-rate-bound phone should stop paying for.
@@ -8286,7 +8414,7 @@
         }
       }
 
-      renderer.render(scene, cameraState.camera);
+      presentFrame();
     };
 
     function handleContextLost(event) {
@@ -8732,7 +8860,12 @@
             tone: renderer.toneMapping,
           };
         },
+        // Where the flock actually lands on screen. Guessing at this from a
+        // capture wasted three attempts.
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
+        // Jump the sun cycle to a point in its period, for captures.
+        setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
+        setSunEnabled: (on) => { sunState.enabled = !!on; return sunState.enabled; },
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {

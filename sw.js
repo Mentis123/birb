@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v28-2026-09-06-neutral-tonemap';
+const CACHE_VERSION = 'v31-2026-09-06-flock';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -60,6 +60,8 @@ const CORE_ASSETS = [
   './src/environment/landmark-valley.js',
   './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
+  './src/environment/sun-cycle.js',
+  './src/environment/flock.js',
   './src/environment/visual-style.js',
   './src/nesting/nest-placement.js',
   './src/nesting/nest-occlusion.js',
@@ -71,6 +73,7 @@ const CORE_ASSETS = [
   './src/nesting/aim-rig.js',
   './src/nesting/rocket.js',
   './src/nesting/drone-system.js',
+  './src/effects/bloom-pass.js',
   './src/effects/contact-shadow.js',
   './src/effects/burst-signatures.js',
   './src/effects/particles.js',
