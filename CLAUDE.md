@@ -50,6 +50,16 @@
 > was the largest visual change of the whole session, and every geometry or
 > overlay effort failed. Item 1 (a ground shader pass: valley mist, cloud
 > shadows, macro noise) is the highest-value thing left and needs no phone.
+> **Fifth pass shipped the big build** (§15): an atmosphere fragment pass
+> (drifting cloud shadows, valley mist, macro tint) at zero draw calls, a
+> ten-minute sun cycle, hand-written half-res bloom as ONE merged pass, an
+> asymmetric wing beat with burst-and-glide cadence, and a distant flock.
+> Mobile now measures 61-70 draw calls and under 70k triangles with
+> everything on. Two traps recorded there: an instanced prop's world position
+> is NOT `modelMatrix * transformed` (the instance matrix lands in
+> `<project_vertex>`, after `<begin_vertex>`), and mist driven by depth alone
+> is not aerial perspective — it must also fall off with view distance.
+>
 > Platform research for September 2026 is in `docs/CUTTING_EDGE_2026.md`:
 > WebGPU is real but an enabler not an upgrade; iOS caps rAF at 60 Hz; and
 > iOS 26.5 cut the switch-based haptics trick to single ticks.

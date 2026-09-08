@@ -786,3 +786,55 @@ will also show whether the 55/58 fps thresholds are right. Nothing in items
 1-4 needs it. Item 5 does. Get the number.
 
 See also `docs/CUTTING_EDGE_2026.md`: what the platform actually offers in September 2026, ranked for this game. Two findings there touch shipped code — iOS caps rAF at 60 Hz, and iOS 26.5 reduced the switch-based haptics trick to single ticks.
+
+---
+
+## 15. Fifth pass — the big build (shipped)
+
+Owner cleared the gate: ten minutes on a real phone, nesting from a cold
+start, no stutter and no heat. That unlocked the fill-rate item, and the
+brief was "push until it is too much quality for the performance". Section 14
+items 1, 2, 3 and 5 shipped, plus one that was not on the list.
+
+| Shipped | What it does | Cost |
+|---|---|---|
+| **Atmosphere pass** | Drifting cloud shadows, valley mist with real aerial perspective, macro tint. One fragment injection on every opaque surface. | Zero draw calls. Measured identical: 60-61 per biome. |
+| **Sun cycle** | Ten-minute sweep, never below the horizon, rim light counter-rotates, warm at low sun. Sky disc, water specular and mist tint follow it free. | One light position and colour per frame. |
+| **Bloom + vignette** | Hand-written merged pass: bright-and-downsample, separable blur, composite. Three passes at HALF res plus ONE at full. | 4 draw calls. Off at tier 1 and on low-end. |
+| **Wing beat** | Asymmetric power/recovery stroke (38/62), wing folds on recovery, burst-then-glide cadence, rate scales with effort. | Pure maths, zero. |
+| **Distant flock** | Eighteen gull silhouettes wheeling around the player's own sky. | One draw call. Off at tier 2. |
+
+Final measured budget, mobile path, all effects on at tier 0: **61-70 draw
+calls and 27-70k triangles** across all eight views. Both inside the
+documented limits with real headroom.
+
+### Four bugs worth remembering, each found by a capture, not by reading
+
+**Instanced world position is not `modelMatrix * transformed`.** The instance
+transform is applied in `<project_vertex>`, AFTER `<begin_vertex>` where a
+varying gets written, so every instanced prop reported the position of the
+unit geometry at the world origin. The mist term read the entire forest as
+120 units underground and painted it flat grey. Guard any new world-space
+varying with `#ifdef USE_INSTANCING`.
+
+**Depth is not aerial perspective.** Mist driven by depth alone washed out
+everything beside the player, because the player spends most of their time
+inside a valley. Air accumulates over DISTANCE; both factors multiply.
+
+**A flock needs three separate things to be visible**, and each was measured
+rather than guessed: it must be at flight height on a great circle (a fixed-Y
+ring puts it 120+ units away and two pixels wide); the wheel must follow the
+PLAYER (a fixed great circle is on the far side of the planet most of the
+time); and the birds must be strung around the whole wheel (a tight cluster
+sat behind the camera — sixteen birds correctly positioned seventy-four units
+away, not one inside the frustum).
+
+**One `presentFrame()`, not two render calls.** The game loop and the
+share-screenshot path both go through it, so a shared image cannot differ
+from the live frame, and the render target is always returned to the canvas —
+which a bloom pass otherwise leaves pointing at an offscreen buffer.
+
+### Still not done
+
+Items 4, 6 and 7 of section 14: per-biome grade tuning (needs the owner on
+glass), mountain perches that can face a cliff, and the desktop density tier.
