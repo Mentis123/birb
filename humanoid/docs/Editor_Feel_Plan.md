@@ -5,6 +5,16 @@ built yet.** This is the brief for the next build pass. It is written from the
 code, not from guesses: every symptom below is traced to the lines that cause
 it.
 
+> **Read `Performance_Research.md` alongside this.** It carries the sourced
+> platform facts and the measured cost of the core
+> (`BABY_BLENDER_BENCH=1 swift test -c release --filter BenchmarkTests`).
+> The headline finding changes emphasis here: every sculpt operation is under
+> 0.2 ms, so the lag is *scheduling* (§1, §4), not maths. Do not thread it or
+> rewrite the core in Float. Paint is the one piece that needs real
+> engineering — the naive projection walk measured 6.3 ms at the largest brush
+> on 1024², so it is built Blender-style (precomputed texel runs + per-triangle
+> affine map, swept per frame) rather than as the naive loop sketched in §2.
+
 ## The first device test
 
 The app compiled, signed and ran on the first attempt. Mentis's report, and what
@@ -105,9 +115,14 @@ Consequences, all good:
 - **Seams are correct by construction**, in every orientation. `seamUVs` and
   `dabAcrossSeams` are deleted.
 - One brush radius, in metres, for sculpt and paint alike.
-- Cost: brush covering 2% of the surface ≈ 20k texels of a 1024² map, tens of
-  microseconds each in tight Swift. Well inside a 120 Hz frame. If it ever is
-  not, the triangle flood is trivially bounded.
+- Cost, **measured** (naive bounding-box walk, release, build box): 0.54 ms at
+  r = 0.03, 1.96 ms at r = 0.06, 6.31 ms at r = 0.12 on 1024². Fine at the
+  default brush, over budget at the largest once the albedo is 2048². So build
+  it the way Blender does (`Performance_Research.md` §4): the texels each UV
+  triangle covers and a pixel→position affine map are **template constants**
+  (topology and UVs never change) generated once; per frame, paint the swept
+  *segment* of the stroke as one capsule test over those runs rather than one
+  dab at a time. Expect 4–8x over the naive numbers.
 
 Tests to pin it (Linux): painting the centre of face +Z changes no texel outside
 +Z's tile; a dab straddling an edge changes texels in exactly the two adjacent
@@ -126,7 +141,9 @@ further.
 
 Also make it **incremental**: `Sculpt.apply` already returns the touched welded
 set. Recompute normals only for touched vertices plus their one-ring; the rest
-have not changed. This is the biggest single CPU saving in the loop.
+have not changed. Measured, the full pass is 0.056 ms on today's Clay and would
+be ~0.25 ms at 48 divisions — so this is hygiene that keeps cost independent of
+mesh size, not the fix for the lag.
 
 ## 4. Per-event work that should be per-frame
 
@@ -142,9 +159,9 @@ Today one Pencil event on Grab does all of this on the main thread:
   Float, and allocates a fresh 128 KB `MTLBuffer`.
 - `view.setNeedsDisplay()`.
 
-Each piece is cheap at 4k vertices; the problem is that the whole chain runs
-**per event at up to 240 Hz**, and the render is paced by input rather than by
-the display. That is where "laggy / glitchy" comes from on a display refreshing
+Each piece is cheap — the whole per-event chain measures 0.17 ms — the problem
+is that it runs **per event at up to 240 Hz**, and the render is paced by input
+rather than by the display. That is where "laggy / glitchy" comes from on a display refreshing
 at 120 Hz.
 
 ### Fix
@@ -264,8 +281,10 @@ lives in the core.
 1. **`Sculpt.Stroke` resampling + live application of every tool + retuned
    per-dab amounts.** Kills the inside-out spikes and the pen-up jump. Core +
    `EditorModel`. *Tests: event-count invariance; displacement bound.*
-2. **Projection painting**; delete `dabAcrossSeams`/`seamUVs`. Core.
-   *Tests: no bleed outside the hit tile; seam continuity; event-count invariance.*
+2. **Projection painting** (Blender-style: precomputed texel runs + affine
+   maps, per-frame swept segment); delete `dabAcrossSeams`/`seamUVs`. Core.
+   *Tests: no bleed outside the hit tile; seam continuity; event-count
+   invariance; bench under 4 ms at r = 0.12 on 2048².*
 3. **Welded + incremental normals**; cached mesh in `Document`. Core.
    *Tests: normals equal across weld members; incremental == full recompute.*
 4. **Frame-batched input** (coalesced touches, unpause during stroke, drain in

@@ -756,6 +756,17 @@ and `MeshTables` keys its weld map on the quantised coordinate TRIPLE, never a
 hash of it (a hash welded 3,750 vertices down to 2,024, fusing unrelated parts
 of the surface).
 
+**First device run (2026-09-08):** the app compiled and ran on the iPad first
+time; everything the Linux tests covered worked. What did not was diagnosed in
+`humanoid/docs/Editor_Feel_Plan.md` (inflate/smooth/paint applied only at pen-up
+with one dab per Pencil event — the "inside-out" spikes; UV-space paint bleeding
+across atlas tiles; input-paced rendering) and researched in
+`humanoid/docs/Performance_Research.md` (sourced platform facts + a measured
+core bench: every sculpt op < 0.2 ms, so the lag is scheduling, not maths; naive
+projection paint 6.3 ms at the largest brush, so it is built Blender-style).
+Read both before touching the editor loop. Bench:
+`BABY_BLENDER_BENCH=1 swift test -c release --filter BenchmarkTests`.
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror
