@@ -1121,3 +1121,73 @@ shares the key light with the sky disc, the water glint and the light shafts —
 
 The view-space normal is rotated back to world by multiplying on the right;
 for a rotation that is the transpose, which is the inverse.
+
+### 16.13 Making the biomes read — the city, the canyons, the flock
+
+Playtest, verbatim: *"many of the environments looked like crap — like the
+city wasn't a city."* Correct on all counts.
+
+**The city is now a city.** It shipped as grey boxes standing in a field.
+Three changes, none of them geometry:
+
+- **Procedural lit windows** (`src/environment/city-windows.js`), derived from
+  the fragment's position on the wall: no geometry, no texture, no draw calls,
+  and it works on an InstancedMesh where every tower shares one box. Three
+  things had to be right — the wall coordinate is in WORLD units (from the
+  instance matrix's own scale) so the window pitch is constant instead of
+  scaling with the building; each tower hashes a seed from its translation so
+  the skyline is not one building repeated; and the edges are anti-aliased
+  from `fwidth`, then faded out entirely once a window drops below a pixel,
+  because two overlapping smoothstep bands are not an average, they are
+  speckle.
+- **A street grid** on the ground, same technique, parameterised by longitude
+  and latitude with longitude corrected by `cos(lat)` so blocks stay square
+  instead of pinching at the poles. Roads carry warm lamps. A city's ground is
+  the one surface a person can identify from a mile up, and what identifies it
+  is the grid.
+- **Dusk lighting.** Ambient 1.05 → 0.52, key 1.28 → 0.78, facades darkened.
+  A lit window only reads against a street that is actually dark.
+
+**The canyons have strata.** A canyon is not a canyon because it is steep —
+plenty of terrain is steep — it is a canyon because you can read the layers in
+the rock, and these walls were one flat colour from rim to floor. The bands
+follow the RADIUS, so they are surfaces of constant altitude and stay level
+across every wall regardless of which way it faces, which is what makes rock
+look deposited rather than painted.
+
+**The flock reads as birds.** Playtest: *"not sure what the little bird arrow
+things in the sky are."* That was the right read of what it was — evenly
+spaced cold-grey chevrons at a uniform distance, with a flap that scaled all
+three axes at once, so they pulsed in size instead of beating their wings.
+Now: a loose skein, warm dark brown, spaced several wingspans apart (the first
+attempt spaced ranks tighter than the wingspan and the formation collapsed
+into a pile of darts), flapping by SPAN alone with a wave running down the
+group, and anchored to the direction the player is FACING. That last one is
+the difference between an effect and no effect at all: a tight group orbiting
+a fixed bearing is inside a portrait phone's field of view about nine per cent
+of the time.
+
+**Three more bugs of the same family, all invisible.**
+
+- `addStreetGrid` wrote to `diffuseColor` at `<opaque_fragment>`, where
+  Lambert has already folded the diffuse into the lighting. The roads were
+  computed correctly and changed nothing anyone could see.
+- The street grid and the atmosphere both declared `varying vec3 vBirbWorld`.
+  Declared twice, the shader does not compile, and Three then draws nothing —
+  so the entire ground of the city was missing while the page looked fine.
+- The sun rim added in 16.12 was a flat additive term, which lifts a DARK
+  material far more than a bright one. The city's asphalt is 0.09 in linear,
+  so it nearly doubled and every street read as pale snow. It is now scaled by
+  the surface's own albedo, which is what forward scatter actually is.
+
+And the water's sun glint was tuned down hard (2.6 → 1.25, and the sky it
+mirrors dimmed to 0.58 of the sky's mid tone). The glint is additive, the
+frame is tone-mapped, and the bloom then finds whatever clipped — so a
+highlight that looks reasonable in isolation became a white hole the size of a
+harbour.
+
+**`tools/birb-shaders.mjs` now exists and runs in CI.** Two shaders failed to
+compile in one session and neither failure looked like one: Three logs the
+error and quietly draws nothing, so the page renders, the frame is plausible,
+and the screenshot harness exits zero. It visits every environment, because a
+material that lives in one biome is exactly the kind nothing else covers.

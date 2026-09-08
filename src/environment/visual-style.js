@@ -41,7 +41,7 @@ export const visualUniforms = {
  * wind injection) rather than replacing it.
  */
 export function addAtmosphere(material, THREE, {
-  baseRadius = 120, cloudStrength = 0.42, sunRim = 0.42,
+  baseRadius = 120, cloudStrength = 0.42, sunRim = 1.5, strata = 0,
 } = {}) {
   if (!material || material.userData.birbAtmosphere) return material;
   material.userData.birbAtmosphere = true;
@@ -65,10 +65,16 @@ export function addAtmosphere(material, THREE, {
     shader.uniforms.uBirbSun = visualUniforms.sunDir;
     shader.uniforms.uBirbSunColor = visualUniforms.sunColor;
     shader.uniforms.uBirbSunRim = { value: sunRim };
+    shader.uniforms.uBirbStrata = { value: strata };
 
-    // The world position varying may already exist from another injection;
-    // a distinct name avoids redeclaring it.
-    shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
+    // The world-position varying is SHARED with the other injections that need
+    // it (the city street grid, for one) and either can run first, so both
+    // sides have to declare it conditionally. Declared twice, the shader does
+    // not compile at all — "vBirbWorld : redefinition" — and Three then draws
+    // nothing for the material, which in this case was the entire ground.
+    if (!shader.vertexShader.includes('varying vec3 vBirbWorld;')) {
+      shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
+    }
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
@@ -88,7 +94,9 @@ export function addAtmosphere(material, THREE, {
       'uniform float uBirbTime; uniform vec3 uBirbMist; uniform float uBirbAtmos;\n'
       + 'uniform float uBirbBase; uniform float uBirbCloud;\n'
       + 'uniform vec3 uBirbSun; uniform vec3 uBirbSunColor; uniform float uBirbSunRim;\n'
-      + 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
+      + 'uniform float uBirbStrata;\n'
+      + (shader.fragmentShader.includes('varying vec3 vBirbWorld;') ? '' : 'varying vec3 vBirbWorld;\n')
+      + shader.fragmentShader;
 
     shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
       // ── Cloud shadows ────────────────────────────────────────────────
@@ -126,8 +134,34 @@ export function addAtmosphere(material, THREE, {
       vec3 birbWorldN = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
       vec3 birbToEye = normalize(cameraPosition - vBirbWorld);
       float birbFacesSun = max(0.0, dot(birbWorldN, normalize(uBirbSun)));
-      float birbGrazing = pow(1.0 - abs(dot(birbWorldN, birbToEye)), 3.0);
-      outgoingLight += uBirbSunColor * (birbFacesSun * birbGrazing * uBirbSunRim * uBirbAtmos);
+      float birbGrazing = pow(1.0 - abs(dot(birbWorldN, birbToEye)), 4.0);
+      // Tinted by the surface's OWN colour, and that is not a stylistic
+      // choice. A flat additive term lifts a dark material far more than a
+      // bright one, in absolute terms and even more in relative ones — the
+      // city's asphalt is 0.09 in linear, so an unqualified 0.07 of warm
+      // light nearly doubled it and turned every street into pale snow.
+      // Scaling by the albedo makes this forward scatter THROUGH the surface,
+      // which is what it is meant to be: bright ground catches the low sun,
+      // dark ground stays dark.
+      outgoingLight += diffuseColor.rgb * uBirbSunColor
+        * (birbFacesSun * birbGrazing * uBirbSunRim * uBirbAtmos);
+
+      // ── Rock strata ──────────────────────────────────────────────────
+      // Canyons only. A canyon is not a canyon because of its shape — plenty
+      // of terrain is steep — it is a canyon because you can read the layers
+      // in the rock, and this world's walls were one flat colour from rim to
+      // floor. Bands follow the RADIUS, so they are level surfaces of constant
+      // altitude and stay horizontal across every wall no matter which way it
+      // faces, which is what makes sedimentary rock look deposited rather than
+      // painted on. Two long-wavelength sines wobble them so they are not a
+      // ruled grating.
+      if (uBirbStrata > 0.0) {
+        float bandY = length(vBirbWorld)
+          + sin(vBirbWorld.x * 0.052) * 1.9
+          + sin(vBirbWorld.z * 0.044) * 1.6;
+        float band = sin(bandY * 0.62) * 0.62 + sin(bandY * 1.73) * 0.38;
+        outgoingLight *= 1.0 + band * uBirbStrata * uBirbAtmos;
+      }
 
       // ── Valley mist ──────────────────────────────────────────────────
       // Terrain carves DOWNWARD only (see spherical-world.js), so depth below
@@ -151,7 +185,7 @@ export function addAtmosphere(material, THREE, {
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => base + '-atmos-v2';
+  material.customProgramCacheKey = () => base + '-atmos-v5';
   return material;
 }
 

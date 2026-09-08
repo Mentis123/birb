@@ -93,6 +93,28 @@
 > `tools/birb-shot.mjs --after` runs JS after the settle, so a pose it sets is
 > the pose photographed.
 
+> **The biomes got a legibility pass** (§16.13). The city shipped as grey
+> boxes in a field; it now has procedural lit windows and a street grid with
+> lamps, both derived from the fragment's own position — no geometry, no
+> texture, no draw calls — plus dusk lighting, because a lit window only reads
+> against a dark street. The canyons have sedimentary strata banded by RADIUS
+> so the layers stay level on every wall. The flock is a loose skein of birds
+> that sweeps across the direction the player is FACING; anchored to a fixed
+> bearing instead, a tight group is inside a portrait phone's field of view
+> about nine per cent of the time.
+>
+> **`tools/birb-shaders.mjs` runs in CI and is the guard that matters here.**
+> A shader that fails to compile does not render wrong — Three logs the error
+> and draws NOTHING for that material, so the page still paints and the
+> screenshot harness still exits zero. Two whole systems shipped invisible
+> that way in one session (the weather: a variable named `half`, reserved in
+> GLSL ES; the city's entire ground: a varying declared twice by two
+> injections that both wanted it). Related traps in the same family: writing
+> to `diffuseColor` at `<opaque_fragment>` changes nothing, because Lambert
+> has already folded it into the lighting; and any FLAT additive term lifts a
+> dark material far more than a bright one, which is how a sun rim turned the
+> city's 0.09-linear asphalt into pale snow.
+
 > **Next round is planned, not built:** `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §14.
 > Ranked by what this session measured. The headline: one enum (tone mapping)
 > was the largest visual change of the whole session, and every geometry or
@@ -830,6 +852,8 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/spherical-world.js` | Sphere + collision system |
 | `src/environment/water.js` | Standing water — lakes/tarns/pools/harbour (unit-tested) |
 | `src/environment/weather.js` | Per-biome snow/pollen/dust/drizzle, all shader-side (unit-tested) |
+| `src/environment/city-windows.js` | Procedural lit windows + street grid for the city |
+| `src/effects/wake.js` | Ripples under a bird flying low over water (unit-tested) |
 | `src/effects/bloom-pass.js` | Bloom + light shafts + vignette + speed smear, one pass |
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |

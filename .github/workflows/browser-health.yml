@@ -67,6 +67,16 @@ jobs:
         # count as failures: that is how the setup bug announced itself.
         run: node tools/birb-modes.mjs
 
+      - name: Every shader compiles, in every environment
+        # Three logs a shader error and then quietly draws NOTHING for that
+        # material, so the page still renders and a screenshot still exits
+        # zero. Two systems shipped invisible this way in one session — the
+        # weather (a variable named `half`, reserved in GLSL ES) and the
+        # city's entire ground (a varying declared twice). Every biome is
+        # visited because a material that lives in one of them is exactly the
+        # kind nothing else covers.
+        run: node tools/birb-shaders.mjs
+
       - name: Upload frames on failure
         if: failure()
         uses: actions/upload-artifact@v4

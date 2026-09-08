@@ -734,8 +734,12 @@ const ENVIRONMENT_VARIANTS = [
     trail: { color: 0x69c8ff, opacity: 0.52 },
     anchor: { color: 0x1c3f62, opacity: 0.9 },
     lighting: {
-      ambient: { sky: 0xc9e5ff, ground: 0x101a29, intensity: 1.05 },
-      key: { color: 0xf0f7ff, intensity: 1.28, position: [8.2, 9.1, 6.4] },
+      // Dusk, not midday. The city's subject is now its lit windows, and a
+      // window only reads against a street that is actually dark — under the
+      // old 1.05 ambient of a near-white sky the ground came up pale enough
+      // to read as snow and the towers competed with it.
+      ambient: { sky: 0x93b6d8, ground: 0x0a1220, intensity: 0.52 },
+      key: { color: 0xf0e2d8, intensity: 0.78, position: [8.2, 9.1, 6.4] },
       rim: { color: 0x4fb7ff, intensity: 0.64, position: [-6.9, 5.5, -5.9] },
       fill: { color: 0x9bd5ff, intensity: 0.45, position: [1.4, 3.8, -7.6] },
       glow: { color: 0x7fd8ff, intensity: 1.7, distance: 15, decay: 2.2, position: [0.2, 2.4, 1.1] },

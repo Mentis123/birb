@@ -61,7 +61,7 @@ export const WATER_PALETTE = {
   forest: { shallow: [0.24, 0.55, 0.52], deep: [0.04, 0.16, 0.24], foam: [0.80, 0.93, 0.92] },
   canyons: { shallow: [0.30, 0.48, 0.46], deep: [0.05, 0.14, 0.19], foam: [0.88, 0.86, 0.76] },
   mountain: { shallow: [0.32, 0.62, 0.70], deep: [0.04, 0.15, 0.28], foam: [0.92, 0.96, 1.00] },
-  city: { shallow: [0.16, 0.34, 0.46], deep: [0.03, 0.09, 0.17], foam: [0.72, 0.82, 0.90] },
+  city: { shallow: [0.09, 0.20, 0.30], deep: [0.015, 0.05, 0.11], foam: [0.62, 0.72, 0.84] },
 };
 
 const VERT = `
@@ -136,12 +136,16 @@ const FRAG = `
     // ── Sun glitter ──────────────────────────────────────────────────────
     vec3 L = normalize(uSunDirection);
     vec3 H = normalize(L + V);
-    float spec = pow(max(dot(N, H), 0.0), 120.0);
+    float spec = pow(max(dot(N, H), 0.0), 150.0);
     // A broad sheen under the tight highlight: the wide lobe is the path of
     // light across the water that you can see from a mile away, and it is the
     // thing that actually makes a lake look like a lake from the air.
-    float sheen = pow(max(dot(N, H), 0.0), 9.0) * 0.16;
-    color += uSunColor * (spec * 2.6 + sheen);
+    float sheen = pow(max(dot(N, H), 0.0), 13.0) * 0.075;
+    // Tuned DOWN hard from 2.6. The glint is additive, the frame is
+    // tone-mapped, and the bloom pass then finds whatever clipped — so a
+    // highlight that looks reasonable in isolation becomes a white hole the
+    // size of a harbour with a halo around it.
+    color += uSunColor * (spec * 1.25 + sheen);
 
     // ── Shore foam ───────────────────────────────────────────────────────
     // A band where the water is shallowest, wobbled by the same swell so it
