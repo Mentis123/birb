@@ -561,10 +561,13 @@ URL stays in the address bar) and at `/icon3d`. Both paths are in `sw.js`'s
 listing only `/icon3d` would leave the QR's own URL unprotected. Unlisted:
 `noindex`, linked from nowhere.
 It started as "the Copilot icon, like the Blender build, but code only" and
-ships two marks: the September 2023 rainbow ribbon (the one with the folds)
-and the flatter August 2026 redesign. Drag to orbit, pinch to zoom, pills for
-Colour/Clay, 2023/2026, and a **GLB** button that bakes the gradients to
-textures and downloads a file Blender opens directly. Three-finger QR as usual.
+ships two marks (the September 2023 rainbow ribbon and the flatter August 2026
+redesign) in **two readings**: **Ribbon**, one continuous strip of material
+that rolls over at four lines and twists — what the artwork depicts, and the
+default — and **Plates**, the flat extruded cut-outs an SVG importer makes.
+Drag to orbit, pinch to zoom, pills for Ribbon/Plates, Colour/Clay, 2023/2026,
+plus **GLB** (baked textures, opens in Blender) and **SVG** (a real vector
+drawing of the view you are looking at). Three-finger QR as usual.
 
 > **Read `icon3d/ARCHITECTURE.md` before touching it.** Same house rules as
 > Gauntlet and Bronze: airtight against the rest of the repo, core Three only
@@ -594,6 +597,30 @@ Things that cost a round, or would have:
   the browser's own `Path2D` fill of the same path data (0.9985–0.9995 per
   piece); the export bake is rendered and compared too, which is the only
   check that can see a vertically mirrored texture.
+- **The ribbon's rulings stay in the picture plane; only their ENDS carry
+  depth.** Front-on the depths vanish and the projection is the artwork; from
+  any other angle the depths are the whole object. Rotating the ruling out of
+  plane instead — a helicoidal twist, or leaning it until the width is truly
+  constant — is geometrically purer and looks wrong: 0.76 IoU and a strap that
+  projects as a bow-tie, or a strap that explodes into an 18-unit fan where the
+  drawn ruling is 1.4 units.
+- **A strap's outline is mostly clip.** Its tips lie on a band's outline (≤0.17
+  units) and are occlusion, not material; the V notch and the sliver that
+  overshoots the transition line are tuck allowance hidden under a band.
+  Leaving the tuck in the edge costs 15 points of IoU because it eats half the
+  arc length.
+- **The gate's floor depends on the builder** — 0.985 for plates, 0.86 for the
+  ribbon — and both numbers are printed. Relaxing it for both would hide a
+  regression; relaxing it for one and reporting the value describes the model.
+- **A raster is not a Visio object.** The SVG export projects the real meshes
+  and emits paths, one group per component, with the brand gradients still
+  gradients under a fitted `gradientTransform`. `up` is `view × right`; the
+  other order mirrors the whole drawing and reads as a colour bug.
+- **`ExtrudeGeometry`'s inset bevel grows a burr at a cusp** — the band's
+  razor tip, where two edges meet at ~0° and the bevel vector is an arbitrary
+  clamped direction. `clampToOutline` pulls those vertices back; the tolerance
+  scales with the outline's extent, because float32 rounds a 513-unit viewBox
+  ten times coarser than a 48-unit one.
 
 Verify with `node tools/icon3d-shot.mjs --page icon3d/index.html --out shot.png
 --query three=local --gate` (needs `npm install --no-save playwright

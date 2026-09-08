@@ -1,57 +1,67 @@
-# Icon3D — closeout, 2026-09-07
+# Icon3D — closeout, 2026-09-08
 
-**Subject:** the Microsoft Copilot icon, 2023 mark (the reference screenshot)
-and the 2026 mark. **Representation:** four (2023) / two (2026) extruded
-plates from the official vector, stacked by paint order, gradients evaluated
-per pixel from the SVG's own definitions. **Evidence sheet:**
-`copilot-sheet.png` in this directory.
+**Subject:** the Microsoft Copilot icon, 2023 mark (the reference in the brief)
+and the 2026 mark. **Two builders from one table:** Ribbon (default) and
+Plates. **Evidence:** `copilot-sheet.png` (plates, first pass) and
+`ribbon-sheet.png` (the ribbon, this pass) in this directory.
 
-## Scene ledger
+## Scene ledger — the ribbon reading
 
-| piece | class | layer | what it is |
+One strip of material, constant character, running:
+
+| leg | class | travels | face shown |
 | --- | --- | --- | --- |
-| band_pink | extruded plate | 0 (front) | purple→pink→orange band, painted last in the SVG |
-| band_blue | extruded plate | −1 | cyan sheen → blue → green → yellow band |
-| fold_blue | extruded plate | −2 | dark-blue fold; its left end is hidden under band_blue |
-| fold_red | extruded plate | −2 | orange→red fold; notch hidden under band_blue, right half under band_pink |
+| band_blue | front layer, ruled between its own two long edges | y 4 → 32.885 | front |
+| fold_red | back layer (the dark strap) | y 32.885 → 44 | back |
+| band_pink | front layer | y 44 → 15.11 | front |
+| fold_blue | back layer | y 15.11 → 4 | back |
 
-Facing: +Z toward the viewer, y up (SVG y flipped in the shape builder, flipped
-back inside the shader). The 2026 mark is two plates, both layer 0.
+Four roll transitions, so the ribbon returns to its starting face: an ordinary
+two-sided loop, not a Möbius band. Facing +Z toward the viewer, y up (SVG y
+negated in the builder). The 2026 mark has no straps to roll through, so it
+falls back to plates under either pill.
 
 ## Deterministic
 
-| check | oracle | threshold | measured |
+| check | oracle | floor | measured |
 | --- | --- | --- | --- |
-| silhouette IoU per piece, front-on orthographic, 768 px wide | browser `Path2D` fill of the same `d` | ≥ 0.985 | 0.9985 / 0.9985 / 0.9989 / 0.9992 (2023); 0.9995 / 0.9995 (2026) |
-| gradient colour, unlit shader vs JS evaluator, interior pixels | `evaluateFill()` | ≤ 4/255 MAE | 0.25 / 0.21 / 0.25 / 0.25 (2023); 0.24 (2026) |
-| baked export textures rendered vs JS evaluator | `evaluateFill()` | ≤ 6/255 MAE | 0.25 (2023, 368k samples); 0.24 (2026) |
-| GLB export | `GLTFExporter` (local copy via import map) | header `glTF` | 1,770,292 bytes, `glTF` |
-| unit tests | `node --test` | all pass | 267 (23 new) |
+| silhouette IoU, plates | browser `Path2D` fill of the same `d` | 0.985 | 0.9985 / 0.9985 / 0.9989 / 0.9992 |
+| silhouette IoU, ribbon 2023 | same | 0.86 | bands 0.967 / 0.969, straps 0.887 / 0.889 |
+| silhouette IoU, ribbon 2026 | same | 0.86 | 0.9995 / 0.9995 (falls back to plates) |
+| gradient colour, shader vs JS reference | `evaluateFill()` | ≤ 4/255 | 0.21 – 0.25 |
+| baked export textures | `evaluateFill()` | ≤ 6/255 | 0.25 (plates), 0.95 (ribbon) |
+| GLB export | `GLTFExporter` | header `glTF` | 1.77 MB, valid |
+| SVG export | browser render of the emitted paths | parses, one group per piece | 4 groups, 18 loops, 66 KB |
+| unit tests | `node --test` | all pass | 294 (39 for icon3d) |
 
 ## Reproducible
 
-Harness: `tools/icon3d-shot.mjs`, Chromium under SwiftShader, `?three=local`.
-Views on the sheet: desktop 1280×800 @1 (yaw 30°, pitch 15°, fit distance
-4.55), phone 390×844 @2 (distance 6.98–7.08), front-on (yaw 0, pitch 0,
-distance 4.4, no tile), diagnostic side view (yaw 78°, pitch 10°). Framebuffer
-nonblank, opaque and nonuniform on every capture; no page or console errors.
-6 draw calls, 13,088 triangles (2023); 4 draw calls, 8,180 (2026).
+Harness `tools/icon3d-shot.mjs`, Chromium under SwiftShader, `?three=local`.
+Delivery views: desktop 1280×800 @1 (yaw 30°, pitch 15°, fit distance 4.55),
+phone 390×844 @2 (distance 6.98), phone landscape 844×390, side view (yaw 82°,
+pitch 12°) and front-on (yaw 0, pitch 0). Framebuffer nonblank, opaque and
+nonuniform on every capture; no page or console errors. Ribbon: 6 draw calls,
+24,620 triangles. Plates: 6 draw calls, 13,088.
 
 ## Human judgment
 
-Front-on against the Wikipedia render of the same vector: silhouette, band
-order, fold placement and colour sweep match (structural and identity levels
-both pass — the shape is the source vector, so this is expected). The 3D
-reading — plates staggered by paint order, folds two layers back — reproduces
-the Blender build in the brief.
+Front-on the ribbon still reads unmistakably as the Copilot mark: band order,
+strap placement, colour sweep and the white S-channel all present. Orbited, it
+reads as one continuous piece of material that turns over — the thing the
+brief asked for and the thing the plates cannot give. The plates build remains
+available and remains the exact-silhouette reference.
 
 ## Unresolved / out of scope
 
 - Not tested on a real phone. SwiftShader is not an iPhone GPU.
-- The CDN-served `GLTFExporter` path could not be exercised here (no CDN
-  egress from the headless browser); the local copy of the same module was.
-  The root game imports `GLTFLoader` the same way in production.
-- The folds are flat plates behind the bands, as in Blender, not a ribbon
-  that actually turns over. A true twisted ribbon is a different model.
-- Focal-point radial gradients, `spreadMethod`, `<use>`, clip paths and
-  strokes are unsupported until an icon needs them.
+- The ribbon's straps project at 0.887 against the artwork's tapered wedges.
+  A lofted strip of material cannot reproduce a stylised taper exactly; the
+  number is measured and reported rather than designed away.
+- The plates' SVG export carries ~250 small loops from the bevel's speckled
+  front-facing set (the ribbon's is 18). Usable, but the ribbon is the tidy
+  vector export.
+- The CDN-served `GLTFExporter` path could not be exercised in this sandbox
+  (no CDN egress from the headless browser); the local copy of the same module
+  was.
+- Focal-point radial gradients, `spreadMethod`, `<use>`, clip paths and strokes
+  are unsupported until an icon needs them.

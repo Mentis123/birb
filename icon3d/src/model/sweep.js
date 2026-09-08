@@ -40,8 +40,10 @@ export function rotateAbout(v, k, theta) {
  *
  * @param {number[][]} points  [x,y,z] samples. For a closed curve the last
  *   point must NOT repeat the first; a closure frame at t = 1 is appended.
- * @param {{closed?: boolean, seed?: number[]}} [opts]  `seed` is the preferred
- *   initial normal (projected perpendicular to the first tangent).
+ * @param {{closed?: boolean, seed?: number[], tangents?: number[][]}} [opts]
+ *   `seed` is the preferred initial normal (projected perpendicular to the
+ *   first tangent); `tangents` supplies analytic unit tangents per point
+ *   instead of finite differences (an open curve with a known derivative).
  * @returns {{frames: {point, tangent, normal, binormal}[], holonomy: number}}
  *   For a closed curve there are points.length + 1 frames, the last being the
  *   transported frame back at the start; `holonomy` is the angle it has
@@ -58,7 +60,8 @@ export function frameCurve(points, opts = {}) {
     const tangents = [];
     for (let i = 0; i < count; i++) {
         let t;
-        if (closed) t = sub(pt(i + 1), pt(i - 1));
+        if (opts.tangents) t = opts.tangents[i % n];
+        else if (closed) t = sub(pt(i + 1), pt(i - 1));
         else if (i === 0) t = sub(points[1], points[0]);
         else if (i === n - 1) t = sub(points[n - 1], points[n - 2]);
         else t = sub(points[i + 1], points[i - 1]);
@@ -128,6 +131,10 @@ export function roundedSection(hw, t, r, k = 3) {
  * @param {boolean} [p.closed]  join the last frame to the first
  * @param {(u:number, i:number) => number[]} [p.aux]  optional per-frame extra
  *   attribute (e.g. the SVG-space centre), copied to every vertex of the ring
+ * @param {(u:number, i:number) => {across:number[], front:number[]}} [p.basis]
+ *   explicit section axes per ring, replacing the frame-derived ones — for
+ *   a ruled band whose rulings are not perpendicular to its edge, or a crease
+ *   ring that shares a point with its neighbour but not an orientation
  * @returns {{positions:Float32Array, normals:Float32Array, uvs:Float32Array,
  *   aux:Float32Array|null, indices:Uint32Array, vertexCount:number, triangleCount:number}}
  */
@@ -148,9 +155,14 @@ export function sweepSection(p) {
     for (let i = 0; i < rings; i++) {
         const u = nu > 1 ? i / (nu - 1) : 0;
         const f = frames[i];
-        const theta = p.roll(u, i);
-        const across = add(scale(f.normal, Math.cos(theta)), scale(f.binormal, Math.sin(theta)));
-        const outward = cross(f.tangent, across); // the "front" of the strip
+        let across, outward;
+        if (p.basis) {
+            ({ across, front: outward } = p.basis(u, i));
+        } else {
+            const theta = p.roll(u, i);
+            across = add(scale(f.normal, Math.cos(theta)), scale(f.binormal, Math.sin(theta)));
+            outward = cross(f.tangent, across); // the "front" of the strip
+        }
         const section = p.section(u, i);
         const auxVal = p.aux ? p.aux(u, i) : null;
         for (let j = 0; j < m; j++) {

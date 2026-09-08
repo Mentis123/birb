@@ -46,6 +46,7 @@ if (new URLSearchParams(location.search).get('three') === 'local') {
 import { loadThree } from '/icon3d/src/core/three-loader.js';
 import { loadBuilder } from '/icon3d/dev/builders.js';
 import { runGate, runBakeCheck } from '/icon3d/src/model/gate.js';
+import { exportSVG as exportSVGFrom } from '/icon3d/src/model/export-svg.js';
 import { createStudio } from '/icon3d/src/view/studio.js';
 import { createOrbit } from '/icon3d/src/view/orbit.js';
 import { getIcon } from '/icon3d/src/icons/index.js';
@@ -151,6 +152,9 @@ function fatal(err) {
             setMode(mode);
             renderer.render(scene, camera);
             return result;
+        },
+        exportSVG(o = {}) {
+            return exportSVGFrom(built, icon, { yaw: orbit.yaw / DEG, pitch: orbit.pitch / DEG, size: 1024, ...o });
         },
         /** Geometry facts the harness can assert on without a screenshot. */
         inspect() {

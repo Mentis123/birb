@@ -36,6 +36,81 @@ Read this before touching any of it.
    to `/svg`, so that is the path the worker sees, and listing only `/icon3d`
    would leave the short URL — the one on the QR code — unprotected.
 
+## Two readings of the same table
+
+The page ships **two builders** and a pill switches them, because they answer
+different questions about the same four path strings.
+
+**Plates** (`src/model/icon-mesh.js`) is what an SVG importer plus an extrude
+makes: four flat cut-outs, bevelled, stacked in depth by paint order. Its
+silhouette IS the vector — 0.9985 IoU per piece — and it is the honest
+reference for "what does this icon look like extruded".
+
+**Ribbon** (`src/model/ribbon.js`) is what the artwork DEPICTS: one strip of
+material that rolls over at four horizontal lines and alternates between a
+front layer (the rainbow curls) and a back layer (the dark straps). It is the
+default, because the icon is a drawing of a ribbon and a stack of plates is
+not one.
+
+The measurements the ribbon is built from, all taken off the vector:
+
+| fact | value | what it means |
+| --- | --- | --- |
+| C2 symmetry of the two bands about (24, 24) | within 0.006 units | neither band is "in front"; the plates build's layer stagger is an artefact of paint order |
+| widest ruling anywhere | 17.7 units | the ribbon's width |
+| crest at y = 4 and y = 44 | 16.04 = 17.7 · cos 25° | the transitions are rolls |
+| crest at y = 15.11 and y = 32.885 | 6.93 = 17.7 · cos 67° | one width explains all four |
+| junctions of long edge to horizontal line | tangential, 8 of 8 | rolls, not knife creases |
+| distance of each fold "tip" from a band outline | ≤ 0.17 units | the tips are occlusion clipping, not material — build none |
+
+**The construction, and why the front view survives it.** Every ring of the
+loft is a ruling between the piece's own two edge paths, taken from the
+artwork, and each END of that ruling carries its own depth. Orthographically
+from the front the depths vanish and the projection is exactly the region the
+artwork draws; from anywhere else the depths are the whole object. Fidelity
+and physicality stop competing.
+
+Two readings were built, rendered and rejected, and the reasons are the
+useful part:
+
+- a **helicoidal twist** between band corners rotates the ruling out of the
+  picture plane, so a strap projects as a bow-tie instead of the artwork's
+  wedge: 0.76 IoU and visibly not the icon from the front;
+- forcing a **truly constant width** by leaning each ruling out of plane until
+  it measures 17.7 is exact and looks wrong — where the artwork's ruling is
+  1.4 units the lean is 18, and the strap explodes into a fan. The mark is a
+  stylised drawing, not an isometry.
+
+A strap's outline is mostly CLIP: runs that lie on a transition line, a V
+notch that leaves and returns to the same line, and a sliver of tuck allowance
+that overshoots the line and is covered by a band. `splitFold` keeps only the
+two runs that connect the two lines, and `trimBetweenLines` cuts them at the
+crossings. Leaving the tuck in costs 15 points of IoU, because it eats half
+the edge's arc length and the rulings then fan across the wrong region.
+
+## Exporting: GLB for 3D, SVG for the page
+
+A PNG of a render is not a Visio object, so the page exports both:
+
+- **GLB** (`src/model/export.js`) bakes the shader gradients into textures with
+  position-mapped UVs and hands the scene to `GLTFExporter`. Blender, Unity and
+  PowerPoint open it directly. `flipY` is false on purpose — glTF puts v = 0 at
+  the top and the bake writes its first row at the piece's minimum SVG y.
+- **SVG** (`src/model/export-svg.js`) projects the actual meshes through the
+  orthographic axonometric you are looking along and emits real vector paths —
+  one `<g>` per component, the brand gradients still gradients (carried across
+  by a `gradientTransform` fitted by least squares from the mesh's own
+  SVG-space coordinates to their projected positions), and shading as a few
+  semi-transparent overlay paths so the drawing reads as lit without a single
+  raster pixel. The ribbon exports in about 18 loops and 60 KB.
+
+  Orthographic, not perspective, because a diagram icon must scale and tile
+  without a vanishing point — and because the projection of a plane is then an
+  exact affine map, which is what makes the gradient transfer exact for the
+  plates. Watch the basis: `up` is `view × right`; the other order points down
+  and mirrors the whole drawing, gradients included, which reads as a colour
+  bug rather than an axis one.
+
 ## Module map
 
 ```
@@ -51,15 +126,22 @@ icon3d/
       svg-path.js            full SVG path grammar → lines + cubics (arcs via centre parameterisation)
       fill-shapes.js         rings → solids with holes, nonzero AND evenodd done properly
       svg-gradient.js        gradientTransform, userSpace/objectBoundingBox, stops, overlay; JS + GLSL
-      icon-mesh.js           table → ExtrudeGeometry per piece, gradient shader material, z by layer
+      icon-mesh.js           PLATES: table → ExtrudeGeometry per piece, gradient shader material, z by layer
+      ribbon.js              RIBBON: band/fold edge extraction, per-edge depth, hairpin turns, one loft
+      sweep.js               rotation-minimising (Bishop) frames + holonomy, sections, mesh audits
+      lift.js                planar refinement, boundary rims, watertight thickening
       export.js              bake the gradient to textures + position UVs, GLTFExporter → GLB
+      export-svg.js          axonometric projection → vector paths per component, gradients preserved
       gate.js                silhouette IoU vs Path2D, colour MAE vs the JS evaluator, bake check
     view/
       studio.js              PMREM room, key light + shadow, rounded tile, shadow catcher
       orbit.js               phone-first orbit/pinch/pan camera (copy)
     ui/qr.js, qr-overlay.js  three-finger QR (copy)
+    dev/
+      probe.html             render ONE builder alone in colour/clay/unlit/id/normal/wire
+      builders.js            the builder registry the probe picks from
 tools/icon3d-shot.mjs        screenshot harness; --gate runs the likeness gate; --print evaluates JS
-tests/icon3d-svg.test.js     23 tests over the pure modules
+tests/icon3d-*.test.js       39 tests over the pure modules, the meshes and the ribbon
 ```
 
 ## The pipeline, and where it differs from a loader
@@ -105,10 +187,21 @@ renders with the first gradient compiled. That one cost a round.
 Three checks, all against an oracle that shares no code with the thing under
 test:
 
-- **Silhouette.** The plates rendered front-on, orthographic, in flat ID
+- **Silhouette.** The geometry rendered front-on, orthographic, in flat ID
   colours, against the browser's own `Path2D` fill of the same `d` strings with
-  the same pixel mapping. Per-piece IoU; the threshold is 0.985 and the
-  measured value is 0.9985–0.9995 (the residual is edge anti-aliasing).
+  the same pixel mapping. Per-piece IoU, with a floor that depends on which
+  builder is loaded and is reported either way:
+
+  | builder | floor | measured |
+  | --- | --- | --- |
+  | plates | 0.985 | 0.9985 – 0.9995 (residual is edge anti-aliasing) |
+  | ribbon | 0.86 | bands 0.967, straps 0.887 |
+
+  The ribbon's floor is lower **on purpose and only for the ribbon**. Its bands
+  still land on their own outlines; its straps are a lofted strip where the
+  artist drew a tapered wedge, and no strip reproduces that exactly. Relaxing
+  the floor for both builders would be hiding a regression; relaxing it for one
+  and reporting the number is describing the model.
 - **Colour.** The unlit gradient shader against `evaluateFill()`, the JS
   reference the GLSL was emitted from, over every interior pixel. Mean
   absolute error in 8-bit sRGB: 0.25.

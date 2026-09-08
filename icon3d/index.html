@@ -37,17 +37,28 @@
     text-transform: uppercase; opacity: 0.62;
   }
   .title b { display: block; font-size: 17px; letter-spacing: 0.16em; opacity: 1; margin-top: 3px; }
-  .foot { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .foot { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
   .pills {
     display: flex; gap: 6px; align-items: center; pointer-events: auto;
-    padding: 5px; border-radius: 999px; background: var(--pill);
+    padding: 5px; border-radius: 22px; background: var(--pill);
     backdrop-filter: blur(8px); border: 1px solid var(--line);
+    /* Six controls do not fit across a 390px phone, and a row that overflows
+       loses the ones at both ends — on the first mobile capture that was
+       PLATES and SVG, i.e. the whole point of the page. Wrapping keeps every
+       control reachable and the row still reads as one control cluster. */
+    flex-wrap: wrap; justify-content: center; max-width: min(100%, 620px);
+    row-gap: 4px;
   }
   .pills button {
     appearance: none; border: 0; background: transparent; color: var(--ink);
     font: inherit; font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
     text-transform: uppercase; padding: 8px 12px; border-radius: 999px;
     cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
+  }
+  @media (max-width: 520px) {
+    .pills button { font-size: 10px; padding: 7px 9px; letter-spacing: 0.1em; }
+    .pills { gap: 4px; }
   }
   .pills button.on { background: var(--pill-on); color: #fff; }
   .pills button:disabled { opacity: 0.45; cursor: default; }
@@ -91,13 +102,17 @@
   <div class="title">Birb Labs · study<b>Icon3D</b></div>
   <div class="foot">
     <div class="pills" data-pills>
+      <button data-build="ribbon" class="on" title="One continuous ribbon">Ribbon</button>
+      <button data-build="plates" title="Flat extruded plates, exact silhouette">Plates</button>
+      <span class="sep"></span>
       <button data-mode="colour" class="on">Colour</button>
       <button data-mode="clay">Clay</button>
       <span class="sep"></span>
       <button data-icon="copilot-2023" class="on">2023</button>
       <button data-icon="copilot-2026">2026</button>
       <span class="sep"></span>
-      <button data-export title="Download as GLB">GLB</button>
+      <button data-export="glb" title="3D model for Blender, Unity, PowerPoint">GLB</button>
+      <button data-export="svg" title="Vector drawing for Visio, Illustrator, Figma">SVG</button>
     </div>
     <div class="hint" data-hint>Drag · pinch · double-tap resets</div>
   </div>
@@ -124,6 +139,8 @@ if (new URLSearchParams(location.search).get('three') === 'local') {
 <script type="module">
 import { loadThree, THREE_VERSION } from '/icon3d/src/core/three-loader.js';
 import { buildIcon } from '/icon3d/src/model/icon-mesh.js';
+import { buildRibbon } from '/icon3d/src/model/ribbon.js';
+import { exportSVG, downloadSVG } from '/icon3d/src/model/export-svg.js';
 import { runGate, runBakeCheck } from '/icon3d/src/model/gate.js';
 import { exportGLB, downloadGLB, buildExportScene } from '/icon3d/src/model/export.js';
 import { createStudio } from '/icon3d/src/view/studio.js';
@@ -177,8 +194,13 @@ createQrOverlay({
     const showTile = params.get('tile') !== '0';
     let iconId = ICONS[params.get('icon')] ? params.get('icon') : DEFAULT_ICON;
     let mode = params.get('mode') === 'clay' ? 'clay' : 'colour';
+    // Two readings of the same table: the ribbon is what the artwork depicts,
+    // the plates are what an SVG importer makes of it. Both are built from the
+    // same path data, so the toggle is a genuine comparison and not a preset.
+    const BUILDERS = { ribbon: buildRibbon, plates: buildIcon };
+    let builderId = BUILDERS[params.get('build')] ? params.get('build') : 'ribbon';
 
-    let built = buildIcon(THREE, getIcon(iconId), { size: ICON_SIZE });
+    let built = BUILDERS[builderId](THREE, getIcon(iconId), { size: ICON_SIZE });
     built.setMode(mode);
     scene.add(built.group);
 
@@ -248,40 +270,59 @@ createQrOverlay({
         markOn('data-mode', mode);
         orbit.invalidate();
     }
-    function setIcon(id) {
-        if (!ICONS[id]) return;
-        iconId = id;
+    function rebuild() {
         scene.remove(built.group);
         built.dispose();
-        built = buildIcon(THREE, getIcon(iconId), { size: ICON_SIZE });
+        built = BUILDERS[builderId](THREE, getIcon(iconId), { size: ICON_SIZE });
         built.setMode(mode);
         scene.add(built.group);
         orbit.targetY = targetHeight();
-        markOn('data-icon', iconId);
         orbit.invalidate();
+    }
+    function setIcon(id) {
+        if (!ICONS[id]) return;
+        iconId = id;
+        rebuild();
+        markOn('data-icon', iconId);
+    }
+    function setBuilder(id) {
+        if (!BUILDERS[id]) return;
+        builderId = id;
+        rebuild();
+        markOn('data-build', builderId);
     }
     pills.addEventListener('click', async (e) => {
         const b = e.target.closest('button');
         if (!b) return;
         if (b.dataset.mode) setMode(b.dataset.mode);
         else if (b.dataset.icon) setIcon(b.dataset.icon);
-        else if ('export' in b.dataset) {
+        else if (b.dataset.build) setBuilder(b.dataset.build);
+        else if (b.dataset.export === 'glb') {
             b.disabled = true;
             toast('Baking…', 6000);
             try {
                 const bytes = await exportGLB(THREE, THREE_VERSION, built, { tile: studio.tile });
-                downloadGLB(bytes, `${iconId}.glb`);
-                toast(`${iconId}.glb · ${(bytes.byteLength / 1024).toFixed(0)} KB`);
+                downloadGLB(bytes, `${iconId}-${builderId}.glb`);
+                toast(`${iconId}-${builderId}.glb · ${(bytes.byteLength / 1024).toFixed(0)} KB`);
             } catch (err) {
                 console.warn('GLB export failed', err);
-                toast('Export needs the CDN — try again online');
+                toast('GLB export needs the CDN — try again online');
             } finally {
                 b.disabled = false;
             }
+        } else if (b.dataset.export === 'svg') {
+            // The vector export takes the view you are looking at, so what you
+            // orbit to is what lands on the page.
+            const { svg, stats } = exportSVG(built, getIcon(iconId), {
+                yaw: orbit.yaw / DEG, pitch: orbit.pitch / DEG, size: 1024,
+            });
+            downloadSVG(svg, `${iconId}-${builderId}.svg`);
+            toast(`${iconId}-${builderId}.svg · ${stats.pieces} shapes · ${(stats.bytes / 1024).toFixed(0)} KB`);
         }
     });
     markOn('data-mode', mode);
     markOn('data-icon', iconId);
+    markOn('data-build', builderId);
 
     const hint = document.querySelector('[data-hint]');
     let touched = false;
@@ -302,6 +343,7 @@ createQrOverlay({
             triangles: renderer.info.render.triangles,
             fps: Math.round(fps),
             icon: iconId,
+            build: builderId,
             mode,
             pieces: built.pieces.length,
             yaw: Math.round(orbit.yaw / DEG),
@@ -328,6 +370,11 @@ createQrOverlay({
         get icon() { return built; },
         setMode,
         setIcon,
+        setBuilder,
+        /** Vector export, for the harness: returns the markup and its stats. */
+        exportSVG(o = {}) {
+            return exportSVG(built, getIcon(iconId), { yaw: orbit.yaw / DEG, pitch: orbit.pitch / DEG, size: 1024, ...o });
+        },
         /** Park the camera at an exact view and render it immediately. */
         setView(yawDeg, pitchDeg, distance) {
             userZoomed = true;

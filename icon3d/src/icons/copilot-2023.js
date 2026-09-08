@@ -54,6 +54,22 @@ export default {
     name: 'Microsoft Copilot (2023 mark)',
     source: 'https://en.wikipedia.org/wiki/File:Microsoft_Copilot_Icon.svg',
     viewBox: [0, 0, 48, 48],
+    /**
+     * The ribbon reading (model/ribbon.js): travel order round the loop.
+     * Bands are ruled between their own two long edges; each fold is a
+     * half-twist from the previous band's pivot corner to the next band's far
+     * corner. The pivot edge of a band is the long edge that follows its
+     * first straight end in path order — the west curve of band_blue and the
+     * east curve of band_pink, the loop's outside.
+     */
+    ribbon: {
+        loop: [
+            { id: 'band_blue', lean: +1 },
+            { id: 'fold_red', fold: true, lean: -1 },
+            { id: 'band_pink', lean: +1 },
+            { id: 'fold_blue', fold: true, lean: -1 },
+        ],
+    },
     pieces: [
         {
             id: 'fold_blue', layer: -2,
