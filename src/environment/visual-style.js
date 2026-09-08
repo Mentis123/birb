@@ -9,6 +9,12 @@ export const visualUniforms = {
   mistColor: { value: null },
   // 0 disables cloud shadows and mist without recompiling anything.
   atmosphere: { value: 1 },
+  // The key light's direction and colour, shared by every ground material so
+  // the terrain's sun rim tracks the same sun as the sky disc and the water
+  // glint. Set once per frame from the lighting rig; null until then, and the
+  // shader term is inert while it is.
+  sunDir: { value: null },
+  sunColor: { value: null },
 };
 
 /**
@@ -34,10 +40,16 @@ export const visualUniforms = {
  * Chains onto any existing onBeforeCompile (the canopies already carry the
  * wind injection) rather than replacing it.
  */
-export function addAtmosphere(material, THREE, { baseRadius = 120, cloudStrength = 0.42 } = {}) {
+export function addAtmosphere(material, THREE, {
+  baseRadius = 120, cloudStrength = 0.42, sunRim = 0.42,
+} = {}) {
   if (!material || material.userData.birbAtmosphere) return material;
   material.userData.birbAtmosphere = true;
   if (!visualUniforms.mistColor.value) visualUniforms.mistColor.value = new THREE.Color(0x9fb8bd);
+  // Inert defaults, so a material compiled before the first frame does not
+  // sample a null uniform.
+  if (!visualUniforms.sunDir.value) visualUniforms.sunDir.value = new THREE.Vector3(0, 1, 0);
+  if (!visualUniforms.sunColor.value) visualUniforms.sunColor.value = new THREE.Color(0, 0, 0);
 
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
@@ -50,6 +62,9 @@ export function addAtmosphere(material, THREE, { baseRadius = 120, cloudStrength
     shader.uniforms.uBirbAtmos = visualUniforms.atmosphere;
     shader.uniforms.uBirbBase = { value: baseRadius };
     shader.uniforms.uBirbCloud = { value: cloudStrength };
+    shader.uniforms.uBirbSun = visualUniforms.sunDir;
+    shader.uniforms.uBirbSunColor = visualUniforms.sunColor;
+    shader.uniforms.uBirbSunRim = { value: sunRim };
 
     // The world position varying may already exist from another injection;
     // a distinct name avoids redeclaring it.
@@ -72,6 +87,7 @@ export function addAtmosphere(material, THREE, { baseRadius = 120, cloudStrength
     shader.fragmentShader =
       'uniform float uBirbTime; uniform vec3 uBirbMist; uniform float uBirbAtmos;\n'
       + 'uniform float uBirbBase; uniform float uBirbCloud;\n'
+      + 'uniform vec3 uBirbSun; uniform vec3 uBirbSunColor; uniform float uBirbSunRim;\n'
       + 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
 
     shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
@@ -91,6 +107,27 @@ export function addAtmosphere(material, THREE, { baseRadius = 120, cloudStrength
       // ── Macro tint ───────────────────────────────────────────────────
       float macro = sin(vBirbWorld.x * 0.037) * sin(vBirbWorld.z * 0.041) * sin(vBirbWorld.y * 0.033);
       outgoingLight *= 1.0 + macro * 0.05 * uBirbAtmos;
+
+      // ── Sun rim ──────────────────────────────────────────────────────
+      // MeshLambert has no specular term at ALL, which is why this world
+      // looked identical at noon and at golden hour: the only thing the sun
+      // did was set a diffuse level. Real ground does not behave like that —
+      // grass, snow and rock all scatter light forward at grazing angles, and
+      // the low sun catching the edge of a hill is most of what "golden hour"
+      // actually looks like.
+      //
+      // Two terms multiplied: how much the surface faces the sun, and how
+      // close to edge-on the eye sees it. Facing alone just brightens the lit
+      // side (which the diffuse already did); the grazing factor is what puts
+      // the light on the RIM, where it reads.
+      //
+      // The view-space normal is rotated back to world by multiplying on the
+      // right — for a rotation that is the transpose, which is the inverse.
+      vec3 birbWorldN = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+      vec3 birbToEye = normalize(cameraPosition - vBirbWorld);
+      float birbFacesSun = max(0.0, dot(birbWorldN, normalize(uBirbSun)));
+      float birbGrazing = pow(1.0 - abs(dot(birbWorldN, birbToEye)), 3.0);
+      outgoingLight += uBirbSunColor * (birbFacesSun * birbGrazing * uBirbSunRim * uBirbAtmos);
 
       // ── Valley mist ──────────────────────────────────────────────────
       // Terrain carves DOWNWARD only (see spherical-world.js), so depth below
@@ -114,7 +151,7 @@ export function addAtmosphere(material, THREE, { baseRadius = 120, cloudStrength
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => base + '-atmos-v1';
+  material.customProgramCacheKey = () => base + '-atmos-v2';
   return material;
 }
 

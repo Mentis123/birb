@@ -1101,3 +1101,23 @@ ambient 1.02 / key 1.32 to ambient 0.62 / key 1.72. **Snow reads by contrast,
 and high ambient of a near-white sky colour is exactly what destroys it** —
 every face lands on the same value and the terrain loses its form. The direct
 light does the work now and the shadows are allowed to go blue.
+
+### 16.12 The terrain finally knows what time it is
+
+`MeshLambertMaterial` has **no specular term at all**, which is why this world
+looked identical at noon and at golden hour: the only thing the moving sun did
+to the ground was set a diffuse level. Real ground does not behave that way —
+grass, snow and rock all scatter light forward at grazing angles, and a low
+sun catching the edge of a hill is most of what golden hour actually looks
+like.
+
+`addAtmosphere` now adds a sun rim: two terms multiplied, how much the surface
+faces the sun and how close to edge-on the eye sees it. Facing alone only
+brightens the lit side, which the diffuse already did; the grazing factor is
+what puts the light on the RIM, where it reads. It runs on every ground and
+prop material, costs a handful of instructions and no draw calls, and it
+shares the key light with the sky disc, the water glint and the light shafts —
+`visualUniforms.sunDir` / `sunColor`, written once per frame.
+
+The view-space normal is rotated back to world by multiplying on the right;
+for a rotation that is the transpose, which is the inverse.

@@ -8413,6 +8413,14 @@
         }
       }
 
+      // The terrain's sun rim shares the key light. One uniform pair, read by
+      // every ground and prop material.
+      if (visualUniforms.sunDir.value && lightingRig.keyLight) {
+        visualUniforms.sunDir.value.copy(lightingRig.keyLight.position).normalize();
+        visualUniforms.sunColor.value.copy(lightingRig.keyLight.color)
+          .multiplyScalar(lightingRig.keyLight.intensity * 0.55);
+      }
+
       // ===== Light shafts =====
       // Where the sun lands on screen. The pass has no scene knowledge, so
       // this is the only place that can tell it.
