@@ -42,7 +42,8 @@ test('plates: every piece of every icon stays inside its outline and stacks by l
         const built = buildIcon(THREE, icon, { size: 2 });
         assert.equal(built.pieces.length, icon.pieces.length);
         for (const p of built.pieces) {
-            const shapes = shapesFromPath(THREE, icon.pieces[p.index].d);
+            const recipePiece = icon.pieces[p.index];
+            const shapes = shapesFromPath(THREE, recipePiece.d, recipePiece.fillRule, recipePiece.translate);
             assert.equal(clampToOutline(p.geometry, shapes, 20), 0, `${icon.id}/${p.id} has vertices outside its outline`);
             p.geometry.computeBoundingBox();
             const bb = p.geometry.boundingBox;

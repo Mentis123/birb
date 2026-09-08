@@ -54,6 +54,7 @@ export default {
     name: 'Microsoft Copilot (2023 mark)',
     source: 'https://en.wikipedia.org/wiki/File:Microsoft_Copilot_Icon.svg',
     viewBox: [0, 0, 48, 48],
+    defaultBuilder: 'ribbon',
     /**
      * The ribbon reading (model/ribbon.js): travel order round the loop.
      * Bands are ruled between their own two long edges; each fold is a

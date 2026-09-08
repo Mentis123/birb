@@ -297,7 +297,7 @@ export function exportSVG(built, icon, opts = {}) {
 
         pieces.push({
             id: piece.id, index: piece.index, depth: depthSum / depthN, loops, shades,
-            affine, fill: icon.pieces[piece.index].fill, compiledBase: piece.fill.base,
+            affine, fill: piece.resolvedFill || icon.pieces[piece.index].fill, compiledBase: piece.fill.base,
         });
     }
 

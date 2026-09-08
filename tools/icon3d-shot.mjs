@@ -28,6 +28,7 @@
  *   --query   query string appended to the URL (e.g. "three=local&icon=copilot-2026")
  *   --gate    run the silhouette + colour gate and fail below threshold
  *   --print   JS expression evaluated after --eval; its (awaited) value is printed as JSON
+ *   --allow-no-canvas   permit DOM-only pages such as the icon catalogue
  *   --allow-console-errors   don't fail the run on console errors
  */
 
@@ -188,7 +189,11 @@ async function main() {
     let readyErr = '';
     try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForFunction('window.__ICON3D_READY === true', null, { timeout: readyTimeout });
+        await page.waitForFunction(
+            'window.__ICON3D_READY === true || window.__ICON3D_CATALOGUE_READY === true',
+            null,
+            { timeout: readyTimeout },
+        );
     } catch (err) {
         readyOk = false;
         readyErr = String(err && err.message || err);
@@ -273,11 +278,12 @@ async function main() {
         return { width, height, samples, opaque, min, max, mean,
             deviation: Math.sqrt(Math.max(0, sumSq / samples - mean * mean)) };
     }).catch(() => null);
-    const pixelOk = Boolean(pixelStats
+    const pixelOk = Boolean((!pixelStats && args['allow-no-canvas'])
+        || (pixelStats
         && pixelStats.samples >= 100
         && pixelStats.opaque / pixelStats.samples > 0.90
         && pixelStats.max - pixelStats.min > 12
-        && pixelStats.deviation > 4);
+        && pixelStats.deviation > 4));
 
     const outPath = path.resolve(REPO_ROOT, args.out);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });

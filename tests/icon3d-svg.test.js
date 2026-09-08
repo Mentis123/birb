@@ -118,7 +118,7 @@ test('path: bounds and area sign', () => {
     assert.ok(signedArea(flattenSubpath(subs[0])) > 0);
 });
 
-test('path: every Copilot piece is one closed subpath inside its viewBox', () => {
+test('path: every icon piece is one closed subpath inside its viewBox', () => {
     for (const icon of Object.values(ICONS)) {
         const [vx, vy, vw, vh] = icon.viewBox;
         for (const piece of icon.pieces) {
@@ -126,8 +126,9 @@ test('path: every Copilot piece is one closed subpath inside its viewBox', () =>
             assert.equal(subs.length, 1, `${icon.id}/${piece.id}`);
             assert.ok(subs[0].closed, `${icon.id}/${piece.id} closed`);
             const [minX, minY, maxX, maxY] = subpathsBounds(subs);
-            assert.ok(minX >= vx - 1 && maxX <= vx + vw + 1, `${piece.id} x within viewBox`);
-            assert.ok(minY >= vy - 1 && maxY <= vy + vh + 1, `${piece.id} y within viewBox`);
+            const [tx, ty] = piece.translate || [0, 0];
+            assert.ok(minX + tx >= vx - 1 && maxX + tx <= vx + vw + 1, `${piece.id} x within viewBox`);
+            assert.ok(minY + ty >= vy - 1 && maxY + ty <= vy + vh + 1, `${piece.id} y within viewBox`);
         }
     }
     const [fold] = parsePath(ICONS['copilot-2023'].pieces[0].d);
@@ -180,7 +181,7 @@ test('holes: disjoint rings are separate solids; degenerate rings are dropped', 
     assert.ok(!pointInPolygon(7, 2, [[0, 0], [5, 0], [5, 5], [0, 5]]));
 });
 
-test('holes: every Copilot piece is a single solid without holes', () => {
+test('holes: every icon piece is a single solid without holes', () => {
     for (const icon of Object.values(ICONS)) {
         for (const piece of icon.pieces) {
             const solids = assignHoles(parsePath(piece.d));

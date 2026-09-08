@@ -2,413 +2,163 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#e4e7ec">
-<title>Icon3D — a Birb Labs study</title>
+<title>Icon3D Catalogue — Birb Labs</title>
 <style>
   :root {
     --paper: #e4e7ec;
     --ink: #1b2130;
     --dim: #6b7280;
-    --line: rgba(27, 33, 48, 0.14);
-    --pill: rgba(255, 255, 255, 0.72);
-    --pill-on: #1b2130;
+    --line: rgba(27, 33, 48, 0.13);
+    --card: rgba(255, 255, 255, 0.62);
+    --card-on: rgba(255, 255, 255, 0.94);
+    --shadow: rgba(47, 56, 78, 0.14);
   }
   * { box-sizing: border-box; }
-  html, body {
-    margin: 0; height: 100%; background: var(--paper); color: var(--ink);
-    overflow: hidden;
+  html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
+  body {
     font-family: ui-rounded, "Avenir Next", "Nunito", "Trebuchet MS", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    overscroll-behavior: none;
   }
-  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-  #stage { position: fixed; inset: 0; }
-
-  .chrome {
-    position: fixed; inset: 0; pointer-events: none;
-    padding: max(env(safe-area-inset-top, 0px), 14px) 16px
-             max(env(safe-area-inset-bottom, 0px), 14px);
-    display: flex; flex-direction: column; justify-content: space-between;
+  .shell {
+    min-height: 100vh; min-height: 100svh;
+    padding: max(env(safe-area-inset-top, 0px), 26px) clamp(18px, 4vw, 56px)
+             calc(max(env(safe-area-inset-bottom, 0px), 24px) + 96px);
+    display: grid; align-content: center;
   }
-  .title {
-    font-size: 11px; font-weight: 800; letter-spacing: 0.34em;
-    text-transform: uppercase; opacity: 0.62;
+  header { max-width: 760px; margin-bottom: clamp(28px, 6vh, 64px); }
+  .eyebrow {
+    margin: 0 0 12px; color: var(--dim); font-size: 10px; font-weight: 800;
+    letter-spacing: 0.34em; text-transform: uppercase;
   }
-  .title b { display: block; font-size: 17px; letter-spacing: 0.16em; opacity: 1; margin-top: 3px; }
-  .foot { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
-  .pills {
-    display: flex; gap: 6px; align-items: center; pointer-events: auto;
-    padding: 5px; border-radius: 22px; background: var(--pill);
-    backdrop-filter: blur(8px); border: 1px solid var(--line);
-    /* Six controls do not fit across a 390px phone, and a row that overflows
-       loses the ones at both ends — on the first mobile capture that was
-       PLATES and SVG, i.e. the whole point of the page. Wrapping keeps every
-       control reachable and the row still reads as one control cluster. */
-    flex-wrap: wrap; justify-content: center; max-width: min(100%, 620px);
-    row-gap: 4px;
+  h1 { margin: 0; font-size: clamp(38px, 6vw, 76px); line-height: 0.94; letter-spacing: -0.055em; word-spacing: .08em; }
+  .intro { margin: 18px 0 0; max-width: 560px; color: var(--dim); font-size: clamp(15px, 1.8vw, 18px); line-height: 1.55; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(14px, 2vw, 24px); }
+  .tile {
+    position: relative; min-width: 0; min-height: clamp(260px, 34vw, 430px); cursor: pointer;
+    border: 1px solid var(--line); border-radius: clamp(24px, 3vw, 38px);
+    background: var(--card); overflow: hidden; box-shadow: 0 22px 60px transparent;
+    transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
   }
-  .pills button {
-    appearance: none; border: 0; background: transparent; color: var(--ink);
-    font: inherit; font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
-    text-transform: uppercase; padding: 8px 12px; border-radius: 999px;
-    cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
-    white-space: nowrap;
+  .tile:hover { transform: translateY(-3px); background: rgba(255,255,255,.78); }
+  .tile:has(input:focus-visible) { outline: 3px solid rgba(48,46,201,.35); outline-offset: 3px; }
+  .tile:has(input:checked) {
+    background: var(--card-on); border-color: rgba(48, 46, 201, 0.32);
+    box-shadow: 0 22px 60px var(--shadow); transform: translateY(-3px);
   }
-  @media (max-width: 520px) {
-    .pills button { font-size: 10px; padding: 7px 9px; letter-spacing: 0.1em; }
-    .pills { gap: 4px; }
+  .tile input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .check {
+    position: absolute; z-index: 2; top: 18px; right: 18px; width: 27px; height: 27px;
+    display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%;
+    background: rgba(255,255,255,.72); color: transparent; font-size: 15px; font-weight: 900;
+    transition: background 150ms ease, color 150ms ease, transform 150ms ease;
   }
-  .pills button.on { background: var(--pill-on); color: #fff; }
-  .pills button:disabled { opacity: 0.45; cursor: default; }
-  .pills .sep { width: 1px; height: 18px; background: var(--line); }
-  .hint {
-    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
-    color: var(--dim); text-align: center;
-    transition: opacity 0.6s ease;
+  input:checked + .check { color: white; background: var(--ink); transform: scale(1.06); }
+  .art { height: 72%; padding: clamp(36px, 5vw, 68px); display: grid; place-items: center; }
+  .art svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 16px 14px rgba(40,48,70,.13)); }
+  .copy { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 22px 22px; }
+  .copy small { display: block; color: var(--dim); font-size: 9px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase; }
+  .copy strong { display: block; margin-top: 5px; font-size: clamp(18px, 2vw, 25px); letter-spacing: -.025em; }
+  .action {
+    position: fixed; z-index: 20; left: 50%; bottom: max(env(safe-area-inset-bottom, 0px), 18px);
+    transform: translateX(-50%); width: min(calc(100% - 36px), 520px); padding: 7px;
+    display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 999px;
+    background: rgba(255,255,255,.82); box-shadow: 0 16px 44px rgba(40,48,70,.16); backdrop-filter: blur(18px);
   }
-  .hint.gone { opacity: 0; }
-
-  .loading {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: var(--paper); z-index: 10;
-    font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--dim);
-    transition: opacity 0.5s ease;
+  .selection { min-width: 0; padding-left: 13px; flex: 1; color: var(--dim); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  .action button {
+    appearance: none; border: 0; border-radius: 999px; padding: 14px 22px;
+    background: var(--ink); color: white; font: inherit; font-size: 11px; font-weight: 850;
+    letter-spacing: .13em; text-transform: uppercase; cursor: pointer;
   }
-  .loading.gone { opacity: 0; pointer-events: none; }
-
-  .fatal {
-    position: fixed; inset: 0; z-index: 500; display: none;
-    align-items: center; justify-content: center; padding: 2rem; text-align: center;
-    background: var(--paper); font-size: 13px; line-height: 1.6;
+  .action button:disabled { opacity: .38; cursor: default; }
+  @media (max-width: 720px) {
+    .shell { align-content: start; padding-top: max(env(safe-area-inset-top, 0px), 24px); }
+    header { margin-bottom: 28px; }
+    .grid { grid-template-columns: 1fr; }
+    .tile { min-height: 270px; }
+    .art { height: 74%; padding: 42px 68px; }
   }
-  .fatal.on { display: flex; }
-
-  .toast {
-    position: fixed; left: 50%; top: 18%; transform: translateX(-50%);
-    padding: 10px 16px; border-radius: 12px; background: var(--ink); color: #fff;
-    font-size: 12px; letter-spacing: 0.08em; opacity: 0; pointer-events: none;
-    transition: opacity 0.25s ease; z-index: 20; max-width: 80vw; text-align: center;
-  }
-  .toast.on { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .tile, .check { transition: none; } }
 </style>
 </head>
 <body>
-
-<div id="stage"><canvas id="scene"></canvas></div>
-
-<div class="chrome">
-  <div class="title">Birb Labs · study<b>Icon3D</b></div>
-  <div class="foot">
-    <div class="pills" data-pills>
-      <button data-build="ribbon" class="on" title="One continuous ribbon">Ribbon</button>
-      <button data-build="plates" title="Flat extruded plates, exact silhouette">Plates</button>
-      <span class="sep"></span>
-      <button data-mode="colour" class="on">Colour</button>
-      <button data-mode="clay">Clay</button>
-      <span class="sep"></span>
-      <button data-icon="copilot-2023" class="on">2023</button>
-      <button data-icon="copilot-2026">2026</button>
-      <span class="sep"></span>
-      <button data-export="glb" title="3D model for Blender, Unity, PowerPoint">GLB</button>
-      <button data-export="svg" title="Vector drawing for Visio, Illustrator, Figma">SVG</button>
+<main class="shell">
+  <header>
+    <p class="eyebrow">Birb Labs · study</p>
+    <h1>Choose your icons.</h1>
+    <p class="intro">Select one, two or all three. We’ll extrude the original artwork and place the finished 3D icons together in the studio.</p>
+  </header>
+  <form data-form>
+    <div class="grid" data-grid></div>
+    <div class="action">
+      <div class="selection" data-selection>No icons selected</div>
+      <button type="submit" disabled data-view>View selected</button>
     </div>
-    <div class="hint" data-hint>Drag · pinch · double-tap resets</div>
-  </div>
-</div>
-
-<div class="loading" data-loading>Extruding…</div>
-<div class="fatal" data-fatal></div>
-<div class="toast" data-toast></div>
-
-<script>
-// Harness escape hatch, see core/three-loader.js: with ?three=local the page
-// runs on a locally installed Three, and the one addon it can fetch on demand
-// (GLTFExporter, from Three's examples) imports the bare specifier `three`.
-// An import map is the only way a browser resolves that without a bundler. It
-// has to exist before the first module script is parsed, hence a classic
-// script here rather than a line in the module below.
-if (new URLSearchParams(location.search).get('three') === 'local') {
-    const map = document.createElement('script');
-    map.type = 'importmap';
-    map.textContent = JSON.stringify({ imports: { three: '/node_modules/three-real/build/three.module.js' } });
-    document.currentScript.after(map);
-}
-</script>
+  </form>
+</main>
 <script type="module">
-import { loadThree, THREE_VERSION } from '/icon3d/src/core/three-loader.js';
-import { buildIcon } from '/icon3d/src/model/icon-mesh.js';
-import { buildRibbon } from '/icon3d/src/model/ribbon.js';
-import { exportSVG, downloadSVG } from '/icon3d/src/model/export-svg.js';
-import { runGate, runBakeCheck } from '/icon3d/src/model/gate.js';
-import { exportGLB, downloadGLB, buildExportScene } from '/icon3d/src/model/export.js';
-import { createStudio } from '/icon3d/src/view/studio.js';
-import { createOrbit } from '/icon3d/src/view/orbit.js';
-import { createQrOverlay } from '/icon3d/src/ui/qr-overlay.js';
-import { getIcon, ICONS, DEFAULT_ICON } from '/icon3d/src/icons/index.js';
+import { getIcon, ICONS, PRODUCTS } from '/icon3d/src/icons/index.js';
+import { createIconPreview } from '/icon3d/src/icons/preview.js';
 
-const DEG = Math.PI / 180;
 const params = new URLSearchParams(location.search);
-const fatalEl = document.querySelector('[data-fatal]');
-const toastEl = document.querySelector('[data-toast]');
-let toastTimer = 0;
-
-function fatal(err) {
-    fatalEl.textContent = 'This icon could not be extruded. ' + (err && err.message ? err.message : err);
-    fatalEl.classList.add('on');
-    // eslint-disable-next-line no-console
-    console.error(err);
-}
-function toast(msg, ms = 2200) {
-    toastEl.textContent = msg;
-    toastEl.classList.add('on');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('on'), ms);
+const legacyIcon = params.get('icon');
+if (legacyIcon && ICONS[legacyIcon]) {
+    const passthrough = new URLSearchParams(params);
+    passthrough.delete('icon');
+    passthrough.set('icons', legacyIcon);
+    location.replace(`/svg/view?${passthrough}`);
 }
 
-// Three-finger QR, the Birb Labs convention, pinned to production.
-createQrOverlay({
-    url: 'https://birbmobile.vercel.app/svg',
-    label: 'birbmobile.vercel.app/svg',
-    kicker: 'Scan to view',
+const selected = new Set((params.get('selected') || '').split(',').filter((id) => ICONS[id]));
+const grid = document.querySelector('[data-grid]');
+const form = document.querySelector('[data-form]');
+const view = document.querySelector('[data-view]');
+const selection = document.querySelector('[data-selection]');
+
+for (const product of PRODUCTS) {
+    const label = document.createElement('label');
+    label.className = 'tile';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'icon';
+    input.value = product.iconId;
+    input.checked = selected.has(product.iconId);
+    const check = document.createElement('span');
+    check.className = 'check';
+    check.setAttribute('aria-hidden', 'true');
+    check.textContent = '✓';
+    const art = document.createElement('span');
+    art.className = 'art';
+    art.append(createIconPreview(getIcon(product.iconId)));
+    const copy = document.createElement('span');
+    copy.className = 'copy';
+    copy.innerHTML = `<small>${product.kicker}</small><strong>${product.name}</strong>`;
+    label.append(input, check, art, copy);
+    grid.append(label);
+}
+
+function selectedIds() {
+    return [...form.querySelectorAll('input:checked')].map((input) => input.value);
+}
+
+function update() {
+    const ids = selectedIds();
+    view.disabled = ids.length === 0;
+    view.textContent = ids.length ? `View selected · ${ids.length}` : 'View selected';
+    selection.textContent = ids.length === 0 ? 'No icons selected' : `${ids.length} icon${ids.length === 1 ? '' : 's'} selected`;
+}
+
+form.addEventListener('change', update);
+form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const ids = selectedIds();
+    if (ids.length) location.href = `/svg/view?icons=${encodeURIComponent(ids.join(','))}`;
 });
-
-(async function boot() {
-    const THREE = await loadThree();
-
-    const canvas = document.getElementById('scene');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    // Neutral keeps the brand hues where the SVG put them; ACES pushes a
-    // saturated yellow towards orange and the purple towards blue.
-    renderer.toneMapping = THREE.NeutralToneMapping;
-    renderer.toneMappingExposure = 1.0;
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(36, 1, 0.05, 120);
-
-    const ICON_SIZE = 2;
-    const showTile = params.get('tile') !== '0';
-    let iconId = ICONS[params.get('icon')] ? params.get('icon') : DEFAULT_ICON;
-    let mode = params.get('mode') === 'clay' ? 'clay' : 'colour';
-    // Two readings of the same table: the ribbon is what the artwork depicts,
-    // the plates are what an SVG importer makes of it. Both are built from the
-    // same path data, so the toggle is a genuine comparison and not a preset.
-    const BUILDERS = { ribbon: buildRibbon, plates: buildIcon };
-    let builderId = BUILDERS[params.get('build')] ? params.get('build') : 'ribbon';
-
-    let built = BUILDERS[builderId](THREE, getIcon(iconId), { size: ICON_SIZE });
-    built.setMode(mode);
-    scene.add(built.group);
-
-    const studio = createStudio(THREE, renderer, scene, built.width, { tile: showTile });
-    scene.fog = new THREE.Fog(scene.background, 9, 34);
-
-    const narrow = () => innerWidth / innerHeight < 0.75;
-    const orbit = createOrbit(camera, canvas, {
-        yaw: 30 * DEG,
-        pitch: 15 * DEG,
-        targetY: built.height * 0.5,
-        distance: 5,
-        minDistance: 1.4,
-        maxDistance: 18,
-        minPitch: -3 * DEG,
-        maxPitch: 75 * DEG,
-        minTargetY: 0.1,
-        maxTargetY: 3,
-        panRadius: 2.5,
-        idleSpin: params.get('spin') === '0' ? 0 : 0.10,
-        idleDelay: 2.5,
-    });
-
-    /**
-     * Camera distance that fits the icon's bounding sphere on BOTH axes. A
-     * portrait phone is limited by its horizontal field of view, a desktop by
-     * its vertical one; fitting one axis alone crops the other. The sphere is
-     * already generous for a slab, so the margin is small.
-     */
-    function fitDistance() {
-        const r = Math.hypot(built.width / 2, built.height / 2) * 1.04;
-        const v = camera.fov * DEG;
-        const hFov = 2 * Math.atan(Math.tan(v / 2) * camera.aspect);
-        return r / Math.sin(Math.min(v, hFov) / 2);
-    }
-    /** The orbit point sits a little under the icon's middle on a phone so the
-     *  icon rises clear of the control pills. */
-    function targetHeight() {
-        return built.height * (narrow() ? 0.42 : 0.5);
-    }
-    let userZoomed = false;
-    function resize() {
-        const w = innerWidth, h = innerHeight;
-        renderer.setSize(w, h, false);
-        camera.fov = narrow() ? 48 : 36;
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        if (!userZoomed) {
-            orbit.setView(orbit.yaw, orbit.pitch, fitDistance(), true);
-            orbit.targetY = targetHeight();
-        }
-        orbit.invalidate();
-    }
-    addEventListener('resize', resize);
-    resize();
-    canvas.addEventListener('wheel', () => { userZoomed = true; }, { passive: true });
-    canvas.addEventListener('pointerdown', (e) => { if (e.isPrimary === false) userZoomed = true; });
-
-    // --- UI -----------------------------------------------------------------
-    const pills = document.querySelector('[data-pills]');
-    function markOn(attr, value) {
-        pills.querySelectorAll(`[${attr}]`).forEach((b) => b.classList.toggle('on', b.getAttribute(attr) === value));
-    }
-    function setMode(next) {
-        mode = next === 'clay' ? 'clay' : 'colour';
-        built.setMode(mode);
-        markOn('data-mode', mode);
-        orbit.invalidate();
-    }
-    function rebuild() {
-        scene.remove(built.group);
-        built.dispose();
-        built = BUILDERS[builderId](THREE, getIcon(iconId), { size: ICON_SIZE });
-        built.setMode(mode);
-        scene.add(built.group);
-        orbit.targetY = targetHeight();
-        orbit.invalidate();
-    }
-    function setIcon(id) {
-        if (!ICONS[id]) return;
-        iconId = id;
-        rebuild();
-        markOn('data-icon', iconId);
-    }
-    function setBuilder(id) {
-        if (!BUILDERS[id]) return;
-        builderId = id;
-        rebuild();
-        markOn('data-build', builderId);
-    }
-    pills.addEventListener('click', async (e) => {
-        const b = e.target.closest('button');
-        if (!b) return;
-        if (b.dataset.mode) setMode(b.dataset.mode);
-        else if (b.dataset.icon) setIcon(b.dataset.icon);
-        else if (b.dataset.build) setBuilder(b.dataset.build);
-        else if (b.dataset.export === 'glb') {
-            b.disabled = true;
-            toast('Baking…', 6000);
-            try {
-                const bytes = await exportGLB(THREE, THREE_VERSION, built, { tile: studio.tile });
-                downloadGLB(bytes, `${iconId}-${builderId}.glb`);
-                toast(`${iconId}-${builderId}.glb · ${(bytes.byteLength / 1024).toFixed(0)} KB`);
-            } catch (err) {
-                console.warn('GLB export failed', err);
-                toast('GLB export needs the CDN — try again online');
-            } finally {
-                b.disabled = false;
-            }
-        } else if (b.dataset.export === 'svg') {
-            // The vector export takes the view you are looking at, so what you
-            // orbit to is what lands on the page.
-            const { svg, stats } = exportSVG(built, getIcon(iconId), {
-                yaw: orbit.yaw / DEG, pitch: orbit.pitch / DEG, size: 1024,
-            });
-            downloadSVG(svg, `${iconId}-${builderId}.svg`);
-            toast(`${iconId}-${builderId}.svg · ${stats.pieces} shapes · ${(stats.bytes / 1024).toFixed(0)} KB`);
-        }
-    });
-    markOn('data-mode', mode);
-    markOn('data-icon', iconId);
-    markOn('data-build', builderId);
-
-    const hint = document.querySelector('[data-hint]');
-    let touched = false;
-    canvas.addEventListener('pointerdown', () => {
-        if (touched) return;
-        touched = true;
-        setTimeout(() => hint.classList.add('gone'), 900);
-    });
-
-    document.querySelector('[data-loading]').classList.add('gone');
-
-    // --- loop ---------------------------------------------------------------
-    let last = performance.now();
-    let frames = 0, fpsAccum = 0, fps = 60;
-    function stats() {
-        return {
-            drawCalls: renderer.info.render.calls,
-            triangles: renderer.info.render.triangles,
-            fps: Math.round(fps),
-            icon: iconId,
-            build: builderId,
-            mode,
-            pieces: built.pieces.length,
-            yaw: Math.round(orbit.yaw / DEG),
-            pitch: Math.round(orbit.pitch / DEG),
-            distance: Math.round(orbit.distance * 100) / 100,
-        };
-    }
-    function frame(now) {
-        const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
-        last = now;
-        fpsAccum += dt; frames++;
-        if (fpsAccum >= 0.5) { fps = frames / fpsAccum; frames = 0; fpsAccum = 0; }
-        if (orbit.update(dt)) {
-            renderer.render(scene, camera);
-            document.documentElement.dataset.icon3dCamera = JSON.stringify(stats());
-        }
-        requestAnimationFrame(frame);
-    }
-    requestAnimationFrame(frame);
-
-    // --- harness hooks --------------------------------------------------------
-    window.__ICON3D = {
-        THREE, renderer, scene, camera, orbit, studio,
-        get icon() { return built; },
-        setMode,
-        setIcon,
-        setBuilder,
-        /** Vector export, for the harness: returns the markup and its stats. */
-        exportSVG(o = {}) {
-            return exportSVG(built, getIcon(iconId), { yaw: orbit.yaw / DEG, pitch: orbit.pitch / DEG, size: 1024, ...o });
-        },
-        /** Park the camera at an exact view and render it immediately. */
-        setView(yawDeg, pitchDeg, distance) {
-            userZoomed = true;
-            orbit.setView(yawDeg * DEG, pitchDeg * DEG, distance ?? orbit.distance, true);
-            orbit.update(0);
-            renderer.render(scene, camera);
-        },
-        /** Silhouette + colour gate against the browser's own rasteriser. */
-        gate(px = 512) {
-            const result = runGate(THREE, renderer, getIcon(iconId), built, px);
-            result.bake = runBakeCheck(THREE, renderer, built, px);
-            orbit.invalidate();
-            renderer.render(scene, camera);
-            return result;
-        },
-        /** Full GLB export without the download; returns size and magic for the harness. */
-        async exportGLB() {
-            const bytes = await exportGLB(THREE, THREE_VERSION, built, { tile: studio.tile });
-            return { bytes: bytes.byteLength, magic: String.fromCharCode(...new Uint8Array(bytes, 0, 4)) };
-        },
-        /** Bake the export scene without downloading; returns what was baked. */
-        bake(px = 128) {
-            const { scene: s, textures } = buildExportScene(THREE, built, { px, tile: studio.tile });
-            let meshes = 0;
-            s.traverse((o) => { if (o.isMesh) meshes++; });
-            const sizes = textures.map((t) => [t.image.width, t.image.height]);
-            textures.forEach((t) => t.dispose());
-            return { meshes, textures: sizes };
-        },
-    };
-    window.__ICON3D_STATS = stats;
-    document.documentElement.dataset.icon3dCamera = JSON.stringify(stats());
-    window.__ICON3D_READY = true;
-})().catch(fatal);
+update();
+window.__ICON3D_CATALOGUE_READY = true;
 </script>
 </body>
 </html>

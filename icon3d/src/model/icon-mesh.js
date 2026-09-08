@@ -56,24 +56,46 @@ export const ID_COLOURS = [
     [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1],
 ];
 
-function toThreePath(THREE, sub, target) {
-    target.moveTo(sub.x, -sub.y);
+function toThreePath(THREE, sub, target, translate = [0, 0]) {
+    const [tx, ty] = translate;
+    target.moveTo(sub.x + tx, -(sub.y + ty));
     for (const s of sub.segments) {
-        if (s.kind === 'L') target.lineTo(s.x, -s.y);
-        else target.bezierCurveTo(s.x1, -s.y1, s.x2, -s.y2, s.x, -s.y);
+        if (s.kind === 'L') target.lineTo(s.x + tx, -(s.y + ty));
+        else target.bezierCurveTo(
+            s.x1 + tx, -(s.y1 + ty),
+            s.x2 + tx, -(s.y2 + ty),
+            s.x + tx, -(s.y + ty),
+        );
     }
     if (sub.closed) target.closePath();
     return target;
 }
 
 /** SVG `d` (+ fill rule) → THREE.Shape[] with holes attached. */
-export function shapesFromPath(THREE, d, fillRule = 'nonzero') {
+export function shapesFromPath(THREE, d, fillRule = 'nonzero', translate = [0, 0]) {
     const subpaths = parsePath(d);
     return assignHoles(subpaths, { fillRule }).map(({ contour, holes }) => {
-        const shape = toThreePath(THREE, contour, new THREE.Shape());
-        for (const h of holes) shape.holes.push(toThreePath(THREE, h, new THREE.Path()));
+        const shape = toThreePath(THREE, contour, new THREE.Shape(), translate);
+        for (const h of holes) shape.holes.push(toThreePath(THREE, h, new THREE.Path(), translate));
         return shape;
     });
+}
+
+function translatedGradient(gradient, tx, ty) {
+    if (typeof gradient === 'string' || (!tx && !ty)) return gradient;
+    return {
+        ...gradient,
+        transform: `matrix(1 0 0 1 ${tx} ${ty})${gradient.transform ? ` ${gradient.transform}` : ''}`,
+    };
+}
+
+/** Apply a source element translation to its user-space gradients without mutating the recipe. */
+export function translatedFill(fill, translate = [0, 0]) {
+    const [tx, ty] = translate;
+    return {
+        base: translatedGradient(fill.base, tx, ty),
+        ...(fill.overlay ? { overlay: translatedGradient(fill.overlay, tx, ty) } : {}),
+    };
 }
 
 /**
@@ -183,13 +205,15 @@ export function buildIcon(THREE, icon, opts = {}) {
 
     icon.pieces.forEach((piece, index) => {
         const subpaths = parsePath(piece.d);
-        const bounds = subpathsBounds(subpaths);
+        const [tx, ty] = piece.translate || [0, 0];
+        const localBounds = subpathsBounds(subpaths);
+        const bounds = [localBounds[0] + tx, localBounds[1] + ty, localBounds[2] + tx, localBounds[3] + ty];
         minX = Math.min(minX, bounds[0]); minY = Math.min(minY, bounds[1]);
         maxX = Math.max(maxX, bounds[2]); maxY = Math.max(maxY, bounds[3]);
         const layer = piece.layer || 0;
         minLayer = Math.min(minLayer, layer); maxLayer = Math.max(maxLayer, layer);
 
-        const shapes = shapesFromPath(THREE, piece.d, piece.fillRule);
+        const shapes = shapesFromPath(THREE, piece.d, piece.fillRule, piece.translate);
         const geometry = new THREE.ExtrudeGeometry(shapes, {
             depth,
             bevelEnabled: bevel > 0,
@@ -204,7 +228,8 @@ export function buildIcon(THREE, icon, opts = {}) {
         geometry.translate(0, 0, -depth / 2);
         geometry.computeVertexNormals();
 
-        const cf = compileFill(piece.fill, bounds);
+        const resolvedFill = translatedFill(piece.fill, piece.translate);
+        const cf = compileFill(resolvedFill, bounds);
         const glsl = fillGLSL('svgFill', cf);
         const key = `icon3d:${icon.id}:${piece.id}`;
 
@@ -227,11 +252,12 @@ export function buildIcon(THREE, icon, opts = {}) {
         const mesh = new THREE.Mesh(geometry, materials.colour);
         mesh.name = piece.id;
         mesh.userData.d = piece.d;
+        mesh.userData.translate = [tx, ty];
         mesh.position.z = layer * layerStep;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         group.add(mesh);
-        pieces.push({ id: piece.id, index, layer, mesh, geometry, materials, bounds, fill: cf });
+        pieces.push({ id: piece.id, index, layer, mesh, geometry, materials, bounds, fill: cf, resolvedFill });
     });
 
     const bounds = [minX, minY, maxX, maxY];

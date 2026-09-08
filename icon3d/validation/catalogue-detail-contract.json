@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "project": "Birb Icon3D three-product baseline",
+  "modelMetersPerUnit": 1,
+  "subjectLedger": [
+    "Copilot: leftmost in three-icon view; continuous rainbow ribbon; freestanding volume",
+    "Foundry: centre in three-icon view; three stacked violet plates; freestanding volume",
+    "Fabric: rightmost in three-icon view; three overlapping green plates; freestanding volume"
+  ],
+  "details": [
+    {
+      "id": "copilot-ribbon",
+      "semanticRead": "A continuous four-colour Copilot loop with two front rolls, two recessed folds and an open centre.",
+      "referenceAsset": "https://birbmobile.vercel.app/svg?icon=copilot-2023",
+      "referenceCrop": [0, 0, 48, 48],
+      "referenceLandmarks": [
+        "cyan-to-yellow left roll",
+        "purple-to-orange right roll",
+        "two dark recessed straps",
+        "open central negative space"
+      ],
+      "physicalBoundsMm": [2000, 1818, 190],
+      "smallestSignalMm": 160,
+      "signalProvenance": "Measured from the 48-unit source viewBox before geometry selection: the narrowest identity-carrying fold is approximately 3.8/48 of the displayed 2000 mm model width.",
+      "representation": "explicit-mesh",
+      "occlusionContract": "Front rolls cover only the intended ends of the two recessed straps; the central opening remains clear from the delivery camera.",
+      "isolationProbe": "/icon3d/view.html?three=local&icons=copilot-2023&build=ribbon&spin=0",
+      "integratedViews": [
+        {
+          "id": "copilot-desktop-diagnostic",
+          "purpose": "diagnostic",
+          "viewport": [1024, 768],
+          "dpr": 1,
+          "camera": {"fov": 36, "target": [0, 0.91, 0], "yaw": 30, "pitch": 15, "distance": 4.52},
+          "objectWidthPx": 430,
+          "smallestSignalPx": 34
+        },
+        {
+          "id": "copilot-mobile-delivery",
+          "purpose": "delivery",
+          "viewport": [390, 844],
+          "dpr": 2,
+          "camera": {"fov": 48, "target": [0, 0.76, 0], "yaw": 30, "pitch": 15, "distance": 4.1},
+          "objectWidthPx": 300,
+          "smallestSignalPx": 24
+        }
+      ],
+      "meshAssertions": ["four watertight ribbon components", "expected winding and layer order", "source-front silhouette threshold"],
+      "renderAssertions": ["opaque nonuniform framebuffer", "rainbow gradients remain ordered", "central negative space remains open"],
+      "humanAcceptance": {"status": "pass", "unresolved": []}
+    },
+    {
+      "id": "foundry-plates",
+      "semanticRead": "A tall violet Foundry arch with a separate rounded arm and the source bridge visible in the central gap.",
+      "referenceAsset": "https://github.com/jajera/azure-icons/blob/main/icons/ai-machine-learning/ai-foundry.svg",
+      "referenceCrop": [0, 0, 18, 18],
+      "referenceLandmarks": [
+        "tall left stem",
+        "narrow central bridge",
+        "rounded right arm",
+        "open upper notch"
+      ],
+      "physicalBoundsMm": [1874, 2000, 112],
+      "smallestSignalMm": 120,
+      "signalProvenance": "Measured from the 18-unit source viewBox before extrusion: the narrow bridge is approximately 1.1/18 of the displayed 2000 mm model height.",
+      "representation": "explicit-mesh",
+      "occlusionContract": "The bridge remains behind the arm and stem; the upper notch and lower separation stay open.",
+      "isolationProbe": "/icon3d/view.html?three=local&icons=ai-foundry&spin=0",
+      "integratedViews": [
+        {
+          "id": "foundry-desktop-diagnostic",
+          "purpose": "diagnostic",
+          "viewport": [1024, 768],
+          "dpr": 1,
+          "camera": {"fov": 36, "target": [0, 1, 0], "yaw": 30, "pitch": 15, "distance": 4.34},
+          "objectWidthPx": 430,
+          "smallestSignalPx": 27
+        },
+        {
+          "id": "foundry-mobile-delivery",
+          "purpose": "delivery",
+          "viewport": [390, 844],
+          "dpr": 2,
+          "camera": {"fov": 48, "target": [0, 0.84, 0], "yaw": 30, "pitch": 15, "distance": 4.1},
+          "objectWidthPx": 290,
+          "smallestSignalPx": 18
+        }
+      ],
+      "meshAssertions": ["three closed extruded components", "zero vertices outside source outlines", "paint-order z stacking"],
+      "renderAssertions": ["opaque nonuniform framebuffer", "violet gradients retain source direction", "three source regions remain distinct"],
+      "humanAcceptance": {"status": "pass", "unresolved": []}
+    },
+    {
+      "id": "fabric-plates",
+      "semanticRead": "Three overlapping mint-to-teal Fabric ribbons stepping down from upper right to lower left.",
+      "referenceAsset": "https://github.com/fergusstrachan/David-Summers-Azure-Design/blob/master/SVG_Azure_All/Microsoft%20Fabric.svg",
+      "referenceCrop": [0, 0, 57.171603, 56.665316],
+      "referenceLandmarks": [
+        "long mint upper plate",
+        "middle green overlap",
+        "short dark lower tail",
+        "two clean diagonal gaps"
+      ],
+      "physicalBoundsMm": [2000, 1982, 113],
+      "smallestSignalMm": 90,
+      "signalProvenance": "Measured from the 57.17-unit source viewBox before extrusion: the narrow overlap clearance is approximately 2.6/57.17 of the displayed 2000 mm model width.",
+      "representation": "explicit-mesh",
+      "occlusionContract": "Upper, middle and lower pieces follow source paint order; diagonal gaps remain readable without z-fighting.",
+      "isolationProbe": "/icon3d/view.html?three=local&icons=microsoft-fabric&spin=0",
+      "integratedViews": [
+        {
+          "id": "fabric-desktop-diagnostic",
+          "purpose": "diagnostic",
+          "viewport": [1024, 768],
+          "dpr": 1,
+          "camera": {"fov": 36, "target": [0, 0.99, 0], "yaw": 30, "pitch": 15, "distance": 4.27},
+          "objectWidthPx": 440,
+          "smallestSignalPx": 20
+        },
+        {
+          "id": "fabric-mobile-delivery",
+          "purpose": "delivery",
+          "viewport": [390, 844],
+          "dpr": 2,
+          "camera": {"fov": 48, "target": [0, 0.83, 0], "yaw": 30, "pitch": 15, "distance": 4.1},
+          "objectWidthPx": 300,
+          "smallestSignalPx": 14
+        }
+      ],
+      "meshAssertions": ["three closed extruded components", "source group translations included in final bounds", "zero vertices outside translated outlines"],
+      "renderAssertions": ["opaque nonuniform framebuffer", "mint-to-teal ordering matches the source", "overlaps remain visually separate"],
+      "humanAcceptance": {"status": "pass", "unresolved": []}
+    }
+  ]
+}

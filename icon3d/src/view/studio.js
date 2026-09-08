@@ -110,10 +110,11 @@ export function createStudio(THREE, renderer, scene, iconWidth, opts = {}) {
 
     let tile = null;
     if (cfg.tile) {
-        const w = iconWidth * cfg.tileScale;
+        const w = opts.tileWidth || iconWidth * cfg.tileScale;
+        const h = opts.tileDepth || w;
         const t = w * cfg.tileThicknessFrac;
         const bevel = t * 0.32;
-        const geo = new THREE.ExtrudeGeometry(roundedRectShape(THREE, w, w, w * cfg.tileCornerFrac), {
+        const geo = new THREE.ExtrudeGeometry(roundedRectShape(THREE, w, h, Math.min(w, h) * cfg.tileCornerFrac), {
             depth: t - 2 * bevel,
             bevelEnabled: true,
             bevelThickness: bevel,

@@ -1,16 +1,16 @@
 # Icon3D — architecture
 
-An SVG icon, extruded into a 3D object, in code. Served at **`/svg`**, the
-short URL this is demoed from; the files live at `/icon3d` and that path works
-too. Unlisted either way (`noindex`, linked from nowhere). The first icon is the
-Microsoft Copilot mark — the 2023 rainbow ribbon and the flatter 2026 one —
-because the study started as "do what Blender's SVG importer does to this icon,
-without Blender".
+SVG icons, extruded into 3D objects, in code. **`/svg`** is the catalogue:
+three lightweight 2D tiles with multi-select. **`/svg/view?icons=...`** loads
+WebGL only after selection and composes one to three finished models in a row.
+The files live at `/icon3d`; both routes remain unlisted (`noindex`). The
+baseline products are Microsoft Copilot, Microsoft Foundry and Microsoft
+Fabric. Copilot keeps its ribbon interpretation; Foundry and Fabric use the
+reference-exact plate builder.
 
-`/svg` is a **rewrite** in `vercel.json`, not a redirect, so the pretty URL
-stays in the address bar. That is only safe because every import on the page is
-absolute (`/icon3d/src/...`): a rewrite serves this HTML at a path one level
-shallower, and relative imports would 404 there — the mistake `/AR` made.
+`/svg` and `/svg/view` are **rewrites** in `vercel.json`, so the public URLs
+stay in the address bar. Every browser import is absolute
+(`/icon3d/src/...`), which keeps both rewritten depths safe.
 
 Read this before touching any of it.
 
@@ -115,13 +115,17 @@ A PNG of a render is not a Visio object, so the page exports both:
 
 ```
 icon3d/
-  index.html                 page: boot, pills (Colour/Clay · 2023/2026 · GLB), loop, harness hooks
+  index.html                 2D catalogue: three tiles, selection state, viewer URL
+  view.html                  WebGL chrome and pinned local-Three import map
   src/
     core/three-loader.js     pinned CDN Three, ?three=local escape hatch (copy)
     icons/
       index.js               the registry — add a table, add a line
       copilot-2023.js        6-path Figma export → 4 pieces (2 bands + 2 folds), sheens as overlays
       copilot-2026.js        2 pieces, radial gradients with a skewX transform
+      ai-foundry.js          3 visible source regions and gradients
+      microsoft-fabric.js    3 source paths, gradients and nested translations
+      preview.js             inert inline SVG used by catalogue tiles
     model/
       svg-path.js            full SVG path grammar → lines + cubics (arcs via centre parameterisation)
       fill-shapes.js         rings → solids with holes, nonzero AND evenodd done properly
@@ -136,12 +140,13 @@ icon3d/
     view/
       studio.js              PMREM room, key light + shadow, rounded tile, shadow catcher
       orbit.js               phone-first orbit/pinch/pan camera (copy)
+      viewer-app.js          one-to-three composition, controls, exports and harness hooks
     ui/qr.js, qr-overlay.js  three-finger QR (copy)
     dev/
       probe.html             render ONE builder alone in colour/clay/unlit/id/normal/wire
       builders.js            the builder registry the probe picks from
 tools/icon3d-shot.mjs        screenshot harness; --gate runs the likeness gate; --print evaluates JS
-tests/icon3d-*.test.js       39 tests over the pure modules, the meshes and the ribbon
+tests/icon3d-*.test.js       pure-module, registry, mesh, export and ribbon tests
 ```
 
 ## The pipeline, and where it differs from a loader
@@ -225,7 +230,15 @@ specifier so the local `GLTFExporter` resolves; production never sees it.
    semi-transparent duplicate path into the base piece's `overlay`.
 2. Give each piece a `layer`: pieces painted over something they overlap go
    in front; pieces that overlap nothing can share a layer.
-3. Register it in `src/icons/index.js`, open `?icon=<id>`, run the gate.
+3. Register its product metadata in `src/icons/index.js`, open
+   `/svg/view?icons=<id>`, and run the gate.
+
+The catalogue imports no Three.js code. Its 2D preview and the 3D builder read
+the same audited recipe, so a newly registered product cannot drift between
+tile and model. Multi-select is URL state: a comma-separated, de-duplicated
+list of at most three valid icon IDs. The viewer builds each model once, lays
+out their measured widths with a fixed world-space gap, then fits the camera
+against both composition width and height.
 
 Unsupported on purpose until an icon needs them: radial gradients with a
 focal point off-centre, `spreadMethod` other than pad, `<use>`, clip paths,
@@ -234,7 +247,8 @@ each should arrive with a test.
 
 ## Budget
 
-6 draw calls, ~13k triangles, one 2048² shadow map, DPR ≤ 2, renders on
-demand (a still frame costs nothing; the idle turntable renders continuously
-by choice). Measured under SwiftShader at 60 fps; a real-phone pass is still
-owed, as it is for Bronze.
+The catalogue has no WebGL cost. The three-icon composition is 12 draw calls
+and ~38k triangles with one shared renderer, camera, environment and 2048²
+shadow map; DPR is capped at 2. Measured under SwiftShader at 60 fps on the
+1440×900 and 390×844 validation views. A still frame renders on demand; the
+idle turntable renders continuously by choice.

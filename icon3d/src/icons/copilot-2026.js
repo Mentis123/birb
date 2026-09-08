@@ -40,6 +40,7 @@ export default {
     name: 'Microsoft Copilot (2026 mark)',
     source: 'https://commons.wikimedia.org/wiki/File:Microsoft-copilot-2026-seeklogo.svg',
     viewBox: [-1, 15, 513, 481],
+    defaultBuilder: 'plates',
     pieces: [
         {
             id: 'band_blue', layer: 0,

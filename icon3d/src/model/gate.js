@@ -104,7 +104,10 @@ export function runGate(THREE, renderer, icon, built, px = 512) {
         const [r, g, b] = ID_COLOURS[p.index % ID_COLOURS.length];
         ctx.fillStyle = `rgb(${r * 255},${g * 255},${b * 255})`;
         const piece = icon.pieces[p.index];
+        ctx.save();
+        if (piece.translate) ctx.translate(piece.translate[0], piece.translate[1]);
         ctx.fill(new Path2D(piece.d), piece.fillRule === 'evenodd' ? 'evenodd' : 'nonzero');
+        ctx.restore();
     }
     const ref = ctx.getImageData(0, 0, pw, ph).data;
 
@@ -221,7 +224,11 @@ export function runBakeCheck(THREE, renderer, built, px = 512) {
     for (const p of order) {
         const [r, g, b] = ID_COLOURS[p.index % ID_COLOURS.length];
         ctx.fillStyle = `rgb(${r * 255},${g * 255},${b * 255})`;
+        ctx.save();
+        const translate = p.mesh.userData.translate;
+        if (translate) ctx.translate(translate[0], translate[1]);
         ctx.fill(new Path2D(p.mesh.userData.d || ''), 'nonzero');
+        ctx.restore();
     }
     const ref = ctx.getImageData(0, 0, pw, ph).data;
 
