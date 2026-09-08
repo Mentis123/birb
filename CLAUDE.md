@@ -93,6 +93,57 @@
 > `tools/birb-shot.mjs --after` runs JS after the settle, so a pose it sets is
 > the pose photographed.
 
+> **Seventh pass: the ground got a legibility pass, and a prop turned out to be
+> a flying doughnut** (§17). Started from a fresh contact sheet, not the
+> roadmap, and the sheet settled it: the city — the one biome that had had a
+> legibility pass — was the best frame on it and the other three were a flat
+> colour each. `src/environment/ground-detail.js` gives each biome procedural
+> ground at zero draw calls. **The geometric normal is free and it is the whole
+> trick**: `normalize(cross(dFdx(P), dFdy(P)))` is the FACET normal, which
+> suits flat-shaded low-poly terrain exactly, and snow-on-flats/rock-on-faces
+> turned the mountain from a uniform pale mass into a ridge with form using a
+> term that has no noise in it at all. Two traps recorded there: **the canyon
+> strata had to band the GROUND, not just the walls** (banding by radius is
+> right, but a canyon floor's radius barely changes across a view, so not one
+> band ever appeared on it), and the first tints were about 0.1 apart per
+> channel — measurably present, visually absent.
+>
+> **The canyons' "arches" were complete tori laid flat and floating 10-25 units
+> in the sky**, scaled to sixteen units across, with nothing holding them up.
+> An arch is a HALF torus on its own two feet; colliders belong on the LEGS
+> (one at the centre makes an arch a wall with a picture of a hole on it) and
+> the perch on the crown. `__BIRB.goToProp(name, i, back, lift)` exists because
+> of this — nine arches on a planet are pure luck to have in frame, and **a
+> prop you cannot reliably photograph is a prop nobody reviews.**
+>
+> **Wingtip ribbons** (`src/effects/ribbon-trail.js`) on boost and hard bank.
+> Camera-facing, because a band in a fixed plane of the bird is invisible
+> edge-on. **A trail's length must be bounded by ARC LENGTH**: fading by buffer
+> position makes it (points x per-frame travel), which is 5 units at 60fps and
+> 70 in a 2fps harness, and fading by age does not rescue it because `update`
+> clamps delta to 50ms to survive a stall. Its tier gate is `< 2` deliberately:
+> two draw calls is not what a struggling phone is struggling with, and a
+> feature gated so tightly the shipping device never satisfies it does not
+> ship. New capture hooks: `__BIRB.boost(on)`, `__BIRB.goToProp()`.
+>
+> **The slalom's tunnel came out** (§16.17). It was a seven-unit lane walled by
+> trees, roofed with arch ribs, wrapped in a backdrop tube and signed three ways
+> — six systems competing for the same seven units against a two-unit bird — and
+> the tell had been sitting in the tooling for a session: `goToSlalom` needed a
+> `lift` argument because a camera at the player's own altitude sat INSIDE the
+> wall. That is not a framing bug, it is the course reporting it has no room in
+> it. It is an open aerial run now. Four numbers matter and each was found by a
+> capture. **Gate spacing and swing must both beat the gate DIAMETER** — at 4-6
+> units apart against a 12.8-unit ring the gates render as a tangle, and swung
+> ±6.5 they nest concentrically looking down the course and the weave vanishes.
+> **Anchor the course to the SPHERE, not the ground**: the terrain carves down
+> 46 units while the gravity-less bird holds a near-constant altitude, so
+> `groundR + 15` plunges out of the flight band into valleys — and into the
+> canopy of trees rooted on the rim above them. **Forest trees are 14-58 units
+> tall**, so a course under ~30 has conifers standing inside its gates. And **a
+> marker fence is the tunnel again at a wider radius** — thirty pylons became
+> one beacon per gate.
+>
 > **The biomes got a legibility pass** (§16.13). The city shipped as grey
 > boxes in a field; it now has procedural lit windows and a street grid with
 > lamps, both derived from the fragment's own position — no geometry, no
@@ -128,6 +179,22 @@
 > work compensates for that. It is safe to raise because it is a ceiling the
 > adaptive tier still drops to 1.0 and 0.85 on measured frame rate. Budgets
 > after all of it: 62-65 draw calls, 76-77k triangles, every biome.
+
+> **The drones and the slalom gates got a pass** (§16.16). Both were flat
+> colours on primitives with `transparent` + `AdditiveBlending` + opacity under
+> one, and **additive light on a bright sky is grey** — which is how the
+> checkpoint gates, the most important things to see on that course, rendered
+> as concrete lifebuoys. `src/effects/energy-ring.js` is the shared fix: an
+> OPAQUE ring with an HDR colour has a silhouette against any sky and the
+> bloom supplies the glow. Its `base` brightness is asserted in tests to stay
+> between 0.25 and 0.6, because both extremes were tried — a 50/50 duty cycle
+> at full brightness is a barber's pole, and a near-black ring is a
+> readability regression wearing an art department's clothes. The drone body
+> is a dark carbon shell now, with seams along the octahedron's own edges:
+> a regular octahedron satisfies |x|+|y|+|z| = r, so `min(|x|,|y|,|z|)` IS the
+> distance to the nearest edge, free. All shader-side, because drones move
+> independently and cannot be instanced. New capture hooks: `__BIRB.solo()`,
+> `goToDrone()`, `goToSlalom()`.
 
 > **Next round is planned, not built:** `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §14.
 > Ranked by what this session measured. The headline: one enum (tone mapping)
