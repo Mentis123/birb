@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<title>Icon3D probe</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #e4e7ec; overflow: hidden; font: 11px/1.4 ui-monospace, monospace; color: #1b2130; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #stage { position: fixed; inset: 0; }
+  .tag { position: fixed; left: 10px; top: 8px; opacity: 0.7; pointer-events: none; white-space: pre; }
+  .fatal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 2rem; background: #e4e7ec; }
+  .fatal.on { display: flex; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="scene"></canvas></div>
+<div class="tag" data-tag></div>
+<div class="fatal" data-fatal></div>
+<script>
+if (new URLSearchParams(location.search).get('three') === 'local') {
+    const map = document.createElement('script');
+    map.type = 'importmap';
+    map.textContent = JSON.stringify({ imports: { three: '/node_modules/three-real/build/three.module.js' } });
+    document.currentScript.after(map);
+}
+</script>
+<script type="module">
+/**
+ * dev/probe.html — render ONE builder in isolation.
+ *
+ * The skill this artefact follows (img2threejsMAX) insists every semantic
+ * detail is first seen alone, in a silhouette or normal material, before it is
+ * judged in the final light. This page is that: no chrome, no pills, a builder
+ * chosen by ?builder=, a material chosen by ?material=, the same harness hooks
+ * as the real page so tools/icon3d-shot.mjs drives it unchanged.
+ *
+ *   ?builder=plates|ribbon      which geometry (dev/builders.js)
+ *   ?material=colour|clay|unlit|ids|normal|wire
+ *   ?icon=copilot-2023|copilot-2026
+ *   ?tile=0                     hide the studio tile
+ *   ?view=yaw,pitch,dist        park the camera (degrees, degrees, units)
+ *   ?three=local                harness escape hatch
+ */
+import { loadThree } from '/icon3d/src/core/three-loader.js';
+import { loadBuilder } from '/icon3d/dev/builders.js';
+import { runGate, runBakeCheck } from '/icon3d/src/model/gate.js';
+import { exportSVG as exportSVGFrom } from '/icon3d/src/model/export-svg.js';
+import { createStudio } from '/icon3d/src/view/studio.js';
+import { createOrbit } from '/icon3d/src/view/orbit.js';
+import { getIcon } from '/icon3d/src/icons/index.js';
+
+const DEG = Math.PI / 180;
+const params = new URLSearchParams(location.search);
+const fatalEl = document.querySelector('[data-fatal]');
+function fatal(err) {
+    fatalEl.textContent = String(err && err.stack || err);
+    fatalEl.classList.add('on');
+    console.error(err);
+}
+
+(async function boot() {
+    const THREE = await loadThree();
+    const builderName = params.get('builder') || 'ribbon';
+    const build = await loadBuilder(builderName);
+    const iconId = params.get('icon') || 'copilot-2023';
+    const icon = getIcon(iconId);
+
+    const canvas = document.getElementById('scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.NeutralToneMapping;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(36, 1, 0.05, 120);
+
+    let built = build(THREE, icon, { size: 2 });
+    scene.add(built.group);
+    const studio = createStudio(THREE, renderer, scene, built.width, { tile: params.get('tile') !== '0' });
+
+    // Diagnostic materials live here, not in the builders: a builder ships
+    // colour/clay/unlit/ids; the probe adds normal and wire on top.
+    const normalMat = new THREE.MeshNormalMaterial();
+    const wireMat = new THREE.MeshBasicMaterial({ color: 0x1b2130, wireframe: true });
+    let mode = params.get('material') || 'colour';
+    function setMode(next) {
+        mode = next;
+        if (next === 'normal' || next === 'wire') {
+            built.group.traverse((o) => { if (o.isMesh) o.material = next === 'normal' ? normalMat : wireMat; });
+        } else {
+            built.setMode(next);
+        }
+        orbit.invalidate();
+    }
+
+    const orbit = createOrbit(camera, canvas, {
+        yaw: 30 * DEG, pitch: 15 * DEG, targetY: built.height * 0.5, distance: 4.6,
+        minDistance: 0.6, maxDistance: 20, minPitch: -60 * DEG, maxPitch: 89 * DEG,
+        minTargetY: -2, maxTargetY: 4, idleSpin: 0,
+    });
+    function resize() {
+        renderer.setSize(innerWidth, innerHeight, false);
+        camera.fov = innerWidth / innerHeight < 0.75 ? 48 : 36;
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        orbit.invalidate();
+    }
+    addEventListener('resize', resize);
+    resize();
+    setMode(mode);
+    if (params.get('view')) {
+        const [y, p, d] = params.get('view').split(',').map(Number);
+        orbit.setView(y * DEG, p * DEG, d, true);
+    }
+
+    let tri = 0, calls = 0;
+    function stats() {
+        return { builder: builderName, icon: iconId, mode, drawCalls: calls, triangles: tri,
+            pieces: built.pieces.length, yaw: Math.round(orbit.yaw / DEG), pitch: Math.round(orbit.pitch / DEG),
+            distance: Math.round(orbit.distance * 100) / 100 };
+    }
+    const tag = document.querySelector('[data-tag]');
+    let last = performance.now();
+    function frame(now) {
+        const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+        last = now;
+        if (orbit.update(dt)) {
+            renderer.render(scene, camera);
+            tri = renderer.info.render.triangles; calls = renderer.info.render.calls;
+            tag.textContent = `${builderName} · ${iconId} · ${mode}\n${calls} calls · ${tri} tris · yaw ${Math.round(orbit.yaw / DEG)} pitch ${Math.round(orbit.pitch / DEG)} d ${orbit.distance.toFixed(2)}`;
+        }
+        requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    window.__ICON3D = {
+        THREE, renderer, scene, camera, orbit, studio,
+        get icon() { return built; },
+        setMode,
+        setView(yawDeg, pitchDeg, distance) {
+            orbit.setView(yawDeg * DEG, pitchDeg * DEG, distance ?? orbit.distance, true);
+            orbit.update(0);
+            renderer.render(scene, camera);
+            tri = renderer.info.render.triangles; calls = renderer.info.render.calls;
+        },
+        gate(px = 512) {
+            const result = runGate(THREE, renderer, icon, built, px);
+            result.bake = runBakeCheck(THREE, renderer, built, px);
+            setMode(mode);
+            renderer.render(scene, camera);
+            return result;
+        },
+        exportSVG(o = {}) {
+            return exportSVGFrom(built, icon, { yaw: orbit.yaw / DEG, pitch: orbit.pitch / DEG, size: 1024, ...o });
+        },
+        /** Geometry facts the harness can assert on without a screenshot. */
+        inspect() {
+            const out = [];
+            for (const p of built.pieces) {
+                const g = p.geometry;
+                g.computeBoundingBox();
+                const pos = g.getAttribute('position');
+                out.push({ id: p.id, vertices: pos.count, triangles: g.index ? g.index.count / 3 : pos.count / 3,
+                    bounds: [g.boundingBox.min.toArray(), g.boundingBox.max.toArray()], z: p.mesh.position.z });
+            }
+            return out;
+        },
+    };
+    window.__ICON3D_STATS = stats;
+    window.__ICON3D_READY = true;
+})().catch(fatal);
+</script>
+</body>
+</html>

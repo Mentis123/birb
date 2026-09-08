@@ -561,6 +561,82 @@ Verify with `node tools/ar-shot.mjs [--go]`. It fakes a camera
 — a zero exit means the gyro produced a reading, the stream went live and
 something actually rendered, not just that a PNG appeared.
 
+### Icon3D — unlisted sibling at `/icon3d` (2026-09-07)
+
+**Icon3D** turns an SVG icon into a 3D extruded object in code, the way
+Blender's SVG importer plus an extrude does. Files live at `icon3d/`; it is
+served at **birbmobile.vercel.app/svg** (a `vercel.json` REWRITE, so the short
+URL stays in the address bar) and at `/icon3d`. Both paths are in `sw.js`'s
+`SIBLING_ARTEFACTS` — the rewrite means the browser navigates to `/svg`, so
+listing only `/icon3d` would leave the QR's own URL unprotected. Unlisted:
+`noindex`, linked from nowhere.
+It started as "the Copilot icon, like the Blender build, but code only" and
+ships two marks (the September 2023 rainbow ribbon and the flatter August 2026
+redesign) in **two readings**: **Ribbon**, one continuous strip of material
+that rolls over at four lines and twists — what the artwork depicts, and the
+default — and **Plates**, the flat extruded cut-outs an SVG importer makes.
+Drag to orbit, pinch to zoom, pills for Ribbon/Plates, Colour/Clay, 2023/2026,
+plus **GLB** (baked textures, opens in Blender) and **SVG** (a real vector
+drawing of the view you are looking at). Three-finger QR as usual.
+
+> **Read `icon3d/ARCHITECTURE.md` before touching it.** Same house rules as
+> Gauntlet and Bronze: airtight against the rest of the repo, core Three only
+> and pinned, zero assets. An icon is a JS table of `d` strings and gradient
+> definitions transcribed verbatim from the source vector, not an SVG file.
+
+Things that cost a round, or would have:
+
+- **The reference was the 2023 mark, not the current one.** Every icon
+  library still serves the 2023 sash shape; Wikipedia serves its exact Figma
+  export, and the 2026 vector is only on Commons. Confirmed by rendering both,
+  not by name — the 2026 one has no folds.
+- **Gradients are evaluated per pixel in the fragment shader**, from the SVG's
+  own `gradientTransform`, stops and stop-opacity. Vertex colours on an
+  extruded cap's few big triangles cannot reproduce a radial sweep. The GLSL is
+  emitted from the same table the JS reference evaluator reads, and the gate
+  measures them against each other: 0.25/255 mean error.
+- **`bevelOffset = -bevelSize`**, or the bevel grows the plate outside its
+  outline and pieces that share an edge in the SVG collide.
+- **Each piece needs its own `customProgramCacheKey`**; identical
+  `onBeforeCompile` closures share a compiled program and every plate gets the
+  first gradient.
+- **Holes are decided by nesting depth and orientation, for both fill rules.**
+  Three's `ShapePath.toShapes` decides by winding alone and fills in the hole
+  of an evenodd export whose rings run the same way.
+- **The gate has an independent oracle.** Silhouette IoU is measured against
+  the browser's own `Path2D` fill of the same path data (0.9985–0.9995 per
+  piece); the export bake is rendered and compared too, which is the only
+  check that can see a vertically mirrored texture.
+- **The ribbon's rulings stay in the picture plane; only their ENDS carry
+  depth.** Front-on the depths vanish and the projection is the artwork; from
+  any other angle the depths are the whole object. Rotating the ruling out of
+  plane instead — a helicoidal twist, or leaning it until the width is truly
+  constant — is geometrically purer and looks wrong: 0.76 IoU and a strap that
+  projects as a bow-tie, or a strap that explodes into an 18-unit fan where the
+  drawn ruling is 1.4 units.
+- **A strap's outline is mostly clip.** Its tips lie on a band's outline (≤0.17
+  units) and are occlusion, not material; the V notch and the sliver that
+  overshoots the transition line are tuck allowance hidden under a band.
+  Leaving the tuck in the edge costs 15 points of IoU because it eats half the
+  arc length.
+- **The gate's floor depends on the builder** — 0.985 for plates, 0.86 for the
+  ribbon — and both numbers are printed. Relaxing it for both would hide a
+  regression; relaxing it for one and reporting the value describes the model.
+- **A raster is not a Visio object.** The SVG export projects the real meshes
+  and emits paths, one group per component, with the brand gradients still
+  gradients under a fitted `gradientTransform`. `up` is `view × right`; the
+  other order mirrors the whole drawing and reads as a colour bug.
+- **`ExtrudeGeometry`'s inset bevel grows a burr at a cusp** — the band's
+  razor tip, where two edges meet at ~0° and the bevel vector is an arbitrary
+  clamped direction. `clampToOutline` pulls those vertices back; the tolerance
+  scales with the outline's extent, because float32 rounds a 513-unit viewBox
+  ten times coarser than a 48-unit one.
+
+Verify with `node tools/icon3d-shot.mjs --page icon3d/index.html --out shot.png
+--query three=local --gate` (needs `npm install --no-save playwright
+three-real@npm:three@0.183.2` then `git checkout -- node_modules/three/index.js`).
+`/icon3d` is in `sw.js`'s `SIBLING_ARTEFACTS`; the reason is under Gauntlet.
+
 ### Baby Blender — the iPad app, not a web artefact (2026-09-05)
 
 **Baby Blender** is the one thing in this repo that is not a web page. It is a
