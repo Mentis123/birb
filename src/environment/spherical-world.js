@@ -4,6 +4,7 @@ import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
 import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
+import { addWindowLights, addStreetGrid } from "./city-windows.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -2520,11 +2521,18 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   // Building bodies carry vertexColors for a baked dark-base → lit-top façade
   // gradient. Per-instance jitter (added after instancing) spreads each tower's
   // tint so the skyline reads as many distinct buildings, not three clones.
+  // Darker than they were (0x223656 / 0x29405f / 0x1e2e49). The windows are
+  // the subject now, and a lit grid only reads against a facade that is
+  // actually in shadow — on the old mid-blue boxes the warm points were a
+  // texture rather than lights.
   const buildingMats = [
-    new THREE.MeshLambertMaterial({ color: 0x223656, flatShading: true, vertexColors: true }),
-    new THREE.MeshLambertMaterial({ color: 0x29405f, flatShading: true, vertexColors: true }),
-    new THREE.MeshLambertMaterial({ color: 0x1e2e49, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x141f33, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x18263c, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x101a2c, flatShading: true, vertexColors: true }),
   ];
+  // Every tower gets a lit window grid. Zero geometry, zero draw calls, and
+  // it is the whole difference between a skyline and a field of slabs.
+  for (const m of buildingMats) addWindowLights(m, THREE);
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x74d4ff, transparent: true, opacity: 0.15 });
   const antennaMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
 
@@ -2876,6 +2884,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     flatShading: true,    // Low-poly aesthetic — every face visible
     side: THREE.FrontSide,
   });
+  // The city's ground gets a street grid. It is the one surface a person can
+  // identify from a mile up, and what identifies it is the grid — without it
+  // the city is a skyline standing in a field.
+  if (variant === 'city') addStreetGrid(sphereMaterial, THREE, { radius: sphereRadius });
 
   const sphereGround = new THREE.Mesh(sphereGeometry, sphereMaterial);
   sphereGround.name = 'sphere-ground';
@@ -3010,7 +3022,12 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       // Three's chunk names, which are not in them, so it would silently do
       // nothing at best and break the compile at worst.
       if (!m || m.transparent || m.isMeshBasicMaterial || m.isShaderMaterial) continue;
-      addAtmosphere(m, THREE, { baseRadius: sphereRadius });
+      addAtmosphere(m, THREE, {
+        baseRadius: sphereRadius,
+        // Sedimentary banding, canyons only. It is the one thing that makes a
+        // steep wall read as a canyon rather than as a cliff.
+        strata: variant === 'canyons' ? 0.115 : 0,
+      });
     }
   });
 

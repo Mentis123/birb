@@ -20,26 +20,49 @@
  */
 
 export const FLOCK_DEFAULTS = {
-  count: 18,
+  // A dozen in a V, not eighteen scattered. Playtest read on the scattered
+  // version was "not sure what the little arrow things in the sky are" — and
+  // that is the correct read of what it was: evenly spaced dark chevrons at a
+  // uniform distance, with no formation to group them and a flap that scaled
+  // the whole bird uniformly, so they pulsed in size instead of beating their
+  // wings. Nothing about it said "creature".
+  count: 13,
   // Height above the ground, NOT a ring radius. The first version orbited a
   // circle of radius 165 at a fixed Y, which on a sphere puts the birds 120+
   // units from the player and about two pixels wide — present in the draw
   // call and invisible on screen. They now ride a great circle just above
   // cruise height, so the flock sweeps across the player's sky.
-  altitude: 19,
-  // Seconds for one lap AROUND THE PLAYER. Slow enough to read as soaring.
-  period: 46,
+  altitude: 21,
+  // Seconds for one sweep across the player's view and back.
+  period: 52,
+  // How far each way, in radians of bearing, the flock swings relative to the
+  // direction the player is facing. A tight V that orbits a full circle is in
+  // frame for about nine per cent of a portrait phone's narrow field of view
+  // — which is to say, never. Swinging it across the forward view instead
+  // means the player actually sees the thing.
+  sweep: 1.05,
   // How wide the wheel is, in radians of arc across the planet surface. At
   // radius 120 this is roughly a 40-unit circle centred on the player.
-  arcRadius: 0.55,
-  wingSpan: 4.8,
-  flapRate: 2.7,
+  // Closer than it was (0.55). At radius 120 that put the flock 66 units out,
+  // where a bird is a few pixels of dark grey and unreadable as anything.
+  arcRadius: 0.52,
+  wingSpan: 3.1,
+  flapRate: 2.35,
   // How far the group is strung out along the orbit, in radians.
   // Spread WIDE around the wheel, not clustered. A tight group on a circle
   // centred on the player is behind the camera most of the time — measured:
   // sixteen birds correctly positioned 74 units away and not one of them on
   // screen. Strung around the wheel, several are always in front.
   spreadArc: 6.283,
+  // How far back and out each rank of the V sits from the leader, in radians
+  // of arc. A V is the one bird formation everyone recognises instantly, and
+  // it does the job no amount of per-bird detail could at this distance.
+  // These have to be several times the wingspan in arc terms or the ranks
+  // overlap and the V collapses into a pile of darts — which is exactly what
+  // 0.030/0.024 against a 7.4 wingspan produced. At radius 120 these put
+  // about nine units between ranks for a bird under four across.
+  vBack: 0.075,
+  vOut: 0.055,
 };
 
 /**
@@ -49,23 +72,37 @@ export const FLOCK_DEFAULTS = {
  * sphere instead of on a flat ring.
  */
 export function flockOffset(index, count, seconds, options = {}) {
-  const { altitude, period, spreadArc } = { ...FLOCK_DEFAULTS, ...options };
+  const { altitude, period, vBack, vOut } = { ...FLOCK_DEFAULTS, ...options };
   const n = Math.max(1, count);
   const i = index % n;
   const t = Number.isFinite(seconds) ? seconds : 0;
-  const lap = (t / period) * Math.PI * 2;
-  // Strung along the orbit, with a slow personal drift so the formation
-  // breathes rather than holding a rigid line.
-  const along = ((i / n) - 0.5) * spreadArc + Math.sin(t * 0.23 + i * 1.7) * 0.035;
-  // Fanned sideways off the orbit and staggered in height, so the group has
-  // real depth instead of being a flat string of birds.
-  const lateral = Math.sin(i * 2.39) * 0.10 + Math.sin(t * 0.17 + i) * 0.012;
-  const rise = altitude + Math.sin(i * 1.31) * 11 + Math.sin(t * 0.31 + i * 0.9) * 4;
+  const lap = Math.sin((t / period) * Math.PI * 2) * (options.sweep ?? FLOCK_DEFAULTS.sweep);
+
+  // ── The V ─────────────────────────────────────────────────────────────
+  // Bird 0 leads; the rest alternate to the left and right wing, each rank
+  // one step further back and further out. It is the single most legible
+  // arrangement of flying birds there is: a viewer who cannot resolve a
+  // single silhouette still reads the shape as geese.
+  const rank = Math.floor((i + 1) / 2);
+  const side = i === 0 ? 0 : (i % 2 === 0 ? 1 : -1);
+  // A little personal slop so the formation breathes instead of looking
+  // stamped out.
+  const jitterBack = Math.sin(t * 0.6 + i * 2.1) * 0.004;
+  const jitterOut = Math.sin(t * 0.47 + i * 1.3) * 0.003;
+
+  const along = -rank * vBack + jitterBack;
+  const lateral = side * (rank * vOut + jitterOut);
+  // Ranks trail slightly below the leader, as they do in a real V, plus a
+  // slow bob.
+  const rise = altitude - rank * 0.55 + Math.sin(t * 0.31 + i * 0.9) * 1.6;
+
   return {
     angle: lap + along,
     lateral,
     height: rise,
-    phase: i * 0.61,
+    // Each rank beats a little behind the one ahead, so the flap runs down
+    // the formation as a wave rather than the whole V clapping in unison.
+    phase: rank * 0.42 + (side < 0 ? 0.12 : 0),
   };
 }
 
@@ -86,13 +123,15 @@ export function createFlock(THREE, { sphereRadius = 120, ...options } = {}) {
   geometry.computeVertexNormals();
 
   const material = new THREE.MeshBasicMaterial({
-    color: 0x1e2a33,
+    // Warm dark brown-grey rather than slate: a cold grey chevron on a warm
+    // sky reads as a UI mark, and this one was being mistaken for one.
+    color: 0x2a2119,
     side: THREE.DoubleSide,
     // Unlit and slightly transparent: at this distance a lit surface just
     // flickers as the orbit turns it through the light, and haze is what
     // actually sells the distance.
     transparent: true,
-    opacity: 0.82,
+    opacity: 0.88,
     depthWrite: false,
   });
 
@@ -128,7 +167,7 @@ export function createFlock(THREE, { sphereRadius = 120, ...options } = {}) {
      *                 the player's own sky rather than a fixed great circle
      * @param center   planet centre (Vector3)
      */
-    update(seconds, birdPos, center) {
+    update(seconds, birdPos, center, forward) {
       // A fixed orbit somewhere on the planet is a flock the player almost
       // never sees: the first version put one on a great circle and it was
       // simply on the far side most of the time. The wheel is anchored to the
@@ -136,10 +175,19 @@ export function createFlock(THREE, { sphereRadius = 120, ...options } = {}) {
       // real flock riding the same thermal would look like.
       if (birdPos) _localUp.copy(birdPos).normalize();
       else _localUp.set(0, 1, 0);
-      // Any tangent basis will do; pick one that cannot degenerate.
-      _t1.set(0, 1, 0);
-      if (Math.abs(_localUp.y) > 0.9) _t1.set(1, 0, 0);
-      _t1.crossVectors(_t1, _localUp).normalize();
+      // The basis is anchored to the direction the player is FACING, so
+      // bearing zero means straight ahead and the sweep crosses the view.
+      // Anchored to an arbitrary world axis instead, the flock spends almost
+      // all of its time behind the camera.
+      if (forward) {
+        _t1.copy(forward).addScaledVector(_localUp, -forward.dot(_localUp));
+        if (_t1.lengthSq() < 1e-6) _t1.set(0, 1, 0);
+      } else {
+        _t1.set(0, 1, 0);
+        if (Math.abs(_localUp.y) > 0.9) _t1.set(1, 0, 0);
+        _t1.crossVectors(_t1, _localUp);
+      }
+      _t1.normalize();
       _t2.crossVectors(_localUp, _t1).normalize();
 
       for (let i = 0; i < count; i++) {
@@ -162,11 +210,16 @@ export function createFlock(THREE, { sphereRadius = 120, ...options } = {}) {
         _look.lookAt(_tangent, ZERO, _dir);
         _quaternion.setFromRotationMatrix(_look);
 
-        // At this distance a silhouette that narrows and widens IS the flap,
-        // and it costs one sine.
+        // The flap is a change of SPAN alone. Scaling all three axes together
+        // — which is what this did — makes the bird grow and shrink, and a
+        // dark shape pulsing in size at a fixed distance does not read as a
+        // wingbeat, it reads as a glitch. Holding the body length fixed while
+        // the wings sweep in and out is the whole silhouette of a bird flying.
         const beat = Math.sin(seconds * flapRate + bird.phase);
-        const span = wingSpan * (0.74 + 0.26 * Math.abs(beat));
-        _scale.set(span, span, span);
+        const span = wingSpan * (0.42 + 0.58 * Math.abs(beat));
+        // Wings dip slightly below the body on the downstroke, which is what
+        // stops the flat card reading as flat.
+        _scale.set(span, wingSpan * (0.10 + 0.06 * beat), wingSpan * 0.82);
         _matrix.compose(_position, _quaternion, _scale);
         mesh.setMatrixAt(i, _matrix);
       }

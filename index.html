@@ -4344,6 +4344,7 @@
     const flock = createFlock(THREE, { sphereRadius: 120 });
     scene.add(flock.mesh);
     const _flockCenter = new THREE.Vector3(0, 0, 0);
+    const _flockForward = new THREE.Vector3();
     // Every rim-light uniform block the bird owns, so the environment switch
     // can retint them all at once.
     const birbRimUniforms = [];
@@ -5759,7 +5760,13 @@
         if (sphericalWorld?.water) {
           sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
           sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
-          if (skyDome.getMidColor) sphericalWorld.water.setSky(skyDome.getMidColor());
+          // Darkened. Seen from above, water mirrors the sky ABOVE it, which
+          // is the zenith rather than the bright horizon band getMidColor
+          // returns — and at dusk the difference is the whole read: an
+          // undimmed mid tone turns every lake into a sheet of pale sky.
+          if (skyDome.getMidColor) {
+            sphericalWorld.water.setSky(skyDome.getMidColor().clone().multiplyScalar(0.58));
+          }
         }
         // The bird's rim is sky light wrapping its silhouette, so it has to be
         // THIS sky. A fixed cyan rim in the canyon's ochre world stops reading
@@ -8375,7 +8382,13 @@
       if (flock) {
         const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
         flock.mesh.visible = showFlock;
-        if (showFlock) flock.update(motionState.elapsed, birdPos, _flockCenter);
+        // The camera's forward, flattened later into the tangent plane: the
+        // flock's sweep is anchored to it so the V crosses the player's view
+        // instead of orbiting somewhere behind their head.
+        if (showFlock) {
+          cam.getWorldDirection(_flockForward);
+          flock.update(motionState.elapsed, birdPos, _flockCenter, _flockForward);
+        }
       }
 
       // ===== Sun cycle =====
@@ -9193,7 +9206,15 @@
         // asks for palette tuning on physical phones against FIXED views; this
         // is how those views get generated from one world build, so the only
         // difference between two frames is the setting under test.
-        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog, tone } = {}) => {
+        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog, tone, atmos, hemiSky } = {}) => {
+          // Atmosphere master (cloud shadows, mist, sun rim) and the
+          // hemisphere light's sky colour, both isolatable: "the ground looks
+          // wrong" has half a dozen candidate causes and turning one off is
+          // the only way to name which.
+          if (Number.isFinite(atmos)) visualUniforms.atmosphere.value = atmos;
+          if (hemiSky !== undefined && lightingRig.ambient?.color) {
+            lightingRig.ambient.color.setHex(hemiSky);
+          }
           if (Number.isFinite(exposure)) renderer.toneMappingExposure = exposure;
           if (tone !== undefined) {
             const map = {
