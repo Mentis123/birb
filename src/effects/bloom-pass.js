@@ -79,15 +79,36 @@ const COMPOSITE_FRAG = `
   uniform sampler2D tBloom;
   uniform float uStrength;
   uniform float uVignette;
+  uniform float uSpeed;
   varying vec2 vUv;
   void main() {
-    vec3 scene = texture2D(tScene, vUv).rgb;
-    vec3 bloom = texture2D(tBloom, vUv).rgb;
-    vec3 c = scene + bloom * uStrength;
-    // Vignette costs two instructions here and would cost an entire
-    // full-screen pass on its own.
     vec2 d = vUv - 0.5;
-    float v = 1.0 - dot(d, d) * uVignette;
+    vec3 scene = texture2D(tScene, vUv).rgb;
+
+    // ── Radial speed smear ───────────────────────────────────────────────
+    // Only while boosting, and only in the OUTER frame: the centre stays
+    // sharp so the thing the player is flying at is never smeared, which is
+    // the mistake that makes speed effects unplayable rather than exciting.
+    // Four extra taps, and they cost nothing at all when uSpeed is zero
+    // because the branch is uniform across the draw.
+    if (uSpeed > 0.001) {
+      float edge = smoothstep(0.12, 0.5, length(d));
+      float amount = uSpeed * edge * 0.055;
+      vec3 smear = scene;
+      smear += texture2D(tScene, vUv - d * amount * 0.5).rgb;
+      smear += texture2D(tScene, vUv - d * amount * 1.0).rgb;
+      smear += texture2D(tScene, vUv - d * amount * 1.7).rgb;
+      smear += texture2D(tScene, vUv - d * amount * 2.6).rgb;
+      scene = mix(scene, smear * 0.2, edge * uSpeed);
+    }
+
+    vec3 bloom = texture2D(tBloom, vUv).rgb;
+    // Boost also lifts the bloom, so speed reads as light as well as motion.
+    vec3 c = scene + bloom * (uStrength * (1.0 + uSpeed * 0.5));
+    // Vignette costs two instructions here and would cost an entire
+    // full-screen pass on its own. It tightens under boost, which is what
+    // actually sells the tunnel.
+    float v = 1.0 - dot(d, d) * (uVignette + uSpeed * 0.85);
     gl_FragColor = vec4(c * v, 1.0);
   }
 `;
@@ -150,6 +171,7 @@ export function createBloomPass(THREE, renderer, {
       tBloom: { value: blurB.texture },
       uStrength: { value: strength },
       uVignette: { value: vignette },
+      uSpeed: { value: 0 },
     },
     depthTest: false,
     depthWrite: false,
@@ -198,6 +220,10 @@ export function createBloomPass(THREE, renderer, {
     setStrength(value) { compositeMaterial.uniforms.uStrength.value = value; },
     setThreshold(value) { brightMaterial.uniforms.uThreshold.value = value; },
     setVignette(value) { compositeMaterial.uniforms.uVignette.value = value; },
+    /** 0..1 boost amount: drives the radial smear, bloom lift and vignette. */
+    setSpeed(value) {
+      compositeMaterial.uniforms.uSpeed.value = Math.max(0, Math.min(1, value || 0));
+    },
 
     /**
      * Render the scene through the pass. Replaces `renderer.render(scene, camera)`.

@@ -4357,6 +4357,8 @@
       bloomPass = null;
     }
     let bloomEnabled = !isLowEnd;
+    // Eased 0..1 boost strength for the composite pass.
+    let boostVisual = 0;
 
     /**
      * The single place a frame reaches the screen.
@@ -8202,6 +8204,14 @@
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
       visualUniforms.time.value = motionState.elapsed;
       visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
+
+      // Boost drives the composite's radial smear, bloom lift and vignette.
+      // Eased, so a tap on the pill does not snap the whole frame.
+      if (bloomPass) {
+        const wantSpeed = (sprintState.active && !isNested && !reducedMotionState.enabled) ? 1 : 0;
+        boostVisual = blendToward(boostVisual, wantSpeed, delta, wantSpeed > boostVisual ? 6 : 3.2);
+        bloomPass.setSpeed(boostVisual);
+      }
 
       // Flock. Dropped at tier 2 with the other optional decoration.
       if (flock) {
