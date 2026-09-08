@@ -1191,3 +1191,22 @@ compile in one session and neither failure looked like one: Three logs the
 error and quietly draws nothing, so the page renders, the frame is plausible,
 and the screenshot harness exits zero. It visits every environment, because a
 material that lives in one biome is exactly the kind nothing else covers.
+
+### 16.14 Two corrections the contact sheet caught
+
+**The mountain's nest view rendered almost entirely black.** Cutting its
+ambient from 1.02 to 0.62 (16.11) bought the contrast that makes snow read,
+and forgot that the ambient is also the ONLY light on the half of the world
+facing away from the sun. A perch on the night side had nothing lighting it
+at all. Back to 0.86, with the key eased from 1.72 to 1.52 and the hemisphere
+ground term lifted — contrast kept, black frame gone. Measured mean brightness
+across the four nest views is now 118-158.
+
+**The mist was erasing the mid-distance rather than placing it.** 0.70
+strength capped at 0.72 meant most of what a player looks at was more than
+half mist, and a nest view — which is nothing but mid-distance — lost its
+subject entirely. Now 0.58 capped at 0.56.
+
+Both were found by looking at the eight-tile contact sheet, and neither would
+have been found any other way: every automated gate was green, the game was
+playable, and the frames were rendering exactly what they were told to.
