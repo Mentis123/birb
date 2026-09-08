@@ -71,9 +71,18 @@ export function createSkyDome(options = {}) {
       // Sun: soft disc + two-lobe atmospheric halo. Pure shader math on the
       // existing dome — a golden-hour anchor with zero extra draw calls.
       float sd = clamp(dot(dir, uSunDirection), 0.0, 1.0);
-      float disc = smoothstep(0.99955, 0.99988, sd);
-      float halo = pow(sd, 160.0) * 0.45 + pow(sd, 18.0) * 0.16;
-      color += uSunColor * (disc * 1.15 + halo);
+      // ~2.6 degrees across. Five times the real sun, which is the right lie:
+      // a physically-sized disc is 20 pixels on a phone and reads as a stuck
+      // dead pixel rather than as the light source the whole scene is lit by.
+      float disc = smoothstep(0.99880, 0.99962, sd);
+      float halo = pow(sd, 160.0) * 0.55 + pow(sd, 18.0) * 0.18;
+      // The disc is deliberately HDR — over 1.0 in scene-linear, before tone
+      // mapping. It has to be: the bloom pass thresholds the TONE-MAPPED
+      // frame, and Neutral tone mapping rolls anything near 1.0 back under
+      // the knee. A disc at 1.15 was the brightest thing in the world and
+      // still bloomed by nothing. It is also the only source the light
+      // shafts have, so its brightness sets their whole strength.
+      color += uSunColor * (disc * 4.5 + halo);
 
       // Star-like noise for the top hemisphere, with a slow gentle twinkle.
       float starNoise = fract(sin(dot(vWorldPosition.xz * 0.1, vec2(12.9898, 78.233))) * 43758.5453);

@@ -3,6 +3,7 @@ import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
 import { createColliderGrid } from "./collider-grid.js";
+import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -16,6 +17,14 @@ const SPHERE_RADIUS = 120;
 // into valleys instead of skating a perfect sphere. Set at the top of
 // createSphericalWorld; null = flat sphere (server/test builds).
 let _activeTerrainProfile = null;
+// Sea level for the environment being built / currently active, in units below
+// the base radius; 0 means this world has no water.
+//
+// It is module-level for the same reason the terrain profile is: the flight
+// floor, the landing check and the walking pose all have to agree with each
+// other and with what the player can see, and they reach the terrain through
+// free functions rather than through the world object.
+let _activeWaterLevel = 0;
 // Landmarks of the world currently being built, reported on the world object.
 let _landmarks = [];
 
@@ -502,6 +511,32 @@ function valleyCarveAt(nx, ny, nz) {
   return Number.isFinite(carve) && carve < 0 ? carve : 0;
 }
 
+/**
+ * The smooth CONTINENTAL height alone — the broad basins and highlands,
+ * without the detail roughness laid over them, and with the landmark valley's
+ * carve folded in because that is a basin too.
+ *
+ * This, not the full height, is what decides where lakes are. The full field
+ * has detail noise with features about twenty units across, and the ground
+ * MESH is only built at 96x64 on mobile — a vertex every eight units. Flood
+ * from the full field and most of the "lakes" are noise pits the mesh never
+ * resolved: the analytic sampler says the ground is four units under water,
+ * the mesh draws it two units above, and every lake in the world is hidden
+ * behind its own bed. That is exactly what shipped in the first build of this,
+ * and it looked precisely like water that had failed to render.
+ */
+function continentalHeight(nx, ny, nz, profile) {
+  let cont = 0;
+  if (profile.continentAmplitude) {
+    const R = SPHERE_RADIUS;
+    const cs = profile.continentScale;
+    const c = fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5) - CONTINENT_BIAS;
+    const carve = c < 0 ? Math.max(-1, -Math.tanh(-FACE_STEEPNESS * c) / TANH_FACE_NORM) : 0;
+    cont = carve * profile.continentAmplitude;
+  }
+  return Math.min(0, cont + valleyCarveAt(nx, ny, nz));
+}
+
 function terrainDisplacement(nx, ny, nz, profile) {
   const R = SPHERE_RADIUS;
   const detail = fbm(nx * R * profile.scale, ny * R * profile.scale, nz * R * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
@@ -519,7 +554,29 @@ function terrainDisplacement(nx, ny, nz, profile) {
   // Clamp the COMBINED height to <= 0 (downward-only — preserves the flight-floor
   // invariant). Detail textures the cliff faces/floors and dimples the plateau,
   // but the plateau itself is the ceiling — nothing rises above the base radius.
-  return Math.min(0, cont + detail + valleyCarveAt(nx, ny, nz));
+  const valley = valleyCarveAt(nx, ny, nz);
+  let h = Math.min(0, cont + detail + valley);
+
+  // ── Lake beds ──────────────────────────────────────────────────────────
+  // Inside a basin deep enough to hold water, the detail roughness is pushed
+  // back down under the surface. Without this the same noise that textures a
+  // hillside puts a ten-unit island in the middle of every lake, and since
+  // the ground is drawn and the water is not tested against it per-pixel,
+  // those islands hide the water rather than sitting in it.
+  //
+  // Faded in over eight units of basin depth, so the shore still shelves
+  // naturally and only the middle of a lake is planed flat. A hard switch at
+  // the waterline would ring every lake with a quarry wall.
+  if (_activeWaterLevel < 0) {
+    const basin = Math.min(0, cont + valley);
+    const submerge = (_activeWaterLevel - basin) / 8;
+    if (submerge > 0) {
+      const t = submerge < 1 ? submerge : 1;
+      const lid = _activeWaterLevel - 0.6;
+      if (h > lid) h += (lid - h) * (t * t * (3 - 2 * t));
+    }
+  }
+  return h;
 }
 
 // FULL terrain height (detail + carved continental) along a unit direction.
@@ -538,7 +595,50 @@ function terrainHeightDir(nx, ny, nz) {
 // clearance hides any sub-vertex skim jitter. Zero-allocation. 0 before any world
 // is built. Kept as its own name because callers are the flight/collision path.
 function terrainFloorDir(nx, ny, nz) {
-  return _activeTerrainProfile ? terrainDisplacement(nx, ny, nz, _activeTerrainProfile) : 0;
+  if (!_activeTerrainProfile) return 0;
+  const h = terrainDisplacement(nx, ny, nz, _activeTerrainProfile);
+  // Water is a floor too. Without this the bird descends straight through a
+  // lake and flies along the bottom of it, which is the one way standing water
+  // can look worse than no water at all.
+  //
+  // The sacred invariant survives intact: sea level is itself negative, so
+  // max(terrain, level) is still <= 0 and the floor still only ever dips below
+  // the base radius. It can never rise into the cruise band and ratchet a
+  // gravity-less bird upward — which is the failure this clamp exists to avoid
+  // and the reason this is a max against a NEGATIVE constant rather than a
+  // height added on top.
+  //
+  // Deliberately NOT applied to terrainHeightDir: the mesh keeps its basin, so
+  // there is a lake bed under the water rather than a flat disc fighting the
+  // surface for the same depth values.
+  return _activeWaterLevel < 0 && h < _activeWaterLevel ? _activeWaterLevel : h;
+}
+
+/**
+ * True when a prop placed here would be standing in real water.
+ *
+ * The wade margin is kept deliberately: trees ankle-deep at a lake edge read
+ * as marsh, which is what a lake edge should look like. Trees in ten metres of
+ * water read as a bug.
+ */
+function submerged(pos, wade = 2.5) {
+  if (_activeWaterLevel >= 0) return false;
+  const len = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+  if (len < 1e-6) return false;
+  const inv = 1 / len;
+  return floodDepthDir(pos.x * inv, pos.y * inv, pos.z * inv) > wade;
+}
+
+/** Depth of standing water at a direction; 0 on dry land. */
+function floodDepthDir(nx, ny, nz) {
+  if (!_activeTerrainProfile || _activeWaterLevel >= 0) return 0;
+  const h = terrainDisplacement(nx, ny, nz, _activeTerrainProfile);
+  return h < _activeWaterLevel ? _activeWaterLevel - h : 0;
+}
+
+/** The smooth basin height, which is what decides where the lakes are. */
+function basinHeightDir(nx, ny, nz) {
+  return _activeTerrainProfile ? continentalHeight(nx, ny, nz, _activeTerrainProfile) : 0;
 }
 
 // Public sampler for the flight controller: the smooth valley FLOOR (≤0) at a
@@ -548,6 +648,28 @@ export function sampleTerrainHeight(x, y, z) {
   if (len < 1e-6) return 0;
   const inv = 1 / len;
   return terrainFloorDir(x * inv, y * inv, z * inv);
+}
+
+/** The smooth basin height at a world position — where lakes can form. */
+export function sampleBasinHeight(x, y, z) {
+  const len = Math.sqrt(x * x + y * y + z * z);
+  if (len < 1e-6) return 0;
+  const inv = 1 / len;
+  return basinHeightDir(x * inv, y * inv, z * inv);
+}
+
+/**
+ * The MESH height at a world position: the lake bed, not the flight floor.
+ *
+ * sampleTerrainHeight is clamped at sea level because the flight floor must
+ * be, so it reports every lake as exactly zero deep. Anything asking how deep
+ * the water is has to come here instead. Zero-allocation.
+ */
+export function sampleTerrainMeshHeight(x, y, z) {
+  const len = Math.sqrt(x * x + y * y + z * z);
+  if (len < 1e-6) return 0;
+  const inv = 1 / len;
+  return terrainHeightDir(x * inv, y * inv, z * inv);
 }
 
 // Height-based color palettes per biome (low altitude → high altitude).
@@ -939,6 +1061,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const exposure = Math.max(0, Math.min(1, 1 - depth / 24));          // 1 exposed top → 0 valley
     if (exposure > 0.82 && Math.random() < (exposure - 0.82) * 1.0) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
+    if (submerged(pos)) continue;                                       // no trees in the lakes
     const up = pos.clone().normalize();
     const trunkHeight = randomInRange(8, 15);
     const trunkRadiusBottom = randomInRange(0.45, 0.9);
@@ -1588,6 +1711,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   for (let i = 0; i < scatterSpirePoints.length; i++) {
     const sp = scatterSpirePoints[i];
     const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    if (submerged(pos)) continue;                                       // no spires in the pools
     const up = pos.clone().normalize();
     const height = randomInRange(14, 44);
     const baseRadius = randomInRange(1.6, 3.6);
@@ -2186,6 +2310,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const exposure = Math.max(0, Math.min(1, 1 - depth / 30));          // 1 exposed top → 0 valley
     if (exposure > 0.78 && Math.random() < (exposure - 0.78) * 0.9) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
+    if (submerged(pos)) continue;                                       // no pines in the tarns
     const up = pos.clone().normalize();
     const trunkH = randomInRange(5, 10);
     const canopyH = randomInRange(6, 11);
@@ -2525,6 +2650,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   for (let i = 0; i < scatterBldgPoints.length; i++) {
     const sp = scatterBldgPoints[i];
     const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.04, 0.04), sp.phi + randomInRange(-0.04, 0.04), 0);
+    if (submerged(pos, 1.2)) continue;                                  // no towers in the harbour
     const up = pos.clone().normalize();
     const height = randomInRange(12, 60);
     const width = randomInRange(3, 6);
@@ -2718,6 +2844,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // placement (placeOnSphere) and ground collision all sample the same rolling
   // displacement. Set before anything is built.
   _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
+  _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
 
   // Carve the landmark valley into the SAME field the mesh & flight floor sample.
@@ -2879,7 +3006,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     if (!material) return;
     const list = Array.isArray(material) ? material : [material];
     for (const m of list) {
-      if (!m || m.transparent || m.isMeshBasicMaterial) continue;
+      // ShaderMaterials carry their own complete GLSL; addAtmosphere patches
+      // Three's chunk names, which are not in them, so it would silently do
+      // nothing at best and break the compile at worst.
+      if (!m || m.transparent || m.isMeshBasicMaterial || m.isShaderMaterial) continue;
       addAtmosphere(m, THREE, { baseRadius: sphereRadius });
     }
   });
@@ -2931,10 +3061,47 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     console.warn('[SphericalWorld] landmark features failed:', e);
   }
 
+  // ── Standing water ──────────────────────────────────────────────────────
+  // Built last, so it is not caught by the atmosphere traverse (its own shader
+  // already does aerial perspective through the scene fog) and so the terrain
+  // is already in the depth buffer ahead of it.
+  let water = null;
+  try {
+    if (_activeWaterLevel < 0) {
+      water = createWater(THREE, {
+        sphereRadius,
+        level: _activeWaterLevel,
+        // The MESH height, not the floor: the floor is clamped at sea level,
+        // and feeding that back in would report every lake as exactly zero
+        // deep and flatten the whole shallow-to-deep gradient.
+        terrainHeightAt: terrainHeightDir,
+        // The flood mask comes from the SMOOTH basin field, never the full
+        // one; see continentalHeight for why the difference matters.
+        basinHeightAt: basinHeightDir,
+        palette: WATER_PALETTE[variant] || WATER_PALETTE.forest,
+        // Shoreline resolution, and it is bought with triangles: at 190 the
+        // grid puts a vertex every four units of arc, which is finer than the
+        // terrain mesh under it and about twelve thousand triangles on a
+        // budget of eighty. Higher looked no better and cost real headroom.
+        segmentsU: _isMobile() ? 190 : 280,
+        segmentsV: _isMobile() ? 95 : 140,
+      });
+      if (water) {
+        water.mesh.raycast = () => {};   // rockets never detonate on a lake
+        root.add(water.mesh);
+      }
+    }
+  } catch (e) {
+    console.warn('[SphericalWorld] water failed:', e);
+    water = null;
+  }
+
   return {
     root,
     landmarks: _landmarks,
     sphereRadius,
+    water,
+    waterLevel: _activeWaterLevel,
     collisionSystem,
     nestablePositions,
     proximityTargets,

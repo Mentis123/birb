@@ -28,7 +28,9 @@
  *   --w --h --dpr    explicit viewport overrides
  *   --env      forest|canyon|mountain|city — switch after start
  *   --nest     land on nest N (default 0) — implies --start
- *   --eval     JS evaluated in the page after start
+ *   --eval     JS evaluated in the page after start, BEFORE the settle wait
+ *   --after    JS evaluated AFTER the settle, just before the shutter
+ *   --afterSettle  ms to wait after --after (default 320)
  *   --settle   ms to wait before capture                    (default 1200)
  *   --wait     ms to wait for the game to be ready         (default 30000)
  *   --allow-console-errors   don't fail the run on console errors
@@ -327,12 +329,31 @@ async function main() {
             'window.__BIRB.stats().nesting === "nested"', null, { timeout: 90000 },
         ).catch(() => { consoleErrors.push('landing did not reach NESTED'); });
     }
+    let evalResult;
     if (ok && args.eval) {
-        try { await page.evaluate(String(args.eval)); }
+        // Report what the eval RETURNED. A setter that silently no-ops because
+        // the feature it drives is disabled on this device looks exactly like
+        // a setter that worked, and the capture that follows is then read as
+        // evidence for something that never ran.
+        try { evalResult = await page.evaluate(String(args.eval)); }
         catch (err) { pageErrors.push('eval failed: ' + String((err && err.message) || err)); }
     }
 
     await page.waitForTimeout(settle);
+
+    // --after runs AFTER the settle, so a pose it sets is the pose that gets
+    // photographed. --eval runs before, and the simulation then has the whole
+    // settle window to fly the bird somewhere else — which is how three
+    // light-shaft captures in a row came back with the sun behind the camera.
+    let afterResult;
+    if (ok && args.after) {
+        try { afterResult = await page.evaluate(String(args.after)); }
+        catch (err) { pageErrors.push('after failed: ' + String((err && err.message) || err)); }
+        // Long enough for the chase camera to damp onto the new pose without
+        // giving the flight model time to leave it.
+        await page.waitForTimeout(Number(args.afterSettle) || 320);
+    }
+
     const stats = await page.evaluate(() => (window.__BIRB ? window.__BIRB.stats() : null)).catch(() => null);
 
     const outPath = path.resolve(REPO_ROOT, args.out);
@@ -343,6 +364,8 @@ async function main() {
     server.close();
 
     console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x${desktop ? ' desktop' : ' mobile'})`);
+    if (evalResult !== undefined) console.log(`eval: ${JSON.stringify(evalResult)}`);
+    if (afterResult !== undefined) console.log(`after: ${JSON.stringify(afterResult)}`);
     if (stats) console.log('stats: ' + JSON.stringify(stats));
     if (!ok) console.error('FAILED: ' + failure);
     if (pageErrors.length) console.error('PAGE ERRORS:\n  ' + pageErrors.join('\n  '));
