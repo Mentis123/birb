@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#e4e7ec">
+<title>Icon3D Viewer — a Birb Labs study</title>
+<style>
+  :root {
+    --paper: #e4e7ec;
+    --ink: #1b2130;
+    --dim: #6b7280;
+    --line: rgba(27, 33, 48, 0.14);
+    --pill: rgba(255, 255, 255, 0.72);
+    --pill-on: #1b2130;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: var(--paper); color: var(--ink);
+    overflow: hidden;
+    font-family: ui-rounded, "Avenir Next", "Nunito", "Trebuchet MS", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #stage { position: fixed; inset: 0; }
+
+  .chrome {
+    position: fixed; inset: 0; pointer-events: none;
+    padding: max(env(safe-area-inset-top, 0px), 14px) 16px
+             max(env(safe-area-inset-bottom, 0px), 14px);
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .title {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.34em;
+    text-transform: uppercase; opacity: 0.62;
+  }
+  .title b { display: block; font-size: 17px; letter-spacing: 0.16em; opacity: 1; margin-top: 3px; }
+  .top { display: flex; align-items: flex-start; gap: 16px; pointer-events: auto; }
+  .back {
+    color: var(--ink); text-decoration: none; border: 1px solid var(--line);
+    background: var(--pill); border-radius: 999px; padding: 8px 11px;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  [hidden] { display: none !important; }
+  .pill-group { display: contents; }
+  .foot { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
+  .pills {
+    display: flex; gap: 6px; align-items: center; pointer-events: auto;
+    padding: 5px; border-radius: 22px; background: var(--pill);
+    backdrop-filter: blur(8px); border: 1px solid var(--line);
+    /* Six controls do not fit across a 390px phone, and a row that overflows
+       loses the ones at both ends — on the first mobile capture that was
+       PLATES and SVG, i.e. the whole point of the page. Wrapping keeps every
+       control reachable and the row still reads as one control cluster. */
+    flex-wrap: wrap; justify-content: center; max-width: min(100%, 620px);
+    row-gap: 4px;
+  }
+  .pills button {
+    appearance: none; border: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: 11px; font-weight: 800; letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 8px 12px; border-radius: 999px;
+    cursor: pointer; transition: background 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
+  }
+  @media (max-width: 520px) {
+    .pills button { font-size: 10px; padding: 7px 9px; letter-spacing: 0.1em; }
+    .pills { gap: 4px; }
+  }
+  .pills button.on { background: var(--pill-on); color: #fff; }
+  .pills button:disabled { opacity: 0.45; cursor: default; }
+  .pills .sep { width: 1px; height: 18px; background: var(--line); }
+  .hint {
+    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--dim); text-align: center;
+    transition: opacity 0.6s ease;
+  }
+  .hint.gone { opacity: 0; }
+
+  .loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: var(--paper); z-index: 10;
+    font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--dim);
+    transition: opacity 0.5s ease;
+  }
+  .loading.gone { opacity: 0; pointer-events: none; }
+
+  .fatal {
+    position: fixed; inset: 0; z-index: 500; display: none;
+    align-items: center; justify-content: center; padding: 2rem; text-align: center;
+    background: var(--paper); font-size: 13px; line-height: 1.6;
+  }
+  .fatal.on { display: flex; }
+
+  .toast {
+    position: fixed; left: 50%; top: 18%; transform: translateX(-50%);
+    padding: 10px 16px; border-radius: 12px; background: var(--ink); color: #fff;
+    font-size: 12px; letter-spacing: 0.08em; opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease; z-index: 20; max-width: 80vw; text-align: center;
+  }
+  .toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="scene"></canvas></div>
+
+<div class="chrome">
+  <div class="top"><a class="back" data-back href="/svg">All icons</a><div class="title">Birb Labs · study<b>Icon3D</b></div></div>
+  <div class="foot">
+    <div class="pills" data-pills>
+      <span class="pill-group" data-build-group>
+        <button data-build="ribbon" class="on" title="One continuous ribbon">Ribbon</button>
+        <button data-build="plates" title="Flat extruded plates, exact silhouette">Plates</button>
+        <span class="sep"></span>
+      </span>
+      <button data-mode="colour" class="on">Colour</button>
+      <button data-mode="clay">Clay</button>
+      <span class="sep"></span>
+      <span class="pill-group" data-variant-group>
+        <button data-icon="copilot-2023" class="on">2023</button>
+        <button data-icon="copilot-2026">2026</button>
+        <span class="sep"></span>
+      </span>
+      <button data-export="glb" data-single-title="3D model for Blender, Unity, PowerPoint" title="3D model for Blender, Unity, PowerPoint">GLB</button>
+      <button data-export="svg" data-single-title="Vector drawing for Visio, Illustrator, Figma" title="Vector drawing for Visio, Illustrator, Figma">SVG</button>
+    </div>
+    <div class="hint" data-hint>Drag · pinch · double-tap resets</div>
+  </div>
+</div>
+
+<div class="loading" data-loading>Extruding…</div>
+<div class="fatal" data-fatal></div>
+<div class="toast" data-toast></div>
+
+<script>
+// Harness escape hatch, see core/three-loader.js: with ?three=local the page
+// runs on a locally installed Three, and the one addon it can fetch on demand
+// (GLTFExporter, from Three's examples) imports the bare specifier `three`.
+// An import map is the only way a browser resolves that without a bundler. It
+// has to exist before the first module script is parsed, hence a classic
+// script here rather than a line in the module below.
+if (new URLSearchParams(location.search).get('three') === 'local') {
+    const map = document.createElement('script');
+    map.type = 'importmap';
+    map.textContent = JSON.stringify({ imports: { three: '/node_modules/three-real/build/three.module.js' } });
+    document.currentScript.after(map);
+}
+</script>
+<script type="module" src="/icon3d/src/view/viewer-app.js"></script>
+</body>
+</html>

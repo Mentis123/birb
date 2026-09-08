@@ -448,7 +448,7 @@ The session is done when:
 Then stop and report to the owner what shipped, what did not, and the exact
 phone test list from the brief's §Acceptance item 4 so they can run it.
 
-## 13. Implementation log (fill in as you go)
+## 13. Implementation log
 
 | Stage | Status | Evidence | Notes |
 |---|---|---|---|
@@ -462,12 +462,162 @@ phone test list from the brief's §Acceptance item 4 so they can run it.
 | G vertex occlusion | Shipped | Sheet before/after | Slope shading and moss zoning on the ground, radial rim term on canopies. Build-time only. |
 | H landmark slice | Shipped | Giant tree visible in the forest flight tile | Giant nesting tree, fallen log, stone arch, placed along the valley's great circle. |
 
+### Second pass (after the first merge)
+
+| Work | Status | Notes |
+|---|---|---|
+| Adaptive quality had never run | Fixed | `updateFpsReadout` returned early on a missing DOM element, and the tier manager's only call site was inside it. Pinned at tier 0 since it was written. `tests/frame-metrics.test.js`. |
+| Landmarks for the other three biomes | Shipped | Leaning monolith, summit arch, broadcast mast. One each: different in kind, not merely bigger. |
+| Suspected landing bug | Not a bug | The capture harness indexed into the nest list and picked nests across a 754-unit circumference; landing auto-flies in a straight line at 16 units/s. Landing on the nearest nest, as the player's tap does, succeeds 24/24 across all four biomes. |
+| Sheet captured degraded output | Fixed | With adaptive quality alive, software rendering downshifts to tier 2 within seconds and every art review would have been conducted against output no phone produces. `--tier N` pins it; the sheet pins tier 0 by default. |
+
+### Capture tooling, as it now stands
+
+Install once per session, in ONE command (a second `--no-save` install prunes
+the first), then restore the tracked Three stub:
+
+```
+npm install --no-save playwright https-proxy-agent
+git checkout -- node_modules/three/index.js
+```
+
+| Tool | What it answers |
+|---|---|
+| `node tools/birb-shot.mjs --start --out shot.png` | Does one frame render, with no page or console error? Takes `--env`, `--nest`, `--desktop`, `--eval`. |
+| `node tools/birb-sheet.mjs --out sheet.png` | How do all four biomes look in flight and at a perch? Pins tier 0 by default; `--tier N` to capture a quality level deliberately. |
+| `node tools/birb-lighting.mjs --out l.png` | Which of six lighting candidates looks best, from one fixed viewpoint? Takes `--env`, `--view nest`. |
+
+The `?debug=1` handle (`window.__BIRB`, absent without the flag) drives all
+three: `setEnvironment`, `forceNest`, `takeOff`, `teleport`, `goToLandmark`,
+`setStick`, `setSprint`, `setAltitude`, `pinTier`, `setLighting`,
+`capturePose` / `restorePose`, and `stats`.
+
+Two things about it are load-bearing. `capturePose` / `restorePose` exists
+because zeroing speed does NOT hold the bird — the flight system rewrites it
+every frame — and a comparison sheet whose tiles differ by viewpoint is worse
+than none. `pinTier` exists because adaptive quality now works, and software
+rendering here downshifts within seconds, so an unpinned art review is
+conducted against output no phone produces.
+
+### The one regression this session shipped, and what it taught
+
+The adaptive-quality fix added `frameSampler.reset()` to `setEnvironment`.
+`setEnvironment` runs during initial setup, hundreds of lines before the
+`const frameSampler` it refers to, so it read a const in its temporal dead
+zone and threw. Initial setup catches its own throw and only logs a warning,
+so the rest of that function — nest points, the collectibles system, the
+rocket collision targets — was silently skipped. The world still built and
+the frame still looked completely normal. The game just had no nests and no
+rings, and it was live in production for about half an hour.
+
+Every check in place at the time passed it. Unit tests do not run
+`index.html`. The screenshot harness exited 0 because a frame rendered. The
+contact sheet looked right because it switches environment first, which
+re-runs `setEnvironment` successfully — so the harness only ever exercised
+the path a player does NOT take.
+
+Three rules came out of it, and they are worth keeping:
+
+1. **A rendering world is not a working world.** `birb-shot` now asserts the
+   nesting and collectibles systems exist before reporting success, on the
+   plain-start path. Verified by reintroducing the bug: exit 1 on the broken
+   build, exit 0 on the fixed one.
+2. **A caught-and-warned exception is a silent failure.** `birb-modes` treats
+   console warnings as failures, because that is the exact channel this bug
+   used to announce itself.
+3. **Test the path the player takes**, not the one the harness finds
+   convenient. The convenient path is the one that hides setup bugs.
+
+### Measured budget position, honestly
+
+Captured with `tools/birb-sheet.mjs --views flight`, world plus bird plus HUD,
+at the end of this session. The documented targets are <100 draw calls and
+<80k triangles.
+
+| Variant | Mobile calls | Mobile triangles | Desktop calls | Desktop triangles |
+|---|---|---|---|---|
+| forest | 62 | 69k | 95 | 131k |
+| canyons | 57 | 38k | 89 | 86k |
+| mountain | 60 | 38k | 88 | 91k |
+| city | 72 | 40k | 84 | 108k |
+
+**Mobile, the target platform, is inside both budgets in every biome.**
+
+**Desktop is over the triangle target in every biome and has been since before
+this session** — the September pass recorded 118k for forest and 92.5k for
+city and said not to cite the 80k figure as achieved. It is worse now: this
+session's landmarks add roughly six draw calls and the forest gained a giant
+tree. Sectored instancing was the intended remedy and was measured to make
+draw calls worse (section 7).
+
+This is a deliberate position, not an oversight. The repo is mobile-first by
+its own house rules, desktop is stated to be for testing, and desktop
+hardware absorbs 130k triangles without noticing. But the 80k number should
+not be quoted as met, and if a desktop budget is ever wanted for real, the
+lever is prop density per device tier, not culling.
+
+### Third pass — owner feedback
+
+Two pieces of feedback after playing it: the big tree could not be found, and
+the wingtip ribbons were janky. Both fair; both acted on.
+
+| Change | Why |
+|---|---|
+| Giants 40 -> 130 units, three of them, amber not green | 40 units IS champion-tree height, so it was neither taller nor differently coloured than its neighbours. On this sphere `sqrt(2 * 120 * h)` is the range at which height h clears the horizon: 98 units at 40, 177 at 130. |
+| Minimap chevron to the nearest landmark, with distance, never distance-gated | The map shows 65 units of a 754-unit planet, so a landmark is nearly always off it. A landmark you cannot steer toward is scenery you bump into. |
+| Wingtip ribbons DELETED | They needed three fixes to become visible and still read as janky. An effect that has to be argued for is not earning two draw calls. |
+| Nests within 46 units of a landmark are dropped | Landmarks are not instanced and `nest-occlusion` only clears instanced props, so a nest beside one had its perch view permanently blocked. |
+| The giant's nest moved off the trunk axis onto a bough | Centred, it sat inside the trunk ringed by colliders; the landing auto-fly was pushed back out every frame and hung. |
+| Landing timeouts 15s -> 90s | Auto-fly is 16 units per SIMULATED second and this sandbox renders at 2-9 fps, so the old timeout measured the renderer, not the game. |
+
+**Known, not fixed:** a mountain perch can occasionally land facing a cliff.
+`nest-occlusion`'s 5-unit radius is too small for large instanced geometry.
+Most mountain perches are fine; this is nest-placement variance, and raising
+the radius risks the whole-batch stripping the September pass removed.
+
+### Fourth pass — "cutting edge, mobile first"
+
+Two candidates from current Three.js practice were measured. One shipped, one
+was rejected on evidence.
+
+**Tone mapping ACES -> Khronos Neutral. SHIPPED.** One enum, zero per-frame
+cost. ACES desaturates as it rolls off, and on a world made of flat-shaded
+colour that is most of what you see. Neutral holds hue into the highlights.
+Measured across all four biomes from fixed cameras; every one reads richer.
+AgX (r160+) was measured in the same pass and lands very close to ACES here —
+it earns its keep on scenes with blown highlights and this one has none.
+
+**Sky-derived ambient via `PMREMGenerator.fromScene` -> `scene.environment`.
+BUILT, MEASURED, REVERTED.** The usual advice is that `scene.environment` is
+PBR-only; it is not — `WebGLPrograms.js` applies it to Lambert and Phong too,
+which is worth knowing since all 36 of this world's materials are Lambert. So
+the lever exists. It just does nothing here: an A/B from one pinned camera at
+intensity 0, 0.45 and 1.0 produced three visually identical frames, because
+the non-PBR env path is a `combine`-based reflection rather than an
+irradiance term. Making it work would mean converting every material to
+`MeshStandardMaterial`, and PBR is materially more expensive than Lambert —
+the wrong trade for a stylised low-poly game on a phone.
+
+**Not attempted, and why.** SSAO/GTAO, SSR, depth of field and volumetrics
+are fill-rate bound, and this game is already fill-rate bound at DPR 1.4 on
+the device it targets. Half-resolution selective bloom is the one
+post-processing effect with a real mobile case (roughly 75% fewer fragment
+invocations than full res) but it needs a phone measurement first, which is
+still outstanding. WebGPU is genuinely production-ready now — Safari 26 ships
+it, `WebGPURenderer` is close to a one-line swap — but this game has three
+`onBeforeCompile` GLSL injections (foliage wind, water ripple, water
+specular) that do not port and would need TSL rewrites, and the migration on
+its own changes nothing a player can see.
+
 ### Left for the next session
 
 - **Bloom, MSAA, WebGPU, texture atlas / KTX2.** Untouched, as planned.
 - **Lighting and palette tuning.** Needs a phone. Use the committed sheet.
-- **The mountain biome's first nest sometimes never completes a landing.**
-  Seen once in a sheet run and not reproduced; pre-existing, not from this work.
+- **Adaptive quality thresholds are now live and have never been exercised on
+  hardware.** 55 fps to downshift, 58 to restore, over 2 and 4 second windows.
+  They were tuned against a system that could not run. A phone may now shed
+  DPR where it previously never did, which is the intent, but it is the first
+  thing to watch on a device.
 - **The physical-phone benchmark is still outstanding** and remains the real
   acceptance gate for everything here. Nothing in this session ran on a device.
 
@@ -483,3 +633,580 @@ phone test list from the brief's §Acceptance item 4 so they can run it.
 | F instance sectors | | | |
 | G vertex occlusion | | | |
 | H landmark slice | | | |
+
+---
+
+## 14. Next round — planned, not built
+
+Written 2026-09-06 at the end of the session, after the owner played it and
+pushed back. Ranked by visual impact per unit of mobile cost, using what this
+session actually measured rather than what sounded good. Nothing below has
+been started. Each item says how to prove it worked, because three things this
+session were built, reported healthy by every counter, and invisible on
+screen.
+
+What the evidence says about where the payoff is: the single largest visual
+change of the whole session was one enum (tone mapping). Colour pipeline and
+light beat geometry on this art style, every time. The things that failed
+were all geometry or overlays (sectors, ribbons, a same-height "giant" tree).
+Plan accordingly.
+
+### Ranked
+
+| # | Item | Impact | Mobile cost | Effort | Gate |
+|---|---|---|---|---|---|
+| 1 | Ground shader pass: valley mist, cloud shadows, macro noise | 5/5 | one fragment term on the ground only | 1 day | none |
+| 2 | Sun drift (slow time of day) | 4/5 | one light position per frame | half a day | none |
+| 3 | Bird flap realism | 4/5 | zero | half a day | none |
+| 4 | Per-biome grade with the lighting tool | 4/5 | zero | tuning only | owner's phone |
+| 5 | Emissive rings/drones, then half-res bloom | 4/5 | half-res pass, tier 0 only | 1-2 days | **phone benchmark** |
+| 6 | Perch placement quality (mountain cliffs) | 3/5 | build-time | half a day | none |
+| 7 | Desktop density tier | 2/5 | desktop only | half a day | none |
+
+### 1. Ground shader pass — the highest-value item left
+
+Three effects, ONE `onBeforeCompile` on the ground material (and the cloud
+term on canopies), sharing one time uniform. The pattern already exists in
+`visual-style.js` (`addFoliageWind`, `addWaterHighlights`); this is the same
+mechanism on the biggest surface in the frame.
+
+- **Height fog / valley mist.** Fog is a single density everywhere. Make it
+  thicker below the base radius so the carved valleys fill with mist and the
+  ridge tops stay clear. The owner singled out the fog as the thing that
+  worked; this is that, aimed at the terrain the world already carves. Term:
+  extra fog factor from `max(0, baseRadius - length(worldPos))`, clamped.
+- **Cloud shadows.** A slow-scrolling, low-frequency darkening across the
+  ground and canopies. Cheap noise (two sines or a 2-octave value noise) in
+  world-space tangent coordinates, scrolled by time, multiplied into the
+  diffuse. This is the classic trick that reads as expensive lighting and
+  costs one noise evaluation. It makes the world move without moving a
+  single vertex.
+- **Macro noise.** The ground is flat colour at low altitude and the contact
+  shadow made that more visible, not less. A low-amplitude tint variation at
+  ~8-unit scale breaks it up.
+
+Verify: `birb-lighting.mjs` with the pass on/off as variants, from a pinned
+camera, mobile path. Draw calls must not change. If the shader compiles on
+both device paths the sheet run already proves it. **Do not** put the cloud
+term on the sky dome or clouds themselves; it is a ground effect.
+
+Risk: fog colour in valleys must come from the sky palette or it reads as
+grey soup. Use `sky.getMidColor()` as the mist tint, per biome.
+
+### 2. Sun drift
+
+The key light and sky palette are static per biome. A slow cycle — eight to
+twelve minutes, elevation clamped to stay above 20 degrees so it never goes
+dark — changes the mood over a session for the cost of one light position
+update and one `setSunDirection` call per frame. Water specular and the sky
+disc already follow the key light, so they come for free. The rim light
+should counter-rotate a little so silhouettes keep an edge at every angle.
+
+Verify: `birb-shot --eval` with a time override, four captures across the
+cycle from one pinned pose. Confirm the perch camera still reads landscape
+at the darkest point.
+
+### 3. Bird flap realism
+
+The owner's "not much realism" is most cheaply answered on the bird, not on
+the world. The flap is a symmetric sine at 6.8 Hz, only while climbing. Real
+birds do not do that. Add to `src/flight/bird-pose.js` (pure, tested):
+
+- **Asymmetric stroke:** fast power downstroke, slower recovery upstroke.
+  A skewed waveform, not a sine.
+- **Wing fold on the upstroke:** `scale.z` pulls in ~15% on recovery, so the
+  wing does not fight the air on the way up.
+- **Burst-and-glide cadence:** three or four flaps, then a glide, gated on
+  climb input and throttle. A continuous flap reads as a machine.
+- **Body bob synced to the stroke:** the bird rises on the downstroke. Small,
+  ~0.04 units, at the flap frequency.
+
+Mirror rule still applies: the right wing has `scale.z = -1`, so every
+symmetric term is applied with opposite signs.
+
+Verify: `birb-shot` cannot capture motion. Add a test that samples one full
+cycle and asserts downstroke duration < upstroke duration, and capture two
+frames at known phases for the pose.
+
+### 4. Per-biome grade
+
+Now that Neutral holds hue, per-biome exposure and fog colour will compound.
+The tool exists: `birb-lighting.mjs --env <biome>`. This is tuning, not code,
+and it needs the owner's eyes on a phone. Candidates worth generating: fog
+density per biome (canyon thinner, mountain thicker), exposure ±0.15.
+
+### 5. Emissives, then bloom — the only post effect worth its cost
+
+Rings, drones, the city mast collar and the rocket trail should be emissive
+first; that alone improves them with zero cost. THEN half-resolution
+selective bloom, tier 0 only, in a single merged pass (pmndrs/postprocessing
+merges effects into one fragment shader; Three's own EffectComposer stacks
+passes, which is the difference between viable and not on a phone). Half
+res is ~75% fewer fragment invocations than full.
+
+**Gated on the phone benchmark.** It is a fill-rate cost on a fill-rate-bound
+device and no number exists yet. Do not ship it blind. When it does ship,
+it is the first thing tier 1 drops.
+
+### 6. Perch placement quality
+
+A mountain perch can land facing a cliff wall. Raising the occlusion radius
+risks the whole-batch stripping the September pass removed. The right fix is
+at build time: reject a nest candidate whose forward hemisphere at perch
+height is blocked within ~12 units by a peak or cliff instance. The collider
+list already exists for this query.
+
+### 7. Desktop density tier
+
+Desktop is over the 80k triangle target in every biome and sectoring does not
+help (section 7). The lever is prop density per device tier: desktop can
+afford more DPR, not more instances. Reduce the scatter counts on the desktop
+path to mobile levels and spend the headroom on resolution.
+
+### Not on this list, and why
+
+- **Environment maps** — measured, invisible on Lambert (section 13, fourth
+  pass). Do not rebuild.
+- **Instance sectors** — measured, draw calls up 40% (section 7).
+- **Wingtip ribbons** — shipped, played, removed.
+- **SSAO / GTAO, SSR, DOF, volumetrics** — fill-rate on a fill-rate-bound
+  device. Not until a phone number exists, and probably not then.
+- **WebGPU** — production-ready and a real option, but three
+  `onBeforeCompile` GLSL injections need TSL rewrites, and the migration
+  changes nothing a player sees. An enabler, not an upgrade. Item 1 above
+  adds a fourth injection; note it.
+- **Texture atlas / KTX2** — not authorised; the game generates every texture.
+
+### The gate that has not moved
+
+Every item that costs fill rate is waiting on the same thing it was waiting
+on at the start of the session: a frame-time measurement on the reference
+phone. Adaptive quality is now live for the first time, so that measurement
+will also show whether the 55/58 fps thresholds are right. Nothing in items
+1-4 needs it. Item 5 does. Get the number.
+
+See also `docs/CUTTING_EDGE_2026.md`: what the platform actually offers in September 2026, ranked for this game. Two findings there touch shipped code — iOS caps rAF at 60 Hz, and iOS 26.5 reduced the switch-based haptics trick to single ticks.
+
+---
+
+## 15. Fifth pass — the big build (shipped)
+
+Owner cleared the gate: ten minutes on a real phone, nesting from a cold
+start, no stutter and no heat. That unlocked the fill-rate item, and the
+brief was "push until it is too much quality for the performance". Section 14
+items 1, 2, 3 and 5 shipped, plus one that was not on the list.
+
+| Shipped | What it does | Cost |
+|---|---|---|
+| **Atmosphere pass** | Drifting cloud shadows, valley mist with real aerial perspective, macro tint. One fragment injection on every opaque surface. | Zero draw calls. Measured identical: 60-61 per biome. |
+| **Sun cycle** | Ten-minute sweep, never below the horizon, rim light counter-rotates, warm at low sun. Sky disc, water specular and mist tint follow it free. | One light position and colour per frame. |
+| **Bloom + vignette** | Hand-written merged pass: bright-and-downsample, separable blur, composite. Three passes at HALF res plus ONE at full. | 4 draw calls. Off at tier 1 and on low-end. |
+| **Wing beat** | Asymmetric power/recovery stroke (38/62), wing folds on recovery, burst-then-glide cadence, rate scales with effort. | Pure maths, zero. |
+| **Distant flock** | Eighteen gull silhouettes wheeling around the player's own sky. | One draw call. Off at tier 2. |
+
+Final measured budget, mobile path, all effects on at tier 0: **61-70 draw
+calls and 27-70k triangles** across all eight views. Both inside the
+documented limits with real headroom.
+
+### Four bugs worth remembering, each found by a capture, not by reading
+
+**Instanced world position is not `modelMatrix * transformed`.** The instance
+transform is applied in `<project_vertex>`, AFTER `<begin_vertex>` where a
+varying gets written, so every instanced prop reported the position of the
+unit geometry at the world origin. The mist term read the entire forest as
+120 units underground and painted it flat grey. Guard any new world-space
+varying with `#ifdef USE_INSTANCING`.
+
+**Depth is not aerial perspective.** Mist driven by depth alone washed out
+everything beside the player, because the player spends most of their time
+inside a valley. Air accumulates over DISTANCE; both factors multiply.
+
+**A flock needs three separate things to be visible**, and each was measured
+rather than guessed: it must be at flight height on a great circle (a fixed-Y
+ring puts it 120+ units away and two pixels wide); the wheel must follow the
+PLAYER (a fixed great circle is on the far side of the planet most of the
+time); and the birds must be strung around the whole wheel (a tight cluster
+sat behind the camera — sixteen birds correctly positioned seventy-four units
+away, not one inside the frustum).
+
+**One `presentFrame()`, not two render calls.** The game loop and the
+share-screenshot path both go through it, so a shared image cannot differ
+from the live frame, and the render target is always returned to the canvas —
+which a bloom pass otherwise leaves pointing at an offscreen buffer.
+
+### Still not done
+
+Items 4, 6 and 7 of section 14: per-biome grade tuning (needs the owner on
+glass), mountain perches that can face a cliff, and the desktop density tier.
+
+---
+
+## 16. Sixth pass — water, weather, shafts, and a pass that was never running
+
+Shipped in one session. Ranked by how much of the frame each changes.
+
+### 16.1 What shipped
+
+| Thing | Where | Cost |
+|---|---|---|
+| Bloom actually enabled on mobile | `index.html` (`isLowEnd`) | none — it was already built |
+| sRGB output transform on the composite | `src/effects/bloom-pass.js` | none |
+| Volumetric light shafts | `src/effects/bloom-pass.js` (`RAYS_FRAG`) | 1 half-res pass + 2 half-res blurs, only while the sun is on screen |
+| HDR sun disc, ~5x angular size | `src/environment/sky-dome.js` | none |
+| Standing water in every biome | `src/environment/water.js` | 1 draw call, 6-8k triangles |
+| Lake beds planed under the surface | `spherical-world.js` (`terrainDisplacement`) | none |
+| Flight floor rests on water | `spherical-world.js` (`terrainFloorDir`) | none |
+| Per-biome weather | `src/environment/weather.js` | 1 draw call, all motion in the vertex shader |
+| Rim light on the bird | `src/environment/visual-style.js` (`addRimLight`) | 3 instructions per fragment on the bird only |
+| Rings bright enough to bloom | `src/environment/collectibles.js` | none |
+
+Budget after all of it, tier 0, mobile emulation: **63-70 draw calls, 50-74k
+triangles** against <100 and <80k. Forest is the worst case at 73.8k. The
+performance envelope the brief asked to find has still not been reached.
+
+### 16.2 The one that matters most
+
+**Bloom had never run on the target platform, and neither had anything built
+on top of it.** The gate was:
+
+```js
+const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 4) <= 4);
+let bloomEnabled = !isLowEnd;
+```
+
+iOS Safari does not expose `navigator.hardwareConcurrency`. `undefined || 4`
+is `4`, and `4 <= 4` is true, so **every iPhone ever made was classified
+low-end** and the post-processing pass written for this game had never once
+executed on the device the game is built for. Every capture taken while
+tuning it was taken with it switched off.
+
+Quality shedding is the adaptive tier's job now — it measures frame rate,
+which is a fact, instead of guessing from a core count the browser refuses to
+report. Note the interaction with the previous session's finding: the tier
+manager only started running at all last pass. Before that, *nothing* shed
+quality and *nothing* enabled bloom.
+
+**A feature gated on a capability probe is not shipped until you have proof
+the probe returns what you think it does on the device you care about.**
+
+### 16.3 The composite was gamma-ing the whole game
+
+The scene target holds LINEAR values — rendering into a render target forces
+`linearToOutputTexel` to identity, so every material writes tone-mapped
+linear and none of them encodes. The composite wrote that straight to an sRGB
+canvas without `#include <colorspace_fragment>`, so the display applied the
+transform a second time.
+
+Measured on the shipped build, same frame, same pose: **mean pixel 90 with
+bloom on, 146 with it off.** The entire game rendered dark whenever the pass
+ran, and it read as a moody grade rather than as a bug. Desktop shipped it
+that way from the day the pass landed.
+
+### 16.4 Saturated colours cannot cross a luminance threshold
+
+Worth writing down because it is not obvious and it wasted a plan.
+
+The bright pass thresholds the **tone-mapped** frame. Neutral tone mapping
+compresses toward 1.0 while preserving hue, so a saturated colour approaches
+its own hue's maximum luminance, not white's. Run the numbers on a forest
+ring, `0x44ff88`, at exposure 1.12:
+
+| Multiplier | Tone-mapped luminance | Contribution at knee 0.78 |
+|---|---|---|
+| 1.0 | 0.69 | 0 |
+| 1.8 | 0.74 | 0 |
+| 3.0 | 0.79 | 0.008 |
+| 3.0, lifted 50% toward white | 0.88 | 0.36 |
+
+Making an emissive brighter does almost nothing. Making it brighter **and
+whiter** works, and it is also what a real bright emissive does: anything hot
+enough to glow washes out at its core and keeps its hue in the halo. So the
+ring torus is now a near-white core and the glow ring carries the colour.
+
+The sun disc needed the same treatment for the same reason — at 1.15 it was
+the brightest thing in the world and bloomed by nothing.
+
+### 16.5 Light shafts, and the two things that make them work
+
+The expensive way to do god rays marches a depth buffer. The cheap way
+exploits something the pipeline already computed: **the bright buffer is
+already an occlusion mask.** The sun is over the knee; every mountain, tree
+and drone in front of it is under. Radially blur it away from the sun's
+screen position and the shafts are correctly interrupted by whatever stands
+in front of the sun, for one half-resolution pass and no depth read.
+
+Two corrections were needed and both were found by looking at the buffer:
+
+- **Dither the start offset.** Twelve undithered taps make every pixel sample
+  the same fractions of the same path, and a tree in front of the sun came
+  out as eight discrete copies of itself marching down the screen — a
+  flip-book, not a shaft. Interleaved gradient noise turns the banding into
+  noise. Then blur the ray buffer once, because the dither's own diagonal
+  weave is visible at half resolution.
+- **A second knee inside the march.** The bright buffer is shared with the
+  bloom, whose threshold is set so a lit hillside does not glow; that is
+  still low enough to admit the sun's whole atmospheric halo, and dragging a
+  halo across the frame is a smear rather than a beam.
+
+Projecting the sun to screen space needs a **view-space check first**. Behind
+the camera the perspective divide flips the sign and the sun reappears
+mirrored on the opposite edge, with shafts converging on a point physically
+behind the player's head.
+
+### 16.6 Water: two bugs that both look like "it didn't render"
+
+The terrain palette has carried "deep water" and "shallow water" colour stops
+since carve-down terrain shipped, and there was no water. Now each biome
+floods a little under a fifth of itself, at a level taken from its own basin
+deciles (`__BIRB.terrainHistogram()`).
+
+The mesh is built by walking a grid and emitting only flooded cells, so 90%
+of the sphere costs nothing and the rest gets a vertex every four units —
+same triangle count as a whole-planet sphere, four times the shoreline
+resolution. Quads with any corner flooded are kept, so the sheet runs under
+the bank and the **depth buffer** cuts the shoreline, which is a better edge
+than any polygon could be.
+
+Both failures presented identically — a correct-looking geometry that puts no
+pixels on screen:
+
+1. **Winding.** On this parameterisation `cross(dP/dtheta, dP/dphi)` points
+   outward, so a triangle must advance in theta before phi. Reversed, every
+   lake is back-facing and `FrontSide` culls the lot. Diagnosed by swapping
+   the material for flat magenta with `depthTest: false` — that separates
+   "never rasterised" from "drew and lost the depth test", which is the only
+   question worth asking and cannot be answered by staring at the render.
+2. **Flooding from the wrong field.** The flood mask must come from the
+   SMOOTH continental layer, never the full terrain. The full field's detail
+   noise has features about twenty units across and the ground mesh is built
+   at 96x64 on mobile — a vertex every eight units. Flood from it and most
+   "lakes" are noise pits the mesh never resolved: the sampler says the
+   ground is four units under water, the mesh draws it two above, and every
+   lake in the world hides behind its own bed.
+
+Inside a basin the detail roughness is now faded out over eight units of
+depth, so the bed is planed below the surface and no island of noise pokes
+through. Faded, not switched — a hard cut at the waterline rings every lake
+with a quarry wall.
+
+**Water is a floor too.** `terrainFloorDir` maxes against sea level so the
+bird skims a lake instead of flying along the bottom of it. Sea level is
+itself negative, so the floor still only ever dips below the base radius and
+cannot ratchet a gravity-less bird upward — the invariant is intact, and it
+is intact *because* this is a max against a negative constant rather than a
+height added on top.
+
+### 16.7 Weather, and two ways a shader disappears silently
+
+One `Points` draw call per biome; the entire motion is in the vertex shader,
+so the per-frame CPU cost is four uniform writes regardless of particle
+count. Particles live in WORLD space and are wrapped into a box centred on
+the camera:
+
+```glsl
+wrapped = mod(world - camera + halfBox, box) - halfBox + camera
+```
+
+A flake you fly past leaves out the back and reappears out the front as a
+different flake. Parent them to the camera instead and the snow hangs in
+front of your face at any speed, which reads as dirt on the lens. The box is
+oriented by the player's **up axis**, not world Y — this is a planet, and
+snow falling toward world-negative-Y is snow falling sideways for three
+quarters of the map.
+
+Two silent failures, one after the other:
+
+- **`half` is a reserved word in GLSL ES 1.00.** The shader does not compile,
+  Three draws nothing for the material, and the weather is simply absent.
+- **A backtick inside a GLSL comment ends the JS template literal.** The
+  comment explaining the first bug contained `` `half` `` in backticks and
+  took the whole module out with a parse error.
+
+Both produced "no weather", one with no console output at all.
+
+### 16.8 The guard that did not guard
+
+`tools/birb-modes.mjs` treats console warnings as failures and exits 1 — and
+it printed **"all 5 modes ok"** on a run that was exiting 1 because the
+console was full of `useProgram: program not valid`. The summary line only
+consulted the per-mode checks. A log whose tail says "ok" on a failing run is
+worse than no log. Fixed: the summary now agrees with the exit code.
+
+That failing shader was `addRimLight` applied to a `MeshBasicMaterial`, which
+has no `vNormal`, no `vViewPosition` and no `outgoingLight`. The guard now
+lives in `addRimLight` rather than in its caller — every future caller would
+have to remember it, and one of them would not.
+
+### 16.9 Tooling added, each paid for by a bug it found
+
+- `--after` runs JS **after** the settle, so a pose it sets is the pose
+  photographed. `--eval` gave the simulation the whole settle window to fly
+  the bird somewhere else; three light-shaft captures in a row came back with
+  the sun behind the camera.
+- `--eval` / `--after` report their return value. A setter that silently
+  no-ops because its feature is disabled looks exactly like one that worked
+  — which is how `setBloom({view:1})` produced an ordinary game frame that
+  was read as a bright buffer.
+- `stats()` takes draw calls from the pass, not the renderer. `renderer.info`
+  resets on every `render()` call and the composite is the last of four, so
+  the whole world reported as **one draw call and one triangle** the moment
+  bloom was switched on — turning the budget check into a rubber stamp. The
+  AR page had already learned this; the root game had not.
+- `__BIRB.setBloom({view:1})` renders the bright buffer to the screen.
+- `__BIRB.terrainHistogram()`, `goToWater()`, `faceSun()`, `waterFlag()`,
+  `weather()`, `water()`.
+
+### 16.10 Still not done
+
+- **Per-biome colour grade.** Still needs an owner on a real phone; the tools
+  to generate the candidates exist.
+- **A real device.** Everything above is measured in headless SwiftShader at
+  2-11 fps. Draw calls and triangles are facts; frame time is not. Bloom now
+  runs on iPhones for the first time, so the first real-device session should
+  watch for the tier dropping DPR where it never used to.
+- **Desktop density tier.** Still over the triangle budget, still low value
+  for a phone demo.
+
+### 16.11 Follow-on: the wake, and a sky that was clipping
+
+**Ripples under a bird flying low over a lake** (`src/effects/wake.js`). One
+InstancedMesh, a fixed pool reused round robin, nothing allocated at runtime.
+It is what turns the water from a blue floor into a surface — the ripple
+gives it a plane, a scale, and a reaction to the player.
+
+The fade has to ride in `instanceColor`, because one InstancedMesh has a
+single material opacity for every instance and the alternative is a draw call
+per ripple. **`instanceColor` tints; it does not set alpha.** Under normal
+blending a half-faded ripple is a fully opaque dark grey ring, and the first
+build drew a stack of charcoal hoops on a pale lake. Additive blending makes
+a dark instance colour contribute nothing, which is exactly a fade — and
+light added to water is what a ripple catching the sun actually is.
+
+Then it was far too bright, twice: additive onto an already-pale lake clips,
+and once it clips the bloom pass finds it and the ripple becomes a
+searchlight. 0.34 clipped, 0.17 could not be found, shipped at 0.26. That one
+is worth re-judging on a phone.
+
+**The sky's glows are now self-limiting.** The horizon band and the sun's
+broad halo are additive, and additive light onto a sky that is already near
+white does not glow — it clips, and a wide soft term clips over a wide soft
+area. The mountain's pale cream horizon (`0xf3e9ce` is 0.89 in linear) plus a
+0.18 band plus the sun's outer lobe turned the upper third of that world into
+a flat white slab. Both terms are now scaled by the sky's remaining headroom,
+which keeps the forest's deep sunset glow at full strength and gives the pale
+skies their gradient back.
+
+The mountain palette was deepened to match, and its lighting rebalanced from
+ambient 1.02 / key 1.32 to ambient 0.62 / key 1.72. **Snow reads by contrast,
+and high ambient of a near-white sky colour is exactly what destroys it** —
+every face lands on the same value and the terrain loses its form. The direct
+light does the work now and the shadows are allowed to go blue.
+
+### 16.12 The terrain finally knows what time it is
+
+`MeshLambertMaterial` has **no specular term at all**, which is why this world
+looked identical at noon and at golden hour: the only thing the moving sun did
+to the ground was set a diffuse level. Real ground does not behave that way —
+grass, snow and rock all scatter light forward at grazing angles, and a low
+sun catching the edge of a hill is most of what golden hour actually looks
+like.
+
+`addAtmosphere` now adds a sun rim: two terms multiplied, how much the surface
+faces the sun and how close to edge-on the eye sees it. Facing alone only
+brightens the lit side, which the diffuse already did; the grazing factor is
+what puts the light on the RIM, where it reads. It runs on every ground and
+prop material, costs a handful of instructions and no draw calls, and it
+shares the key light with the sky disc, the water glint and the light shafts —
+`visualUniforms.sunDir` / `sunColor`, written once per frame.
+
+The view-space normal is rotated back to world by multiplying on the right;
+for a rotation that is the transpose, which is the inverse.
+
+### 16.13 Making the biomes read — the city, the canyons, the flock
+
+Playtest, verbatim: *"many of the environments looked like crap — like the
+city wasn't a city."* Correct on all counts.
+
+**The city is now a city.** It shipped as grey boxes standing in a field.
+Three changes, none of them geometry:
+
+- **Procedural lit windows** (`src/environment/city-windows.js`), derived from
+  the fragment's position on the wall: no geometry, no texture, no draw calls,
+  and it works on an InstancedMesh where every tower shares one box. Three
+  things had to be right — the wall coordinate is in WORLD units (from the
+  instance matrix's own scale) so the window pitch is constant instead of
+  scaling with the building; each tower hashes a seed from its translation so
+  the skyline is not one building repeated; and the edges are anti-aliased
+  from `fwidth`, then faded out entirely once a window drops below a pixel,
+  because two overlapping smoothstep bands are not an average, they are
+  speckle.
+- **A street grid** on the ground, same technique, parameterised by longitude
+  and latitude with longitude corrected by `cos(lat)` so blocks stay square
+  instead of pinching at the poles. Roads carry warm lamps. A city's ground is
+  the one surface a person can identify from a mile up, and what identifies it
+  is the grid.
+- **Dusk lighting.** Ambient 1.05 → 0.52, key 1.28 → 0.78, facades darkened.
+  A lit window only reads against a street that is actually dark.
+
+**The canyons have strata.** A canyon is not a canyon because it is steep —
+plenty of terrain is steep — it is a canyon because you can read the layers in
+the rock, and these walls were one flat colour from rim to floor. The bands
+follow the RADIUS, so they are surfaces of constant altitude and stay level
+across every wall regardless of which way it faces, which is what makes rock
+look deposited rather than painted.
+
+**The flock reads as birds.** Playtest: *"not sure what the little bird arrow
+things in the sky are."* That was the right read of what it was — evenly
+spaced cold-grey chevrons at a uniform distance, with a flap that scaled all
+three axes at once, so they pulsed in size instead of beating their wings.
+Now: a loose skein, warm dark brown, spaced several wingspans apart (the first
+attempt spaced ranks tighter than the wingspan and the formation collapsed
+into a pile of darts), flapping by SPAN alone with a wave running down the
+group, and anchored to the direction the player is FACING. That last one is
+the difference between an effect and no effect at all: a tight group orbiting
+a fixed bearing is inside a portrait phone's field of view about nine per cent
+of the time.
+
+**Three more bugs of the same family, all invisible.**
+
+- `addStreetGrid` wrote to `diffuseColor` at `<opaque_fragment>`, where
+  Lambert has already folded the diffuse into the lighting. The roads were
+  computed correctly and changed nothing anyone could see.
+- The street grid and the atmosphere both declared `varying vec3 vBirbWorld`.
+  Declared twice, the shader does not compile, and Three then draws nothing —
+  so the entire ground of the city was missing while the page looked fine.
+- The sun rim added in 16.12 was a flat additive term, which lifts a DARK
+  material far more than a bright one. The city's asphalt is 0.09 in linear,
+  so it nearly doubled and every street read as pale snow. It is now scaled by
+  the surface's own albedo, which is what forward scatter actually is.
+
+And the water's sun glint was tuned down hard (2.6 → 1.25, and the sky it
+mirrors dimmed to 0.58 of the sky's mid tone). The glint is additive, the
+frame is tone-mapped, and the bloom then finds whatever clipped — so a
+highlight that looks reasonable in isolation became a white hole the size of a
+harbour.
+
+**`tools/birb-shaders.mjs` now exists and runs in CI.** Two shaders failed to
+compile in one session and neither failure looked like one: Three logs the
+error and quietly draws nothing, so the page renders, the frame is plausible,
+and the screenshot harness exits zero. It visits every environment, because a
+material that lives in one biome is exactly the kind nothing else covers.
+
+### 16.14 Two corrections the contact sheet caught
+
+**The mountain's nest view rendered almost entirely black.** Cutting its
+ambient from 1.02 to 0.62 (16.11) bought the contrast that makes snow read,
+and forgot that the ambient is also the ONLY light on the half of the world
+facing away from the sun. A perch on the night side had nothing lighting it
+at all. Back to 0.86, with the key eased from 1.72 to 1.52 and the hemisphere
+ground term lifted — contrast kept, black frame gone. Measured mean brightness
+across the four nest views is now 118-158.
+
+**The mist was erasing the mid-distance rather than placing it.** 0.70
+strength capped at 0.72 meant most of what a player looks at was more than
+half mist, and a nest view — which is nothing but mid-distance — lost its
+subject entirely. Now 0.58 capped at 0.56.
+
+Both were found by looking at the eight-tile contact sheet, and neither would
+have been found any other way: every automated gate was green, the game was
+playable, and the frames were rendering exactly what they were told to.

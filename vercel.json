@@ -3,5 +3,11 @@
   "redirects": [
     { "source": "/ar", "destination": "/AR/", "permanent": false },
     { "source": "/ar/:path*", "destination": "/AR/:path*", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/svg/view", "destination": "/icon3d/view.html" },
+    { "source": "/svg/view/", "destination": "/icon3d/view.html" },
+    { "source": "/svg", "destination": "/icon3d/index.html" },
+    { "source": "/svg/", "destination": "/icon3d/index.html" }
   ]
 }

@@ -3445,6 +3445,8 @@
       // carved valleys so the bird can fly down INTO canyons (reads the live
       // active environment, so it tracks environment switches automatically).
       var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
+      var sampleTerrainMeshHeight = sphericalWorldModule.sampleTerrainMeshHeight;
+      var sampleBasinHeight = sphericalWorldModule.sampleBasinHeight;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -3465,13 +3467,26 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
-      var { visualUniforms, getQualityPixelRatio } = await import('./src/environment/visual-style.js');
+      var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
-      var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
-      var { blendToward, perchPose, tumbleFlap, tailPitchOffset } = await import("./src/flight/bird-pose.js");
+      var { createFrameSampler } = await import("./src/game/frame-metrics.js");
+      var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
+      var { createBloomPass } = await import("./src/effects/bloom-pass.js");
+      var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
+      var { createWake } = await import("./src/effects/wake.js");
+      var { createFlock } = await import("./src/environment/flock.js");
+      // Constructed HERE, not beside its first read. setEnvironment resets the
+      // sampler and is called during initial setup, hundreds of lines before
+      // that read — so a `const` declared there sat in its temporal dead zone
+      // and threw. The throw was caught by the initial-setup handler, which
+      // then skipped everything after it: nest points, the collectibles
+      // system and the rocket collision targets. The world still rendered, so
+      // the game looked fine and simply had no nests and no rings.
+      var frameSampler = createFrameSampler();
+      var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -3550,7 +3565,16 @@
     const _uaMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
     const _coarsePointer = window.matchMedia("(pointer: coarse)").matches;
     const isMobile = _uaMobile || _coarsePointer;
-    const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 4) <= 4);
+    // Advisory only, and deliberately no longer gates anything on its own.
+    //
+    // It used to switch the bloom pass off, and it was wrong on the primary
+    // target platform: iOS Safari does not expose navigator.hardwareConcurrency
+    // at all, so `undefined || 4` is 4, `4 <= 4` is true, and EVERY iPhone was
+    // classified low-end. The post-processing pass built for this game had
+    // never once run on the device the game is built for. Quality shedding is
+    // the adaptive tier's job now — it measures the frame rate instead of
+    // guessing from a core count the browser refuses to report.
+    const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 8) <= 4);
     // Expose globally so environment modules can inspect it without prop drilling.
     window.__birbIsMobile = isMobile;
     window.__birbIsLowEnd = isLowEnd;
@@ -4187,7 +4211,18 @@
 
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     // One art pipeline: highlights roll off consistently on phones and desktop.
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    // Khronos Neutral, not ACES. Measured side by side from one fixed camera
+    // (tools/birb-lighting.mjs): ACES desaturates as it rolls off, and on a
+    // world made of flat-shaded colour that is most of what you see — greens
+    // go grey-olive and the sky goes to cream. Neutral holds hue into the
+    // highlights, so the same scene reads as gold sky over saturated forest
+    // with no change to a single light, material or vertex colour.
+    //
+    // AgX was measured too and lands very close to ACES here: it earns its
+    // keep on scenes with blown highlights, and this one has none.
+    //
+    // One enum. Zero per-frame cost.
+    renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.12;
 
     const scene = new THREE.Scene();
@@ -4302,12 +4337,92 @@
     // rebuilt on every environment switch and the shadow belongs to the bird.
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
-    // One ribbon per wingtip. Scene-parented for the same reason as the
-    // shadow: they belong to the bird, not to a world that gets rebuilt.
-    const wingRibbons = [createRibbonTrail(THREE), createRibbonTrail(THREE)];
-    for (const ribbon of wingRibbons) scene.add(ribbon.mesh);
-    const _ribbonAnchor = new THREE.Vector3();
-    const _ribbonSide = new THREE.Vector3();
+
+    // A distant flock. One draw call for fourteen birds, and the only thing
+    // in the world that moves of its own accord and is not trying to kill
+    // you. Scene-parented so it survives environment switches.
+    const flock = createFlock(THREE, { sphereRadius: 120 });
+    scene.add(flock.mesh);
+    const _flockCenter = new THREE.Vector3(0, 0, 0);
+    const _flockForward = new THREE.Vector3();
+    // Every rim-light uniform block the bird owns, so the environment switch
+    // can retint them all at once.
+    const birbRimUniforms = [];
+    const _rimWhite = new THREE.Color(0xffffff);
+    // Weather is per-biome and rebuilt on every environment switch, because
+    // the profile IS the biome: snow in the mountains, pollen in the forest,
+    // dust in the canyons, drizzle in the city.
+    let weather = null;
+    const _weatherUp = new THREE.Vector3(0, 1, 0);
+    // Ripples under a bird flying low over a lake. Built once and reused
+    // across environments — it is one InstancedMesh with no world knowledge.
+    let wake = null;
+    const wakeState = { cooldown: 0 };
+    const _wakePoint = new THREE.Vector3();
+    const _wakeNormal = new THREE.Vector3();
+    // Scratch for projecting the sun to screen space for the light shafts.
+    const _sunDir = new THREE.Vector3();
+    const _sunView = new THREE.Vector3();
+    const _sunClip = new THREE.Vector3();
+    // Last computed screen position of the sun, for stats and for tools.
+    const sunScreen = { u: 0.5, v: 0.5, visible: 0 };
+
+    // Bloom. The one post-processing effect in the game, and the only thing
+    // in this session gated on the owner's ten-minute phone playtest coming
+    // back clean. Hand-written as ONE merged pass (bright + two half-res
+    // blurs + a composite that also does the vignette) rather than an
+    // EffectComposer stack, because a stack costs a full-screen pass per
+    // effect and this device is fill-rate bound.
+    //
+    // Dropped entirely at tier 1: an optional overlay goes before distant
+    // detail, which goes before resolution.
+    let bloomPass = null;
+    try {
+      bloomPass = createBloomPass(THREE, renderer, {
+        // Rings, drone cores and the city mast collar are the emissives worth
+        // blooming; the sky and lit terrain must stay below the knee or the
+        // whole frame glows and reads as a smeared lens.
+        threshold: 0.78,
+        softness: 0.24,
+        strength: 0.78,
+        vignette: 0.42,
+      });
+    } catch (bloomError) {
+      console.warn('Bloom unavailable; rendering without it', bloomError);
+      bloomPass = null;
+    }
+    // On by default everywhere. The tier check inside presentFrame() sheds it
+    // the moment a device cannot hold the frame rate, which is a measurement
+    // rather than a guess — see the isLowEnd note above for what the guess
+    // cost.
+    try {
+      wake = createWake(THREE);
+      scene.add(wake.mesh);
+    } catch (wakeError) {
+      console.warn('Wake unavailable:', wakeError);
+      wake = null;
+    }
+
+    let bloomEnabled = true;
+    // Eased 0..1 boost strength for the composite pass.
+    let boostVisual = 0;
+
+    /**
+     * The single place a frame reaches the screen.
+     *
+     * Both the game loop and the share-screenshot path go through here, so a
+     * shared image and the live frame can never differ — and the render
+     * target is always returned to the canvas, which a bloom pass otherwise
+     * leaves pointing at an offscreen buffer.
+     */
+    function presentFrame() {
+      if (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1) {
+        bloomPass.render(scene, cameraState.camera);
+        return;
+      }
+      renderer.setRenderTarget(null);
+      renderer.render(scene, cameraState.camera);
+    }
 
     // ===== Proximity cue state =====
     // Pre-allocated working vectors (zero-alloc per frame).
@@ -4467,6 +4582,20 @@
     scene.add(glowLight);
 
     const lightingRig = { ambient, keyLight, rimLight, fillLight, glowLight };
+
+    // Sun cycle. The biome's own key position and colour are captured as the
+    // BASE when the environment loads; the cycle rotates and tints around
+    // that, so each biome keeps its identity while the light moves.
+    const sunState = {
+      enabled: true,
+      seconds: Math.random() * 600,   // Two sessions do not start at the same hour.
+      baseKeyColor: new THREE.Color(0xffe4b5),
+      baseKeyIntensity: 1.25,
+      baseRimIntensity: 0.48,
+      distance: 12,
+      _dir: new THREE.Vector3(),
+      _color: new THREE.Color(),
+    };
 
     const debugVectorState = (() => {
       const hasDebugVectors = new URLSearchParams(window.location.search).has("debugVectors");
@@ -4762,6 +4891,14 @@
     // Last tier the mist budget was applied for, so the draw range is only
     // rewritten when the tier actually changes rather than every frame.
     let mistBudgetTier = -1;
+
+    // Set once the nest launch handler is defined, so the ?debug=1 harness can
+    // fire through the same path the on-screen button uses.
+    let handleNestLaunch = () => {};
+
+    // Pose snapshot for comparison captures; ?debug=1 harness only.
+    let __birbSavedPose = null;
+    let __birbWaterRealMat = null;
 
     // Set only by the ?debug=1 capture harness; null in production.
     let __birbStickOverride = null;
@@ -5086,7 +5223,7 @@
           let files = null;
           try {
             if (renderer && scene && cameraState?.camera) {
-              renderer.render(scene, cameraState.camera);
+              presentFrame();
               const blob = await new Promise((resolve) =>
                 renderer.domElement.toBlob(resolve, 'image/jpeg', 0.85));
               if (blob) {
@@ -5490,6 +5627,42 @@
       }
 
       sphericalWorld = nextWorld;
+
+      // ===== Weather =====
+      // Attached to the SCENE, not the world root: it is anchored to the
+      // camera and has no business rotating with the terrain.
+      if (weather) {
+        scene.remove(weather.points);
+        weather.dispose();
+        weather = null;
+      }
+      // Ripples belong to a lake that no longer exists.
+      wake?.clear();
+      try {
+        const profile = WEATHER_PROFILES[definition.id];
+        if (profile) {
+          weather = createWeather(THREE, {
+            profile,
+            // Thinned on a phone, but not halved: density is the entire
+            // effect, and the cost is a vertex each plus a handful of
+            // fragments — the flakes are a few pixels across. Count is the
+            // cheapest quality dial in the scene and also the least worth
+            // turning down.
+            count: isMobile ? Math.round(profile.count * 0.7) : profile.count,
+            pixelRatio: renderer.getPixelRatio(),
+          });
+          scene.add(weather.points);
+        }
+      } catch (weatherError) {
+        console.warn('Weather unavailable:', weatherError);
+        weather = null;
+      }
+
+      // Building a world is hundreds of milliseconds of synchronous work.
+      // Charging that to the frame rate would downshift quality on every
+      // environment switch, permanently, since the tier only recovers after
+      // four seconds of good frames it would then be measuring at low DPR.
+      frameSampler.reset();
       glideTrail = null; // No glide trail on spherical world
 
       // Set sphere center for camera and flight controller to handle spherical up vector
@@ -5575,7 +5748,39 @@
         // The pool's specular follows the same light as the sky's sun disc.
         // Aimed at a fixed direction instead, the glint sat on the wrong side
         // of the water in three of the four biomes.
+        // Remember what this biome asked for; the cycle rotates around it.
+        sunState.baseKeyColor.copy(lightingRig.keyLight.color);
+        sunState.baseKeyIntensity = lightingRig.keyLight.intensity;
+        sunState.baseRimIntensity = lightingRig.rimLight.intensity;
+        sunState.distance = lightingRig.keyLight.position.length() || 12;
         sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+        // The lakes mirror the sky, so they need this biome's sky — a forest
+        // lake reflecting the mountain's cold blue is the tell that the
+        // environment switch missed something.
+        if (sphericalWorld?.water) {
+          sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
+          sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
+          // Darkened. Seen from above, water mirrors the sky ABOVE it, which
+          // is the zenith rather than the bright horizon band getMidColor
+          // returns — and at dusk the difference is the whole read: an
+          // undimmed mid tone turns every lake into a sheet of pale sky.
+          if (skyDome.getMidColor) {
+            sphericalWorld.water.setSky(skyDome.getMidColor().clone().multiplyScalar(0.58));
+          }
+        }
+        // The bird's rim is sky light wrapping its silhouette, so it has to be
+        // THIS sky. A fixed cyan rim in the canyon's ochre world stops reading
+        // as light and starts reading as a selection outline.
+        if (birbRimUniforms.length && skyDome.getMidColor) {
+          for (const u of birbRimUniforms) {
+            u.uBirbRimColor.value.copy(skyDome.getMidColor()).lerp(_rimWhite, 0.45);
+          }
+        }
+        // Valley mist takes the sky's own mid tone. Grey mist in a golden
+        // world reads as fog on a lens; sky-coloured mist reads as air.
+        if (visualUniforms.mistColor.value && skyDome.getMidColor) {
+          visualUniforms.mistColor.value.copy(skyDome.getMidColor()).lerp(new THREE.Color(0xffffff), 0.18);
+        }
       }
       // Atmospheric haze: tint fog toward the sky's mid band so far geometry
       // dissolves softly into the painterly sky instead of a flat slate color.
@@ -6153,6 +6358,21 @@
       rightFoot.position.set(0.04, -0.38, -0.18);
       birbModel.add(rightFoot);
 
+      // ── Rim light ────────────────────────────────────────────────────────
+      // Applied to every material the bird owns, in one traverse, so a part
+      // added later cannot be quietly left out and read as a hole in the
+      // silhouette. The uniforms are collected so the environment switch can
+      // retint the rim to each biome's sky.
+      birbRimUniforms.length = 0;
+      birbModel.traverse((child) => {
+        if (!child.material) return;
+        const list = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of list) {
+          const u = addRimLight(m, THREE, { color: 0x9fe8ff, power: 3.0, strength: 0.42 });
+          if (u) birbRimUniforms.push(u);
+        }
+      });
+
       return birbModel;
     };
 
@@ -6185,11 +6405,11 @@
       elapsed: 0,
     };
 
-    const fpsState = {
-      lastSampleTime: null,
-      frames: 0,
-      value: 0,
-    };
+    // Only the last measured value is kept here now; the windowing lives in
+    // frame-metrics.js so it can be tested away from the DOM. The sampler
+    // itself is created up with the module imports, because setEnvironment
+    // resets it and runs long before this line does.
+    const fpsState = { value: 0 };
 
     let previousTime = null;
 
@@ -6234,28 +6454,19 @@
     };
 
     function updateFpsReadout(time) {
-      if (!fpsMetric) return;
-
-      if (fpsState.lastSampleTime === null) {
-        fpsState.lastSampleTime = time;
-        fpsState.frames = 0;
-        return;
-      }
-
-      fpsState.frames += 1;
-      const elapsed = time - fpsState.lastSampleTime;
-      if (elapsed < 250) {
-        return;
-      }
-
-      const fps = (fpsState.frames / elapsed) * 1000;
+      // Sample FIRST, unconditionally. This function used to open with
+      // `if (!fpsMetric) return;` — and `[data-metric="fps"]` is not in the
+      // document, so it returned on every frame the game has ever rendered
+      // and the adaptive quality tier was never given a single sample. DPR
+      // never dropped, no optional effect was ever shed, and a phone that
+      // could not hold 60fps just kept not holding it. Drawing the number is
+      // optional; measuring it is what the game acts on.
+      const fps = frameSampler.sample(time);
+      if (fps === null) return;
       fpsState.value = fps;
-      fpsState.frames = 0;
-      fpsState.lastSampleTime = time;
-      const formatted = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
-      fpsMetric.textContent = formatted;
-
-      // Feed the adaptive quality tier manager with the sampled FPS.
+      if (fpsMetric) {
+        fpsMetric.textContent = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
+      }
       adaptiveTier.sampleFps(fps, time);
     }
 
@@ -6305,6 +6516,7 @@
 
       return {
         sampleFps(fps, time) {
+          if (state.pinned) return;
           if (state.windowStart === 0) state.windowStart = time;
           state.fpsSum += fps;
           state.fpsCount += 1;
@@ -6329,6 +6541,18 @@
           state.windowStart = time;
         },
         getTier() { return state.tier; },
+        /**
+         * Hold the tier and ignore further samples. For the capture harness
+         * only: this sandbox renders through SwiftShader at a few frames per
+         * second, so an honest sampler downshifts immediately and every art
+         * review would then be conducted against degraded output that no real
+         * phone would produce.
+         */
+        pin(tier) {
+          applyTier(tier);
+          state.pinned = true;
+        },
+        isPinned() { return !!state.pinned; },
       };
     })();
 
@@ -6558,6 +6782,13 @@
 
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(nextWidth, nextHeight, false);
+      // The offscreen targets are sized in DEVICE pixels; a rotation that
+      // changes either the CSS size or the DPR leaves them stale, and a stale
+      // bloom target shows last orientation's frame stretched over this one.
+      if (bloomPass) bloomPass.setSize(nextWidth, nextHeight, pixelRatio);
+      // gl_PointSize is in device pixels, so a DPR change halves or doubles
+      // every flake unless the shader is told.
+      if (weather) weather.setPixelRatio(pixelRatio);
       if (cameraState) {
         const camera = cameraState.camera;
         camera.aspect = nextWidth / nextHeight;
@@ -7132,7 +7363,7 @@
 
       // Synchronous launch handler (data3-cisco-live pattern)
       // Keep everything in the gesture call stack for iOS audio to work
-      const handleLaunch = () => {
+      const handleLaunch = handleNestLaunch = () => {
         // CRITICAL: Initialize audio synchronously within gesture context
         // This unlocks audio AND pre-generates buffers for instant playback
         unlockAudio();
@@ -7405,6 +7636,10 @@
       if (sphericalWorld?.features) {
         sphericalWorld.features.update(flightController.position, delta, time);
       }
+      // The lakes' swell. One uniform; the waves are shader-side.
+      if (sphericalWorld?.water) {
+        sphericalWorld.water.update(reducedMotionState.enabled ? 0 : motionState.elapsed);
+      }
 
       let nestedAimQuaternion = null;
 
@@ -7412,7 +7647,7 @@
       // In Zen mode, apply additional smoothing for a floatier feel.
       let inputState = newFlightSystem?.input?.get() ?? { x: 0, y: 0, active: false };
       // Capture-harness stick override (?debug=1 only). A screenshot cannot
-      // hold a turn, and the wingtip ribbons only exist during one.
+      // hold a turn, and turn-dependent animation only exists during one.
       if (__birbStickOverride) inputState = __birbStickOverride;
       // Shape every mode's stick (deadzone + expo) before it drives flight.
       _shapedInput.x = shapeAxis(inputState.x, INPUT_SHAPE);
@@ -7964,11 +8199,23 @@
 
         // Subtle downward wing sweep during glide, stronger while banking.
         const glideSweep = gliding ? 0.18 + Math.min(Math.abs(yawInput), 1) * 0.14 : 0;
+        // Wing beat: asymmetric power stroke, wing folding on recovery, and a
+        // burst-then-glide cadence. A constant sine is the single most
+        // artificial thing a procedural bird can do, and that is what this
+        // was. Beats while climbing, and idles a slow beat otherwise so the
+        // bird is never completely inert in the air.
         let flapOffset = 0;
-        if (isAirborneVisual && climbing && !bankingHard) {
-          const flapFreq = 6.8;
-          const flapAmp = 0.34;
-          flapOffset = Math.sin(motionState.elapsed * flapFreq) * flapAmp;
+        let beatSpan = 1;
+        if (isAirborneVisual && !bankingHard) {
+          const drive = climbing ? 1 : 0.35;
+          const envelope = beatEnvelope(motionState.elapsed) * drive;
+          if (envelope > 0.001) {
+            // Beat rate rises with effort: a climbing bird works harder.
+            const rate = climbing ? 4.4 : 2.6;
+            const beat = wingBeat(motionState.elapsed * rate);
+            flapOffset = beat.angle * envelope;
+            beatSpan = 1 - (1 - beat.span) * envelope;
+          }
         }
 
         // Idle wing flutter — soft breathing-style oscillation when the bird
@@ -7999,7 +8246,7 @@
         if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = flex;
         if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = flex * 1.5;
         if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = flex * 1.5;
-        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span;
+        const wingStretch = (sprintState.active && isAirborneVisual ? 0.88 : 1) * perch.span * beatSpan;
         const wingBlend = 1 - Math.exp(-delta * 8);
         leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
@@ -8080,6 +8327,139 @@
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
       visualUniforms.time.value = motionState.elapsed;
       visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
+
+      // Boost drives the composite's radial smear, bloom lift and vignette.
+      // Eased, so a tap on the pill does not snap the whole frame.
+      if (bloomPass) {
+        const wantSpeed = (sprintState.active && !isNested && !reducedMotionState.enabled) ? 1 : 0;
+        boostVisual = blendToward(boostVisual, wantSpeed, delta, wantSpeed > boostVisual ? 6 : 3.2);
+        bloomPass.setSpeed(boostVisual);
+      }
+
+      // ===== Wake =====
+      // A bird skimming a lake leaves rings on it. Cheap, and it is what turns
+      // the water from a blue floor into a surface: the ripple gives it a
+      // plane, a scale, and a reaction to the player.
+      if (wake) {
+        wakeState.cooldown -= delta;
+        const level = sphericalWorld?.waterLevel ?? 0;
+        if (level < 0 && birdPos && !isNested && typeof sampleTerrainMeshHeight === 'function') {
+          const surfaceRadius = sphericalWorld.sphereRadius + level;
+          const height = birdPos.length() - surfaceRadius;
+          // Over water only: the flight floor is clamped at sea level, so
+          // being low is not enough — the BED has to be under it too, or the
+          // bird leaves ripples across dry hilltops.
+          const overWater = height >= -0.5 && height <= wake.config.reach
+            && sampleTerrainMeshHeight(birdPos.x, birdPos.y, birdPos.z) < level;
+          if (overWater && wakeState.cooldown <= 0) {
+            _wakeNormal.copy(birdPos).normalize();
+            // Dropped straight down onto the surface. No lateral offset: the
+            // bird has already moved several units between one ripple and the
+            // next, so the trail is a trail without help.
+            _wakePoint.copy(_wakeNormal).multiplyScalar(surfaceRadius);
+            wake.spawn(_wakePoint, _wakeNormal);
+            // Closer to the water means a busier wake.
+            wakeState.cooldown = 0.10 + 0.16 * Math.max(0, height / wake.config.reach);
+          }
+        }
+        wake.update(delta);
+      }
+
+      // Weather. Four uniform writes; the motion is all in the vertex shader.
+      if (weather && birdPos) {
+        const tier = adaptiveTier.getTier();
+        // Sheds before resolution does, like every other optional layer, and
+        // reduced motion turns it off outright — drifting particles across
+        // the whole frame are exactly what that setting is asking about.
+        weather.setDensity(reducedMotionState.enabled ? 0 : tier >= 2 ? 0 : tier === 1 ? 0.5 : 1);
+        if (weather.points.visible) {
+          _weatherUp.copy(birdPos).normalize();
+          weather.update(motionState.elapsed, cam.position, _weatherUp);
+        }
+      }
+
+      // Flock. Dropped at tier 2 with the other optional decoration.
+      if (flock) {
+        const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
+        flock.mesh.visible = showFlock;
+        // The camera's forward, flattened later into the tangent plane: the
+        // flock's sweep is anchored to it so the V crosses the player's view
+        // instead of orbiting somewhere behind their head.
+        if (showFlock) {
+          cam.getWorldDirection(_flockForward);
+          flock.update(motionState.elapsed, birdPos, _flockCenter, _flockForward);
+        }
+      }
+
+      // ===== Sun cycle =====
+      // One light position and one colour per frame. Everything that already
+      // follows the key light — the sky's sun disc, the water specular, the
+      // mist tint — moves with it for free. Reduced motion holds it still.
+      if (sunState.enabled && !reducedMotionState.enabled && lightingRig.keyLight) {
+        sunState.seconds += delta;
+        const sun = sunDirectionAt(sunState.seconds);
+        sunState._dir.set(sun.x, sun.y, sun.z).multiplyScalar(sunState.distance);
+        lightingRig.keyLight.position.copy(sunState._dir);
+        const warmth = sunWarmth(sun.height);
+        sunState._color.copy(sunState.baseKeyColor);
+        sunState._color.r *= warmth.r;
+        sunState._color.g *= warmth.g;
+        sunState._color.b *= warmth.b;
+        lightingRig.keyLight.color.copy(sunState._color);
+        lightingRig.keyLight.intensity = sunState.baseKeyIntensity * warmth.intensity;
+        // The rim counter-rotates a little so a silhouette keeps an edge at
+        // every point of the cycle rather than going flat when the sun is
+        // behind the camera.
+        if (lightingRig.rimLight) {
+          lightingRig.rimLight.position.set(-sun.x, Math.max(0.35, sun.y * 0.7), -sun.z)
+            .multiplyScalar(sunState.distance * 0.85);
+          lightingRig.rimLight.intensity = sunState.baseRimIntensity * (1.25 - sun.height * 0.4);
+        }
+        if (skyDome?.setSunDirection) skyDome.setSunDirection(lightingRig.keyLight.position);
+        sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+        // The glitter path across a lake is the whole point of putting water
+        // in a world with a moving sun; it only works if the water's sun is
+        // the same sun.
+        if (sphericalWorld?.water) {
+          sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
+          sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
+        }
+      }
+
+      // The terrain's sun rim shares the key light. One uniform pair, read by
+      // every ground and prop material.
+      if (visualUniforms.sunDir.value && lightingRig.keyLight) {
+        visualUniforms.sunDir.value.copy(lightingRig.keyLight.position).normalize();
+        visualUniforms.sunColor.value.copy(lightingRig.keyLight.color)
+          .multiplyScalar(lightingRig.keyLight.intensity * 0.55);
+      }
+
+      // ===== Light shafts =====
+      // Where the sun lands on screen. The pass has no scene knowledge, so
+      // this is the only place that can tell it.
+      //
+      // Projecting a far point along the sun direction is NOT enough on its
+      // own: behind the camera the perspective divide flips the sign and the
+      // sun reappears, mirrored, on the opposite edge — shafts converging on
+      // a point that is physically behind the player's head. The view-space
+      // check is what rejects that, and it has to come first.
+      if (bloomPass && lightingRig.keyLight) {
+        _sunDir.copy(lightingRig.keyLight.position).normalize();
+        _sunView.copy(_sunDir).transformDirection(cam.matrixWorldInverse);
+        // View space looks down -z, so a sun in front has negative z.
+        if (_sunView.z < -0.05) {
+          _sunClip.copy(cam.position).addScaledVector(_sunDir, 4000).project(cam);
+          // Fade out as the sun leaves the frame instead of cutting: the
+          // shafts of a sun just past the edge are the good ones.
+          const radius = Math.hypot(_sunClip.x, _sunClip.y);
+          sunScreen.u = _sunClip.x * 0.5 + 0.5;
+          sunScreen.v = _sunClip.y * 0.5 + 0.5;
+          sunScreen.visible = 1 - Math.max(0, Math.min(1, (radius - 0.75) / 1.05));
+        } else {
+          sunScreen.u = 0.5; sunScreen.v = 0.5; sunScreen.visible = 0;
+        }
+        bloomPass.setSun(sunScreen.u, sunScreen.v, sunScreen.visible);
+      }
       // Optional detail sheds before resolution does: the waterfall mist is
       // the largest transparent surface in the scene and the first thing a
       // fill-rate-bound phone should stop paying for.
@@ -8099,44 +8479,6 @@
 
       // IMPROVEMENT 5: Update particles
       if (particleSystem) particleSystem.update(delta, cam?.position);
-
-      // Wingtip ribbons. Shown only while boosting or banking hard, and only
-      // in the air — a strip trailing a walking bird reads as a bug. Dropped
-      // at tier 1: an optional overlay goes before distant detail, which goes
-      // before resolution. Reduced motion removes them outright.
-      if (wingRibbons.length) {
-        const bankAmount = Math.abs(wingInputState?.x ?? 0);
-        const airborne = flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
-        const ribbonsAllowed = airborne && !isNested
-          && !reducedMotionState.enabled && adaptiveTier.getTier() < 1;
-        // Boost is the loud case; a hard bank earns a fainter ribbon so a
-        // tight turn still reads as fast without shouting.
-        // Banking is the real trigger. A ribbon trailing straight back from a
-        // wingtip points almost exactly at a chase camera and foreshortens to
-        // nothing, so boost alone shows the player no ribbon at all; it only
-        // sweeps into view when the bird turns. Boost therefore amplifies a
-        // turn rather than triggering the effect on its own.
-        const turn = Math.max(0, (bankAmount - 0.3) / 0.5);
-        const ribbonTarget = !ribbonsAllowed ? 0
-          : Math.min(1, turn * (sprintState.active ? 1.35 : 0.85));
-        const wings = [birbAnchor?.getObjectByName('leftWing'), birbAnchor?.getObjectByName('rightWing')];
-        for (let i = 0; i < wingRibbons.length; i++) {
-          const tip = wings[i]?.userData?.tipFeather;
-          if (!tip || ribbonTarget <= 0) {
-            wingRibbons[i].update(null, null, delta, 0);
-            continue;
-          }
-          tip.getWorldPosition(_ribbonAnchor);
-          // Width runs along the bird's RIGHT axis, making the ribbon
-          // horizontal. Along the up axis instead, the ribbon's plane
-          // contains the flight direction — and a chase camera looks straight
-          // down that direction, so it saw two perfectly edge-on ribbons and
-          // rendered nothing while every counter said they were visible.
-          _ribbonSide.set(1, 0, 0);
-          if (birdQuat) _ribbonSide.applyQuaternion(birdQuat);
-          wingRibbons[i].update(_ribbonAnchor, _ribbonSide, delta, ribbonTarget);
-        }
-      }
 
       // Bird contact shadow. Reads the SAME terrain sampler the flight floor
       // uses, so the disc sits on the ground the bird would actually land on
@@ -8284,7 +8626,7 @@
           const nestPos = (isNested && flightController) ? flightController.position : null;
           const nestList = (typeof nestPointsSystem !== 'undefined' && nestPointsSystem && nestPointsSystem.nests)
             ? nestPointsSystem.nests : null;
-          minimap.update(birdPos, birdQuat, ringData, drones, nestPos, delta, currentGameMode, GAME_MODES, nestList);
+          minimap.update(birdPos, birdQuat, ringData, drones, nestPos, delta, currentGameMode, GAME_MODES, nestList, sphericalWorld?.landmarks);
         } else if (minimap) {
           minimap.setVisible(false);
         }
@@ -8295,7 +8637,7 @@
         }
       }
 
-      renderer.render(scene, cameraState.camera);
+      presentFrame();
     };
 
     function handleContextLost(event) {
@@ -8337,8 +8679,10 @@
       if (document.hidden) {
         previousTime = null;
         flightControls.reset({ releasePointerLock: true });
-        fpsState.lastSampleTime = null;
-        fpsState.frames = 0;
+        // The gap across a backgrounded tab is not a frame rate. Without this
+        // the first sample after returning reads as a handful of frames per
+        // second and drops the quality tier on a device that is fine.
+        frameSampler.reset();
         if (fpsMetric) {
           fpsMetric.textContent = "--";
         }
@@ -8564,8 +8908,7 @@
           p.normalize().multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
           return p.length();
         },
-        // Drives the ribbons from a capture: they only appear while boosting
-        // or banking hard, neither of which a screenshot can hold on its own.
+        // Drives boost from a capture: a screenshot cannot hold a button.
         setStick: (x, y) => {
           __birbStickOverride = (x === null) ? null : { x, y: y || 0, active: true };
           return __birbStickOverride;
@@ -8598,12 +8941,330 @@
           const terrain = (typeof sampleTerrainHeight === 'function')
             ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
           flightController.position.copy(dir).multiplyScalar(sphericalWorld.sphereRadius + terrain + 16);
-          // Face the landmark, so a capture does not depend on which way the
-          // bird happened to be pointing.
-          if (flightController.setForward) flightController.setForward(found.position.clone().sub(target).normalize());
+          // AIM at it. The first version called a setForward() that does not
+          // exist on this controller, so the bird kept whatever heading it had
+          // and the landmark was usually behind the camera — which is how three
+          // 130-unit trees could be built, reported, and never seen in a single
+          // capture. The controller orients purely by quaternion, so build the
+          // basis directly: forward toward the target, up radial.
+          const eye = flightController.position;
+          const radial = eye.clone().normalize();
+          const fwd = found.position.clone().sub(eye);
+          fwd.addScaledVector(radial, -fwd.dot(radial)).normalize();  // into the tangent plane
+          const rightAxis = new THREE.Vector3().crossVectors(fwd, radial).normalize();
+          const basis = new THREE.Matrix4().makeBasis(
+            rightAxis, radial, fwd.clone().multiplyScalar(-1),  // model faces -Z
+          );
+          flightController.quaternion.setFromRotationMatrix(basis);
           return found.id;
         },
+        // Paint the lakes flat magenta and unlit. When water cannot be found
+        // in a frame there are two very different reasons — it is not being
+        // drawn, or it is being drawn and looks like the misted ground around
+        // it — and no amount of staring at the render separates them.
+        waterFlag: (on = true) => {
+          const w = sphericalWorld?.water;
+          if (!w) return null;
+          if (on) {
+            if (!__birbWaterRealMat) __birbWaterRealMat = w.mesh.material;
+            // depthTest off on purpose: it separates "the mesh never
+            // rasterised" (culling, winding, frustum) from "the mesh drew and
+            // lost the depth test", which look identical on screen.
+            w.mesh.material = new THREE.MeshBasicMaterial({
+              color: 0xff00ff, fog: false, depthTest: on !== 'depth', side: THREE.DoubleSide,
+            });
+          } else if (__birbWaterRealMat) {
+            w.mesh.material.dispose();
+            w.mesh.material = __birbWaterRealMat;
+            __birbWaterRealMat = null;
+          }
+          return w.mesh.material.type;
+        },
+        // Force a ripple under the bird, so the wake can be photographed
+        // without waiting for a lake to arrive.
+        wake: (spawn = 0) => {
+          if (!wake || !flightController?.position) return null;
+          const level = sphericalWorld?.waterLevel ?? 0;
+          if (spawn > 0 && level < 0) {
+            const n = flightController.position.clone().normalize();
+            for (let i = 0; i < spawn; i++) {
+              wake.spawn(n.clone().multiplyScalar(sphericalWorld.sphereRadius + level), n);
+              wake.update(0.18);
+            }
+          }
+          return { present: true, visible: wake.mesh.visible, reach: wake.config.reach };
+        },
+        weather: () => (weather ? {
+          count: weather.count,
+          visible: weather.points.visible,
+          profile: weather.profile,
+        } : null),
+        water: () => {
+          const w = sphericalWorld?.water;
+          return {
+            present: !!w,
+            level: sphericalWorld?.waterLevel ?? 0,
+            triangles: w?.triangles ?? null,
+            visible: w?.mesh?.visible ?? null,
+            inScene: !!w?.mesh?.parent,
+            verts: w?.mesh?.geometry?.attributes?.position?.count ?? null,
+            indices: w?.mesh?.geometry?.index?.count ?? null,
+            boundR: w?.mesh?.geometry?.boundingSphere
+              ? +w.mesh.geometry.boundingSphere.radius.toFixed(2) : null,
+            // Radius of the first vertex: this should be sphereRadius+level.
+            firstR: w?.mesh?.geometry?.attributes?.position
+              ? +Math.hypot(
+                w.mesh.geometry.attributes.position.getX(0),
+                w.mesh.geometry.attributes.position.getY(0),
+                w.mesh.geometry.attributes.position.getZ(0),
+              ).toFixed(2) : null,
+            birdR: flightController?.position
+              ? +flightController.position.length().toFixed(2) : null,
+            rootScale: sphericalWorld?.root?.scale?.x ?? null,
+            frustumCulled: w?.mesh?.frustumCulled ?? null,
+          };
+        },
+        // Fly to the middle of the deepest lake in this world. Standing water
+        // covers about a tenth of each biome, so a random spawn almost never
+        // shows any — and "the lakes are not there" and "the lakes are over
+        // that way" look identical in a screenshot.
+        goToWater: (rank = 0, altitude = 30) => {
+          if (typeof sampleTerrainMeshHeight !== 'function' || !sphericalWorld) return null;
+          const level = sphericalWorld.waterLevel ?? 0;
+          if (!(level < 0)) return null;
+          const samples = 12000;
+          const found = [];
+          for (let i = 0; i < samples; i++) {
+            const z = 1 - 2 * ((i + 0.5) / samples);
+            const r = Math.sqrt(Math.max(0, 1 - z * z));
+            const a = i * 2.399963229728653;
+            const x = r * Math.cos(a);
+            const y = z;
+            const zz = r * Math.sin(a);
+            // The FLOOR is clamped at sea level, so it cannot report depth;
+            // ask the mesh sampler what the lake bed is doing instead.
+            const bed = sampleTerrainMeshHeight(x, y, zz);
+            if (bed <= level) found.push({ x, y, z: zz, depth: level - bed });
+          }
+          if (!found.length) return null;
+          found.sort((p, q) => q.depth - p.depth);
+          const pick = found[Math.min(rank, found.length - 1)];
+          flightController.position.set(pick.x, pick.y, pick.z)
+            .multiplyScalar(sphericalWorld.sphereRadius + level + altitude);
+          return { level, candidates: found.length, depth: +pick.depth.toFixed(2) };
+        },
+        // Turn to face the sun, so light-shaft work can be judged from a
+        // repeatable frame instead of from whichever way the bird happened to
+        // be pointing when the shutter fired.
+        faceSun: (pitchUp = 0.22) => {
+          if (!flightController?.position || !lightingRig?.keyLight) return null;
+          const eye = flightController.position;
+          const radial = eye.clone().normalize();
+          const sun = lightingRig.keyLight.position.clone().normalize();
+          const fwd = sun.clone();
+          fwd.addScaledVector(radial, -fwd.dot(radial));
+          if (fwd.lengthSq() < 1e-6) return null;   // sun straight overhead
+          fwd.normalize().addScaledVector(radial, pitchUp).normalize();
+          const rightAxis = new THREE.Vector3().crossVectors(fwd, radial).normalize();
+          const upAxis = new THREE.Vector3().crossVectors(rightAxis, fwd).normalize();
+          const basis = new THREE.Matrix4().makeBasis(
+            rightAxis, upAxis, fwd.clone().multiplyScalar(-1),
+          );
+          flightController.quaternion.setFromRotationMatrix(basis);
+          return sun.toArray().map((n) => +n.toFixed(3));
+        },
+        // Snapshot and restore the bird's exact pose. Zeroing speed is not
+        // enough — the flight system rewrites it — so a comparison sheet has
+        // to put the bird back rather than ask it to stay. The chase camera
+        // damps toward the bird, so restoring the same pose and waiting
+        // reconverges the camera to the same viewpoint every time.
+        capturePose: () => {
+          if (!flightController) return null;
+          __birbSavedPose = {
+            position: flightController.position.clone(),
+            quaternion: flightController.quaternion ? flightController.quaternion.clone() : null,
+          };
+          return __birbSavedPose.position.toArray().map((n) => +n.toFixed(2));
+        },
+        restorePose: () => {
+          if (!__birbSavedPose || !flightController) return false;
+          flightController.position.copy(__birbSavedPose.position);
+          if (__birbSavedPose.quaternion && typeof flightController.setOrientation === 'function') {
+            flightController.setOrientation(__birbSavedPose.quaternion);
+          }
+          if (flightController.velocity) flightController.velocity.set(0, 0, 0);
+          return true;
+        },
+
+        // Zeroes the throttle. NOTE: this does not actually hold the bird in
+        // place — the flight system rewrites speed each frame — which is why
+        // the comparison sheet uses capturePose/restorePose instead. Kept
+        // because it is still the right way to stop a player-driven boost.
+        freeze: (on = true) => {
+          if (!flightController) return null;
+          if (typeof flightController.setSpeed === 'function') flightController.setSpeed(on ? 0 : 11);
+          else flightController.speed = on ? 0 : 11;
+          __birbStickOverride = on ? { x: 0, y: 0, active: false } : null;
+          return flightController.speed;
+        },
+        // Game modes. The root game has never had an end-to-end check that a
+        // mode can be entered, reports sane state and can be left again; the
+        // sibling repo shipped a Ring Rush whose win condition could not be
+        // met, so this is a class of bug worth a net under it.
+        startMode: (mode) => { startGameMode(mode); return miniGameState.active; },
+        endMode: (completed = false) => { endGameMode(completed); return miniGameState.active; },
+        modeState: () => ({
+          mode: currentGameMode,
+          active: miniGameState.active,
+          ringsTotal: miniGameState.ringsTotal,
+          ringsSpawned: collectiblesSystem?.rings?.length ?? null,
+          lives: miniGameState.lives,
+          wave: miniGameState.wave,
+          time: +miniGameState.time.toFixed(2),
+          nesting: nestingSystem ? nestingSystem.getState() : null,
+        }),
+        landing: () => {
+          const n = nestingSystem?.getCurrentNest?.();
+          if (!n) return null;
+          const t = n.getWorldPosition(new THREE.Vector3());
+          return {
+            state: nestingSystem.getState(),
+            distance: +t.distanceTo(flightController.position).toFixed(2),
+            birdR: +flightController.position.length().toFixed(2),
+            nestR: +t.length().toFixed(2),
+          };
+        },
+        modes: () => Object.values(GAME_MODES),
+        // Fires through the real launch handler — the same path the on-screen
+        // button takes, including aim assist and the cooldown gate. A rocket
+        // system that constructs correctly and never actually launches from a
+        // perch is the kind of thing only firing can reveal.
+        fire: () => {
+          const before = rocketSystem ? rocketSystem.getRocketCount() : -1;
+          handleNestLaunch();
+          return { before, after: rocketSystem ? rocketSystem.getRocketCount() : -1 };
+        },
+        rockets: () => ({
+          active: rocketSystem ? rocketSystem.getRocketCount() : null,
+          canFire: rocketSystem ? rocketSystem.canFire() : null,
+        }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // How the current biome's ground is actually distributed, as decile
+        // heights below the base radius. Sea level is a number that has to be
+        // chosen against this, not guessed: the same value floods a third of
+        // the forest and none of the city.
+        terrainHistogram: (samples = 20000) => {
+          if (typeof sampleTerrainHeight !== 'function') return null;
+          const h = new Float64Array(samples);
+          for (let i = 0; i < samples; i++) {
+            // Uniform on the sphere: z uniform in [-1,1], angle uniform.
+            const z = 1 - 2 * ((i + 0.5) / samples);
+            const r = Math.sqrt(Math.max(0, 1 - z * z));
+            const a = i * 2.399963229728653;   // golden angle, well spread
+            h[i] = sampleTerrainHeight(r * Math.cos(a), z, r * Math.sin(a));
+          }
+          h.sort();
+          const at = (q) => +h[Math.min(samples - 1, Math.floor(q * samples))].toFixed(2);
+          // The BASIN field decides where lakes go, so its deciles are the ones
+          // a sea level has to be chosen against.
+          const b = new Float64Array(samples);
+          for (let i = 0; i < samples; i++) {
+            const z = 1 - 2 * ((i + 0.5) / samples);
+            const r = Math.sqrt(Math.max(0, 1 - z * z));
+            const a = i * 2.399963229728653;
+            b[i] = sampleBasinHeight(r * Math.cos(a), z, r * Math.sin(a));
+          }
+          b.sort();
+          const bat = (q) => +b[Math.min(samples - 1, Math.floor(q * samples))].toFixed(2);
+          return {
+            env: sphericalWorld?.root?.name ?? null,
+            min: at(0), p10: at(0.1), p25: at(0.25), p50: at(0.5),
+            p75: at(0.75), p90: at(0.9), max: at(0.999),
+            basin: {
+              min: bat(0), p05: bat(0.05), p10: bat(0.1), p15: bat(0.15),
+              p20: bat(0.2), p25: bat(0.25), p50: bat(0.5),
+            },
+          };
+        },
+        // Bloom + light-shaft controls, and the two debug views that make the
+        // pass inspectable. `view: 1` renders the BRIGHT buffer straight to
+        // the screen — the only honest answer to "does anything in this world
+        // actually cross the knee?". The first time it was pointed at the
+        // shipped world the answer was almost nothing, which is how a bloom
+        // pass runs for a week and changes no pixel.
+        setBloom: ({ enabled, threshold, strength, rays, view } = {}) => {
+          if (enabled !== undefined) bloomEnabled = !!enabled;
+          if (bloomPass) {
+            if (Number.isFinite(threshold)) bloomPass.setThreshold(threshold);
+            if (Number.isFinite(strength)) bloomPass.setStrength(strength);
+            if (Number.isFinite(rays)) bloomPass.setRays(rays);
+            if (view !== undefined) bloomPass.setDebugView(view);
+          }
+          return { enabled: bloomEnabled, present: !!bloomPass, tier: adaptiveTier.getTier() };
+        },
+        // Lighting overrides for side-by-side comparison captures. The brief
+        // asks for palette tuning on physical phones against FIXED views; this
+        // is how those views get generated from one world build, so the only
+        // difference between two frames is the setting under test.
+        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog, tone, atmos, hemiSky } = {}) => {
+          // Atmosphere master (cloud shadows, mist, sun rim) and the
+          // hemisphere light's sky colour, both isolatable: "the ground looks
+          // wrong" has half a dozen candidate causes and turning one off is
+          // the only way to name which.
+          if (Number.isFinite(atmos)) visualUniforms.atmosphere.value = atmos;
+          if (hemiSky !== undefined && lightingRig.ambient?.color) {
+            lightingRig.ambient.color.setHex(hemiSky);
+          }
+          if (Number.isFinite(exposure)) renderer.toneMappingExposure = exposure;
+          if (tone !== undefined) {
+            const map = {
+              aces: THREE.ACESFilmicToneMapping,
+              agx: THREE.AgXToneMapping,
+              neutral: THREE.NeutralToneMapping,
+              reinhard: THREE.ReinhardToneMapping,
+              cineon: THREE.CineonToneMapping,
+              linear: THREE.LinearToneMapping,
+            };
+            // Accept the numeric constant too. The baseline snapshot reads
+            // renderer.toneMapping back as a NUMBER, and a string-only setter
+            // silently ignored it — so the comparison tool never restored the
+            // baseline and every variant after the first inherited the
+            // previous one's tone mapping. A sheet that leaks state between
+            // tiles reports differences that are not there.
+            const resolved = typeof tone === 'number' ? tone : map[tone];
+            if (resolved !== undefined) {
+              renderer.toneMapping = resolved;
+              // Every material's program embeds the tone-mapping function, so
+              // switching it needs a recompile or the change does nothing.
+              scene.traverse((o) => {
+                if (o.material) {
+                  const list = Array.isArray(o.material) ? o.material : [o.material];
+                  for (const m of list) m.needsUpdate = true;
+                }
+              });
+            }
+          }
+          if (Number.isFinite(amb)) lightingRig.ambient.intensity = amb;
+          if (Number.isFinite(key)) lightingRig.keyLight.intensity = key;
+          if (Number.isFinite(rim)) lightingRig.rimLight.intensity = rim;
+          if (Number.isFinite(fill)) lightingRig.fillLight.intensity = fill;
+          if (Number.isFinite(fog) && scene.fog) scene.fog.density = fog;
+          return {
+            exposure: renderer.toneMappingExposure,
+            ambient: lightingRig.ambient.intensity,
+            key: lightingRig.keyLight.intensity,
+            rim: lightingRig.rimLight.intensity,
+            fill: lightingRig.fillLight.intensity,
+            fog: scene.fog ? scene.fog.density : null,
+            tone: renderer.toneMapping,
+          };
+        },
+        // Where the flock actually lands on screen. Guessing at this from a
+        // capture wasted three attempts.
+        pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
+        // Jump the sun cycle to a point in its period, for captures.
+        setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
+        setSunEnabled: (on) => { sunState.enabled = !!on; return sunState.enabled; },
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {
@@ -8611,9 +9272,6 @@
           }
           return sprintState.active;
         },
-        ribbons: () => wingRibbons.map((r) => ({
-          visible: r.mesh.visible, intensity: +r.intensity.toFixed(3), rungs: r.length,
-        })),
         shadow: () => ({
           visible: contactShadow.mesh.visible,
           opacity: contactShadow.mesh.material.opacity,
@@ -8621,15 +9279,53 @@
           radius: contactShadow.mesh.position.length(),
           birdRadius: flightController?.position?.length() ?? null,
         }),
-        forceNest: (index = 0) => {
+        // Lands on the NEAREST nest by default, which is what the player's own
+        // tap does. Indexing into the list instead picked whichever nest was
+        // built first — routinely on the far side of the planet — and the
+        // landing state auto-flies in a straight line, so a capture waited out
+        // a 400-unit crossing and looked like a broken state machine.
+        forceNest: (index = null) => {
           const list = nestPointsSystem?.nests;
           if (!nestingSystem || !list || !list.length) return false;
+          if (index === null || index === true) {
+            const best = list.reduce((acc, nest) => {
+              const d = nest.getWorldPosition(new THREE.Vector3()).distanceToSquared(flightController.position);
+              return (!acc || d < acc.d) ? { nest, d } : acc;
+            }, null);
+            if (!best) return false;
+            // Close the gap first. A player only ever lands from inside
+            // proximity range; the harness was auto-flying a straight line at
+            // 16 units/s across a 754-unit circumference, which takes most of
+            // a minute and reads as a hung state machine. Move to just outside
+            // the nest, as if the player had flown there, then land.
+            const target = best.nest.getWorldPosition(new THREE.Vector3());
+            if (best.d > 40 * 40) {
+              const up = target.clone().normalize();
+              const side = new THREE.Vector3(0, 1, 0).cross(up);
+              if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+              side.normalize();
+              flightController.position.copy(target).addScaledVector(side, 22);
+            }
+            return nestingSystem.tryLandOnNest(flightController.position)
+              || nestingSystem.forceNestAt(best.nest);
+          }
           return nestingSystem.forceNestAt(list[Math.min(index, list.length - 1)]);
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
         stats: () => ({
-          calls: renderer.info.render.calls,
-          triangles: renderer.info.render.triangles,
+          // From the pass when it is running: renderer.info resets per
+          // render() call and the composite is the last one, so reading the
+          // renderer directly reports 1 call for the whole world.
+          calls: (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1)
+            ? bloomPass.frameStats.calls : renderer.info.render.calls,
+          triangles: (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1)
+            ? bloomPass.frameStats.triangles : renderer.info.render.triangles,
+          // Where the light shafts think the sun is, and how strongly they are
+          // applying. An empty shaft buffer is almost always this, not the
+          // shader.
+          sunUv: sunScreen.visible > 0
+            ? [+sunScreen.u.toFixed(3), +sunScreen.v.toFixed(3), +sunScreen.visible.toFixed(2)]
+            : [0, 0, 0],
           programs: renderer.info.programs?.length ?? 0,
           tier: adaptiveTier.getTier(),
           fps: Math.round(fpsState?.value ?? 0),

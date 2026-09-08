@@ -66,6 +66,13 @@ async function main() {
 
     await page.goto(`http://127.0.0.1:${port}/index.html?debug=1`, { waitUntil: 'domcontentloaded' });
     await startGame(page, 45000);
+    // Pin full quality unless asked otherwise. Software rendering here runs at
+    // a few frames per second, so the (correctly working) adaptive tier drops
+    // to its lowest setting within seconds and the sheet would show degraded
+    // output that no target device produces. Pass --tier N to capture a
+    // specific quality tier deliberately.
+    const pinned = args.tier === undefined ? 0 : Number(args.tier);
+    if (pinned >= 0) await page.evaluate((t) => window.__BIRB.pinTier(t), pinned);
 
     const tiles = [];
     for (const biome of BIOMES) {
@@ -76,7 +83,10 @@ async function main() {
             if (view === 'nest') {
                 const landed = await page.evaluate(() => window.__BIRB.forceNest(0));
                 if (!landed) { problems.push(`${biome}: no landable nest`); continue; }
-                await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 20000 })
+                // The landing auto-flies in a straight line at 16 units per
+                // second and the nearest nest can still be most of a 754-unit
+                // circumference away, so this needs real headroom.
+                await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 90000 })
                     .catch(() => problems.push(`${biome}: landing never reached NESTED`));
             }
             await page.waitForTimeout(settle);

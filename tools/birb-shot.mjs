@@ -28,7 +28,9 @@
  *   --w --h --dpr    explicit viewport overrides
  *   --env      forest|canyon|mountain|city — switch after start
  *   --nest     land on nest N (default 0) — implies --start
- *   --eval     JS evaluated in the page after start
+ *   --eval     JS evaluated in the page after start, BEFORE the settle wait
+ *   --after    JS evaluated AFTER the settle, just before the shutter
+ *   --afterSettle  ms to wait after --after (default 320)
  *   --settle   ms to wait before capture                    (default 1200)
  *   --wait     ms to wait for the game to be ready         (default 30000)
  *   --allow-console-errors   don't fail the run on console errors
@@ -156,7 +158,16 @@ export function fetchThroughProxy(url) {
     });
 }
 
-/** Serve every CDN request from the on-disk cache, filling it on a miss. */
+/**
+ * Serve every CDN request from the on-disk cache, filling it on a miss.
+ *
+ * ONLY for immutable, version-pinned CDN URLs. Never pass the host you are
+ * testing: caching the site under test means the next run verifies a
+ * deployment against a copy of the previous one and reports it healthy. That
+ * happened once here, checking production after a fix and being handed the
+ * pre-fix page from a 102-entry cache. To check a live site, route it through
+ * `fetchThroughProxy` directly with no cache.
+ */
 export async function installCdnCache(context, hosts = ['esm.sh', 'cdn.jsdelivr.net', 'unpkg.com']) {
     fs.mkdirSync(CDN_CACHE, { recursive: true });
     for (const host of hosts) {
@@ -228,6 +239,25 @@ export async function startGame(page, timeout = 30000) {
     await page.waitForFunction(
         'window.__BIRB && window.__BIRB.stats().elapsed > 0.5', null, { timeout },
     );
+
+    // A rendering world is not a WORKING world. Initial environment setup runs
+    // inside a try/catch that logs a warning and continues, so a throw part way
+    // through it leaves the terrain built and looking perfectly normal while
+    // nest points, the collectibles system and the rocket collision targets
+    // were never created. That shipped once, undetected, because every capture
+    // switched environment first and so re-ran the setup successfully. This is
+    // the check that would have caught it: assert the systems a player needs
+    // exist on the path a player actually takes.
+    const health = await page.evaluate(() => ({
+        nesting: window.__BIRB.stats().nesting,
+        rings: window.__BIRB.modeState ? window.__BIRB.modeState().ringsSpawned : null,
+    }));
+    if (health.nesting === null) {
+        throw new Error('initial setup incomplete: no nesting system (check console warnings)');
+    }
+    if (health.rings === null) {
+        throw new Error('initial setup incomplete: no collectibles system (check console warnings)');
+    }
 }
 
 async function main() {
@@ -291,16 +321,39 @@ async function main() {
         const landed = await page.evaluate((i) => window.__BIRB.forceNest(i), index);
         if (!landed) { ok = false; failure = 'forceNest returned false — no landable nest'; }
         // The landing is an animated approach, not a teleport; let it complete.
+        // Generous on purpose. The landing auto-flies at 16 units per SIMULATED
+        // second, and headless software rendering here runs at 2-9 fps, so a
+        // four second landing can cost forty seconds of wall clock. A tight
+        // timeout here does not measure the game, it measures the renderer.
         else await page.waitForFunction(
-            'window.__BIRB.stats().nesting === "nested"', null, { timeout: 15000 },
+            'window.__BIRB.stats().nesting === "nested"', null, { timeout: 90000 },
         ).catch(() => { consoleErrors.push('landing did not reach NESTED'); });
     }
+    let evalResult;
     if (ok && args.eval) {
-        try { await page.evaluate(String(args.eval)); }
+        // Report what the eval RETURNED. A setter that silently no-ops because
+        // the feature it drives is disabled on this device looks exactly like
+        // a setter that worked, and the capture that follows is then read as
+        // evidence for something that never ran.
+        try { evalResult = await page.evaluate(String(args.eval)); }
         catch (err) { pageErrors.push('eval failed: ' + String((err && err.message) || err)); }
     }
 
     await page.waitForTimeout(settle);
+
+    // --after runs AFTER the settle, so a pose it sets is the pose that gets
+    // photographed. --eval runs before, and the simulation then has the whole
+    // settle window to fly the bird somewhere else — which is how three
+    // light-shaft captures in a row came back with the sun behind the camera.
+    let afterResult;
+    if (ok && args.after) {
+        try { afterResult = await page.evaluate(String(args.after)); }
+        catch (err) { pageErrors.push('after failed: ' + String((err && err.message) || err)); }
+        // Long enough for the chase camera to damp onto the new pose without
+        // giving the flight model time to leave it.
+        await page.waitForTimeout(Number(args.afterSettle) || 320);
+    }
+
     const stats = await page.evaluate(() => (window.__BIRB ? window.__BIRB.stats() : null)).catch(() => null);
 
     const outPath = path.resolve(REPO_ROOT, args.out);
@@ -311,6 +364,8 @@ async function main() {
     server.close();
 
     console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x${desktop ? ' desktop' : ' mobile'})`);
+    if (evalResult !== undefined) console.log(`eval: ${JSON.stringify(evalResult)}`);
+    if (afterResult !== undefined) console.log(`after: ${JSON.stringify(afterResult)}`);
     if (stats) console.log('stats: ' + JSON.stringify(stats));
     if (!ok) console.error('FAILED: ' + failure);
     if (pageErrors.length) console.error('PAGE ERRORS:\n  ' + pageErrors.join('\n  '));

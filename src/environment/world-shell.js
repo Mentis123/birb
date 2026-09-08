@@ -684,7 +684,10 @@ const ENVIRONMENT_VARIANTS = [
     fogColor: 0x0f1f2f,
     fogNear: 110,
     fogFar: 760,
-    sky: { top: 0x4e84b9, mid: 0xb2cedb, horizon: 0xf3e9ce, bottom: 0x506e89, glow: 0.32 },
+    // Deepened from mid 0xb2cedb / horizon 0xf3e9ce. Snow reads by CONTRAST,
+    // and against a near-white sky it has none: the old pair left the whole
+    // world one milky value from the peaks to the zenith.
+    sky: { top: 0x3d74ad, mid: 0x9dc0d4, horizon: 0xe3d3ae, bottom: 0x44637e, glow: 0.32 },
     hazeColor: 0x1a2f42,
     hazeLayers: [
       { radius: 184, height: 104, opacity: 0.19 },
@@ -696,8 +699,17 @@ const ENVIRONMENT_VARIANTS = [
     trail: { color: 0x7fd5ff, opacity: 0.5 },
     anchor: { color: 0x315a6b, opacity: 0.92 },
     lighting: {
-      ambient: { sky: 0xc6e3ff, ground: 0x112028, intensity: 1.02 },
-      key: { color: 0xeaf4ff, intensity: 1.32, position: [7.6, 8.5, 5.4] },
+      // Less ambient, more key. High ambient of a near-white sky colour is
+      // exactly what flattens a snow world: every face ends up at the same
+      // value and the terrain loses its form. The direct light does the work
+      // now and the shadows are allowed to go blue, which is what makes snow
+      // look like snow.
+      // 0.62 ambient was too far. Contrast is what makes snow read, but the
+      // ambient is ALSO the only light on the side of the world facing away
+      // from the sun, and at 0.62 a perch on the night side rendered very
+      // nearly black — a whole nest view with nothing in it.
+      ambient: { sky: 0xa9cdf0, ground: 0x18293a, intensity: 0.86 },
+      key: { color: 0xeaf4ff, intensity: 1.52, position: [7.6, 8.5, 5.4] },
       rim: { color: 0x81c5ff, intensity: 0.52, position: [-6.4, 5, -5.2] },
       fill: { color: 0x99c9ff, intensity: 0.4, position: [1.6, 3.4, -6.6] },
       glow: { color: 0x88d1ff, intensity: 1.55, distance: 13, decay: 2.2, position: [0.4, 2, 0.6] },
@@ -726,8 +738,12 @@ const ENVIRONMENT_VARIANTS = [
     trail: { color: 0x69c8ff, opacity: 0.52 },
     anchor: { color: 0x1c3f62, opacity: 0.9 },
     lighting: {
-      ambient: { sky: 0xc9e5ff, ground: 0x101a29, intensity: 1.05 },
-      key: { color: 0xf0f7ff, intensity: 1.28, position: [8.2, 9.1, 6.4] },
+      // Dusk, not midday. The city's subject is now its lit windows, and a
+      // window only reads against a street that is actually dark — under the
+      // old 1.05 ambient of a near-white sky the ground came up pale enough
+      // to read as snow and the towers competed with it.
+      ambient: { sky: 0x93b6d8, ground: 0x0a1220, intensity: 0.52 },
+      key: { color: 0xf0e2d8, intensity: 0.78, position: [8.2, 9.1, 6.4] },
       rim: { color: 0x4fb7ff, intensity: 0.64, position: [-6.9, 5.5, -5.9] },
       fill: { color: 0x9bd5ff, intensity: 0.45, position: [1.4, 3.8, -7.6] },
       glow: { color: 0x7fd8ff, intensity: 1.7, distance: 15, decay: 2.2, position: [0.2, 2.4, 1.1] },

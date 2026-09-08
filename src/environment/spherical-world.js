@@ -1,8 +1,10 @@
-import { createCanopyGeometry, addFoliageWind, bakeGroundContacts } from './visual-style.js';
+import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
 import { createColliderGrid } from "./collider-grid.js";
+import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
+import { addWindowLights, addStreetGrid } from "./city-windows.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -16,6 +18,14 @@ const SPHERE_RADIUS = 120;
 // into valleys instead of skating a perfect sphere. Set at the top of
 // createSphericalWorld; null = flat sphere (server/test builds).
 let _activeTerrainProfile = null;
+// Sea level for the environment being built / currently active, in units below
+// the base radius; 0 means this world has no water.
+//
+// It is module-level for the same reason the terrain profile is: the flight
+// floor, the landing check and the walking pose all have to agree with each
+// other and with what the player can see, and they reach the terrain through
+// free functions rather than through the world object.
+let _activeWaterLevel = 0;
 // Landmarks of the world currently being built, reported on the world object.
 let _landmarks = [];
 
@@ -502,6 +512,32 @@ function valleyCarveAt(nx, ny, nz) {
   return Number.isFinite(carve) && carve < 0 ? carve : 0;
 }
 
+/**
+ * The smooth CONTINENTAL height alone — the broad basins and highlands,
+ * without the detail roughness laid over them, and with the landmark valley's
+ * carve folded in because that is a basin too.
+ *
+ * This, not the full height, is what decides where lakes are. The full field
+ * has detail noise with features about twenty units across, and the ground
+ * MESH is only built at 96x64 on mobile — a vertex every eight units. Flood
+ * from the full field and most of the "lakes" are noise pits the mesh never
+ * resolved: the analytic sampler says the ground is four units under water,
+ * the mesh draws it two units above, and every lake in the world is hidden
+ * behind its own bed. That is exactly what shipped in the first build of this,
+ * and it looked precisely like water that had failed to render.
+ */
+function continentalHeight(nx, ny, nz, profile) {
+  let cont = 0;
+  if (profile.continentAmplitude) {
+    const R = SPHERE_RADIUS;
+    const cs = profile.continentScale;
+    const c = fbm(nx * R * cs, ny * R * cs, nz * R * cs, 3, 2.0, 0.5) - CONTINENT_BIAS;
+    const carve = c < 0 ? Math.max(-1, -Math.tanh(-FACE_STEEPNESS * c) / TANH_FACE_NORM) : 0;
+    cont = carve * profile.continentAmplitude;
+  }
+  return Math.min(0, cont + valleyCarveAt(nx, ny, nz));
+}
+
 function terrainDisplacement(nx, ny, nz, profile) {
   const R = SPHERE_RADIUS;
   const detail = fbm(nx * R * profile.scale, ny * R * profile.scale, nz * R * profile.scale, profile.octaves, profile.lacunarity, profile.persistence) * profile.amplitude;
@@ -519,7 +555,29 @@ function terrainDisplacement(nx, ny, nz, profile) {
   // Clamp the COMBINED height to <= 0 (downward-only — preserves the flight-floor
   // invariant). Detail textures the cliff faces/floors and dimples the plateau,
   // but the plateau itself is the ceiling — nothing rises above the base radius.
-  return Math.min(0, cont + detail + valleyCarveAt(nx, ny, nz));
+  const valley = valleyCarveAt(nx, ny, nz);
+  let h = Math.min(0, cont + detail + valley);
+
+  // ── Lake beds ──────────────────────────────────────────────────────────
+  // Inside a basin deep enough to hold water, the detail roughness is pushed
+  // back down under the surface. Without this the same noise that textures a
+  // hillside puts a ten-unit island in the middle of every lake, and since
+  // the ground is drawn and the water is not tested against it per-pixel,
+  // those islands hide the water rather than sitting in it.
+  //
+  // Faded in over eight units of basin depth, so the shore still shelves
+  // naturally and only the middle of a lake is planed flat. A hard switch at
+  // the waterline would ring every lake with a quarry wall.
+  if (_activeWaterLevel < 0) {
+    const basin = Math.min(0, cont + valley);
+    const submerge = (_activeWaterLevel - basin) / 8;
+    if (submerge > 0) {
+      const t = submerge < 1 ? submerge : 1;
+      const lid = _activeWaterLevel - 0.6;
+      if (h > lid) h += (lid - h) * (t * t * (3 - 2 * t));
+    }
+  }
+  return h;
 }
 
 // FULL terrain height (detail + carved continental) along a unit direction.
@@ -538,7 +596,50 @@ function terrainHeightDir(nx, ny, nz) {
 // clearance hides any sub-vertex skim jitter. Zero-allocation. 0 before any world
 // is built. Kept as its own name because callers are the flight/collision path.
 function terrainFloorDir(nx, ny, nz) {
-  return _activeTerrainProfile ? terrainDisplacement(nx, ny, nz, _activeTerrainProfile) : 0;
+  if (!_activeTerrainProfile) return 0;
+  const h = terrainDisplacement(nx, ny, nz, _activeTerrainProfile);
+  // Water is a floor too. Without this the bird descends straight through a
+  // lake and flies along the bottom of it, which is the one way standing water
+  // can look worse than no water at all.
+  //
+  // The sacred invariant survives intact: sea level is itself negative, so
+  // max(terrain, level) is still <= 0 and the floor still only ever dips below
+  // the base radius. It can never rise into the cruise band and ratchet a
+  // gravity-less bird upward — which is the failure this clamp exists to avoid
+  // and the reason this is a max against a NEGATIVE constant rather than a
+  // height added on top.
+  //
+  // Deliberately NOT applied to terrainHeightDir: the mesh keeps its basin, so
+  // there is a lake bed under the water rather than a flat disc fighting the
+  // surface for the same depth values.
+  return _activeWaterLevel < 0 && h < _activeWaterLevel ? _activeWaterLevel : h;
+}
+
+/**
+ * True when a prop placed here would be standing in real water.
+ *
+ * The wade margin is kept deliberately: trees ankle-deep at a lake edge read
+ * as marsh, which is what a lake edge should look like. Trees in ten metres of
+ * water read as a bug.
+ */
+function submerged(pos, wade = 2.5) {
+  if (_activeWaterLevel >= 0) return false;
+  const len = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+  if (len < 1e-6) return false;
+  const inv = 1 / len;
+  return floodDepthDir(pos.x * inv, pos.y * inv, pos.z * inv) > wade;
+}
+
+/** Depth of standing water at a direction; 0 on dry land. */
+function floodDepthDir(nx, ny, nz) {
+  if (!_activeTerrainProfile || _activeWaterLevel >= 0) return 0;
+  const h = terrainDisplacement(nx, ny, nz, _activeTerrainProfile);
+  return h < _activeWaterLevel ? _activeWaterLevel - h : 0;
+}
+
+/** The smooth basin height, which is what decides where the lakes are. */
+function basinHeightDir(nx, ny, nz) {
+  return _activeTerrainProfile ? continentalHeight(nx, ny, nz, _activeTerrainProfile) : 0;
 }
 
 // Public sampler for the flight controller: the smooth valley FLOOR (≤0) at a
@@ -548,6 +649,28 @@ export function sampleTerrainHeight(x, y, z) {
   if (len < 1e-6) return 0;
   const inv = 1 / len;
   return terrainFloorDir(x * inv, y * inv, z * inv);
+}
+
+/** The smooth basin height at a world position — where lakes can form. */
+export function sampleBasinHeight(x, y, z) {
+  const len = Math.sqrt(x * x + y * y + z * z);
+  if (len < 1e-6) return 0;
+  const inv = 1 / len;
+  return basinHeightDir(x * inv, y * inv, z * inv);
+}
+
+/**
+ * The MESH height at a world position: the lake bed, not the flight floor.
+ *
+ * sampleTerrainHeight is clamped at sea level because the flight floor must
+ * be, so it reports every lake as exactly zero deep. Anything asking how deep
+ * the water is has to come here instead. Zero-allocation.
+ */
+export function sampleTerrainMeshHeight(x, y, z) {
+  const len = Math.sqrt(x * x + y * y + z * z);
+  if (len < 1e-6) return 0;
+  const inv = 1 / len;
+  return terrainHeightDir(x * inv, y * inv, z * inv);
 }
 
 // Height-based color palettes per biome (low altitude → high altitude).
@@ -939,6 +1062,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const exposure = Math.max(0, Math.min(1, 1 - depth / 24));          // 1 exposed top → 0 valley
     if (exposure > 0.82 && Math.random() < (exposure - 0.82) * 1.0) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
+    if (submerged(pos)) continue;                                       // no trees in the lakes
     const up = pos.clone().normalize();
     const trunkHeight = randomInRange(8, 15);
     const trunkRadiusBottom = randomInRange(0.45, 0.9);
@@ -1235,26 +1359,40 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
 // ============================================================
 
 /**
- * Landmarks: a handful of one-off, hand-placed forms that are NOT instanced.
+ * Landmarks: hand-placed forms you can navigate BY.
  *
- * The 2026-05-31 distribution pass made the world dense and even, which fixed
- * emptiness and created a different problem: every direction looks like every
- * other direction, so there is nothing to fly TOWARD and no way to tell where
- * you are. A grove of two hundred identical trees is scenery; one tree twice
- * the height of the others is a destination.
+ * The 2026-05-31 distribution pass fixed emptiness by scattering props evenly,
+ * and created the opposite problem: every direction looks like every other, so
+ * there is nothing to fly toward and no way to tell where you are.
  *
- * Deliberately few and deliberately not instanced. Six draw calls buys three
- * recognisable silhouettes, and an instanced landmark is a contradiction.
+ * The first attempt at this failed and it is worth recording why, because the
+ * mistake is easy to repeat. A "giant" tree was built at ~40 units — which is
+ * exactly the height of the champion trees already in every grove — and given
+ * the same green as the forest around it. It was neither taller than its
+ * neighbours nor a different colour, and the owner could not find it.
  *
- * Placed along the great circle running out of the landmark valley, so the
- * waterfall and these share a route rather than sitting in unrelated corners.
+ * A landmark on a sphere has to clear the HORIZON, and that is a hard number,
+ * not a matter of taste. On this radius-120 planet an object of height h is
+ * visible from roughly sqrt(2 * 120 * h) units away:
+ *
+ *     40 units  ->  98 units   (13% of the way round — and invisible among
+ *                               champion trees of the same height)
+ *    130 units  -> 177 units   (23% of the way round, over a 754-unit
+ *                               circumference)
+ *
+ * So they are now 130 units tall, three of them spread a third of the planet
+ * apart, and pale gold against a green forest. Height is what makes them
+ * reachable; colour is what makes them legible once reached.
+ *
+ * Their NESTS still sit at ~34 units, in the same band as every corrected
+ * perch. A nest at the crown of a 130-unit tree is the aerial observation
+ * tower the September pass existed to remove — the tree is tall so you can
+ * SEE it, not so you can sit on top of it.
  */
 function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions }) {
   const group = new THREE.Group();
   group.name = 'forest-landmarks';
 
-  // A tangent frame at the valley, so landmarks can be offset along a
-  // consistent bearing rather than at arbitrary latitudes and longitudes.
   const anchor = new THREE.Vector3(VALLEY_ANCHOR.x, VALLEY_ANCHOR.y, VALLEY_ANCHOR.z).normalize();
   const frame = _tangentFrame(THREE, VALLEY_ANCHOR);
   const forward = new THREE.Vector3(frame.forward.x, frame.forward.y, frame.forward.z).normalize();
@@ -1271,97 +1409,129 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
       .addScaledVector(dir, Math.sin(angle))
       .normalize();
   };
+  const groundAt = (dir) => ({
+    position: dir.clone().multiplyScalar(sphereRadius + terrainHeightDir(dir.x, dir.y, dir.z)),
+    up: dir.clone(),
+  });
+  const orient = (object, up) => object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
 
-  /** Ground position and local up for a unit direction. */
-  const groundAt = (dir) => {
-    const height = terrainHeightDir(dir.x, dir.y, dir.z);
-    return { position: dir.clone().multiplyScalar(sphereRadius + height), up: dir.clone() };
-  };
-
-  const orient = (object, up) => {
-    object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-  };
-
-  const barkMat = new THREE.MeshLambertMaterial({ color: 0x4a3520, flatShading: true });
-  const crownMat = new THREE.MeshLambertMaterial({ color: 0x2b7f45, flatShading: true, vertexColors: true });
+  // Lighter than ordinary bark. At 0x5a4028 the trunk of a 88-unit tree read
+  // as a black slab against the sky — the shaded side of a big flat cylinder
+  // gets almost no light, and the eye reads that as a hole, not a tree.
+  const barkMat = new THREE.MeshLambertMaterial({ color: 0x8a6440, flatShading: true });
+  // Pale gold, deliberately NOT the forest's green: a landmark the same colour
+  // as its surroundings is camouflage however tall it is.
+  //
+  // vertexColors is OFF here, unlike every other canopy in the world. The
+  // shared crown geometry bakes interior shade down to about 0.25, which is
+  // right for reading branch pockets on a tree you fly past and wrong for a
+  // navigation beacon: multiplied through, the gold came out near-black from
+  // below, which is the angle you approach it from. Lambert's directional
+  // term still gives it form. Legibility beats texture on a landmark.
+  const crownMat = new THREE.MeshLambertMaterial({ color: 0xf0b83c, flatShading: true });
   addFoliageWind(crownMat);
   const stoneMat = new THREE.MeshLambertMaterial({ color: 0x6b6257, flatShading: true });
-
-  // ── The giant nesting tree ──────────────────────────────────────────
-  // A destination, and a nest host. Its crown is kept within the same 30-40
-  // unit band the corrected perches use: a taller one becomes an observation
-  // tower, which is the failure the September pass was fixing.
-  const giantDir = along(0.30, 0.0);
-  const giant = groundAt(giantDir);
-  const trunkHeight = 26;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 3.4, trunkHeight, 9), barkMat);
-  trunk.position.copy(giant.position).addScaledVector(giant.up, trunkHeight / 2);
-  orient(trunk, giant.up);
-  group.add(trunk);
-
-  // Three stacked crowns, widest at the bottom, reusing the shared canopy
-  // profile so the giant reads as the same species as the forest it towers over.
   const crownGeometry = createCanopyGeometry(THREE, 1);
-  let crownTop = trunkHeight;
-  for (let i = 0; i < 3; i++) {
-    const scale = 13 - i * 3;
-    const crown = new THREE.Mesh(crownGeometry, crownMat);
-    const base = trunkHeight - 6 + i * 6.5;
-    crown.position.copy(giant.position).addScaledVector(giant.up, base);
-    crown.scale.set(scale, scale * 0.92, scale);
-    orient(crown, giant.up);
-    group.add(crown);
-    crownTop = base + scale * 0.92;
+
+  const landmarks = [];
+  const TRUNK_HEIGHT = 88;
+  const NEST_HEIGHT = 34; // Same perch band as every other nest in the game.
+
+  // Three of them, spread roughly a third of the planet apart, so no matter
+  // where the player is at least one is within its horizon range.
+  const SITES = [
+    { angle: 0.30, bearing: 0.0, id: 'giant-tree' },
+    { angle: 1.95, bearing: 1.9, id: 'giant-tree-north' },
+    { angle: 2.30, bearing: -1.7, id: 'giant-tree-far' },
+  ];
+
+  for (const site of SITES) {
+    const dir = along(site.angle, site.bearing);
+    const { position: base, up } = groundAt(dir);
+
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 7.5, TRUNK_HEIGHT, 9), barkMat);
+    trunk.position.copy(base).addScaledVector(up, TRUNK_HEIGHT / 2);
+    orient(trunk, up);
+    group.add(trunk);
+
+    // Four crowns stacked up the top half, widest low, so the silhouette
+    // reads as one enormous tree rather than a pole with a hat.
+    let top = TRUNK_HEIGHT;
+    for (let i = 0; i < 4; i++) {
+      const scale = 26 - i * 5;
+      const crown = new THREE.Mesh(crownGeometry, crownMat);
+      const height = TRUNK_HEIGHT * 0.52 + i * 15;
+      crown.position.copy(base).addScaledVector(up, height);
+      crown.scale.set(scale, scale * 0.95, scale);
+      orient(crown, up);
+      group.add(crown);
+      top = height + scale * 0.95;
+    }
+
+    // A bough at nest height, so the perch has something to sit on and the
+    // trunk is not a bare pole where the player lands.
+    const bough = new THREE.Mesh(crownGeometry, crownMat);
+    bough.position.copy(base).addScaledVector(up, NEST_HEIGHT - 6);
+    bough.scale.set(15, 9, 15);
+    orient(bough, up);
+    group.add(bough);
+
+    // Solid the whole way up: the trunk crosses the cruise band, and a
+    // landmark you fly straight through is not a landmark. The band around
+    // nest height is left CLEAR — a collider there sits on the landing
+    // approach and shoves the bird back out every frame, so the auto-fly
+    // never converges and the landing hangs forever. (It did. The startup
+    // health check caught it, which is what that check is for.)
+    for (let h = 6; h < TRUNK_HEIGHT; h += 14) {
+      if (Math.abs(h - NEST_HEIGHT) < 16) continue;
+      collisionSystem.addCollider(base.clone().addScaledVector(up, h), 5.5, 'tree');
+    }
+    collisionSystem.addCollider(base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.78), 19, 'tree');
+
+    // On the BOUGH, not on the trunk axis. Centred, the nest sits inside the
+    // trunk cylinder, so the bird lands in solid wood and the perch camera
+    // opens on bark.
+    const boughOut = new THREE.Vector3().crossVectors(up, forward).normalize();
+    const nestPos = base.clone().addScaledVector(up, NEST_HEIGHT).addScaledVector(boughOut, 8.5);
+
+    // hostObject stays NULL: nest-points hides any non-instanced host while
+    // the player is nested in it, which would erase the landmark they are
+    // sitting in — the one object guaranteed to be on screen at that moment.
+    nestablePositions.push({
+      position: nestPos,
+      surfaceNormal: up.clone(),
+      hostObject: null,
+      hostId: site.id,
+      groveId: `forest-landmark-${site.id}`,
+    });
+    proximityTargets.push({
+      position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.5),
+      radius: 26,
+      tint: 0xf0dda0,
+    });
+    landmarks.push({ id: site.id, position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.6) });
   }
 
-  // Solid at cruise altitude, like every other champion.
-  collisionSystem.addCollider(
-    giant.position.clone().addScaledVector(giant.up, trunkHeight * 0.5), 3.6, 'tree',
-  );
-  collisionSystem.addCollider(
-    giant.position.clone().addScaledVector(giant.up, trunkHeight + 4), 11, 'tree',
-  );
-
-  // hostObject stays NULL. nest-points hides any non-instanced host object
-  // while the player is nested in it, which would erase the very tree they
-  // are sitting in — the one landmark guaranteed to be on screen.
-  nestablePositions.push({
-    position: giant.position.clone().addScaledVector(giant.up, Math.min(crownTop - 2, 38)),
-    surfaceNormal: giant.up.clone(),
-    hostObject: null,
-    hostId: 'forest-giant-tree',
-    groveId: 'forest-landmark',
-  });
-  proximityTargets.push({
-    position: giant.position.clone().addScaledVector(giant.up, trunkHeight),
-    radius: 20,
-    tint: 0xbdf5c8,
-  });
-
-  // ── A fallen log, lying across the approach ─────────────────────────
+  // Two smaller silhouettes near the valley, for close-range orientation.
   const logDir = along(0.17, 1.15);
   const log = groundAt(logDir);
   const logMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.8, 34, 8), barkMat);
   logMesh.position.copy(log.position).addScaledVector(log.up, 2.2);
-  // Laid ALONG the surface: rotate the cylinder's own axis onto a tangent.
   const logAxis = new THREE.Vector3().crossVectors(log.up, forward).normalize();
   logMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), logAxis);
   group.add(logMesh);
   proximityTargets.push({ position: logMesh.position.clone(), radius: 12, tint: 0xd8c9a4 });
 
-  // ── A stone arch to fly through ─────────────────────────────────────
   const archDir = along(0.22, -1.05);
   const arch = groundAt(archDir);
   const archMesh = new THREE.Mesh(new THREE.TorusGeometry(13, 2.4, 6, 14, Math.PI), stoneMat);
   archMesh.position.copy(arch.position).addScaledVector(arch.up, 0.5);
-  // The torus lies in its own XY plane; stand it up so the opening faces
-  // along the route rather than flat against the ground.
-  const archQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), arch.up);
-  const standUp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-  archMesh.quaternion.copy(archQuat).multiply(standUp);
+  archMesh.quaternion
+    .setFromUnitVectors(new THREE.Vector3(0, 1, 0), arch.up)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
   group.add(archMesh);
-  // Legs only. The opening is the point of an arch; a collider across it
-  // would make the one thing you want to fly through a wall.
+  // Legs only. A collider across the opening turns the one thing worth flying
+  // through into a wall.
   const archSide = new THREE.Vector3().crossVectors(arch.up, forward).normalize();
   for (const sign of [-1, 1]) {
     collisionSystem.addCollider(
@@ -1371,13 +1541,91 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   proximityTargets.push({ position: archMesh.position.clone(), radius: 16, tint: 0xe0dcc8 });
 
   root.add(group);
-  // Reported so the capture harness can aim at a landmark instead of hunting
-  // for one: a landmark that cannot be found in a render is not a landmark.
-  return [
-    { id: 'giant-tree', position: giant.position.clone().addScaledVector(giant.up, trunkHeight) },
+  landmarks.push(
     { id: 'fallen-log', position: logMesh.position.clone() },
     { id: 'stone-arch', position: archMesh.position.clone() },
-  ];
+  );
+  return landmarks;
+}
+
+function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant }) {
+  const anchor = new THREE.Vector3(VALLEY_ANCHOR.x, VALLEY_ANCHOR.y, VALLEY_ANCHOR.z).normalize();
+  const frame = _tangentFrame(THREE, VALLEY_ANCHOR);
+  const forward = new THREE.Vector3(frame.forward.x, frame.forward.y, frame.forward.z).normalize();
+  const dir = new THREE.Vector3()
+    .addScaledVector(anchor, Math.cos(0.26))
+    .addScaledVector(forward, Math.sin(0.26))
+    .normalize();
+  const height = terrainHeightDir(dir.x, dir.y, dir.z);
+  const base = dir.clone().multiplyScalar(sphereRadius + height);
+  const up = dir.clone();
+  const group = new THREE.Group();
+  group.name = `${variant}-landmark`;
+  const orient = (object) => object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+
+  let apexHeight = 0;
+  let id = `${variant}-landmark`;
+
+  if (variant === 'canyons') {
+    // A leaning monolith. The canyon is all vertical needles, so the one
+    // thing that stands out among them is a mass that is NOT vertical.
+    id = 'leaning-monolith';
+    const mat = new THREE.MeshLambertMaterial({ color: 0x9c4a2e, flatShading: true });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 8.5, 54, 7), mat);
+    shaft.position.copy(base).addScaledVector(up, 24);
+    orient(shaft);
+    // Leaned off vertical: a plumb monolith reads as one more spire.
+    shaft.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.22));
+    group.add(shaft);
+    const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(9, 0), mat);
+    cap.position.copy(base).addScaledVector(up, 50);
+    group.add(cap);
+    apexHeight = 50;
+    collisionSystem.addCollider(base.clone().addScaledVector(up, 26), 8, 'rock');
+  } else if (variant === 'mountain') {
+    // A stone arch high on the ridge, wide enough to fly through.
+    id = 'summit-arch';
+    const mat = new THREE.MeshLambertMaterial({ color: 0x8794a4, flatShading: true });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(17, 3.1, 6, 16, Math.PI), mat);
+    ring.position.copy(base).addScaledVector(up, 1);
+    const stand = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+    ring.quaternion.copy(stand).multiply(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2),
+    );
+    group.add(ring);
+    apexHeight = 18;
+    // Legs only. A collider across the opening turns the one thing worth
+    // flying through into a wall.
+    const side = new THREE.Vector3().crossVectors(up, forward).normalize();
+    for (const sign of [-1, 1]) {
+      collisionSystem.addCollider(base.clone().addScaledVector(side, sign * 17).addScaledVector(up, 5), 4, 'rock');
+    }
+  } else {
+    // A broadcast mast, taller than every tower, with a lit crown. The city
+    // is a field of similar boxes; the landmark is the one thing with a
+    // different silhouette rather than simply a taller box.
+    id = 'broadcast-mast';
+    const mat = new THREE.MeshLambertMaterial({ color: 0x3d4a5c, flatShading: true });
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 5.2, 74, 6), mat);
+    mast.position.copy(base).addScaledVector(up, 37);
+    orient(mast);
+    group.add(mast);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(6.5, 1.4, 5, 10), new THREE.MeshBasicMaterial({ color: 0x74e0ff }));
+    collar.position.copy(base).addScaledVector(up, 58);
+    orient(collar);
+    collar.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+    group.add(collar);
+    apexHeight = 74;
+    collisionSystem.addCollider(base.clone().addScaledVector(up, 36), 5, 'tower');
+  }
+
+  root.add(group);
+  proximityTargets.push({
+    position: base.clone().addScaledVector(up, Math.min(apexHeight, 40)),
+    radius: 18,
+    tint: 0xf0e6d0,
+  });
+  return [{ id, position: base.clone().addScaledVector(up, apexHeight) }];
 }
 
 function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {
@@ -1464,6 +1712,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   for (let i = 0; i < scatterSpirePoints.length; i++) {
     const sp = scatterSpirePoints[i];
     const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.05, 0.05), sp.phi + randomInRange(-0.05, 0.05), 0);
+    if (submerged(pos)) continue;                                       // no spires in the pools
     const up = pos.clone().normalize();
     const height = randomInRange(14, 44);
     const baseRadius = randomInRange(1.6, 3.6);
@@ -1714,6 +1963,10 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     applyInstanceColorJitter(THREE, needleInst, needleCount, 1, 1, 1, 0.16, 0.035);
     root.add(needleInst);
   }
+
+  _landmarks = buildBiomeLandmark({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant: 'canyons',
+  });
 
   return nestablePositions;
 }
@@ -2058,6 +2311,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const exposure = Math.max(0, Math.min(1, 1 - depth / 30));          // 1 exposed top → 0 valley
     if (exposure > 0.78 && Math.random() < (exposure - 0.78) * 0.9) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
+    if (submerged(pos)) continue;                                       // no pines in the tarns
     const up = pos.clone().normalize();
     const trunkH = randomInRange(5, 10);
     const canopyH = randomInRange(6, 11);
@@ -2248,6 +2502,10 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     root.add(cloudInst);
   }
 
+  _landmarks = buildBiomeLandmark({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant: 'mountain',
+  });
+
   return nestablePositions;
 }
 
@@ -2263,11 +2521,18 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   // Building bodies carry vertexColors for a baked dark-base → lit-top façade
   // gradient. Per-instance jitter (added after instancing) spreads each tower's
   // tint so the skyline reads as many distinct buildings, not three clones.
+  // Darker than they were (0x223656 / 0x29405f / 0x1e2e49). The windows are
+  // the subject now, and a lit grid only reads against a facade that is
+  // actually in shadow — on the old mid-blue boxes the warm points were a
+  // texture rather than lights.
   const buildingMats = [
-    new THREE.MeshLambertMaterial({ color: 0x223656, flatShading: true, vertexColors: true }),
-    new THREE.MeshLambertMaterial({ color: 0x29405f, flatShading: true, vertexColors: true }),
-    new THREE.MeshLambertMaterial({ color: 0x1e2e49, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x141f33, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x18263c, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x101a2c, flatShading: true, vertexColors: true }),
   ];
+  // Every tower gets a lit window grid. Zero geometry, zero draw calls, and
+  // it is the whole difference between a skyline and a field of slabs.
+  for (const m of buildingMats) addWindowLights(m, THREE);
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x74d4ff, transparent: true, opacity: 0.15 });
   const antennaMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
 
@@ -2393,6 +2658,7 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   for (let i = 0; i < scatterBldgPoints.length; i++) {
     const sp = scatterBldgPoints[i];
     const pos = placeOnSphere(THREE, sphereRadius, sp.theta + randomInRange(-0.04, 0.04), sp.phi + randomInRange(-0.04, 0.04), 0);
+    if (submerged(pos, 1.2)) continue;                                  // no towers in the harbour
     const up = pos.clone().normalize();
     const height = randomInRange(12, 60);
     const width = randomInRange(3, 6);
@@ -2561,6 +2827,10 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     root.add(hoverInst);
   }
 
+  _landmarks = buildBiomeLandmark({
+    THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant: 'city',
+  });
+
   return nestablePositions;
 }
 
@@ -2582,6 +2852,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // placement (placeOnSphere) and ground collision all sample the same rolling
   // displacement. Set before anything is built.
   _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
+  _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
 
   // Carve the landmark valley into the SAME field the mesh & flight floor sample.
@@ -2613,6 +2884,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     flatShading: true,    // Low-poly aesthetic — every face visible
     side: THREE.FrontSide,
   });
+  // The city's ground gets a street grid. It is the one surface a person can
+  // identify from a mile up, and what identifies it is the grid — without it
+  // the city is a skyline standing in a field.
+  if (variant === 'city') addStreetGrid(sphereMaterial, THREE, { radius: sphereRadius });
 
   const sphereGround = new THREE.Mesh(sphereGeometry, sphereMaterial);
   sphereGround.name = 'sphere-ground';
@@ -2642,7 +2917,119 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       proximityTargets,
     }) || [];
   }
+  // Reject nests whose outlook is a wall.
+  //
+  // A perch is a place you sit and LOOK, so a nest with a cliff face or a
+  // peak twelve units in front of it is worse than no nest at all — the
+  // corrected perch camera opens on rock. nest-occlusion clears props within
+  // five units of the camera, which is right for a branch in the way and
+  // useless against a mountainside.
+  //
+  // Cheapest correct test: sample the ring of directions around each
+  // candidate at perch height and require that a majority of them are clear
+  // of any collider. The collider list already exists and is exactly the set
+  // of solid things in the world.
+  if (nestablePositions.length && collisionSystem?.objectColliders?.length) {
+    const CLEARANCE = 22;
+    const SAMPLES = 8;
+    const blockers = collisionSystem.objectColliders;
+    const before = nestablePositions.length;
+    nestablePositions = nestablePositions.filter((candidate) => {
+      const p = candidate.position;
+      const n = candidate.surfaceNormal;
+      if (!p || !n) return true;
+      // A tangent basis at the nest, to sweep the horizon around it.
+      const upx = n.x, upy = n.y, upz = n.z;
+      let ax = 0, ay = 1, az = 0;
+      if (Math.abs(upy) > 0.9) { ax = 1; ay = 0; }
+      // t1 = up x a, t2 = up x t1  (both tangent to the surface)
+      let t1x = upy * az - upz * ay, t1y = upz * ax - upx * az, t1z = upx * ay - upy * ax;
+      const t1l = Math.hypot(t1x, t1y, t1z) || 1;
+      t1x /= t1l; t1y /= t1l; t1z /= t1l;
+      const t2x = upy * t1z - upz * t1y, t2y = upz * t1x - upx * t1z, t2z = upx * t1y - upy * t1x;
+
+      let clear = 0;
+      for (let k = 0; k < SAMPLES; k++) {
+        const a = (k / SAMPLES) * Math.PI * 2;
+        const dx = Math.cos(a) * t1x + Math.sin(a) * t2x;
+        const dy = Math.cos(a) * t1y + Math.sin(a) * t2y;
+        const dz = Math.cos(a) * t1z + Math.sin(a) * t2z;
+        const sx = p.x + dx * CLEARANCE, sy = p.y + dy * CLEARANCE, sz = p.z + dz * CLEARANCE;
+        let blocked = false;
+        for (let b = 0; b < blockers.length; b++) {
+          const c = blockers[b];
+          const r = c.radius;
+          const ddx = sx - c.position.x, ddy = sy - c.position.y, ddz = sz - c.position.z;
+          if (ddx * ddx + ddy * ddy + ddz * ddz < r * r) { blocked = true; break; }
+        }
+        if (!blocked) clear++;
+      }
+      // Half the horizon open is enough: a nest tucked against one cliff with
+      // a view the other way is a good perch, not a bad one.
+      return clear >= SAMPLES * 0.625;
+    });
+    const dropped = before - nestablePositions.length;
+    if (dropped) console.log(`[SphericalWorld] dropped ${dropped} nest(s) with a blocked outlook`);
+  }
+
+  // Landmarks are big, hand-placed and NOT instanced, and nest occlusion only
+  // clears instanced props — so a nest that happens to sit inside or behind a
+  // landmark has its perch view permanently blocked by it. The canyon and
+  // mountain perches both opened on the inside of one. Rather than hand-tune
+  // placements against a scattered nest field, drop any nest that lands too
+  // close to a landmark; there are dozens of nests and only a handful of
+  // landmarks, so losing one costs nothing.
+  if (_landmarks.length && nestablePositions.length) {
+    const MIN_SEPARATION = 46;
+    const minAngle = MIN_SEPARATION / sphereRadius;
+    const landmarkDirs = _landmarks.map((l) => {
+      const d = l.position.clone().normalize();
+      return { id: l.id, x: d.x, y: d.y, z: d.z };
+    });
+    const before = nestablePositions.length;
+    nestablePositions = nestablePositions.filter((candidate) => {
+      // A landmark's OWN nest is the point of it and is exempt.
+      if (candidate.hostId && landmarkDirs.some((l) => l.id === candidate.hostId)) return true;
+      const p = candidate.position;
+      const len = Math.hypot(p.x, p.y, p.z);
+      if (!(len > 1e-6)) return true;
+      const nx = p.x / len, ny = p.y / len, nz = p.z / len;
+      for (const l of landmarkDirs) {
+        // Great-circle separation: a nest 30 units up a tower is metres from
+        // the tower in 3D but directly inside it from any viewing angle.
+        const dot = Math.min(1, Math.max(-1, nx * l.x + ny * l.y + nz * l.z));
+        if (Math.acos(dot) < minAngle) return false;
+      }
+      return true;
+    });
+    const dropped = before - nestablePositions.length;
+    if (dropped) console.log(`[SphericalWorld] dropped ${dropped} nest(s) sitting inside a landmark`);
+  }
+
   bakeGroundContacts(THREE, sphereGeometry, root);
+
+  // Atmosphere on every opaque surface in the world. It has to be EVERY
+  // surface, not just the ground: a cloud shadow that darkens the terrain and
+  // leaves the trees standing in it at full brightness reads as a texture bug
+  // rather than as weather. Transparent layers (clouds, canopy ceilings, the
+  // water) are skipped — mist over glass is fog on a lens.
+  root.traverse((object) => {
+    const material = object.material;
+    if (!material) return;
+    const list = Array.isArray(material) ? material : [material];
+    for (const m of list) {
+      // ShaderMaterials carry their own complete GLSL; addAtmosphere patches
+      // Three's chunk names, which are not in them, so it would silently do
+      // nothing at best and break the compile at worst.
+      if (!m || m.transparent || m.isMeshBasicMaterial || m.isShaderMaterial) continue;
+      addAtmosphere(m, THREE, {
+        baseRadius: sphereRadius,
+        // Sedimentary banding, canyons only. It is the one thing that makes a
+        // steep wall read as a canyon rather than as a cliff.
+        strata: variant === 'canyons' ? 0.115 : 0,
+      });
+    }
+  });
 
   console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions, ${proximityTargets.length} proximity targets`);
 
@@ -2691,10 +3078,47 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     console.warn('[SphericalWorld] landmark features failed:', e);
   }
 
+  // ── Standing water ──────────────────────────────────────────────────────
+  // Built last, so it is not caught by the atmosphere traverse (its own shader
+  // already does aerial perspective through the scene fog) and so the terrain
+  // is already in the depth buffer ahead of it.
+  let water = null;
+  try {
+    if (_activeWaterLevel < 0) {
+      water = createWater(THREE, {
+        sphereRadius,
+        level: _activeWaterLevel,
+        // The MESH height, not the floor: the floor is clamped at sea level,
+        // and feeding that back in would report every lake as exactly zero
+        // deep and flatten the whole shallow-to-deep gradient.
+        terrainHeightAt: terrainHeightDir,
+        // The flood mask comes from the SMOOTH basin field, never the full
+        // one; see continentalHeight for why the difference matters.
+        basinHeightAt: basinHeightDir,
+        palette: WATER_PALETTE[variant] || WATER_PALETTE.forest,
+        // Shoreline resolution, and it is bought with triangles: at 190 the
+        // grid puts a vertex every four units of arc, which is finer than the
+        // terrain mesh under it and about twelve thousand triangles on a
+        // budget of eighty. Higher looked no better and cost real headroom.
+        segmentsU: _isMobile() ? 190 : 280,
+        segmentsV: _isMobile() ? 95 : 140,
+      });
+      if (water) {
+        water.mesh.raycast = () => {};   // rockets never detonate on a lake
+        root.add(water.mesh);
+      }
+    }
+  } catch (e) {
+    console.warn('[SphericalWorld] water failed:', e);
+    water = null;
+  }
+
   return {
     root,
     landmarks: _landmarks,
     sphereRadius,
+    water,
+    waterLevel: _activeWaterLevel,
     collisionSystem,
     nestablePositions,
     proximityTargets,

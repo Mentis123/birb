@@ -132,10 +132,23 @@ function createRing(THREE, config) {
   // Main ring - small torus. Mobile uses a slightly brighter base (lerp toward
   // white once at build) to compensate for the missing glow/core overlays.
   const ringGeo = new THREE.TorusGeometry(2.5, 0.3, mobile ? 8 : 12, mobile ? 16 : 24);
+  // ── Bright enough to bloom, which takes both halves ────────────────────
+  //
+  // The bloom pass thresholds the TONE-MAPPED frame, and Neutral tone mapping
+  // compresses everything toward 1.0 while preserving hue. Run the numbers on
+  // a saturated ring and it never gets there: 0x44ff88 at three times its
+  // brightness still tone-maps to 0.79 luminance against a 0.78 knee, so it
+  // contributes essentially nothing. Saturated colours cannot reach a
+  // luminance threshold by getting brighter alone.
+  //
+  // Lifting toward white as well as up is what crosses it — and it is also
+  // what a real bright emissive does, since anything hot enough to glow
+  // washes out to white at its core and keeps its hue in the halo. Here the
+  // torus is the core and the glow ring below carries the colour.
   const ringMat = new THREE.MeshBasicMaterial({
-    color: mobile
-      ? new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.35)
-      : config.color,
+    color: new THREE.Color(config.color)
+      .lerp(new THREE.Color(0xffffff), 0.5)
+      .multiplyScalar(2.2),
     transparent: true,
     opacity: 0.95,
   });
@@ -151,7 +164,10 @@ function createRing(THREE, config) {
     // Outer glow
     const glowGeo = new THREE.TorusGeometry(2.9, 0.15, 8, 24);
     glowMat = new THREE.MeshBasicMaterial({
-      color: config.glow,
+      // The halo keeps the hue: it is what tells the player which biome's
+      // ring this is, and it sits under the knee on purpose so the bloom
+      // picks up the white core rather than a coloured smear.
+      color: new THREE.Color(config.glow).multiplyScalar(1.35),
       transparent: true,
       opacity: 0.5,
       depthWrite: false,
@@ -162,7 +178,7 @@ function createRing(THREE, config) {
     // Inner bright core
     const coreGeo = new THREE.TorusGeometry(2.3, 0.12, 8, 24);
     coreMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+      color: new THREE.Color(0xffffff).multiplyScalar(2.4),
       transparent: true,
       opacity: 0.7,
       depthWrite: false,
@@ -173,8 +189,13 @@ function createRing(THREE, config) {
     // Pre-allocated color endpoints for shimmer (no per-frame allocs).
     // Base = config color (slightly dimmed); bright = base lifted toward white
     // so the ring reads as an emissive pulse rather than a hue shift.
-    baseColor = new THREE.Color(config.color).multiplyScalar(0.85);
-    brightColor = new THREE.Color(config.color).lerp(new THREE.Color(0xffffff), 0.55);
+    // The shimmer runs between these two on the ring's own material, so both
+    // endpoints have to stay above the knee or the pulse reads as the glow
+    // switching off rather than as the ring breathing.
+    baseColor = new THREE.Color(config.color)
+      .lerp(new THREE.Color(0xffffff), 0.5).multiplyScalar(1.9);
+    brightColor = new THREE.Color(config.color)
+      .lerp(new THREE.Color(0xffffff), 0.68).multiplyScalar(2.8);
   }
 
   // Store for animation
