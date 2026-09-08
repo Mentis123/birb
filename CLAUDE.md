@@ -45,6 +45,54 @@
 > console **warnings** as failures. Never add a check that only proves
 > something painted.
 >
+> **Sixth pass shipped: water, weather, light shafts — and a bloom pass that
+> had never run.** See `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §16. Four things
+> from it are worth knowing before touching any of this.
+>
+> **Bloom was gated off on every iPhone ever made.** `isLowEnd = isMobile &&
+> (navigator.hardwareConcurrency || 4) <= 4`, and iOS Safari does not expose
+> `hardwareConcurrency` at all — `undefined || 4` is 4. The post-processing
+> pass written for this game had never once executed on the device the game is
+> built for, and every capture taken while tuning it was taken with it off.
+> Shedding is the adaptive tier's job now. Separately, the composite was
+> missing `#include <colorspace_fragment>`, so the whole game rendered dark
+> whenever the pass ran: mean pixel 90 against 146 for the same frame with
+> bloom off. **A feature gated on a capability probe is not shipped until you
+> have proof the probe returns what you think it does.**
+>
+> **Saturated colours cannot cross a luminance threshold by getting brighter.**
+> The bright pass thresholds the TONE-MAPPED frame and Neutral tone mapping
+> preserves hue, so a forest ring at three times its brightness still lands at
+> 0.79 against a 0.78 knee and contributes nothing. Lifting it toward white as
+> well as up is what works — and is what a real emissive does. Same reason the
+> sun disc is now HDR and about five times its real angular size.
+>
+> **Water floods from the SMOOTH continental field, never the full terrain.**
+> The detail noise has features about twenty units across and the ground mesh
+> is 96x64 on mobile; flood from the full field and most "lakes" are noise
+> pits the mesh never resolved, so the ground draws over its own water. That
+> shipped first and looked exactly like water that failed to render — as did
+> the separate bug where the quad winding was reversed and `FrontSide` culled
+> every lake. Diagnose this class by swapping the material for flat magenta
+> with `depthTest: false`: it separates "never rasterised" from "drew and lost
+> the depth test", which staring at the render cannot. Water is also a FLOOR
+> (`terrainFloorDir` maxes against sea level, which is negative, so the
+> gravity-less-floor invariant holds).
+>
+> **`tools/birb-modes.mjs` printed "all 5 modes ok" on a run that was exiting
+> 1.** The console was full of `useProgram: program not valid` from a shader
+> that would not compile; the summary line only consulted the per-mode checks.
+> A log whose tail says "ok" on a failing run is worse than no log. Fixed —
+> and note the same trap in reverse: `renderer.info.render` resets on every
+> `render()` call, so with bloom on the whole world reported as one draw call
+> and one triangle until `stats()` started reading the pass's own snapshot.
+>
+> New debug hooks (all `?debug=1`): `setBloom({view:1})` renders the bright
+> buffer so you can see what actually crosses the knee; `terrainHistogram()`,
+> `goToWater()`, `faceSun()`, `waterFlag()`, `water()`, `weather()`.
+> `tools/birb-shot.mjs --after` runs JS after the settle, so a pose it sets is
+> the pose photographed.
+
 > **Next round is planned, not built:** `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §14.
 > Ranked by what this session measured. The headline: one enum (tone mapping)
 > was the largest visual change of the whole session, and every geometry or
@@ -780,6 +828,9 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/nesting/rocket.js` | Projectile system with arc trajectory |
 | `src/nesting/drone-system.js` | Enemy drone spawning and AI |
 | `src/environment/spherical-world.js` | Sphere + collision system |
+| `src/environment/water.js` | Standing water — lakes/tarns/pools/harbour (unit-tested) |
+| `src/environment/weather.js` | Per-biome snow/pollen/dust/drizzle, all shader-side (unit-tested) |
+| `src/effects/bloom-pass.js` | Bloom + light shafts + vignette + speed smear, one pass |
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |

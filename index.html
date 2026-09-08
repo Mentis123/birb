@@ -3467,7 +3467,7 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
-      var { visualUniforms, getQualityPixelRatio } = await import('./src/environment/visual-style.js');
+      var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
@@ -3475,6 +3475,7 @@
       var { createFrameSampler } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
+      var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createFlock } = await import("./src/environment/flock.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
@@ -4342,6 +4343,15 @@
     const flock = createFlock(THREE, { sphereRadius: 120 });
     scene.add(flock.mesh);
     const _flockCenter = new THREE.Vector3(0, 0, 0);
+    // Every rim-light uniform block the bird owns, so the environment switch
+    // can retint them all at once.
+    const birbRimUniforms = [];
+    const _rimWhite = new THREE.Color(0xffffff);
+    // Weather is per-biome and rebuilt on every environment switch, because
+    // the profile IS the biome: snow in the mountains, pollen in the forest,
+    // dust in the canyons, drizzle in the city.
+    let weather = null;
+    const _weatherUp = new THREE.Vector3(0, 1, 0);
     // Scratch for projecting the sun to screen space for the light shafts.
     const _sunDir = new THREE.Vector3();
     const _sunView = new THREE.Vector3();
@@ -5601,6 +5611,35 @@
       }
 
       sphericalWorld = nextWorld;
+
+      // ===== Weather =====
+      // Attached to the SCENE, not the world root: it is anchored to the
+      // camera and has no business rotating with the terrain.
+      if (weather) {
+        scene.remove(weather.points);
+        weather.dispose();
+        weather = null;
+      }
+      try {
+        const profile = WEATHER_PROFILES[definition.id];
+        if (profile) {
+          weather = createWeather(THREE, {
+            profile,
+            // Thinned on a phone, but not halved: density is the entire
+            // effect, and the cost is a vertex each plus a handful of
+            // fragments — the flakes are a few pixels across. Count is the
+            // cheapest quality dial in the scene and also the least worth
+            // turning down.
+            count: isMobile ? Math.round(profile.count * 0.7) : profile.count,
+            pixelRatio: renderer.getPixelRatio(),
+          });
+          scene.add(weather.points);
+        }
+      } catch (weatherError) {
+        console.warn('Weather unavailable:', weatherError);
+        weather = null;
+      }
+
       // Building a world is hundreds of milliseconds of synchronous work.
       // Charging that to the frame rate would downshift quality on every
       // environment switch, permanently, since the tier only recovers after
@@ -5704,6 +5743,14 @@
           sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
           sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
           if (skyDome.getMidColor) sphericalWorld.water.setSky(skyDome.getMidColor());
+        }
+        // The bird's rim is sky light wrapping its silhouette, so it has to be
+        // THIS sky. A fixed cyan rim in the canyon's ochre world stops reading
+        // as light and starts reading as a selection outline.
+        if (birbRimUniforms.length && skyDome.getMidColor) {
+          for (const u of birbRimUniforms) {
+            u.uBirbRimColor.value.copy(skyDome.getMidColor()).lerp(_rimWhite, 0.45);
+          }
         }
         // Valley mist takes the sky's own mid tone. Grey mist in a golden
         // world reads as fog on a lens; sky-coloured mist reads as air.
@@ -6287,6 +6334,21 @@
       rightFoot.position.set(0.04, -0.38, -0.18);
       birbModel.add(rightFoot);
 
+      // ── Rim light ────────────────────────────────────────────────────────
+      // Applied to every material the bird owns, in one traverse, so a part
+      // added later cannot be quietly left out and read as a hole in the
+      // silhouette. The uniforms are collected so the environment switch can
+      // retint the rim to each biome's sky.
+      birbRimUniforms.length = 0;
+      birbModel.traverse((child) => {
+        if (!child.material) return;
+        const list = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of list) {
+          const u = addRimLight(m, THREE, { color: 0x9fe8ff, power: 3.0, strength: 0.42 });
+          if (u) birbRimUniforms.push(u);
+        }
+      });
+
       return birbModel;
     };
 
@@ -6700,6 +6762,9 @@
       // changes either the CSS size or the DPR leaves them stale, and a stale
       // bloom target shows last orientation's frame stretched over this one.
       if (bloomPass) bloomPass.setSize(nextWidth, nextHeight, pixelRatio);
+      // gl_PointSize is in device pixels, so a DPR change halves or doubles
+      // every flake unless the shader is told.
+      if (weather) weather.setPixelRatio(pixelRatio);
       if (cameraState) {
         const camera = cameraState.camera;
         camera.aspect = nextWidth / nextHeight;
@@ -8247,6 +8312,19 @@
         bloomPass.setSpeed(boostVisual);
       }
 
+      // Weather. Four uniform writes; the motion is all in the vertex shader.
+      if (weather && birdPos) {
+        const tier = adaptiveTier.getTier();
+        // Sheds before resolution does, like every other optional layer, and
+        // reduced motion turns it off outright — drifting particles across
+        // the whole frame are exactly what that setting is asking about.
+        weather.setDensity(reducedMotionState.enabled ? 0 : tier >= 2 ? 0 : tier === 1 ? 0.5 : 1);
+        if (weather.points.visible) {
+          _weatherUp.copy(birdPos).normalize();
+          weather.update(motionState.elapsed, cam.position, _weatherUp);
+        }
+      }
+
       // Flock. Dropped at tier 2 with the other optional decoration.
       if (flock) {
         const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
@@ -8835,6 +8913,11 @@
           }
           return w.mesh.material.type;
         },
+        weather: () => (weather ? {
+          count: weather.count,
+          visible: weather.points.visible,
+          profile: weather.profile,
+        } : null),
         water: () => {
           const w = sphericalWorld?.water;
           return {
