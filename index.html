@@ -3445,6 +3445,8 @@
       // carved valleys so the bird can fly down INTO canyons (reads the live
       // active environment, so it tracks environment switches automatically).
       var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
+      var sampleTerrainMeshHeight = sphericalWorldModule.sampleTerrainMeshHeight;
+      var sampleBasinHeight = sphericalWorldModule.sampleBasinHeight;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -3465,7 +3467,7 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
-      var { visualUniforms, getQualityPixelRatio } = await import('./src/environment/visual-style.js');
+      var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
@@ -3473,6 +3475,7 @@
       var { createFrameSampler } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
+      var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createFlock } = await import("./src/environment/flock.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
@@ -3561,7 +3564,16 @@
     const _uaMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
     const _coarsePointer = window.matchMedia("(pointer: coarse)").matches;
     const isMobile = _uaMobile || _coarsePointer;
-    const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 4) <= 4);
+    // Advisory only, and deliberately no longer gates anything on its own.
+    //
+    // It used to switch the bloom pass off, and it was wrong on the primary
+    // target platform: iOS Safari does not expose navigator.hardwareConcurrency
+    // at all, so `undefined || 4` is 4, `4 <= 4` is true, and EVERY iPhone was
+    // classified low-end. The post-processing pass built for this game had
+    // never once run on the device the game is built for. Quality shedding is
+    // the adaptive tier's job now — it measures the frame rate instead of
+    // guessing from a core count the browser refuses to report.
+    const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 8) <= 4);
     // Expose globally so environment modules can inspect it without prop drilling.
     window.__birbIsMobile = isMobile;
     window.__birbIsLowEnd = isLowEnd;
@@ -4331,6 +4343,21 @@
     const flock = createFlock(THREE, { sphereRadius: 120 });
     scene.add(flock.mesh);
     const _flockCenter = new THREE.Vector3(0, 0, 0);
+    // Every rim-light uniform block the bird owns, so the environment switch
+    // can retint them all at once.
+    const birbRimUniforms = [];
+    const _rimWhite = new THREE.Color(0xffffff);
+    // Weather is per-biome and rebuilt on every environment switch, because
+    // the profile IS the biome: snow in the mountains, pollen in the forest,
+    // dust in the canyons, drizzle in the city.
+    let weather = null;
+    const _weatherUp = new THREE.Vector3(0, 1, 0);
+    // Scratch for projecting the sun to screen space for the light shafts.
+    const _sunDir = new THREE.Vector3();
+    const _sunView = new THREE.Vector3();
+    const _sunClip = new THREE.Vector3();
+    // Last computed screen position of the sun, for stats and for tools.
+    const sunScreen = { u: 0.5, v: 0.5, visible: 0 };
 
     // Bloom. The one post-processing effect in the game, and the only thing
     // in this session gated on the owner's ten-minute phone playtest coming
@@ -4356,7 +4383,11 @@
       console.warn('Bloom unavailable; rendering without it', bloomError);
       bloomPass = null;
     }
-    let bloomEnabled = !isLowEnd;
+    // On by default everywhere. The tier check inside presentFrame() sheds it
+    // the moment a device cannot hold the frame rate, which is a measurement
+    // rather than a guess — see the isLowEnd note above for what the guess
+    // cost.
+    let bloomEnabled = true;
     // Eased 0..1 boost strength for the composite pass.
     let boostVisual = 0;
 
@@ -4851,6 +4882,7 @@
 
     // Pose snapshot for comparison captures; ?debug=1 harness only.
     let __birbSavedPose = null;
+    let __birbWaterRealMat = null;
 
     // Set only by the ?debug=1 capture harness; null in production.
     let __birbStickOverride = null;
@@ -5579,6 +5611,35 @@
       }
 
       sphericalWorld = nextWorld;
+
+      // ===== Weather =====
+      // Attached to the SCENE, not the world root: it is anchored to the
+      // camera and has no business rotating with the terrain.
+      if (weather) {
+        scene.remove(weather.points);
+        weather.dispose();
+        weather = null;
+      }
+      try {
+        const profile = WEATHER_PROFILES[definition.id];
+        if (profile) {
+          weather = createWeather(THREE, {
+            profile,
+            // Thinned on a phone, but not halved: density is the entire
+            // effect, and the cost is a vertex each plus a handful of
+            // fragments — the flakes are a few pixels across. Count is the
+            // cheapest quality dial in the scene and also the least worth
+            // turning down.
+            count: isMobile ? Math.round(profile.count * 0.7) : profile.count,
+            pixelRatio: renderer.getPixelRatio(),
+          });
+          scene.add(weather.points);
+        }
+      } catch (weatherError) {
+        console.warn('Weather unavailable:', weatherError);
+        weather = null;
+      }
+
       // Building a world is hundreds of milliseconds of synchronous work.
       // Charging that to the frame rate would downshift quality on every
       // environment switch, permanently, since the tier only recovers after
@@ -5675,6 +5736,22 @@
         sunState.baseRimIntensity = lightingRig.rimLight.intensity;
         sunState.distance = lightingRig.keyLight.position.length() || 12;
         sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+        // The lakes mirror the sky, so they need this biome's sky — a forest
+        // lake reflecting the mountain's cold blue is the tell that the
+        // environment switch missed something.
+        if (sphericalWorld?.water) {
+          sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
+          sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
+          if (skyDome.getMidColor) sphericalWorld.water.setSky(skyDome.getMidColor());
+        }
+        // The bird's rim is sky light wrapping its silhouette, so it has to be
+        // THIS sky. A fixed cyan rim in the canyon's ochre world stops reading
+        // as light and starts reading as a selection outline.
+        if (birbRimUniforms.length && skyDome.getMidColor) {
+          for (const u of birbRimUniforms) {
+            u.uBirbRimColor.value.copy(skyDome.getMidColor()).lerp(_rimWhite, 0.45);
+          }
+        }
         // Valley mist takes the sky's own mid tone. Grey mist in a golden
         // world reads as fog on a lens; sky-coloured mist reads as air.
         if (visualUniforms.mistColor.value && skyDome.getMidColor) {
@@ -6257,6 +6334,21 @@
       rightFoot.position.set(0.04, -0.38, -0.18);
       birbModel.add(rightFoot);
 
+      // ── Rim light ────────────────────────────────────────────────────────
+      // Applied to every material the bird owns, in one traverse, so a part
+      // added later cannot be quietly left out and read as a hole in the
+      // silhouette. The uniforms are collected so the environment switch can
+      // retint the rim to each biome's sky.
+      birbRimUniforms.length = 0;
+      birbModel.traverse((child) => {
+        if (!child.material) return;
+        const list = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of list) {
+          const u = addRimLight(m, THREE, { color: 0x9fe8ff, power: 3.0, strength: 0.42 });
+          if (u) birbRimUniforms.push(u);
+        }
+      });
+
       return birbModel;
     };
 
@@ -6670,6 +6762,9 @@
       // changes either the CSS size or the DPR leaves them stale, and a stale
       // bloom target shows last orientation's frame stretched over this one.
       if (bloomPass) bloomPass.setSize(nextWidth, nextHeight, pixelRatio);
+      // gl_PointSize is in device pixels, so a DPR change halves or doubles
+      // every flake unless the shader is told.
+      if (weather) weather.setPixelRatio(pixelRatio);
       if (cameraState) {
         const camera = cameraState.camera;
         camera.aspect = nextWidth / nextHeight;
@@ -7517,6 +7612,10 @@
       if (sphericalWorld?.features) {
         sphericalWorld.features.update(flightController.position, delta, time);
       }
+      // The lakes' swell. One uniform; the waves are shader-side.
+      if (sphericalWorld?.water) {
+        sphericalWorld.water.update(reducedMotionState.enabled ? 0 : motionState.elapsed);
+      }
 
       let nestedAimQuaternion = null;
 
@@ -8213,6 +8312,19 @@
         bloomPass.setSpeed(boostVisual);
       }
 
+      // Weather. Four uniform writes; the motion is all in the vertex shader.
+      if (weather && birdPos) {
+        const tier = adaptiveTier.getTier();
+        // Sheds before resolution does, like every other optional layer, and
+        // reduced motion turns it off outright — drifting particles across
+        // the whole frame are exactly what that setting is asking about.
+        weather.setDensity(reducedMotionState.enabled ? 0 : tier >= 2 ? 0 : tier === 1 ? 0.5 : 1);
+        if (weather.points.visible) {
+          _weatherUp.copy(birdPos).normalize();
+          weather.update(motionState.elapsed, cam.position, _weatherUp);
+        }
+      }
+
       // Flock. Dropped at tier 2 with the other optional decoration.
       if (flock) {
         const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
@@ -8246,6 +8358,40 @@
         }
         if (skyDome?.setSunDirection) skyDome.setSunDirection(lightingRig.keyLight.position);
         sphericalWorld?.features?.valley?.setSunDirection?.(lightingRig.keyLight.position);
+        // The glitter path across a lake is the whole point of putting water
+        // in a world with a moving sun; it only works if the water's sun is
+        // the same sun.
+        if (sphericalWorld?.water) {
+          sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
+          sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
+        }
+      }
+
+      // ===== Light shafts =====
+      // Where the sun lands on screen. The pass has no scene knowledge, so
+      // this is the only place that can tell it.
+      //
+      // Projecting a far point along the sun direction is NOT enough on its
+      // own: behind the camera the perspective divide flips the sign and the
+      // sun reappears, mirrored, on the opposite edge — shafts converging on
+      // a point that is physically behind the player's head. The view-space
+      // check is what rejects that, and it has to come first.
+      if (bloomPass && lightingRig.keyLight) {
+        _sunDir.copy(lightingRig.keyLight.position).normalize();
+        _sunView.copy(_sunDir).transformDirection(cam.matrixWorldInverse);
+        // View space looks down -z, so a sun in front has negative z.
+        if (_sunView.z < -0.05) {
+          _sunClip.copy(cam.position).addScaledVector(_sunDir, 4000).project(cam);
+          // Fade out as the sun leaves the frame instead of cutting: the
+          // shafts of a sun just past the edge are the good ones.
+          const radius = Math.hypot(_sunClip.x, _sunClip.y);
+          sunScreen.u = _sunClip.x * 0.5 + 0.5;
+          sunScreen.v = _sunClip.y * 0.5 + 0.5;
+          sunScreen.visible = 1 - Math.max(0, Math.min(1, (radius - 0.75) / 1.05));
+        } else {
+          sunScreen.u = 0.5; sunScreen.v = 0.5; sunScreen.visible = 0;
+        }
+        bloomPass.setSun(sunScreen.u, sunScreen.v, sunScreen.visible);
       }
       // Optional detail sheds before resolution does: the waterfall mist is
       // the largest transparent surface in the scene and the first thing a
@@ -8745,6 +8891,107 @@
           flightController.quaternion.setFromRotationMatrix(basis);
           return found.id;
         },
+        // Paint the lakes flat magenta and unlit. When water cannot be found
+        // in a frame there are two very different reasons — it is not being
+        // drawn, or it is being drawn and looks like the misted ground around
+        // it — and no amount of staring at the render separates them.
+        waterFlag: (on = true) => {
+          const w = sphericalWorld?.water;
+          if (!w) return null;
+          if (on) {
+            if (!__birbWaterRealMat) __birbWaterRealMat = w.mesh.material;
+            // depthTest off on purpose: it separates "the mesh never
+            // rasterised" (culling, winding, frustum) from "the mesh drew and
+            // lost the depth test", which look identical on screen.
+            w.mesh.material = new THREE.MeshBasicMaterial({
+              color: 0xff00ff, fog: false, depthTest: on !== 'depth', side: THREE.DoubleSide,
+            });
+          } else if (__birbWaterRealMat) {
+            w.mesh.material.dispose();
+            w.mesh.material = __birbWaterRealMat;
+            __birbWaterRealMat = null;
+          }
+          return w.mesh.material.type;
+        },
+        weather: () => (weather ? {
+          count: weather.count,
+          visible: weather.points.visible,
+          profile: weather.profile,
+        } : null),
+        water: () => {
+          const w = sphericalWorld?.water;
+          return {
+            present: !!w,
+            level: sphericalWorld?.waterLevel ?? 0,
+            triangles: w?.triangles ?? null,
+            visible: w?.mesh?.visible ?? null,
+            inScene: !!w?.mesh?.parent,
+            verts: w?.mesh?.geometry?.attributes?.position?.count ?? null,
+            indices: w?.mesh?.geometry?.index?.count ?? null,
+            boundR: w?.mesh?.geometry?.boundingSphere
+              ? +w.mesh.geometry.boundingSphere.radius.toFixed(2) : null,
+            // Radius of the first vertex: this should be sphereRadius+level.
+            firstR: w?.mesh?.geometry?.attributes?.position
+              ? +Math.hypot(
+                w.mesh.geometry.attributes.position.getX(0),
+                w.mesh.geometry.attributes.position.getY(0),
+                w.mesh.geometry.attributes.position.getZ(0),
+              ).toFixed(2) : null,
+            birdR: flightController?.position
+              ? +flightController.position.length().toFixed(2) : null,
+            rootScale: sphericalWorld?.root?.scale?.x ?? null,
+            frustumCulled: w?.mesh?.frustumCulled ?? null,
+          };
+        },
+        // Fly to the middle of the deepest lake in this world. Standing water
+        // covers about a tenth of each biome, so a random spawn almost never
+        // shows any — and "the lakes are not there" and "the lakes are over
+        // that way" look identical in a screenshot.
+        goToWater: (rank = 0, altitude = 30) => {
+          if (typeof sampleTerrainMeshHeight !== 'function' || !sphericalWorld) return null;
+          const level = sphericalWorld.waterLevel ?? 0;
+          if (!(level < 0)) return null;
+          const samples = 12000;
+          const found = [];
+          for (let i = 0; i < samples; i++) {
+            const z = 1 - 2 * ((i + 0.5) / samples);
+            const r = Math.sqrt(Math.max(0, 1 - z * z));
+            const a = i * 2.399963229728653;
+            const x = r * Math.cos(a);
+            const y = z;
+            const zz = r * Math.sin(a);
+            // The FLOOR is clamped at sea level, so it cannot report depth;
+            // ask the mesh sampler what the lake bed is doing instead.
+            const bed = sampleTerrainMeshHeight(x, y, zz);
+            if (bed <= level) found.push({ x, y, z: zz, depth: level - bed });
+          }
+          if (!found.length) return null;
+          found.sort((p, q) => q.depth - p.depth);
+          const pick = found[Math.min(rank, found.length - 1)];
+          flightController.position.set(pick.x, pick.y, pick.z)
+            .multiplyScalar(sphericalWorld.sphereRadius + level + altitude);
+          return { level, candidates: found.length, depth: +pick.depth.toFixed(2) };
+        },
+        // Turn to face the sun, so light-shaft work can be judged from a
+        // repeatable frame instead of from whichever way the bird happened to
+        // be pointing when the shutter fired.
+        faceSun: (pitchUp = 0.22) => {
+          if (!flightController?.position || !lightingRig?.keyLight) return null;
+          const eye = flightController.position;
+          const radial = eye.clone().normalize();
+          const sun = lightingRig.keyLight.position.clone().normalize();
+          const fwd = sun.clone();
+          fwd.addScaledVector(radial, -fwd.dot(radial));
+          if (fwd.lengthSq() < 1e-6) return null;   // sun straight overhead
+          fwd.normalize().addScaledVector(radial, pitchUp).normalize();
+          const rightAxis = new THREE.Vector3().crossVectors(fwd, radial).normalize();
+          const upAxis = new THREE.Vector3().crossVectors(rightAxis, fwd).normalize();
+          const basis = new THREE.Matrix4().makeBasis(
+            rightAxis, upAxis, fwd.clone().multiplyScalar(-1),
+          );
+          flightController.quaternion.setFromRotationMatrix(basis);
+          return sun.toArray().map((n) => +n.toFixed(3));
+        },
         // Snapshot and restore the bird's exact pose. Zeroing speed is not
         // enough — the flight system rewrites it — so a comparison sheet has
         // to put the bird back rather than ask it to stay. The chase camera
@@ -8821,6 +9068,59 @@
           canFire: rocketSystem ? rocketSystem.canFire() : null,
         }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // How the current biome's ground is actually distributed, as decile
+        // heights below the base radius. Sea level is a number that has to be
+        // chosen against this, not guessed: the same value floods a third of
+        // the forest and none of the city.
+        terrainHistogram: (samples = 20000) => {
+          if (typeof sampleTerrainHeight !== 'function') return null;
+          const h = new Float64Array(samples);
+          for (let i = 0; i < samples; i++) {
+            // Uniform on the sphere: z uniform in [-1,1], angle uniform.
+            const z = 1 - 2 * ((i + 0.5) / samples);
+            const r = Math.sqrt(Math.max(0, 1 - z * z));
+            const a = i * 2.399963229728653;   // golden angle, well spread
+            h[i] = sampleTerrainHeight(r * Math.cos(a), z, r * Math.sin(a));
+          }
+          h.sort();
+          const at = (q) => +h[Math.min(samples - 1, Math.floor(q * samples))].toFixed(2);
+          // The BASIN field decides where lakes go, so its deciles are the ones
+          // a sea level has to be chosen against.
+          const b = new Float64Array(samples);
+          for (let i = 0; i < samples; i++) {
+            const z = 1 - 2 * ((i + 0.5) / samples);
+            const r = Math.sqrt(Math.max(0, 1 - z * z));
+            const a = i * 2.399963229728653;
+            b[i] = sampleBasinHeight(r * Math.cos(a), z, r * Math.sin(a));
+          }
+          b.sort();
+          const bat = (q) => +b[Math.min(samples - 1, Math.floor(q * samples))].toFixed(2);
+          return {
+            env: sphericalWorld?.root?.name ?? null,
+            min: at(0), p10: at(0.1), p25: at(0.25), p50: at(0.5),
+            p75: at(0.75), p90: at(0.9), max: at(0.999),
+            basin: {
+              min: bat(0), p05: bat(0.05), p10: bat(0.1), p15: bat(0.15),
+              p20: bat(0.2), p25: bat(0.25), p50: bat(0.5),
+            },
+          };
+        },
+        // Bloom + light-shaft controls, and the two debug views that make the
+        // pass inspectable. `view: 1` renders the BRIGHT buffer straight to
+        // the screen — the only honest answer to "does anything in this world
+        // actually cross the knee?". The first time it was pointed at the
+        // shipped world the answer was almost nothing, which is how a bloom
+        // pass runs for a week and changes no pixel.
+        setBloom: ({ enabled, threshold, strength, rays, view } = {}) => {
+          if (enabled !== undefined) bloomEnabled = !!enabled;
+          if (bloomPass) {
+            if (Number.isFinite(threshold)) bloomPass.setThreshold(threshold);
+            if (Number.isFinite(strength)) bloomPass.setStrength(strength);
+            if (Number.isFinite(rays)) bloomPass.setRays(rays);
+            if (view !== undefined) bloomPass.setDebugView(view);
+          }
+          return { enabled: bloomEnabled, present: !!bloomPass, tier: adaptiveTier.getTier() };
+        },
         // Lighting overrides for side-by-side comparison captures. The brief
         // asks for palette tuning on physical phones against FIXED views; this
         // is how those views get generated from one world build, so the only
@@ -8924,8 +9224,19 @@
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
         stats: () => ({
-          calls: renderer.info.render.calls,
-          triangles: renderer.info.render.triangles,
+          // From the pass when it is running: renderer.info resets per
+          // render() call and the composite is the last one, so reading the
+          // renderer directly reports 1 call for the whole world.
+          calls: (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1)
+            ? bloomPass.frameStats.calls : renderer.info.render.calls,
+          triangles: (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1)
+            ? bloomPass.frameStats.triangles : renderer.info.render.triangles,
+          // Where the light shafts think the sun is, and how strongly they are
+          // applying. An empty shaft buffer is almost always this, not the
+          // shader.
+          sunUv: sunScreen.visible > 0
+            ? [+sunScreen.u.toFixed(3), +sunScreen.v.toFixed(3), +sunScreen.visible.toFixed(2)]
+            : [0, 0, 0],
           programs: renderer.info.programs?.length ?? 0,
           tier: adaptiveTier.getTier(),
           fps: Math.round(fpsState?.value ?? 0),

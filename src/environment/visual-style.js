@@ -293,3 +293,66 @@ export function addWaterHighlights(material, THREE, normal) {
 export function getQualityPixelRatio(devicePixelRatio, cap, tier) {
   return Math.min(devicePixelRatio || 1, tier >= 2 ? 0.85 : tier === 1 ? 1 : cap);
 }
+
+/**
+ * A rim light, for the one object that is on screen in every single frame.
+ *
+ * The bird is a mid-blue silhouette against a pale sky for most of a session,
+ * and a diffuse-lit mid-blue against a pale anything is the exact case where
+ * a form goes flat: the terminator lands somewhere in the middle of the body
+ * and the edge nearest the camera has no contrast against the background at
+ * all. Every stylised game solves this the same way and it costs three
+ * instructions — a Fresnel term added to the outgoing light, so the edges
+ * that turn away from the camera pick up a sky-coloured lip.
+ *
+ * It is added to the light, never mixed into it: this is a light source, and
+ * a mix would darken the lit side to pay for the rim.
+ *
+ * The colour is a uniform so the caller can hand it the biome's own sky. A
+ * fixed cyan rim in the canyon's ochre world reads as a selection outline.
+ */
+export function addRimLight(material, THREE, { color = 0x9fe8ff, power = 3.0, strength = 0.42 } = {}) {
+  if (!material) return null;
+  if (material.userData?.birbRim) return material.userData.birbRim;
+  // Only LIT materials. A MeshBasicMaterial has no vNormal, no vViewPosition
+  // and no outgoingLight, so this injection does not fail to look right — it
+  // fails to COMPILE, and Three then refuses to use the program at all. The
+  // symptom is a stream of "useProgram: program not valid" warnings and one
+  // invisible object, which is a long way from the cause. The guard belongs
+  // here rather than in the caller: every future caller would need to
+  // remember it, and one of them would not.
+  const lit = material.isMeshStandardMaterial || material.isMeshPhysicalMaterial
+    || material.isMeshPhongMaterial || material.isMeshLambertMaterial
+    || material.isMeshToonMaterial;
+  if (!lit) return null;
+  const uniforms = {
+    uBirbRimColor: { value: new THREE.Color(color) },
+    uBirbRimPower: { value: power },
+    uBirbRimStrength: { value: strength },
+  };
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous(shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader =
+      'uniform vec3 uBirbRimColor; uniform float uBirbRimPower; uniform float uBirbRimStrength;\n'
+      + shader.fragmentShader;
+    // opaque_fragment is where outgoingLight becomes gl_FragColor, so this is
+    // the last moment the light can still be added to.
+    const anchor = shader.fragmentShader.includes('#include <opaque_fragment>')
+      ? '#include <opaque_fragment>'
+      : '#include <output_fragment>';
+    shader.fragmentShader = shader.fragmentShader.replace(anchor, `
+      // vViewPosition runs from the fragment TO the camera, so this is N·V.
+      float birbRimFacing = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+      float birbRim = pow(1.0 - birbRimFacing, uBirbRimPower);
+      outgoingLight += uBirbRimColor * birbRim * uBirbRimStrength;
+      ${anchor}
+    `);
+  };
+  material.customProgramCacheKey = () => 'birb-rim-v1';
+  material.needsUpdate = true;
+  material.userData = material.userData || {};
+  material.userData.birbRim = uniforms;
+  return uniforms;
+}

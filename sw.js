@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v33-2026-09-06-perch-outlook';
+const CACHE_VERSION = 'v34-2026-09-08-water-weather-shafts';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -62,6 +62,8 @@ const CORE_ASSETS = [
   './src/environment/sky-dome.js',
   './src/environment/sun-cycle.js',
   './src/environment/flock.js',
+  './src/environment/water.js',
+  './src/environment/weather.js',
   './src/environment/visual-style.js',
   './src/nesting/nest-placement.js',
   './src/nesting/nest-occlusion.js',

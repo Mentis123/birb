@@ -105,7 +105,18 @@ async function main() {
 
     if (noise.length) console.error('CONSOLE NOISE:\n  ' + noise.slice(0, 10).join('\n  '));
     if (failures.length) console.error('FAILURES:\n  ' + failures.join('\n  '));
-    else console.log(`all ${modes.length} modes ok in ${env}`);
+    // The summary has to agree with the exit code. It used to print "all 5
+    // modes ok" whenever the per-mode checks passed, even on a run that was
+    // exiting 1 because the console was full of "useProgram: program not
+    // valid" — so the log said the game was fine while a shader was failing
+    // to compile, and a human reading the tail believed the log.
+    if (!failures.length && !noise.length) {
+        console.log(`all ${modes.length} modes ok in ${env}`);
+    } else if (!failures.length) {
+        console.error(`FAILED: every mode behaved, but ${noise.length} console `
+            + 'error(s)/warning(s) were emitted. In this game that is how a broken '
+            + 'shader or a half-built system reports itself.');
+    }
     process.exit(failures.length || noise.length ? 1 : 0);
 }
 

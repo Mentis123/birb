@@ -838,3 +838,231 @@ which a bloom pass otherwise leaves pointing at an offscreen buffer.
 
 Items 4, 6 and 7 of section 14: per-biome grade tuning (needs the owner on
 glass), mountain perches that can face a cliff, and the desktop density tier.
+
+---
+
+## 16. Sixth pass — water, weather, shafts, and a pass that was never running
+
+Shipped in one session. Ranked by how much of the frame each changes.
+
+### 16.1 What shipped
+
+| Thing | Where | Cost |
+|---|---|---|
+| Bloom actually enabled on mobile | `index.html` (`isLowEnd`) | none — it was already built |
+| sRGB output transform on the composite | `src/effects/bloom-pass.js` | none |
+| Volumetric light shafts | `src/effects/bloom-pass.js` (`RAYS_FRAG`) | 1 half-res pass + 2 half-res blurs, only while the sun is on screen |
+| HDR sun disc, ~5x angular size | `src/environment/sky-dome.js` | none |
+| Standing water in every biome | `src/environment/water.js` | 1 draw call, 6-8k triangles |
+| Lake beds planed under the surface | `spherical-world.js` (`terrainDisplacement`) | none |
+| Flight floor rests on water | `spherical-world.js` (`terrainFloorDir`) | none |
+| Per-biome weather | `src/environment/weather.js` | 1 draw call, all motion in the vertex shader |
+| Rim light on the bird | `src/environment/visual-style.js` (`addRimLight`) | 3 instructions per fragment on the bird only |
+| Rings bright enough to bloom | `src/environment/collectibles.js` | none |
+
+Budget after all of it, tier 0, mobile emulation: **63-70 draw calls, 50-74k
+triangles** against <100 and <80k. Forest is the worst case at 73.8k. The
+performance envelope the brief asked to find has still not been reached.
+
+### 16.2 The one that matters most
+
+**Bloom had never run on the target platform, and neither had anything built
+on top of it.** The gate was:
+
+```js
+const isLowEnd = isMobile && ((navigator.hardwareConcurrency || 4) <= 4);
+let bloomEnabled = !isLowEnd;
+```
+
+iOS Safari does not expose `navigator.hardwareConcurrency`. `undefined || 4`
+is `4`, and `4 <= 4` is true, so **every iPhone ever made was classified
+low-end** and the post-processing pass written for this game had never once
+executed on the device the game is built for. Every capture taken while
+tuning it was taken with it switched off.
+
+Quality shedding is the adaptive tier's job now — it measures frame rate,
+which is a fact, instead of guessing from a core count the browser refuses to
+report. Note the interaction with the previous session's finding: the tier
+manager only started running at all last pass. Before that, *nothing* shed
+quality and *nothing* enabled bloom.
+
+**A feature gated on a capability probe is not shipped until you have proof
+the probe returns what you think it does on the device you care about.**
+
+### 16.3 The composite was gamma-ing the whole game
+
+The scene target holds LINEAR values — rendering into a render target forces
+`linearToOutputTexel` to identity, so every material writes tone-mapped
+linear and none of them encodes. The composite wrote that straight to an sRGB
+canvas without `#include <colorspace_fragment>`, so the display applied the
+transform a second time.
+
+Measured on the shipped build, same frame, same pose: **mean pixel 90 with
+bloom on, 146 with it off.** The entire game rendered dark whenever the pass
+ran, and it read as a moody grade rather than as a bug. Desktop shipped it
+that way from the day the pass landed.
+
+### 16.4 Saturated colours cannot cross a luminance threshold
+
+Worth writing down because it is not obvious and it wasted a plan.
+
+The bright pass thresholds the **tone-mapped** frame. Neutral tone mapping
+compresses toward 1.0 while preserving hue, so a saturated colour approaches
+its own hue's maximum luminance, not white's. Run the numbers on a forest
+ring, `0x44ff88`, at exposure 1.12:
+
+| Multiplier | Tone-mapped luminance | Contribution at knee 0.78 |
+|---|---|---|
+| 1.0 | 0.69 | 0 |
+| 1.8 | 0.74 | 0 |
+| 3.0 | 0.79 | 0.008 |
+| 3.0, lifted 50% toward white | 0.88 | 0.36 |
+
+Making an emissive brighter does almost nothing. Making it brighter **and
+whiter** works, and it is also what a real bright emissive does: anything hot
+enough to glow washes out at its core and keeps its hue in the halo. So the
+ring torus is now a near-white core and the glow ring carries the colour.
+
+The sun disc needed the same treatment for the same reason — at 1.15 it was
+the brightest thing in the world and bloomed by nothing.
+
+### 16.5 Light shafts, and the two things that make them work
+
+The expensive way to do god rays marches a depth buffer. The cheap way
+exploits something the pipeline already computed: **the bright buffer is
+already an occlusion mask.** The sun is over the knee; every mountain, tree
+and drone in front of it is under. Radially blur it away from the sun's
+screen position and the shafts are correctly interrupted by whatever stands
+in front of the sun, for one half-resolution pass and no depth read.
+
+Two corrections were needed and both were found by looking at the buffer:
+
+- **Dither the start offset.** Twelve undithered taps make every pixel sample
+  the same fractions of the same path, and a tree in front of the sun came
+  out as eight discrete copies of itself marching down the screen — a
+  flip-book, not a shaft. Interleaved gradient noise turns the banding into
+  noise. Then blur the ray buffer once, because the dither's own diagonal
+  weave is visible at half resolution.
+- **A second knee inside the march.** The bright buffer is shared with the
+  bloom, whose threshold is set so a lit hillside does not glow; that is
+  still low enough to admit the sun's whole atmospheric halo, and dragging a
+  halo across the frame is a smear rather than a beam.
+
+Projecting the sun to screen space needs a **view-space check first**. Behind
+the camera the perspective divide flips the sign and the sun reappears
+mirrored on the opposite edge, with shafts converging on a point physically
+behind the player's head.
+
+### 16.6 Water: two bugs that both look like "it didn't render"
+
+The terrain palette has carried "deep water" and "shallow water" colour stops
+since carve-down terrain shipped, and there was no water. Now each biome
+floods a little under a fifth of itself, at a level taken from its own basin
+deciles (`__BIRB.terrainHistogram()`).
+
+The mesh is built by walking a grid and emitting only flooded cells, so 90%
+of the sphere costs nothing and the rest gets a vertex every four units —
+same triangle count as a whole-planet sphere, four times the shoreline
+resolution. Quads with any corner flooded are kept, so the sheet runs under
+the bank and the **depth buffer** cuts the shoreline, which is a better edge
+than any polygon could be.
+
+Both failures presented identically — a correct-looking geometry that puts no
+pixels on screen:
+
+1. **Winding.** On this parameterisation `cross(dP/dtheta, dP/dphi)` points
+   outward, so a triangle must advance in theta before phi. Reversed, every
+   lake is back-facing and `FrontSide` culls the lot. Diagnosed by swapping
+   the material for flat magenta with `depthTest: false` — that separates
+   "never rasterised" from "drew and lost the depth test", which is the only
+   question worth asking and cannot be answered by staring at the render.
+2. **Flooding from the wrong field.** The flood mask must come from the
+   SMOOTH continental layer, never the full terrain. The full field's detail
+   noise has features about twenty units across and the ground mesh is built
+   at 96x64 on mobile — a vertex every eight units. Flood from it and most
+   "lakes" are noise pits the mesh never resolved: the sampler says the
+   ground is four units under water, the mesh draws it two above, and every
+   lake in the world hides behind its own bed.
+
+Inside a basin the detail roughness is now faded out over eight units of
+depth, so the bed is planed below the surface and no island of noise pokes
+through. Faded, not switched — a hard cut at the waterline rings every lake
+with a quarry wall.
+
+**Water is a floor too.** `terrainFloorDir` maxes against sea level so the
+bird skims a lake instead of flying along the bottom of it. Sea level is
+itself negative, so the floor still only ever dips below the base radius and
+cannot ratchet a gravity-less bird upward — the invariant is intact, and it
+is intact *because* this is a max against a negative constant rather than a
+height added on top.
+
+### 16.7 Weather, and two ways a shader disappears silently
+
+One `Points` draw call per biome; the entire motion is in the vertex shader,
+so the per-frame CPU cost is four uniform writes regardless of particle
+count. Particles live in WORLD space and are wrapped into a box centred on
+the camera:
+
+```glsl
+wrapped = mod(world - camera + halfBox, box) - halfBox + camera
+```
+
+A flake you fly past leaves out the back and reappears out the front as a
+different flake. Parent them to the camera instead and the snow hangs in
+front of your face at any speed, which reads as dirt on the lens. The box is
+oriented by the player's **up axis**, not world Y — this is a planet, and
+snow falling toward world-negative-Y is snow falling sideways for three
+quarters of the map.
+
+Two silent failures, one after the other:
+
+- **`half` is a reserved word in GLSL ES 1.00.** The shader does not compile,
+  Three draws nothing for the material, and the weather is simply absent.
+- **A backtick inside a GLSL comment ends the JS template literal.** The
+  comment explaining the first bug contained `` `half` `` in backticks and
+  took the whole module out with a parse error.
+
+Both produced "no weather", one with no console output at all.
+
+### 16.8 The guard that did not guard
+
+`tools/birb-modes.mjs` treats console warnings as failures and exits 1 — and
+it printed **"all 5 modes ok"** on a run that was exiting 1 because the
+console was full of `useProgram: program not valid`. The summary line only
+consulted the per-mode checks. A log whose tail says "ok" on a failing run is
+worse than no log. Fixed: the summary now agrees with the exit code.
+
+That failing shader was `addRimLight` applied to a `MeshBasicMaterial`, which
+has no `vNormal`, no `vViewPosition` and no `outgoingLight`. The guard now
+lives in `addRimLight` rather than in its caller — every future caller would
+have to remember it, and one of them would not.
+
+### 16.9 Tooling added, each paid for by a bug it found
+
+- `--after` runs JS **after** the settle, so a pose it sets is the pose
+  photographed. `--eval` gave the simulation the whole settle window to fly
+  the bird somewhere else; three light-shaft captures in a row came back with
+  the sun behind the camera.
+- `--eval` / `--after` report their return value. A setter that silently
+  no-ops because its feature is disabled looks exactly like one that worked
+  — which is how `setBloom({view:1})` produced an ordinary game frame that
+  was read as a bright buffer.
+- `stats()` takes draw calls from the pass, not the renderer. `renderer.info`
+  resets on every `render()` call and the composite is the last of four, so
+  the whole world reported as **one draw call and one triangle** the moment
+  bloom was switched on — turning the budget check into a rubber stamp. The
+  AR page had already learned this; the root game had not.
+- `__BIRB.setBloom({view:1})` renders the bright buffer to the screen.
+- `__BIRB.terrainHistogram()`, `goToWater()`, `faceSun()`, `waterFlag()`,
+  `weather()`, `water()`.
+
+### 16.10 Still not done
+
+- **Per-biome colour grade.** Still needs an owner on a real phone; the tools
+  to generate the candidates exist.
+- **A real device.** Everything above is measured in headless SwiftShader at
+  2-11 fps. Draw calls and triangles are facts; frame time is not. Bloom now
+  runs on iPhones for the first time, so the first real-device session should
+  watch for the tier dropping DPR where it never used to.
+- **Desktop density tier.** Still over the triangle budget, still low value
+  for a phone demo.
