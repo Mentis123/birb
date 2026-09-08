@@ -129,6 +129,22 @@
 > adaptive tier still drops to 1.0 and 0.85 on measured frame rate. Budgets
 > after all of it: 62-65 draw calls, 76-77k triangles, every biome.
 
+> **The drones and the slalom gates got a pass** (§16.16). Both were flat
+> colours on primitives with `transparent` + `AdditiveBlending` + opacity under
+> one, and **additive light on a bright sky is grey** — which is how the
+> checkpoint gates, the most important things to see on that course, rendered
+> as concrete lifebuoys. `src/effects/energy-ring.js` is the shared fix: an
+> OPAQUE ring with an HDR colour has a silhouette against any sky and the
+> bloom supplies the glow. Its `base` brightness is asserted in tests to stay
+> between 0.25 and 0.6, because both extremes were tried — a 50/50 duty cycle
+> at full brightness is a barber's pole, and a near-black ring is a
+> readability regression wearing an art department's clothes. The drone body
+> is a dark carbon shell now, with seams along the octahedron's own edges:
+> a regular octahedron satisfies |x|+|y|+|z| = r, so `min(|x|,|y|,|z|)` IS the
+> distance to the nearest edge, free. All shader-side, because drones move
+> independently and cannot be instanced. New capture hooks: `__BIRB.solo()`,
+> `goToDrone()`, `goToSlalom()`.
+
 > **Next round is planned, not built:** `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §14.
 > Ranked by what this session measured. The headline: one enum (tone mapping)
 > was the largest visual change of the whole session, and every geometry or

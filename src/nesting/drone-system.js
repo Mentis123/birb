@@ -1,3 +1,5 @@
+import { visualUniforms } from '../environment/visual-style.js';
+import { addDroneShell, addDroneRing } from './drone-look.js';
 /**
  * Drone Target System
  * Spawns and manages flying drone targets around the sphere for turret practice.
@@ -68,24 +70,31 @@ function createDroneMesh(THREE) {
 
   // Main body - glowing octahedron — 50% bigger than the 4× base (3.6 -> 5.4)
   const bodyGeometry = new THREE.OctahedronGeometry(5.4, 0);
+  // Dark carbon shell, not solid crimson. A body already at full red has
+  // nowhere to put a glowing seam — everything lands as one flat colour, which
+  // is what made this read as a kite rather than a machine. The light comes
+  // from addDroneShell instead: panel seams along the octahedron's own edges
+  // and a band that sweeps the hull like a scanner.
   const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0xff3366,
-    emissive: 0xff2255,
-    emissiveIntensity: 0.8,
-    metalness: 0.6,
-    roughness: 0.3,
+    color: 0x2c1a21,
+    emissive: 0x140206,
+    emissiveIntensity: 0.6,
+    metalness: 0.75,
+    roughness: 0.34,
   });
+  addDroneShell(bodyMaterial, THREE, visualUniforms.time, { radius: 5.4 });
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   group.add(body);
 
   // Spinning ring — 50% bigger than the 4× base (5.4 -> 8.1, tube 0.36 -> 0.54).
   // Segment counts unchanged, so triangle count per drone is identical.
   const ringGeometry = new THREE.TorusGeometry(8.1, 0.54, 8, 24);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff6699,
-    transparent: true,
-    opacity: 0.7,
-  });
+  // Opaque, and lit entirely by the injection: the ring is emitted light, so
+  // there is no surface for a transparent blend to soften. The dashes give it
+  // the break that the old flat 0.7-opacity hoop was trying to get from the
+  // sky showing through.
+  const ringMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  addDroneRing(ringMaterial, THREE, visualUniforms.time);
   const ring = new THREE.Mesh(ringGeometry, ringMaterial);
   ring.rotation.x = Math.PI / 2;
   group.add(ring);

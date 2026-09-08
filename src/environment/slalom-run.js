@@ -1,7 +1,13 @@
+import { addEnergyRing } from '../effects/energy-ring.js';
+import { visualUniforms } from './visual-style.js';
+
 // Slalom "Run" — an exciting neon flythrough course through a forest tunnel.
 //
-// Rebuilt from the sparse cone-corridor into a real course (no custom GLSL, so
-// nothing can ship black under the no-local-test workflow):
+// Rebuilt from the sparse cone-corridor into a real course. It was originally
+// built with NO custom GLSL, on the reasoning that a shader which fails to
+// compile ships black and nothing would catch it. That reasoning was right and
+// is now obsolete: tools/birb-shaders.mjs runs in CI and visits every
+// environment, so a shader that will not compile fails the build.
 //  • dense, inward-leaning, tint-varied gate trees (walls)
 //  • overhead ARCH RIBS (instanced half-tori) that close the canopy → a tunnel
 //  • two glowing EDGE STRIPS with a traveling light-wave (texture-scroll)
@@ -430,11 +436,30 @@ export function createSlalomRun({
   for (let i = 4; i < N - 2; i += isMobile ? 5 : 4) gateIdx.push(i);
   const gateR = corridorWidth * 0.82;
   const gateGeo = new THREE.TorusGeometry(gateR, 0.5, 8, 28);
-  const gateMat = new THREE.MeshBasicMaterial({ color: CYAN, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false });
+  // OPAQUE, and lit by an HDR energy shader rather than by additive blending.
+  // Additive cyan on a pale dusk sky is grey — every channel runs to the top
+  // of the range and the tone mapper flattens what is left — so these gates,
+  // the most important things to see on the whole course, rendered as
+  // concrete lifebuoys. An opaque ring has a silhouette against any sky, and
+  // the bloom pass supplies the glow the additive blend was reaching for.
+  const gateMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  addEnergyRing(gateMat, THREE, visualUniforms.time, {
+    tag: 'slalom-gate',
+    glow: [0.32, 1.75, 2.30],
+    base: 0.30,
+    pulses: 12,
+    speed: 0.75,
+  });
+  // The halo stays additive — it IS a glow and has no silhouette to protect —
+  // but much fainter, because it was most of what muddied the ring.
   const gateGlowGeo = new THREE.TorusGeometry(gateR, 1.3, 8, 28);
-  const gateGlowMat = new THREE.MeshBasicMaterial({ color: 0x9af3ff, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
+  const gateGlowMat = new THREE.MeshBasicMaterial({ color: 0x9af3ff, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false });
   const gateInst = new THREE.InstancedMesh(gateGeo, gateMat, gateIdx.length + 1);
   const gateGlow = new THREE.InstancedMesh(gateGlowGeo, gateGlowMat, gateIdx.length + 1);
+  // Named so the capture harness can solo them: the course is walled by a
+  // dense tree tunnel, and "slalom-gate-trees" would match a name filter for
+  // the gates themselves.
+  gateInst.name = 'slalom-ring'; gateGlow.name = 'slalom-ring-glow';
   gateInst.renderOrder = 5; gateGlow.renderOrder = 4;
   const gates = [];
   gateIdx.forEach((i, gi) => {
@@ -514,5 +539,7 @@ export function createSlalomRun({
     }
   };
 
-  return { group, update };
+  // gates[] is exposed for the capture harness: photographing a course that
+  // sits at one fixed anchor otherwise means flying around until you find it.
+  return { group, update, gates };
 }

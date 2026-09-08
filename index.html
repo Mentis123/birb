@@ -3447,6 +3447,7 @@
       var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
       var sampleTerrainMeshHeight = sphericalWorldModule.sampleTerrainMeshHeight;
       var sampleBasinHeight = sphericalWorldModule.sampleBasinHeight;
+      var SLALOM_ANCHOR = sphericalWorldModule.SLALOM_ANCHOR;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -8996,6 +8997,89 @@
           visible: weather.points.visible,
           profile: weather.profile,
         } : null),
+        // Fly to the slalom course's first checkpoint gate and look down it.
+        // The Run is at a fixed anchor, so without this a capture of it is a
+        // matter of flying around until you find it.
+        // Hide everything in the world except objects whose name matches, so
+        // one system can be looked at on its own. The slalom course is walled
+        // by a dense tree tunnel and the chase camera lands inside it, so
+        // "does this gate render correctly" is otherwise a question of luck
+        // with the framing. Same idea as sculpture/dev/probe-parts.html.
+        solo: (match = null) => {
+          const root = sphericalWorld?.root;
+          if (!root) return null;
+          if (!match) {
+            root.traverse((o) => { o.visible = true; });
+            return 'all visible';
+          }
+          // Hide everything, then walk UP from each match re-showing its
+          // ancestors. Hiding by name alone also hides the group a match
+          // lives in, which hides the match — the first version of this
+          // returned the objects it had "shown" and rendered an empty world.
+          const shown = [];
+          root.traverse((o) => { if (o !== root) o.visible = false; });
+          root.traverse((o) => {
+            if (!o.name || !o.name.includes(match)) return;
+            shown.push(o.name);
+            for (let node = o; node && node !== root.parent; node = node.parent) {
+              node.visible = true;
+            }
+          });
+          return shown.slice(0, 12);
+        },
+        goToSlalom: (index = 0, back = 30, lift = 0) => {
+          const gates = sphericalWorld?.features?.slalom?.gates;
+          if (!gates?.length || !flightController?.position) return null;
+          const gate = gates[Math.min(index, gates.length - 1)];
+          const next = gates[Math.min(index + 1, gates.length - 1)];
+          // Stand back ALONG the course, so the shot looks down the run
+          // rather than at a gate edge-on.
+          const along = next === gate
+            ? new THREE.Vector3(0, 1, 0).cross(gate.center).normalize()
+            : next.center.clone().sub(gate.center).normalize();
+          // Lift as well as stand back. The corridor is walled with dense
+          // gate trees, so a camera at the player's own altitude sits inside
+          // one and photographs bark.
+          const radial = gate.center.clone().normalize();
+          flightController.position.copy(gate.center)
+            .addScaledVector(along, -back).addScaledVector(radial, lift);
+          const eye = flightController.position;
+          const up = eye.clone().normalize();
+          const fwd = gate.center.clone().sub(eye);
+          fwd.addScaledVector(up, -fwd.dot(up)).normalize();
+          const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
+          flightController.quaternion.setFromRotationMatrix(
+            new THREE.Matrix4().makeBasis(right, up, fwd.clone().multiplyScalar(-1)),
+          );
+          return { gates: gates.length, index };
+        },
+        // Fly to the nearest live drone and look at it. Drones orbit the whole
+        // planet, so a capture of one is otherwise a matter of luck.
+        goToDrone: (back = 26) => {
+          const list = droneSystem?.getDrones?.() || [];
+          const live = list.filter((d) => d?.userData?.isAlive && d.position);
+          if (!live.length || !flightController?.position) return null;
+          const eye = flightController.position;
+          live.sort((a, b) => a.position.distanceToSquared(eye) - b.position.distanceToSquared(eye));
+          // Of the nearest few, take the HIGHEST. Drones share the bird's
+          // flight band, so the closest one is regularly inside a tree canopy
+          // and photographs as a leaf.
+          const target = live.slice(0, 5)
+            .sort((a, b) => b.position.length() - a.position.length())[0];
+          const radial = target.position.clone().normalize();
+          const side = new THREE.Vector3(0, 1, 0).cross(radial);
+          if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+          side.normalize();
+          eye.copy(target.position).addScaledVector(side, back);
+          const fwd = target.position.clone().sub(eye);
+          const up = eye.clone().normalize();
+          fwd.addScaledVector(up, -fwd.dot(up)).normalize();
+          const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
+          flightController.quaternion.setFromRotationMatrix(
+            new THREE.Matrix4().makeBasis(right, up, fwd.clone().multiplyScalar(-1)),
+          );
+          return { drones: live.length, distance: back };
+        },
         water: () => {
           const w = sphericalWorld?.water;
           return {
