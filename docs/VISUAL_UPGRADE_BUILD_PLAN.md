@@ -1258,3 +1258,59 @@ It would fix edge quality directly, and at DPR 1.7 with a half-float target it
 is roughly 30MB and four times the bandwidth of the scene pass — too large a
 bet to place without a frame-time measurement on the device itself. Raising
 DPR was chosen instead because it is self-correcting and MSAA is not.
+
+### 16.16 The drones and the slalom gates
+
+Both were reported as looking bad, and both were bad for the same reason: a
+flat colour on a primitive, with `transparent`, `AdditiveBlending` and an
+opacity under one.
+
+**Additive light on a bright sky is grey.** Adding cyan to a pale dusk sky
+pushes every channel toward the top of the range, the tone mapper compresses
+what is left, and the result is a washed neutral. That is why the slalom
+course's checkpoint gates — the most important things to see on the whole
+course — rendered as concrete lifebuoys. An OPAQUE ring with an HDR colour has
+a definite silhouette against any background, and the bloom pass then supplies
+the glow the additive blend was reaching for.
+
+`src/effects/energy-ring.js` is that treatment, shared by the drones' gyro
+ring and the slalom gates: opaque, HDR, with a pulse travelling round the ring
+so it reads as a machine that is switched on rather than a prop.
+
+**Getting the pulse right took three passes and both failure modes are
+recorded in the file.** A 50/50 duty cycle at full brightness is a barber's
+pole. Near-black between the pulses is worse — the ring is what the player has
+to see and steer through, so a mostly-dark ring is a readability regression
+wearing an art department's clothes. A lit base with brighter pulses moving
+over it is the answer, and `base` is asserted in the tests to stay between
+0.25 and 0.6 so neither mistake can come back.
+
+**The drone body is now a machine.** It was a solid crimson octahedron, and a
+shell already at full red has nowhere to put a glowing seam — everything lands
+as one flat colour. It is now a dark carbon shell with glowing panel seams and
+a band that sweeps it like a scanner.
+
+The seams are free. A regular octahedron's surface satisfies |x|+|y|+|z| = r,
+and its twelve edges are exactly where one coordinate passes through zero — so
+`min(|x|,|y|,|z|)` IS the distance to the nearest edge, with no extra
+attribute, no UV set and no wireframe pass.
+
+All of it is shader-side, which matters here more than anywhere: drones move
+independently so they cannot be instanced, and at eight to twelve of them a
+body plus a ring is already sixteen to twenty-four draw calls out of a hundred.
+A lens, a second gyro ring and a set of vents as geometry would have doubled
+that. Derived from the fragment's own position, they cost nothing.
+
+**New capture tooling, all of it paid for by this work.**
+
+- `__BIRB.solo('name')` hides everything in the world except objects matching a
+  name and their ancestors. The slalom course is walled by a dense tree tunnel
+  and the chase camera lands inside it, so "does this gate render correctly"
+  was otherwise a question of luck with the framing — six captures in a row
+  photographed bark. The first version of `solo` hid matches' own PARENT group
+  and rendered an empty world while reporting the objects it had "shown".
+- `__BIRB.goToDrone()` and `__BIRB.goToSlalom(index, back, lift)`. The latter
+  needs the lift: at the player's own altitude the camera is inside a trunk.
+- `goToDrone` takes the HIGHEST of the nearest few drones rather than the
+  nearest, because drones share the bird's flight band and the closest one is
+  regularly inside a tree canopy.

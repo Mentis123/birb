@@ -425,7 +425,7 @@ const CONTINENT_BIAS = 0.35;
 // (pool/waterfall/river) lives in landmark-valley.js and rides this carve via a
 // heightAt() probe. The slalom Run is anchored separately (SLALOM_ANCHOR).
 const VALLEY_ANCHOR = (() => { const x = 0.35, y = 0.78, z = 0.52; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
-const SLALOM_ANCHOR = (() => { const x = -0.55, y = 0.62, z = -0.58; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
+export const SLALOM_ANCHOR = (() => { const x = -0.55, y = 0.62, z = -0.58; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
 // riverDepth 7 (was 4): the inflow brook must out-carve the forest detail
 // noise or the water reads as buried slivers on the plateau.
 const VALLEY_PARAMS = { radiusAng: 0.16, depth: 28, riverHalfAng: 0.05, riverReachAng: 0.30, riverDepth: 7, poolRadius: 11, canyonReachAng: 0.52, canyonHalfAng: 0.062, canyonDepth: 22 };
@@ -3075,6 +3075,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     slalom.group.traverse((o) => { o.raycast = _noRaycast; });
     features = {
       valley,
+      slalom,
       update(birdPos, delta, timeMs) {
         valley.update(delta, timeMs, birdPos);
         slalom.update(birdPos, delta, timeMs);
