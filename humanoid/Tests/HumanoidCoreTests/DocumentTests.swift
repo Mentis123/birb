@@ -37,8 +37,9 @@ final class DocumentTests: XCTestCase {
     func testEditingNeverChangesTopology() throws {
         var document = try clay()
         drag(&document)
+        let paintPath0 = SurfacePath.acrossFrontFace(of: document.mesh, from: -0.05, to: 0.05)
         document.paint(.init(radius: 0.1, opacity: 1, colour: (0, 0, 0)),
-                       along: [Vec2(0.2, 0.2), Vec2(0.6, 0.6)])
+                       along: paintPath0)
         let mesh = document.mesh
         XCTAssertEqual(mesh.vertexCount, document.template.vertexCount)
         XCTAssertEqual(mesh.indices, document.template.indices)
@@ -118,8 +119,9 @@ final class DocumentTests: XCTestCase {
     func testUndoingAPaintStrokeRestoresThePixels() throws {
         var document = try clay()
         let before = document.albedo.rgba
+        let paintPath1 = SurfacePath.acrossFrontFace(of: document.mesh, from: -0.05, to: 0.05)
         document.paint(.init(radius: 0.15, opacity: 1.0, colour: (0, 0, 0)),
-                       along: [Vec2(0.5, 0.5)])
+                       along: paintPath1)
         XCTAssertNotEqual(document.albedo.rgba, before)
         document.undo()
         XCTAssertEqual(document.albedo.rgba, before)
@@ -130,7 +132,8 @@ final class DocumentTests: XCTestCase {
         let cleanPixels = document.albedo.rgba
         drag(&document)
         let sculptedPositions = document.mesh.positions
-        document.paint(.init(radius: 0.15, opacity: 1, colour: (0, 0, 0)), along: [Vec2(0.5, 0.5)])
+        document.paint(.init(radius: 0.15, opacity: 1, colour: (0, 0, 0)),
+                       along: SurfacePath.centreOfFrontFace(of: document.mesh))
 
         // Undo the paint: pixels revert, shape stays.
         document.undo()
@@ -169,8 +172,9 @@ final class DocumentTests: XCTestCase {
             document.sculpt(.inflate(0.004), at: [Vec3(0.06 * Double(i - 2), 0.03, 0.10)],
                             settings: .init(radius: 0.05, strength: 0.7, symmetric: true))
         }
+        let paintPath2 = SurfacePath.acrossFrontFace(of: document.mesh, from: -0.05, to: 0.05)
         document.paint(.init(radius: 0.08, opacity: 0.9, colour: (30, 90, 160)),
-                       along: [Vec2(0.2, 0.3), Vec2(0.5, 0.6), Vec2(0.8, 0.4)])
+                       along: paintPath2)
 
         let report = document.validate()
         XCTAssertTrue(report.passes, report.summary)
@@ -256,7 +260,8 @@ final class StrokeGroupingTests: XCTestCase {
         document.beginStroke()
         document.sculpt(.inflate(0.003), at: [Vec3(0, 0, 0.11)],
                         settings: .init(radius: 0.04, strength: 0.6, symmetric: false))
-        document.paint(.init(radius: 0.2, opacity: 1, colour: (0, 0, 0)), along: [Vec2(0.5, 0.5)])
+        document.paint(.init(radius: 0.2, opacity: 1, colour: (0, 0, 0)),
+                       along: SurfacePath.centreOfFrontFace(of: document.mesh))
         document.endStroke()
 
         XCTAssertNotEqual(document.albedo.rgba, pristine)

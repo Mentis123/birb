@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 import HumanoidCore
 import ExporterVRM
 import ExporterFBX
@@ -99,14 +100,112 @@ func clayCases() -> [Case] {
                  document.sculpt(.smooth, at: [Vec3(0, 0, 0.12)],
                                  settings: .init(radius: 0.06, strength: 0.6, symmetric: true))
                  document.fill((196, 176, 210))
+                 // Painted through the surface, the way the editor does it: a
+                 // ray per sample, then a world-space brush. Painting by UV
+                 // would bleed across the atlas tiles onto other faces.
+                 let mesh = document.mesh
+                 let path = stride(from: -0.07, through: 0.07, by: 0.01).compactMap {
+                     x -> (point: Vec3, seed: Int)? in
+                     guard let hit = Picking.raycast(mesh, origin: Vec3(x, x * 0.4, 1),
+                                                     direction: Vec3(0, 0, -1)) else { return nil }
+                     return (hit.position, hit.triangle)
+                 }
                  document.paint(.init(radius: 0.05, opacity: 0.85, colour: (40, 60, 120)),
-                                along: [Vec2(0.20, 0.30), Vec2(0.45, 0.42),
-                                        Vec2(0.70, 0.35), Vec2(0.85, 0.60)])
+                                along: path)
              }),
     ]
 }
 
 switch arguments.dropFirst().first {
+case "bench":
+    // Timed OUTSIDE the test bundle on purpose. `@testable import` compiles the
+    // library with -enable-testing, which suppresses optimisations the hot paint
+    // loop depends on; numbers taken through XCTest are not release numbers.
+    func time(_ label: String, iterations: Int = 20, _ body: () -> Void) {
+        body()
+        let start = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<iterations { body() }
+        let per = Double(DispatchTime.now().uptimeNanoseconds - start) / Double(iterations) / 1e6
+        print("BENCH " + label.padding(toLength: 52, withPad: " ", startingAt: 0)
+              + String(format: "%9.3f ms", per))
+    }
+
+    // Calibration. Before calling the painter slow, know what this machine does
+    // with the same shape of work: a flat loop of comparable float arithmetic
+    // over a million iterations. Without this, "36 ns per texel" is a number
+    // with nothing to compare it to.
+    var sink: Float = 0
+    let controlCount = 1_000_000
+    time("control: 1M iterations of texel-shaped float work", iterations: 10) {
+        var accumulator: Float = 0
+        for i in 0..<controlCount {
+            let v = Float(i) * 1e-6, w = Float(i) * 2e-6
+            let dx = 0.1 + 0.2 * v + 0.3 * w, dy = 0.4 + 0.5 * v, dz = 0.6 + 0.7 * w
+            let d2 = dx * dx + dy * dy + dz * dz
+            if d2 > 1 { continue }
+            let unit = 1 - d2.squareRoot() * 2
+            accumulator += unit * unit * (3 - 2 * unit)
+        }
+        sink = accumulator
+    }
+    print("BENCH   (control sink \(sink))")
+
+    let template = try TemplateFile.Bundled.clay.load()
+    var benchMesh = template.mesh
+    let benchTables = MeshTables(benchMesh)
+    benchMesh.recomputeNormals(benchTables)
+    print("BENCH clay \(benchMesh.vertexCount) verts / \(benchMesh.triangleCount) tris")
+
+    for size in [1024, 2048] {
+        var canvas = PNG.Image.solid(width: size, height: size, r: 200, g: 200, b: 200)
+        var map: SurfacePaint.Map!
+        time("Map build \(size)²", iterations: 3) {
+            map = SurfacePaint.Map(benchMesh, tables: benchTables, width: size, height: size)
+        }
+        print("BENCH   runs \(map.runCount), texels \(map.texelCount) "
+              + "(\(map.texelCount * 100 / (size * size))% of texture)")
+
+        guard let centre = Picking.raycast(benchMesh, origin: Vec3(0, 0, 5),
+                                           direction: Vec3(0, 0, -1)) else { break }
+        // The albedo snapshot a stroke takes for undo. Copy-on-write means it
+        // is charged to the first texel written, so it lands inside the first
+        // dab of every stroke and nowhere else. Measured separately because it
+        // is a per-STROKE cost and everything else here is per-frame.
+        var copySink: UInt8 = 0
+        time("  albedo copy-on-write \(size)²") {
+            var copy = canvas
+            copy.rgba[0] = copy.rgba[0] &+ 1
+            copySink = copy.rgba[0]
+        }
+        _ = copySink
+
+        var stroke = SurfacePaint.Stroke(map: map, brush: .init(), origin: canvas)
+        time("  stroke reset only \(size)²") {
+            stroke.reset(brush: .init(radius: 0.04, opacity: 1, colour: (0, 0, 0)),
+                         origin: canvas)
+        }
+        for radius in [0.01, 0.04, 0.06, 0.12] {
+            var faceCount = 0, texelCount = 0
+            time("  reach only r=\(radius) on \(size)²") {
+                let f = SurfacePaint.reach(from: centre.position, to: centre.position,
+                                           seed: centre.triangle, radius: radius,
+                                           mesh: benchMesh, tables: benchTables)
+                faceCount = f.count
+                texelCount = f.reduce(0) { $0 + map.texels(of: $1) }
+            }
+            print("BENCH     \(faceCount) triangles own \(texelCount) texels")
+            let brush = SurfacePaint.Brush(radius: radius, opacity: 1, colour: (0, 0, 0))
+            var touched = 0
+            time("  dab r=\(radius) on \(size)²") {
+                stroke.reset(brush: brush, origin: canvas)
+                let rect = stroke.extend(to: centre.position, seed: centre.triangle,
+                                         mesh: benchMesh, tables: benchTables, into: &canvas)
+                touched = rect.isEmpty ? 0 : (rect.maxX - rect.minX + 1) * (rect.maxY - rect.minY + 1)
+            }
+            print("BENCH     dirty rect \(touched) texels")
+        }
+    }
+
 case "gate":
     // Both shipped templates, because "the gate passes" has to mean the gate
     // that each document kind actually runs.

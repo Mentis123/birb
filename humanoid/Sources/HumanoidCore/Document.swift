@@ -28,6 +28,9 @@ public struct Document {
     /// more than that in overhead long before a model was half sculpted.
     public private(set) var sculptDelta: [Vec3]
     public private(set) var albedo: PNG.Image
+    /// What Erase paints back. The material is opaque, so erasing to
+    /// transparency would export as a black patch.
+    public let baseColour: (r: UInt8, g: UInt8, b: UInt8)
 
     /// The current shape, kept up to date in place.
     ///
@@ -70,6 +73,7 @@ public struct Document {
         self.tables = MeshTables(loaded.mesh)
         self.skeleton = loaded.skeleton
         self.sculptDelta = [Vec3](repeating: .zero, count: loaded.mesh.vertexCount)
+        self.baseColour = baseColour
         self.albedo = PNG.Image.solid(width: textureSize, height: textureSize,
                                       r: baseColour.r, g: baseColour.g, b: baseColour.b)
         var start = loaded.mesh
@@ -145,20 +149,64 @@ public struct Document {
         return welded.flatMap { tables.weldMembers[$0] }.sorted()
     }
 
-    /// Applies one paint stroke and records it.
-    @discardableResult
-    public mutating func paint(_ brush: Paint.Brush, along uvs: [Vec2],
-                               spacing: Double = 0.25) -> Paint.Rect {
-        guard !uvs.isEmpty else { return .empty }
-        let snapshotBefore = albedo
-        var stroke = Paint.Stroke(brush: brush, spacing: spacing)
-        var touched = Paint.Rect.empty
-        for uv in uvs { touched = touched.union(stroke.extend(to: uv, into: &albedo)) }
-        guard !touched.isEmpty else { return .empty }
+    // MARK: - Painting
 
-        push(.paint(rect: touched,
-                    before: copy(snapshotBefore, touched),
-                    after: copy(albedo, touched)))
+    /// Texel coverage per triangle, built once and reused for the life of the
+    /// document. Topology and UVs never change, so nothing can invalidate it.
+    private var surfaceMap: SurfacePaint.Map?
+    private var paintStroke: SurfacePaint.Stroke?
+    private var paintOrigin: PNG.Image?
+
+    /// Builds the paint map if it is not built yet.
+    ///
+    /// Worth calling off the critical path — at load, or while the user is still
+    /// looking at the model — because the first paint stroke otherwise pays for
+    /// it and starts with a hitch.
+    public mutating func prepareForPainting() {
+        guard surfaceMap == nil else { return }
+        surfaceMap = SurfacePaint.Map(template, width: albedo.width, height: albedo.height)
+    }
+
+    /// Opens a paint stroke. Everything until `endPaintStroke` is one undo step
+    /// and one idempotent pass over the texture.
+    public mutating func beginPaintStroke(_ brush: SurfacePaint.Brush) {
+        prepareForPainting()
+        guard let surfaceMap else { return }
+        endPaintStroke()
+        paintOrigin = albedo
+        paintStroke = SurfacePaint.Stroke(map: surfaceMap, brush: brush, origin: albedo,
+                                          base: baseColour)
+    }
+
+    /// Extends the open paint stroke to a point on the surface.
+    @discardableResult
+    public mutating func paint(to point: Vec3, seed: Int) -> Paint.Rect {
+        guard paintStroke != nil else { return .empty }
+        return paintStroke!.extend(to: point, seed: seed, mesh: current,
+                                   tables: tables, into: &albedo)
+    }
+
+    /// Closes the stroke and records it as one undoable step.
+    public mutating func endPaintStroke() {
+        guard let stroke = paintStroke, let origin = paintOrigin else { return }
+        paintStroke = nil
+        paintOrigin = nil
+        let rect = stroke.dirty
+        guard !rect.isEmpty else { return }
+        push(.paint(rect: rect, before: copy(origin, rect), after: copy(albedo, rect)))
+    }
+
+    /// A whole stroke in one call, for callers that already have the path —
+    /// tests, and the frame-batched editor, which hands over a frame's samples
+    /// together.
+    @discardableResult
+    public mutating func paint(_ brush: SurfacePaint.Brush,
+                               along path: [(point: Vec3, seed: Int)]) -> Paint.Rect {
+        guard !path.isEmpty else { return .empty }
+        beginPaintStroke(brush)
+        var touched = Paint.Rect.empty
+        for step in path { touched = touched.union(paint(to: step.point, seed: step.seed)) }
+        endPaintStroke()
         return touched
     }
 

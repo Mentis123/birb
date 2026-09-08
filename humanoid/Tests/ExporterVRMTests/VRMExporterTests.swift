@@ -223,8 +223,15 @@ final class DocumentExportTests: XCTestCase {
             document.sculpt(.inflate(0.004), at: [Vec3(0.06 * Double(i - 2), 0.03, 0.10)],
                             settings: .init(radius: 0.05, strength: 0.7, symmetric: true))
         }
-        document.paint(.init(radius: 0.08, opacity: 0.9, colour: (30, 90, 160)),
-                       along: [Vec2(0.2, 0.3), Vec2(0.5, 0.6), Vec2(0.8, 0.4)])
+        let mesh = document.mesh
+        let path = stride(from: -0.06, through: 0.06, by: 0.02).compactMap {
+            x -> (point: Vec3, seed: Int)? in
+            guard let hit = Picking.raycast(mesh, origin: Vec3(x, 0.02, 1),
+                                            direction: Vec3(0, 0, -1)) else { return nil }
+            return (hit.position, hit.triangle)
+        }
+        XCTAssertFalse(path.isEmpty)
+        document.paint(.init(radius: 0.08, opacity: 0.9, colour: (30, 90, 160)), along: path)
 
         let snapshot = document.exportSnapshot(named: "Lump")
         XCTAssertTrue(snapshot.validate().passes, snapshot.validate().summary)
