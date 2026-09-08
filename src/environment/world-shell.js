@@ -704,8 +704,12 @@ const ENVIRONMENT_VARIANTS = [
       // value and the terrain loses its form. The direct light does the work
       // now and the shadows are allowed to go blue, which is what makes snow
       // look like snow.
-      ambient: { sky: 0xa9cdf0, ground: 0x0c1a26, intensity: 0.62 },
-      key: { color: 0xeaf4ff, intensity: 1.72, position: [7.6, 8.5, 5.4] },
+      // 0.62 ambient was too far. Contrast is what makes snow read, but the
+      // ambient is ALSO the only light on the side of the world facing away
+      // from the sun, and at 0.62 a perch on the night side rendered very
+      // nearly black — a whole nest view with nothing in it.
+      ambient: { sky: 0xa9cdf0, ground: 0x18293a, intensity: 0.86 },
+      key: { color: 0xeaf4ff, intensity: 1.52, position: [7.6, 8.5, 5.4] },
       rim: { color: 0x81c5ff, intensity: 0.52, position: [-6.4, 5, -5.2] },
       fill: { color: 0x99c9ff, intensity: 0.4, position: [1.6, 3.4, -6.6] },
       glow: { color: 0x88d1ff, intensity: 1.55, distance: 13, decay: 2.2, position: [0.4, 2, 0.6] },

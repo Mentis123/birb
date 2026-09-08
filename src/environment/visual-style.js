@@ -177,15 +177,19 @@ export function addAtmosphere(material, THREE, {
       float depthFactor = 1.0 - exp(-below * 0.045);
       float viewDist = length(cameraPosition - vBirbWorld);
       float distFactor = 1.0 - exp(-viewDist * 0.022);
-      float mist = depthFactor * distFactor * 0.70 * uBirbAtmos;
-      outgoingLight = mix(outgoingLight, uBirbMist, clamp(mist, 0.0, 0.72));
+      // Pulled back from 0.70/0.72. Aerial perspective should place things in
+      // depth, not erase them: at the old strength the mid-distance of every
+      // biome went to a flat wash, and a nest view — which is nothing BUT
+      // mid-distance — lost its whole subject.
+      float mist = depthFactor * distFactor * 0.58 * uBirbAtmos;
+      outgoingLight = mix(outgoingLight, uBirbMist, clamp(mist, 0.0, 0.56));
 
       #include <opaque_fragment>
     `);
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => base + '-atmos-v5';
+  material.customProgramCacheKey = () => base + '-atmos-v6';
   return material;
 }
 
