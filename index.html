@@ -3473,6 +3473,7 @@
       var { createFrameSampler } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
+      var { createFlock } = await import("./src/environment/flock.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
       // that read — so a `const` declared there sat in its temporal dead zone
@@ -4323,6 +4324,13 @@
     // rebuilt on every environment switch and the shadow belongs to the bird.
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
+
+    // A distant flock. One draw call for fourteen birds, and the only thing
+    // in the world that moves of its own accord and is not trying to kill
+    // you. Scene-parented so it survives environment switches.
+    const flock = createFlock(THREE, { sphereRadius: 120 });
+    scene.add(flock.mesh);
+    const _flockCenter = new THREE.Vector3(0, 0, 0);
 
     // Bloom. The one post-processing effect in the game, and the only thing
     // in this session gated on the owner's ten-minute phone playtest coming
@@ -8195,6 +8203,13 @@
       visualUniforms.time.value = motionState.elapsed;
       visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
 
+      // Flock. Dropped at tier 2 with the other optional decoration.
+      if (flock) {
+        const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
+        flock.mesh.visible = showFlock;
+        if (showFlock) flock.update(motionState.elapsed, birdPos, _flockCenter);
+      }
+
       // ===== Sun cycle =====
       // One light position and one colour per frame. Everything that already
       // follows the key light — the sky's sun disc, the water specular, the
@@ -8845,6 +8860,8 @@
             tone: renderer.toneMapping,
           };
         },
+        // Where the flock actually lands on screen. Guessing at this from a
+        // capture wasted three attempts.
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
         // Jump the sun cycle to a point in its period, for captures.
         setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
