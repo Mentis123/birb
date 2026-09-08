@@ -2,6 +2,7 @@ import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { createSlalomRun } from "./slalom-run.js";
+import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
@@ -1869,34 +1870,53 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const archMat = new THREE.MeshLambertMaterial({ color: 0xb25e34, flatShading: true });
   const archCount = _isMobile() ? 9 : 12;
   {
-    const archGeom = new THREE.TorusGeometry(8, 1.2, 6, 16);
+    // These used to be COMPLETE tori laid flat in the tangent plane and lifted
+    // 10-25 units off the ground, scaled up to 2x — which is to say a stone
+    // doughnut sixteen units across, hovering unsupported in the sky. Nothing
+    // held it up and nothing explained it; a contact-sheet capture of the
+    // canyons has one filling the top third of the frame like a dropped
+    // wedding ring. An arch is a HALF torus standing on its own two feet.
+    //
+    // `TorusGeometry(..., Math.PI)` gives the upper half of a ring in the
+    // local XY plane, feet at (+-r, 0, 0). So local +Y has to map to the
+    // surface normal and the whole thing seats at ground level; the previous
+    // build rotated the ring INTO the tangent plane instead, which is what
+    // made the major radius point sideways rather than upward.
+    const archR = 8, archTube = 1.2;
+    const archGeom = new THREE.TorusGeometry(archR, archTube, 6, 18, Math.PI);
     const archInst = new THREE.InstancedMesh(archGeom, archMat, archCount);
     archInst.name = 'canyon-arches';
     const dummy = new THREE.Object3D();
     const orientQ = new THREE.Quaternion();
-    const flatXQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-    const spinZQ = new THREE.Quaternion();
-    const zAxis = new THREE.Vector3(0, 0, 1);
+    const spinYQ = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const legDir = new THREE.Vector3();
     for (let i = 0; i < archCount; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(1 - 2 * Math.random());
-      const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(10, 25));
+      const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
       const s = randomInRange(1.2, 2.0);
-      orientQ.setFromUnitVectors(defaultUp, up).multiply(flatXQ);
-      spinZQ.setFromAxisAngle(zAxis, Math.random() * Math.PI);
-      orientQ.multiply(spinZQ);
+      orientQ.setFromUnitVectors(defaultUp, up);
+      spinYQ.setFromAxisAngle(yAxis, Math.random() * Math.PI * 2);
+      orientQ.multiply(spinYQ);
       dummy.position.copy(pos);
       dummy.quaternion.copy(orientQ);
       dummy.scale.setScalar(s);
       dummy.updateMatrix();
       archInst.setMatrixAt(i, dummy.matrix);
-      collisionSystem.addCollider(pos, 6 * s, 'arch');
-      // This torus lies in the tangent plane: its 8u major radius extends
-      // SIDEWAYS, not upward. Seat the bowl on the tube instead of floating
-      // 8*s above the ring's empty centre.
-      const archNestPos = new THREE.Vector3(8 * s, 0, 0).applyQuaternion(orientQ)
-        .add(pos).addScaledVector(up, 1.2 * s + 0.2);
+      // Colliders on the LEGS, not in the middle. An arch is something to
+      // thread; one sphere at its centre makes it a wall with a picture of a
+      // hole on it.
+      legDir.set(1, 0, 0).applyQuaternion(orientQ);
+      for (const side of [-1, 1]) {
+        collisionSystem.addCollider(
+          pos.clone().addScaledVector(legDir, side * archR * s),
+          archTube * s * 2.2, 'arch');
+      }
+      // The perch is the CROWN — the one place on an arch a bird would
+      // actually sit, and the view from it is the whole point of the thing.
+      const archNestPos = pos.clone().addScaledVector(up, (archR + archTube) * s + 0.2);
       nestablePositions.push({ position: archNestPos, surfaceNormal: up.clone(),
         hostObject: null, hostId: `canyon-arch-${i}` });
     }
@@ -2894,6 +2914,12 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // identify from a mile up, and what identifies it is the grid — without it
   // the city is a skyline standing in a field.
   if (variant === 'city') addStreetGrid(sphereMaterial, THREE, { radius: sphereRadius });
+  // Everything else gets procedural ground character instead: moss and soil in
+  // the forest, sand in the canyon basins, snow on the flats and rock on the
+  // faces in the mountains. Derived from the fragment's own world position and
+  // the facet normal, so it is zero geometry, zero textures and zero draw
+  // calls — the same trade the city's windows make.
+  addGroundDetail(sphereMaterial, THREE, { baseRadius: sphereRadius, biome: variant });
 
   const sphereGround = new THREE.Mesh(sphereGeometry, sphereMaterial);
   sphereGround.name = 'sphere-ground';

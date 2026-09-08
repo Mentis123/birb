@@ -3478,6 +3478,7 @@
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
+      var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
       // that read — so a `const` declared there sat in its temporal dead zone
@@ -4348,6 +4349,15 @@
     // rebuilt on every environment switch and the shadow belongs to the bird.
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
+
+    // Wingtip ribbons. Added to the SCENE, not the world root: the root is
+    // rebuilt from scratch on every environment switch, and a trail parented
+    // to it would be disposed mid-flight along with the trees.
+    const wingRibbons = [createRibbonTrail(THREE), createRibbonTrail(THREE)];
+    for (const r of wingRibbons) scene.add(r.mesh);
+    // Scratch for the wingtip world positions. getWorldPosition writes into a
+    // target and allocates nothing, so this is the whole per-frame cost.
+    const _ribbonTip = new THREE.Vector3();
 
     // The distant flock was REMOVED on playtest feedback: "not sure what the
     // little bird arrow things in the sky are... don't want." Two attempts
@@ -8495,6 +8505,37 @@
         contactShadow.update(birdPos, floorRadius, shadowOn);
       }
 
+      // Wingtip ribbons — the mark the bird leaves when it is really working.
+      //
+      // Shown on boost and on a hard bank, and nowhere else: a trail that is
+      // always on is scenery, and one that appears exactly when the player
+      // does something is feedback. Off entirely under reduced motion.
+      //
+      // The tier gate is < 2, not < 1. Two ribbons are two draw calls and
+      // about seventy triangles, so this is not what a struggling phone is
+      // struggling with — and a feature gated so tightly that the device it
+      // ships on never satisfies the gate is a feature that does not ship.
+      // The bloom pass spent this project's entire history behind exactly
+      // that mistake (16.2).
+      if (wingRibbons) {
+        const bankNow = Math.abs(wingInputState?.x ?? 0);
+        const ribbonOn = !isNested && !reducedMotionState.enabled
+          && adaptiveTier.getTier() < 2 && birbAnchor?.visible !== false
+          && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
+        // Boost is the full-strength case; a hard bank ramps in from the
+        // threshold so the ribbon does not switch on at a hard edge.
+        const want = !ribbonOn ? 0
+          : Math.max(sprintState.active ? 1 : 0,
+                     Math.min(1, Math.max(0, bankNow - 0.45) / 0.35));
+        const camPos = cameraState.camera?.position;
+        const tips = [leftWing?.userData?.tipFeather, rightWing?.userData?.tipFeather];
+        for (let i = 0; i < wingRibbons.length; i++) {
+          const tip = tips[i];
+          if (tip && want > 0) tip.getWorldPosition(_ribbonTip);
+          wingRibbons[i].update(tip ? _ribbonTip : null, camPos, delta, tip ? want : 0);
+        }
+      }
+
       // ===== Proximity "speed of passage" cue =====
       // Pooled whoosh streak + optional haptic when bird flies close to a giant prop.
       // Squared-distance compare; cooldown per-target; zero allocations in the hot path.
@@ -9026,6 +9067,47 @@
             }
           });
           return shown.slice(0, 12);
+        },
+        // Fly to one instance of a named InstancedMesh and look at it.
+        //
+        // Paid for by a real defect: the canyons' "arches" were complete stone
+        // tori laid flat and floating ten to twenty-five units in the air, and
+        // that survived every capture this project ever took, because nine
+        // arches scattered over a whole planet are pure luck to have in frame.
+        // A prop you cannot reliably photograph is a prop nobody reviews.
+        // Force the sprint on or off. The wingtip ribbons only appear while
+        // boosting or banking hard, so without this there is no way for a
+        // capture to prove they render at all.
+        boost: (on = true) => {
+          if (!sprintState) return null;
+          sprintState.active = !!on;
+          flightController.speed = on ? sprintState.sprintSpeed : sprintState.baseSpeed;
+          return sprintState.active;
+        },
+        goToProp: (name, index = 0, back = 34, lift = 12) => {
+          if (!sphericalWorld?.root || !flightController?.position) return null;
+          let mesh = null;
+          sphericalWorld.root.traverse((o) => {
+            if (!mesh && o.isInstancedMesh && o.name && o.name.includes(name)) mesh = o;
+          });
+          if (!mesh) return null;
+          const m = new THREE.Matrix4();
+          mesh.getMatrixAt(Math.min(index, mesh.count - 1), m);
+          const target = new THREE.Vector3().setFromMatrixPosition(m);
+          mesh.localToWorld(target);
+          const up = target.clone().normalize();
+          const side = new THREE.Vector3(0, 1, 0).cross(up).normalize();
+          flightController.position.copy(target)
+            .addScaledVector(side, -back).addScaledVector(up, lift);
+          const eye = flightController.position;
+          const fwd = target.clone().sub(eye);
+          const eyeUp = eye.clone().normalize();
+          fwd.addScaledVector(eyeUp, -fwd.dot(eyeUp)).normalize();
+          const right = new THREE.Vector3().crossVectors(fwd, eyeUp).normalize();
+          flightController.quaternion.setFromRotationMatrix(
+            new THREE.Matrix4().makeBasis(right, eyeUp, fwd.clone().multiplyScalar(-1)),
+          );
+          return { name: mesh.name, count: mesh.count, index };
         },
         goToSlalom: (index = 0, back = 30, lift = 0) => {
           const gates = sphericalWorld?.features?.slalom?.gates;

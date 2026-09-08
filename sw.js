@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v41-2026-09-08-open-slalom';
+const CACHE_VERSION = 'v42-2026-09-08-ground-and-ribbons';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -63,6 +63,7 @@ const CORE_ASSETS = [
   './src/environment/sun-cycle.js',
   './src/environment/water.js',
   './src/environment/city-windows.js',
+  './src/environment/ground-detail.js',
   './src/nesting/drone-look.js',
   './src/environment/weather.js',
   './src/environment/visual-style.js',
@@ -79,6 +80,7 @@ const CORE_ASSETS = [
   './src/effects/bloom-pass.js',
   './src/effects/wake.js',
   './src/effects/energy-ring.js',
+  './src/effects/ribbon-trail.js',
   './src/effects/contact-shadow.js',
   './src/effects/burst-signatures.js',
   './src/effects/particles.js',

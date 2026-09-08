@@ -1385,3 +1385,124 @@ work with, so all the extra brightness does is desaturate it. Just under 1.0
 keeps the cyan. And the first gate sat 14 units past the start arch, inside the
 arch's own pillar; the arch is wider (±23, clearing a gate swung to 15.4) and
 the gates start further down-course.
+
+## 17. Seventh pass — what the ground is made of
+
+Started from a fresh four-biome contact sheet rather than from the roadmap,
+and the sheet made the case on its own: the **city**, the one biome that got a
+legibility pass, was far and away the best frame on it, and the other three
+were a flat colour each — the forest a plain olive field, the canyons a smooth
+orange dome, the mountain a uniform pale blue-grey. The forest is the DEFAULT
+biome, so that flat olive field is the first thing anybody ever sees.
+
+The ground is also, by a long way, the largest thing on screen. Most of what
+was left on the roadmap improves something occupying a tenth of the frame.
+
+### 17.1 `src/environment/ground-detail.js`
+
+Per-biome procedural ground, injected into the terrain material. Zero
+geometry, zero textures, zero draw calls — the same trade the city's windows
+make.
+
+**The geometric normal is free and it is the whole trick.**
+`normalize(cross(dFdx(P), dFdy(P)))` on the interpolated world position is the
+FACET normal, which suits a flat-shaded low-poly terrain exactly: two
+derivatives and a cross product, no attribute, no tangent frame, and it agrees
+with the visible faceting rather than with a smoothed vertex normal that does
+not. Snow lying on the flats and rock showing on the faces, sand collecting in
+the basins and not on the walls, soil showing where the hill is steep — all of
+it is one `smoothstep` away once you have the slope. The mountain is the
+before-and-after that proves it: one uniform pale mass in, a ridge with real
+form out, from a term with no noise in it at all.
+
+Only the forest wants actual noise, and one octave of it, because the slope
+term carries the structure and the noise only has to break up the facets. That
+keeps this inside a phone's fill rate and leaves no octave stack to tune.
+
+Three things it had to get right, each caught by a capture:
+
+- **Tints multiply, they never add.** A flat additive term lifts a dark
+  material far more than a bright one — the same trap that turned the city's
+  asphalt into snow (§16.13). Everything here is a multiply about a mean of 1,
+  so a face keeps its exposure and only its hue and value move.
+- **`outgoingLight`, not `diffuseColor`.** By `<opaque_fragment>` Lambert has
+  already folded the diffuse colour into the lighting, so writing there does
+  nothing at all — exactly how the street grid first shipped invisible.
+- **The first tints were too close together to see.** Moss and soil about 0.1
+  apart in every channel gave a soft gradient across the whole field rather
+  than ground with anything on it: measurably present, visually absent.
+
+And one that only a capture could have found: **the canyons needed the strata
+banded across the GROUND, not only down the walls.** `addAtmosphere` bands by
+radius, which is right — it keeps the layers level everywhere on a sphere —
+but a canyon floor is nearly level, so its radius barely changes across a whole
+view and not one band ever appeared on it. The first ground-detail capture
+still read as a smooth orange dome for that reason alone. Banding the ground
+too turns the plateau into exposed strata seen from above.
+
+### 17.2 The canyon "arches" were flying doughnuts
+
+Found while framing a capture, not while looking for it. The canyons' arches
+were **complete tori** laid flat in the tangent plane and lifted 10-25 units
+off the ground, scaled up to 2x: a stone ring sixteen units across, hovering
+unsupported in the sky, with nothing holding it up and nothing explaining it.
+A contact-sheet capture has one filling the top third of the frame like a
+dropped wedding ring.
+
+An arch is a HALF torus standing on its own two feet. `TorusGeometry(...,
+Math.PI)` gives the upper half in the local XY plane with feet at (±r, 0, 0),
+so local +Y maps to the surface normal and the whole thing seats at ground
+level; the old build rotated the ring INTO the tangent plane instead, which is
+what pointed the major radius sideways rather than upward. The colliders moved
+to the LEGS — one sphere at the centre makes an arch a wall with a picture of a
+hole on it — and the perch moved to the crown, which is the one place on an
+arch a bird would sit.
+
+**`__BIRB.goToProp(name, index, back, lift)`** exists because of this. Nine
+arches scattered over a whole planet are pure luck to have in frame, and a prop
+you cannot reliably photograph is a prop nobody reviews. It finds an
+InstancedMesh by name and frames one of its instances.
+
+### 17.3 Wingtip ribbons
+
+`src/effects/ribbon-trail.js`. The bird is the one object on screen a hundred
+per cent of the time and nothing about it changed when the player did something
+skilful. Two ribbons, shown on boost and on a hard bank and nowhere else — a
+trail that is always on is scenery; one that appears exactly when the player
+acts is feedback.
+
+**Camera-facing, not body-facing.** A band lying in a fixed plane of the bird
+is invisible edge-on, which on a chase camera is most of the time it exists.
+Each rib's width axis is `cross(tangent, toCamera)`.
+
+**The length must be measured in world units, and this took three builds.**
+Fading by buffer POSITION makes the visible length (points x per-frame travel):
+about five units at 60fps, and seventy in the headless harness at 2fps. Same
+code, a fourteen-fold difference, and only one of the two was ever going to be
+looked at. Fading by AGE does not rescue it either — `update` clamps its delta
+to 50ms to survive a stall, so at 2fps a point ages twenty times slower than
+the wall clock and the fade never arrives. **Arc length is measured off the
+geometry itself and cannot be fooled by either.** Age is kept as the second
+terminator, for the trail of a bird that has stopped.
+
+Two smaller ones. The first build used a half-width of 0.13 and the capture is
+unambiguous — two white bands forty pixels wide running down the screen, which
+read as painted runway markings; a trail is thinner than it feels like it
+should be, and cyan rather than white, because a white ribbon on a pale sky is
+a paint stripe. And the tier gate is `< 2`, not `< 1`: two ribbons are two draw
+calls and about seventy triangles, so this is not what a struggling phone is
+struggling with, and **a feature gated so tightly that the device it ships on
+never satisfies the gate is a feature that does not ship** — which is precisely
+where the bloom pass spent this project's entire history (§16.2).
+
+Also new: **`__BIRB.boost(on)`**, because the ribbons only appear while
+boosting or banking hard and without it no capture can prove they render.
+
+### 17.4 What the sheet flagged and this pass did NOT change
+
+`city · nest` came back almost entirely black, and the harness said why in its
+own output: *"city: landing never reached NESTED"*. Captured directly it is the
+best frame in the game — a lit skyline seen from a rooftop. The black cell is a
+landing that timed out, not a rendering defect, and the fix belongs to the
+landing path rather than here. Worth keeping in view: the harness reported it
+honestly instead of printing a cell and moving on.
