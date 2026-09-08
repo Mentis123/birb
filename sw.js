@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v40-2026-09-08-drones-and-gates';
+const CACHE_VERSION = 'v41-2026-09-08-open-slalom';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

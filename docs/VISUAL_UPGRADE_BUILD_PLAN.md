@@ -1314,3 +1314,74 @@ that. Derived from the fragment's own position, they cost nothing.
 - `goToDrone` takes the HIGHEST of the nearest few drones rather than the
   nearest, because drones share the bird's flight band and the closest one is
   regularly inside a tree canopy.
+
+### 16.17 The tunnel comes out
+
+Playtest on the previous section's work, verbatim: *"Redo the tunnel and the
+slalom it's horrible and too dense and doesn't vibe well at all fix."* That is
+the right read, and re-lighting the gates was never going to save it — the
+problem was the shape of the thing.
+
+**What was there.** A seven-unit-wide lane walled by two or three rows of
+inward-leaning trees, roofed with half-torus arch ribs, wrapped in a backdrop
+tube, and signed with chevron boards, floor chevrons and a checker banner. Six
+systems competing for the same seven units of space, against a bird two units
+across. The tell had been sitting in the tooling for a whole session and was
+read as a framing problem: `goToSlalom` needed a `lift` argument because a
+camera at the player's own altitude sat INSIDE the wall and photographed bark.
+That is not a camera bug. That is the course reporting it has no room in it.
+
+Deleted outright: the gate-tree walls, the canopy ribs, the backdrop tube, the
+floor chevrons, the turn-direction boards, the checker banner and the three
+canvas-texture helpers that only they used. What is left is a line of glowing
+gates arcing through open sky over a landscape you can see the whole time, one
+race-line ribbon on the ground, one beacon per gate, and a start and finish
+arch. It costs fewer draw calls and far fewer triangles than the tunnel did.
+
+Four things had to be got right after that, and each was found by a capture.
+
+**Gate spacing must beat the gate DIAMETER, and so must the swing.** The old
+course was 40 samples at 0.016 rad — 77 units end to end, which is shorter than
+four gate diameters, so everything on it was crammed because there was nowhere
+else to put it. The first rewrite kept that length and simply removed the
+walls: the gates then sat 4-6 units apart against a 12.8-unit ring and rendered
+as a tangle of overlapping hoops. The course is 250-300 units now with gates
+every ~31 units. Separately, gates swung ±6.5 nest *concentrically* inside one
+another when the camera looks down the course, which erases the weave that is
+the entire game; at ±9 the centres are 18 apart against a 12.8-unit ring and
+the slalom reads as a slalom.
+
+**Anchor the course to the SPHERE, not to the ground.** `groundR(dir) + 15`
+sounds like the obvious way to hold a course above the terrain and it is wrong
+here: the terrain carves downward by up to 46 units, so the course plunged into
+every valley it crossed and climbed back out, while the bird — which has no
+gravity and whose sphere clamp is a floor only — holds a near-constant
+altitude. The course kept leaving the band the player actually flies in, and
+every gate it dropped into a valley landed inside the canopy of trees rooted on
+the rim above it. Pinned to the sphere (`max(sphereRadius + ALT, groundR +
+MIN_CLEAR)`) it stays level the whole way.
+
+**The altitude has to clear the canopy, and 15 does not.** Forest trees run
+14-58 units tall — trunk 8-16 plus canopy 8-16, scaled 1-2× — and are rooted at
+or near the base radius. Every capture at 11-15 had a full-size conifer
+standing inside a gate. At 30 the run clears roughly two thirds of them and the
+ones that do reach it are emergents standing *beside* a gate, which reads as a
+course threading the treetops. The bird has no ceiling, so a course it must
+climb to is a course, not an obstacle.
+
+**A marker fence reproduces the tunnel at a wider radius.** The first cut kept
+a running line of pylons every five samples at 19 units out — thirty-odd posts
+— and it read as exactly what it was: pale vertical bars threading the trees,
+dense enough to be clutter, carrying no information the race line did not
+already carry. There is one beacon per gate now, planted on the outside of that
+gate's swing and tall enough to reach it, so a post on the ground means "the
+next gate is over here" and nothing else. Eight posts instead of thirty.
+
+Two smaller ones worth recording. The pylons were `MeshBasicMaterial` at
+(0.30, 1.55, 2.10) — HDR, on the theory that the gates needed HDR to bloom — and
+they tone-mapped to pale grey-blue sticks, which is the *same* trap §16.4
+records for saturated colour: a slim unlit post has no area for the bloom to
+work with, so all the extra brightness does is desaturate it. Just under 1.0
+keeps the cyan. And the first gate sat 14 units past the start arch, inside the
+arch's own pillar; the arch is wider (±23, clearing a gate swung to 15.4) and
+the gates start further down-course.

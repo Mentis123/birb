@@ -93,6 +93,24 @@
 > `tools/birb-shot.mjs --after` runs JS after the settle, so a pose it sets is
 > the pose photographed.
 
+> **The slalom's tunnel came out** (§16.17). It was a seven-unit lane walled by
+> trees, roofed with arch ribs, wrapped in a backdrop tube and signed three ways
+> — six systems competing for the same seven units against a two-unit bird — and
+> the tell had been sitting in the tooling for a session: `goToSlalom` needed a
+> `lift` argument because a camera at the player's own altitude sat INSIDE the
+> wall. That is not a framing bug, it is the course reporting it has no room in
+> it. It is an open aerial run now. Four numbers matter and each was found by a
+> capture. **Gate spacing and swing must both beat the gate DIAMETER** — at 4-6
+> units apart against a 12.8-unit ring the gates render as a tangle, and swung
+> ±6.5 they nest concentrically looking down the course and the weave vanishes.
+> **Anchor the course to the SPHERE, not the ground**: the terrain carves down
+> 46 units while the gravity-less bird holds a near-constant altitude, so
+> `groundR + 15` plunges out of the flight band into valleys — and into the
+> canopy of trees rooted on the rim above them. **Forest trees are 14-58 units
+> tall**, so a course under ~30 has conifers standing inside its gates. And **a
+> marker fence is the tunnel again at a wider radius** — thirty pylons became
+> one beacon per gate.
+>
 > **The biomes got a legibility pass** (§16.13). The city shipped as grey
 > boxes in a field; it now has procedural lit windows and a street grid with
 > lamps, both derived from the fragment's own position — no geometry, no
