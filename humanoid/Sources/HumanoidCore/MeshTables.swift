@@ -34,6 +34,12 @@ public struct MeshTables: Sendable {
     public let weldMembers: [[Int]]
     /// Welded position index -> the welded positions sharing an edge with it.
     public let neighbours: [[Int]]
+    /// Welded position index -> every triangle with a corner at that position.
+    ///
+    /// This is what makes an incremental normal pass and a projection paint
+    /// flood possible: both start from "which faces did this point move" and
+    /// walking the whole index buffer to answer that defeats the purpose.
+    public let trianglesOfWelded: [[Int32]]
     /// Welded position index -> its mirror across x = 0. A point on the mirror
     /// plane is its own partner. `nil` where no partner exists, which on a
     /// symmetric template means never.
@@ -101,6 +107,18 @@ public struct MeshTables: Sendable {
         // and floating-point addition is not associative, so an unordered set
         // would give a different answer run to run.
         self.neighbours = adjacency.map { $0.sorted() }
+
+        var incident = [[Int32]](repeating: [], count: members.count)
+        for t in stride(from: 0, to: mesh.indices.count, by: 3) {
+            let face = Int32(t / 3)
+            let a = weldOf[Int(mesh.indices[t])]
+            let b = weldOf[Int(mesh.indices[t + 1])]
+            let c = weldOf[Int(mesh.indices[t + 2])]
+            incident[a].append(face)
+            if b != a { incident[b].append(face) }
+            if c != a && c != b { incident[c].append(face) }
+        }
+        self.trianglesOfWelded = incident
 
         self.mirror = weldedPosition.map { p in
             idByCell[cell(Vec3(-p.x, p.y, p.z))]

@@ -45,6 +45,14 @@ public struct MeshData: Sendable {
 
     /// Recomputes area-weighted vertex normals in place. Called after any edit
     /// that moves vertices.
+    ///
+    /// Accumulating per *vertex* is wrong wherever the mesh has a UV seam: the
+    /// two or three copies of a seam point each see only the triangles on their
+    /// own island, so they end up with different normals for the same place on
+    /// the surface and the shading creases along every seam. On the cube that
+    /// is all twelve edges. Prefer `recomputeNormals(_:touching:)`, which welds;
+    /// this form is kept for the generators, which build a mesh before any
+    /// tables exist for it.
     public mutating func recomputeNormals() {
         var acc = [Vec3](repeating: .zero, count: positions.count)
         for t in stride(from: 0, to: indices.count, by: 3) {
@@ -54,6 +62,64 @@ public struct MeshData: Sendable {
             acc[a] += n; acc[b] += n; acc[c] += n
         }
         normals = acc.map { normalize($0) }
+    }
+
+    /// Recomputes normals across welded positions, optionally only where the
+    /// surface moved.
+    ///
+    /// **Welded**: every vertex sharing a position gets the same normal, summed
+    /// over every triangle touching that position on any island. That is what
+    /// makes a seam invisible.
+    ///
+    /// **Incremental**: pass the welded set a brush returned and only those
+    /// points and their one-ring are redone — a vertex normal depends on the
+    /// triangles it touches, so moving a point dirties exactly the corners of
+    /// its incident faces. The full pass is 0.06 ms on today's Clay and would be
+    /// four times that at 48 divisions; this keeps the cost proportional to the
+    /// brush rather than to the model.
+    public mutating func recomputeNormals(_ tables: MeshTables, touching moved: Set<Int>? = nil) {
+        guard let moved else { return recomputeNormalsWelded(tables) }
+        guard !moved.isEmpty else { return }
+
+        // Faces whose shape changed, then every welded corner of those faces:
+        // those are the only normals that can have moved.
+        var dirtyFaces = Set<Int32>()
+        for w in moved { dirtyFaces.formUnion(tables.trianglesOfWelded[w]) }
+        var dirty = moved
+        for face in dirtyFaces {
+            let t = Int(face) * 3
+            dirty.insert(tables.weldOf[Int(indices[t])])
+            dirty.insert(tables.weldOf[Int(indices[t + 1])])
+            dirty.insert(tables.weldOf[Int(indices[t + 2])])
+        }
+        for w in dirty { writeNormal(w, tables) }
+    }
+
+    private mutating func recomputeNormalsWelded(_ tables: MeshTables) {
+        var acc = [Vec3](repeating: .zero, count: tables.weldedCount)
+        for t in stride(from: 0, to: indices.count, by: 3) {
+            let a = Int(indices[t]), b = Int(indices[t + 1]), c = Int(indices[t + 2])
+            let n = cross(positions[b] - positions[a], positions[c] - positions[a])
+            acc[tables.weldOf[a]] += n
+            acc[tables.weldOf[b]] += n
+            acc[tables.weldOf[c]] += n
+        }
+        for w in 0..<tables.weldedCount {
+            let n = normalize(acc[w])
+            for member in tables.weldMembers[w] { normals[member] = n }
+        }
+    }
+
+    /// One welded position's normal, summed over every face touching it.
+    private mutating func writeNormal(_ welded: Int, _ tables: MeshTables) {
+        var acc = Vec3.zero
+        for face in tables.trianglesOfWelded[welded] {
+            let t = Int(face) * 3
+            let a = Int(indices[t]), b = Int(indices[t + 1]), c = Int(indices[t + 2])
+            acc += cross(positions[b] - positions[a], positions[c] - positions[a])
+        }
+        let n = normalize(acc)
+        for member in tables.weldMembers[welded] { normals[member] = n }
     }
 }
 

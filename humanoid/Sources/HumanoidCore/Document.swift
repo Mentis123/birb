@@ -29,6 +29,15 @@ public struct Document {
     public private(set) var sculptDelta: [Vec3]
     public private(set) var albedo: PNG.Image
 
+    /// The current shape, kept up to date in place.
+    ///
+    /// Stored rather than rebuilt on read. It used to be a computed property
+    /// that walked every vertex and recomputed every normal, and the editor
+    /// touched it twice per Pencil event — once to sculpt, once for the renderer
+    /// to upload — so a gesture paid for two full rebuilds at up to 240 Hz. The
+    /// deltas are still the source of truth for undo; this is their running sum.
+    private var current: MeshData
+
     private var history: [Record] = []
     private var redoStack: [Record] = []
 
@@ -63,6 +72,11 @@ public struct Document {
         self.sculptDelta = [Vec3](repeating: .zero, count: loaded.mesh.vertexCount)
         self.albedo = PNG.Image.solid(width: textureSize, height: textureSize,
                                       r: baseColour.r, g: baseColour.g, b: baseColour.b)
+        var start = loaded.mesh
+        // Welded from the outset: the template is generated with per-vertex
+        // normals, so its seam points disagree before a brush has touched them.
+        start.recomputeNormals(self.tables)
+        self.current = start
     }
 
     public static func clay(textureSize: Int = 1024) throws -> Document {
@@ -77,15 +91,8 @@ public struct Document {
                         textureSize: textureSize)
     }
 
-    /// The current shape: template plus deltas, with normals rebuilt.
-    public var mesh: MeshData {
-        var result = template
-        for i in 0..<result.positions.count {
-            result.positions[i] = template.positions[i] + sculptDelta[i]
-        }
-        result.recomputeNormals()
-        return result
-    }
+    /// The current shape: template plus deltas, normals welded.
+    public var mesh: MeshData { current }
 
     public var canUndo: Bool { !history.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
@@ -101,21 +108,41 @@ public struct Document {
     public mutating func sculpt(_ brush: Sculpt.Brush, at points: [Vec3],
                                 settings: Sculpt.Settings) -> Int {
         guard !points.isEmpty else { return 0 }
-        var working = mesh
-        var touched = Set<Int>()
-        for point in points {
-            touched.formUnion(Sculpt.apply(brush, to: &working, tables: tables,
-                                           at: point, settings: settings))
-        }
-        guard !touched.isEmpty else { return 0 }
-
-        let vertices = touched.flatMap { tables.weldMembers[$0] }.sorted()
+        let vertices = pendingVertices(brush, at: points, settings: settings)
         let before = vertices.map { sculptDelta[$0] }
-        for v in vertices { sculptDelta[v] = working.positions[v] - template.positions[v] }
+        let touched = Sculpt.apply(brush, to: &current, tables: tables,
+                                   at: points, settings: settings)
+        guard !touched.isEmpty else { return 0 }
+        for v in vertices { sculptDelta[v] = current.positions[v] - template.positions[v] }
         let after = vertices.map { sculptDelta[$0] }
 
         push(.sculpt(vertices: vertices, before: before, after: after))
         return touched.count
+    }
+
+    /// Every vertex a run of dabs can reach, so the undo record can snapshot
+    /// their prior deltas before the brush overwrites them.
+    ///
+    /// Deliberately generous — a sphere test per dab centre, plus its mirror —
+    /// rather than exact. A vertex listed here but not actually moved records
+    /// `before == after`, which undo handles as a no-op; a vertex moved but not
+    /// listed would be unrecoverable.
+    private func pendingVertices(_ brush: Sculpt.Brush, at points: [Vec3],
+                                 settings: Sculpt.Settings) -> [Int] {
+        let r2 = settings.radius * settings.radius
+        var welded = Set<Int>()
+        for w in 0..<tables.weldedCount {
+            let p = current.positions[tables.weldMembers[w][0]]
+            for centre in points {
+                var d = p - centre
+                if dot(d, d) <= r2 { welded.insert(w); break }
+                if settings.symmetric {
+                    d = p - Vec3(-centre.x, centre.y, centre.z)
+                    if dot(d, d) <= r2 { welded.insert(w); break }
+                }
+            }
+        }
+        return welded.flatMap { tables.weldMembers[$0] }.sorted()
     }
 
     /// Applies one paint stroke and records it.
@@ -233,7 +260,13 @@ public struct Document {
         switch record {
         case .sculpt(let vertices, let before, let after):
             let values = forward ? after : before
-            for (i, v) in vertices.enumerated() { sculptDelta[v] = values[i] }
+            var moved = Set<Int>()
+            for (i, v) in vertices.enumerated() {
+                sculptDelta[v] = values[i]
+                current.positions[v] = template.positions[v] + values[i]
+                moved.insert(tables.weldOf[v])
+            }
+            current.recomputeNormals(tables, touching: moved)
         case .paint(let rect, let before, let after):
             paste(forward ? after : before, into: rect)
         }
