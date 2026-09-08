@@ -5,7 +5,7 @@
 
 // Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
 // on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v32-2026-09-06-boost-speed';
+const CACHE_VERSION = 'v33-2026-09-06-perch-outlook';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

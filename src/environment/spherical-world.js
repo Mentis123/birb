@@ -2778,6 +2778,61 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       proximityTargets,
     }) || [];
   }
+  // Reject nests whose outlook is a wall.
+  //
+  // A perch is a place you sit and LOOK, so a nest with a cliff face or a
+  // peak twelve units in front of it is worse than no nest at all — the
+  // corrected perch camera opens on rock. nest-occlusion clears props within
+  // five units of the camera, which is right for a branch in the way and
+  // useless against a mountainside.
+  //
+  // Cheapest correct test: sample the ring of directions around each
+  // candidate at perch height and require that a majority of them are clear
+  // of any collider. The collider list already exists and is exactly the set
+  // of solid things in the world.
+  if (nestablePositions.length && collisionSystem?.objectColliders?.length) {
+    const CLEARANCE = 22;
+    const SAMPLES = 8;
+    const blockers = collisionSystem.objectColliders;
+    const before = nestablePositions.length;
+    nestablePositions = nestablePositions.filter((candidate) => {
+      const p = candidate.position;
+      const n = candidate.surfaceNormal;
+      if (!p || !n) return true;
+      // A tangent basis at the nest, to sweep the horizon around it.
+      const upx = n.x, upy = n.y, upz = n.z;
+      let ax = 0, ay = 1, az = 0;
+      if (Math.abs(upy) > 0.9) { ax = 1; ay = 0; }
+      // t1 = up x a, t2 = up x t1  (both tangent to the surface)
+      let t1x = upy * az - upz * ay, t1y = upz * ax - upx * az, t1z = upx * ay - upy * ax;
+      const t1l = Math.hypot(t1x, t1y, t1z) || 1;
+      t1x /= t1l; t1y /= t1l; t1z /= t1l;
+      const t2x = upy * t1z - upz * t1y, t2y = upz * t1x - upx * t1z, t2z = upx * t1y - upy * t1x;
+
+      let clear = 0;
+      for (let k = 0; k < SAMPLES; k++) {
+        const a = (k / SAMPLES) * Math.PI * 2;
+        const dx = Math.cos(a) * t1x + Math.sin(a) * t2x;
+        const dy = Math.cos(a) * t1y + Math.sin(a) * t2y;
+        const dz = Math.cos(a) * t1z + Math.sin(a) * t2z;
+        const sx = p.x + dx * CLEARANCE, sy = p.y + dy * CLEARANCE, sz = p.z + dz * CLEARANCE;
+        let blocked = false;
+        for (let b = 0; b < blockers.length; b++) {
+          const c = blockers[b];
+          const r = c.radius;
+          const ddx = sx - c.position.x, ddy = sy - c.position.y, ddz = sz - c.position.z;
+          if (ddx * ddx + ddy * ddy + ddz * ddz < r * r) { blocked = true; break; }
+        }
+        if (!blocked) clear++;
+      }
+      // Half the horizon open is enough: a nest tucked against one cliff with
+      // a view the other way is a good perch, not a bad one.
+      return clear >= SAMPLES * 0.625;
+    });
+    const dropped = before - nestablePositions.length;
+    if (dropped) console.log(`[SphericalWorld] dropped ${dropped} nest(s) with a blocked outlook`);
+  }
+
   // Landmarks are big, hand-placed and NOT instanced, and nest occlusion only
   // clears instanced props — so a nest that happens to sit inside or behind a
   // landmark has its perch view permanently blocked by it. The canyon and
