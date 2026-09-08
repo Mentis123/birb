@@ -3477,7 +3477,6 @@
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
-      var { createFlock } = await import("./src/environment/flock.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
       // that read — so a `const` declared there sat in its temporal dead zone
@@ -3619,7 +3618,18 @@
 
     // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
     // Adaptive quality further drops this to 1.0 below 55 FPS.
-    const DPR_CAP = isMobile ? 1.2 : 1.8;
+    // Raised from 1.2 on 2026-09-08, on a real-device report that the game
+    // was running smooth with everything on. On an iPhone reporting
+    // devicePixelRatio 3, a 1.2 cap renders at 40% of the panel's linear
+    // resolution and every edge in the world is visibly stepped — it is the
+    // single largest thing standing between this and "sharp", and no amount
+    // of shading work compensates for it.
+    //
+    // Safe to raise because it is a CEILING, not a setting: getQualityPixelRatio
+    // drops to 1.0 at tier 1 and 0.85 at tier 2, and the tier is driven by
+    // measured frame rate. A device that cannot hold this sheds it within a
+    // few seconds.
+    const DPR_CAP = isMobile ? 1.7 : 1.8;
     if (_perfDebug) {
       console.log(`[perf] isMobile=${isMobile} isLowEnd=${isLowEnd} DPR_CAP=${DPR_CAP} antialias=${!isMobile}`);
     }
@@ -4338,13 +4348,13 @@
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
 
-    // A distant flock. One draw call for fourteen birds, and the only thing
-    // in the world that moves of its own accord and is not trying to kill
-    // you. Scene-parented so it survives environment switches.
-    const flock = createFlock(THREE, { sphereRadius: 120 });
-    scene.add(flock.mesh);
-    const _flockCenter = new THREE.Vector3(0, 0, 0);
-    const _flockForward = new THREE.Vector3();
+    // The distant flock was REMOVED on playtest feedback: "not sure what the
+    // little bird arrow things in the sky are... don't want." Two attempts
+    // went into making it read — a V formation, a span-only wingbeat, a sweep
+    // anchored to the player's own facing — and at the distance it has to sit
+    // to be a flock rather than traffic, it still read as marks on the sky
+    // rather than as creatures. The module is deleted rather than disabled: a
+    // dead flag is one more thing the next person has to work out.
     // Every rim-light uniform block the bird owns, so the environment switch
     // can retint them all at once.
     const birbRimUniforms = [];
@@ -8378,19 +8388,6 @@
         }
       }
 
-      // Flock. Dropped at tier 2 with the other optional decoration.
-      if (flock) {
-        const showFlock = adaptiveTier.getTier() < 2 && !reducedMotionState.enabled;
-        flock.mesh.visible = showFlock;
-        // The camera's forward, flattened later into the tangent plane: the
-        // flock's sweep is anchored to it so the V crosses the player's view
-        // instead of orbiting somewhere behind their head.
-        if (showFlock) {
-          cam.getWorldDirection(_flockForward);
-          flock.update(motionState.elapsed, birdPos, _flockCenter, _flockForward);
-        }
-      }
-
       // ===== Sun cycle =====
       // One light position and one colour per frame. Everything that already
       // follows the key light — the sky's sun disc, the water specular, the
@@ -9259,8 +9256,8 @@
             tone: renderer.toneMapping,
           };
         },
-        // Where the flock actually lands on screen. Guessing at this from a
-        // capture wasted three attempts.
+        // Pin the adaptive quality tier, so a capture is not judged against
+        // whatever DPR the sampler happened to settle on.
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
         // Jump the sun cycle to a point in its period, for captures.
         setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
