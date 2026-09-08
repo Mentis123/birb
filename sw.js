@@ -60,6 +60,7 @@ const CORE_ASSETS = [
   './src/environment/landmark-valley.js',
   './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
+  './src/environment/sun-cycle.js',
   './src/environment/visual-style.js',
   './src/nesting/nest-placement.js',
   './src/nesting/nest-occlusion.js',
