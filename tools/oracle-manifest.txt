@@ -83,7 +83,7 @@ ef02bf80a755f505703284905ab97aa88681cee6b6b667cfb2f635fea7409db7  tools/birb-lig
 1e76f9c9bffdcbb14a8be5d5f16eebf32ffa9c1312feba3933894a2c4f97889f  tools/birb-modes.mjs
 708d15c40998957495c2548394cd806d602c4255ee7776ac509f64639ff9e76b  tools/birb-shaders.mjs
 # --- the contract ------------------------------------------------------------
-64aab8549a9e461e5b920252b983df311551d386d9669f2d24b3d51e37416a02  docs/perf/CONTRACT.md
+edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONTRACT.md
 # --- the coverage oracle (G0: R5 was not enforced on it) ---------------------
 839a5bee550e812df229f09c21940bd40a20c55cf759d94b6d3b31527bc85e33  tools/req-verify.mjs
 # --- Wave 1: the oracles Wave 2 spends (R5: implementers must not edit these) ---
