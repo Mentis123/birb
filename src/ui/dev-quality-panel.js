@@ -94,6 +94,22 @@ export function sentinel(reason = SENTINEL_REASONS.NOT_IMPLEMENTED) {
   return Object.freeze({ value: null, state: 'unavailable', reason });
 }
 
+/**
+ * The device's own pixel ratio, and the ceiling of the render-DPR control.
+ *
+ * Guarded because this module is imported under plain `node --test`, where
+ * there is no window at all — the 4-class Three stub in node_modules means the
+ * unit suite never has a DOM. Falls back to 2, which is a sane desktop-retina
+ * bound rather than a value that would silently disable the control.
+ *
+ * Rendering ABOVE native buys nothing: there are no pixels to put it in. So
+ * native is the honest ceiling, and it is a real one — an iPhone reports 3.
+ */
+export function nativeDpr() {
+  const r = (typeof window !== 'undefined' && window && window.devicePixelRatio) || 0;
+  return r > 0 ? Math.max(1, r) : 2;
+}
+
 export const PANEL_VIEWS = Object.freeze({
   PERFORMANCE: 'performance',
   LOOK: 'look',
@@ -197,7 +213,10 @@ export const CONTROL_REGISTRY = Object.freeze([
   // ---- Look view: render-cost-vs-fidelity dials ----
   {
     id: 'dpr', view: PANEL_VIEWS.LOOK, kind: 'slider', label: 'Render DPR',
-    min: 0.85, max: 2.0, step: 0.05, requestKey: 'dpr',
+    // Max is the DEVICE's own pixel ratio, resolved at build time — 3.0 on
+    // the iPhone this is built for. 2.0 was 67% of native with no way to ask
+    // for the rest, on the one control that most changes how the game looks.
+    min: 0.85, max: nativeDpr(), step: 0.05, requestKey: 'dpr',
   },
   {
     id: 'postQuality', view: PANEL_VIEWS.LOOK, kind: 'select', label: 'Post quality',
@@ -205,6 +224,7 @@ export const CONTROL_REGISTRY = Object.freeze([
       { value: 'off', label: 'Off' },
       { value: 'quarter', label: 'Quarter' },
       { value: 'half', label: 'Half' },
+      { value: 'full', label: 'Full (post at scene resolution)' },
     ],
     requestKey: 'postQuality',
   },

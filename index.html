@@ -6743,9 +6743,23 @@
         // 0..1 density/strength; the caller's own <input type=range> already
         // enforces min/max/step, so this clamp is redundant-but-safe rather
         // than the only bound in the system.
-        if (key === 'dpr') return Math.min(2.0, Math.max(0.85, value));
+        // The workbench exists to find HEADROOM, not only to shed it, and the
+        // ceiling here was the shipping cap wearing a slider's clothes: the
+        // panel could only ever make the game look worse than it already did.
+        // 2.0 is also below native on the device this is built for — an
+        // iPhone reports devicePixelRatio 3, so the old bound rendered at 67%
+        // of the panel's real resolution with no way to ask for the rest.
+        // Bounded by NATIVE (never render more pixels than the display has)
+        // and never below 0.85.
+        if (key === 'dpr') {
+          const native = Math.max(1, window.devicePixelRatio || 1);
+          return Math.min(native, Math.max(0.85, value));
+        }
         if (key === 'bloomStrength') return Math.min(3, Math.max(0, value));
-        if (key === 'postQuality') return ['off', 'quarter', 'half'].includes(value) ? value : 'half';
+        // 'full' = downscale 1, post at the scene's own resolution. It was
+        // absent, so the best post this engine can do was unreachable from the
+        // panel that exists to reach it.
+        if (key === 'postQuality') return ['off', 'quarter', 'half', 'full'].includes(value) ? value : 'half';
         if (key === 'shafts') return !!value;
         return Math.min(1, Math.max(0, value));
       },
@@ -6760,7 +6774,7 @@
           updateRendererSize(true);
         } else if (key === 'postQuality') {
           bloomEnabled = value !== 'off';
-          if (bloomPass) bloomPass.setDownscale(value === 'quarter' ? 4 : 2);
+          if (bloomPass) bloomPass.setDownscale(value === 'quarter' ? 4 : value === 'full' ? 1 : 2);
         } else if (key === 'shafts') {
           if (bloomPass) bloomPass.setRays(value ? DEFAULT_RAYS_STRENGTH : 0);
         } else if (key === 'bloomStrength') {
@@ -6777,7 +6791,8 @@
         if (key === 'dpr') return renderer.getPixelRatio();
         if (key === 'postQuality') {
           if (!bloomPass || !bloomEnabled) return 'off';
-          return bloomPass.getSizes().downscale >= 4 ? 'quarter' : 'half';
+          const d = bloomPass.getSizes().downscale;
+          return d >= 4 ? 'quarter' : d <= 1 ? 'full' : 'half';
         }
         if (key === 'shafts') return bloomPass ? bloomPass.getRays() > 0.001 : false;
         if (key === 'bloomStrength') return bloomPass ? bloomPass.getStrength() : null;
