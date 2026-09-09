@@ -2,6 +2,12 @@
 
 Research and implementation plan · 9 September 2026
 
+> **Execution plan:** [ULTRACODE_PERFORMANCE_PLAN.md](ULTRACODE_PERFORMANCE_PLAN.md)
+> sequences this work across a tiered agent fleet and corrects one thing here:
+> the thresholds below are marked "tune these numbers on phones", so the device
+> pass is a hard gate *between* the workbench and the controller — not an input
+> to the last batch. Contracts must not fix a number before it is measured.
+
 **Recommendation:** build a small performance workbench and a reversible quality controller first. Spend recovered frame time on image stability, believable materials and nearby detail. The controller runs locally; it needs no AI calls or ongoing token spend.
 
 Reviewed root Birb Mobile at [main `2eac8e1`](https://github.com/Mentis123/birb/tree/2eac8e1a2bf71d91ac952670696cd27a0f48394f), including the latest ground, drone, gate and ribbon changes. This is source review and targeted research, not a physical-device benchmark. Effort and thresholds below are initial engineering estimates. No game code was changed.
