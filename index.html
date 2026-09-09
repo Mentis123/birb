@@ -4428,6 +4428,45 @@
     // Eased 0..1 boost strength for the composite pass.
     let boostVisual = 0;
 
+    // ===== Whole-frame render totals (observability only) =====
+    // renderer.info.render RESETS on every renderer.render() call, so reading
+    // it once after presentFrame() reports only the LAST pass — one draw call
+    // for the whole world once bloom is running. This accumulator is owned by
+    // the FRAME (not the bloom pass): presentFrame() resets it once per frame
+    // and tallies every renderer.render() call inside it, whichever branch
+    // ran — including the no-post branch at tier >= 1, which is exactly the
+    // case the old stats() reasoning left unreported. Read-only bookkeeping:
+    // it never assigns to any renderer/bloom/weather property or uniform.
+    const frameRenderTotals = {
+      calls: 0,
+      triangles: 0,
+      passes: 0,
+      sceneCalls: 0,
+      sceneTriangles: 0,
+      // Which stats source the frame that just rendered ACTUALLY used. Latched
+      // by presentFrame() in the branch it really took — never recomputed from
+      // the tier. A probe that re-evaluates the predicate reports what the code
+      // MEANT to do, and the desync this whole workbench exists to find is
+      // precisely the case where intent and reality have come apart.
+      statsPath: 'renderer-info',
+    };
+
+    // Called immediately after each real renderer.render() call, while
+    // renderer.info.render still holds that call's own numbers (before the
+    // next render() resets them). isScenePass marks the one pass that drew
+    // the actual world, as opposed to a fullscreen bloom/blur/composite quad.
+    function tallyRenderPass(isScenePass) {
+      const calls = renderer.info.render.calls;
+      const triangles = renderer.info.render.triangles;
+      frameRenderTotals.calls += calls;
+      frameRenderTotals.triangles += triangles;
+      frameRenderTotals.passes += 1;
+      if (isScenePass) {
+        frameRenderTotals.sceneCalls = calls;
+        frameRenderTotals.sceneTriangles = triangles;
+      }
+    }
+
     /**
      * The single place a frame reaches the screen.
      *
@@ -4437,12 +4476,20 @@
      * leaves pointing at an offscreen buffer.
      */
     function presentFrame() {
+      frameRenderTotals.calls = 0;
+      frameRenderTotals.triangles = 0;
+      frameRenderTotals.passes = 0;
+      frameRenderTotals.sceneCalls = 0;
+      frameRenderTotals.sceneTriangles = 0;
       if (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1) {
-        bloomPass.render(scene, cameraState.camera);
+        frameRenderTotals.statsPath = 'bloom-frameStats';
+        bloomPass.render(scene, cameraState.camera, tallyRenderPass);
         return;
       }
+      frameRenderTotals.statsPath = 'renderer-info';
       renderer.setRenderTarget(null);
       renderer.render(scene, cameraState.camera);
+      tallyRenderPass(true);
     }
 
     // ===== Proximity cue state =====
@@ -9506,7 +9553,50 @@
               - sampleTerrainHeight(flightController.position.x, flightController.position.y, flightController.position.z)
               ).toFixed(2) : null,
           elapsed: +(motionState.elapsed ?? 0).toFixed(2),
+          pinned: adaptiveTier.isPinned(),
         }),
+        // Whole-frame draw calls/triangles, summed across EVERY
+        // renderer.render() call this frame (frameRenderTotals is reset once
+        // at the top of presentFrame() and tallied after each real render
+        // call, in whichever branch ran) — unlike stats() above, this is
+        // accurate at every tier, including tier >= 1 where bloom is off and
+        // renderer.info.render alone already reports the whole frame, and
+        // tier < 1 where bloom's own passes would otherwise hide behind the
+        // last pass's reset numbers. `scene` is reported alongside, not
+        // instead: the single pass that actually drew the world, so a caller
+        // can see both "what the world cost" and "what the frame cost".
+        frameTotals: () => ({
+          calls: frameRenderTotals.calls,
+          triangles: frameRenderTotals.triangles,
+          passes: frameRenderTotals.passes,
+          scene: {
+            calls: frameRenderTotals.sceneCalls,
+            triangles: frameRenderTotals.sceneTriangles,
+          },
+          tier: adaptiveTier.getTier(),
+        }),
+        // Read-only snapshot of what is ACTUALLY sized right now, as opposed
+        // to what the tier/DPR_CAP say should be sized. Every field below
+        // reads a live object property — never a recomputation from tier or
+        // DPR_CAP — because the whole point is to catch a desync between
+        // what the code intended and what the buffers really are; a hook
+        // that recomputes intent cannot see that desync.
+        effective: () => {
+          const gl = renderer.getContext();
+          return {
+            rendererPixelRatio: renderer.getPixelRatio(),
+            drawingBufferWidth: gl.drawingBufferWidth,
+            drawingBufferHeight: gl.drawingBufferHeight,
+            bloom: bloomPass ? bloomPass.getSizes() : null,
+            weatherPixelRatio: weather ? weather.getPixelRatio() : null,
+            resizeStatePixelRatio: resizeState.pixelRatio,
+            // Observed, not derived: the branch presentFrame() actually took on
+            // the last frame. G0 rejected the earlier version of this field for
+            // recomputing `adaptiveTier.getTier() < 1` and reporting the answer
+            // as a measurement.
+            statsPath: frameRenderTotals.statsPath,
+          };
+        },
       };
       window.__BIRB_READY = true;
     }

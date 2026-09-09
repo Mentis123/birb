@@ -253,6 +253,8 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
     },
 
     setPixelRatio(ratio) { material.uniforms.uPixelRatio.value = ratio; },
+    /** Live read of the uniform actually bound to the shader right now. */
+    getPixelRatio() { return material.uniforms.uPixelRatio.value; },
 
     dispose() { geometry.dispose(); material.dispose(); },
   };

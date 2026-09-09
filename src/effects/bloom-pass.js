@@ -345,6 +345,22 @@ export function createBloomPass(THREE, renderer, {
 
     setSize,
 
+    /**
+     * Live sizes of every offscreen target, read from the targets
+     * themselves — never recomputed from `downscale` and the canvas size.
+     * `downscale` is reported alongside as the divisor actually applied by
+     * the last `setSize()` call, not the constructor option in isolation.
+     */
+    getSizes() {
+      return {
+        sceneTarget: { width: sceneTarget.width, height: sceneTarget.height },
+        blurA: { width: blurA.width, height: blurA.height },
+        blurB: { width: blurB.width, height: blurB.height },
+        rayTarget: { width: rayTarget.width, height: rayTarget.height },
+        downscale,
+      };
+    },
+
     setStrength(value) { compositeMaterial.uniforms.uStrength.value = value; },
     setThreshold(value) { brightMaterial.uniforms.uThreshold.value = value; },
     setVignette(value) { compositeMaterial.uniforms.uVignette.value = value; },
@@ -370,8 +386,17 @@ export function createBloomPass(THREE, renderer, {
 
     /**
      * Render the scene through the pass. Replaces `renderer.render(scene, camera)`.
+     *
+     * `onRenderPass`, if given, is called with a boolean (true only for the
+     * scene pass) immediately after EVERY real renderer.render() call this
+     * method makes — while renderer.info.render still holds that call's own
+     * numbers, before the next render() resets them. It exists so a caller
+     * can own a whole-frame accumulator without this pass owning it: see
+     * index.html's `frameRenderTotals` / `tallyRenderPass`. Purely an
+     * observability hook — it never touches rendering state itself.
      */
-    render(scene, camera) {
+    render(scene, camera, onRenderPass) {
+      const tally = typeof onRenderPass === 'function' ? onRenderPass : null;
       // The world, into an offscreen buffer at full resolution.
       renderer.setRenderTarget(sceneTarget);
       renderer.clear();
@@ -384,10 +409,12 @@ export function createBloomPass(THREE, renderer, {
       // between the scene and the post passes, and that is the real number.
       frameStats.calls = renderer.info.render.calls;
       frameStats.triangles = renderer.info.render.triangles;
+      if (tally) tally(true);
 
       // Bright pass and downsample, half res. This buffer is the input to
       // BOTH the bloom blur and the light shafts.
       drawWith(brightMaterial, blurA);
+      if (tally) tally(false);
 
       // Light shafts, from the un-blurred bright buffer. Skipped outright
       // when the sun is off screen, which is most of the time — the cost is
@@ -403,6 +430,7 @@ export function createBloomPass(THREE, renderer, {
       if (raysOn || raysDirty) {
         raysMaterial.uniforms.tBright.value = blurA.texture;
         drawWith(raysMaterial, rayTarget);
+        if (tally) tally(false);
         if (raysOn) {
           // The dither that fixed the ghosting leaves its own signature: a
           // fine diagonal weave, chunky because the buffer is half resolution
@@ -413,9 +441,11 @@ export function createBloomPass(THREE, renderer, {
           blurMaterial.uniforms.tSource.value = rayTarget.texture;
           blurMaterial.uniforms.uDirection.value.set(1 / rayTarget.width, 0);
           drawWith(blurMaterial, blurB);
+          if (tally) tally(false);
           blurMaterial.uniforms.tSource.value = blurB.texture;
           blurMaterial.uniforms.uDirection.value.set(0, 1 / rayTarget.height);
           drawWith(blurMaterial, rayTarget);
+          if (tally) tally(false);
         }
         raysDirty = raysOn;
       }
@@ -424,13 +454,16 @@ export function createBloomPass(THREE, renderer, {
       blurMaterial.uniforms.tSource.value = blurA.texture;
       blurMaterial.uniforms.uDirection.value.set(1 / blurA.width, 0);
       drawWith(blurMaterial, blurB);
+      if (tally) tally(false);
       blurMaterial.uniforms.tSource.value = blurB.texture;
       blurMaterial.uniforms.uDirection.value.set(0, 1 / blurA.height);
       drawWith(blurMaterial, blurA);
+      if (tally) tally(false);
 
       // Composite plus vignette, the one full-resolution pass.
       compositeMaterial.uniforms.tBloom.value = blurA.texture;
       drawWith(compositeMaterial, null);
+      if (tally) tally(false);
     },
 
     dispose() {

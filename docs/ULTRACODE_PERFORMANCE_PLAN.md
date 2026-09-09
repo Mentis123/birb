@@ -265,6 +265,15 @@ be flipped is rejected before a single cheap task starts.
   export. Every telemetry field is verified by **injection**:
   `__BIRB.injectIntervals([...])` feeds a series whose p95 is far from its mean
   and the panel must display that exact p50/p95/p99.
+- **P2.1e** `sonnet/high` — **a seeded world RNG.** Found by G0, owned by nobody in the original
+  decomposition. `src/environment/` makes 76 unseeded `Math.random()` calls and there is no seeded
+  generator anywhere, so the control table's "Benchmark fixes seed, route, settings and sun" is
+  unsatisfiable — *there is no seed*. Every page load builds a different world, which makes any
+  two-load A/B in Waves 5–6 a comparison of two worlds rather than two settings, and is why G0's own
+  mean-pixel check could not resolve a small change. Thread one seeded generator (mulberry32 or
+  equivalent) through every environment builder, expose `__BIRB.worldSeed(n)`, and prove it: two loads
+  at the same seed must produce identical instanced-mesh translations. **Blocks Benchmark mode in
+  Wave 2 and Experiments 1 and 5 in Wave 5.**
 - **P2.4** `haiku ×2` — pinned-state line in `birb-shot`, `birb-sheet` **and
   `birb-lighting`** (it pins tier 0 too); nest tiles stamped `NOT LANDED — not
   visual evidence` on timeout; CI wiring.
