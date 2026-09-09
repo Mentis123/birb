@@ -41,7 +41,19 @@ export const DEV_GESTURE_DEFAULTS = Object.freeze({
   fingers: 3,   // the first touch count this game can never produce on its own:
                 // one is the stick, two is stick + boost / the sprint tracker.
   gatherMs: 250,
-  holdMs: 350,
+  // 350 ms was tuned for a deliberate PRESS and rejected a tap. Reported from a
+  // real iPhone: "three finger tap should do something?" — and it did nothing,
+  // silently, which is the worst answer a gesture can give. A purposeful
+  // three-finger tap lands around 80-150 ms, so the old value sat just above
+  // the thing people actually do.
+  //
+  // 120 ms is safe here in a way it would not be in another app, because three
+  // simultaneous contacts is a count this game can never produce on its own
+  // (one is the stick, two is stick + boost). The protection against a stray
+  // brush is that all three must ARRIVE together within gatherMs and then
+  // RELEASE — a rolling palm contact satisfies neither. The hold is what stops
+  // a resting hand arming it, and 120 ms is still ten times a spurious sample.
+  holdMs: 120,
 });
 
 export const DEV_GESTURE_STATES = Object.freeze({
