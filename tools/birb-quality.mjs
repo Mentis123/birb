@@ -96,6 +96,7 @@ import {
 import {
   ASSERTIONS, ASSERTION_IDS, MUTATIONS, mutationCoverage, exitCodeFor, matchesExpectedRed,
 } from './lib/quality-assertions.mjs';
+import { LIVE_CAPTURES as PANEL_CAPTURES } from './lib/quality-captures.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -464,12 +465,23 @@ async function captureA9(page) {
   return { before, samplesAfter, sunVisible };
 }
 
+// G2d gate decision, and the ONE authorised edit to this frozen harness.
+//
+// Creating src/ui/dev-quality-panel.js and dev-gesture.js flipped seven
+// assertions to "available" here, and this file had no capturer for any of
+// them — so A1/A2/A3/A5/A10/A11/A12 were ungraded and --check all exited 1 for
+// a harness reason, not a finding. Wave 2R wrote the seven capturers into the
+// unfrozen tools/lib/quality-captures.mjs and correctly refused to edit this
+// file to wire them in (R5). The wiring is a gate decision, taken here: an
+// import ADDS capturers and cannot weaken an assertion, and the manifest is
+// re-hashed in the same commit.
 const LIVE_CAPTURES = Object.freeze({
   A4: captureA4,
   A6: captureResizeRestore,
   A7: captureA7,
   A8: captureA8,
   A9: captureA9,
+  ...PANEL_CAPTURES,
 });
 
 // ---------------------------------------------------------------------------
@@ -573,6 +585,35 @@ async function doCheck(args) {
     const results = [];
     for (const id of ids) {
       console.log(`\n--- ${id} (${ASSERTIONS[id].title}) ---`);
+      // G2d gate decision, second and last authorised edit to this frozen file.
+      //
+      // `--check all` deliberately boots ONE page — SwiftShader costs 20-60s a
+      // boot and twelve would price this gate out of CI. But A6 walks the
+      // renderer through tier0 -> degrade -> resize -> restore and scores every
+      // buffer against the ratio in force, so ANY assertion that ran before it
+      // and left a routed quantity moved changes its verdict. Measured: A6
+      // passed standalone and failed inside `--check all`, beginning its tier0
+      // step at the 1.3 captureA3 left on the DPR slider. Restoring per
+      // quantity in the capturers was tried and does not converge — the shared
+      // surface is larger than the one control.
+      //
+      // A check whose verdict depends on which siblings ran before it is not a
+      // check, so A6 alone gets a clean page. One extra boot, and the assertion
+      // this whole wave exists to satisfy stops being order-dependent.
+      if (id === 'A6' && ids.length > 1) {
+        const iso = await boot();
+        try {
+          results.push(await runOneCheck(iso.page, id, args));
+          if (iso.pageErrors.length || iso.consoleErrors.length) {
+            console.error('A6 ISOLATED PAGE ERRORS:\n  '
+              + iso.pageErrors.concat(iso.consoleErrors).join('\n  '));
+            results.push({ id: 'A6-isolation', state: 'fail', message: 'errors on the isolated page' });
+          }
+        } finally {
+          await iso.close();
+        }
+        continue;
+      }
       results.push(await runOneCheck(session.page, id, args));
     }
     printCoverageLine();

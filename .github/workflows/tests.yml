@@ -14,9 +14,12 @@ jobs:
         run: npm test
       - name: Run performance-instrumented tests
         # The BIRB_PERF_IMPL environment variable enables the Wave 2 quality-assertion
-        # test suites. They are not yet fully green (one failing test in FS-A1b),
-        # so this step continues on error. Wave 2 (P2.1–P2.4) will complete them.
-        # Once fully green, remove continue-on-error and integrate these into the
-        # base test suite.
+        # test suites. FS-A1b (the percentile-implementation defect docs/perf/gates/G2a.md
+        # and G2c.md tracked across three gates) is fixed and passing as of this wave.
+        # Measured on this tree it is not yet fully green regardless — remaining
+        # failures are in-flight elsewhere in this same wave (Wave 2R) and are not this
+        # step's concern to fix — so this step still continues on error. Once the full
+        # BIRB_PERF_IMPL suite is green, remove continue-on-error and fold these into
+        # the base `npm test` step above instead of running the suite twice.
         run: BIRB_PERF_IMPL=1 npm test
         continue-on-error: true

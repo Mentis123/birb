@@ -77,9 +77,9 @@ f9d96ad5dfb918df5985298b4e25c7daa639bb9c27e76785b0fc4c20c1fcbd07  tests/visual-u
 b086039c1b8f9f55450f1637a3f385d328cb655cc6c7121a809f0e83a3747a18  tests/water.test.js
 651573cfedd60d6b5bb9c6a9883682a3c7cb8048629b73774e3fd7061d66b973  tests/weather.test.js
 # --- browser/visual harnesses ------------------------------------------------
-28e1c629e0922a6aeda19899fed6e62c76f1db282593bc8243df5793969fd071  tools/birb-shot.mjs
-72f0dc16859580e21bbe9eba1c7149c496ad5ad6657783d6fe09b9a0e5243749  tools/birb-sheet.mjs
-1660ea9737bac27d29189c7bf41f24318d3a7b22230a515047df5a2a15598b86  tools/birb-lighting.mjs
+a8c11a1e313c1e33ae5329ed87245b4994a0759e3d2c63c3bc68ffc9f2ca8f41  tools/birb-shot.mjs
+e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-sheet.mjs
+ef02bf80a755f505703284905ab97aa88681cee6b6b667cfb2f635fea7409db7  tools/birb-lighting.mjs
 1e76f9c9bffdcbb14a8be5d5f16eebf32ffa9c1312feba3933894a2c4f97889f  tools/birb-modes.mjs
 708d15c40998957495c2548394cd806d602c4255ee7776ac509f64639ff9e76b  tools/birb-shaders.mjs
 # --- the contract ------------------------------------------------------------
@@ -88,12 +88,15 @@ b086039c1b8f9f55450f1637a3f385d328cb655cc6c7121a809f0e83a3747a18  tests/water.te
 839a5bee550e812df229f09c21940bd40a20c55cf759d94b6d3b31527bc85e33  tools/req-verify.mjs
 # --- Wave 1: the oracles Wave 2 spends (R5: implementers must not edit these) ---
 3b5974b1d9797b903ebe8117413691a01244b3387cbc6bbfad77d8a2308a8db2  tools/lib/quality-assertions.mjs
-faea3cb97ee3bc241f2aa7e56d88edbe8878a5016747c835afe8f49ec9368815  tools/birb-quality.mjs
+569f7d69d90a3ad0ccc1825c1e6f2f5e5f770dd32c11e31e72d68072a6730fc9  tools/birb-quality.mjs
 73a14e636dfbf1bcd7c6b0b16bb21b9b4c1af0edef233edaf7423938c94aa2ba  tests/frame-metrics-stats.test.js
 0f58a56fd72a386c17ea6bf514348dd71a06ce70ce079d87578a02985b87bae0  tests/quality-settings.test.js
 968016b32e29f80105a0a3ec43faa9ca28f4d67faf46cdde37fbac9ae3d52005  tests/frame-stats-totals.test.js
 d77a5feddd1d23950901b66430f44fa1dc29750603a703b6781ab6cb5d15097f  tests/gpu-timer.test.js
 4a7daa35f688b6eb8df6e8dd552de8581b12caf8ae0ca1f926cca8c78104bd3d  tests/dev-gesture.test.js
 13572bdc24496baa32786aa6c2fe1b949c73ba42d4cf20abd3f18966ed0fd8e8  tests/quality-assertions.test.js
-f1cd0e693d1d0f9462f5ac89e930fbfbe4c72aa93a9c4d3390b2d01fbb6b66d2  docs/perf/EXPECTED-RED.md
+058b8c336d2722c3a9259244fd44257517c54e24cc359a6d4f27467bc2e2f72d  docs/perf/EXPECTED-RED.md
 b5ac0092f6773dd03b3c48978f44ba3a4b970f0a4cfa9dbff8fc3b02a256885f  docs/perf/ASSERTIONS.md
+# --- Wave 2R: capturers, the superseded RED manifest, the seeded generator ---
+c732e32e657b6f811170e8deed2e83d79e852d2b873fa42ce2cae41f5f11e7aa  tools/lib/quality-captures.mjs
+9810099045fa2bcddb109fda68a1fc920c52a68b7f2f02464a51a93d1325d76c  src/environment/seeded-random.js

@@ -1,5 +1,30 @@
 # EXPECTED-RED — what `birb-quality --check resize-restore` must report failing on HEAD
 
+> ## SUPERSEDED — the bug this file describes is FIXED (G2d gate decision, Wave 2R)
+>
+> `--check resize-restore` now exits **0** and A6 reports **pass**: all four steps are
+> coherent, including `restored`. Wave 2's single sizing function (P2.2b) closed the
+> `applyTier`/bloom/weather desync this manifest was written to pin down, and G2b proved
+> the causation by reverting that one change and watching A6 go red again.
+>
+> **This file is retained as the historical record of the defect, not as a live expectation.**
+> §4 of this document required that any revision be a gate decision rather than a harness
+> convenience; G2c §7.1 authorised it and G2d took it.
+>
+> Two things it still governs, and they are the reason it is not deleted:
+>
+> 1. **`EXPECTED_RED_HEAD` in `tools/lib/quality-assertions.mjs` still encodes these values**,
+>    and `matchesExpectedRed()` therefore now reports `matches: false` with the differences
+>    listed. That is correct and expected: the tree no longer matches the broken manifest.
+>    The frozen assertion was not edited to make it agree — R5 — and `--check resize-restore`
+>    scores A6 on coherence, not on matching this file.
+> 2. **The four-step sequence in §1 is still the required shape of the check.** A run
+>    truncated at step 2 is red today for the right reason and would go green forever the
+>    moment anyone touched the sizing path. If A6 is ever rewritten, it keeps all four steps.
+>
+> If A6 goes red again, this manifest is the description of the bug that came back.
+
+
 Wave 1 / task **P1.2** of [docs/ULTRACODE_PERFORMANCE_PLAN.md](../ULTRACODE_PERFORMANCE_PLAN.md) §4.
 Authority for everything below: [`CONTRACT.md`](CONTRACT.md) §4 (A6), §5.1 (harness context),
 §7.2 (the routing register). Machine-readable twin: `EXPECTED_RED_HEAD` in

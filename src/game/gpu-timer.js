@@ -47,19 +47,21 @@ export function createGpuTimer({ getContext }) {
   // ----- Capability Probe -----
 
   let probeState = null;  // { state: string, reason: string|null, available: boolean }
+  let cachedExtension = null;  // Cache the extension object from the probe
 
   function probeCapability() {
-    // Always re-probe if context is lost, even if we cached a probe
-    if (isContextLost()) {
+    const gl = getContext();
+
+    // Invalidate cache if context is lost or gone
+    if (!gl || (gl.isContextLost && typeof gl.isContextLost === 'function' && gl.isContextLost())) {
       probeState = null;
+      cachedExtension = null;
     }
 
     // Probe only once per context unless it was lost
     if (probeState) {
       return probeState;
     }
-
-    const gl = getContext();
 
     // Precedence: no-context > not-webgl2 > no-extension
     if (!gl) {
@@ -86,6 +88,8 @@ export function createGpuTimer({ getContext }) {
       return probeState;
     }
 
+    // Cache the extension object
+    cachedExtension = ext;
     probeState = { state: 'ok', reason: null, available: true };
     return probeState;
   }

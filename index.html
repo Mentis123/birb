@@ -3438,6 +3438,11 @@
       createWorldShell = worldModule.createWorldShell;
       ENVIRONMENT_VARIANTS = worldModule.ENVIRONMENT_VARIANTS;
       getEnvironmentDefinition = worldModule.getEnvironmentDefinition;
+      // Wave 2R shipped the seeded world generator; __BIRB.worldSeed() needs
+      // its setter, and every environment builder already draws from it.
+      const seededRandomModule = await import("./src/environment/seeded-random.js");
+      var setWorldSeed = seededRandomModule.setWorldSeed;
+      var getWorldSeed = seededRandomModule.getWorldSeed;
       const sphericalWorldModule = await import("./src/environment/spherical-world.js");
       var createSphericalWorld = sphericalWorldModule.createSphericalWorld;
       var SPHERE_RADIUS = sphericalWorldModule.SPHERE_RADIUS;
@@ -10099,6 +10104,12 @@
               ).toFixed(2) : null,
           elapsed: +(motionState.elapsed ?? 0).toFixed(2),
           pinned: adaptiveTier.isPinned(),
+          // GAP-A2 (docs/perf/ASSERTIONS.md §5): sprintState.active had no
+          // reader anywhere on __BIRB — setSprint() writes it, nothing read
+          // it back — so A2's "the two-finger sprint survives" half was
+          // structurally unreadable. This is the harness hook the gap asked
+          // for; it changes no gameplay behaviour.
+          sprintActive: !!(sprintState && sprintState.active),
         }),
         // Whole-frame draw calls/triangles, summed across EVERY
         // renderer.render() call this frame (frameRenderTotals is reset once
@@ -10166,22 +10177,21 @@
             sentinelFields: ['cooldown', 'lastAdjustment.reason'],
           };
         },
-        // P2.1f / G2a finding 4.2: P2.1e's seeded world RNG (mulberry32
-        // threaded through spherical-world.js / world-shell.js / weather.js /
-        // collectibles.js) was never shipped — `src/environment/` still has
-        // 76 raw `Math.random()` call sites and no seeded-random.js exists on
-        // disk. This method therefore cannot seed anything real. It reports
-        // the sentinel HONESTLY rather than pretending a lock exists (the
-        // same rule that keeps `panelGetEvidence().seed` a sentinel above) —
-        // returning a fabricated "seeded" value here would be a worse defect
-        // than leaving the method a stub, because a caller (BAT-3's seeded
-        // capture route, Experiments 1/5) would build on a determinism
-        // guarantee that isn't there. Re-implement this for real once
-        // src/environment/seeded-random.js exists and is wired through the
-        // builders; until then `n` is intentionally unused.
+        // G2d: this returned the not-implemented sentinel, and its comment
+        // asserted as present fact that "src/environment/ still has 76 raw
+        // Math.random() call sites and no seeded-random.js exists on disk".
+        // Wave 2R shipped src/environment/seeded-random.js and threaded it
+        // through the builders, so both clauses were false — text asserting the
+        // opposite of the tree, which is the defect class G2c §3.5 caught in
+        // the CI step names in the same wave.
+        //
+        // Seeding takes effect on the next world build, so this reports the
+        // seed it set AND whether a rebuild is still owed, rather than implying
+        // the world in front of you is already the seeded one.
         worldSeed: (n) => {
-          void n;
-          return qualitySentinel(QUALITY_SENTINEL_REASONS.NOT_IMPLEMENTED);
+          if (n === undefined) return getWorldSeed();
+          setWorldSeed(n);
+          return { seed: getWorldSeed(), appliesOn: 'next-world-build' };
         },
         // P2.3b — verify every displayed percentile by INJECTION rather than
         // by eye: feed a known series (e.g. mostly 12ms with a scattered 40ms

@@ -42,6 +42,8 @@
  *  - box: how large a volume is kept populated around the camera. Bigger
  *    boxes need more particles for the same density.
  */
+import { worldRng } from './seeded-random.js';
+
 export const WEATHER_PROFILES = {
   forest: {
     // Pollen and midges in warm air: barely falls, wanders, catches the light.
@@ -161,9 +163,17 @@ const FRAG = `
  * @param profile one of WEATHER_PROFILES
  * @returns { points, update(seconds, cameraPos, localUp), setDensity(0..1), dispose() }
  */
-export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
+export function createWeather(THREE, { profile, count, pixelRatio = 1, id } = {}) {
   const p = profile || WEATHER_PROFILES.forest;
   const total = Math.max(1, Math.floor(count ?? p.count));
+  // Its own named stream (see seeded-random.js) — independent of the ground
+  // builders in spherical-world.js / world-shell.js and of collectibles.js,
+  // so a seeded world's weather is reproducible without being coupled to
+  // how many props any other subsystem happened to place. `id` lets a
+  // future caller distinguish per-biome weather instances; unset callers
+  // (the only ones today) all share one 'weather' stream, which is still a
+  // fully independent subsystem stream on its own.
+  const rng = worldRng(`weather:${id ?? 'default'}`);
 
   const geometry = new THREE.BufferGeometry();
   // position is required by Three's Points, but every coordinate this shader
@@ -173,10 +183,10 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(total * 3), 3));
   const seeds = new Float32Array(total * 4);
   for (let i = 0; i < total; i++) {
-    seeds[i * 4] = Math.random();
-    seeds[i * 4 + 1] = Math.random();
-    seeds[i * 4 + 2] = Math.random();
-    seeds[i * 4 + 3] = Math.random();
+    seeds[i * 4] = rng();
+    seeds[i * 4 + 1] = rng();
+    seeds[i * 4 + 2] = rng();
+    seeds[i * 4 + 3] = rng();
   }
   geometry.setAttribute('aSeed', new THREE.Float32BufferAttribute(seeds, 4));
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);

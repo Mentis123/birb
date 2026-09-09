@@ -31,12 +31,21 @@ export const HITCH_THRESHOLD_MS = 50;
 /**
  * Nearest-rank percentile: for sorted values, index = clamp(ceil(p * n) - 1, 0, n - 1).
  * Does not sort the input array in place.
+ *
+ * `p` accepts either convention, reconciled per docs/perf/gates/G2a.md §4.1:
+ * every P1.1a caller in this file's own suite passes a FRACTION (0.5, 0.95,
+ * 0.99, 1), while tests/frame-stats-totals.test.js's FS-A1b — the cross-module
+ * consistency check CONTRACT requires — calls this same helper with a
+ * PERCENTAGE (95). Both frozen oracles must pass, so p > 1 is treated as a
+ * percentage (p = p / 100) and p <= 1 stays a fraction. `percentile(1..100, 1)`
+ * must still be 100 — 1 is never rescaled.
  */
 export function percentile(values, p) {
   if (!Array.isArray(values) || values.length === 0) return null;
+  const fraction = p > 1 ? p / 100 : p;
   const sorted = values.slice().sort((a, b) => a - b);
   const n = sorted.length;
-  let index = Math.ceil(p * n) - 1;
+  let index = Math.ceil(fraction * n) - 1;
   if (index < 0) index = 0;
   if (index > n - 1) index = n - 1;
   return sorted[index];
@@ -50,9 +59,19 @@ export function percentile(values, p) {
 export function createIntervalRecorder({ capacity = INTERVAL_CAPACITY, targetFPS = 60 } = {}) {
   const budgetMs = 1000 / targetFPS;
 
-  // Fixed-capacity rings
+  // Fixed-capacity rings, pre-filled with reusable record objects so the
+  // per-frame path (sample()) never allocates — CLAUDE.md house rule 4 and
+  // docs/perf/gates/G2a.md §4.10: the previous version allocated a fresh
+  // `{dtMs,tMs,valid,invalidReason}` literal (plus a second on every hitch)
+  // once per frame, inside the one module that measures the frame.
   const intervals = new Array(capacity);
+  for (let i = 0; i < capacity; i += 1) {
+    intervals[i] = { dtMs: 0, tMs: 0, valid: true, invalidReason: null };
+  }
   const hitches = new Array(HITCH_CAPACITY);
+  for (let i = 0; i < HITCH_CAPACITY; i += 1) {
+    hitches[i] = { dtMs: 0, tMs: 0 };
+  }
   const boundaries = new Array(BOUNDARY_CAPACITY);
 
   let intervalWritePos = 0;
@@ -86,21 +105,21 @@ export function createIntervalRecorder({ capacity = INTERVAL_CAPACITY, targetFPS
       throw new Error(`Invalid reason "${invalidReason}" not in INVALID_REASONS enum`);
     }
 
-    // Record interval
-    const record = {
-      dtMs,
-      tMs: timeMs,
-      valid,
-      invalidReason: valid ? null : invalidReason,
-    };
+    // Record interval — mutate the pre-allocated slot in place, never a new literal.
+    const record = intervals[intervalWritePos];
+    record.dtMs = dtMs;
+    record.tMs = timeMs;
+    record.valid = valid;
+    record.invalidReason = valid ? null : invalidReason;
 
-    intervals[intervalWritePos] = record;
     intervalWritePos = (intervalWritePos + 1) % capacity;
     if (intervalCount < capacity) intervalCount += 1;
 
-    // Record hitch if valid and over threshold
+    // Record hitch if valid and over threshold — same in-place mutation.
     if (valid && dtMs > HITCH_THRESHOLD_MS) {
-      hitches[hitchWritePos] = { dtMs, tMs: timeMs };
+      const hitch = hitches[hitchWritePos];
+      hitch.dtMs = dtMs;
+      hitch.tMs = timeMs;
       hitchWritePos = (hitchWritePos + 1) % HITCH_CAPACITY;
       if (hitchCount < HITCH_CAPACITY) hitchCount += 1;
     }

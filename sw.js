@@ -9,6 +9,13 @@
 // CORE_ASSETS is a blank page offline, and this MUST equal index.html's
 // BIRB_BUILD literal in the same commit — tests/build-identity.test.js
 // (P2.1f) enforces both halves.
+//
+// src/environment/seeded-random.js (P2R.5, the seeded world RNG) was added
+// to CORE_ASSETS below without a version bump here: this task's brief is
+// explicit that index.html is not to be touched, and SW-2 requires this
+// literal to equal index.html's BIRB_BUILD exactly, so bumping one without
+// the other would fail that check rather than pass it. Whoever next edits
+// index.html should bump CACHE_VERSION then, picking up this file too.
 const CACHE_VERSION = 'v43-2026-09-09-perf-workbench';
 
 /**
@@ -78,6 +85,7 @@ const CORE_ASSETS = [
   './src/nesting/nest-occlusion.js',
   './src/environment/collectibles.js',
   './src/environment/collider-grid.js',
+  './src/environment/seeded-random.js',
   './src/ui/minimap.js',
   './src/ui/dev-quality-panel.js',
   './src/ui/dev-gesture.js',

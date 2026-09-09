@@ -237,6 +237,7 @@ export function createBloomPass(THREE, renderer, {
   let lastWidth = 1;
   let lastHeight = 1;
   let lastRatio = 1;
+  let hasSizeBeenSet = false;
   let currentDownscale = downscale;
 
   const sceneTarget = new THREE.WebGLRenderTarget(1, 1, targetOptions);
@@ -327,6 +328,7 @@ export function createBloomPass(THREE, renderer, {
     lastWidth = width;
     lastHeight = height;
     lastRatio = ratio;
+    hasSizeBeenSet = true;
     const w = Math.max(1, Math.floor(width * ratio));
     const h = Math.max(1, Math.floor(height * ratio));
     sceneTarget.setSize(w, h);
@@ -388,6 +390,9 @@ export function createBloomPass(THREE, renderer, {
      * derivation, not because the shader maths requires it.
      */
     setDownscale(n) {
+      // Guard against setDownscale being called before the first setSize
+      if (!hasSizeBeenSet) return;
+
       const next = Math.max(1, Math.floor(n) || 1);
       if (next === currentDownscale) return;
       currentDownscale = next;

@@ -57,7 +57,14 @@ export const BENCHMARK_FROZEN = ['seed', 'route', 'settings', 'sun'];
  * @returns {Object} instance
  *   .mode — current mode string (auto/manual/benchmark)
  *   .setMode(mode) — throws RangeError on unknown mode
- *   .request({ source, key, value }) — route a request; returns record
+ *   .request({ source, key, value }) — route a request; returns record with fields:
+ *       { key, source, requested, effective, clamped, desync, changed, applied, rejected, reason? }
+ *       - requested: the value exactly as requested, unmodified
+ *       - effective: the value read back from the live object after apply (CONTRACT §0)
+ *       - clamped: true if the injected clamp function bounded the request
+ *       - desync: true if effective !== what was handed to apply (the headline defect)
+ *       - changed: true if effective before and after apply differ
+ *       - applied: true only if request was not rejected and not desync
  *   .sealDefaults() — end the probe's defaults window
  *   .setPaused(bool) — mark samples valid/invalid for adaptive decisions
  *   .setLearningEnabled(bool) — the user's learning preference (PNL-5)
@@ -105,13 +112,16 @@ export function createQualitySettings({
         }
         learningEnabled = false;
       }
-      // Exiting BENCHMARK to AUTO: thaw everything, restore learning, reset history.
-      else if (oldMode === QUALITY_MODES.BENCHMARK && newMode === QUALITY_MODES.AUTO) {
+      // Exiting BENCHMARK: thaw everything, restore learning. Reset history only when entering AUTO.
+      else if (oldMode === QUALITY_MODES.BENCHMARK) {
         for (const item of BENCHMARK_FROZEN) {
           freeze(item, false);
         }
         learningEnabled = userLearningPreference;
-        onResetHistory({ tag: RESET_TAGS.MANUAL, mode: newMode, atMs: now() });
+        // Only reset history when transitioning to AUTO, not to MANUAL
+        if (newMode === QUALITY_MODES.AUTO) {
+          onResetHistory({ tag: RESET_TAGS.MANUAL, mode: newMode, atMs: now() });
+        }
       }
       // Entering MANUAL: suspend learning (but preserve the user's preference).
       else if (newMode === QUALITY_MODES.MANUAL) {
@@ -177,9 +187,39 @@ export function createQualitySettings({
       // Read effective after apply (CONTRACT §0: never recomputed from intent).
       const effectiveAfter = readEffective(key);
       const changed = effectiveBefore !== effectiveAfter;
-      // Clamped is true if the effective value differs from the requested value.
-      // This covers both the injected clamp function and the live object's quantization.
-      const clamped = value !== effectiveAfter;
+
+      // Clamped: the request was not honoured in full — the gap between what
+      // the panel asked for and what the live object came back with.
+      //
+      // G2d gate decision. Wave 2R redefined this as `clampedValue !== value`
+      // on G2a's prose recommendation, which broke QS-A6 and QS-A7 — two FROZEN
+      // assertions that were green. The suite defines the term deliberately and
+      // says so in its own failure message: "the gap between the two is
+      // reported as a clamp". From the panel's side that is the reportable
+      // fact, and WHICH layer bounded the request (a clamp function, or the
+      // renderer refusing it) is a separate question. R5: the oracle wins over
+      // advice about the oracle.
+      const clamped = effectiveAfter !== value;
+
+      // Desync: the live object did not accept the value handed to apply.
+      // This is the distinction G2a was actually reaching for, and it is kept —
+      // additively, because it is real. A clamp function bounding 1.73 to 1.7
+      // is an honest clamp; the live object ignoring what it was handed is the
+      // headline defect class this programme exists to detect, and only this
+      // field separates them.
+      const desync = effectiveAfter !== clampedValue;
+
+      // Applied: the request actually reached the live object AND moved it.
+      // G2a §4.7's real finding was here, not in `clamped`: with apply wired to
+      // nothing, this used to report true. A record claiming a request was
+      // applied when no rendering state moved is the exact failure G2b exists
+      // to detect, appearing inside the module that reports it.
+      // Not `!desync`: QS-A6's rig injects the quantiser on the RENDERER, so a
+      // live object that legitimately snaps 1.73 to its own 0.05 grid reports
+      // desync while having genuinely applied the request. Rendering state
+      // moving is the evidence; re-requesting the value already in force is
+      // honest too, and is the second clause.
+      const applied = changed || effectiveAfter === clampedValue;
 
       // Build the record.
       const record = {
@@ -188,8 +228,9 @@ export function createQualitySettings({
         requested: value,
         effective: effectiveAfter,
         clamped,
+        desync,
         changed,
-        applied: true,
+        applied,
         rejected: false,
       };
 
@@ -223,6 +264,7 @@ export function createQualitySettings({
           requested: record.requested,
           effective: record.effective,
           clamped: record.clamped,
+          desync: record.desync,
         };
       }
 

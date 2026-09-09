@@ -8,7 +8,16 @@
  * Exports two functions:
  *   evaluateAcceptanceGates(samples, { targetFPS, thresholds? })
  *   evaluateOscillation(tierChangeLog, { settleMs?, windowMs?, observedMs, maxReversals? })
+ *
+ * Percentiles are computed by the ONE shared helper in `frame-metrics.js`
+ * (docs/perf/CONTRACT.md: "the value the controller fires on and the value
+ * the acceptance gate scores must be computed by the same module, or the
+ * loop is closed against itself" — see docs/perf/gates/G2a.md §4.1). This
+ * module used to carry its own private `nearestRankPercentile`; it disagreed
+ * with `frame-metrics.percentile` and was O(n^2) on top of that (§4.11).
  */
+
+import { percentile as sharedPercentile, HITCH_THRESHOLD_MS } from './frame-metrics.js';
 
 // ============================================================================
 // ACCEPTANCE GATES — thresholds and provenance (CONTRACT §10)
@@ -30,7 +39,11 @@ export const ACCEPTANCE_THRESHOLDS = {
   p95MaxMs: 18.5,               // PRO-10
   longIntervalMs: 25,           // PRO-11
   longIntervalMaxFraction: 0.01, // PRO-11: < 1%
-  spikeMs: 50,                  // PRO-12
+  // PRO-12: derived from frame-metrics' own HITCH_THRESHOLD_MS, not restated —
+  // docs/perf/gates/G2a.md §4.12: the same provisional number declared twice
+  // in two modules is a number Wave 4 will change in one place and not the
+  // other, with nothing to say so (CONTRACT §10 rule 2: one named constant).
+  spikeMs: HITCH_THRESHOLD_MS,
   spikeRecurrenceCount: 3,      // min occurrences to call it "recurring"
   minSamples: 100,              // sufficiency floor (testable as <<, unmeasured value)
 };
@@ -102,39 +115,6 @@ const VALID_TAGS = new Set([
  */
 function sentinel(reason) {
   return { value: null, state: 'unavailable', reason };
-}
-
-// ============================================================================
-// PERCENTILE COMPUTATION
-// ============================================================================
-
-/**
- * Nearest-rank percentile over values.
- * P_q is the smallest observed value v such that at least q% of the values
- * are <= v. This is the definition used by CONTRACT §3 and tests/frame-stats-totals.test.js.
- *
- * @param {number[]} values — sorted or unsorted, must be non-empty
- * @param {number} q — percentile: 50, 95, 99, etc.
- * @returns {number} the percentile value, or null if empty
- */
-function nearestRankPercentile(values, q) {
-  if (values.length === 0) return null;
-
-  const n = values.length;
-  const need = Math.ceil((q / 100) * n);
-
-  // Count how many values are <= each unique candidate.
-  const sorted = values.slice().sort((a, b) => a - b);
-  for (const v of sorted) {
-    let count = 0;
-    for (const x of values) {
-      if (x <= v) count += 1;
-    }
-    if (count >= need) return v;
-  }
-
-  // Fallback: should not reach here
-  return sorted[sorted.length - 1];
 }
 
 // ============================================================================
@@ -277,12 +257,13 @@ export function evaluateAcceptanceGates(samples, { targetFPS, thresholds } = {})
 
   let acc1Pass = false;
   let acc2Pass = false;
+  let acc2Value = insufficientSentinel;
 
   if (sufficient) {
     // Compute percentiles over valid intervals only
-    p50 = nearestRankPercentile(validIntervals, 50);
-    p95 = nearestRankPercentile(validIntervals, 95);
-    p99 = nearestRankPercentile(validIntervals, 99);
+    p50 = sharedPercentile(validIntervals, 50);
+    p95 = sharedPercentile(validIntervals, 95);
+    p99 = sharedPercentile(validIntervals, 99);
 
     // Missed-target percentage: count intervals > budget / total valid
     let missedCount = 0;
@@ -301,21 +282,29 @@ export function evaluateAcceptanceGates(samples, { targetFPS, thresholds } = {})
     }
     const longFraction = validCount > 0 ? longCount / validCount : 0;
     acc2Pass = longFraction <= T.longIntervalMaxFraction;
+    // Reported alongside its own threshold (T.longIntervalMaxFraction * 100) —
+    // docs/perf/gates/G2a.md §4.3: the gate used to score longFraction but
+    // report missedTargetPct (a different quantity, against B not 25ms) next
+    // to it, so a passing ACC-2 could display e.g. 40 against a threshold of 1.
+    acc2Value = longFraction * 100;
   }
 
   // ========================================================================
   // ACC-3: no recurring unexplained spikes
   // ========================================================================
 
-  let unexplainedSpikes = 0;
+  let unexplainedSpikes = insufficientSentinel;
   let acc3Pass = true;
 
   if (sufficient) {
-    // Count spikes > spikeMs that are NOT tagged (i.e., unexplained)
+    // Count spikes > spikeMs that are NOT tagged (i.e., unexplained) AND not
+    // excluded by validity. docs/perf/gates/G2a.md §4.4 / CONTRACT §2.2: tags
+    // EXPLAIN spikes, validity EXCLUDES samples — different axes. A hidden-tab
+    // frame (valid:false, no tag) previously counted as an unexplained spike.
     const spikeOccurrences = [];
     for (let i = 0; i < samples.length; i += 1) {
       const sample = samples[i];
-      if (sample.dtMs > T.spikeMs && !sample.tag) {
+      if (sample.valid !== false && sample.dtMs > T.spikeMs && !sample.tag) {
         spikeOccurrences.push(i);
       }
     }
@@ -354,7 +343,7 @@ export function evaluateAcceptanceGates(samples, { targetFPS, thresholds } = {})
         ? { pass: acc1Pass, value: p95, threshold: T.p95MaxMs }
         : insufficientSentinel,
       'ACC-2': sufficient
-        ? { pass: acc2Pass, value: missedTargetPct, threshold: T.longIntervalMaxFraction * 100 }
+        ? { pass: acc2Pass, value: acc2Value, threshold: T.longIntervalMaxFraction * 100 }
         : insufficientSentinel,
       'ACC-3': sufficient
         ? { pass: acc3Pass, value: unexplainedSpikes, threshold: T.spikeRecurrenceCount }
@@ -409,16 +398,24 @@ export function evaluateOscillation(tierChangeLog, { settleMs, windowMs, observe
   // Sufficiency check: do we have enough observed time?
   // ========================================================================
 
-  const minObservedMs = settleWindow + evalWindow;
-  if (observed < minObservedMs) {
+  const endMs = settleWindow + evalWindow;
+  if (observed < endMs) {
     return sentinel('insufficient-samples');
   }
 
   // ========================================================================
-  // Filter to entries after the settle window
+  // Filter to entries INSIDE the window this function reports.
+  //
+  // docs/perf/gates/G2a.md §4.9: this used to filter only `entry.tMs >=
+  // settleWindow` with no upper bound, while the returned `window` advertised
+  // `{ startMs: settleMs, endMs: settleMs + windowMs }` — so a reversal at,
+  // say, 80s was counted and blamed on a "window" that reports itself as
+  // closing at 35s. Bounded here by endMs, chosen over widening the reported
+  // window: PRO-13's window is "evaluate reversals in this window after
+  // settling", a fixed evaluation period, not "however long the log runs".
   // ========================================================================
 
-  const settled = tierChangeLog.filter((entry) => entry.tMs >= settleWindow);
+  const settled = tierChangeLog.filter((entry) => entry.tMs >= settleWindow && entry.tMs <= endMs);
 
   // ========================================================================
   // Count reversals in the settled window
@@ -455,7 +452,7 @@ export function evaluateOscillation(tierChangeLog, { settleMs, windowMs, observe
     reversals,
     window: {
       startMs: settleWindow,
-      endMs: settleWindow + evalWindow,
+      endMs,
     },
   };
 }

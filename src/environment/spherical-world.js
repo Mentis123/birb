@@ -6,6 +6,7 @@ import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
+import { worldRng } from "./seeded-random.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -19,6 +20,14 @@ const SPHERE_RADIUS = 120;
 // into valleys instead of skating a perfect sphere. Set at the top of
 // createSphericalWorld; null = flat sphere (server/test builds).
 let _activeTerrainProfile = null;
+// RNG for the environment currently being built. Every builder function in
+// this file draws prop placement (position, rotation, scale, material pick)
+// from this single closure instead of Math.random() directly, so a seeded
+// world reproduces exactly. Set at the top of createSphericalWorld from
+// worldRng('spherical-world:<variant>') — unseeded (the default, `setWorldSeed`
+// never called) it IS Math.random, so an unseeded world is exactly as
+// nondeterministic as it always was. See ./seeded-random.js.
+let _activeRng = Math.random;
 // Sea level for the environment being built / currently active, in units below
 // the base radius; 0 means this world has no water.
 //
@@ -235,7 +244,7 @@ function fibonacciSpherePoints(count, radius) {
 }
 
 function randomInRange(min, max) {
-  return min + Math.random() * (max - min);
+  return min + _activeRng() * (max - min);
 }
 
 // ============================================================
@@ -256,10 +265,10 @@ function randomInRange(min, max) {
 function applyInstanceColorJitter(THREE, inst, count, baseR, baseG, baseB, lumJit, hueJit) {
   const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
-    const lum = 1 + (Math.random() * 2 - 1) * lumJit;
-    const r = baseR * lum + (Math.random() * 2 - 1) * hueJit;
-    const g = baseG * lum + (Math.random() * 2 - 1) * hueJit;
-    const b = baseB * lum + (Math.random() * 2 - 1) * hueJit;
+    const lum = 1 + (_activeRng() * 2 - 1) * lumJit;
+    const r = baseR * lum + (_activeRng() * 2 - 1) * hueJit;
+    const g = baseG * lum + (_activeRng() * 2 - 1) * hueJit;
+    const b = baseB * lum + (_activeRng() * 2 - 1) * hueJit;
     c.setRGB(
       r < 0 ? 0 : r > 1 ? 1 : r,
       g < 0 ? 0 : g > 1 ? 1 : g,
@@ -897,13 +906,13 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const placedAngles = [];
 
     // Pick 1-2 "champion" indices and 1-2 "shrimp" indices per grove
-    const championCount = 1 + (Math.random() < 0.4 ? 1 : 0);
-    const shrimpCount = 1 + (Math.random() < 0.5 ? 1 : 0);
+    const championCount = 1 + (_activeRng() < 0.4 ? 1 : 0);
+    const shrimpCount = 1 + (_activeRng() < 0.5 ? 1 : 0);
     const championSet = new Set();
     const shrimpSet = new Set();
-    while (championSet.size < championCount) championSet.add(Math.floor(Math.random() * treesInGrove));
+    while (championSet.size < championCount) championSet.add(Math.floor(_activeRng() * treesInGrove));
     while (shrimpSet.size < shrimpCount) {
-      const idx = Math.floor(Math.random() * treesInGrove);
+      const idx = Math.floor(_activeRng() * treesInGrove);
       if (!championSet.has(idx)) shrimpSet.add(idx);
     }
 
@@ -934,7 +943,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const trunkRadiusBottom = randomInRange(0.5, 1.0);
       const canopyHeight = randomInRange(8, 16);
       const canopyRadius = randomInRange(3, 6);
-      const canopyColorIdx = Math.floor(Math.random() * canopyMats.length);
+      const canopyColorIdx = Math.floor(_activeRng() * canopyMats.length);
 
       // Scale variation with champion / shrimp overrides for dramatic height variation
       let scale;
@@ -1061,7 +1070,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
     const depth = -th;                                                  // 0 plateau → deep valley
     const exposure = Math.max(0, Math.min(1, 1 - depth / 24));          // 1 exposed top → 0 valley
-    if (exposure > 0.82 && Math.random() < (exposure - 0.82) * 1.0) continue; // thin exposed tops
+    if (exposure > 0.82 && _activeRng() < (exposure - 0.82) * 1.0) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     if (submerged(pos)) continue;                                       // no trees in the lakes
     const up = pos.clone().normalize();
@@ -1070,7 +1079,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const canopyHeight = randomInRange(8, 15);
     const canopyRadius = randomInRange(3, 5.5);
     const scale = randomInRange(0.9, 2.0) * (0.78 + (1 - exposure) * 0.32); // dwarf tops, lush valleys
-    const canopyColorIdx = Math.floor(Math.random() * canopyMats.length);
+    const canopyColorIdx = Math.floor(_activeRng() * canopyMats.length);
     trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
     canopyPlacementsByColor[canopyColorIdx].push({ pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight });
     collisionSystem.addCollider(pos, Math.min(trunkRadiusBottom * scale * 1.2, 3.5), 'tree');
@@ -1168,7 +1177,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const posAttr = baseDiscGeom.getAttribute('position');
     for (let v = 1; v < posAttr.count; v++) {
       const cx = posAttr.getX(v), cy = posAttr.getY(v);
-      const jitter = 0.82 + Math.random() * 0.36;
+      const jitter = 0.82 + _activeRng() * 0.36;
       posAttr.setX(v, cx * jitter);
       posAttr.setY(v, cy * jitter);
     }
@@ -1252,7 +1261,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const scaleMul = randomInRange(1.0, 2.5);
       const s = baseRadius * scaleMul;
       dummy.position.copy(pos);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
       dummy.scale.set(s, s, s);
       dummy.updateMatrix();
       rockInst.setMatrixAt(i, dummy.matrix);
@@ -1313,8 +1322,8 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const _cloudQuat = new THREE.Quaternion();
   const _cloudOffset = new THREE.Vector3();
   for (let i = 0; i < cloudCount; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(1 - 2 * Math.random());
+    const theta = _activeRng() * Math.PI * 2;
+    const phi = Math.acos(1 - 2 * _activeRng());
     const center = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(40, 80));
     const up = center.clone().normalize();
     _cloudQuat.setFromUnitVectors(defaultUp, up);
@@ -1652,10 +1661,10 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   ridgeCenters.forEach((ridge, rIdx) => {
     const spiresInRidge = Math.floor(randomInRange(_isMobile() ? 6 : 7, _isMobile() ? 11 : 13));
     // Ridge direction — a random tangent angle
-    const ridgeAngle = Math.random() * Math.PI;
+    const ridgeAngle = _activeRng() * Math.PI;
     const ridgeLength = randomInRange(0.06, 0.1);
 
-    const championIdx = Math.floor(Math.random() * spiresInRidge);
+    const championIdx = Math.floor(_activeRng() * spiresInRidge);
     const shrimpIdx = (championIdx + Math.floor(spiresInRidge / 2)) % spiresInRidge;
 
     for (let s = 0; s < spiresInRidge; s++) {
@@ -1670,7 +1679,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
 
       const height = randomInRange(22, 64);
       const baseRadius = randomInRange(2.0, 4.5);
-      const matIdx = Math.random() > 0.5 ? 0 : 1;
+      const matIdx = _activeRng() > 0.5 ? 0 : 1;
 
       let scale;
       if (s === championIdx) scale = randomInRange(2.5, 3.5);
@@ -1718,7 +1727,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const height = randomInRange(14, 44);
     const baseRadius = randomInRange(1.6, 3.6);
     const scale = randomInRange(0.8, 1.6);
-    const matIdx = Math.random() > 0.5 ? 0 : 1;
+    const matIdx = _activeRng() > 0.5 ? 0 : 1;
     spirePlacementsByMat[matIdx].push({
       pos, up, height, baseRadius, scale,
       rotX: randomInRange(-0.08, 0.08),
@@ -1784,12 +1793,12 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   corridorRidgeIndices.forEach((rIdx) => {
     const ridge = ridgeCenters[rIdx];
     if (!ridge) return;
-    const corridorAngle = Math.random() * Math.PI;
+    const corridorAngle = _activeRng() * Math.PI;
     const corridorLengthAng = 0.10;
     const corridorWorldLen = sphereRadius * corridorLengthAng * 1.05;
-    const wallOffsetWorld = 9 + Math.random() * 4; // 9-13 corridor half-width
-    const wallHeight = 70 + Math.random() * 25;     // 70-95 — taller than mountains
-    const wallThickness = 4 + Math.random() * 3;
+    const wallOffsetWorld = 9 + _activeRng() * 4; // 9-13 corridor half-width
+    const wallHeight = 70 + _activeRng() * 25;     // 70-95 — taller than mountains
+    const wallThickness = 4 + _activeRng() * 3;
 
     for (let side = -1; side <= 1; side += 2) {
       const centerPos = placeOnSphere(THREE, sphereRadius, ridge.theta, ridge.phi, 0);
@@ -1892,13 +1901,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const yAxis = new THREE.Vector3(0, 1, 0);
     const legDir = new THREE.Vector3();
     for (let i = 0; i < archCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(1 - 2 * Math.random());
+      const theta = _activeRng() * Math.PI * 2;
+      const phi = Math.acos(1 - 2 * _activeRng());
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
       const s = randomInRange(1.2, 2.0);
       orientQ.setFromUnitVectors(defaultUp, up);
-      spinYQ.setFromAxisAngle(yAxis, Math.random() * Math.PI * 2);
+      spinYQ.setFromAxisAngle(yAxis, _activeRng() * Math.PI * 2);
       orientQ.multiply(spinYQ);
       dummy.position.copy(pos);
       dummy.quaternion.copy(orientQ);
@@ -1940,7 +1949,7 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const scaleMul = randomInRange(1.0, 2.0);
       const s = baseR * scaleMul;
       dummy.position.copy(pos);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
       dummy.scale.set(s, s, s);
       dummy.updateMatrix();
       boulderInst.setMatrixAt(i, dummy.matrix);
@@ -1966,8 +1975,8 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const dummy = new THREE.Object3D();
     const orientQ = new THREE.Quaternion();
     for (let i = 0; i < needleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(1 - 2 * Math.random());
+      const theta = _activeRng() * Math.PI * 2;
+      const phi = Math.acos(1 - 2 * _activeRng());
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
       orientQ.setFromUnitVectors(defaultUp, up);
@@ -2029,9 +2038,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const peaksInRange = Math.floor(randomInRange(_isMobile() ? 3 : 4, _isMobile() ? 6 : 8));
     // Slightly wider spread so peaks aren't stacked
     const rangeSpread = randomInRange(0.05, 0.09);
-    const rangeAngle = Math.random() * Math.PI;
+    const rangeAngle = _activeRng() * Math.PI;
 
-    const championIdx = Math.floor(Math.random() * peaksInRange);
+    const championIdx = Math.floor(_activeRng() * peaksInRange);
     const shrimpIdx = (championIdx + Math.floor(peaksInRange / 2)) % peaksInRange;
 
     for (let p = 0; p < peaksInRange; p++) {
@@ -2168,11 +2177,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   cliffRangeIndices.forEach((rIdx) => {
     const range = rangeCenters[rIdx];
     if (!range) return;
-    const corridorAngle = Math.random() * Math.PI;
+    const corridorAngle = _activeRng() * Math.PI;
     const corridorWorldLen = sphereRadius * 0.11;
-    const wallOffsetWorld = 11 + Math.random() * 5;
-    const wallHeight = 75 + Math.random() * 30;
-    const wallThickness = 5 + Math.random() * 3;
+    const wallOffsetWorld = 11 + _activeRng() * 5;
+    const wallHeight = 75 + _activeRng() * 30;
+    const wallThickness = 5 + _activeRng() * 3;
 
     for (let side = -1; side <= 1; side += 2) {
       const centerPos = placeOnSphere(THREE, sphereRadius, range.theta, range.phi, 0);
@@ -2260,7 +2269,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const groveSpread = randomInRange(0.05, 0.09);
     const minPineAngularSpacing = randomInRange(0.026, 0.038);
     const placedPineAngles = [];
-    const championIdx = Math.floor(Math.random() * pinesInGrove);
+    const championIdx = Math.floor(_activeRng() * pinesInGrove);
     let maxTopOffset = 0;
     for (let t = 0; t < pinesInGrove; t++) {
       let theta = grove.theta;
@@ -2329,7 +2338,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const th = terrainHeightDir(spp * Math.cos(jt), Math.cos(jp), spp * Math.sin(jt));
     const depth = -th;                                                  // 0 plateau → deep valley
     const exposure = Math.max(0, Math.min(1, 1 - depth / 30));          // 1 exposed top → 0 valley
-    if (exposure > 0.78 && Math.random() < (exposure - 0.78) * 0.9) continue; // thin exposed tops
+    if (exposure > 0.78 && _activeRng() < (exposure - 0.78) * 0.9) continue; // thin exposed tops
     const pos = placeOnSphere(THREE, sphereRadius, jt, jp, 0);
     if (submerged(pos)) continue;                                       // no pines in the tarns
     const up = pos.clone().normalize();
@@ -2402,7 +2411,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const posAttr = baseDiscGeom.getAttribute('position');
     for (let v = 1; v < posAttr.count; v++) {
       const cx = posAttr.getX(v), cy = posAttr.getY(v);
-      const jitter = 0.85 + Math.random() * 0.3;
+      const jitter = 0.85 + _activeRng() * 0.3;
       posAttr.setX(v, cx * jitter);
       posAttr.setY(v, cy * jitter);
     }
@@ -2443,7 +2452,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const scaleMul = randomInRange(1.0, 2.0);
       const s = baseR * scaleMul;
       dummy.position.copy(pos);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
       dummy.scale.set(s, s, s);
       dummy.updateMatrix();
       boulderInst.setMatrixAt(i, dummy.matrix);
@@ -2467,13 +2476,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const dummy = new THREE.Object3D();
     const jitter = new THREE.Vector3();
     for (let i = 0; i < screeCount; i++) {
-      const peak = peakPlacements[Math.floor(Math.random() * peakPlacements.length)];
+      const peak = peakPlacements[Math.floor(_activeRng() * peakPlacements.length)];
       jitter.set(randomInRange(-1, 1), randomInRange(-1, 1), randomInRange(-1, 1))
         .normalize().multiplyScalar(randomInRange(4, 16));
       const pos = peak.pos.clone().add(jitter).normalize().multiplyScalar(sphereRadius - 0.3);
       const s = randomInRange(0.8, 2.0);
       dummy.position.copy(pos);
-      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
       dummy.scale.set(s, s * 0.7, s);
       dummy.updateMatrix();
       screeInst.setMatrixAt(i, dummy.matrix);
@@ -2492,8 +2501,8 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   const _mc = new THREE.Quaternion();
   const _mo = new THREE.Vector3();
   for (let i = 0; i < mtnCloudCount; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(1 - 2 * Math.random());
+    const theta = _activeRng() * Math.PI * 2;
+    const phi = Math.acos(1 - 2 * _activeRng());
     const center = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(25, 55));
     _mc.setFromUnitVectors(defaultUp, center.clone().normalize());
     const mtnCloudScale = randomInRange(1.5, 3.0);
@@ -2571,9 +2580,9 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   blockCenters.forEach((block) => {
     const buildingsInBlock = Math.floor(randomInRange(_isMobile() ? 11 : 13, _isMobile() ? 19 : 24));
     const gridSize = Math.ceil(Math.sqrt(buildingsInBlock));
-    const gridAngle = Math.random() * Math.PI;
+    const gridAngle = _activeRng() * Math.PI;
 
-    const championIdx = Math.floor(Math.random() * buildingsInBlock);
+    const championIdx = Math.floor(_activeRng() * buildingsInBlock);
     const shrimpIdx = (championIdx + Math.floor(buildingsInBlock / 2)) % buildingsInBlock;
 
     for (let b = 0; b < buildingsInBlock; b++) {
@@ -2603,8 +2612,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
         depth = randomInRange(3, 7);
       }
 
-      const matIdx = Math.floor(Math.random() * buildingMats.length);
-      const yaw = Math.random() * Math.PI * 0.5;
+      const matIdx = Math.floor(_activeRng() * buildingMats.length);
+      const yaw = _activeRng() * Math.PI * 0.5;
 
       const common = { pos, up, height, width, depth, yaw };
       bodyPlacementsByMat[matIdx].push(common);
@@ -2683,9 +2692,9 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     const height = randomInRange(12, 60);
     const width = randomInRange(3, 6);
     const depth = randomInRange(3, 6);
-    const yaw = Math.random() * Math.PI * 0.5;
+    const yaw = _activeRng() * Math.PI * 0.5;
     const common = { pos, up, height, width, depth, yaw };
-    bodyPlacementsByMat[Math.floor(Math.random() * buildingMats.length)].push(common);
+    bodyPlacementsByMat[Math.floor(_activeRng() * buildingMats.length)].push(common);
     glowPlacements.push(common);
     collisionSystem.addCollider(pos, Math.max(width, depth) * 0.6, 'tower');
     const scatterTowerMid = pos.clone().add(up.clone().multiplyScalar(height * 0.5));
@@ -2832,8 +2841,8 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
     const orientQ = new THREE.Quaternion();
     const flatXQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
     for (let i = 0; i < hoverCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(1 - 2 * Math.random());
+      const theta = _activeRng() * Math.PI * 2;
+      const phi = Math.acos(1 - 2 * _activeRng());
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(30, 60));
       orientQ.setFromUnitVectors(defaultUp, pos.clone().normalize()).multiply(flatXQ);
       dummy.position.copy(pos);
@@ -2874,6 +2883,11 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
   _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
+  // One RNG for this build, drawn once and reused for every prop placed
+  // below — see the comment on _activeRng's declaration for why it must be
+  // fetched once (a fresh, unadvanced stream every call would not be
+  // deterministic across the many draws one environment makes).
+  _activeRng = worldRng(`spherical-world:${variant}`);
 
   // Carve the landmark valley into the SAME field the mesh & flight floor sample.
   // Must happen BEFORE displaceSphereGeometry so the basin shows in the mesh.
