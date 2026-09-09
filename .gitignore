@@ -11,3 +11,8 @@ npm-debug.log*
 # they are large. The harness exiting zero is the durable result, not the PNG.
 shots/
 .cdn-cache/
+
+# tools/birb-quality.mjs writes screenshots + JSON snapshots here on a
+# failing --check/--hooks-only/--emit-samples run. Throwaway diagnostic
+# evidence for one run, not a durable result — the exit code is that.
+.quality-artefacts/
