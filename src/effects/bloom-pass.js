@@ -229,6 +229,16 @@ export function createBloomPass(THREE, renderer, {
     stencilBuffer: false,
   };
 
+  // Cached inputs of the last setSize() call, so a live setDownscale(n) can
+  // re-derive the blur/ray target dimensions without the caller re-supplying
+  // width/height/ratio. `downscale` itself becomes mutable state here (it was
+  // constructor-only before): the closed-over `downscale` param is shadowed
+  // by this cache's own field the moment setSize/setDownscale run.
+  let lastWidth = 1;
+  let lastHeight = 1;
+  let lastRatio = 1;
+  let currentDownscale = downscale;
+
   const sceneTarget = new THREE.WebGLRenderTarget(1, 1, targetOptions);
   // The blur targets need no depth buffer at all; they are full-screen
   // triangle passes over a texture.
@@ -314,11 +324,14 @@ export function createBloomPass(THREE, renderer, {
   quadScene.add(quadMesh);
 
   function setSize(width, height, ratio) {
+    lastWidth = width;
+    lastHeight = height;
+    lastRatio = ratio;
     const w = Math.max(1, Math.floor(width * ratio));
     const h = Math.max(1, Math.floor(height * ratio));
     sceneTarget.setSize(w, h);
-    const bw = Math.max(1, Math.floor(w / downscale));
-    const bh = Math.max(1, Math.floor(h / downscale));
+    const bw = Math.max(1, Math.floor(w / currentDownscale));
+    const bh = Math.max(1, Math.floor(h / currentDownscale));
     blurA.setSize(bw, bh);
     blurB.setSize(bw, bh);
     rayTarget.setSize(bw, bh);
@@ -357,14 +370,41 @@ export function createBloomPass(THREE, renderer, {
         blurA: { width: blurA.width, height: blurA.height },
         blurB: { width: blurB.width, height: blurB.height },
         rayTarget: { width: rayTarget.width, height: rayTarget.height },
-        downscale,
+        downscale: currentDownscale,
       };
     },
 
+    /**
+     * Change the post-resolution divisor live. `downscale` used to be
+     * constructor-only because `setSize(w,h,ratio)` stored nothing — there
+     * was no way to re-derive the half-res target dimensions from a new
+     * divisor alone. Now it re-runs `setSize` against the cached last
+     * width/height/ratio, exactly as if the caller had called `setSize`
+     * again with the new divisor already in effect.
+     *
+     * blurA, blurB and rayTarget keep sharing one divisor here (unchanged
+     * from before): CONTRACT does not ask for them to diverge, and they are
+     * numerically identical today only as a consequence of that shared
+     * derivation, not because the shader maths requires it.
+     */
+    setDownscale(n) {
+      const next = Math.max(1, Math.floor(n) || 1);
+      if (next === currentDownscale) return;
+      currentDownscale = next;
+      setSize(lastWidth, lastHeight, lastRatio);
+    },
+
     setStrength(value) { compositeMaterial.uniforms.uStrength.value = value; },
+    getStrength() { return compositeMaterial.uniforms.uStrength.value; },
     setThreshold(value) { brightMaterial.uniforms.uThreshold.value = value; },
     setVignette(value) { compositeMaterial.uniforms.uVignette.value = value; },
     setRays(value) { compositeMaterial.uniforms.uRays.value = Math.max(0, value || 0); },
+    /**
+     * Live read of the composite's own shaft-strength uniform (P2.3b — the
+     * dev panel's shafts toggle needs an EFFECTIVE readback, never a mirror
+     * of what it last requested, per CONTRACT §0 "effective").
+     */
+    getRays() { return compositeMaterial.uniforms.uRays.value; },
     /**
      * Where the sun is on screen, in UV, and how much of the shaft effect to
      * apply. The caller owns this because only it knows where the sun is; the

@@ -3,9 +3,13 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-// Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
-// on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v42-2026-09-08-ground-and-ribbons';
+// Bumped for the Wave 2 perf-workbench modules added to CORE_ASSETS below
+// (frame-stats.js, gpu-timer.js, quality-settings.js, dev-quality-panel.js,
+// dev-gesture.js). CONTRACT §8.3/8.4: a new src/ module absent from
+// CORE_ASSETS is a blank page offline, and this MUST equal index.html's
+// BIRB_BUILD literal in the same commit — tests/build-identity.test.js
+// (P2.1f) enforces both halves.
+const CACHE_VERSION = 'v43-2026-09-09-perf-workbench';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -48,6 +52,9 @@ const CORE_ASSETS = [
   './src/flight/bird-pose.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
+  './src/game/frame-stats.js',
+  './src/game/gpu-timer.js',
+  './src/game/quality-settings.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
   './src/camera/fpv-camera.js',
@@ -72,6 +79,8 @@ const CORE_ASSETS = [
   './src/environment/collectibles.js',
   './src/environment/collider-grid.js',
   './src/ui/minimap.js',
+  './src/ui/dev-quality-panel.js',
+  './src/ui/dev-gesture.js',
   './src/nesting/nest-points.js',
   './src/nesting/nesting-system.js',
   './src/nesting/aim-rig.js',

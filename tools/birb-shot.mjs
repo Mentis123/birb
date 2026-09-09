@@ -363,7 +363,8 @@ async function main() {
     await browser.close();
     server.close();
 
-    console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x${desktop ? ' desktop' : ' mobile'})`);
+    const qualityLabel = stats ? (stats.pinned ? `tier ${stats.tier} (pinned)` : `tier ${stats.tier} (adaptive)`) : 'unknown';
+    console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x${desktop ? ' desktop' : ' mobile'})  [quality: ${qualityLabel}]`);
     if (evalResult !== undefined) console.log(`eval: ${JSON.stringify(evalResult)}`);
     if (afterResult !== undefined) console.log(`after: ${JSON.stringify(afterResult)}`);
     if (stats) console.log('stats: ' + JSON.stringify(stats));

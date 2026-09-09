@@ -220,6 +220,8 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
   const _fwd = new THREE.Vector3();
   const _ref = new THREE.Vector3();
 
+  let _currentDensity = 1;
+
   return {
     points,
     profile: p,
@@ -248,9 +250,20 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
     /** 0 hides the weather entirely; 1 is the profile's own opacity. */
     setDensity(amount) {
       const a = Math.max(0, Math.min(1, amount));
+      _currentDensity = a;
       material.uniforms.uOpacity.value = p.opacity * a;
       points.visible = a > 0.01;
     },
+    /**
+     * P2.3b — the dev panel's weather-density slider needs an effective
+     * readback distinct from `points.visible` alone (a boolean can't show
+     * "requested 0.4, only just above the visibility floor"). `uOpacity`
+     * itself can't be inverted back to `amount` when `p.opacity` is 0, so
+     * this mirrors the last accepted `amount` rather than re-deriving it —
+     * still a live read of what THIS module actually applied, never a copy
+     * of the caller's intent.
+     */
+    getDensity() { return _currentDensity; },
 
     setPixelRatio(ratio) { material.uniforms.uPixelRatio.value = ratio; },
     /** Live read of the uniform actually bound to the shader right now. */

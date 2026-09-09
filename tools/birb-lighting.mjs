@@ -111,8 +111,10 @@ async function main() {
         await page.waitForTimeout(220);
         const file = path.join(tileDir, `${variant.name.replace(/\s+/g, '-')}.png`);
         await page.screenshot({ path: file });
-        tiles.push({ ...variant, file });
-        console.log(`  ${variant.name}: ${variant.note}`);
+        const stats = await page.evaluate(() => window.__BIRB.stats());
+        const qualityLabel = stats ? (stats.pinned ? `tier ${stats.tier} (pinned)` : `tier ${stats.tier} (adaptive)`) : 'unknown';
+        tiles.push({ ...variant, file, qualityLabel });
+        console.log(`  ${variant.name}: ${variant.note}  [quality: ${qualityLabel}]`);
     }
 
     const cols = 3;
@@ -132,7 +134,7 @@ async function main() {
     <p>Same world, same camera, same bird. Only the light differs. "current" is what ships today.</p>
     <div class="grid">${tiles.map((t) => `<figure>
       <img src="file://${t.file}">
-      <figcaption><b>${t.name}</b><br><span>${t.note}</span></figcaption>
+      <figcaption><b>${t.name}</b><br><span>${t.note}</span><br><span style="font-size:12px;color:#6b7c8a">${t.qualityLabel}</span></figcaption>
     </figure>`).join('')}</div>`);
 
     const sheetPage = await context.newPage();

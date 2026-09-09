@@ -3471,14 +3471,29 @@
       var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
+      var { createDevGesture } = await import("./src/ui/dev-gesture.js");
+      var { createDevQualityPanel, sentinel: qualitySentinel, SENTINEL_REASONS: QUALITY_SENTINEL_REASONS } =
+        await import("./src/ui/dev-quality-panel.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
-      var { createFrameSampler } = await import("./src/game/frame-metrics.js");
+      var { createFrameSampler, createIntervalRecorder } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
+      // P2.3b (the panel's controls, telemetry and evidence export) — the
+      // three modules P2.1 built and nothing had wired into the game loop
+      // yet. quality-settings routes panel requests (CONTRACT §7.1
+      // precedence); frame-stats scores the raw intervals intervalRecorder
+      // (above) collects; gpu-timer is feature-detected once and polled
+      // every frame, and reports its own sentinel on every platform this
+      // repo's CI and most real devices run on (DEF-2 — the probe is what
+      // ships, not a validated GPU time).
+      var { createQualitySettings, QUALITY_MODES, REQUEST_SOURCES, RESET_TAGS: QS_RESET_TAGS } =
+        await import("./src/game/quality-settings.js");
+      var { evaluateAcceptanceGates, ACCEPTANCE_THRESHOLDS } = await import("./src/game/frame-stats.js");
+      var { createGpuTimer } = await import("./src/game/gpu-timer.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
       // that read — so a `const` declared there sat in its temporal dead zone
@@ -3617,6 +3632,13 @@
     }
 
     const contextState = { lost: false };
+
+    // CONTRACT §8.3 SW-1: a build identity, as a literal because this repo
+    // has no build step. MUST equal sw.js's CACHE_VERSION — P2.4 owns
+    // keeping the two in sync and bumping both together; this line only
+    // gives the panel's evidence export and __BIRB.quality() something to
+    // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
+    const BIRB_BUILD = 'v43-2026-09-09-perf-workbench';
 
     // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
     // Adaptive quality further drops this to 1.0 below 55 FPS.
@@ -4468,6 +4490,20 @@
     }
 
     /**
+     * T1/T13/T14 (CONTRACT §7.2), shared: whether the post pass runs THIS
+     * frame. One function so `presentFrame()`'s render gate and the debug
+     * `stats()` readout's "which counters did the real frame use" branch can
+     * never disagree — two copies of this predicate is exactly the T15/T19
+     * trap CONTRACT §1.2 already warns about (an anchor re-derived by
+     * guessing instead of read from one place).
+     */
+    function isPostPassActive() {
+      return panelOverrides.postQuality != null
+        ? bloomEnabled
+        : (bloomEnabled && adaptiveTier.getTier() < 1);
+    }
+
+    /**
      * The single place a frame reaches the screen.
      *
      * Both the game loop and the share-screenshot path go through here, so a
@@ -4481,7 +4517,7 @@
       frameRenderTotals.passes = 0;
       frameRenderTotals.sceneCalls = 0;
       frameRenderTotals.sceneTriangles = 0;
-      if (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1) {
+      if (bloomPass && isPostPassActive()) {
         frameRenderTotals.statsPath = 'bloom-frameStats';
         bloomPass.render(scene, cameraState.camera, tallyRenderPass);
         return;
@@ -4955,10 +4991,6 @@
     // rather than snapped: switching pose on the frame the nesting state flips
     // reads as a dropped frame, not as a bird settling onto a nest.
     let perchBlend = 0;
-
-    // Last tier the mist budget was applied for, so the draw range is only
-    // rewritten when the tier actually changes rather than every frame.
-    let mistBudgetTier = -1;
 
     // Set once the nest launch handler is defined, so the ?debug=1 harness can
     // fire through the same path the on-screen button uses.
@@ -6529,6 +6561,14 @@
       // never dropped, no optional effect was ever shed, and a phone that
       // could not hold 60fps just kept not holding it. Drawing the number is
       // optional; measuring it is what the game acts on.
+      // P2.3b — TEL-2/TEL-3's raw per-frame interval, fed every frame
+      // (unlike frameSampler's 250ms-window average below, which only
+      // resolves periodically and is meaningless for percentiles per
+      // CONTRACT §1.3). `valid`/`invalidReason` implement §2.2: the sample
+      // is still recorded while paused, only excluded from the percentiles.
+      const pauseReason = currentPauseReason();
+      intervalRecorder.sample(time, pauseReason === null, pauseReason);
+
       const fps = frameSampler.sample(time);
       if (fps === null) return;
       fpsState.value = fps;
@@ -6564,16 +6604,23 @@
         state.tier = newTier;
         state.lastTierChange = performance.now();
 
+        // CONTRACT §7.2 / A6: route the pixel-ratio change through the SAME
+        // sizing function a resize uses, forced, so the renderer, the bloom
+        // targets, the weather uniform and resizeState all commit together
+        // at the new tier's ratio. This used to call renderer.setPixelRatio()
+        // alone here, which resizes the renderer's own buffer (internally)
+        // but leaves bloomPass's offscreen targets and weather's uPixelRatio
+        // stale at whatever ratio the last real resize left them — invisible
+        // in the canvas dimensions, and permanent until the next resize.
+        updateRendererSize(true);
+
         // Tier 1+: drop DPR to 1.0.
         // Tier 2+: drop DPR below 1.0 (0.85) and hide haze layers if any.
         if (newTier === 0) {
-          renderer.setPixelRatio(getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, newTier));
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = true;
         } else if (newTier === 1) {
-          renderer.setPixelRatio(getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, newTier));
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
         } else if (newTier >= 2) {
-          renderer.setPixelRatio(getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, newTier));
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
         }
 
@@ -6621,8 +6668,151 @@
           state.pinned = true;
         },
         isPinned() { return !!state.pinned; },
+        /**
+         * P2.3b — Resume Auto's counterpart to `pin()`. T12 (CONTRACT §7.2)
+         * shipped a latch with no way back; the panel's Manual/Benchmark ->
+         * Auto transition is the first caller that actually needs one.
+         */
+        unpin() { state.pinned = false; },
       };
     })();
+
+    // ─── Performance workbench routing (P2.3b) ────────────────────────────
+    // CONTRACT §7.1 precedence: panel request > adaptive tier > capability
+    // probe. `panelOverrides` is what makes that real rather than aspirational
+    // — every one of T1/T4/T5-T6/T7-T8/T9/T10 below is edited to check its
+    // own key here FIRST and only fall through to the tier-derived default
+    // when the panel has never touched that key (value stays `null`), so a
+    // page that never opens the panel behaves byte-for-byte as it did before
+    // this task. Values only become non-null through `qualitySettings.apply`
+    // below, which only ever runs from a 'panel' or 'probe' source request —
+    // never from the adaptive tier itself (CONTRACT §7.1: "Once Manual is
+    // active, the adaptive tier must not write the quantities the panel
+    // owns — not once, not on the next frame" — A10 exists to catch exactly
+    // an unrouted per-frame writer reverting this).
+    const panelOverrides = {
+      dpr: null,               // number | null
+      postQuality: null,       // 'off' | 'quarter' | 'half' | null
+      shafts: null,            // boolean | null — independent of postQuality
+      bloomStrength: null,     // number | null
+      weatherDensity: null,    // 0..1 | null
+      mistBudget: null,        // 0..1 | null
+      decorativeDensity: null, // 0..1 | null — wind (T4) + contact shadow (T9) + ribbons (T10)
+    };
+    // Last value actually handed to sphericalWorld.features.valley.setMistBudget,
+    // whichever site called it (tier-derived or panel-requested). That module
+    // (owned by a different task) exposes no getter, so this is the closest
+    // true "effective" reading available without editing a third file for a
+    // single number — see the P2.3b task report for why this is a documented
+    // limitation rather than a live readback.
+    let mistBudgetEffective = 1;
+    const DEFAULT_RAYS_STRENGTH = 0.62; // bloom-pass.js constructor default
+
+    // Frozen-by-Benchmark flags. CONTRACT §2.1 'manual'-tagged Benchmark mode
+    // must freeze seed, route, settings AND sun (a 10-minute cycle confounds
+    // any A/B taken minutes apart). 'seed' and 'route' have no live mechanism
+    // to freeze — P2.1e (a seeded world RNG) was never shipped (see G2a
+    // finding 4.2) and there is no route-recording concept anywhere in this
+    // repo — so those two are tracked for the export/telemetry record only;
+    // freezing them here would be reporting a lock on a mechanism that does
+    // not exist, which CONTRACT §0's "sentinel" rule exists to forbid.
+    const benchmarkFreezes = { seed: false, route: false, settings: false, sun: false };
+
+    const qualitySettings = createQualitySettings({
+      now: () => performance.now(),
+      freeze: (what, frozen) => {
+        benchmarkFreezes[what] = frozen;
+      },
+      onResetHistory: ({ tag }) => {
+        // Coordinated reset (CONTRACT §2.1 rule 2): the frame sampler AND the
+        // raw interval recorder restart their decision windows together, one
+        // tag, one call. adaptiveTier's own fpsSum/windowStart accumulator has
+        // no reset hook (GAP-5, Wave 3's to fix) so it is left as-is here —
+        // sampleFps() already no-ops while `state.pinned`, and Resume Auto
+        // below unpins AFTER this fires, so no adaptive sample is lost to it.
+        frameSampler.reset();
+        intervalRecorder.reset(tag);
+      },
+      clamp: (key, value) => {
+        // PRO-9: DPR slider 0.85-2.0. Every other slider here is a plain
+        // 0..1 density/strength; the caller's own <input type=range> already
+        // enforces min/max/step, so this clamp is redundant-but-safe rather
+        // than the only bound in the system.
+        if (key === 'dpr') return Math.min(2.0, Math.max(0.85, value));
+        if (key === 'bloomStrength') return Math.min(3, Math.max(0, value));
+        if (key === 'postQuality') return ['off', 'quarter', 'half'].includes(value) ? value : 'half';
+        if (key === 'shafts') return !!value;
+        return Math.min(1, Math.max(0, value));
+      },
+      // `apply`/`readEffective` are the ONLY place a panel request touches a
+      // live renderer object. Both run SYNCHRONOUSLY (never via
+      // scheduleRendererResize's rAF hop) so `readEffective` immediately
+      // after `apply` reports what really happened this tick, not next
+      // frame's stale value — A3's "effective changed" check depends on this.
+      apply: (key, value) => {
+        panelOverrides[key] = value;
+        if (key === 'dpr') {
+          updateRendererSize(true);
+        } else if (key === 'postQuality') {
+          bloomEnabled = value !== 'off';
+          if (bloomPass) bloomPass.setDownscale(value === 'quarter' ? 4 : 2);
+        } else if (key === 'shafts') {
+          if (bloomPass) bloomPass.setRays(value ? DEFAULT_RAYS_STRENGTH : 0);
+        } else if (key === 'bloomStrength') {
+          if (bloomPass) bloomPass.setStrength(value);
+        }
+        // weatherDensity / mistBudget / decorativeDensity need no immediate
+        // side effect here: they are read every frame at T5-T6/T7-T8/T4-T9-T10
+        // below, exactly like the tier-derived values they now take
+        // precedence over, so the very next rendered frame already reflects
+        // them and no frame goes by with the OLD value re-applied on top
+        // (which is what A10 exists to catch).
+      },
+      readEffective: (key) => {
+        if (key === 'dpr') return renderer.getPixelRatio();
+        if (key === 'postQuality') {
+          if (!bloomPass || !bloomEnabled) return 'off';
+          return bloomPass.getSizes().downscale >= 4 ? 'quarter' : 'half';
+        }
+        if (key === 'shafts') return bloomPass ? bloomPass.getRays() > 0.001 : false;
+        if (key === 'bloomStrength') return bloomPass ? bloomPass.getStrength() : null;
+        if (key === 'weatherDensity') return weather ? weather.getDensity() : null;
+        if (key === 'mistBudget') return mistBudgetEffective;
+        if (key === 'decorativeDensity') return visualUniforms.wind.value;
+        return panelOverrides[key];
+      },
+    });
+
+    // Raw per-frame interval buffer (TEL-2/TEL-3 source). CONTRACT §1.3: the
+    // sampler's averaged-rate window is meaningless for percentiles; this is
+    // the module built to replace it as an input, fed once per frame below.
+    const intervalRecorder = createIntervalRecorder({ targetFPS: 60 });
+
+    // GPU time probe (TEL-5). DEF-2: the query lifecycle ships, but on
+    // SwiftShader (this repo's own CI) and on Safari (this repo's actual
+    // target) the extension is absent, so `reason: 'no-extension'` is the
+    // expected, correct, platform-fact answer almost everywhere this runs.
+    const gpuTimer = createGpuTimer({ getContext: () => renderer.getContext() });
+    let gpuFrameId = 0;
+
+    /**
+     * CONTRACT §2.2 — paused is a VALIDITY state, not a reset: the sample is
+     * still recorded (with `valid:false`), never discarded. OR of the
+     * documented sources this integration can actually observe; `contextLost`
+     * is not listed because `renderFrame` returns before reaching the sample
+     * call while the context is lost, so no sample is recorded for it at all
+     * (nothing to mark invalid); `frozen` (the debug `__BIRB.freeze` speed
+     * override) and `panelHold` are not wired — neither exposes a readable
+     * flag today — and are named here as a documented gap, not silently
+     * dropped.
+     */
+    function currentPauseReason() {
+      if (document.hidden) return 'hidden';
+      if (benchmarkFreezes.settings && qualitySettings.snapshot().paused) return 'benchmarkHold';
+      if (controlState.systemPaused) return 'systemPaused';
+      if (!motionState.animate) return 'flightPaused';
+      return null;
+    }
 
     function updateControlMetrics(speed) {
       const throttleSetting = Number.isFinite(flightController?.throttle)
@@ -6831,7 +7021,14 @@
 
       const nextWidth = Math.floor(clientWidth);
       const nextHeight = Math.floor(clientHeight);
-      const pixelRatio = getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, adaptiveTier.getTier());
+      // T3 (CONTRACT §7.2/§7.1 precedence): the panel's DPR request wins
+      // over the tier-derived ratio once set. PRO-9's 0.85-2.0 slider range
+      // is enforced by qualitySettings' `clamp`, not here — this is the
+      // single sizing function every quality/viewport change routes
+      // through, so it trusts what already reached `panelOverrides.dpr`.
+      const pixelRatio = panelOverrides.dpr != null
+        ? panelOverrides.dpr
+        : getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, adaptiveTier.getTier());
 
       if (
         !force &&
@@ -7567,6 +7764,298 @@
     document.addEventListener('touchcancel', (e) => {
       updateSprintState(e.touches.length);
     }, { passive: true });
+
+    // ─── Dev workbench gesture (production path) ──────────────────────────
+    // CONTRACT §6: this registers UNCONDITIONALLY, outside the `?debug`
+    // block below — every harness in this repo loads `?debug=1`, so a
+    // gesture registered in there would pass every automated check while
+    // being unreachable at the one URL the workbench exists to be used on.
+    // `?debug` gates only the scriptable `window.__BIRB` handle, exactly as
+    // before; it never gated this.
+    //
+    // Opening is a CustomEvent on `document` — src/ui/dev-quality-panel.js
+    // (Wave 2 / P2.3, not yet built) is the intended listener; this task owns
+    // getting the signal there without disturbing flight input, not the
+    // panel UI itself.
+    const DEV_PANEL_OPEN_EVENT = 'birb:dev-panel-open';
+    const DEV_PANEL_CLOSE_EVENT = 'birb:dev-panel-close';
+    let devPanelOpen = false;
+    // P2.3b — found live: Route 3 used to call `openDevWorkbench()`
+    // synchronously during module setup, long before Tap-to-Start even
+    // exists to be clicked (`startGameLoop` itself is not assigned until
+    // far later in this same setup). Once the panel actually had controls
+    // in it (rather than the P2.3a shell's near-empty body) it was tall
+    // enough to sit on top of, and intercept clicks on, the Tap-to-Start
+    // button — the splash/title flow's own "nothing runs behind splashes"
+    // invariant does not cover an overlay that isn't part of `<main>` at
+    // all. Deferred to the same moment `startGameLoop()` actually runs.
+    let pendingDevPanelOpen = false;
+
+    const openDevWorkbench = () => {
+      if (devPanelOpen) return;
+      devPanelOpen = true;
+      document.dispatchEvent(new CustomEvent(DEV_PANEL_OPEN_EVENT));
+    };
+
+    // A listening panel calls this (or dispatches the close event itself) so
+    // the gesture can be repeated later in the same session — otherwise
+    // devPanelOpen would latch true forever after the first open.
+    document.addEventListener(DEV_PANEL_CLOSE_EVENT, () => {
+      devPanelOpen = false;
+    });
+
+    const devGesture = createDevGesture({
+      onOpen: openDevWorkbench,
+      // Never synthesise a touchcancel — the game resets its own input state
+      // directly. Three fingers is already this game's sprint trigger
+      // (touchCount >= 2 above), so this must run ONLY when the gesture
+      // actually opens, never on a fumbled or void candidate.
+      onCancelPointers: () => {
+        if (sprintState.active) {
+          sprintState.active = false;
+          if (flightController && flightController.speed !== undefined) {
+            flightController.speed = sprintState.baseSpeed;
+          }
+        }
+        mouseSprintActive = false;
+        __birbStickOverride = null;
+      },
+    });
+
+    document.addEventListener('touchstart', (e) => {
+      for (const t of e.changedTouches) devGesture.down(t.identifier, e.timeStamp);
+    }, { passive: true });
+
+    document.addEventListener('touchend', (e) => {
+      for (const t of e.changedTouches) devGesture.up(t.identifier, e.timeStamp);
+    }, { passive: true });
+
+    document.addEventListener('touchcancel', (e) => {
+      for (const t of e.changedTouches) devGesture.cancel(t.identifier, e.timeStamp);
+    }, { passive: true });
+
+    // ─── Evidence / telemetry supplier for the dev panel (P2.3b) ──────────
+    //
+    // SW-4: `serving` is read via `caches.keys()` (CONTRACT §8.3 option (a))
+    // rather than the postMessage round-trip (option (b)) — the panel reads
+    // telemetry synchronously at 4Hz and cannot await a worker round-trip
+    // on every tick. Resolved once, asynchronously, into this cache; before
+    // it resolves, or with no controlling service worker at all, `serving`
+    // is `null`, which assertA12 accepts as the "no service worker" case —
+    // never a false stale claim (CONTRACT §8.3 SW-4: "absence of a service
+    // worker is not staleness").
+    let cachedServingBuild = null;
+    if (typeof caches !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.controller) {
+      caches.keys().then((keys) => {
+        const match = keys.find((k) => k.startsWith('birb-core-'));
+        cachedServingBuild = match ? match.slice('birb-core-'.length) : null;
+      }).catch(() => { cachedServingBuild = null; });
+    }
+
+    function buildIdentity() {
+      const hasController = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+      const serving = hasController ? cachedServingBuild : null;
+      return { requested: BIRB_BUILD, serving, stale: serving !== null && serving !== BIRB_BUILD };
+    }
+
+    function panelGetControlState() {
+      const snap = qualitySettings.snapshot();
+      const bloomSizes = bloomPass ? bloomPass.getSizes() : null;
+      return {
+        mode: snap.mode,
+        dpr: { requested: panelOverrides.dpr, effective: renderer.getPixelRatio() },
+        postQuality: {
+          requested: panelOverrides.postQuality,
+          effective: (bloomPass && bloomEnabled)
+            ? (bloomSizes.downscale >= 4 ? 'quarter' : 'half') : 'off',
+        },
+        shafts: { requested: panelOverrides.shafts, effective: bloomPass ? bloomPass.getRays() > 0.001 : false },
+        bloomStrength: { requested: panelOverrides.bloomStrength, effective: bloomPass ? bloomPass.getStrength() : null },
+        weatherDensity: { requested: panelOverrides.weatherDensity, effective: weather ? weather.getDensity() : null },
+        mistBudget: { requested: panelOverrides.mistBudget, effective: mistBudgetEffective },
+        decorativeDensity: { requested: panelOverrides.decorativeDensity, effective: visualUniforms.wind.value },
+        targetRate: { requested: 60, effective: 60 }, // DEF-3: only 60 ships
+        surfaceDetail: { requested: 'baseline', effective: 'baseline' }, // DEF-4: no runtime variant
+      };
+    }
+
+    // TEL-12: "resource counts are not byte-accurate GPU memory readings —
+    // label it estimated, always" (CONTRACT §3.2). Only sceneTarget carries
+    // a depth buffer (read from bloom-pass.js's own WebGLRenderTarget calls,
+    // not guessed) — the other three post targets are explicitly
+    // `depthBuffer:false` — so it is the only one doubled.
+    function estimateBloomTargetMb(sizes) {
+      if (!sizes) return null;
+      const px = (t) => t.width * t.height;
+      const bytes = px(sizes.sceneTarget) * 4 * 2
+        + px(sizes.blurA) * 4 + px(sizes.blurB) * 4 + px(sizes.rayTarget) * 4;
+      return bytes / (1024 * 1024);
+    }
+
+    /**
+     * getTelemetry() for the panel — one entry per FIELD_REGISTRY id.
+     * TEL-4 (separate CPU-update/render-submission accumulators) and TEL-13/
+     * TEL-14 (adjustment reason / cooldown) render the sentinel: no timing
+     * bracket exists around the update step or the submission step anywhere
+     * in this codebase (checked, not assumed — see the P2.3b task report),
+     * and the adaptive tier records only a bare timestamp, never a reason or
+     * a live countdown (CONTRACT §3.2 TEL-13/14: "NONE, AND NONE IS
+     * AVAILABLE"). TEL-15 (active mode) DOES have a real source as of this
+     * task — `qualitySettings.mode` — which is what CONTRACT's own table
+     * assigns to "W2 (P2.3 panel)"; only INFERRING it from `isPinned()` is
+     * forbidden, and this reads the mode module's own state, not that.
+     */
+    function panelGetTelemetry() {
+      const gl = renderer.getContext();
+      const fs = intervalRecorder.stats();
+      const rpr = renderer.getPixelRatio();
+      const bloomSizes = bloomPass ? bloomPass.getSizes() : null;
+      const gpuRead = gpuTimer.read();
+      const nativeDpr = window.devicePixelRatio || 1;
+
+      const ok = (value) => ({ value, state: 'ok', reason: null });
+      const unavail = (reason) => qualitySentinel(reason);
+
+      return {
+        'TEL-1': fpsState.value > 0 ? ok(+fpsState.value.toFixed(1)) : unavail(QUALITY_SENTINEL_REASONS.INSUFFICIENT_SAMPLES),
+        'TEL-2': fs.p95.state === 'ok'
+          ? ok(`${fs.p50.value.toFixed(1)} / ${fs.p95.value.toFixed(1)} / ${fs.p99.value.toFixed(1)} ms`)
+          : unavail(fs.p95.reason),
+        'TEL-3': fs.missedTargetPct.state === 'ok'
+          ? ok(`${fs.missedTargetPct.value.toFixed(1)}%`)
+          : unavail(fs.missedTargetPct.reason),
+        'TEL-4': unavail(QUALITY_SENTINEL_REASONS.NOT_IMPLEMENTED),
+        'TEL-5': gpuRead.state === 'ok' ? ok(`${gpuRead.value.toFixed(2)} ms`) : unavail(gpuRead.reason),
+        'TEL-6': ok(`${gl.drawingBufferWidth}×${gl.drawingBufferHeight}`),
+        'TEL-7': ok(`${rpr.toFixed(2)} (${nativeDpr > 0 ? ((rpr / nativeDpr) * 100).toFixed(0) : '?'}% native)`),
+        'TEL-8': ok(`${frameRenderTotals.sceneCalls} calls / ${frameRenderTotals.sceneTriangles} tris`),
+        'TEL-9': ok(`${frameRenderTotals.calls} calls / ${frameRenderTotals.triangles} tris / ${frameRenderTotals.passes} passes`),
+        'TEL-10': ok(renderer.info.programs?.length ?? 0),
+        'TEL-11': ok(`${renderer.info.memory?.geometries ?? 0} geo / ${renderer.info.memory?.textures ?? 0} tex`),
+        'TEL-12': bloomSizes ? ok(`~${estimateBloomTargetMb(bloomSizes).toFixed(2)} MB (estimated)`) : unavail(QUALITY_SENTINEL_REASONS.NOT_APPLICABLE),
+        'TEL-13': unavail(QUALITY_SENTINEL_REASONS.NOT_IMPLEMENTED),
+        'TEL-14': unavail(QUALITY_SENTINEL_REASONS.NOT_IMPLEMENTED),
+        'TEL-15': ok(qualitySettings.mode),
+        'TEL-16': ok(adaptiveTier.isPinned()),
+        'TEL-17': bloomSizes
+          ? ok(`${bloomSizes.sceneTarget.width}x${bloomSizes.sceneTarget.height} /${bloomSizes.downscale}`)
+          : unavail(QUALITY_SENTINEL_REASONS.NOT_APPLICABLE),
+        'TEL-18': ok(`req ${panelOverrides.dpr ?? '(tier-derived)'} / eff ${rpr.toFixed(2)}`),
+        'TEL-19': ok(frameRenderTotals.statsPath),
+        'TEL-20': ok(BIRB_BUILD),
+        // PNL-1..5: Wave 3 (the learning loop / policy machine). PNL-6
+        // (export) has real content — the export button itself — but is not
+        // a single displayable VALUE, so it stays sentinel here too; the
+        // button next to this row is the feature.
+      };
+    }
+
+    function panelGetEvidence() {
+      const snap = qualitySettings.snapshot();
+      const fs = intervalRecorder.stats();
+      const gates = fs.samples.valid >= ACCEPTANCE_THRESHOLDS.minSamples
+        ? evaluateAcceptanceGates(intervalRecorder.exportIntervals(), { targetFPS: 60 })
+        : null;
+      return {
+        build: buildIdentity(),
+        mode: snap.mode,
+        // P2.1e (a seeded world RNG) was never shipped — G2a's finding 4.2.
+        // Reporting a fixed seed here would be reporting a lock on a
+        // mechanism that does not exist, which is exactly what CONTRACT
+        // §0's "sentinel" rule forbids.
+        seed: qualitySentinel(QUALITY_SENTINEL_REASONS.NOT_IMPLEMENTED),
+        benchmarkFreezes: { ...benchmarkFreezes },
+        device: {
+          userAgent: navigator.userAgent,
+          devicePixelRatio: window.devicePixelRatio,
+          isMobile,
+          hasTouch: ('ontouchstart' in window) || (navigator.maxTouchPoints > 0),
+          hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+        },
+        browser: { vendor: navigator.vendor || null, platform: navigator.platform || null },
+        requested: { ...panelOverrides },
+        effective: panelGetControlState(),
+        timing: {
+          stats: fs,
+          hitches: intervalRecorder.hitches(),
+          boundaries: intervalRecorder.boundaries(),
+        },
+        gates,
+      };
+    }
+
+    function panelOnRequest(request) {
+      if (!request) return;
+      if (request.kind === 'mode') {
+        qualitySettings.setMode(request.mode);
+        if (request.mode === QUALITY_MODES.AUTO) adaptiveTier.unpin();
+        return;
+      }
+      if (request.kind === 'control') {
+        qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: request.key, value: request.value });
+        return;
+      }
+      if (request.kind === 'action') {
+        if (request.action === 'resumeAuto') {
+          qualitySettings.setMode(QUALITY_MODES.AUTO);
+          adaptiveTier.unpin();
+        } else if (request.action === 'reset') {
+          qualitySettings.setMode(QUALITY_MODES.AUTO);
+          adaptiveTier.unpin();
+          for (const key of Object.keys(panelOverrides)) panelOverrides[key] = null;
+          bloomEnabled = true;
+          if (bloomPass) {
+            bloomPass.setRays(DEFAULT_RAYS_STRENGTH);
+            bloomPass.setStrength(0.85); // bloom-pass.js constructor default
+            bloomPass.setDownscale(2);
+          }
+          updateRendererSize(true);
+        }
+        // 'export' and 'compare' are handled entirely inside the panel
+        // (Blob/anchor-click, an in-memory A/B diff) — nothing to route here.
+      }
+    }
+
+    // The panel (P2.3a shell / P2.3b controls+telemetry+export) — registers
+    // unconditionally, same production path as the gesture above (CONTRACT
+    // §6). It listens for DEV_PANEL_OPEN_EVENT itself and dispatches
+    // DEV_PANEL_CLOSE_EVENT when it closes, which is what un-latches
+    // `devPanelOpen` above so the gesture can be repeated later in the
+    // session. mount() must run before Route 2/3 below, which can open the
+    // panel synchronously.
+    const devQualityPanel = createDevQualityPanel({
+      openEventName: DEV_PANEL_OPEN_EVENT,
+      closeEventName: DEV_PANEL_CLOSE_EVENT,
+      getTelemetry: panelGetTelemetry,
+      getControlState: panelGetControlState,
+      getEvidence: panelGetEvidence,
+      getBuildStale: () => buildIdentity().stale,
+      onRequest: panelOnRequest,
+    });
+    devQualityPanel.mount();
+
+    // Route 2: keyboard fallback (OS multi-touch gestures — Control Centre,
+    // accessibility touch remapping — can intercept a three-finger contact
+    // before this page ever sees it).
+    document.addEventListener('keydown', (event) => {
+      if (
+        event.target &&
+        (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(event.target.tagName))
+      ) {
+        return;
+      }
+      if (event.code === 'Backquote' && !event.repeat) {
+        openDevWorkbench();
+      }
+    });
+
+    // Route 3: a URL flag distinct from `?debug` (RULING §6.3 — routes (a)
+    // and (b) must work without `?debug`, so the panel's own flag must too,
+    // or the ruling is defeated by the back door). Deferred until the game
+    // loop actually starts — see `pendingDevPanelOpen` above.
+    if (new URLSearchParams(location.search).has('devpanel')) {
+      pendingDevPanelOpen = true;
+    }
 
     // Mouse click to sprint (desktop only - fine pointer devices)
     const isDesktopPointer = window.matchMedia('(pointer: fine)').matches;
@@ -8394,7 +8883,14 @@
 
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
       visualUniforms.time.value = motionState.elapsed;
-      visualUniforms.wind.value = reducedMotionState.enabled ? 0 : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
+      // T4 (CONTRACT §7.2): the panel's "decorative density" slider covers
+      // wind (here) + contact shadow (T9) + wingtip ribbons (T10) as one
+      // lever, the same three effects the tier already sheds together at
+      // tier 2. 0 == tier-2-equivalent, 1 == tier-0/1-equivalent.
+      visualUniforms.wind.value = reducedMotionState.enabled ? 0
+        : panelOverrides.decorativeDensity != null
+          ? 0.35 + panelOverrides.decorativeDensity * 0.65
+          : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
 
       // Boost drives the composite's radial smear, bloom lift and vignette.
       // Eased, so a tap on the pill does not snap the whole frame.
@@ -8439,7 +8935,11 @@
         // Sheds before resolution does, like every other optional layer, and
         // reduced motion turns it off outright — drifting particles across
         // the whole frame are exactly what that setting is asking about.
-        weather.setDensity(reducedMotionState.enabled ? 0 : tier >= 2 ? 0 : tier === 1 ? 0.5 : 1);
+        // T5/T6 (CONTRACT §7.2): the panel's weather-density slider wins
+        // once set, tier-derived density otherwise.
+        weather.setDensity(reducedMotionState.enabled ? 0
+          : panelOverrides.weatherDensity != null ? panelOverrides.weatherDensity
+          : tier >= 2 ? 0 : tier === 1 ? 0.5 : 1);
         if (weather.points.visible) {
           _weatherUp.copy(birdPos).normalize();
           weather.update(motionState.elapsed, cam.position, _weatherUp);
@@ -8450,7 +8950,10 @@
       // One light position and one colour per frame. Everything that already
       // follows the key light — the sky's sun disc, the water specular, the
       // mist tint — moves with it for free. Reduced motion holds it still.
-      if (sunState.enabled && !reducedMotionState.enabled && lightingRig.keyLight) {
+      // `benchmarkFreezes.sun` (CONTRACT §2.1 'manual' Benchmark freeze) holds
+      // it too — a 10-minute cycle confounds any A/B taken minutes apart, and
+      // the sun is the one item this task was told twice not to get wrong.
+      if (sunState.enabled && !reducedMotionState.enabled && !benchmarkFreezes.sun && lightingRig.keyLight) {
         sunState.seconds += delta;
         const sun = sunDirectionAt(sunState.seconds);
         sunState._dir.set(sun.x, sun.y, sun.z).multiplyScalar(sunState.distance);
@@ -8518,11 +9021,18 @@
       // Optional detail sheds before resolution does: the waterfall mist is
       // the largest transparent surface in the scene and the first thing a
       // fill-rate-bound phone should stop paying for.
-      if (mistBudgetTier !== adaptiveTier.getTier()) {
-        mistBudgetTier = adaptiveTier.getTier();
-        sphericalWorld?.features?.valley?.setMistBudget?.(
-          mistBudgetTier >= 2 ? 0.35 : mistBudgetTier === 1 ? 0.65 : 1,
-        );
+      // T7/T8 (CONTRACT §7.2): panel mist-budget slider wins once set;
+      // change-detected against `mistBudgetEffective` (rather than the tier
+      // alone) so a panel request is applied on the very next frame even
+      // when the tier itself has not changed.
+      {
+        const desiredMistBudget = panelOverrides.mistBudget != null
+          ? panelOverrides.mistBudget
+          : (adaptiveTier.getTier() >= 2 ? 0.35 : adaptiveTier.getTier() === 1 ? 0.65 : 1);
+        if (desiredMistBudget !== mistBudgetEffective) {
+          mistBudgetEffective = desiredMistBudget;
+          sphericalWorld?.features?.valley?.setMistBudget?.(desiredMistBudget);
+        }
       }
       if (skyDome && cam) skyDome.followCamera(cam.position, motionState.elapsed);
 
@@ -8541,7 +9051,12 @@
       // budget goes to resolution, and hidden while nested (the bird is in a
       // crown 40 units up; a disc on the ground below is not its shadow).
       if (contactShadow) {
-        const shadowOn = !!birdPos && !isNested && adaptiveTier.getTier() < 2
+        // T9 (CONTRACT §7.2): panel decorative-density wins once set (>0 ==
+        // tier-0/1-equivalent "on", 0 == tier-2-equivalent "off").
+        const decorativeOn = panelOverrides.decorativeDensity != null
+          ? panelOverrides.decorativeDensity > 0.001
+          : adaptiveTier.getTier() < 2;
+        const shadowOn = !!birdPos && !isNested && decorativeOn
           && birbAnchor?.visible !== false;
         let floorRadius = NaN;
         if (shadowOn && sphericalWorld) {
@@ -8566,8 +9081,12 @@
       // that mistake (16.2).
       if (wingRibbons) {
         const bankNow = Math.abs(wingInputState?.x ?? 0);
+        // T10 (CONTRACT §7.2): same decorative-density lever as T9.
+        const ribbonsDecorativeOn = panelOverrides.decorativeDensity != null
+          ? panelOverrides.decorativeDensity > 0.001
+          : adaptiveTier.getTier() < 2;
         const ribbonOn = !isNested && !reducedMotionState.enabled
-          && adaptiveTier.getTier() < 2 && birbAnchor?.visible !== false
+          && ribbonsDecorativeOn && birbAnchor?.visible !== false
           && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
         // Boost is the full-strength case; a hard bank ramps in from the
         // threshold so the ribbon does not switch on at a hard edge.
@@ -8723,7 +9242,19 @@
         }
       }
 
+      // TEL-5 — GPU time probe. beginFrame/endFrame bracket the ONE place a
+      // frame reaches the screen (presentFrame, which itself may issue 1
+      // (no-post) or up to 8 (bloom) internal renderer.render() calls — the
+      // query still brackets the whole thing, which is what "GPU time for
+      // this frame" has to mean). poll() reads back a query from an EARLIER
+      // frame (never this one — its own contract forbids that), so it can
+      // run on either side; kept last so a just-issued query is never
+      // mistaken for the readable one on the same tick.
+      gpuFrameId += 1;
+      gpuTimer.beginFrame(gpuFrameId);
       presentFrame();
+      gpuTimer.endFrame(gpuFrameId);
+      gpuTimer.poll(gpuFrameId);
     };
 
     function handleContextLost(event) {
@@ -8732,6 +9263,7 @@
       previousTime = null;
       flightControls?.reset?.({ releasePointerLock: true });
       renderer.setAnimationLoop(null);
+      gpuTimer.onContextLost();
       if (statusMetric) {
         statusMetric.textContent = "Graphics context lost — attempting to restore...";
       }
@@ -8740,6 +9272,19 @@
     function handleContextRestored() {
       contextState.lost = false;
       renderer.state?.reset?.();
+      // Every shader program recompiles across a context loss, so any FPS
+      // history from before it is a measurement of a connection that no
+      // longer exists. CONTRACT §2.1 assigns this the 'contextRestore' reset
+      // tag — now carried through, P2.3b having built the module that
+      // actually tags a reset (frameSampler predates the tag enum entirely
+      // and has no tag parameter, so it stays untagged here).
+      frameSampler.reset();
+      intervalRecorder.reset(QS_RESET_TAGS.CONTEXT_RESTORE);
+      gpuTimer.onContextRestored();
+      // scheduleRendererResize(true) re-applies the current tier's settings
+      // through the single sizing function (updateRendererSize), so the
+      // renderer, bloom targets and weather uniform all recommit rather than
+      // staying sized for whatever ratio was live before the context was lost.
       scheduleRendererResize(true);
       renderer.setAnimationLoop(document.hidden ? null : renderFrame);
       renderFrame(0);
@@ -9526,9 +10071,9 @@
           // From the pass when it is running: renderer.info resets per
           // render() call and the composite is the last one, so reading the
           // renderer directly reports 1 call for the whole world.
-          calls: (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1)
+          calls: (bloomPass && isPostPassActive())
             ? bloomPass.frameStats.calls : renderer.info.render.calls,
-          triangles: (bloomPass && bloomEnabled && adaptiveTier.getTier() < 1)
+          triangles: (bloomPass && isPostPassActive())
             ? bloomPass.frameStats.triangles : renderer.info.render.triangles,
           // Where the light shafts think the sun is, and how strongly they are
           // applying. An empty shaft buffer is almost always this, not the
@@ -9597,6 +10142,68 @@
             statsPath: frameRenderTotals.statsPath,
           };
         },
+        // CONTRACT §8.3 SW-4. `__BIRB.quality()` and the panel's evidence
+        // export carry the SAME build-identity object (both halves) — this
+        // reuses `buildIdentity()` and `panelGetEvidence()` rather than a
+        // second, divergent implementation. A11 requires every sourceless
+        // field to serialise the sentinel here too: `sentinelFields` is a
+        // fixed list of the fields Waves 0-2 do not source (CONTRACT §3.2/
+        // §3.3), each rendered through the real telemetry supplier so a
+        // second-guessed sentinel list can never drift from what the panel
+        // itself shows.
+        quality: () => {
+          const telemetry = panelGetTelemetry();
+          const evidence = panelGetEvidence();
+          return {
+            build: evidence.build,
+            mode: evidence.mode,
+            pinned: adaptiveTier.isPinned(),
+            requested: evidence.requested,
+            effective: evidence.effective,
+            cooldown: telemetry['TEL-14'],
+            lastAdjustment: { reason: telemetry['TEL-13'] },
+            activeMode: telemetry['TEL-15'],
+            sentinelFields: ['cooldown', 'lastAdjustment.reason'],
+          };
+        },
+        // P2.1f / G2a finding 4.2: P2.1e's seeded world RNG (mulberry32
+        // threaded through spherical-world.js / world-shell.js / weather.js /
+        // collectibles.js) was never shipped — `src/environment/` still has
+        // 76 raw `Math.random()` call sites and no seeded-random.js exists on
+        // disk. This method therefore cannot seed anything real. It reports
+        // the sentinel HONESTLY rather than pretending a lock exists (the
+        // same rule that keeps `panelGetEvidence().seed` a sentinel above) —
+        // returning a fabricated "seeded" value here would be a worse defect
+        // than leaving the method a stub, because a caller (BAT-3's seeded
+        // capture route, Experiments 1/5) would build on a determinism
+        // guarantee that isn't there. Re-implement this for real once
+        // src/environment/seeded-random.js exists and is wired through the
+        // builders; until then `n` is intentionally unused.
+        worldSeed: (n) => {
+          void n;
+          return qualitySentinel(QUALITY_SENTINEL_REASONS.NOT_IMPLEMENTED);
+        },
+        // P2.3b — verify every displayed percentile by INJECTION rather than
+        // by eye: feed a known series (e.g. mostly 12ms with a scattered 40ms
+        // tail) and read `__BIRB.quality()`-adjacent telemetry or the panel's
+        // own display back to confirm p50/p95/p99 match. Reconstructs the
+        // series as real, consecutive intervals via a synthetic clock — the
+        // SAME sample() path a real frame uses — rather than poking the ring
+        // buffer directly, so this exercises the real computation, not a
+        // shortcut around it. Uses the 'manual' reset tag: an explicit
+        // debug action is the closest fit in the closed enum (CONTRACT §2.1)
+        // for an action with no dedicated tag of its own.
+        injectIntervals: (dtMsArray) => {
+          if (!Array.isArray(dtMsArray) || dtMsArray.length === 0) return null;
+          intervalRecorder.reset(QS_RESET_TAGS.MANUAL);
+          let t = 0;
+          intervalRecorder.sample(t); // primes the clock; records nothing
+          for (const dt of dtMsArray) {
+            t += Number(dt) || 0;
+            intervalRecorder.sample(t);
+          }
+          return intervalRecorder.stats();
+        },
       };
       window.__BIRB_READY = true;
     }
@@ -9606,6 +10213,10 @@
       gameLoopStarted = true;
       scheduleRendererResize(true);
       renderer.setAnimationLoop(renderFrame);
+      if (pendingDevPanelOpen) {
+        pendingDevPanelOpen = false;
+        openDevWorkbench();
+      }
     };
     // If the user already tapped Start before the script finished loading
     // (very fast tap / slow network), run the full start sequence now — it

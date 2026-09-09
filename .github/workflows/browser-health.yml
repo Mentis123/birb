@@ -30,7 +30,10 @@ concurrency:
 jobs:
   health:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # Raised from 12: added three birb-quality checks (--selftest ~4m, --check
+    # resize-restore ~3m, --check all ~5m) to the existing browser health suite.
+    # Reuses the single Chromium install and does not re-run npm install.
+    timeout-minutes: 24
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +54,24 @@ jobs:
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+
+      - name: Quality harness can initialize
+        # Selftest verifies the harness can boot a game, install the assertions,
+        # and read telemetry from __BIRB.effective(). Exits non-zero if any step fails.
+        run: node tools/birb-quality.mjs --selftest
+
+      - name: Resize-restore bug still present on HEAD
+        # A6 asserts that tier restoration without a canvas resize leaves bloom
+        # and weather targets desynchronized. This is the permanent bug that Wave 2
+        # will fix. Exits 0 on HEAD (expected red), exits 1 otherwise (regression).
+        run: node tools/birb-quality.mjs --check resize-restore
+
+      - name: All quality assertions pass or match expected-RED
+        # Runs all twelve assertions. A1–A3, A5, A10–A12 are not-yet-implemented.
+        # A6 is expected to fail (documented in docs/perf/EXPECTED-RED.md).
+        # A4, A7, A8, A9 must pass. Exits non-zero if any implemented assertion
+        # regresses or if the harness initialization fails.
+        run: node tools/birb-quality.mjs --check all
 
       - name: Game starts and is actually playable
         # Asserts a rendered frame AND that the nesting and collectibles

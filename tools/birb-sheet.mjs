@@ -80,6 +80,7 @@ async function main() {
         if (!switched) { problems.push(`unknown environment id: ${biome}`); continue; }
         await page.waitForTimeout(1100);
         for (const view of views) {
+            let landingFailed = false;
             if (view === 'nest') {
                 const landed = await page.evaluate(() => window.__BIRB.forceNest(0));
                 if (!landed) { problems.push(`${biome}: no landable nest`); continue; }
@@ -87,14 +88,16 @@ async function main() {
                 // second and the nearest nest can still be most of a 754-unit
                 // circumference away, so this needs real headroom.
                 await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 90000 })
-                    .catch(() => problems.push(`${biome}: landing never reached NESTED`));
+                    .catch(() => { problems.push(`${biome}: landing never reached NESTED`); landingFailed = true; });
             }
             await page.waitForTimeout(settle);
             const stats = await page.evaluate(() => window.__BIRB.stats());
             const file = path.join(tileDir, `${biome}-${view}.png`);
             await page.screenshot({ path: file });
-            tiles.push({ file, label: `${biome} · ${view}`, stats });
-            console.log(`  ${biome} ${view}: ${stats.calls} calls, ${stats.triangles} tris`);
+            const statusNote = landingFailed ? ' — NOT LANDED, not visual evidence' : '';
+            const qualityLabel = stats ? (stats.pinned ? `tier ${stats.tier} (pinned)` : `tier ${stats.tier} (adaptive)`) : 'unknown';
+            tiles.push({ file, label: `${biome} · ${view}${statusNote}`, stats, qualityLabel });
+            console.log(`  ${biome} ${view}: ${stats.calls} calls, ${stats.triangles} tris  [quality: ${qualityLabel}]`);
             if (view === 'nest') {
                 // Return to flight so the next biome starts from the air; a
                 // world rebuilt underneath a perched bird is not a clean view.
@@ -118,7 +121,7 @@ async function main() {
       span{color:#8b97a8}
     </style><div class="grid">${tiles.map((t) => `<figure>
       <img src="file://${t.file}">
-      <figcaption><b>${t.label}</b><br><span>${t.stats.calls} calls · ${(t.stats.triangles / 1000).toFixed(1)}k tris · tier ${t.stats.tier}</span></figcaption>
+      <figcaption><b>${t.label}</b><br><span>${t.stats.calls} calls · ${(t.stats.triangles / 1000).toFixed(1)}k tris · ${t.qualityLabel}</span></figcaption>
     </figure>`).join('')}</div>`);
 
     const sheetPage = await context.newPage();
