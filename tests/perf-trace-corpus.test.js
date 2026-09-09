@@ -37,7 +37,10 @@ import {
 } from './fixtures/perf-traces/index.js';
 import { runTrace, runPair, APPLY_KINDS } from './fixtures/perf-traces/driver.js';
 import { validateScenario, capacityAt, feasibleRung, EVENT_KINDS, GPU_STATES } from './fixtures/perf-traces/schema.js';
-import { makePolicy, createFixedPolicy, createStaticPolicy } from './fixtures/perf-traces/reference-policies.js';
+import {
+  makePolicy, createFixedPolicy, createStaticPolicy,
+  createClairvoyantPolicy, CLAIRVOYANT_STRATEGIES,
+} from './fixtures/perf-traces/reference-policies.js';
 import * as INV from './fixtures/perf-traces/invariants.js';
 import { generateHoldout, holdoutFingerprint, HOLDOUT_ENV_VAR } from './fixtures/perf-traces/holdout.js';
 import { PROVISIONAL, PROVENANCE, provenanceProblems, withConstants, budgetMs } from '../src/game/perf-constants.js';
@@ -512,6 +515,21 @@ test('TC-14b holdout traces validate, run, and contain the shapes the corpus del
     assert.ok(Number.isFinite(s.groundTruth.decisiveMs));
     assert.ok(Number.isFinite(s.groundTruth.gainAvailableMs));
     assert.ok(Number.isInteger(s.groundTruth.regimeChanges));
+    // Both directions of travel are rate-limited by the contract, and INV-14
+    // charged only one of them until a clairvoyant reference was recorded as
+    // DOMINATED for descending at exactly the rate PRO-6 mandates.
+    assert.ok(Number.isInteger(s.groundTruth.upwardSteps) && s.groundTruth.upwardSteps >= 0);
+    assert.ok(Number.isInteger(s.groundTruth.downwardSteps) && s.groundTruth.downwardSteps >= 0);
+    // The gain NET of the toll of reaching it. It is the same segments as
+    // gainAvailableMs minus the contract's own rate limits, minus the segments
+    // where no rung meets the budget and both metrics are rung-independent —
+    // so it can never exceed it, and a sign error in the toll arithmetic shows
+    // up here rather than as a silently wider INV-18 guard.
+    assert.ok(Number.isFinite(s.groundTruth.collectableGainMs));
+    assert.ok(s.groundTruth.collectableGainMs >= 0,
+      `${s.name}: collectableGainMs must not be negative`);
+    assert.ok(s.groundTruth.collectableGainMs <= s.groundTruth.gainAvailableMs + 1e-9,
+      `${s.name}: collectable gain ${s.groundTruth.collectableGainMs} exceeds available gain ${s.groundTruth.gainAvailableMs}`);
     // And it really runs.
     const r = runTrace(s, { policy: makePolicy('compat', { K }), K });
     assert.equal(r.endedBecause, 'duration', `${s.name} hit the step cap`);
@@ -524,96 +542,172 @@ test('TC-14b holdout traces validate, run, and contain the shapes the corpus del
 });
 
 // ---------------------------------------------------------------------------
-// TC-15 — the holdout invariants discriminate, and are satisfiable.
+// TC-15 — the holdout DISCRIMINATES. Deterministic, and it has to be.
 //
-// Both halves matter and both were measured before this test was written: an
-// early version of INV-14 was failed even by a controller handed the capacity
-// model itself, because a trace whose every segment fits at all rungs (or at
-// none) has no decision in it and a fixed profile is optimal there by
-// definition. The `decisive` guard is the fix and this pins it.
 // ---------------------------------------------------------------------------
-test('TC-15 the holdout can fail a bad controller and can be passed by a good one', () => {
-  const traces = generateHoldout(freshSeed(), { count: 10, K });
-  let failedByBad = 0;
-  let passedByGood = 0;
+// WHY THIS TEST NO LONGER ASKS WHETHER THE ORACLES ARE SATISFIABLE
+// ---------------------------------------------------------------------------
+// It used to ask both questions of ONE randomly drawn seed: "can a bad
+// controller fail this?" and "can a good controller pass it?". The second is a
+// SEARCH over trace space, and a search answered by one random sample is a
+// coin toss — measured, three consecutive `npm test` runs gave exit 0, 1, 1.
+// This suite is the default suite, which is four sibling projects' CI, and a
+// nondeterministic test in a shared suite is worse than no test: it trains
+// everyone who sees it to re-run rather than to read.
+//
+// Pinning a seed is not the fix. TC-14 asserts the holdout has no committed
+// default seed, and a seed written down here is a committed seed whatever file
+// it sits in — it converts the holdout into more committed scenarios and
+// deletes the only check in the wave that catches a controller tuned to the
+// corpus.
+//
+// So the two questions are separated by what can be stated without a seed:
+//
+//   DISCRIMINATION is a THEOREM and lives here. A controller that never
+//   applies anything is byte-identical to fixed(startRung) — same rung every
+//   frame, same costs, same metrics — so wherever INV-18 scores a trace at
+//   all, it must fail, because a strict inequality against itself is false.
+//   That holds for every seed, so sweeping several of them is a strengthening
+//   and never a lottery. The one statistical claim, "at least one of ~48
+//   traces is scored", has a per-trace rate around 0.4: it fails with
+//   probability under 1e-10, and if the guards are ever widened enough to make
+//   it fail, that is the finding.
+//
+//   SATISFIABILITY is a SEARCH and lives in the gate: TC-15b below, on the
+//   gate's own seed, plus `node tools/perf-satisfiability.mjs`, which sweeps
+//   ten seeds and 120 traces with the same shared clairvoyant reference.
+//   The alternative considered and rejected was to keep it here as a
+//   statistical assertion over many seeds. That does not make it
+//   deterministic, it makes it rarely wrong — and it lowers the flake rate by
+//   exactly the factor it lowers the power to detect a rare unsatisfiable
+//   shape, which is the only thing it was there to detect.
+//
+// The loose satisfiability floor below is the compromise, and it is labelled
+// as what it is: a smoke alarm, not the gate.
+// ---------------------------------------------------------------------------
+test('TC-15 every holdout trace the invariants score is one a never-moving controller fails', () => {
+  const SEEDS = 6;                 // swept, not pinned — see the header
+  const PER_SEED = 8;
   let scored = 0;
+  let idleFailed = 0;
+  let skipped = 0;
+  let referenceScored = 0;
+  let referenceWon = 0;
+  const problems = [];
 
-  for (const s of traces) {
-    const depth = s.ladder.length;
-    const fixed = [];
-    for (let r = 0; r < depth; r += 1) fixed.push(runTrace(s, { policy: createFixedPolicy(r), K }));
-    const gt = s.groundTruth;
-    const opts = { K, decisiveMs: gt.decisiveMs, regimeChanges: gt.regimeChanges, upwardSteps: gt.upwardSteps };
+  for (let s = 0; s < SEEDS; s += 1) {
+    for (const scenario of generateHoldout(freshSeed(), { count: PER_SEED, K })) {
+      const depth = scenario.ladder.length;
+      const gt = scenario.groundTruth;
+      const fixed = [];
+      for (let r = 0; r < depth; r += 1) fixed.push(runTrace(scenario, { policy: createFixedPolicy(r), K }));
+      const opts = {
+        gainAvailableMs: gt.gainAvailableMs, decisiveMs: gt.decisiveMs, K,
+        collectableGainMs: gt.collectableGainMs, allFixed: fixed,
+      };
 
-    // A controller handed the capacity model itself, with a one-window reaction
-    // lag. Not a candidate for anything — it reads the future — but it is the
-    // only honest way to ask "is this invariant satisfiable at all?"
-    const good = runTrace(s, { policy: clairvoyant(s, K.evaluationWindowMs, depth), K });
-    const gc = [
-      INV.notDominatedByFixedProfile(good, fixed, opts),
-      INV.beatsStandingStill(good, fixed[s.startRung], { gainAvailableMs: gt.gainAvailableMs, climbBudgetMs: gt.climbBudgetMs, climbWindowMs: gt.climbWindowMs, decisiveMs: gt.decisiveMs, K, allFixed: fixed }),
-      INV.noViolations(good),
-      INV.noPersistentOscillation(good, { K }),
-    ];
-    const gfail = gc.filter((c) => !c.pass);
-    assert.deepEqual(gfail.map((c) => `${s.name} ${c.id}: ${c.message}`), [],
-      'a controller with the capacity model in hand must be able to pass the holdout');
-    passedByGood += 1;
+      // The premise of the theorem, asserted rather than assumed: a controller
+      // that never applies anything IS the fixed profile at its start rung.
+      const idle = runTrace(scenario, { policy: createStaticPolicy(), K });
+      const same = fixed[scenario.startRung].metrics;
+      assert.equal(idle.metrics.timeOutsideBudgetMs, same.timeOutsideBudgetMs,
+        `${scenario.name}: a controller that never moves must score exactly what fixed(startRung) scores`);
+      assert.equal(idle.metrics.timeUnnecessarilyDegradedMs, same.timeUnnecessarilyDegradedMs,
+        `${scenario.name}: a controller that never moves must score exactly what fixed(startRung) scores`);
 
-    // A controller that never moves.
-    const idle = runTrace(s, { policy: createStaticPolicy(), K });
-    const ic = [
-      INV.notDominatedByFixedProfile(idle, fixed, opts),
-      INV.beatsStandingStill(idle, fixed[s.startRung], { gainAvailableMs: gt.gainAvailableMs, climbBudgetMs: gt.climbBudgetMs, climbWindowMs: gt.climbWindowMs, decisiveMs: gt.decisiveMs, K, allFixed: fixed }),
-    ];
-    if (ic.some((c) => !c.pass && !c.skipped)) failedByBad += 1;
-    if (ic.some((c) => !c.skipped)) scored += 1;
+      const idleCheck = INV.beatsStandingStill(idle, fixed[scenario.startRung], opts);
+      if (idleCheck.skipped) { skipped += 1; continue; }
+      scored += 1;
+      if (idleCheck.pass) {
+        problems.push(`${scenario.name}: INV-18 scored this trace and a controller that NEVER ADAPTS passed it — ${idleCheck.message}`);
+      } else {
+        idleFailed += 1;
+      }
+
+      // The smoke alarm. Not the satisfiability gate — that is TC-15b and
+      // tools/perf-satisfiability.mjs — but a floor low enough never to flake
+      // and high enough to notice if a change makes the oracles broadly
+      // unsatisfiable. Only the scored traces are worth asking about: a
+      // skipped trace makes no demand of anybody.
+      referenceScored += 1;
+      const ref = runTrace(scenario, { policy: createClairvoyantPolicy(scenario, { K }), K });
+      if (INV.beatsStandingStill(ref, fixed[scenario.startRung], opts).pass) referenceWon += 1;
+    }
   }
 
-  assert.equal(passedByGood, traces.length);
-  assert.ok(scored > 0, 'no holdout trace was scoreable at all — the guards are too wide');
-  assert.ok(failedByBad > 0,
-    'a controller that never adapts passed every holdout trace — the holdout is not discriminating');
-
-  // Reads the capacity model, and still plays by the rules — the point of it is
-  // to answer "is this invariant satisfiable at all?", which it cannot do if it
-  // cheats. It climbs ONE rung at a time under PRO-8's probe budget: G3o found
-  // that an upward move labelled 'upshift' escaped that budget entirely, so the
-  // driver now requires a climb to be either a probe or a PRO-4 restore, and
-  // this helper was itself climbing after 7.45 s with the label 'upshift'.
-  function clairvoyant(scenario, lagMs, depth) {
-    let applyFn = null; let cur = 0; let pending = null;
-    let lastProbeAt = -Infinity; let probeOutstanding = false;
-    return {
-      start(ctx) { applyFn = ctx.apply; cur = Math.min(depth - 1, Math.max(0, ctx.startProfile.rung | 0)); },
-      frame(f) {
-        if (!applyFn) return;
-        const want = feasibleRung(capacityAt(scenario, f.tMs, depth).costMs, f.budgetMs);
-        if (want !== cur && pending === null) pending = { want, at: f.tMs + lagMs };
-        if (!(pending && f.tMs >= pending.at)) return;
-        const w = pending.want;
-        if (w === cur) { pending = null; return; }
-        if (w > cur) {
-          // Down is the overload path and is not probe-governed.
-          pending = null;
-          if (probeOutstanding) { applyFn({ kind: 'probe-rollback', rung: cur + 1, reason: 'capacity model' }); probeOutstanding = false; }
-          else applyFn({ kind: 'downshift', rung: cur + 1, reason: 'capacity model' });
-          cur += 1;
-          return;
-        }
-        // Up, one rung, on the probe budget. Keep `pending` until the climb is
-        // finished so a multi-rung recovery resumes rather than being forgotten.
-        if (probeOutstanding) { applyFn({ kind: 'probe-keep', rung: cur, reason: 'capacity model' }); probeOutstanding = false; }
-        if (f.tMs - lastProbeAt < K.probeIntervalMs) return;
-        applyFn({ kind: 'probe', rung: cur - 1, reason: 'capacity model' });
-        cur -= 1;
-        lastProbeAt = f.tMs;
-        probeOutstanding = true;
-        if (cur === w) pending = null;
-      },
-    };
-  }
+  assert.deepEqual(problems, [],
+    'the holdout scored a trace that a controller which never adapts passed. ' +
+    'A guard wide enough to hide an unsatisfiable trace is wide enough to hide a bad controller.');
+  assert.ok(scored > 0,
+    `no holdout trace out of ${SEEDS * PER_SEED} was scoreable at all (${skipped} skipped) — the guards are too wide`);
+  assert.equal(idleFailed, scored,
+    `${scored} traces were scored and only ${idleFailed} failed a controller that never adapts`);
+  assert.ok(referenceWon >= Math.ceil(referenceScored * 0.9),
+    `a conforming clairvoyant reference beat standing still on only ${referenceWon} of the ${referenceScored} ` +
+    'traces the invariants scored. The oracles have become broadly unsatisfiable; run ' +
+    '`node tools/perf-satisfiability.mjs` for the per-trace diagnosis.');
 });
+
+// ---------------------------------------------------------------------------
+// TC-15b — SATISFIABILITY, on the gate's seed. Skipped in the default suite
+// because the seed is not in the worktree and must never be (TC-14, TC-18).
+//
+//   BIRB_PERF_HOLDOUT_SEED=<the gate's seed> node --test tests/perf-trace-corpus.test.js
+//
+// This is the half that cannot be stated without a seed, so it is stated with
+// one the gate supplies. `node tools/perf-satisfiability.mjs` is the wider
+// form of the same question — ten seeds rather than one — and the gate runs
+// both. The principle they enforce is G3o's, and it is permanent:
+// BEFORE SHIPPING AN ORACLE, PROVE A CONFORMING IMPLEMENTATION CAN SATISFY IT.
+//
+// The reference is CLAIRVOYANT: it reads feasibleRung straight out of the
+// capacity model, so nothing can beat it and a failure here is the oracle's,
+// never the controller's. Satisfiability is "SOME conforming controller can do
+// it", so both strategies are tried and a trace fails only if all of them do —
+// see createClairvoyantPolicy's header for why the greedy one is not an upper
+// bound on its own.
+// ---------------------------------------------------------------------------
+test('TC-15b a conforming clairvoyant controller satisfies every invariant on the gate\'s holdout seed', {
+  skip: process.env[HOLDOUT_ENV_VAR] ? false : `set ${HOLDOUT_ENV_VAR} to run the satisfiability half (gate only)`,
+}, () => {
+  const seed = process.env[HOLDOUT_ENV_VAR];
+  console.error(`[TC-15b] holdout seed fingerprint ${holdoutFingerprint(seed)}`);
+  const traces = generateHoldout(seed, { count: 12, K });
+  const failures = [];
+
+  for (const scenario of traces) {
+    const depth = scenario.ladder.length;
+    const gt = scenario.groundTruth;
+    const fixed = [];
+    for (let r = 0; r < depth; r += 1) fixed.push(runTrace(scenario, { policy: createFixedPolicy(r), K }));
+
+    const perStrategy = CLAIRVOYANT_STRATEGIES.map((chase) => {
+      const ref = runTrace(scenario, { policy: createClairvoyantPolicy(scenario, { K, chase }), K });
+      const bad = [
+        INV.noViolations(ref),
+        INV.boundedProbes(ref, { K }),
+        INV.noPersistentOscillation(ref, { K }),
+        INV.notDominatedByFixedProfile(ref, fixed, {
+          K, decisiveMs: gt.decisiveMs, regimeChanges: gt.regimeChanges,
+          upwardSteps: gt.upwardSteps, downwardSteps: gt.downwardSteps,
+        }),
+        INV.beatsStandingStill(ref, fixed[scenario.startRung], {
+          gainAvailableMs: gt.gainAvailableMs, decisiveMs: gt.decisiveMs, K,
+          collectableGainMs: gt.collectableGainMs, allFixed: fixed,
+        }),
+      ].filter((c) => !c.pass);
+      return bad.map((c) => `${scenario.name} [${chase}] ${c.id}: ${c.message}`);
+    });
+    if (perStrategy.every((f) => f.length > 0)) failures.push(...perStrategy.flat());
+  }
+
+  assert.deepEqual(failures, [],
+    `no conforming controller can satisfy these oracles on ${failures.length ? 'some' : 'any'} of the ` +
+    `${traces.length} traces from seed fingerprint ${holdoutFingerprint(seed)}. An oracle that is red for a ` +
+    'correct implementation is worse than no oracle: the implementer\'s only route to green is to break ' +
+    `something else.\n  - ${failures.join('\n  - ')}`);
+});
+
 
 // ---------------------------------------------------------------------------
 // TC-16 — provenance. Every provisional number says where it came from.

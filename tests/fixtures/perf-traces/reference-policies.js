@@ -326,6 +326,114 @@ export function createProbeOnlyPolicy({ K = PROVISIONAL } = {}) {
   };
 }
 
+/* ========================================================================== *
+ * 9. CLAIRVOYANT — the UPPER BOUND, and the only honest way to ask whether an
+ *    oracle is satisfiable at all.
+ *
+ * It reads `feasibleRung` straight out of the capacity model, so no real
+ * controller can ever beat it, and it still obeys the contract: one rung per
+ * move, PRO-6's hold between moves, PRO-8's probe budget on every upward move,
+ * every probe resolved with probe-keep / probe-rollback.
+ *
+ * NOT a candidate for anything and not copyable into a product: it takes the
+ * scenario object and reads the future out of it. It exists because of the
+ * principle G3o established and this wave made permanent — BEFORE SHIPPING AN
+ * ORACLE, PROVE A CONFORMING IMPLEMENTATION CAN SATISFY IT — and it lives here,
+ * once, because there were three divergent copies of it (the satisfiability
+ * tool, TC-15, and the gate's own driver) and only one of them was right.
+ *
+ * ---------------------------------------------------------------------------
+ * `chase` — AND WHY THE DEFAULT IS NOT 'greedy'
+ * ---------------------------------------------------------------------------
+ * 'greedy' walks to `feasibleRung` always. That is what every earlier copy of
+ * this instrument did, and it is NOT an upper bound — measured, it failed 4 of
+ * 120 holdout traces and 21 of 1200. In a regime where NOTHING on the ladder
+ * meets the budget, `feasibleRung` is the deepest rung by definition
+ * (schema.js: "the honest answer is the cheapest setting") and BOTH scored
+ * metrics are rung-independent there: every rung is outside budget, and
+ * nothing can be unnecessarily degraded below the deepest rung. So descending
+ * buys nothing at all — and under PRO-8 it costs 30 seconds per rung to undo,
+ * which is why a greedy instrument arrived at the next good regime three rungs
+ * too deep and tied standing still.
+ *
+ * 'metric' holds position while nothing fits. That is not a trick to make the
+ * oracle green: it is precisely what the holdout was BUILT to demand. Its own
+ * header says of CPU-bound regimes, "Nothing on this ladder helps, and the
+ * correct behaviour is to stop descending, not to keep paying visual cost for
+ * nothing." The greedy instrument was modelling the very controller the corpus
+ * exists to catch.
+ *
+ * Neither strategy dominates the other — 'metric' arrives at a late descent
+ * later — so satisfiability is "SOME conforming controller can do it", and
+ * `tools/perf-satisfiability.mjs` runs both.
+ * ========================================================================== */
+export function createClairvoyantPolicy(scenario, { K = PROVISIONAL, chase = 'metric' } = {}) {
+  if (!scenario || !scenario.groundTruth || !Array.isArray(scenario.groundTruth.timeline)) {
+    throw new TypeError('createClairvoyantPolicy needs a scenario carrying groundTruth.timeline — it reads the capacity model, that is the whole point of it');
+  }
+  if (chase !== 'metric' && chase !== 'greedy') {
+    throw new RangeError(`chase must be 'metric' or 'greedy', got ${JSON.stringify(chase)}`);
+  }
+  const timeline = scenario.groundTruth.timeline;
+  let rung = 0;
+  let lastMoveAt = -Infinity;
+  let lastProbeAt = -Infinity;
+  let probeOutstanding = false;
+  let applyFn = null;
+
+  const segmentAt = (tMs) => {
+    let seg = timeline[0];
+    for (const s of timeline) if (tMs >= s.fromMs) seg = s;
+    return seg;
+  };
+
+  return {
+    label: `clairvoyant(${chase})`,
+    start(ctx) { applyFn = ctx.apply; rung = ctx.startProfile.rung | 0; },
+    frame(f) {
+      if (!applyFn) return;
+      rung = f.rung;                      // read BACK off the world, never echoed
+      const seg = segmentAt(f.tMs);
+      const inert = chase === 'metric' && !seg.anyFits;
+      const want = seg.feasibleRung;
+
+      // Resolve an outstanding probe FIRST, always. Leaving one open forever
+      // was a real defect in the first version of this instrument: the climb
+      // path returned early while a probe was outstanding, so after its first
+      // probe it never moved again, scored identically to standing still, and
+      // reported the oracle SATISFIABLE. An instrument that cannot move is not
+      // an upper bound and its green is an artifact.
+      if (probeOutstanding && f.tMs - lastProbeAt >= K.settleHoldMs) {
+        const keep = inert ? true : want <= rung;
+        applyFn({ kind: keep ? 'probe-keep' : 'probe-rollback', rung: keep ? rung : rung + 1, reason: 'clairvoyant: resolve probe' });
+        probeOutstanding = false;
+        if (!keep) lastMoveAt = f.tMs;
+        return;
+      }
+      if (probeOutstanding) return;
+      if (inert) return;                  // nothing fits: no move changes either metric
+      if (want === rung) return;
+      if (f.tMs - lastMoveAt < K.settleHoldMs) return;   // PRO-6
+
+      if (want > rung) {
+        // Down is the overload path; PRO-8 does not govern it.
+        applyFn({ kind: 'downshift', rung: rung + 1, reason: 'clairvoyant: capacity model' });
+        lastMoveAt = f.tMs;
+        return;
+      }
+      // Up. PRO-8: at most one optional upgrade probe per 30 s, one outstanding.
+      if (f.tMs - lastProbeAt < K.probeIntervalMs) return;
+      applyFn({ kind: 'probe', rung: rung - 1, reason: 'clairvoyant: capacity model' });
+      lastProbeAt = f.tMs;
+      lastMoveAt = f.tMs;
+      probeOutstanding = true;
+    },
+  };
+}
+
+/** The two conforming clairvoyant strategies, in the order the gate reports them. */
+export const CLAIRVOYANT_STRATEGIES = Object.freeze(['metric', 'greedy']);
+
 /**
  * The registry the corpus's discrimination matrix names policies through.
  * A scenario says `{ policy: 'twitchy', mustFail: ['INV-2'] }` and this is

@@ -231,9 +231,9 @@ controller that never moves ties with a fixed profile and is therefore not
 dominated, so where the ground truth says there was something to win, it must
 beat standing still.
 
-Three allowances on INV-14, each added because a controller that had the
+Four allowances on INV-14, each added because a controller that had the
 capacity model in its hand, or one that passed all sixteen committed scenarios,
-failed without it. All three were measured, not guessed:
+failed without it. All four were measured, not guessed:
 
 - a segment where every rung fits, or none does, is not *decisive* — the ladder
   decides nothing there and no controller can beat a fixed profile on it;
@@ -245,12 +245,47 @@ failed without it. All three were measured, not guessed:
   probe per thirty seconds a three-rung climb takes ninety seconds however good
   the controller is; an oracle without this term demands behaviour the contract
   forbids.
+- every rung it requires the controller to **descend** beyond one per regime
+  change costs one PRO-6 hold, and that time scores as outside budget. This one
+  was missing for a whole gate cycle because "downward steps are cheap" is true
+  per rung and false per descent: a response deadline covers ONE adjustment,
+  and a four-rung descent is four of them with a hold between each. Measured, a
+  clairvoyant reference starting on rung 0 of a five-rung ladder whose first
+  segment needs rung 4 was recorded as DOMINATED — 29283 ms outside budget
+  against fixed(4)'s 21717 — for descending at exactly the rate PRO-6 mandates.
 
 The climb allowance is on INV-14 only, and deliberately **not** on INV-18.
 There it excuses the adaptive controller's extra cost; here it would become a
 hurdle the controller has to clear — the same number pointing the wrong way.
 Measured: with it applied to INV-18, a controller that beat standing still by
 twenty-three seconds of degraded time was recorded as having failed.
+
+INV-18 charges the toll on the other side of the comparison instead, where it
+belongs: to the question of whether the trace had anything to offer at all.
+`gainAvailableMs` — the time the correct rung differs from the starting one —
+is a duration, and the contract's rates are not free, so it over-counts twice
+over. It counts segments where NOTHING on the ladder meets the budget, where
+both scored metrics are rung-independent and no controller can gain anything
+(one trace reported 217239 ms of gain available and had 18068 ms of it); and it
+charges nothing for reaching the better rung, when PRO-8 caps the climb at one
+rung per thirty seconds and `timeUnnecessarilyDegradedMs` is a PREDICATE, so
+the partial climb that DOES fit in a short window earns literally zero. So the
+ground truth now also carries **`collectableGainMs`**: the same segments, net of
+the contract's own rate limits, merged so an opportunity is charged its toll
+once. Where it falls under the noise tolerance, INV-18 declines to score the
+trace and says so.
+
+Measured in both directions over 2,400 generated traces before it shipped: it
+declines 10 traces that no conforming reference can win and 0 that any
+reference can win, and costs 7 of 513 previously scored traces. Over an
+independent 1,800-trace sweep the clairvoyant reference satisfies every
+invariant on 1800 of 1800, INV-18 scores 761 of 1800, and a controller that
+never adapts fails all 761 of those. The two wider guards tried at G3o skipped
+10 of 12 traces and 12 of 12: **a guard wide enough to hide an unsatisfiable
+trace is wide enough to hide a bad controller**, and the arithmetic above is
+derived from the capacity model alone precisely so that
+`tools/perf-satisfiability.mjs` stays an independent check of it rather than a
+mirror.
 
 ---
 

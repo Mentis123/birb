@@ -377,6 +377,7 @@ export function notDominatedByFixedProfile(result, fixedResults, {
   decisiveMs = null,      // time in segments where the LADDER decides whether the budget is met
   regimeChanges = null,   // how many times the correct rung changed
   upwardSteps = null,     // how many rungs the trace requires the controller to CLIMB
+  downwardSteps = null,   // how many rungs it requires the controller to DESCEND
   minDecisiveMs = null,
 } = {}) {
   // A trace in which every segment either fits at every rung or fits at none
@@ -406,9 +407,20 @@ export function notDominatedByFixedProfile(result, fixedResults, {
   // behaviour PRO-8 forbids, and the first controller written against this
   // corpus failed traces it could not possibly have passed.
   const base = (regimeChanges === null) ? K.evaluationWindowMs : (1 + regimeChanges) * overloadResponseDeadlineMs(K);
-  const tolOutside = toleranceMs ?? base;
+  // G3o BLOCKER 1, residual. `base` allows ONE response deadline per change in
+  // the correct rung, and a response deadline covers ONE rung — it ends in a
+  // single settleHoldMax. A descent of four rungs is four adjustments and
+  // PRO-6 holds between each of them, so the rungs BEYOND one per change cost
+  // a further hold apiece and nothing counted them. Measured: a conforming
+  // clairvoyant reference starting on rung 0 of a five-rung ladder whose first
+  // segment needs rung 4 spent 29283 ms outside budget against fixed(4)'s
+  // 21717 and was recorded as DOMINATED — for descending at exactly the rate
+  // PRO-6 mandates, with regimeChanges = 0 so `base` was one deadline flat.
+  // Narrow on purpose: a trace whose descents are one rung per regime change
+  // adds nothing at all here.
+  const extraDescentHoldsMs = Math.max(0, (downwardSteps ?? 0) - (1 + (regimeChanges ?? 0))) * K.settleHoldMaxMs;
+  const tolOutside = toleranceMs ?? (base + extraDescentHoldsMs);
   const tolDegraded = toleranceMs ?? (base + (upwardSteps ?? 0) * K.probeIntervalMs);
-  const tol = tolOutside;
   const a = result.metrics;
   const dominators = [];
   fixedResults.forEach((f, i) => {
@@ -429,7 +441,8 @@ export function notDominatedByFixedProfile(result, fixedResults, {
   }
   return bad('INV-14',
     `a FIXED profile dominates the adaptive controller on this trace, beyond the discovery allowance ` +
-    `(${Math.round(tolOutside)} ms outside / ${Math.round(tolDegraded)} ms degraded, for ${regimeChanges} regime change(s) and ${upwardSteps ?? 0} upward step(s)). ` +
+    `(${Math.round(tolOutside)} ms outside / ${Math.round(tolDegraded)} ms degraded, for ${regimeChanges} regime change(s), ` +
+    `${upwardSteps ?? 0} upward and ${downwardSteps ?? 0} downward step(s)). ` +
     `Adaptive: outside=${Math.round(a.timeOutsideBudgetMs)} ms, degraded=${Math.round(a.timeUnnecessarilyDegradedMs)} ms. Dominated by: ` +
     dominators.map((d) => `fixed(rung ${d.rung}) outside=${Math.round(d.timeOutsideBudgetMs)} degraded=${Math.round(d.timeUnnecessarilyDegradedMs)}`).join('; ') +
     '. Adaptation did not earn its overhead here.',
@@ -536,7 +549,7 @@ export function controllerRetainsHitches(snapshot, { atLeast = 3 } = {}) {
  *   `fixedAtStart` is the result of running createFixedPolicy(startRung) on
  *   the identical trace.
  * -------------------------------------------------------------------------- */
-export function beatsStandingStill(result, fixedAtStart, { gainAvailableMs, decisiveMs = null, K = PROVISIONAL, toleranceMs = null, climbBudgetMs = null, climbWindowMs = null, allFixed = null } = {}) {
+export function beatsStandingStill(result, fixedAtStart, { gainAvailableMs, decisiveMs = null, K = PROVISIONAL, toleranceMs = null, climbBudgetMs = null, climbWindowMs = null, allFixed = null, collectableGainMs = null } = {}) {
   // ONE tolerance, and a small one: a window of noise. INV-14's climb allowance
   // deliberately does NOT appear here. There it excuses the adaptive
   // controller's extra cost; here it would become a HURDLE the controller has
@@ -571,6 +584,39 @@ export function beatsStandingStill(result, fixedAtStart, { gainAvailableMs, deci
   if (decisiveMs !== null && decisiveMs < floor) {
     return { id: 'INV-18', pass: true, skipped: true,
       message: `only ${Math.round(decisiveMs)} ms of this trace had a rung choice that changed whether the budget was met (< ${floor} ms): moving could not have shown up in either metric` };
+  }
+  // G3o BLOCKER 1, RESIDUAL — and this is the guard that says what "beats
+  // standing still" means once PRO-8's toll is charged.
+  //
+  // `gainAvailableMs` is a DURATION and the contract's rates are not free. A
+  // 20-second window that wants a rung three climbs away offers no gain to
+  // anybody: PRO-8 allows one upgrade probe per 30 s, so reaching it takes
+  // sixty seconds of waiting, and `timeUnnecessarilyDegradedMs` is a
+  // PREDICATE (`rung > feasibleRung`), so the partial climb that DOES fit
+  // earns exactly nothing. Measured on a clairvoyant reference: 4 -> 3 -> 2
+  // across a 33-second window whose feasible rung was 0 moved the metric by
+  // 0 ms. `gainAvailableMs` also counts segments where NO rung meets the
+  // budget, where both metrics are rung-independent — one trace reported
+  // 217239 ms of gain available and had 18068 ms of it.
+  //
+  // `collectableGainMs` (holdout.js) is the same segments net of the
+  // contract's own rate limits. Where it is under the noise tolerance, "beat
+  // standing still" is not a demanding oracle, it is an unsatisfiable one.
+  //
+  // NARROW, and measured in both directions over 2,400 generated traces:
+  // it declines 10 traces that no conforming reference can win (0 that any
+  // reference can win — no false positives), and costs 7 of 513 previously
+  // scored traces. The two wider guards G3o tried skipped 10 of 12 and 12 of
+  // 12; this leaves 41% of all traces scored, and a controller that never
+  // adapts fails EVERY ONE of them. It is also derived from the capacity model
+  // alone, never from a controller run, which is what keeps
+  // tools/perf-satisfiability.mjs an independent check rather than a mirror.
+  if (collectableGainMs !== null && !(collectableGainMs > tol)) {
+    return { id: 'INV-18', pass: true, skipped: true,
+      message: `${Math.round(gainAvailableMs)} ms of this trace wanted a different rung, but only `
+        + `${Math.round(collectableGainMs)} ms of it is collectable under PRO-8's probe budget and `
+        + `PRO-6's hold (< ${Math.round(tol)} ms): the toll of reaching the better rung consumes the `
+        + `gain, so standing still is competitive and no conforming controller can beat it` };
   }
   // G3o BLOCKER 1, final form. Where the STARTING rung is already the best of
   // every fixed profile, "beat standing still" is asking the controller to beat

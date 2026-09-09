@@ -280,6 +280,82 @@ function generateOne(seedInt, index, K) {
 }
 
 /**
+ * How much of standing-still's loss a CONFORMING controller could actually
+ * collect — the number INV-18 needs and did not have.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY gainAvailableMs IS THE WRONG NUMBER
+ * ---------------------------------------------------------------------------
+ * `gainAvailableMs` counts every millisecond whose feasible rung differs from
+ * the starting rung. That over-counts in two directions at once, and every
+ * residual G3o failure was one of them:
+ *
+ *  - A segment where NOTHING on the ladder meets the budget reports
+ *    `feasibleRung = depth - 1` (schema.js: "the honest answer is the cheapest
+ *    setting"), so it counts as gain — while on BOTH scored metrics every rung
+ *    is identical there. Time outside budget accrues at every rung, and
+ *    nothing can be "unnecessarily degraded" below the deepest rung. A trace
+ *    ending in a 147-second collapse reported 217 s of gain available and had
+ *    exactly 18 s.
+ *  - It costs nothing to reach. It is a duration, and the contract's rates are
+ *    not free: PRO-8 allows one upgrade probe per 30 s, so a three-rung climb
+ *    takes ninety seconds however good the controller is, and PRO-6 holds
+ *    2-3 s between ordinary adjustments. A 20-second window wanting a rung
+ *    three climbs away offers no gain at all.
+ *
+ * And the metric is a PREDICATE, not a magnitude: `rung > feasibleRung` scores
+ * the same at one rung out as at four, so a partial climb earns literally
+ * nothing. Measured, on a clairvoyant reference: 4 -> 3 -> 2 across a
+ * 33-second window whose feasible rung was 0 reduced timeUnnecessarilyDegraded
+ * by 0 ms.
+ *
+ * So the gain a controller can collect is, per opportunity,
+ * `duration - toll`, and the toll is the contract's own rate limit.
+ *
+ * Derived from the capacity model alone, like everything else here. That
+ * matters: it is what keeps `tools/perf-satisfiability.mjs` an INDEPENDENT
+ * check. If this guard were computed by running the reference controller, the
+ * reference would satisfy it by construction and the instrument would be
+ * measuring itself.
+ */
+function collectableGainMs(timeline, startRung, K) {
+  // Consecutive segments that want the same rung are ONE opportunity: the toll
+  // is paid on entry, not again at every capacity change that does not move
+  // the answer. Without this merge, two adjacent 15-second segments both
+  // wanting rung 0 are each charged the full climb and both score zero.
+  const runs = [];
+  for (const seg of timeline) {
+    const last = runs[runs.length - 1];
+    if (last && last.feasibleRung === seg.feasibleRung && last.anyFits === seg.anyFits) {
+      last.toMs = seg.toMs;
+    } else {
+      runs.push({ fromMs: seg.fromMs, toMs: seg.toMs, feasibleRung: seg.feasibleRung, anyFits: seg.anyFits });
+    }
+  }
+  let total = 0;
+  for (const run of runs) {
+    const durMs = run.toMs - run.fromMs;
+    const f = run.feasibleRung;
+    if (f < startRung) {
+      // Standing still is UNNECESSARILY DEGRADED here and only a climb fixes
+      // it. PRO-8: one upgrade probe per 30 s. The first may be immediate, so
+      // N rungs cost (N-1) intervals of WAITING, not N.
+      total += Math.max(0, durMs - (startRung - f - 1) * K.probeIntervalMs);
+    } else if (f > startRung && run.anyFits) {
+      // Standing still is OUTSIDE BUDGET here and a descent fixes it. PRO-6
+      // holds after each adjustment; same (N-1) arithmetic, at the FASTEST
+      // hold the contract permits, because the question is what SOME
+      // conforming controller could do, not what a particular one does.
+      total += Math.max(0, durMs - (f - startRung - 1) * K.settleHoldMinMs);
+    }
+    // f === startRung: standing still is already on the right rung.
+    // !anyFits: no rung meets the budget, so both metrics are rung-independent
+    // here and there is no gain for any controller, however clairvoyant.
+  }
+  return total;
+}
+
+/**
  * Ground truth derived from the capacity model alone — never from a controller
  * run. This is what lets the holdout ask questions of a controller that has
  * never seen the trace without also telling it the answer.
@@ -324,12 +400,31 @@ function computeGroundTruth(scenario, depth, B, K) {
   for (let i = 1; i < timeline.length; i += 1) {
     upwardSteps += Math.max(0, timeline[i - 1].feasibleRung - timeline[i].feasibleRung);
   }
+  // G3o BLOCKER 1, residual. DOWNWARD steps, the symmetric quantity, and it
+  // was simply missing — the comment above says "downward steps are cheap",
+  // which is true per rung and false per DESCENT. PRO-6 holds 2-3 s after an
+  // ordinary adjustment, so an N-rung descent costs (N-1) holds of waiting
+  // however good the controller is, and every millisecond of it scores as
+  // time outside budget that a fixed profile born on the right rung never
+  // pays. Measured: a conforming reference starting on rung 0 of a five-rung
+  // ladder whose very first segment needs rung 4 was recorded by INV-14 as
+  // DOMINATED — 29283 ms outside against fixed(4)'s 21717 — for spending ten
+  // seconds descending at exactly the rate PRO-6 mandates.
+  let downwardSteps = Math.max(0, timeline[0].feasibleRung - scenario.startRung);
+  for (let i = 1; i < timeline.length; i += 1) {
+    downwardSteps += Math.max(0, timeline[i].feasibleRung - timeline[i - 1].feasibleRung);
+  }
   const last = timeline[timeline.length - 1];
   return {
     timeline,
     decisiveMs,
     regimeChanges,
     upwardSteps,
+    downwardSteps,
+    // How much of standing still's loss a conforming controller could actually
+    // collect. This — not gainAvailableMs — is what "there was something to
+    // gain" has to mean once PRO-8 is in force. See collectableGainMs().
+    collectableGainMs: collectableGainMs(timeline, scenario.startRung, K),
     // G3o BLOCKER 1. The comment above already knew a climb costs
     // upwardSteps x probeIntervalMs under PRO-8; nothing computed it, so
     // nothing could tell a demanding trace from an impossible one. These two

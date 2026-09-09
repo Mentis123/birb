@@ -122,10 +122,19 @@ test('HO-1 the controller survives traces it has never seen', { skip: SKIP }, as
       INV.boundedProbes(adaptive, { K }),
       INV.noPersistentOscillation(adaptive, { K }),
       INV.notDominatedByFixedProfile(adaptive, fixed, {
-        K, decisiveMs: gt.decisiveMs, regimeChanges: gt.regimeChanges, upwardSteps: gt.upwardSteps,
+        K, decisiveMs: gt.decisiveMs, regimeChanges: gt.regimeChanges,
+        // BOTH directions of travel are rate-limited by the contract and only
+        // the upward one was ever charged. PRO-8 caps the climb at one rung per
+        // 30 s; PRO-6 holds between the adjustments of a descent. See INV-14.
+        upwardSteps: gt.upwardSteps, downwardSteps: gt.downwardSteps,
       }),
       INV.beatsStandingStill(adaptive, fixed[scenario.startRung], {
-        gainAvailableMs: gt.gainAvailableMs, climbBudgetMs: gt.climbBudgetMs, climbWindowMs: gt.climbWindowMs, decisiveMs: gt.decisiveMs, K, allFixed: fixed,
+        gainAvailableMs: gt.gainAvailableMs, climbBudgetMs: gt.climbBudgetMs, climbWindowMs: gt.climbWindowMs,
+        // The gain NET of the toll PRO-8 and PRO-6 charge to reach it. Without
+        // it INV-18 demanded climbs the contract makes arithmetically
+        // impossible inside the trace's own lifetime.
+        collectableGainMs: gt.collectableGainMs,
+        decisiveMs: gt.decisiveMs, K, allFixed: fixed,
       }),
     ];
 
