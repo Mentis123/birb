@@ -16,7 +16,7 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v43-2026-09-09-perf-workbench';
+const CACHE_VERSION = 'v44-2026-09-09-perf-traces';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -62,6 +62,7 @@ const CORE_ASSETS = [
   './src/game/frame-stats.js',
   './src/game/gpu-timer.js',
   './src/game/quality-settings.js',
+  './src/game/perf-constants.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
   './src/camera/fpv-camera.js',
