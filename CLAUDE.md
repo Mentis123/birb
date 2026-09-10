@@ -986,6 +986,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |
+| `docs/ULTRACODE_REALISM_PLAN.md` | How to run the realism backlog with an agent fleet: the tiering law + art corollary, the 16-wave plan, the cost model, and the blind paired forced-choice check that is the only thing able to catch a green stage that did not improve the game |
 | `docs/realism/AUTHORED_ASSETS.md` | The authored-asset contract + the brief an external image agent (Codex) works from. Root Birb only — the siblings keep their zero-asset rules |
 | `tools/asset-check.mjs` | Structural acceptance for authored textures (tiling, baked light, colour space by suffix, POT, budget). Runs in CI over `assets/`; empty root exits 0 |
 | `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |

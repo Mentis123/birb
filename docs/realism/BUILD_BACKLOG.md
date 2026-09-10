@@ -1,6 +1,6 @@
 # Ordered build handoff
 
-Implement this plan in reviewable stages on current main. [The decision report](README.md) defines the art/architecture direction; [the profile protocol](PROFILES.md) defines acceptance. The work begins with the ambitious image, after a short measurement prerequisite. It does not wait for a finished optimizer before doing art.
+Implement this plan in reviewable stages on current main. [The tiered agent execution plan](../ULTRACODE_REALISM_PLAN.md) says who runs each row, what each model tier may own, and which checks have to be watched failing before anything is spent against them — read it before commissioning any stage below. [The decision report](README.md) defines the art/architecture direction; [the profile protocol](PROFILES.md) defines acceptance. The work begins with the ambitious image, after a short measurement prerequisite. It does not wait for a finished optimizer before doing art.
 
 Effort ranges below are rough experienced-specialist person-days including local iteration, not elapsed-time promises, token estimates or evidence of feasibility. A technical artist and rendering engineer may work on independent deliverables, but integration and phone gates remain sequential. Asset sourcing, device access and substantial feedback changes can expand the ranges.
 
