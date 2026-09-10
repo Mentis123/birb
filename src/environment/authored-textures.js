@@ -144,9 +144,15 @@ export function applyAuthoredBark(THREE, material, { circumference, height, base
   material.normalMap = normalMap;
   // NOT roughnessMap: MeshLambertMaterial has no such slot. Assigning one
   // uploads a texture, perturbs the program cache key into a fresh compile that
-  // produces an identical shader, and samples nothing. Verified against the
-  // pinned three@0.183.2 source — meshlambert_frag.glsl.js contains the string
-  // "roughness" zero times.
+  // produces an identical shader, and samples nothing.
+  //
+  // Verified twice against the pinned three@0.183.2 source, because the first
+  // citation was bad: src/renderers/shaders/ShaderLib/meshlambert.glsl.js (note
+  // the path — meshlambert_frag.glsl.js does not exist and the CDN returns a
+  // 100-byte "couldn't find the requested file" stub that greps as zero hits
+  // for anything). The real 3,253-byte file contains "roughness" zero times.
+  // MeshLambertMaterial.js independently declares only ten maps, none of them
+  // roughnessMap, which is what the decision actually rested on.
   material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
   material.needsUpdate = true;
 

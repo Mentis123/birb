@@ -2,6 +2,8 @@
 
 **Audience: an external generation agent (Codex with an image model, or equivalent) and whoever integrates what it returns.**
 
+> **The live job queue is [ASSET_JOBS.md](ASSET_JOBS.md).** This document is the contract — formats, colour spaces, budgets, failure modes. That one says what to make next and what came back last time. Read both; start there.
+
 [The decision report](README.md) permits this and bounds it:
 
 > Allow authored meshes and a small compressed texture set for root Birb. Retain procedural placement. Offline authoring/baking is allowed; the shipped site can remain static with no runtime build framework. This does not amend the independent zero-asset rules of `/sculpture`.
@@ -172,6 +174,7 @@ It checks:
 | Channel divergence | roughness, AO, metal | > 3 — it is not single-channel |
 | Channel divergence | packed (`_orm`) | ≤ 3 — it is greyscale, so two of the three maps are lost |
 | Aspect | sky | not 2:1 |
+| **Longitude wrap** | sky | left and right edges are the same meridian; a seam there stands in the sky and in every reflection. Poles are deliberately NOT checked |
 | **Dynamic range** (p1–p99 of G) | roughness, gloss | span < **0.20** — a map with no range is a constant that costs a texture unit; `material.roughness = x` costs neither. `_ao`/`_metal` are exempt by kind |
 | **Self-duplication** vs unrelated regions | albedo, normal, roughness, packed | any half/quarter shift or mirror scoring < **0.12** of the baseline |
 | **Normal convention** vs the sibling albedo | normal | `rG ≤ −0.30` (green-down/DirectX) or `rR ≥ +0.30` (X inverted). Abstains below \|0.30\| rather than guessing |

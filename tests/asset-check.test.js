@@ -222,9 +222,32 @@ test('non power-of-two dimensions are rejected', () => {
   assert.equal(analyse(goodAlbedo(256, 128), 'albedo').fails.length, 0);
 });
 
-test('a sky must be 2:1 equirectangular', () => {
-  assert.equal(analyse(make(512, 256, () => [100, 120, 160]), 'sky').fails.length, 0);
+test('a sky must be 2:1 equirectangular and must wrap in longitude', () => {
+  const TAU2 = Math.PI * 2;
+  // A plausible sky: a vertical gradient (zenith to horizon) with cloud
+  // structure that is periodic in longitude, which is what wrapping means.
+  const sky = make(512, 256, (x, y) => {
+    const v = 1 - y / 256;
+    const cloud = 18 * Math.sin(TAU2 * 3 * x / 512) * Math.cos(TAU2 * 2 * y / 256)
+      + 12 * Math.cos(TAU2 * 5 * x / 512);
+    return [60 + v * 60 + cloud, 90 + v * 60 + cloud, 150 + v * 50 + cloud];
+  });
+  assert.equal(analyse(sky, 'sky').fails.length, 0);
   assert.ok(analyse(make(512, 512, () => [100, 120, 160]), 'sky').fails.some(f => /2:1/.test(f)));
+
+  // The poles legitimately differ top to bottom, so the y seam must NOT fail.
+  // This one has a violent top-to-bottom discontinuity and still passes.
+  const poles = make(512, 256, (x, y) => (y < 128 ? [30, 40, 90] : [200, 190, 160]));
+  assert.equal(analyse(poles, 'sky').fails.length, 0, 'a pole discontinuity is not a defect');
+
+  // But the left and right edges are the SAME meridian. A discontinuity there
+  // is a vertical seam standing in the sky and in every reflection of it.
+  const split = make(512, 256, (x, y) => {
+    const v = 1 - y / 256;
+    const jump = x > 480 ? 90 : 0;
+    return [60 + v * 60 + jump, 90 + v * 60 + jump, 150 + v * 50 + jump];
+  });
+  assert.ok(analyse(split, 'sky').fails.some(f => /longitude wrap/.test(f)));
 });
 
 test('decoded cost counts the mip chain, and the budget is a real constraint', () => {

@@ -586,6 +586,15 @@ export function analyse(p, kind, siblings = {}) {
   }
   if (kind === 'sky') {
     if (Math.abs(p.w / p.h - 2) > 0.02) fails.push(`equirectangular sky must be 2:1, got ${p.w}x${p.h}`);
+    // An equirectangular map wraps in LONGITUDE only. The left and right edges
+    // are the same meridian, so a discontinuity there is a vertical seam
+    // standing in the sky and in every reflection of it. The poles are top and
+    // bottom rows and legitimately differ, so the y seam is not checked.
+    const t = tiling(p);
+    notes.push(`longitude wrap ${(t.seamX / Math.max(t.p90, 1)).toFixed(2)}x (seam ${t.seamX}, p90 ${t.p90})`);
+    if (t.seamX / Math.max(t.p90, 1) > THRESHOLDS.seamRatio) {
+      fails.push(`the longitude wrap is ${(t.seamX / Math.max(t.p90, 1)).toFixed(2)}x the steepest ordinary step: the left and right edges are the same meridian, so this is a vertical seam standing in the sky and in every reflection of it`);
+    }
   }
   if (p.chunks) {
     const a = ancillary(p, kind);
