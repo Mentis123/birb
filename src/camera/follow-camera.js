@@ -419,11 +419,53 @@ export function createFollowCameraRig(three, options = {}) {
     };
   }
 
+  /**
+   * Collapse every damped term onto its target, immediately.
+   *
+   * The rig lerps position, lookAt and orientation toward their desired values
+   * each frame, so after a teleport the camera is somewhere between where it
+   * was and where it belongs -- and WHICH somewhere depends on how many frames
+   * have elapsed. That makes two captures of "the same" pose different
+   * pictures, which spoiled three separate A/B measurements before this
+   * existed.
+   *
+   * `_breathTime` is reset for the same reason and it is the subtler half: the
+   * breathing sway accumulates from page load, so two runs are never at the
+   * same phase and the camera sits up to a full CAMERA_BREATH_AMPLITUDE apart
+   * even when everything else agrees.
+   *
+   * Call it AFTER at least one updateFromPose, or the desired values it
+   * collapses onto have never been computed.
+   */
+  function snap() {
+    // `perspective` is local to attach/updateFromPose; the rig keeps the
+    // attached camera on state.camera, which is what is reachable from here.
+    const cam = state.camera;
+    if (!cam) return null;
+    state.position.copy(state.desiredPosition);
+    state.lookAt.copy(state.desiredLookAt);
+    _breathTime = 0;
+    cam.position.copy(state.position);
+    const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);
+    scratch.lookMatrix.lookAt(state.position, state.lookAt, upForLookAt);
+    state.targetOrientation.setFromRotationMatrix(scratch.lookMatrix);
+    state.orientation.copy(state.targetOrientation);
+    cam.quaternion.copy(state.orientation);
+    scratch.lookDirection.set(0, 0, -1).applyQuaternion(state.orientation);
+    scratch.lookTarget.copy(state.position).add(scratch.lookDirection);
+    cam.lookAt(scratch.lookTarget);
+    return {
+      position: state.position.toArray().map((n) => +n.toFixed(4)),
+      lookAt: state.lookAt.toArray().map((n) => +n.toFixed(4)),
+    };
+  }
+
   return {
     attach,
     configure,
     reset,
     updateFromPose,
     getDebugState,
+    snap,
   };
 }

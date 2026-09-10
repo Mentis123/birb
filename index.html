@@ -3660,7 +3660,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v49-2026-09-11-sky-texture';
+    const BIRB_BUILD = 'v50-2026-09-11-pin-checkpoint';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -10827,6 +10827,43 @@
         // place — the flight system rewrites speed each frame — which is why
         // the comparison sheet uses capturePose/restorePose instead. Kept
         // because it is still the right way to stop a player-driven boost.
+        /**
+         * Hold everything that makes two captures of "the same" frame differ.
+         *
+         * Seed, sun and tier were already pinnable one call at a time; the
+         * camera never was. This does the whole sequence in the right order --
+         * the seed only applies on the NEXT world build, so the rebuild has to
+         * follow it -- and returns the full record as a capture sidecar.
+         *
+         * Three measurements in one session were lost to comparing frames whose
+         * triangle counts did not even match. This is the fix.
+         */
+        pinCheckpoint: ({ seed = 16160, env = null, sunTime = 0.35, tier = 0, pose = null } = {}) => {
+          // Through the public hooks, not the bare locals: several of those
+          // (setSunEnabled, setSunTime) are defined only as properties of this
+          // very object, so naming them directly is a ReferenceError at call
+          // time rather than a load-time one -- silent until the harness runs.
+          const B = window.__BIRB;
+          B.worldSeed(seed);
+          if (env) B.setEnvironment(env);
+          B.pinTier(tier);
+          B.setSunEnabled(false);
+          B.setSunTime(sunTime);
+          if (pose) B.restorePose(pose);
+          // Speed 0 and a zeroed stick, or the controller integrates the bird
+          // out from under the pose that was just set.
+          B.freeze(true);
+          const cam = cameraState && typeof cameraState.snap === 'function' ? cameraState.snap() : null;
+          return {
+            seed: B.worldSeed(),
+            env: env || null,
+            sunTime,
+            tier,
+            pose: B.capturePose(),
+            camera: cam,
+            build: BIRB_BUILD,
+          };
+        },
         freeze: (on = true) => {
           if (!flightController) return null;
           if (typeof flightController.setSpeed === 'function') flightController.setSpeed(on ? 0 : 11);

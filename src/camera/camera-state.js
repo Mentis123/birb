@@ -626,6 +626,17 @@ export function createCameraState({ three, scene, flightController, sphereCenter
     reset,
     updateActiveCamera,
     update: updateActiveCamera,
+    /**
+     * Collapse the follow rig's damping onto its target so the camera is
+     * exactly where the current pose says it belongs, with no dependence on
+     * how many frames have elapsed since the pose changed. Harness-only: a
+     * player never wants this, and an A/B cannot work without it.
+     */
+    snap() {
+      return followState.rig && typeof followState.rig.snap === 'function'
+        ? followState.rig.snap()
+        : null;
+    },
     dispose,
     setSphereCenter,
     getConfig(mode) {
