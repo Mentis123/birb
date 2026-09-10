@@ -425,7 +425,13 @@ const STYLE_TEXT = `
 #${ROOT_ELEMENT_ID} {
   position: fixed;
   left: 0; right: 0; bottom: 0;
-  max-height: 72vh;
+  /* Reported from the device: "when it pops up it covers the whole screen so I
+     keep having to close it to view things". At 72vh it did — and you cannot
+     judge a colour grade through a panel that covers the thing you are grading,
+     which is the one job this panel has. Three states now, cycled from the
+     header, and COMPACT is the default: enough to work a slider, small enough
+     to watch the sky while you do. */
+  max-height: var(--bqp-h, 40vh);
   display: flex;
   flex-direction: column;
   background: rgba(12, 14, 18, 0.94);
@@ -458,6 +464,36 @@ const STYLE_TEXT = `
   color: #fff;
   box-shadow: inset 0 -2px 0 #4fc3f7;
 }
+#${ROOT_ELEMENT_ID}[data-size="peek"] { --bqp-h: 96px; }
+#${ROOT_ELEMENT_ID}[data-size="compact"] { --bqp-h: 40vh; }
+#${ROOT_ELEMENT_ID}[data-size="full"] { --bqp-h: 78vh; }
+#${ROOT_ELEMENT_ID} .bqp-size {
+  width: 44px;
+  min-height: 44px;
+  background: none;
+  border: 0;
+  color: #e8ecf1;
+  font-size: 15px;
+}
+/* The launcher. The three-finger gesture stays — it is the fast path once you
+   know it — but a gesture with no visible affordance is a feature nobody can
+   find, which is exactly how this one was reported. Small, low-contrast, out of
+   the thumb's flight path, and it never covers the stick or the boost pill. */
+#birb-dev-quality-launcher {
+  position: fixed;
+  right: max(8px, env(safe-area-inset-right));
+  top: max(8px, env(safe-area-inset-top));
+  width: 40px; height: 40px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(12,14,18,0.45);
+  color: #cfe6f5;
+  font: 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 999998;
+  -webkit-tap-highlight-color: transparent;
+}
+#birb-dev-quality-launcher[hidden] { display: none !important; }
 #${ROOT_ELEMENT_ID} .bqp-close {
   flex: 0 0 auto;
   width: 44px;
@@ -692,6 +728,14 @@ export function createDevQualityPanel(opts = {}) {
   let root = null;
   let tabButtons = null; // view -> button element
   let bodyEl = null;
+  let sizeButton = null;
+  let launcherEl = null;
+  // Restored per device, so the size you chose survives a reload — you are
+  // outdoors and should not have to set it again every time.
+  let panelSize = (() => {
+    try { return win.localStorage.getItem('birbPanelSize') || 'compact'; }
+    catch (_) { return 'compact'; }
+  })();
   let staleBanner = null;
   let rowValueEls = null; // field id -> value element
   let controlEls = null; // control id -> { el, readout?, wrap, kind }
@@ -733,6 +777,19 @@ export function createDevQualityPanel(opts = {}) {
       tabButtons[view] = btn;
     }
 
+    const sizeBtn = doc.createElement('button');
+    sizeBtn.type = 'button';
+    sizeBtn.className = 'bqp-size';
+    sizeBtn.setAttribute('aria-label', 'Cycle panel size');
+    sizeBtn.textContent = '⌃';
+    sizeBtn.addEventListener('click', () => {
+      const order = ['peek', 'compact', 'full'];
+      const next = order[(order.indexOf(panelSize) + 1) % order.length];
+      setPanelSize(next);
+    });
+    tabs.appendChild(sizeBtn);
+    sizeButton = sizeBtn;
+
     const closeBtn = doc.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'bqp-close';
@@ -754,6 +811,9 @@ export function createDevQualityPanel(opts = {}) {
     root.appendChild(staleBanner);
     root.appendChild(bodyEl);
     doc.body.appendChild(root);
+
+    setPanelSize(panelSize);
+    ensureLauncher();
 
     renderBody();
   }
@@ -1083,6 +1143,55 @@ export function createDevQualityPanel(opts = {}) {
     }
   }
 
+  /**
+   * Panel size. 'compact' is the default because the panel's job is to let you
+   * change something and WATCH THE RESULT, and at 72vh there was nothing left
+   * to watch. 'peek' keeps only the tab strip and one row on screen, which is
+   * what you want while flying to a spot; 'full' is for reading telemetry.
+   */
+  function setPanelSize(next) {
+    panelSize = next;
+    if (root) root.setAttribute('data-size', next);
+    if (sizeButton) {
+      sizeButton.textContent = next === 'full' ? '⌄' : '⌃';
+      sizeButton.setAttribute('aria-label', `Panel size: ${next}. Tap to cycle.`);
+    }
+    try { win.localStorage.setItem('birbPanelSize', next); } catch (_) { /* private mode */ }
+  }
+
+  /**
+   * The launcher. The three-finger gesture is the fast path, but it is
+   * invisible: reported from the device as "it's hard to get that diag console
+   * up - maybe a little button?" A gesture nobody can discover is a feature
+   * nobody has.
+   *
+   * Deliberately NOT inside the ?debug block — CONTRACT §6 puts the workbench
+   * on the production path, and a launcher that only exists under ?debug would
+   * be unreachable at the one URL the workbench exists to be used on.
+   */
+  function ensureLauncher() {
+    if (launcherEl || !doc || !doc.body) return;
+    launcherEl = doc.createElement('button');
+    launcherEl.type = 'button';
+    launcherEl.id = 'birb-dev-quality-launcher';
+    launcherEl.setAttribute('aria-label', 'Open performance workbench');
+    launcherEl.textContent = '⚙';
+    launcherEl.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openPanel();
+    });
+    doc.body.appendChild(launcherEl);
+  }
+
+  function syncLauncher() {
+    if (!launcherEl) return;
+    // Hidden while the panel is up: it would sit on top of the panel's own
+    // close button, and two controls for the same thing on a phone is one too
+    // many.
+    launcherEl.hidden = !!(root && !root.hidden);
+  }
+
   function renderBody() {
     if (!bodyEl) return;
     bodyEl.textContent = '';
@@ -1222,6 +1331,7 @@ export function createDevQualityPanel(opts = {}) {
     renderBody();
     if (timerId !== null) clearIntervalFn(timerId);
     timerId = setIntervalFn(tick, tickIntervalMs);
+    syncLauncher();
     onOpen();
   }
 
@@ -1233,6 +1343,7 @@ export function createDevQualityPanel(opts = {}) {
       clearIntervalFn(timerId);
       timerId = null;
     }
+    syncLauncher();
     onClose();
     // Tell the gesture wiring the panel is gone so the three-finger hold can
     // open it again later in the same session (index.html un-latches its
