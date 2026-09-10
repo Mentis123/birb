@@ -19,7 +19,7 @@ The primary acceptance device is **iPhone 16 Pro, Chrome 152.0.7977.64**, as rep
 | Gameplay and world | Keep the radius-120 spherical gameplay domain in the first slice. Increase apparent scale through hierarchy, coherent landmarks and distant scenery. Reconsider radius only in a separate flight-design experiment. |
 | Release sequence | Minimal observability repairs → ambitious vertical slice → phone profile experiments → controller implementation → four-biome rollout. Research approval is complete; device certification is a build acceptance gate. |
 
-Companion documents: [profiles and validation](PROFILES.md), [ordered build backlog](BUILD_BACKLOG.md), and [proposed machine-readable profiles](profiles.proposed.json). The JSON is a specification for builders, **not a preset file the current game can import**.
+Companion documents: [profiles and validation](PROFILES.md), [ordered build backlog](BUILD_BACKLOG.md), [the authored-asset contract and generation brief](AUTHORED_ASSETS.md), and [proposed machine-readable profiles](profiles.proposed.json). The JSON is a specification for builders, **not a preset file the current game can import**.
 
 ## Reviewed baseline and evidence
 

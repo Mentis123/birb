@@ -1,6 +1,6 @@
 # Research handoff and validation record
 
-Read [the executive decisions](README.md), then [the build order](BUILD_BACKLOG.md) and [the profile protocol](PROFILES.md). The [profile proposal](profiles.proposed.json) supplies versioned starting candidates for builders; it is not executable configuration for the current game.
+Read [the executive decisions](README.md), then [the build order](BUILD_BACKLOG.md) and [the profile protocol](PROFILES.md). If you are here to produce art rather than code, [the authored-asset brief](AUTHORED_ASSETS.md) is the one to read: it carries the contract, the ranked list and the acceptance gate. The [profile proposal](profiles.proposed.json) supplies versioned starting candidates for builders; it is not executable configuration for the current game.
 
 ## Repository provenance
 

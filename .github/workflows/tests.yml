@@ -12,6 +12,11 @@ jobs:
         uses: actions/checkout@v4
       - name: Run harness and unit tests
         run: npm test
+      - name: Check authored assets
+        # Live before the first texture exists: an empty assets/ exits zero, so
+        # this step starts gating the moment one is committed rather than being
+        # remembered and added afterwards. Contract: docs/realism/AUTHORED_ASSETS.md
+        run: node tools/asset-check.mjs assets/
       - name: Run performance-instrumented tests
         # The BIRB_PERF_IMPL environment variable enables the Wave 2 quality-assertion
         # test suites. FS-A1b (the percentile-implementation defect docs/perf/gates/G2a.md
