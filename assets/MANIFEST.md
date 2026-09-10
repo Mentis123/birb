@@ -19,7 +19,9 @@ Rules, in short:
 
 | File | Kind | Source (model + prompt, or tool) | Licence | Commit |
 |---|---|---|---|---|
-| _(none yet)_ | | | | |
+| `textures/bark_pine_albedo.png` | sRGB albedo | OpenAI built-in image generation; prompt: “seamless, unlit grey-brown weathered pine bark plates with deep vertical fissures”; generated from scratch, then resized to 512² RGB with Pillow 12.3.0 | ISC | `e20a04b` |
+| `textures/bark_pine_normal.png` | linear tangent-space normal | Offline authored from `bark_pine_albedo.png` with Pillow 12.3.0 + NumPy 2.3.5: wrap-aware multiscale luminance height proxy, circular gradients, OpenGL +Y normals | ISC | `e20a04b` |
+| `textures/bark_pine_rough.png` | linear roughness | Offline authored from `bark_pine_albedo.png` with Pillow 12.3.0 + NumPy 2.3.5: wrap-aware local relief mapped to restrained high roughness, identical RGB channels | ISC | `e20a04b` |
 
 ## Where things live
 
