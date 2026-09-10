@@ -3643,7 +3643,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v44-2026-09-09-perf-traces';
+    const BIRB_BUILD = 'v46-2026-09-10-ultra-panel';
 
     // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
     // Adaptive quality further drops this to 1.0 below 55 FPS.
@@ -3658,6 +3658,10 @@
     // drops to 1.0 at tier 1 and 0.85 at tier 2, and the tier is driven by
     // measured frame rate. A device that cannot hold this sheds it within a
     // few seconds.
+    // The bloom strength this game actually ships with. Named because it was
+    // written twice with two different values — the pass constructed at 0.78 and
+    // 'reset to default' restoring 0.85.
+    const SHIPPING_BLOOM_STRENGTH = 0.78;
     const DPR_CAP = isMobile ? 1.7 : 1.8;
     if (_perfDebug) {
       console.log(`[perf] isMobile=${isMobile} isLowEnd=${isLowEnd} DPR_CAP=${DPR_CAP} antialias=${!isMobile}`);
@@ -4412,6 +4416,9 @@
     const _sunDir = new THREE.Vector3();
     const _sunView = new THREE.Vector3();
     const _sunClip = new THREE.Vector3();
+    // Ascend wave — shadows lever. Scratch for the shadow-caster follow
+    // update (T-SHADOW, added near setEnvironment below); zero-alloc.
+    const _shadowSunDir = new THREE.Vector3();
     // Last computed screen position of the sun, for stats and for tools.
     const sunScreen = { u: 0.5, v: 0.5, visible: 0 };
 
@@ -4432,7 +4439,7 @@
         // whole frame glows and reads as a smeared lens.
         threshold: 0.78,
         softness: 0.24,
-        strength: 0.78,
+        strength: SHIPPING_BLOOM_STRENGTH,
         vignette: 0.42,
       });
     } catch (bloomError) {
@@ -5663,6 +5670,184 @@
       }
     }
 
+    // ─── Real shadow maps, opt-in (Ascend wave) ───────────────────────────
+    // renderer.shadowMap.enabled stays FALSE at boot (line ~3633) — nothing
+    // here changes the default. shadowLight is a SEPARATE light from
+    // keyLight on purpose: keyLight.position is overwritten every frame
+    // below in "Sun cycle" as sunState._dir * sunState.distance (~12 units
+    // from the WORLD ORIGIN), and half a dozen consumers — skyDome's sun
+    // disc, the water glitter, the ground rim uniform, the light-shaft
+    // convergence point — read that position back and NORMALIZE it for
+    // DIRECTION only. A directional light's shadow camera, though, sits AT
+    // light.position looking at light.target.position — not a direction,
+    // an actual point — so if shadowLight were keyLight itself, moving it to
+    // follow the bird would put every one of those consumers on the wrong
+    // side of the sky. shadowLight mirrors keyLight's direction/color each
+    // frame (see the follow update further down) but is POSITIONED near the
+    // bird instead of the origin, so its fitted frustum covers ground the
+    // player can actually see — a radius-120 sphere's whole surface is not
+    // "the visible region", it is almost entirely empty of it.
+    const SHADOW_FIT_HALF_EXTENT = 55;  // half-width of the fitted square (world units)
+    const SHADOW_LIGHT_DISTANCE = 80;   // offset back along the sun direction
+    const SHADOW_CAMERA_NEAR = 10;
+    const SHADOW_CAMERA_FAR = 220;      // offset + 2x fit extent + margin for a 58-unit champion tree
+    const SHADOW_MAP_SIZES = { low: 512, medium: 1024, high: 2048 };
+    const shadowLight = new THREE.DirectionalLight(0xffe4b5, 0);
+    // .visible=false excludes a light from BOTH illumination and shadow
+    // collection in Three's per-frame light/shadow gather (both gate on
+    // object.visible, castShadow is the second, independent gate) — so an
+    // unopened panel adds this light to the scene graph but it contributes
+    // nothing and is not counted when computing shader defines.
+    shadowLight.visible = false;
+    shadowLight.castShadow = false;
+    shadowLight.shadow.camera.left = -SHADOW_FIT_HALF_EXTENT;
+    shadowLight.shadow.camera.right = SHADOW_FIT_HALF_EXTENT;
+    shadowLight.shadow.camera.top = SHADOW_FIT_HALF_EXTENT;
+    shadowLight.shadow.camera.bottom = -SHADOW_FIT_HALF_EXTENT;
+    shadowLight.shadow.camera.near = SHADOW_CAMERA_NEAR;
+    shadowLight.shadow.camera.far = SHADOW_CAMERA_FAR;
+    shadowLight.shadow.mapSize.set(SHADOW_MAP_SIZES.medium, SHADOW_MAP_SIZES.medium);
+    // Eyeballed under SwiftShader, not device-measured (CONTRACT §10 spirit —
+    // a real pass should retune these against a phone before Wave 4/6).
+    shadowLight.shadow.bias = -0.0018;
+    shadowLight.shadow.normalBias = 0.4;
+    scene.add(shadowLight);
+    scene.add(shadowLight.target);
+    let shadowsEnabled = false;
+    let shadowMapSizeKey = 'medium';
+
+    // Nest-host proxy — how "champion structures cast" ships without also
+    // casting from the scatter. The real champion trees/spires/peaks/towers
+    // ride the SAME InstancedMesh buffer as the hundreds of ordinary scatter
+    // props of that type (spherical-world.js's own comments: champions "ride
+    // the SAME trunk InstancedMesh — zero new draw calls"), so castShadow on
+    // that buffer casts from the whole forest/ridge/range/block at once —
+    // exactly the "everything casting is wrong" case this task warns about.
+    // This proxy is the one new draw call that buys real per-structure
+    // shadows without paying for the scatter: it is built once per
+    // environment from that biome's OWN nestablePositions (the champion/
+    // nest-host perch list every biome already computes — no new placement
+    // logic, no new RNG draw), and colorWrite/depthWrite/depthTest are all
+    // off, so it never appears or occludes in the ordinary color pass — only
+    // the shadow pass, which uses its own depth material regardless of those
+    // three flags, ever draws it.
+    //
+    // shadowSide: checked, not assumed. The proxy is a CAPPED cone
+    // (openEnded left at its default false) and the bird below is built
+    // entirely from SphereGeometry + capped ConeGeometry — both watertight
+    // solids, not the open swept-sheet case that made a sibling shadow its
+    // own front face. Three's default (BackSide for a FrontSide material's
+    // shadow pass) is the physically correct choice for a closed solid and
+    // is deliberately left untouched on both; forcing FrontSide here would
+    // risk reintroducing self-shadow acne on a shape that doesn't have the
+    // bug. The genuinely open geometry in this world — flat canopy-ceiling
+    // discs, cloud puffs, pylons — is exactly the scatter this design does
+    // not cast from, so the trap was avoided by the choice of casters.
+    let shadowCasterProxy = null;
+    const SHADOW_PROXY_HEIGHT = 20;
+    const SHADOW_PROXY_RADIUS = 3.2;
+    const shadowProxyGeom = new THREE.ConeGeometry(SHADOW_PROXY_RADIUS, SHADOW_PROXY_HEIGHT, 6);
+    shadowProxyGeom.translate(0, SHADOW_PROXY_HEIGHT / 2, 0); // base sits at the nest position
+    const shadowProxyMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false });
+
+    function rebuildShadowCasterProxy(nestablePositions) {
+      if (shadowCasterProxy) {
+        scene.remove(shadowCasterProxy);
+        shadowCasterProxy.geometry === shadowProxyGeom || shadowCasterProxy.geometry?.dispose?.();
+        shadowCasterProxy = null;
+      }
+      const positions = nestablePositions || [];
+      if (!positions.length) return;
+      shadowCasterProxy = new THREE.InstancedMesh(shadowProxyGeom, shadowProxyMat, positions.length);
+      shadowCasterProxy.name = 'shadow-caster-proxy';
+      // One small draw call covering the whole sphere; not worth a frustum
+      // gamble against a shadow camera that moves every frame.
+      shadowCasterProxy.frustumCulled = false;
+      shadowCasterProxy.castShadow = shadowsEnabled;
+      shadowCasterProxy.receiveShadow = false;
+      // .visible, not just .castShadow: a visible-but-colorWrite-false mesh
+      // still gets submitted (and counted) in the ordinary color pass, which
+      // would add one draw call on every page load whether or not shadows
+      // are ever turned on. Hidden by default so the shipping default really
+      // does not move; shadowsSetEnabled flips this alongside castShadow.
+      shadowCasterProxy.visible = shadowsEnabled;
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const upAxis = new THREE.Vector3(0, 1, 0);
+      const unitScale = new THREE.Vector3(1, 1, 1);
+      for (let i = 0; i < positions.length; i++) {
+        const entry = positions[i];
+        const pos = entry.position || entry;
+        const normal = entry.surfaceNormal || pos.clone().normalize();
+        q.setFromUnitVectors(upAxis, normal);
+        m.compose(pos, q, unitScale);
+        shadowCasterProxy.setMatrixAt(i, m);
+      }
+      shadowCasterProxy.instanceMatrix.needsUpdate = true;
+      scene.add(shadowCasterProxy);
+    }
+
+    // The one place shadow state actually changes. CONTRACT §7.1: routed
+    // ONLY from quality-settings' apply() below (panel/probe sources), never
+    // from a per-frame writer — a panel request must not be clobbered on the
+    // very next frame (A10's failure mode).
+    function shadowsSetEnabled(enabled) {
+      shadowsEnabled = !!enabled;
+      renderer.shadowMap.enabled = shadowsEnabled;
+      shadowLight.visible = shadowsEnabled;
+      shadowLight.castShadow = shadowsEnabled;
+      if (shadowCasterProxy) {
+        shadowCasterProxy.castShadow = shadowsEnabled;
+        shadowCasterProxy.visible = shadowsEnabled;
+      }
+      if (birbAnchor) {
+        birbAnchor.traverse((o) => { if (o.isMesh) o.castShadow = shadowsEnabled; });
+      }
+      if (sphericalWorld?.root) {
+        const ground = sphericalWorld.root.getObjectByName('sphere-ground');
+        if (ground) ground.receiveShadow = shadowsEnabled;
+      }
+      // Toggling renderer.shadowMap.enabled changes the program cache key
+      // for EVERY material in the scene — the risk this whole task was
+      // warned about. Three re-derives that key lazily on an object's next
+      // render call, but the setLighting({tone}) adapter above found relying
+      // on the implicit path was not enough for a renderer-wide flag and
+      // forces material.needsUpdate explicitly; same fix, same reason.
+      scene.traverse((o) => {
+        if (!o.material) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const mat of mats) { if (mat) mat.needsUpdate = true; }
+      });
+    }
+
+    function shadowsSetType(typeKey) {
+      const map = {
+        basic: THREE.BasicShadowMap, pcf: THREE.PCFShadowMap,
+        // PCFSoftShadowMap is DEPRECATED on the pinned three@0.183.2: Three logs
+        // "PCFSoftShadowMap has been deprecated. Using PCFShadowMap instead." and
+        // renders PCF. Offering it made requested and effective agree with each
+        // other while both disagreed with the renderer — the exact shape of desync
+        // this whole workbench exists to detect, shipped inside the workbench.
+        // Mapped to PCF so the name cannot outlive the behaviour.
+        pcfsoft: THREE.PCFShadowMap, vsm: THREE.VSMShadowMap,
+      };
+      renderer.shadowMap.type = map[typeKey] ?? THREE.PCFShadowMap;
+      renderer.shadowMap.needsUpdate = true;
+    }
+
+    function shadowsSetMapSize(sizeKey) {
+      const resolved = sizeKey in SHADOW_MAP_SIZES ? sizeKey : 'medium';
+      shadowMapSizeKey = resolved;
+      shadowLight.shadow.mapSize.set(SHADOW_MAP_SIZES[resolved], SHADOW_MAP_SIZES[resolved]);
+      // shadow.map is a fixed-size WebGLRenderTarget once allocated; changing
+      // mapSize alone does not resize it. Dispose so Three reallocates at
+      // the new size on the next frame shadows render.
+      if (shadowLight.shadow.map) {
+        shadowLight.shadow.map.dispose();
+        shadowLight.shadow.map = null;
+      }
+    }
+
     const resetNestingSystems = () => {
       const wasNested = nestingSystem?.isNested?.() ?? false;
 
@@ -5690,6 +5875,98 @@
       }
       nestCameraReturnMode = preferredCameraMode ?? nestCameraReturnMode;
     };
+
+    // ─── Anisotropic filtering, opt-in (Ascend wave, "sharpness" lever) ───
+    // Declared here, ahead of setEnvironment (which reapplies a standing
+    // request on every biome switch, below) and well ahead of
+    // qualitySettings/panelOverrides — this file's FIRST setEnvironment()
+    // call runs at boot, synchronously, before that block's `const`s exist,
+    // and referencing one from inside setEnvironment before its own
+    // declaration line has run is a TDZ ReferenceError swallowed silently by
+    // setEnvironment's caller (a plain try/catch, CLAUDE.md's own recorded
+    // trap: a throw partway through env setup leaves the terrain built and
+    // looking normal while everything after the throw — nests, in this case
+    // anisotropy re-apply — never ran, and nothing here would have caught
+    // it as a REGRESSION rather than a boot warning).
+    //
+    // Ground and props carry no sampled texture at all in this game — the
+    // ground is procedural fragment-shader math (ground-detail.js) and the
+    // scatter is flat-shaded vertex colour, so anisotropy has nothing to act
+    // on there. The textures that DO exist and DO get viewed at a grazing
+    // angle in flight are the landmark valley's water surface (foam/caustic/
+    // ripple, every biome), the bird's own contact-shadow decal, the slalom
+    // signage/ribbons and — desktop only — the cloud shell; cloudTex is the
+    // one texture in the whole repo that already sets anisotropy (2), which
+    // this lever supersedes only once the panel asks for something else.
+    // Walking `scene` rather than importing a registry from each of those
+    // modules keeps this a single-file, additive change: none of them need
+    // to know this lever exists.
+    const ANISOTROPIC_TEX_SLOTS = ['map', 'alphaMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'bumpMap'];
+    function forEachAnisotropicTexture(fn) {
+      scene.traverse((obj) => {
+        if (!obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const mat of mats) {
+          if (!mat) continue;
+          for (const slot of ANISOTROPIC_TEX_SLOTS) {
+            const tex = mat[slot];
+            if (tex && tex.isTexture) fn(tex);
+          }
+        }
+      });
+    }
+    // Per-texture value BEFORE any panel override, so "back to shipping
+    // default" restores exactly what each texture shipped with (cloudTex's
+    // 2, everything else's un-set 1) rather than flattening every texture to
+    // one number. Keyed by object identity — a WeakMap so a disposed/
+    // replaced texture (an environment switch tears down landmark-valley's)
+    // is never kept alive by this alone.
+    const anisotropyBaseline = new WeakMap();
+    let anisotropyRequested = null; // null = untouched; 1..maxAniso once the panel has asked
+    function applyAnisotropyLevel(level) {
+      if (level == null) {
+        // Restore every texture this lever ever touched to its own original
+        // value, then forget it. Textures created AFTER the last apply (a
+        // fresh biome's landmark-valley water) were never touched and need
+        // no restoring — they are already at their authored default.
+        forEachAnisotropicTexture((tex) => {
+          if (anisotropyBaseline.has(tex)) {
+            tex.anisotropy = anisotropyBaseline.get(tex);
+            anisotropyBaseline.delete(tex);
+          }
+        });
+        anisotropyRequested = null;
+        return;
+      }
+      const maxAniso = renderer.capabilities.getMaxAnisotropy();
+      const clamped = Math.max(1, Math.min(maxAniso, Math.round(level)));
+      forEachAnisotropicTexture((tex) => {
+        if (!anisotropyBaseline.has(tex)) anisotropyBaseline.set(tex, tex.anisotropy);
+        tex.anisotropy = clamped;
+      });
+      anisotropyRequested = clamped;
+    }
+    // True "effective" readback (CONTRACT §0): the minimum anisotropy across
+    // every matched texture right now, not an echo of what was requested. If
+    // the request could not reach every texture the two would diverge here;
+    // in practice every texture accepts the same integer, so this only ever
+    // disagrees with the request when nothing has been touched yet (returns
+    // null — sentinel, not a fabricated 0 or 1) or nothing matched at all.
+    function readAnisotropyEffective() {
+      let found = null;
+      forEachAnisotropicTexture((tex) => {
+        if (found === null || tex.anisotropy < found) found = tex.anisotropy;
+      });
+      return found;
+    }
+
+    // Ground mesh resolution, opt-in (Ascend wave, "sharpness" lever). Same
+    // TDZ reason as above: setEnvironment reads this on every build/rebuild,
+    // including the boot call below, before qualitySettings/panelOverrides
+    // exist — so this is the variable of record, and apply()'s
+    // 'terrainResolution' case (below, in the workbench block) mirrors into
+    // it rather than setEnvironment reading panelOverrides directly.
+    let terrainResolutionRequested = null; // null = 'standard' (untouched); else 'high' | 'ultra'
 
     function setEnvironment(variantId) {
       const definition = getEnvironmentDefinition(variantId);
@@ -5726,12 +6003,26 @@
           three: THREE,
           variant: definition.id,
           definition: definition,
+          // A standing terrainResolution panel request survives an
+          // environment switch (CONTRACT §7.1) even though the mesh it
+          // applies to does not — build the new biome's ground straight at
+          // the requested preset instead of building 'standard' first and
+          // rebuilding a second time.
+          groundResolution: terrainResolutionRequested || undefined,
         });
       } catch (envError) {
         console.warn("Spherical world creation failed:", envError);
       }
 
       sphericalWorld = nextWorld;
+
+      // A standing anisotropy panel request survives the switch too: the new
+      // biome's landmark-valley water textures were just created fresh (at
+      // their own authored default), and the cloud shell (desktop only) is
+      // the one texture NOT rebuilt here — re-applying is a harmless no-op
+      // for it, since applyAnisotropyLevel only records a texture's baseline
+      // the first time it sees it.
+      if (anisotropyRequested != null) applyAnisotropyLevel(anisotropyRequested);
 
       // ===== Weather =====
       // Attached to the SCENE, not the world root: it is anchored to the
@@ -5784,6 +6075,16 @@
           // Pass nestable positions from the environment to the nest system
           // Use sphericalWorld.root instead of scene so nests rotate with the world
           const nestablePositions = sphericalWorld.nestablePositions || [];
+          // Ascend wave: the old world's ground/proxy went with sphericalWorld.dispose()
+          // above; rebuild the shadow-caster proxy from THIS biome's own nest-host
+          // list and, if shadows are already on, re-flag the new ground mesh — a
+          // panel request survives an environment switch (CONTRACT §7.1), the
+          // meshes it applies to do not.
+          rebuildShadowCasterProxy(nestablePositions);
+          if (shadowsEnabled) {
+            const ground = sphericalWorld.root.getObjectByName('sphere-ground');
+            if (ground) ground.receiveShadow = true;
+          }
           nestPointsSystem = createNestPointsSystem(
             THREE,
             sphericalWorld.root,
@@ -5820,6 +6121,7 @@
       } else {
         sphericalWorld = null;
         glideTrail = null;
+        rebuildShadowCasterProxy([]); // no world -> no nest hosts, drop the stale proxy
         // Clear sphere center if world creation fails
         if (cameraState && typeof cameraState.setSphereCenter === 'function') {
           cameraState.setSphereCenter(null);
@@ -6703,6 +7005,12 @@
       weatherDensity: null,    // 0..1 | null
       mistBudget: null,        // 0..1 | null
       decorativeDensity: null, // 0..1 | null — wind (T4) + contact shadow (T9) + ribbons (T10)
+      antialiasing: null,      // 'off' | '2x' | '4x' | null — scene-target MSAA, see bloom-pass.js
+      shadowsEnabled: null,    // boolean | null — renderer.shadowMap.enabled, see shadowsSetEnabled above
+      shadowType: null,        // 'basic' | 'pcf' | 'pcfsoft' | 'vsm' | null
+      shadowMapSize: null,     // 'low' | 'medium' | 'high' | null
+      anisotropy: null,        // 1..getMaxAnisotropy() | null — see applyAnisotropyLevel below
+      terrainResolution: null, // 'standard' | 'high' | 'ultra' | null — ground mesh segment preset
     };
     // Last value actually handed to sphericalWorld.features.valley.setMistBudget,
     // whichever site called it (tier-derived or panel-requested). That module
@@ -6722,6 +7030,22 @@
     // freezing them here would be reporting a lock on a mechanism that does
     // not exist, which CONTRACT §0's "sentinel" rule exists to forbid.
     const benchmarkFreezes = { seed: false, route: false, settings: false, sun: false };
+
+    // Antialiasing panel enum <-> bloom-pass.js sample count. index.html's
+    // WebGL context is created `antialias: !isMobile` (a context-creation
+    // flag that cannot be toggled live), so the mobile AA lever routes
+    // through bloomPass.setSamples() instead — MSAA on the offscreen scene
+    // target the bloom pass already renders to, resolved automatically when
+    // that target's texture is sampled by the composite (see bloom-pass.js's
+    // file-header note). '2x'/'4x' name the REQUEST; bloomPass clamps to
+    // renderer.capabilities.maxSamples and to 0 on a device lacking
+    // EXT_color_buffer_float, so the effective value read back below can
+    // legitimately differ from what was requested — that gap is the
+    // reportable desync, not a bug in this mapping.
+    const AA_SAMPLES = { off: 0, '2x': 2, '4x': 4 };
+    function aaLabelForSamples(n) {
+      return n >= 4 ? '4x' : n >= 2 ? '2x' : 'off';
+    }
 
     const qualitySettings = createQualitySettings({
       now: () => performance.now(),
@@ -6761,6 +7085,22 @@
         // panel that exists to reach it.
         if (key === 'postQuality') return ['off', 'quarter', 'half', 'full'].includes(value) ? value : 'half';
         if (key === 'shafts') return !!value;
+        if (key === 'antialiasing') return Object.prototype.hasOwnProperty.call(AA_SAMPLES, value) ? value : 'off';
+        if (key === 'shadowsEnabled') return !!value;
+        if (key === 'shadowType') return ['basic', 'pcf', 'vsm'].includes(value) ? value : 'pcf';
+        if (key === 'shadowMapSize') return ['low', 'medium', 'high'].includes(value) ? value : 'medium';
+        // 0 is the "back to shipping default" sentinel (restore each
+        // texture's own authored value) — never a real GL anisotropy level,
+        // whose minimum is 1. Bounded above by the DEVICE's own reported
+        // ceiling so the panel can never request more than the hardware has.
+        if (key === 'anisotropy') {
+          if (!value || value <= 0) return 0;
+          const maxAniso = renderer.capabilities.getMaxAnisotropy();
+          return Math.max(1, Math.min(maxAniso, Math.round(value)));
+        }
+        if (key === 'terrainResolution') {
+          return ['standard', 'high', 'ultra'].includes(value) ? value : 'standard';
+        }
         return Math.min(1, Math.max(0, value));
       },
       // `apply`/`readEffective` are the ONLY place a panel request touches a
@@ -6779,6 +7119,27 @@
           if (bloomPass) bloomPass.setRays(value ? DEFAULT_RAYS_STRENGTH : 0);
         } else if (key === 'bloomStrength') {
           if (bloomPass) bloomPass.setStrength(value);
+        } else if (key === 'antialiasing') {
+          if (bloomPass) bloomPass.setSamples(AA_SAMPLES[value] ?? 0);
+        } else if (key === 'shadowsEnabled') {
+          shadowsSetEnabled(value);
+        } else if (key === 'shadowType') {
+          shadowsSetType(value);
+        } else if (key === 'shadowMapSize') {
+          shadowsSetMapSize(value);
+        } else if (key === 'anisotropy') {
+          applyAnisotropyLevel(value === 0 ? null : value);
+        } else if (key === 'terrainResolution') {
+          // Rebuilds ONLY the ground mesh's geometry (see
+          // spherical-world.js's setGroundResolution) — not the per-frame
+          // path, and not a full setEnvironment() teardown, so this does not
+          // reset nests/rockets/weather/RNG. Applied here means applied on
+          // release: this function only runs from a panel/probe request,
+          // never from a per-frame writer.
+          terrainResolutionRequested = value === 'standard' ? null : value;
+          if (sphericalWorld && typeof sphericalWorld.setGroundResolution === 'function') {
+            sphericalWorld.setGroundResolution(value);
+          }
         }
         // weatherDensity / mistBudget / decorativeDensity need no immediate
         // side effect here: they are read every frame at T5-T6/T7-T8/T4-T9-T10
@@ -6796,9 +7157,21 @@
         }
         if (key === 'shafts') return bloomPass ? bloomPass.getRays() > 0.001 : false;
         if (key === 'bloomStrength') return bloomPass ? bloomPass.getStrength() : null;
+        if (key === 'antialiasing') return bloomPass ? aaLabelForSamples(bloomPass.getSamples()) : 'off';
         if (key === 'weatherDensity') return weather ? weather.getDensity() : null;
         if (key === 'mistBudget') return mistBudgetEffective;
         if (key === 'decorativeDensity') return visualUniforms.wind.value;
+        if (key === 'shadowsEnabled') return renderer.shadowMap.enabled;
+        if (key === 'shadowType') {
+          const rev = {
+            [THREE.BasicShadowMap]: 'basic', [THREE.PCFShadowMap]: 'pcf',
+            [THREE.PCFSoftShadowMap]: 'pcfsoft', [THREE.VSMShadowMap]: 'vsm',
+          };
+          return rev[renderer.shadowMap.type] ?? null;
+        }
+        if (key === 'shadowMapSize') return shadowMapSizeKey;
+        if (key === 'anisotropy') return readAnisotropyEffective() ?? 0;
+        if (key === 'terrainResolution') return sphericalWorld ? sphericalWorld.groundResolution : null;
         return panelOverrides[key];
       },
     });
@@ -7886,16 +8259,48 @@
         dpr: { requested: panelOverrides.dpr, effective: renderer.getPixelRatio() },
         postQuality: {
           requested: panelOverrides.postQuality,
+          // Found while verifying the MAX REALISM preset (Ascend wave): this
+          // never had a 'full' case, so requesting 'full' (downscale 1) read
+          // back here as 'half' even though qualitySettings.readEffective's
+          // OWN postQuality branch a few hundred lines up already handles
+          // downscale<=1 correctly. An evidence export taken at MAX REALISM
+          // is exactly the capture item 4 says must record what was really
+          // asked for — this control-state copy is what the panel UI and
+          // panelGetEvidence().effective both read, so the mismatch was real.
           effective: (bloomPass && bloomEnabled)
-            ? (bloomSizes.downscale >= 4 ? 'quarter' : 'half') : 'off',
+            ? (bloomSizes.downscale >= 4 ? 'quarter' : bloomSizes.downscale <= 1 ? 'full' : 'half') : 'off',
         },
         shafts: { requested: panelOverrides.shafts, effective: bloomPass ? bloomPass.getRays() > 0.001 : false },
         bloomStrength: { requested: panelOverrides.bloomStrength, effective: bloomPass ? bloomPass.getStrength() : null },
         weatherDensity: { requested: panelOverrides.weatherDensity, effective: weather ? weather.getDensity() : null },
         mistBudget: { requested: panelOverrides.mistBudget, effective: mistBudgetEffective },
         decorativeDensity: { requested: panelOverrides.decorativeDensity, effective: visualUniforms.wind.value },
+        antialiasing: {
+          requested: panelOverrides.antialiasing,
+          effective: bloomPass ? aaLabelForSamples(bloomPass.getSamples()) : 'off',
+        },
         targetRate: { requested: 60, effective: 60 }, // DEF-3: only 60 ships
         surfaceDetail: { requested: 'baseline', effective: 'baseline' }, // DEF-4: no runtime variant
+        shadowsEnabled: { requested: panelOverrides.shadowsEnabled, effective: renderer.shadowMap.enabled },
+        shadowType: {
+          requested: panelOverrides.shadowType,
+          effective: ({
+            [THREE.BasicShadowMap]: 'basic', [THREE.PCFShadowMap]: 'pcf',
+            [THREE.PCFSoftShadowMap]: 'pcfsoft', [THREE.VSMShadowMap]: 'vsm',
+          })[renderer.shadowMap.type] ?? null,
+        },
+        shadowMapSize: { requested: panelOverrides.shadowMapSize, effective: shadowMapSizeKey },
+        // These two were wired into qualitySettings' apply()/readEffective()
+        // by the levers themselves but never surfaced here — an evidence
+        // export taken at MAX REALISM would have recorded every OTHER lever
+        // and gone silent on exactly these two. panelGetEvidence() below
+        // wraps this function, so fixing it here is what item 4 ("appears in
+        // the evidence export") actually requires.
+        anisotropy: { requested: panelOverrides.anisotropy, effective: readAnisotropyEffective() ?? 0 },
+        terrainResolution: {
+          requested: panelOverrides.terrainResolution,
+          effective: sphericalWorld ? sphericalWorld.groundResolution : null,
+        },
       };
     }
 
@@ -7907,7 +8312,14 @@
     function estimateBloomTargetMb(sizes) {
       if (!sizes) return null;
       const px = (t) => t.width * t.height;
-      const bytes = px(sizes.sceneTarget) * 4 * 2
+      const sceneColorBytes = px(sizes.sceneTarget) * 4 * 2; // RGBA half-float, resolved texture
+      // Scene-target MSAA (perf-wave-3b) allocates a SEPARATE multisample
+      // colour renderbuffer alongside the resolved texture above — real
+      // extra GPU memory this estimate would otherwise understate. Estimated
+      // the same way the rest of this function already is (no depth-buffer
+      // term either): one extra colour-sized allocation per sample beyond 1.
+      const msaaBytes = sizes.sceneSamples > 1 ? sceneColorBytes * sizes.sceneSamples : 0;
+      const bytes = sceneColorBytes + msaaBytes
         + px(sizes.blurA) * 4 + px(sizes.blurB) * 4 + px(sizes.rayTarget) * 4;
       return bytes / (1024 * 1024);
     }
@@ -7958,7 +8370,8 @@
         'TEL-15': ok(qualitySettings.mode),
         'TEL-16': ok(adaptiveTier.isPinned()),
         'TEL-17': bloomSizes
-          ? ok(`${bloomSizes.sceneTarget.width}x${bloomSizes.sceneTarget.height} /${bloomSizes.downscale}`)
+          ? ok(`${bloomSizes.sceneTarget.width}x${bloomSizes.sceneTarget.height} /${bloomSizes.downscale}` +
+              (bloomSizes.sceneSamples > 0 ? ` (${bloomSizes.sceneSamples}x MSAA)` : ''))
           : unavail(QUALITY_SENTINEL_REASONS.NOT_APPLICABLE),
         'TEL-18': ok(`req ${panelOverrides.dpr ?? '(tier-derived)'} / eff ${rpr.toFixed(2)}`),
         'TEL-19': ok(frameRenderTotals.statsPath),
@@ -8004,6 +8417,54 @@
       };
     }
 
+    // Ascend wave — requirement 3 ("BACK TO SHIPPING DEFAULT... getting out
+    // must be exactly as easy as getting in") and the pre-existing Capture-
+    // view "Reset overrides + history" action both need to land on exactly
+    // what a player who never opens this panel sees. One function, two
+    // buttons, so they can never drift apart. §5.7 of G2b flagged this exact
+    // class of bug for bloom strength (Reset changing the look instead of
+    // restoring it) — every branch below calls the REAL setter, never just
+    // nulls the override map and hopes a later frame reads the null.
+    //
+    // Before this task, anisotropy and terrainResolution were both missing
+    // from this list even though their apply()/readEffective() plumbing
+    // already existed — a reset tap left a standing "high"/"ultra" terrain
+    // mesh or a non-default anisotropy level in place while every OTHER
+    // lever went back to shipping. Fixed here alongside adding the new
+    // MAX REALISM / BACK TO SHIPPING DEFAULT actions, not separately, so the
+    // fix and the thing that exposed it land in the same review.
+    function resetVisualOverridesToShipping() {
+      qualitySettings.setMode(QUALITY_MODES.AUTO);
+      adaptiveTier.unpin();
+      for (const key of Object.keys(panelOverrides)) panelOverrides[key] = null;
+      bloomEnabled = true;
+      if (bloomPass) {
+        bloomPass.setRays(DEFAULT_RAYS_STRENGTH);
+        // 0.85 was wrong: this game constructs the pass at 0.78 (index.html:4438),
+        // so 'reset' RAISED bloom above the shipping value and left it there for the
+        // session. G2b §5.7 flagged it; the Ascend gate measured it (0.78 -> 0.85 over a
+        // round trip). A reset that does not reset is worse than no reset, because it
+        // silently poisons every capture taken after someone pressed it.
+        bloomPass.setStrength(SHIPPING_BLOOM_STRENGTH);
+        bloomPass.setDownscale(2);
+        bloomPass.setSamples(0); // shipping default — see bloom-pass.js file header
+      }
+      shadowsSetEnabled(false);
+      // 'pcf', not 'pcfsoft'. Boot never sets renderer.shadowMap.type at all, so the
+      // shipping value is Three's own default, PCFShadowMap (1) — measured. Resetting
+      // to pcfsoft left the renderer on a filter it had never had, and on this pinned
+      // Three that filter is deprecated and silently becomes PCF anyway. Reset must
+      // land on what boot had, not on what the panel's default happens to be.
+      shadowsSetType('pcf');
+      shadowsSetMapSize('medium');
+      applyAnisotropyLevel(null); // restores every touched texture's own authored value
+      terrainResolutionRequested = null;
+      if (sphericalWorld && typeof sphericalWorld.setGroundResolution === 'function') {
+        sphericalWorld.setGroundResolution('standard');
+      }
+      updateRendererSize(true);
+    }
+
     function panelOnRequest(request) {
       if (!request) return;
       if (request.kind === 'mode') {
@@ -8019,17 +8480,44 @@
         if (request.action === 'resumeAuto') {
           qualitySettings.setMode(QUALITY_MODES.AUTO);
           adaptiveTier.unpin();
-        } else if (request.action === 'reset') {
-          qualitySettings.setMode(QUALITY_MODES.AUTO);
-          adaptiveTier.unpin();
-          for (const key of Object.keys(panelOverrides)) panelOverrides[key] = null;
-          bloomEnabled = true;
-          if (bloomPass) {
-            bloomPass.setRays(DEFAULT_RAYS_STRENGTH);
-            bloomPass.setStrength(0.85); // bloom-pass.js constructor default
-            bloomPass.setDownscale(2);
-          }
-          updateRendererSize(true);
+        } else if (request.action === 'reset' || request.action === 'backToShipping') {
+          resetVisualOverridesToShipping();
+        } else if (request.action === 'maxRealism') {
+          // One tap, every above-baseline lever to its ceiling. Each call is
+          // a REQUEST through the exact same qualitySettings.request() path
+          // a manual slider drag uses (CONTRACT §7.1) — this function has no
+          // rendering side effect that isn't also reachable by hand, one
+          // control at a time; it only saves fourteen taps on a phone in
+          // bright sunlight (the brief's own words).
+          const src = REQUEST_SOURCES.PANEL;
+          qualitySettings.request({ source: src, key: 'dpr', value: Math.max(1, window.devicePixelRatio || 1) });
+          qualitySettings.request({ source: src, key: 'postQuality', value: 'full' });
+          qualitySettings.request({ source: src, key: 'shadowsEnabled', value: true });
+          // VSM is the softest/highest-quality of the four filters this game
+          // exposes — the ceiling of shadowType's own enum, same reasoning
+          // as "highest map size" for shadowMapSize just below.
+          qualitySettings.request({ source: src, key: 'shadowType', value: 'vsm' });
+          qualitySettings.request({ source: src, key: 'shadowMapSize', value: 'high' });
+          qualitySettings.request({ source: src, key: 'antialiasing', value: '4x' });
+          qualitySettings.request({ source: src, key: 'anisotropy', value: renderer.capabilities.getMaxAnisotropy() });
+          // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
+          // 80k-triangle budget on desktop (85,504 tris — see spherical-
+          // world.js's own GROUND_RESOLUTION_PRESETS comment), which is a
+          // deliberate one-lever-at-a-time choice, not the one-tap "show me
+          // the envelope" preset's job. Ultra is still reachable by hand from
+          // the Terrain mesh resolution control right above this button.
+          qualitySettings.request({ source: src, key: 'terrainResolution', value: 'high' });
+          // decorativeDensity's new ceiling (this wave) is 2.0; weatherDensity/
+          // mistBudget were NOT extended (they'd need a bigger pre-allocated
+          // particle buffer this wave did not build), so they are left alone
+          // here rather than requesting a "new maximum" that is really just
+          // their unchanged shipping value.
+          // 1, not 2. The gate measured this above 1.0 and found a label: clamp()'s
+          // fallthrough capped it at 1 while the readout showed "2.00", and even
+          // unclamped the value only scales visualUniforms.wind — 14 mm more foliage
+          // sway, no particle, no draw call, no triangle. A ceiling the system cannot
+          // reach is a promise the panel cannot keep.
+          qualitySettings.request({ source: src, key: 'decorativeDensity', value: 1 });
         }
         // 'export' and 'compare' are handled entirely inside the panel
         // (Blob/anchor-click, an in-memory A/B diff) — nothing to route here.
@@ -8903,13 +9391,15 @@
 
       // IMPROVEMENT 1: Sky dome follows camera (elapsed drives star twinkle)
       visualUniforms.time.value = motionState.elapsed;
-      // T4 (CONTRACT §7.2): the panel's "decorative density" slider covers
+      // T4 (CONTRACT §7.2 + Wave 4): the panel's "decorative density" slider covers
       // wind (here) + contact shadow (T9) + wingtip ribbons (T10) as one
       // lever, the same three effects the tier already sheds together at
-      // tier 2. 0 == tier-2-equivalent, 1 == tier-0/1-equivalent.
+      // tier 2. 0 == tier-2-equivalent (0.35), 1 == tier-0/1-equivalent (1.0),
+      // 2.0 == maximum (1.65 = 1.0 + 0.65). Wind is a shader uniform; >1.0 is
+      // real rendering work (more animated spray/bloom), not a label.
       visualUniforms.wind.value = reducedMotionState.enabled ? 0
         : panelOverrides.decorativeDensity != null
-          ? 0.35 + panelOverrides.decorativeDensity * 0.65
+          ? 0.35 + Math.min(2, panelOverrides.decorativeDensity) * 0.65
           : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
 
       // Boost drives the composite's radial smear, bloom lift and vignette.
@@ -9002,6 +9492,21 @@
           sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
           sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
         }
+      }
+
+      // ===== Shadow-caster follow (Ascend wave, opt-in) =====
+      // shadowLight.visible gates the whole light out of Three's per-frame
+      // light/shadow gather when off, so `shadowsEnabled` here is the ONLY
+      // per-frame cost this lever adds and it is exactly zero on a page that
+      // never opened the panel. Reads lightingRig.keyLight.position AFTER
+      // the sun-cycle block above has set it this frame, so the shadow never
+      // lags the visible sun by a frame.
+      if (shadowsEnabled && birdPos) {
+        _shadowSunDir.copy(lightingRig.keyLight.position).normalize();
+        shadowLight.target.position.copy(birdPos);
+        shadowLight.position.copy(birdPos).addScaledVector(_shadowSunDir, SHADOW_LIGHT_DISTANCE);
+        shadowLight.color.copy(lightingRig.keyLight.color);
+        shadowLight.intensity = lightingRig.keyLight.intensity;
       }
 
       // The terrain's sun rim shares the key light. One uniform pair, read by
@@ -10037,6 +10542,35 @@
         // Pin the adaptive quality tier, so a capture is not judged against
         // whatever DPR the sampler happened to settle on.
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
+        // Real shadow maps, opt-in (Ascend wave). An adapter onto the SAME
+        // panel/quality-settings request path a control row uses (CONTRACT
+        // §7.2: "Existing setLighting/setBloom hooks remain adapters"), so a
+        // capture harness can drive this before any panel UI exists for it,
+        // and so this hook and a future panel control can never fight over
+        // which layer owns the state.
+        // The Ascend gate could not verify reversibility because 'reset' is a panel
+        // ACTION with no scriptable handle — so the one control that gets you out of
+        // max realism on a phone in a park was the one nothing could test. Same class
+        // as A1/A2 before their capturers existed: unreachable from the harness means
+        // ungraded.
+        resetOverrides: () => { resetVisualOverridesToShipping(); return true; },
+        setShadows: ({ enabled, type, mapSize } = {}) => {
+          if (enabled !== undefined) {
+            qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'shadowsEnabled', value: !!enabled });
+          }
+          if (type !== undefined) {
+            qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'shadowType', value: type });
+          }
+          if (mapSize !== undefined) {
+            qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'shadowMapSize', value: mapSize });
+          }
+          return {
+            enabled: renderer.shadowMap.enabled,
+            type: renderer.shadowMap.type,
+            mapSize: shadowLight.shadow.mapSize.x,
+            casterCount: shadowCasterProxy ? shadowCasterProxy.count : 0,
+          };
+        },
         // Jump the sun cycle to a point in its period, for captures.
         setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
         setSunEnabled: (on) => { sunState.enabled = !!on; return sunState.enabled; },

@@ -20,6 +20,41 @@
  *
  * Zero dependencies, in keeping with the rest of the repo. Everything is
  * pre-allocated in the constructor; `render()` allocates nothing.
+ *
+ * ---------------------------------------------------------------------------
+ * SCENE-TARGET MSAA (perf-wave-3b, "antialiasing on mobile")
+ * ---------------------------------------------------------------------------
+ * `index.html`'s WebGL context is created `antialias: !isMobile` — a
+ * context-creation flag that cannot be toggled after the fact, so it cannot
+ * be a live panel lever. But this pass never draws the scene straight to
+ * that context: it draws to `sceneTarget`, an offscreen `WebGLRenderTarget`,
+ * first. `WebGLRenderTarget` accepts a `samples` option, and — verified
+ * against the exact pinned CDN build (three@0.183.2) with the exact target
+ * options used below (RGBA HalfFloatType, depthBuffer, no stencil) under a
+ * real (SwiftShader/ANGLE) WebGL2 context — sampling that target's texture
+ * from a later full-screen pass (exactly what `brightMaterial`/
+ * `compositeMaterial` do) triggers an automatic multisample resolve with NO
+ * extra draw call and NO extra pass: a probe scanline across a rasterised
+ * diagonal edge went from 0 blended pixels at `samples: 0` to 2 blended
+ * pixels at `samples: 2` and `samples: 4`, with zero console warnings.
+ * That is real hardware MSAA on the one pass that matters (the scene pass,
+ * where every world edge is drawn) without recreating the WebGL context —
+ * the third route the task brief asked to weigh, and it beats both an
+ * FXAA-style resolve (which blurs; PERFORMANCE_REALISM_PLAN Experiment 2's
+ * own caveat) and a full context rebuild (which tears down every material,
+ * texture and render target mid-session).
+ *
+ * `samples` defaults to 0 — identical to today's plain `WebGLRenderTarget`,
+ * so a page that never calls `setSamples` is byte-for-byte unchanged.
+ * `setSamples(n)` clamps to `renderer.capabilities.maxSamples` AND requires
+ * `EXT_color_buffer_float` to be present (probed once, here, not assumed —
+ * `RGBA16F` multisample renderbuffers need it even under WebGL2, and this
+ * repo has shipped a capability probe nobody checked the return value of
+ * before). A device lacking either reports `samples` back as 0 for any
+ * request — an honest requested-vs-effective desync per CONTRACT §0, never
+ * a console warning and never a broken frame. Only `sceneTarget` gets
+ * `samples`; `blurA`/`blurB`/`rayTarget` stay single-sample — they are
+ * half-res full-screen quads with no geometric edges to smooth.
  */
 
 const FULLSCREEN_VERT = `
@@ -217,6 +252,11 @@ export function createBloomPass(THREE, renderer, {
   rayKnee = 0.42,
   // Half the canvas in each axis, so a quarter of the pixels per blur tap.
   downscale = 2,
+  // Scene-target MSAA. 0 is today's plain single-sample target — the
+  // shipping default on every platform. Never pass non-zero here from a
+  // constructor call; raise it live via setSamples() from a panel request
+  // only (see the file-header note above).
+  samples = 0,
 } = {}) {
   const size = renderer.getSize(new THREE.Vector2());
   const pixelRatio = renderer.getPixelRatio();
@@ -240,7 +280,25 @@ export function createBloomPass(THREE, renderer, {
   let hasSizeBeenSet = false;
   let currentDownscale = downscale;
 
-  const sceneTarget = new THREE.WebGLRenderTarget(1, 1, targetOptions);
+  // Probed ONCE, not assumed: RGBA16F multisample renderbuffers need
+  // EXT_color_buffer_float even on a WebGL2 context, and this repo has
+  // shipped a capability probe nobody checked before (the
+  // hardwareConcurrency/bloom trap CLAUDE.md records). A device missing
+  // either half of this reports every setSamples() request back as 0.
+  const gl = renderer.getContext();
+  const msaaSupported = !!(
+    renderer.capabilities.isWebGL2 &&
+    renderer.capabilities.maxSamples > 0 &&
+    gl.getExtension('EXT_color_buffer_float')
+  );
+
+  // `sceneTarget` is `let`, not `const`: raising samples recreates it
+  // (WebGLRenderTarget's multisample renderbuffer is allocated at
+  // construction, not re-derivable by mutating `.samples` after the fact),
+  // so every closure below that needs the CURRENT target reads this binding
+  // rather than capturing the original object.
+  let currentSamples = msaaSupported ? Math.max(0, Math.min(Math.floor(samples) || 0, renderer.capabilities.maxSamples)) : 0;
+  let sceneTarget = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, samples: currentSamples });
   // The blur targets need no depth buffer at all; they are full-screen
   // triangle passes over a texture.
   const blurA = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, depthBuffer: false });
@@ -340,6 +398,27 @@ export function createBloomPass(THREE, renderer, {
   }
   setSize(size.x, size.y, pixelRatio);
 
+  /**
+   * Recreate `sceneTarget` at a new sample count. A `WebGLRenderTarget`'s
+   * multisample renderbuffer is allocated once, at construction, from its
+   * `samples` option — there is no live setter that re-derives it, unlike
+   * `downscale` above — so a sample-count change disposes the old target
+   * and builds a new one, then re-runs `setSize` against the cached last
+   * width/height/ratio so the new target lands at the SAME dimensions the
+   * old one had, not 1x1. Every closure that reads `tScene` off the old
+   * target's texture (brightMaterial, compositeMaterial) is repointed here;
+   * `render()` and `getSizes()` close over the `sceneTarget` BINDING, not a
+   * snapshot, so they pick the new object up with no further change.
+   */
+  function recreateSceneTarget(nextSamples) {
+    sceneTarget.dispose();
+    sceneTarget = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, samples: nextSamples });
+    sceneTarget.texture.colorSpace = THREE.NoColorSpace;
+    brightMaterial.uniforms.tScene.value = sceneTarget.texture;
+    compositeMaterial.uniforms.tScene.value = sceneTarget.texture;
+    if (hasSizeBeenSet) setSize(lastWidth, lastHeight, lastRatio);
+  }
+
   // True while the ray buffer holds shafts that must be cleared once the sun
   // leaves the frame.
   let raysDirty = false;
@@ -355,7 +434,11 @@ export function createBloomPass(THREE, renderer, {
 
   return {
     get enabled() { return true; },
-    sceneTarget,
+    // Getter, not a plain data property: `sceneTarget` (the closure
+    // variable) is reassigned by recreateSceneTarget() whenever setSamples
+    // changes the sample count, and a snapshot taken here at construction
+    // time would go stale the moment that happens.
+    get sceneTarget() { return sceneTarget; },
     frameStats,
 
     setSize,
@@ -365,6 +448,10 @@ export function createBloomPass(THREE, renderer, {
      * themselves — never recomputed from `downscale` and the canvas size.
      * `downscale` is reported alongside as the divisor actually applied by
      * the last `setSize()` call, not the constructor option in isolation.
+     * `sceneSamples` is `sceneTarget.samples` itself — the EFFECTIVE sample
+     * count the live render target actually holds, already clamped against
+     * `renderer.capabilities.maxSamples` and gated on `msaaSupported` by
+     * `setSamples()` below, never recomputed from what was requested.
      */
     getSizes() {
       return {
@@ -373,8 +460,26 @@ export function createBloomPass(THREE, renderer, {
         blurB: { width: blurB.width, height: blurB.height },
         rayTarget: { width: rayTarget.width, height: rayTarget.height },
         downscale: currentDownscale,
+        sceneSamples: sceneTarget.samples,
       };
     },
+
+    /**
+     * Raise or lower the scene pass's hardware MSAA sample count live (see
+     * the file-header note). 0 disables it — the shipping default, and
+     * always the effective result on a device that lacks `EXT_color_buffer_
+     * float` or WebGL2, no matter what is requested; `getSizes().
+     * sceneSamples` / `getSamples()` report the true effective value so a
+     * caller can see that clamp happen rather than assume the request took.
+     */
+    setSamples(n) {
+      const requested = Math.max(0, Math.floor(n) || 0);
+      const next = msaaSupported ? Math.min(requested, renderer.capabilities.maxSamples) : 0;
+      if (next === currentSamples) return;
+      currentSamples = next;
+      recreateSceneTarget(next);
+    },
+    getSamples() { return sceneTarget.samples; },
 
     /**
      * Change the post-resolution divisor live. `downscale` used to be

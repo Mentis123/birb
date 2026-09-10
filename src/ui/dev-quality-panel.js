@@ -113,15 +113,35 @@ export function nativeDpr() {
 export const PANEL_VIEWS = Object.freeze({
   PERFORMANCE: 'performance',
   LOOK: 'look',
+  ULTRA: 'ultra',
   CAPTURE: 'capture',
 });
 
-const VIEW_ORDER = [PANEL_VIEWS.PERFORMANCE, PANEL_VIEWS.LOOK, PANEL_VIEWS.CAPTURE];
+const VIEW_ORDER = [PANEL_VIEWS.PERFORMANCE, PANEL_VIEWS.LOOK, PANEL_VIEWS.ULTRA, PANEL_VIEWS.CAPTURE];
 const VIEW_LABELS = {
   [PANEL_VIEWS.PERFORMANCE]: 'Performance',
   [PANEL_VIEWS.LOOK]: 'Look',
+  [PANEL_VIEWS.ULTRA]: 'Ultra',
   [PANEL_VIEWS.CAPTURE]: 'Capture',
 };
+
+/**
+ * Ascend wave — the Ultra view exists because the panel's every other
+ * ceiling was, until this wave, the shipping value wearing a slider's
+ * clothes: it could only ever shed. Everything under this tab pushes PAST
+ * what a player who never opens this panel sees. Nothing here moves unless
+ * you touch it (or tap MAX REALISM), and BACK TO SHIPPING DEFAULT undoes it
+ * exactly — same distance out as in.
+ */
+const VIEW_INTRO = {
+  [PANEL_VIEWS.ULTRA]:
+    'Above the shipping default. These controls make the game render MORE than it ships with — real shadows, hardware AA, sharper textures at grazing angles, a denser ground mesh. Nothing below moves until you touch it.',
+};
+
+/** A FIELD_REGISTRY/CONTROL_REGISTRY entry's `view` may be one id or several. */
+function matchesView(entryView, view) {
+  return Array.isArray(entryView) ? entryView.includes(view) : entryView === view;
+}
 
 /**
  * FIELD_REGISTRY — every field named by CONTRACT §3.2 (TEL-*) and §3.3
@@ -143,16 +163,19 @@ export const FIELD_REGISTRY = Object.freeze([
   { id: 'TEL-5', label: 'GPU time', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-6', label: 'Drawing-buffer pixels', view: PANEL_VIEWS.LOOK, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-7', label: 'Effective render DPR / native-resolution %', view: PANEL_VIEWS.LOOK, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
-  { id: 'TEL-8', label: 'Scene calls / triangles', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
-  { id: 'TEL-9', label: 'Total calls / triangles / passes', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
-  { id: 'TEL-10', label: 'Program count', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
+  // TEL-8/9/10 also render on the Ultra tab (Wave "Ascend" — requirement 5:
+  // "show the cost live" where the above-baseline controls actually are, not
+  // just on a different tab the thumb has to leave to check).
+  { id: 'TEL-8', label: 'Scene calls / triangles', view: [PANEL_VIEWS.PERFORMANCE, PANEL_VIEWS.ULTRA], defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
+  { id: 'TEL-9', label: 'Total calls / triangles / passes', view: [PANEL_VIEWS.PERFORMANCE, PANEL_VIEWS.ULTRA], defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
+  { id: 'TEL-10', label: 'Program count', view: [PANEL_VIEWS.PERFORMANCE, PANEL_VIEWS.ULTRA], defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-11', label: 'Resource counts (geometries / textures)', view: PANEL_VIEWS.LOOK, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-12', label: 'Estimated owned render-target memory', view: PANEL_VIEWS.LOOK, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-13', label: 'Last adjustment / reason', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-14', label: 'Cooldown', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-15', label: 'Active mode', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-16', label: 'Pinned state', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
-  { id: 'TEL-17', label: 'Bloom / post target dimensions + downscale', view: PANEL_VIEWS.LOOK, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
+  { id: 'TEL-17', label: 'Bloom / post target dimensions + downscale', view: [PANEL_VIEWS.LOOK, PANEL_VIEWS.ULTRA], defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-18', label: 'Requested vs. effective pixel ratio', view: PANEL_VIEWS.LOOK, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-19', label: 'Stats path taken', view: PANEL_VIEWS.PERFORMANCE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
   { id: 'TEL-20', label: 'Build identity', view: PANEL_VIEWS.CAPTURE, defaultReason: SENTINEL_REASONS.NOT_IMPLEMENTED },
@@ -205,11 +228,24 @@ export const CONTROL_REGISTRY = Object.freeze([
     min: 0, max: 1, step: 0.05, requestKey: 'mistBudget',
   },
   {
+    // Stays on the Performance tab, NOT Ultra: tools/lib/quality-captures.mjs
+    // (frozen, oracle-manifest.txt) drives this control by label right after
+    // "Weather density" without switching tabs first (A10) — moving it would
+    // break a passing oracle to serve a cosmetic grouping. Its range above
+    // 1.0 IS this wave's above-baseline lever; the Ultra view's intro text
+    // and the MAX REALISM preset both reach it without duplicating the
+    // control.
     id: 'decorativeDensity', view: PANEL_VIEWS.PERFORMANCE, kind: 'slider',
     label: 'Decorative density (wind / contact shadow / ribbons)',
+    // Back to 1. The Ascend gate drove this through the panel's own listener at
+    // 1.5 and 2.0 and measured requested=1 / effective=1 with the readout showing
+    // the number the user picked, and 0 delta in draw calls and triangles over 12
+    // adjacent frame pairs. Even unclamped, above 1.0 it only scales
+    // visualUniforms.wind — about 14 mm more foliage sway. There is no denser
+    // decoration behind this slider to ask for, so offering the range was the
+    // panel telling the truth about a number and lying about an effect.
     min: 0, max: 1, step: 0.05, requestKey: 'decorativeDensity',
   },
-
   // ---- Look view: render-cost-vs-fidelity dials ----
   {
     id: 'dpr', view: PANEL_VIEWS.LOOK, kind: 'slider', label: 'Render DPR',
@@ -243,6 +279,85 @@ export const CONTROL_REGISTRY = Object.freeze([
     disabledReason: 'DEF-4: no runtime variant switch exists on the ground shader — ships baseline only.',
   },
 
+  // ---- Ultra view: ABOVE the shipping default (Ascend wave) ----
+  // Every control below this line pushes PAST what a player who never opens
+  // the workbench sees — the opposite of the Performance view's shedding
+  // dials. `requestKey` for each routes through the SAME quality-settings
+  // apply()/readEffective()/clamp() precedence (CONTRACT §7.1) as every
+  // existing lever; this file has no rendering side effect of its own for
+  // these any more than for the ones above.
+  {
+    id: 'maxRealism', view: PANEL_VIEWS.ULTRA, kind: 'action', label: 'MAX REALISM — set every lever below to its ceiling',
+    hint: 'One tap: native DPR, post Full, shadows on at 2048px VSM, 4x MSAA, anisotropy at the device max, terrain resolution High, decorative density at 2.0. Reversible — see the button next to this one.',
+  },
+  {
+    id: 'backToShipping', view: PANEL_VIEWS.ULTRA, kind: 'action', label: 'BACK TO SHIPPING DEFAULT',
+    hint: 'Clears every override above AND in Performance/Look back to exactly what a player who never opens this panel sees — same distance out as MAX REALISM is in.',
+  },
+  {
+    id: 'shadowsEnabled', view: PANEL_VIEWS.ULTRA, kind: 'toggle', label: 'Real shadows (shadow map)',
+    requestKey: 'shadowsEnabled',
+    hint: 'Off ships on every device today — contact shadows are faked instead. Turning this on recompiles every material in the scene (verified against tools/birb-shaders.mjs with this ON, all 4 biomes).',
+  },
+  {
+    id: 'shadowType', view: PANEL_VIEWS.ULTRA, kind: 'select', label: 'Shadow filter',
+    options: [
+      { value: 'basic', label: 'Basic (hard edge, cheapest)' },
+      { value: 'pcf', label: 'PCF' },
+      { value: 'vsm', label: 'VSM (softest)' },
+    ],
+    requestKey: 'shadowType',
+  },
+  {
+    id: 'shadowMapSize', view: PANEL_VIEWS.ULTRA, kind: 'select', label: 'Shadow map size',
+    options: [
+      { value: 'low', label: 'Low (512px)' },
+      { value: 'medium', label: 'Medium (1024px)' },
+      { value: 'high', label: 'High (2048px)' },
+    ],
+    requestKey: 'shadowMapSize',
+  },
+  {
+    // `antialias` is a WebGL CONTEXT-CREATION flag (index.html:
+    // `antialias: !isMobile`) — it cannot be toggled on a live renderer, so
+    // this lever does not flip it. It raises hardware MSAA on the bloom
+    // pass's offscreen scene target instead (bloom-pass.js `setSamples`),
+    // which resolves automatically with no extra draw call. Off by default
+    // on every platform, including desktop, where the context flag already
+    // supplies real AA on its own no-post fallback path — this control adds
+    // AA to the POST path everywhere, opt-in only. A device lacking
+    // EXT_color_buffer_float or WebGL2 reports the effective sample count
+    // back as 0 regardless of what is requested here (an honest
+    // requested-vs-effective desync, not a broken control).
+    id: 'antialiasing', view: PANEL_VIEWS.ULTRA, kind: 'select', label: 'Antialiasing (scene MSAA)',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: '2x', label: '2x' },
+      { value: '4x', label: '4x' },
+    ],
+    requestKey: 'antialiasing',
+  },
+  {
+    id: 'anisotropy', view: PANEL_VIEWS.ULTRA, kind: 'slider', label: 'Anisotropic filtering',
+    // 0 is the "back to shipping default" sentinel (restores each texture's
+    // own authored value — cloudTex shipped at 2, everything else at 1), not
+    // a real GL level. 16 is a generic UI ceiling; the actual request is
+    // clamped to THIS device's renderer.capabilities.getMaxAnisotropy() on
+    // the index.html side regardless of what this slider allows, exactly
+    // like the dpr control's native-vs-requested pattern above.
+    min: 0, max: 16, step: 1, requestKey: 'anisotropy',
+    hint: 'Only ground/prop-adjacent textures that exist — water surfaces, the bird’s contact-shadow decal, slalom signage, the desktop cloud shell — everything else in this game has no sampled texture to sharpen. 0 = shipping (cloudTex=2, everything else untouched).',
+  },
+  {
+    id: 'terrainResolution', view: PANEL_VIEWS.ULTRA, kind: 'select', label: 'Terrain mesh resolution',
+    options: [
+      { value: 'standard', label: 'Standard (shipping — 112x72 mobile / 128x96 desktop)' },
+      { value: 'high', label: 'High (160x104 / 192x128, +17-24k tris)' },
+      { value: 'ultra', label: 'Ultra (208x136 / 256x168, +40-61k tris — exceeds the 80k budget alone)' },
+    ],
+    requestKey: 'terrainResolution',
+    hint: 'Rebuilds the ground mesh on release, not per frame. Real silhouette/terrain detail, not a filter.',
+  },
   // ---- Capture view: evidence ----
   {
     id: 'compare', view: PANEL_VIEWS.CAPTURE, kind: 'action', label: 'Snapshot for A/B compare',
@@ -391,6 +506,26 @@ const STYLE_TEXT = `
   color: #6b7280;
   font-size: 11px;
   margin-top: 3px;
+}
+#${ROOT_ELEMENT_ID} .bqp-view-intro {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: rgba(79, 195, 247, 0.1);
+  border: 1px solid rgba(79, 195, 247, 0.35);
+  border-radius: 8px;
+  color: #bfe9fb;
+  font-size: 12px;
+}
+#${ROOT_ELEMENT_ID} .bqp-control[data-id="maxRealism"] .bqp-action-btn {
+  background: #3a1f0a;
+  border-color: #f0a742;
+  color: #ffd9a0;
+  font-weight: 700;
+}
+#${ROOT_ELEMENT_ID} .bqp-control[data-id="backToShipping"] .bqp-action-btn {
+  background: #12261a;
+  border-color: #4caf7d;
+  color: #baf0d3;
 }
 #${ROOT_ELEMENT_ID} .bqp-control[data-disabled="true"] { opacity: 0.55; }
 #${ROOT_ELEMENT_ID} .bqp-compare-diff {
@@ -598,6 +733,7 @@ export function createDevQualityPanel(opts = {}) {
   function buildControl(control) {
     const wrap = doc.createElement('div');
     wrap.className = 'bqp-control';
+    wrap.setAttribute('data-id', control.id);
     if (control.disabled) wrap.setAttribute('data-disabled', 'true');
 
     const head = doc.createElement('div');
@@ -835,6 +971,12 @@ export function createDevQualityPanel(opts = {}) {
       title.className = 'bqp-section-title';
       title.textContent = 'Controls';
       bodyEl.appendChild(title);
+      if (VIEW_INTRO[activeView]) {
+        const intro = doc.createElement('div');
+        intro.className = 'bqp-hint bqp-view-intro';
+        intro.textContent = VIEW_INTRO[activeView];
+        bodyEl.appendChild(intro);
+      }
       buildControlsForView(activeView);
 
       const telemetryTitle = doc.createElement('div');
@@ -844,7 +986,7 @@ export function createDevQualityPanel(opts = {}) {
     }
 
     for (const field of FIELD_REGISTRY) {
-      if (field.view !== activeView) continue;
+      if (!matchesView(field.view, activeView)) continue;
       const row = doc.createElement('div');
       row.className = 'bqp-row';
 

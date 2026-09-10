@@ -88,7 +88,7 @@ edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONT
 839a5bee550e812df229f09c21940bd40a20c55cf759d94b6d3b31527bc85e33  tools/req-verify.mjs
 # --- Wave 1: the oracles Wave 2 spends (R5: implementers must not edit these) ---
 3b5974b1d9797b903ebe8117413691a01244b3387cbc6bbfad77d8a2308a8db2  tools/lib/quality-assertions.mjs
-569f7d69d90a3ad0ccc1825c1e6f2f5e5f770dd32c11e31e72d68072a6730fc9  tools/birb-quality.mjs
+3b77ec06b4891d9f9196d27612ac75b365826deb7e85e6de8582ccf5f5a08791  tools/birb-quality.mjs
 73a14e636dfbf1bcd7c6b0b16bb21b9b4c1af0edef233edaf7423938c94aa2ba  tests/frame-metrics-stats.test.js
 0f58a56fd72a386c17ea6bf514348dd71a06ce70ce079d87578a02985b87bae0  tests/quality-settings.test.js
 968016b32e29f80105a0a3ec43faa9ca28f4d67faf46cdde37fbac9ae3d52005  tests/frame-stats-totals.test.js

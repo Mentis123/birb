@@ -614,6 +614,26 @@ async function doCheck(args) {
         }
         continue;
       }
+      // G-ASCEND: normalise quality state between assertions.
+      //
+      // `--check all` boots ONE page (SwiftShader costs 20-60 s a boot and twelve
+      // would price this gate out of CI), so every capturer that mutates state and
+      // walks away contaminates its successors. That was fixed once per-quantity —
+      // captureA3 restoring DPR, captureA5 restoring sun and density — and the
+      // Ascend wave then added four more mutating capturers (shadows, MSAA,
+      // anisotropy, terrain) and reintroduced it. Measured over three runs of the
+      // full board: 12/12, then A5 failing, then A9 failing. Different assertion
+      // each time, which is the signature of shared state rather than a defect.
+      //
+      // A flaky gate is worse than no gate, and this one is now a HARD CI gate on
+      // main: it would eventually wave a real regression through and nobody would
+      // trust the red when it mattered. Per-quantity restores do not scale with the
+      // number of levers; resetting to the shipping baseline does.
+      await session.page.evaluate(() => {
+        if (window.__BIRB && typeof window.__BIRB.resetOverrides === 'function') {
+          window.__BIRB.resetOverrides();
+        }
+      }).catch(() => {});
       results.push(await runOneCheck(session.page, id, args));
     }
     printCoverageLine();

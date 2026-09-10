@@ -14,6 +14,32 @@ const DEG2RAD = Math.PI / 180;
 // At speed 8, loop time ~94s — room to breathe, fly THROUGH environments
 const SPHERE_RADIUS = 120;
 
+// Ground mesh resolution, opt-in above the shipping default (Ascend wave,
+// "sharpness" lever). `standard` is EXACTLY today's shipped mobile/desktop
+// segment counts — the workbench's ceiling was the shipping value wearing a
+// slider's clothes everywhere else in this pass, and this is the one place
+// it is a REAL mesh, not a filter: raising it adds real vertices/triangles,
+// which is why it is rebuilt on release (see setGroundResolution below)
+// rather than every frame. Triangle counts below are exact — a UV sphere of
+// widthSegments×heightSegments has 2*W*(H-1) triangles (the pole rows are
+// half-populated), verified against three.js's own SphereGeometry index
+// construction, not eyeballed:
+//   standard mobile  112x72  -> 15,904 tris (today's shipped value, unchanged)
+//   standard desktop 128x96  -> 24,320 tris (today's shipped value, unchanged)
+//   high     mobile  160x104 -> 32,960 tris (+17,056 over standard mobile)
+//   high     desktop 192x128 -> 48,768 tris (+24,448 over standard desktop)
+//   ultra    mobile  208x136 -> 56,160 tris (+40,256 over standard mobile)
+//   ultra    desktop 256x168 -> 85,504 tris (+61,184 over standard desktop)
+// `ultra` desktop alone exceeds the whole scene's 80k-triangle budget
+// (CLAUDE.md/CONTRACT) — that is the deliberate point of an above-baseline
+// "push the envelope" tier the owner explicitly asked to see, not a bug.
+export const GROUND_RESOLUTION_PRESETS = {
+  standard: { mobile: [112, 72], desktop: [128, 96] },
+  high: { mobile: [160, 104], desktop: [192, 128] },
+  ultra: { mobile: [208, 136], desktop: [256, 168] },
+};
+export const DEFAULT_GROUND_RESOLUTION = 'standard';
+
 // Active terrain profile for the environment currently being built. Lets
 // placeOnSphere() AND ground collision sample the SAME FBM displacement, so
 // props sit ON the rolling terrain and the bird flies over highlands / down
@@ -2871,7 +2897,7 @@ const SPHERE_BUILDERS = {
   mountain: buildMountainOnSphere,
 };
 
-export function createSphericalWorld(scene, { three, variant = 'forest', definition } = {}) {
+export function createSphericalWorld(scene, { three, variant = 'forest', definition, groundResolution } = {}) {
   const THREE = three ?? THREEImported;
 
   const sphereRadius = SPHERE_RADIUS;
@@ -2912,9 +2938,14 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // 120x76 was tried first and put the city at 79.7k against an 80k budget,
   // which is not headroom, it is luck. 112x72 costs about four thousand
   // triangles and leaves every biome a real margin.
-  const groundWidthSeg = _isMobile() ? 112 : 128;
-  const groundHeightSeg = _isMobile() ? 72 : 96;
-  const sphereGeometry = new THREE.SphereGeometry(sphereRadius, groundWidthSeg, groundHeightSeg);
+  // groundResolution: opt-in override (Ascend wave). Unknown/absent key falls
+  // back to 'standard', which resolves to the exact same [112,72]/[128,96]
+  // pair hardcoded here before this lever existed — the default does not move.
+  let groundResolutionKey = GROUND_RESOLUTION_PRESETS[groundResolution] ? groundResolution : DEFAULT_GROUND_RESOLUTION;
+  const [groundWidthSeg, groundHeightSeg] = _isMobile()
+    ? GROUND_RESOLUTION_PRESETS[groundResolutionKey].mobile
+    : GROUND_RESOLUTION_PRESETS[groundResolutionKey].desktop;
+  let sphereGeometry = new THREE.SphereGeometry(sphereRadius, groundWidthSeg, groundHeightSeg);
   const terrainData = displaceSphereGeometry(sphereGeometry, sphereRadius, variant);
 
   // Lambert (vs Standard) drops the PBR roughness/metalness pass — cheaper to
@@ -3170,6 +3201,52 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     nestablePositions,
     proximityTargets,
     features,
+    // Getters, not plain data properties: an object LITERAL copies
+    // `groundResolutionKey`'s value at construction time, so a later
+    // setGroundResolution() call — which reassigns the closure variables,
+    // not this returned object — would leave `.groundResolution` reporting
+    // 'standard' forever. Found verifying the Ascend-wave panel's MAX
+    // REALISM preset: index.html's readEffective('terrainResolution') reads
+    // this property directly, and a snapshot here is exactly the "requested
+    // vs effective" desync the whole workbench exists to catch, except this
+    // one was never real — the mesh really did rebuild; only the readback lied.
+    get groundResolution() { return groundResolutionKey; },
+    get groundTriangles() { return sphereGeometry.index ? sphereGeometry.index.count / 3 : 0; },
+    // Ascend wave, "sharpness" lever. Rebuilds ONLY the ground mesh's
+    // geometry at a new segment count — not a per-frame op (a mobile GPU
+    // does not get a new vertex buffer every tick) and not a full
+    // setEnvironment() teardown either, so nests/rockets/weather/RNG state
+    // are untouched. Deterministic: displaceSphereGeometry is pure geometry
+    // math (position -> noise -> displacement + vertex color), no RNG draw,
+    // so calling it again mid-session does not desync the world's seeded
+    // RNG stream the way re-placing props would.
+    // bakeGroundContacts re-runs too: it paints moss/soil tint into the
+    // ground's OWN vertex-color buffer near tree-trunk instances already in
+    // `root` — a fresh geometry has none of that baked in, and skipping the
+    // re-bake would silently lose it (a mesh with fewer/more vertices doesn't
+    // inherit a color baked onto a different vertex set).
+    // Unknown key -> 'standard', same fallback as construction; never throws
+    // on a bad panel value.
+    setGroundResolution(key) {
+      const resolved = GROUND_RESOLUTION_PRESETS[key] ? key : DEFAULT_GROUND_RESOLUTION;
+      const [w, h] = _isMobile()
+        ? GROUND_RESOLUTION_PRESETS[resolved].mobile
+        : GROUND_RESOLUTION_PRESETS[resolved].desktop;
+      const trianglesNow = sphereGeometry.index ? sphereGeometry.index.count / 3 : 0;
+      if (resolved === groundResolutionKey) {
+        return { changed: false, key: resolved, widthSegments: sphereGeometry.parameters?.widthSegments ?? w, heightSegments: sphereGeometry.parameters?.heightSegments ?? h, triangles: trianglesNow };
+      }
+      const oldGeometry = sphereGeometry;
+      const nextGeometry = new THREE.SphereGeometry(sphereRadius, w, h);
+      displaceSphereGeometry(nextGeometry, sphereRadius, variant);
+      bakeGroundContacts(THREE, nextGeometry, root);
+      sphereGround.geometry = nextGeometry;
+      sphereGeometry = nextGeometry;
+      oldGeometry.dispose();
+      groundResolutionKey = resolved;
+      const triangles = nextGeometry.index ? nextGeometry.index.count / 3 : 0;
+      return { changed: true, key: resolved, widthSegments: w, heightSegments: h, triangles };
+    },
     dispose() {
       // Remove from scene first to prevent visual artifacts during environment switch
       scene.remove(root);
