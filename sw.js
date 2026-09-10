@@ -16,7 +16,7 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v47-2026-09-10-authored-bark';
+const CACHE_VERSION = 'v48-2026-09-11-sky-ibl';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -77,6 +77,7 @@ const CORE_ASSETS = [
   './src/controls/virtual-thumbstick.js',
   './src/environment/world-shell.js',
   './src/environment/authored-textures.js',
+  './src/environment/sky-environment.js',
   // Pre-existing gap, caught by SW-3 when authored-textures.js was added: this
   // is dynamically imported by the dev panel's grade cycler (index.html:3451),
   // so offline it would have thrown a failed import rather than a blank page —

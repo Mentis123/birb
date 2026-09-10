@@ -46,10 +46,14 @@ The research's conclusion, which this brief exists to act on, is that pushing ev
 
 Ranked by how much of the gap in §0 each one closes. Do them in order; item 1 alone changes every material in the game.
 
-### 1. An environment map for image-based lighting — the single highest-value asset
+### 1. ~~An environment map for image-based lighting~~ — **MEASURED AND CANCELLED**
 
-**Deliver:** one equirectangular HDR-ish sky per biome, 2:1, 1024×512, PNG.
-`assets/env/forest_sky.png`, `canyons_sky.png`, `mountain_sky.png`, `city_sky.png`.
+**Do not make these.** The path was built and measured with a procedural map first: a flat grey
+environment and the real sky gradient land **0.7% apart** in frame luminance, because
+`lights_lambert_pars_fragment` defines no `RE_IndirectSpecular` and Lambert therefore takes IBL as
+diffuse irradiance only. Detail integrates away before it reaches a pixel. The full measurement is
+in [ASSET_JOBS.md](ASSET_JOBS.md). The game's own four gradients now supply this for free via
+`src/environment/sky-environment.js` behind `?ibl=1`.
 
 Every `MeshStandardMaterial` in the game currently reflects nothing, because there is nothing to reflect. A PMREM-prefiltered environment gives the whole world sky-coloured ambient occlusion-ish falloff, a horizon in every wet surface, and a rim on the bird for free — at the cost of one texture and one prefilter at environment-switch time (never per frame; see §5).
 

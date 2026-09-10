@@ -51,66 +51,30 @@ Assigning one uploads a texture, perturbs the program cache key into a fresh com
 
 ---
 
-## Job 02 — four biome environment maps — **LIVE, this is the next one**
+## Job 02 — four biome environment maps — **CANCELLED, and here is the measurement that killed it**
 
-The highest-value asset in the whole programme, and the premise is verified rather than assumed.
+**Do not make these. The work was proved with a procedural map first, and it does not pay.**
 
-**The consumer is real.** `WebGLPrograms.js:54` reads:
+The premise held: `scene.environment` really does reach every prop. `WebGLPrograms.js:54` names `isMeshLambertMaterial` explicitly, and `meshlambert.glsl.js` includes `envmap_physical_pars_fragment`. The path was built (`src/environment/sky-environment.js`, `?ibl=1`), it runs with **zero console errors or warnings**, and it costs **no measurable draw calls** — 82–84 with it on or off, inside frame-to-frame variance.
 
-```js
-const environment = ( material.isMeshStandardMaterial || material.isMeshLambertMaterial
-                   || material.isMeshPhongMaterial ) ? scene.environment : null;
-```
+Then it was measured, with the world seed, sun, tier, pose and drones all pinned so the frames were actually comparable:
 
-`isMeshLambertMaterial` is named explicitly, and `meshlambert.glsl.js` includes `envmap_physical_pars_fragment` — the PMREM path. So a single `scene.environment` reaches **every prop in the world at once**: trees, rocks, spires, buildings, the lot. Nothing else on the list touches that many pixels for one texture.
+| Environment | Frame luminance | vs no IBL |
+|---|---:|---:|
+| none (shipping) | 0.0489 | — |
+| the real four-stop sky gradient | 0.0861 | **1.759×** |
+| a **flat grey**, no gradient at all | 0.0854 | **1.746×** |
 
-Today `scene.environment` is `null` and `PMREMGenerator` appears nowhere. There is no image-based lighting in this game at all.
+**A flat grey and the real sky are 0.7% apart.** The shape of the map does not matter, and there is a structural reason rather than a tuning one: `lights_lambert_pars_fragment.glsl.js` defines only `RE_Direct` and `RE_IndirectDiffuse`. There is **no `RE_IndirectSpecular`**. Lambert takes IBL as diffuse irradiance only — the cosine-weighted integral of the whole sky — which is low-frequency by construction. Clouds, structure and detail integrate away before they reach a single pixel.
 
-### Deliver
+So four authored 1024×512 maps would cost 10.67 MB of repository and buy a difference measured at **0.7%** on every tree, rock, spire and building in the game. The four gradients the game already computes give the same lighting for nothing, which is what the module now does.
 
-| File | Size | Notes |
-|---|---|---|
-| `assets/env/forest_sky.png` | 1024×512 | 2:1 equirectangular, RGB |
-| `assets/env/canyons_sky.png` | 1024×512 | note the spelling — **canyons**, not canyon |
-| `assets/env/mountain_sky.png` | 1024×512 | |
-| `assets/env/city_sky.png` | 1024×512 | |
+Two things that *did* come out of it, and they are worth more than the maps would have been:
 
-Only one is resident at a time (2.67 MB decoded with mips), so the set is comfortably inside the 24 MB resident budget.
+- **IBL is a +76% ambient lift**, so switching it on needs the hemisphere ambient (currently 1.12 in forest) cut by roughly 43% to hold the exposure. That rebalance is a lighting decision for the owner's eye, not an asset.
+- **An authored sky would still matter for `MeshStandardMaterial`** — the backdrop shell, the drones, the rockets — because those *do* evaluate indirect specular. That is a much smaller and more specific case than "the highest-value asset in the programme", and it should be argued on its own merits when something in that set actually needs it.
 
-### Match the sky the player is actually looking at
-
-The game draws its own gradient sky dome. If the environment map disagrees with it, reflections will contradict the background and read as a bug. These are the shipped values — match them.
-
-| Biome | Zenith | Mid | Horizon | Below horizon | Fog |
-|---|---|---|---|---|---|
-| forest | `#397da7` | `#91bdb9` | `#ffe0a1` | `#3c665d` | `#0a1b2e` |
-| canyons | `#756eaa` | `#dca68e` | `#ffd4a1` | `#644959` | `#2b150f` |
-| mountain | `#3d74ad` | `#9dc0d4` | `#e3d3ae` | `#44637e` | `#0f1f2f` |
-| city | `#283a75` | `#748da9` | `#e5b7a0` | `#283c55` | `#0b1524` |
-
-City is dusk on purpose — a lit window only reads against a dark street. Do not brighten it.
-
-### The sun
-
-All four biomes put the key light at **41–47° above the horizon**, azimuth ~52–55°. Put the warm brightening of the sky in that quadrant so the ambient light has a direction.
-
-**Do not paint a sun disc.** The game already draws its own HDR sun disc on the dome at about five times its true angular size, and a second one baked into the reflections would disagree with it. What the map supplies is *directional ambient and a horizon* — the punchy specular comes from the existing key light.
-
-Be aware this is 8-bit LDR, so it cannot carry real sun energy, and that is fine: it is doing the job a sky dome does, not the job a light does. Do not try to fake HDR by clipping a white blob into it.
-
-### Azimuth and strength are fixable here, so do not agonise
-
-`scene.environmentRotation` (an `Euler`) and `scene.environmentIntensity` both exist in 0.183.2. If the bright quadrant lands at the wrong bearing, one rotation fixes it at wiring time; if the whole thing is too strong, one scalar does. Get the *vertical* structure and the colours right — those are the parts a rotation cannot repair.
-
-### Acceptance
-
-```
-node tools/asset-check.mjs assets/env/
-```
-
-The `sky` kind checks three things: the 2:1 aspect, the ancillary chunks, and — added for this job — the **longitude wrap**. The left and right edges of an equirectangular map are the same meridian, so a discontinuity there is a vertical seam standing in the sky and in every reflection of it. The **poles are not checked**: top and bottom rows legitimately differ, and a check that failed that would be wrong. As always the tool says **nothing** about whether it looks like sky — that is an eye on a real phone.
-
-Return the four files, the tool output, and the `assets/MANIFEST.md` rows with **target** (`scene.environment`) and **world tile** (`n/a — equirectangular`) filled in.
+The general lesson, and the reason this was worth two hours: **prove the consumer before commissioning the asset.** This is the second time on this track — the first was a roughness map for a material class with no roughness slot.
 
 ---
 
@@ -118,7 +82,7 @@ Return the four files, the tool output, and the `assets/MANIFEST.md` rows with *
 
 | # | Job | Files | Resident cost | Why it is here |
 |---|---|---:|---:|---|
-| 03 | Forest ground and rock: `forest_soil`, `forest_rock`, `forest_litter`, `river_gravel` | 8 | 10.7 MB | The first production scene is a forest river valley and its terrain is flat-shaded noise with a tint |
+| **03 — NOW LIVE** | Forest ground and rock: `forest_soil`, `forest_rock`, `forest_litter`, `river_gravel`, each `_albedo` + `_normal` | 8 | 10.7 MB | The first production scene is a forest river valley and its terrain is flat-shaded noise with a tint. **These land on `map` and `normalMap`, which Lambert samples per pixel at full frequency** — unlike an environment map, detail here survives all the way to the screen. Same rules as the bark: tileable, unlit, POT, world tile size declared |
 | 04 | `foliage_needle` — albedo **with alpha**, RGBA | 1 | 1.3 MB | The hero tree's canopy. First cut-out asset, so the gate needs an alpha-coverage check written before it lands, not after |
 | 05 | `feather_wing_normal` — detail map for the bird | 1 | 1.3 MB | A detail map riding on the existing blue/cyan, **not** a colour map. The blue/cyan identity is a fixed decision; do not repaint the bird |
 | 06 | Reference imagery — concept boards, geology, plumage, a lighting key | — | 0 | Committed to `docs/realism/reference/` where **nothing imports it**. Evidence, never a runtime dependency. This is also the missing half of the whole programme: there is currently no reference image of anything being aimed at |

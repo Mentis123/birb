@@ -3486,6 +3486,11 @@
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
       var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
+      // Image-based lighting from the same gradient the dome paints, behind
+      // ?ibl=1. scene.environment is null on the shipping path; see the module
+      // header for why this is being proved with a procedural map before the
+      // authored biome skies (ASSET_JOBS.md job 02) are wired to it.
+      var { installSkyEnvironment, iblRequested } = await import("./src/environment/sky-environment.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { createDevGesture } = await import("./src/ui/dev-gesture.js");
       var { createDevQualityPanel, sentinel: qualitySentinel, SENTINEL_REASONS: QUALITY_SENTINEL_REASONS } =
@@ -3654,7 +3659,14 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v47-2026-09-10-authored-bark';
+    const BIRB_BUILD = 'v48-2026-09-11-sky-ibl';
+
+    // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
+    // the whole point of proving this with a procedural map is to find out how
+    // much irradiance it ADDS on top of the hemisphere ambient before any
+    // rebalancing hides the answer.
+    const IBL_INTENSITY = 1;
+    let disposeSkyEnvironment = null;
 
     // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
     // Adaptive quality further drops this to 1.0 below 55 FPS.
@@ -6320,6 +6332,28 @@
       // ===== IMPROVEMENT 1: Update sky dome colors =====
       if (skyDome && definition.sky) {
         skyDome.setColors(definition.sky);
+      }
+      // The reflected sky follows the drawn sky, and is rebuilt per biome so
+      // the two can never disagree. PMREM runs HERE, once per environment
+      // switch -- never per frame, which the backlog names explicitly.
+      if (disposeSkyEnvironment) { disposeSkyEnvironment(); disposeSkyEnvironment = null; }
+      if (definition.sky && typeof iblRequested === 'function'
+          && (iblRequested(window.location?.search)
+              || /[?&]ibl=flat/.test(window.location?.search || ''))) {
+        try {
+          // ?ibl=flat paints a uniform grey environment: the diagnostic that
+          // separates a wrong MAP from a wrong lighting path.
+          const iblFlat = /[?&]ibl=flat/.test(window.location?.search || '');
+          disposeSkyEnvironment = installSkyEnvironment(THREE, renderer, scene, definition.sky, {
+            intensity: IBL_INTENSITY,
+            flat: iblFlat ? 0.25 : null,
+          });
+        } catch (err) {
+          // Initial environment setup catches its own exception and only warns,
+          // so an uncontained throw here leaves the terrain standing and the
+          // nests missing. Contain it.
+          console.warn('[ibl] sky environment failed; keeping direct lighting only', err);
+        }
       }
       // Aim the sky's sun at the env's key light so the visible sun disc and
       // the scene's directional lighting always agree.
