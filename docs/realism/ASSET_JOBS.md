@@ -78,7 +78,13 @@ The general lesson, and the reason this was worth two hours: **prove the consume
 
 ---
 
-## Job 03 — reference imagery and the acceptance rubric — **LIVE, and it needs no code at all**
+## Job 03 — reference imagery and the acceptance rubric — **CLOSED**
+
+Delivered in `18fa6a5` and merged to main in `062d6ac`: four generated-from-scratch
+reference images selected from two candidates per brief, plus the precommitted
+28-check [`LIKENESS_BIRB.md`](LIKENESS_BIRB.md) rubric. Every retained image is
+cited by the rubric and none is imported by runtime code. The forest-river image
+also establishes the first production scene's golden-hour lighting key.
 
 **This is the job with the highest value and the lowest risk on the whole list, and it is the one thing here an image model is unambiguously the right tool for.**
 
