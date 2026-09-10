@@ -17,9 +17,18 @@ Rules, in short:
   says nothing about whether it *looks* right, which is a human's call on a
   real phone.
 
-| File | Kind | Source (model + prompt, or tool) | Licence | Commit |
-|---|---|---|---|---|
-| _(none yet)_ | | | | |
+| File | Kind | Target (material + slot) | World tile | Source (model + prompt, or tool) | Licence | Commit |
+|---|---|---|---|---|---|---|
+| _(none yet)_ | | | | | | |
+
+**Target** names the material and the slot the asset is for — `barkMat.map`, not "trees".
+A slot the material class does not have is a silent no-op: `MeshLambertMaterial` has no
+`roughnessMap`, and assigning one uploads a texture, perturbs the program cache key, and
+samples nothing.
+
+**World tile** is how many metres of surface one tile of the image depicts. `map.repeat`,
+not the pixel count, is what sets on-screen density, and without this number nobody can
+set it.
 
 ## Where things live
 

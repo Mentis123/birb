@@ -77,11 +77,32 @@ const results = [];
 let failed = 0;
 let totalMb = 0;
 
+/**
+ * A normal map's convention (green-up vs green-down) is only decidable against
+ * the height field it was derived from, and the sibling albedo is the closest
+ * thing to that on disk. `bark_pine_normal.png` -> `bark_pine_albedo.png`.
+ * Without it the check abstains, which is why a lone --kind normal run says
+ * nothing about the one bug that renders as plausible material.
+ */
+function siblingAlbedo(file) {
+  const base = path.basename(file);
+  const stem = base.replace(/_(normal|nrm)\.png$/i, '');
+  if (stem === base) return null;
+  for (const suffix of ['_albedo', '_basecolor', '_color', '_colour', '_diff']) {
+    const candidate = path.join(path.dirname(file), `${stem}${suffix}.png`);
+    if (fs.existsSync(candidate)) {
+      try { return decodePng(fs.readFileSync(candidate), candidate); } catch { return null; }
+    }
+  }
+  return null;
+}
+
 for (const file of files) {
   const kind = explicitKind || inferKind(path.basename(file));
   let r;
   try {
-    r = analyse(decodePng(fs.readFileSync(file), file), kind);
+    const siblings = kind === 'normal' ? { albedo: siblingAlbedo(file) } : {};
+    r = analyse(decodePng(fs.readFileSync(file), file), kind, siblings);
   } catch (err) {
     results.push({ file, kind, fails: [err.message], notes: [], mb: 0 });
     failed += 1;

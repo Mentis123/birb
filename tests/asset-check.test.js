@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {
   decodePng, encodePng, analyse, inferKind, tiling, bakedLight,
   normalSanity, greyscale, isPow2, decodedMb, MEM_BUDGET_MB, THRESHOLDS,
+  channelSpan, selfDuplication, normalConvention, normalLength, ancillary,
 } from '../tools/lib/asset-analysis.mjs';
 
 /**
@@ -34,10 +35,22 @@ function make(w, h, fn, ch = 3) {
   return { w, h, ch, data };
 }
 
-/** A field that is periodic in both axes, so it tiles by construction. */
+/**
+ * A field that is periodic in both axes, so it tiles by construction.
+ *
+ * The last two terms are ODD harmonics and they are load-bearing. With only the
+ * even ones (4, 6, 2) the field is bit-identical to itself under a half-width
+ * OR half-height shift -- verified, max difference 0.0000000000 -- so every
+ * "good" fixture in this file was a 128px texture stored at 256, and the
+ * selfDuplication check below would have failed the fixtures it was written to
+ * pass. An odd cosine flips sign under a half shift; the sin-sin term breaks
+ * the mirrors.
+ */
 const field = (x, y, w, h) =>
   45 * Math.sin(TAU * 4 * x / w) * Math.cos(TAU * 4 * y / h)
-  + 25 * Math.sin(TAU * 6 * x / w + TAU * 2 * y / h);
+  + 25 * Math.sin(TAU * 6 * x / w + TAU * 2 * y / h)
+  + 18 * Math.cos(TAU * 3 * x / w) * Math.cos(TAU * 3 * y / h)
+  + 14 * Math.sin(TAU * 5 * x / w) * Math.sin(TAU * 3 * y / h);
 
 const goodAlbedo = (w = 256, h = 256) => make(w, h, (x, y) => {
   const v = field(x, y, w, h);
@@ -137,10 +150,13 @@ test('a lit albedo is rejected, an unlit one is not', () => {
 
 // -- normal maps ----------------------------------------------------------
 
+// Odd harmonics here for the same reason as field() above: with 4, 4 and 2 this
+// fixture was bit-identical under a half shift and the selfDuplication check
+// rejected it -- correctly.
 const goodNormal = (w = 256, h = 256) => make(w, h, (x, y) => {
-  const dx = Math.sin(TAU * 4 * x / w) * 28;
-  const dy = Math.sin(TAU * 4 * y / h) * 28;
-  return [128 + dx, 128 + dy, 240 + 10 * Math.cos(TAU * 2 * x / w)];
+  const dx = Math.sin(TAU * 4 * x / w) * 22 + Math.cos(TAU * 3 * x / w) * 14;
+  const dy = Math.sin(TAU * 4 * y / h) * 22 + Math.sin(TAU * 5 * y / h) * 14;
+  return [128 + dx, 128 + dy, 240 + 8 * Math.cos(TAU * 3 * x / w)];
 });
 
 test('a normal map passes; a height field posing as one does not', () => {
@@ -183,7 +199,7 @@ test('a roughness map must be greyscale', () => {
 test('a packed map must carry three different channels', () => {
   const packed = make(256, 256, (x, y) => [
     120 + field(x, y, 256, 256) * 0.4,          // occlusion
-    170 + Math.sin(TAU * 8 * x / 256) * 40,     // roughness
+    170 + Math.sin(TAU * 7 * x / 256) * 40,     // roughness (odd harmonic: see field())
     20,                                          // metalness: dielectric
   ]);
   assert.equal(analyse(packed, 'packed').fails.length, 0);
@@ -233,7 +249,10 @@ test('kind is inferred from the filename suffix, normal before albedo', () => {
   // check that actually matters would never run.
   assert.equal(inferKind('bark_color_normal.png'), 'normal');
   assert.equal(inferKind('bark_rough.png'), 'roughness');
-  assert.equal(inferKind('bark_ao.png'), 'roughness');
+  // _ao and _metal are legitimately near-constant, so they get their own kind
+  // and skip the dynamic-range check that roughness must pass.
+  assert.equal(inferKind('bark_ao.png'), 'mask');
+  assert.equal(inferKind('bark_metal.png'), 'mask');
   // A packed map must NOT be scored as a roughness map: it would fail the
   // greyscale check for doing precisely what packing is for.
   assert.equal(inferKind('bark_orm.png'), 'packed');
@@ -281,4 +300,144 @@ test('the CLI accepts a good set, rejects a bad one, and tolerates an empty root
   assert.equal(run(path.join(root, 'nope')), 2);
 
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+// -- the checks added after the first authored delivery --------------------
+// Each one exists because something got through the gate, or because a
+// violator was built by hand and the gate rated it flawless. Every threshold
+// below has been watched rejecting a texture built to break it.
+
+test('a roughness map with no dynamic range is rejected; a mask is not', () => {
+  // The real case: the first authored roughness map spanned 0.137 across 37 of
+  // 256 values -- a constant wearing a texture's filename. It passed the gate.
+  const flat = make(256, 256, (x, y) => {
+    const v = 209 + field(x, y, 256, 256) * 0.09;   // ~0.03 of span
+    return [v, v, v];
+  });
+  const c = channelSpan(flat, 1);
+  assert.ok(c.span01 < THRESHOLDS.minMapSpan, `flat fixture span ${c.span01}`);
+  assert.ok(analyse(flat, 'roughness').fails.some(f => /dynamic range/.test(f)));
+
+  const real = make(256, 256, (x, y) => {
+    const v = 150 + field(x, y, 256, 256) * 0.75;   // wet/dry, plate/fissure
+    return [v, v, v];
+  });
+  assert.ok(channelSpan(real, 1).span01 >= THRESHOLDS.minMapSpan);
+  assert.equal(analyse(real, 'roughness').fails.length, 0);
+
+  // The named false positive: AO on a convex surface and metalness on a
+  // dielectric are LEGITIMATELY flat. They must not be caught by this.
+  assert.equal(analyse(flat, 'mask').fails.length, 0,
+    'a near-constant mask is correct, not a defect');
+});
+
+test('a mirror-tiled fake is rejected even though its seam score is perfect', () => {
+  // Mirror-tiling is the cheap way to make anything seamless, and it defeats
+  // the seam check completely: it scores 0, a BETTER result than a genuinely
+  // tileable texture. That is why this check exists.
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const noise = [];
+  for (let i = 0; i < 256 * 256; i += 1) noise.push(rnd());
+  const raw = (x, y) => 60 + (x / 256) * 120 + noise[(y % 256) * 256 + (x % 256)] * 40;
+
+  const mirrored = make(256, 256, (x, y) => {
+    const v = raw(x < 128 ? x * 2 : (255 - x) * 2, y < 128 ? y * 2 : (255 - y) * 2);
+    return [v, v * 0.9, v * 0.8];
+  });
+  assert.equal(tiling(mirrored).ratio, 0, 'the seam check rates the fake perfect');
+  const d = selfDuplication(mirrored);
+  assert.ok(d.worst < THRESHOLDS.selfDup, `mirror fixture scored ${d.worst}`);
+  assert.ok(/mirror/.test(d.worstKey));
+  assert.ok(analyse(mirrored, 'albedo').fails.some(f => /MIRROR/.test(f)));
+
+  // An honest texture sits near the unrelated-region baseline.
+  assert.ok(selfDuplication(goodAlbedo()).worst > THRESHOLDS.selfDup * 3);
+});
+
+test('a green-down (DirectX) normal map is caught, and only with its albedo', () => {
+  const w = 256;
+  const h = 256;
+  const albedo = goodAlbedo(w, h);
+  // Derive a normal from that albedo's luminance, the way the delivered set was.
+  const L = (x, y) => {
+    const i = (((y % h) + h) % h * w + ((x % w) + w) % w) * albedo.ch;
+    return 0.2126 * albedo.data[i] + 0.7152 * albedo.data[i + 1] + 0.0722 * albedo.data[i + 2];
+  };
+  const derive = (flipG) => make(w, h, (x, y) => {
+    const dRow = (L(x, y + 1) - L(x, y - 1)) * 0.6;
+    const dCol = (L(x + 1, y) - L(x - 1, y)) * 0.6;
+    const g = 128 + dRow;
+    return [128 - dCol, flipG ? 255 - g : g, 245];
+  });
+
+  const gl = derive(false);
+  const dx = derive(true);
+
+  // The flip is invisible to every other check: same mean, same bias, same length.
+  assert.ok(Math.abs(normalSanity(gl).meanG - normalSanity(dx).meanG) < 1.5,
+    'the flip must not move the mean, or an existing check would already catch it');
+  assert.equal(analyse(dx, 'normal').fails.length, 0, 'without the albedo it passes everything');
+
+  // With the sibling albedo in hand it becomes decidable.
+  assert.ok(normalConvention(gl, albedo).rG > THRESHOLDS.conventionR);
+  assert.ok(normalConvention(dx, albedo).rG < -THRESHOLDS.conventionR);
+  assert.equal(analyse(gl, 'normal', { albedo }).fails.length, 0);
+  assert.ok(analyse(dx, 'normal', { albedo }).fails.some(f => /GREEN-DOWN/.test(f)));
+});
+
+test('a painted normal map is caught by decoded vector length', () => {
+  // Three independent smooth fields with no unit constraint: what you get when
+  // a normal map is generated as an IMAGE rather than derived as a vector field.
+  const painted = make(256, 256, (x, y) => [
+    128 + 60 * Math.sin(TAU * 3 * x / 256),
+    128 + 60 * Math.cos(TAU * 5 * y / 256),
+    250,
+  ]);
+  const len = normalLength(painted);
+  assert.ok(len.max > THRESHOLDS.normalLongCeil, `painted max ${len.max}`);
+  assert.ok(len.longFrac > THRESHOLDS.normalLongFrac);
+  assert.ok(analyse(painted, 'normal').fails.some(f => /quantisation of a unit vector cannot produce/.test(f)));
+
+  // One-sided on purpose: SHORT vectors are ordinary. Lerping toward
+  // (128,128,255) is the standard way to dial strength down, and this file's
+  // own goodNormal is short -- a two-sided check would fail a fixture the
+  // suite asserts must pass.
+  assert.ok(normalLength(goodNormal()).mean < 1);
+  assert.equal(analyse(goodNormal(), 'normal').fails.length, 0);
+});
+
+test('a colour profile spliced into a data map is rejected', () => {
+  // An editor writes an iCCP the moment somebody opens the file to look at it.
+  // The browser applies it before texImage2D, so the GPU gets different pixels
+  // from the ones every number in this tool measured.
+  const png = encodePng(goodNormal());
+  const body = Buffer.concat([Buffer.from('fake\0\0', 'latin1'), Buffer.alloc(40)]);
+  const chunk = Buffer.alloc(body.length + 12);
+  chunk.writeUInt32BE(body.length, 0);
+  chunk.write('iCCP', 4, 'ascii');
+  body.copy(chunk, 8);
+  const spliced = Buffer.concat([png.subarray(0, 33), chunk, png.subarray(33)]);
+
+  const p = decodePng(spliced);
+  assert.ok(p.chunks.some(c => c.type === 'iCCP'));
+  assert.deepEqual([...p.data], [...decodePng(png).data], 'not one pixel changed');
+  assert.ok(ancillary(p, 'normal').fails.some(f => /ICC profile/.test(f)));
+  assert.ok(analyse(p, 'normal').fails.some(f => /ICC profile/.test(f)));
+
+  // The named false positive: gAMA 45455 + sRGB on an ALBEDO is correct and
+  // ordinary, which is why the rule partitions by kind instead of banning.
+  const gama = Buffer.alloc(4);
+  gama.writeUInt32BE(45455, 0);
+  const gc = Buffer.alloc(16);
+  gc.writeUInt32BE(4, 0);
+  gc.write('gAMA', 4, 'ascii');
+  gama.copy(gc, 8);
+  const alb = decodePng(Buffer.concat([
+    (() => { const a = encodePng(goodAlbedo()); return a.subarray(0, 33); })(),
+    gc,
+    (() => { const a = encodePng(goodAlbedo()); return a.subarray(33); })(),
+  ]));
+  assert.equal(ancillary(alb, 'albedo').fails.length, 0, 'sRGB gamma on an albedo is correct');
+  assert.ok(ancillary(alb, 'roughness').fails.some(f => /it is DATA/.test(f)));
 });
