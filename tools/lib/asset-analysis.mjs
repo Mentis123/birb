@@ -495,8 +495,25 @@ export function analyse(p, kind, siblings = {}) {
   const notes = [];
   const mb = decodedMb(p.w, p.h);
 
+  // POT is NOT a correctness requirement here and the earlier message claiming
+  // it was ("cannot be mipped at NPOT") was wrong: three@0.183.2 is WebGL2-only
+  // -- WebGLCapabilities.js still carries `isWebGL2: true` purely for backwards
+  // compatibility -- and WebGL2 mips and repeat-wraps NPOT textures happily.
+  //
+  // It survives for TILING maps for a real but softer reason: a POT chain
+  // halves exactly at every level, while an NPOT reduction resamples on a
+  // fractional grid and drifts the detail a little at each step, which on a
+  // surface that repeats is a shimmer you cannot chase. A sky is sampled once
+  // and tiles nowhere, so it gets a note instead of a failure -- rejecting a
+  // perfectly good 1770x886 panorama on this rule would be the gate inventing
+  // a constraint the renderer does not have.
   if (!isPow2(p.w) || !isPow2(p.h)) {
-    fails.push(`dimensions ${p.w}x${p.h} are not powers of two — a repeating texture cannot be mipped at NPOT, and an unmipped ground texture aliases into noise at distance`);
+    const msg = `dimensions ${p.w}x${p.h} are not powers of two`;
+    if (kind === 'sky') {
+      notes.push(`${msg} — fine for a sky on WebGL2, which mips NPOT; POT would still give an exact mip chain`);
+    } else {
+      fails.push(`${msg} — a tiling map wants an exact mip chain, and an NPOT reduction resamples on a fractional grid at every level, which shimmers on a surface that repeats`);
+    }
   }
   notes.push(`${p.w}x${p.h}, ${p.ch === 4 ? 'RGBA' : 'RGB'}, ~${mb.toFixed(2)} MB decoded with mips`);
 

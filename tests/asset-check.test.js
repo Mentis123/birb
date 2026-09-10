@@ -215,11 +215,22 @@ test('a packed map must carry three different channels', () => {
 
 // -- shape and budget -----------------------------------------------------
 
-test('non power-of-two dimensions are rejected', () => {
+test('non power-of-two is rejected for a tiling map and allowed for a sky', () => {
   assert.ok(isPow2(256) && isPow2(1) && !isPow2(300) && !isPow2(0));
   const npot = make(300, 256, () => [128, 128, 128]);
   assert.ok(analyse(npot, 'albedo').fails.some(f => /powers of two/.test(f)));
   assert.equal(analyse(goodAlbedo(256, 128), 'albedo').fails.length, 0);
+
+  // three@0.183.2 is WebGL2-only, and WebGL2 mips NPOT textures. A sky tiles
+  // nowhere and is sampled once, so failing a good 1770x886 panorama on this
+  // rule would be the gate inventing a constraint the renderer does not have.
+  const skyNpot = make(886, 443, (x, y) => {
+    const v = 1 - y / 443;
+    return [60 + v * 60, 90 + v * 60, 150 + v * 50];
+  });
+  const r = analyse(skyNpot, 'sky');
+  assert.equal(r.fails.length, 0, `an NPOT 2:1 sky must pass: ${r.fails.join('; ')}`);
+  assert.ok(r.notes.some(n => /powers of two/.test(n)), 'but it must still say so');
 });
 
 test('a sky must be 2:1 equirectangular and must wrap in longitude', () => {
