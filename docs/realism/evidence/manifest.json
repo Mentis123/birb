@@ -1,0 +1,37 @@
+{
+  "reviewedMain": "f3f7c171e1ade34057c89929f8193ca600431815",
+  "observationType": "desktop browser composition evidence; not physical device qualification",
+  "hashSemantics": "PNG: exact bytes. JSON: UTF-8 with CRLF normalized to LF for cross-platform Git checkouts.",
+  "files": [
+    {
+      "file": "canyons.png",
+      "bytes": 125047,
+      "sha256": "c7ee9131d111cfbbfcb1317f297be4a3f5aaa1004260af762bdd606a35f00743"
+    },
+    {
+      "file": "city.png",
+      "bytes": 173888,
+      "sha256": "ac2980bf661c76fd766449db5530d5a9d7ebff846024c42c79a4609896015936"
+    },
+    {
+      "file": "contact-sheet.png",
+      "bytes": 1184471,
+      "sha256": "e9dd703813e93a32a82578db54970ebae7aaa21a7b860d41c9d10621f4feb2e1"
+    },
+    {
+      "file": "forest.png",
+      "bytes": 124270,
+      "sha256": "a97f9f85c7686d236275a3d0f9ecb7736b0468f7f5157867034615cb2fecf621"
+    },
+    {
+      "file": "mountain.png",
+      "bytes": 143763,
+      "sha256": "6316ebe28cbb12c8a96830bd6f0342d6ccf05e9aa0cdea7f0fd43ba3b8d6754d"
+    },
+    {
+      "file": "observations.json",
+      "bytes": 19524,
+      "sha256": "1d693a1c6d0dca40d22d7e7996d8c57854939c826235a242e15b6518131b7988"
+    }
+  ]
+}

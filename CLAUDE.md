@@ -1,5 +1,16 @@
 # CLAUDE.md — Birb Mobile
 
+> **2026-09-10 realism research and executive direction:**
+> [docs/realism/README.md](docs/realism/README.md) is the next-phase decision
+> record, reviewed against main `f3f7c17`. Build the ambitious forest-river
+> reference slice with a rebuilt bird, coherent surfaces/light and reversible
+> profiles, then qualify it on the owner's **iPhone 16 Pro / Chrome
+> 152.0.7977.64**. Root-game authored assets and selective visual rebuilds are
+> approved in that plan; sibling-app contracts are unchanged. The existing
+> performance contract/oracles remain binding unless explicitly amended.
+> The profile JSON is a proposal, not a current runtime import. No phone
+> performance or thermal certification is claimed by the research package.
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.
