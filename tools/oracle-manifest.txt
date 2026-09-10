@@ -79,7 +79,19 @@ b086039c1b8f9f55450f1637a3f385d328cb655cc6c7121a809f0e83a3747a18  tests/water.te
 # --- browser/visual harnesses ------------------------------------------------
 a8c11a1e313c1e33ae5329ed87245b4994a0759e3d2c63c3bc68ffc9f2ca8f41  tools/birb-shot.mjs
 e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-sheet.mjs
-ef02bf80a755f505703284905ab97aa88681cee6b6b667cfb2f635fea7409db7  tools/birb-lighting.mjs
+# tools/birb-lighting.mjs's line below was regenerated 2026-09-10 for the
+# VISUAL_UPGRADE_BUILD_PLAN §16.10 colour-grade wave (docs/visual-upgrade/,
+# grade-candidate sheets), NOT an ULTRACODE_PERFORMANCE_PLAN wave — there is
+# no docs/perf/gates/G<n>.md for this one, because that gate structure
+# belongs to the performance-plan track this edit is not part of. Recorded
+# here instead, per this file's own "regenerated in the same commit as the
+# change it blesses, never before it" rule, so the update is loud rather than
+# silent. The change: added a per-biome grade-candidate mode (`--grades
+# <dir>`), reusing every existing helper (VISUAL_UPGRADE_BUILD_PLAN §16.10
+# explicitly asks not to write a second tool); fixed a stale "current (ACES)"
+# label (the shipping default is Neutral 1.12, not ACES); the harness itself
+# is unchanged in the legacy --env/--out path.
+61a9d9a531d706cbd740ef062f0616e39acf29b1a1c28dc063f4a0e556238df9  tools/birb-lighting.mjs
 1e76f9c9bffdcbb14a8be5d5f16eebf32ffa9c1312feba3933894a2c4f97889f  tools/birb-modes.mjs
 708d15c40998957495c2548394cd806d602c4255ee7776ac509f64639ff9e76b  tools/birb-shaders.mjs
 # --- the contract ------------------------------------------------------------

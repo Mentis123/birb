@@ -279,6 +279,47 @@ export const CONTROL_REGISTRY = Object.freeze([
     disabledReason: 'DEF-4: no runtime variant switch exists on the ground shader — ships baseline only.',
   },
 
+  // ---- Look view: per-biome colour grade (VISUAL_UPGRADE_BUILD_PLAN §16.10)
+  // ----
+  // Tone mapping / exposure / the bloom knee sit ABOVE each biome's own light
+  // rig (ambient/key/rim/fill/glow, tuned per biome already) — see
+  // world-shell.js's DEFAULT_GRADE and index.html's applyColorGrade. Every
+  // control below routes through the SAME qualitySettings
+  // request()/apply()/readEffective() precedence (CONTRACT §7.1) as every
+  // dial above it on this same tab; this file has no rendering side effect
+  // of its own for these any more than for postQuality/shafts/bloomStrength.
+  // index.html scopes a standing request PER BIOME (gradeOverridesByBiome) —
+  // switching environment shows THAT biome's own grade (its default, or a
+  // standing override made while IT was active), never one carried over from
+  // whichever biome happened to be on screen when a slider was last moved.
+  {
+    id: 'tone', view: PANEL_VIEWS.LOOK, kind: 'select', label: 'Tone mapping', group: 'Grade',
+    options: [
+      { value: 'neutral', label: 'Neutral (shipping)' },
+      { value: 'agx', label: 'AgX' },
+      { value: 'aces', label: 'ACES Filmic' },
+    ],
+    requestKey: 'tone',
+    hint: 'Changes what the bloom pass sees as bright. A different curve may need its own Bloom threshold below to keep rings/gates readable — measure it, do not assume it carries over from Neutral (CLAUDE.md: "0.79 against a 0.78 knee" missed a bloom entirely).',
+  },
+  {
+    id: 'exposure', view: PANEL_VIEWS.LOOK, kind: 'slider', label: 'Exposure', group: 'Grade',
+    min: 0.7, max: 1.8, step: 0.02, requestKey: 'exposure',
+  },
+  {
+    id: 'bloomThreshold', view: PANEL_VIEWS.LOOK, kind: 'slider', label: 'Bloom threshold', group: 'Grade',
+    min: 0.3, max: 1.2, step: 0.01, requestKey: 'bloomThreshold',
+    hint: 'The tone-mapped-luminance knee the bright pass thresholds. Lower = more things glow. Shipping is 0.78 under Neutral — a different tone curve changes what crosses it, so re-check this per grade rather than carrying the number over.',
+  },
+  {
+    id: 'gradeNextCandidate', view: PANEL_VIEWS.LOOK, kind: 'action', label: 'Next candidate', group: 'Grade',
+    hint: 'Cycles the same comparison set tools/birb-lighting.mjs --grades renders to a sheet for THIS biome, applied live from a fixed baseline each tap (never compounding onto the last candidate) — so a sheet frame and this phone show the same set.',
+  },
+  {
+    id: 'copyGrade', view: PANEL_VIEWS.LOOK, kind: 'action', label: 'Copy grade', group: 'Grade',
+    hint: 'Copies {biome, tone, exposure, bloomThreshold} for THIS biome as one JSON line, ready to paste back into a message.',
+  },
+
   // ---- Ultra view: ABOVE the shipping default (Ascend wave) ----
   // Every control below this line pushes PAST what a player who never opens
   // the workbench sees — the opposite of the Performance view's shedding
@@ -436,6 +477,16 @@ const STYLE_TEXT = `
   margin: 14px 0 4px;
   color: #6b7280;
   font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+#${ROOT_ELEMENT_ID} .bqp-subsection-title {
+  margin: 16px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  color: #7fb8e0;
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -822,6 +873,16 @@ export function createDevQualityPanel(opts = {}) {
       btn.addEventListener('click', () => handleAction(control));
       wrap.appendChild(btn);
       inputEl = btn;
+      if (control.id === 'gradeNextCandidate') {
+        // Read by tick() from controlState.grade.candidate — index.html
+        // names the candidate it just applied; showing that name (not just
+        // "done") is the whole point ("Show the candidate's NAME" — panel
+        // task brief).
+        readoutEl = doc.createElement('div');
+        readoutEl.className = 'bqp-hint';
+        readoutEl.textContent = 'Tap to preview a candidate grade for this biome';
+        wrap.appendChild(readoutEl);
+      }
     }
 
     if (control.disabled && control.disabledReason) {
@@ -852,6 +913,8 @@ export function createDevQualityPanel(opts = {}) {
       downloadEvidence();
     } else if (control.id === 'compare') {
       runCompareStep();
+    } else if (control.id === 'copyGrade') {
+      copyGradeToClipboard();
     } else if (control.id === 'reset' || control.id === 'resumeAuto') {
       // Local reflection only — index.html's onRequest handler does the
       // real work (qualitySettings.setMode('auto'), adaptiveTier.unpin(),
@@ -859,6 +922,56 @@ export function createDevQualityPanel(opts = {}) {
       // picks up the real post-reset state from getControlState().
       if (compareDiffEl) { compareDiffEl.hidden = true; }
       compareSnapshotA = null;
+    }
+  }
+
+  /**
+   * "Copy grade" (panel task): {biome, tone, exposure, bloomThreshold} for
+   * the CURRENTLY ACTIVE biome, as one compact JSON line — "the owner is
+   * reading numbers off a phone screen and retyping them" is exactly the
+   * failure mode this exists to remove. Reads getControlState() fresh
+   * (rather than whatever the last 4Hz tick cached) so a rapid grade-then-
+   * copy never copies a stale reading.
+   */
+  function copyGradeToClipboard() {
+    let state;
+    try { state = getControlState() || {}; } catch { state = {}; }
+    const g = state.grade || {};
+    const payload = JSON.stringify({
+      biome: g.biome ?? null,
+      tone: g.tone ?? null,
+      exposure: g.exposure ?? null,
+      bloomThreshold: g.bloomThreshold ?? null,
+    });
+    const entry = controlEls && controlEls.copyGrade;
+    const btn = entry && entry.input;
+    const showFeedback = (text) => {
+      if (!btn) return;
+      const original = btn.dataset.originalLabel || btn.textContent;
+      btn.dataset.originalLabel = original;
+      btn.textContent = text;
+      setTimeout(() => { if (btn) btn.textContent = original; }, 1200);
+    };
+    const fallbackCopy = () => {
+      try {
+        const ta = doc.createElement('textarea');
+        ta.value = payload;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        doc.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        doc.execCommand('copy');
+        doc.body.removeChild(ta);
+        showFeedback('Copied!');
+      } catch {
+        showFeedback('Copy failed');
+      }
+    };
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(payload).then(() => showFeedback('Copied!'), fallbackCopy);
+    } else {
+      fallbackCopy();
     }
   }
 
@@ -950,8 +1063,20 @@ export function createDevQualityPanel(opts = {}) {
 
   function buildControlsForView(view) {
     controlEls = controlEls || {};
+    let lastGroup;
     for (const control of CONTROL_REGISTRY) {
       if (control.view !== view) continue;
+      // A `group` (currently only Look's Grade section) gets its own small
+      // sub-heading the first time it appears, so the colour-grade controls
+      // read as a labelled group distinct from the render-cost dials above
+      // them rather than one undifferentiated list under "Controls".
+      if (control.group && control.group !== lastGroup) {
+        const sub = doc.createElement('div');
+        sub.className = 'bqp-subsection-title';
+        sub.textContent = control.group;
+        bodyEl.appendChild(sub);
+        lastGroup = control.group;
+      }
       const built = buildControl(control);
       bodyEl.appendChild(built.wrap);
       controlEls[control.id] = { ...built, def: control };
@@ -1071,6 +1196,16 @@ export function createDevQualityPanel(opts = {}) {
         if (state && typeof state.effective === 'boolean' && doc.activeElement !== entry.input) {
           entry.input.checked = state.effective;
         }
+      } else if (def.id === 'gradeNextCandidate' && entry.readout) {
+        // controlState.grade is a shared object (index.html's
+        // panelGetControlState), not keyed per control id like the others
+        // above — `candidate` is null until "Next candidate" has been
+        // pressed at least once since the last environment switch.
+        const g = controlState.grade;
+        const c = g && g.candidate;
+        entry.readout.textContent = c && c.name
+          ? `${c.index + 1}/${c.total}: ${c.name}`
+          : 'Tap to preview a candidate grade for this biome';
       }
     }
   }

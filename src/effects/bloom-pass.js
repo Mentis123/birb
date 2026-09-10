@@ -227,13 +227,30 @@ const COMPOSITE_FRAG = `
     float v = 1.0 - dot(d, d) * (uVignette + uSpeed * 0.85);
     gl_FragColor = vec4(c * v, 1.0);
     // ── The output transform, and it is not optional ─────────────────────
-    // The scene target holds LINEAR values: rendering into a render target
-    // forces linearToOutputTexel to identity, so every material writes
-    // tone-mapped linear and no material encodes. Writing that straight to an
-    // sRGB canvas is a gamma the display then applies twice — measured on the
-    // shipped build at mean 90 against 146 for the same frame with the pass
-    // switched off. The whole game was rendering dark whenever bloom ran, and
-    // it read as a moody grade rather than as a bug.
+    // The scene target holds RAW LINEAR values, and BOTH halves of the output
+    // transform have to happen here.
+    //
+    // The comment that used to sit here said "every material writes tone-mapped
+    // linear". That was false, and it hid the second half of this bug for as
+    // long as the pass has run. Three forces toneMapping = NoToneMapping
+    // whenever the render target is non-null and not XR, so the scene materials
+    // are compiled WITHOUT the tone-mapping chunk: renderer.toneMapping and
+    // toneMappingExposure never reach a single program that draws the world.
+    // The colourspace half was found and fixed; the tone half was asserted to be
+    // handled and was not.
+    //
+    // Measured on the shipped build, mean frame pixel over a 4.4x exposure sweep
+    // (0.5 -> 2.2): tier 0, where this pass runs, moved 1.89/255 — noise. Tier 1,
+    // where the game renders straight to the canvas and Three applies the curve
+    // normally, moved 72.03/255. So the tone curve was inert on the shipping path
+    // and live the moment the adaptive tier shed bloom, which also means the
+    // frame visibly changed character at the tier boundary.
+    //
+    // <tonemapping_fragment> is injected by Three for a material drawn to the
+    // CANVAS (null target), which is exactly what this composite is — so the
+    // curve the renderer is set to is the curve applied, and it recompiles when
+    // that enum changes because toneMapping is part of the program cache key.
+    #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `;

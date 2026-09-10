@@ -1058,8 +1058,18 @@ have to remember it, and one of them would not.
 
 ### 16.10 Still not done
 
-- **Per-biome colour grade.** Still needs an owner on a real phone; the tools
-  to generate the candidates exist.
+- **Per-biome colour grade.** The SYSTEM now exists end to end — every biome
+  carries its own `grade` block (`world-shell.js`, defaulting to exactly
+  today's shipping Neutral/1.12/0.78), `index.html` applies it per biome and
+  scopes any panel override the same way, and both the offline sheet
+  (`tools/birb-lighting.mjs --grades`) and the on-device workbench (three-
+  finger tap → Look → Grade: Tone/Exposure/Bloom threshold/Next
+  candidate/Copy grade) cycle the identical candidate set
+  (`src/environment/grade-candidates.js`, drift-guarded against the sheet
+  tool by `tests/grade-candidates.test.js`). What is still not done is the
+  actual CHOICE: nothing ships until an owner picks a grade per biome on a
+  real phone — see `docs/visual-upgrade/GRADE-CHOICE.md` for the four
+  candidate sheets and how to send a pick back.
 - **A real device.** Everything above is measured in headless SwiftShader at
   2-11 fps. Draw calls and triangles are facts; frame time is not. Bloom now
   runs on iPhones for the first time, so the first real-device session should

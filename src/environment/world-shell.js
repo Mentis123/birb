@@ -621,6 +621,26 @@ function buildMountainEnvironment({ THREE, root, propOrigin, terrainScale, space
   root.add(floatingIce);
 }
 
+// Per-biome colour grade (VISUAL_UPGRADE_BUILD_PLAN §16.10 / perf-grade wave).
+// Tone mapping + exposure sit ABOVE the per-biome light rig above (ambient/
+// key/rim/fill/glow) — the lights are graded per biome already, the curve
+// that rolls them off into the final pixel was not. `bloomThreshold` rides
+// along in the same block because changing the tone curve changes what
+// crosses the bloom knee (ACES pushes highlights toward white and crosses it
+// more readily than Neutral; AgX holds saturation and may cross it less —
+// see index.html's bloom-pass file header and CLAUDE.md's own recorded
+// "0.79 against a 0.78 knee" miss). If a biome's grade needs its own knee to
+// keep rings/gates readable under a different curve, it changes THIS number,
+// not the global default in index.html.
+//
+// INVARIANT: every biome's default below is EXACTLY today's shipping global
+// (renderer.toneMapping = NeutralToneMapping, toneMappingExposure = 1.12,
+// bloomPass threshold = 0.78 — index.html:4268-4269/4438). This block makes
+// the grade a per-biome AUTHORING SURFACE; it does not itself change what
+// ships. Picking real grades per biome is a human decision on a real phone,
+// not this wave's job — see docs/VISUAL_UPGRADE_BUILD_PLAN.md §16.10.
+export const DEFAULT_GRADE = Object.freeze({ tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 });
+
 const ENVIRONMENT_VARIANTS = [
   {
     id: "forest",
@@ -650,6 +670,9 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0x9fc8ff, intensity: 0.38, position: [1.2, 3.1, -6.2] },
       glow: { color: 0x63d0ff, intensity: 1.35, distance: 12, decay: 2.1, position: [0.3, 1.6, 0.8] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
     builder: buildForestEnvironment,
   },
   {
@@ -680,6 +703,9 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0xffc9a4, intensity: 0.34, position: [2.2, 3, -7.1] },
       glow: { color: 0xffa05e, intensity: 1.5, distance: 14, decay: 2.6, position: [1, 2.1, 0.4] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
     builder: buildCanyonEnvironment,
   },
   {
@@ -722,6 +748,9 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0x99c9ff, intensity: 0.4, position: [1.6, 3.4, -6.6] },
       glow: { color: 0x88d1ff, intensity: 1.55, distance: 13, decay: 2.2, position: [0.4, 2, 0.6] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
     builder: buildMountainEnvironment,
   },
   {
@@ -756,6 +785,9 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0x9bd5ff, intensity: 0.45, position: [1.4, 3.8, -7.6] },
       glow: { color: 0x7fd8ff, intensity: 1.7, distance: 15, decay: 2.2, position: [0.2, 2.4, 1.1] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
     builder: buildCityEnvironment,
   },
 ];

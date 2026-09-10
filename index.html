@@ -3408,6 +3408,7 @@
       createWorldShell,
       ENVIRONMENT_VARIANTS,
       getEnvironmentDefinition,
+      DEFAULT_GRADE,
       nipplejs,
       BirdFlight, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
 
@@ -3438,6 +3439,16 @@
       createWorldShell = worldModule.createWorldShell;
       ENVIRONMENT_VARIANTS = worldModule.ENVIRONMENT_VARIANTS;
       getEnvironmentDefinition = worldModule.getEnvironmentDefinition;
+      // perf-grade wave: the fallback a biome missing its own `grade` block
+      // resolves to — identical to today's shipping global (renderer boot
+      // below), so an absent grade is still a no-op, never a guess.
+      DEFAULT_GRADE = worldModule.DEFAULT_GRADE;
+      // perf-grade panel wave: the SAME candidate generator
+      // tools/birb-lighting.mjs --grades renders to a sheet (src/environment/
+      // grade-candidates.js is a browser-safe port — see its own header and
+      // tests/grade-candidates.test.js for the drift guard), so the panel's
+      // "Next candidate" control cycles the exact set a sheet would show.
+      var { gradeCandidatesFor } = await import('./src/environment/grade-candidates.js');
       // Wave 2R shipped the seeded world generator; __BIRB.worldSeed() needs
       // its setter, and every environment builder already draws from it.
       const seededRandomModule = await import("./src/environment/seeded-random.js");
@@ -5968,6 +5979,130 @@
     // it rather than setEnvironment reading panelOverrides directly.
     let terrainResolutionRequested = null; // null = 'standard' (untouched); else 'high' | 'ultra'
 
+    // ─── Per-biome colour grade (perf-grade wave, VISUAL_UPGRADE_BUILD_PLAN
+    // §16.10) ────────────────────────────────────────────────────────────
+    // Same TDZ trap as anisotropy/terrainResolution just above: setEnvironment's
+    // FIRST call (near the bottom of this function's block, before
+    // panelOverrides/qualitySettings exist) has to read SOMETHING to decide
+    // whether a panel already asked for a tone/exposure/bloomThreshold this
+    // session — so, same fix, these three are the variables of record and
+    // qualitySettings' apply() mirrors into them (CONTRACT §7.1: a panel
+    // request outranks the biome's own grade and must survive the switch
+    // that rebuilds everything else).
+    let toneRequested = null;          // null = untouched (biome's own grade wins); else tone key/number
+    let exposureRequested = null;      // null = untouched; else a number
+    let bloomThresholdRequested = null; // null = untouched; else a number
+
+    // perf-grade PANEL wave: a panel request on tone/exposure/bloomThreshold
+    // is scoped to the biome that was active when it was made — "a grade
+    // chosen for the forest must not follow you to the city" (panel task
+    // brief). toneRequested/exposureRequested/bloomThresholdRequested above
+    // stay the single source applyColorGrade actually reads (unchanged), but
+    // now mean "the override for the CURRENTLY ACTIVE biome" rather than a
+    // flat global — setEnvironment resyncs them from this map on every
+    // switch (see the resync block inside setEnvironment, right before its
+    // applyColorGrade call), and qualitySettings' apply() writes into this
+    // map in the same branch that sets the tracker, below. Keyed by
+    // environment id; a key is present on a biome's entry only once the
+    // panel has actually touched that field for that biome.
+    const gradeOverridesByBiome = {};
+    function rememberGradeOverride(key, value) {
+      const bucket = gradeOverridesByBiome[environmentState.id] || (gradeOverridesByBiome[environmentState.id] = {});
+      bucket[key] = value;
+    }
+
+    // "Next candidate" (panel task): cycles src/environment/grade-candidates.js's
+    // gradeCandidatesFor(biome, baseline) — the SAME generator
+    // tools/birb-lighting.mjs --grades renders to a sheet — so a tap on the
+    // phone previews the exact set a sheet would show. gradeCandidateBaseline
+    // is captured ONCE per biome (lazily, on first use) so every subsequent
+    // tap applies its candidate from the SAME starting point rather than
+    // compounding onto whichever candidate was showing before it — matching
+    // the sheet tool's own captureVariants() loop (restore baseline, then
+    // apply ONE candidate). All four reset whenever the active biome changes
+    // (a candidate index/name from forest means nothing in the city) and on
+    // a full reset-to-shipping.
+    let gradeCandidateBiomeId = null;
+    let gradeCandidateBaseline = null;
+    let gradeCandidateIndex = -1;   // -1 = no candidate chosen yet for this biome
+    let gradeCandidateName = null;
+    let gradeCandidateTotal = null;
+
+    // Every material's program embeds the tone-mapping function, so
+    // switching it needs a recompile or the change does nothing (the same
+    // trap __BIRB.setLighting's tone handling already had to work around).
+    // No-ops (returns the current mapping unchanged) on an unresolvable
+    // value rather than falling back to a default — matching setLighting's
+    // long-standing behaviour so this refactor changes no observable case.
+    function resolveToneMapping(tone) {
+      if (typeof tone === 'number') return tone;
+      const map = {
+        aces: THREE.ACESFilmicToneMapping,
+        agx: THREE.AgXToneMapping,
+        neutral: THREE.NeutralToneMapping,
+        reinhard: THREE.ReinhardToneMapping,
+        cineon: THREE.CineonToneMapping,
+        linear: THREE.LinearToneMapping,
+        none: THREE.NoToneMapping,
+      };
+      return map[tone];
+    }
+    // The reverse of resolveToneMapping's string half — one map, shared by
+    // qualitySettings' readEffective('tone') and the evidence export below,
+    // so the two can never drift into disagreeing about what a given
+    // renderer.toneMapping number is called.
+    function toneMappingKey(mapping) {
+      const rev = {
+        [THREE.ACESFilmicToneMapping]: 'aces',
+        [THREE.AgXToneMapping]: 'agx',
+        [THREE.NeutralToneMapping]: 'neutral',
+        [THREE.ReinhardToneMapping]: 'reinhard',
+        [THREE.CineonToneMapping]: 'cineon',
+        [THREE.LinearToneMapping]: 'linear',
+        [THREE.NoToneMapping]: 'none',
+      };
+      return rev[mapping] ?? mapping;
+    }
+    function applyToneMapping(tone) {
+      const resolved = resolveToneMapping(tone);
+      if (resolved === undefined) return renderer.toneMapping;
+      if (resolved !== renderer.toneMapping) {
+        renderer.toneMapping = resolved;
+        scene.traverse((o) => {
+          if (o.material) {
+            const list = Array.isArray(o.material) ? o.material : [o.material];
+            for (const m of list) m.needsUpdate = true;
+          }
+        });
+      }
+      return renderer.toneMapping;
+    }
+    // bloomPass exposes no getThreshold() (setThreshold is write-only, same
+    // shape as mistBudgetEffective a few hundred lines up) — tracked here so
+    // readEffective('bloomThreshold') has something honest to read back.
+    let bloomThresholdEffective = DEFAULT_GRADE.bloomThreshold;
+    function applyBloomThreshold(value) {
+      if (!Number.isFinite(value)) return bloomThresholdEffective;
+      bloomThresholdEffective = value;
+      if (bloomPass) bloomPass.setThreshold(value);
+      return bloomThresholdEffective;
+    }
+    // Applies ONE biome's grade. Called from setEnvironment (so every
+    // environment switch re-grades) and from resetVisualOverridesToShipping
+    // (so "back to shipping default" restores the ACTIVE biome's own
+    // default rather than a hardcoded global — the two are equal today by
+    // the shipping invariant, but must not be conflated). Never called from
+    // the adaptive tier: Look controls are an artistic choice Auto must
+    // never touch (CONTRACT §7.1).
+    function applyColorGrade(definition) {
+      const grade = definition?.grade ?? DEFAULT_GRADE;
+      if (toneRequested == null) applyToneMapping(grade.tone);
+      if (exposureRequested == null && Number.isFinite(grade.exposure)) {
+        renderer.toneMappingExposure = grade.exposure;
+      }
+      if (bloomThresholdRequested == null) applyBloomThreshold(grade.bloomThreshold);
+    }
+
     function setEnvironment(variantId) {
       const definition = getEnvironmentDefinition(variantId);
       if (!definition) return;
@@ -6143,6 +6278,44 @@
       environmentState.index = resolvedIndex >= 0 ? resolvedIndex : 0;
       updateEnvironmentControls(definition);
       applyLightingPreset(definition);
+      // perf-grade PANEL wave: resync the trackers from THIS biome's own
+      // override bucket (gradeOverridesByBiome, above) before
+      // applyColorGrade reads them — a standing override is per-biome now,
+      // not global, so switching to a biome the panel has never touched must
+      // land on null (biome's own grade wins) even if some OTHER biome has a
+      // standing override recorded.
+      const bioOverride = gradeOverridesByBiome[definition.id] || {};
+      toneRequested = Object.prototype.hasOwnProperty.call(bioOverride, 'tone') ? bioOverride.tone : null;
+      exposureRequested = Object.prototype.hasOwnProperty.call(bioOverride, 'exposure') ? bioOverride.exposure : null;
+      bloomThresholdRequested = Object.prototype.hasOwnProperty.call(bioOverride, 'bloomThreshold')
+        ? bioOverride.bloomThreshold : null;
+      // applyColorGrade below SKIPS a non-null tracker on the assumption its
+      // value is already live on the renderer — true for the old global-
+      // sticky design, false here: an intervening biome with NO override of
+      // its own (or a different override) just wrote its own tone/exposure/
+      // bloomThreshold straight onto the renderer via the branches below. So
+      // a resynced non-null tracker has to be RE-APPLIED here, not just
+      // remembered, or a forest->city->forest round trip lands back on
+      // city's neutral instead of forest's own standing override — measured,
+      // this was exactly the bug on the first pass of this wave.
+      if (toneRequested != null) applyToneMapping(toneRequested);
+      if (exposureRequested != null) renderer.toneMappingExposure = exposureRequested;
+      if (bloomThresholdRequested != null) applyBloomThreshold(bloomThresholdRequested);
+      // A candidate index/name from the PREVIOUS biome means nothing here —
+      // "Next candidate" starts fresh on this biome's own baseline next time
+      // it's pressed (captured lazily; see panelOnRequest's 'gradeNextCandidate').
+      if (gradeCandidateBiomeId !== definition.id) {
+        gradeCandidateBiomeId = null;
+        gradeCandidateBaseline = null;
+        gradeCandidateIndex = -1;
+        gradeCandidateName = null;
+        gradeCandidateTotal = null;
+      }
+      // The curve that sits on top of the light rig applyLightingPreset just
+      // set. Precedence (CONTRACT §7.1) lives inside applyColorGrade itself —
+      // a standing panel request on tone/exposure/bloomThreshold survives
+      // this switch even though the meshes it applies to do not.
+      applyColorGrade(definition);
 
       // ===== IMPROVEMENT 1: Update sky dome colors =====
       if (skyDome && definition.sky) {
@@ -7011,6 +7184,12 @@
       shadowMapSize: null,     // 'low' | 'medium' | 'high' | null
       anisotropy: null,        // 1..getMaxAnisotropy() | null — see applyAnisotropyLevel below
       terrainResolution: null, // 'standard' | 'high' | 'ultra' | null — ground mesh segment preset
+      // perf-grade wave. Look controls, not performance levers: the adaptive
+      // tier must never write these (CONTRACT §7.1). null here means the
+      // ACTIVE biome's own grade block wins — see applyColorGrade above.
+      tone: null,              // 'aces'|'agx'|'neutral'|'reinhard'|'cineon'|'linear'|'none'|number | null
+      exposure: null,          // number | null
+      bloomThreshold: null,    // number | null — bloomPass bright-pass knee
     };
     // Last value actually handed to sphericalWorld.features.valley.setMistBudget,
     // whichever site called it (tier-derived or panel-requested). That module
@@ -7101,6 +7280,12 @@
         if (key === 'terrainResolution') {
           return ['standard', 'high', 'ultra'].includes(value) ? value : 'standard';
         }
+        // perf-grade wave. No forced range: resolveToneMapping/applyToneMapping
+        // already no-op on an unresolvable tone (matching setLighting's
+        // long-standing behaviour), and exposure/bloomThreshold are a curve's
+        // own artistic numbers, not a 0..1 density slider — the generic
+        // fallthrough below would silently clamp an exposure like 1.35 to 1.
+        if (key === 'tone' || key === 'exposure' || key === 'bloomThreshold') return value;
         return Math.min(1, Math.max(0, value));
       },
       // `apply`/`readEffective` are the ONLY place a panel request touches a
@@ -7140,6 +7325,34 @@
           if (sphericalWorld && typeof sphericalWorld.setGroundResolution === 'function') {
             sphericalWorld.setGroundResolution(value);
           }
+        } else if (key === 'tone') {
+          // Recorded here, not read off panelOverrides.tone, for the exact
+          // TDZ reason toneRequested/exposureRequested/bloomThresholdRequested
+          // exist at all (comment above their declaration): setEnvironment's
+          // first call runs before this object exists.
+          // Only latched on a value that actually resolves — matching
+          // setLighting's long-standing "unresolvable tone is a no-op"
+          // contract. Latching an unresolvable value would freeze the CURRENT
+          // tone in place and silently disable every future biome's own grade
+          // (applyColorGrade skips a non-null toneRequested), which is a much
+          // bigger regression than the no-op it replaces.
+          if (resolveToneMapping(value) !== undefined) {
+            toneRequested = value;
+            rememberGradeOverride('tone', value);
+            applyToneMapping(value);
+          }
+        } else if (key === 'exposure') {
+          if (Number.isFinite(value)) {
+            exposureRequested = value;
+            rememberGradeOverride('exposure', value);
+            renderer.toneMappingExposure = value;
+          }
+        } else if (key === 'bloomThreshold') {
+          if (Number.isFinite(value)) {
+            bloomThresholdRequested = value;
+            rememberGradeOverride('bloomThreshold', value);
+            applyBloomThreshold(value);
+          }
         }
         // weatherDensity / mistBudget / decorativeDensity need no immediate
         // side effect here: they are read every frame at T5-T6/T7-T8/T4-T9-T10
@@ -7172,6 +7385,17 @@
         if (key === 'shadowMapSize') return shadowMapSizeKey;
         if (key === 'anisotropy') return readAnisotropyEffective() ?? 0;
         if (key === 'terrainResolution') return sphericalWorld ? sphericalWorld.groundResolution : null;
+        if (key === 'tone') {
+          // String form, matching how a request arrives (same shape as
+          // shadowType's own reverse map just above) — a numeric raw THREE
+          // constant is still accepted as a REQUEST (legacy setLighting
+          // support) but read back as the string so requested/effective
+          // compare sanely for the common case instead of reporting a false
+          // desync between 'agx' and the number it resolves to.
+          return toneMappingKey(renderer.toneMapping);
+        }
+        if (key === 'exposure') return renderer.toneMappingExposure;
+        if (key === 'bloomThreshold') return bloomThresholdEffective;
         return panelOverrides[key];
       },
     });
@@ -8301,6 +8525,45 @@
           requested: panelOverrides.terrainResolution,
           effective: sphericalWorld ? sphericalWorld.groundResolution : null,
         },
+        // perf-grade wave. Look controls, not performance levers — the
+        // adaptive tier never writes these (CONTRACT §7.1); `requested` is
+        // null whenever the ACTIVE biome's own grade block is what's on
+        // screen (untouched by any panel/debug-hook request).
+        //
+        // perf-grade PANEL wave: reads gradeOverridesByBiome[THIS biome], not
+        // the flat panelOverrides.tone/exposure/bloomThreshold — those three
+        // are written by qualitySettings' generic `panelOverrides[key] =
+        // value` on every request regardless of which biome was active, so
+        // they go stale the moment the panel touches a SECOND biome (still
+        // reporting the first biome's override as "requested" after
+        // switching away from it). gradeOverridesByBiome is the one store
+        // that is actually scoped per biome — see its declaration and
+        // setEnvironment's resync block above.
+        tone: { requested: gradeOverridesByBiome[environmentState.id]?.tone ?? null, effective: toneMappingKey(renderer.toneMapping) },
+        exposure: { requested: gradeOverridesByBiome[environmentState.id]?.exposure ?? null, effective: renderer.toneMappingExposure },
+        bloomThreshold: { requested: gradeOverridesByBiome[environmentState.id]?.bloomThreshold ?? null, effective: bloomThresholdEffective },
+        // The ACTIVE biome's grade, named — so a capture records what
+        // produced it rather than three bare numbers (item 4: "a screenshot
+        // that does not say what grade produced it is not evidence"). `source`
+        // is 'panel' the moment ANY of the three has been requested FOR THIS
+        // BIOME, because from here on the biome's own block is not what's on
+        // screen for at least one of them. `candidate` is the "Next
+        // candidate" control's own state (null until pressed at least once
+        // since the last biome switch) — panel task, not the system task
+        // that built the rest of this object.
+        grade: (() => {
+          const bio = gradeOverridesByBiome[environmentState.id] || {};
+          return {
+            biome: environmentState.id,
+            source: (bio.tone != null || bio.exposure != null || bio.bloomThreshold != null) ? 'panel' : 'biome',
+            tone: toneMappingKey(renderer.toneMapping),
+            exposure: renderer.toneMappingExposure,
+            bloomThreshold: bloomThresholdEffective,
+            candidate: gradeCandidateName
+              ? { index: gradeCandidateIndex, total: gradeCandidateTotal, name: gradeCandidateName }
+              : null,
+          };
+        })(),
       };
     }
 
@@ -8462,7 +8725,84 @@
       if (sphericalWorld && typeof sphericalWorld.setGroundResolution === 'function') {
         sphericalWorld.setGroundResolution('standard');
       }
+      // perf-grade wave. Lands on the ACTIVE biome's own grade, not a
+      // hardcoded global — the two are equal today only because of the
+      // shipping invariant every biome's grade block holds to; conflating
+      // them is exactly the class of bug this function's own bloomStrength
+      // comment above already paid for once.
+      toneRequested = null;
+      exposureRequested = null;
+      bloomThresholdRequested = null;
+      // perf-grade PANEL wave: clears every BIOME's standing override, not
+      // just the active one's tracker variables above — a reset that left
+      // some other biome's gradeOverridesByBiome entry in place would look
+      // clean here and then reappear the moment the player flew there.
+      for (const id of Object.keys(gradeOverridesByBiome)) delete gradeOverridesByBiome[id];
+      gradeCandidateBiomeId = null;
+      gradeCandidateBaseline = null;
+      gradeCandidateIndex = -1;
+      gradeCandidateName = null;
+      gradeCandidateTotal = null;
+      applyColorGrade(getEnvironmentDefinition(environmentState.id));
       updateRendererSize(true);
+    }
+
+    // Shared by __BIRB.setLighting (debug-only) and the panel's "Next
+    // candidate" action (always available — the panel registers
+    // unconditionally, CONTRACT §6) so there is exactly one place that
+    // applies a lighting-comparison settings object, not two copies that can
+    // drift. tone/exposure/bloomThreshold route through
+    // qualitySettings.request (CONTRACT §7.1/§7.2: "existing setLighting/
+    // setBloom hooks remain adapters") so a request made here is a normal
+    // panel-sourced request — it lands in gradeOverridesByBiome exactly like
+    // a slider drag would, per-biome, surviving an environment switch the
+    // same way. ambient/key/rim/fill/fog/atmos/hemiSky are NOT part of the
+    // grade schema (DEFAULT_GRADE only has tone/exposure/bloomThreshold) and
+    // are applied directly with no persistence, matching this function's
+    // pre-refactor behaviour exactly — they are comparison nudges, not a
+    // chosen grade.
+    function applyLightingSettings({ exposure, ambient: amb, key, rim, fill, fog, tone, atmos, hemiSky, bloomThreshold } = {}) {
+      if (Number.isFinite(atmos)) visualUniforms.atmosphere.value = atmos;
+      if (hemiSky !== undefined && lightingRig.ambient?.color) {
+        lightingRig.ambient.color.setHex(hemiSky);
+      }
+      if (Number.isFinite(exposure)) {
+        qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'exposure', value: exposure });
+      }
+      if (tone !== undefined) {
+        qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'tone', value: tone });
+      }
+      if (Number.isFinite(bloomThreshold)) {
+        qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'bloomThreshold', value: bloomThreshold });
+      }
+      if (Number.isFinite(amb)) lightingRig.ambient.intensity = amb;
+      if (Number.isFinite(key)) lightingRig.keyLight.intensity = key;
+      if (Number.isFinite(rim)) lightingRig.rimLight.intensity = rim;
+      if (Number.isFinite(fill)) lightingRig.fillLight.intensity = fill;
+      if (Number.isFinite(fog) && scene.fog) scene.fog.density = fog;
+      return {
+        exposure: renderer.toneMappingExposure,
+        ambient: lightingRig.ambient.intensity,
+        key: lightingRig.keyLight.intensity,
+        rim: lightingRig.rimLight.intensity,
+        fill: lightingRig.fillLight.intensity,
+        fog: scene.fog ? scene.fog.density : null,
+        tone: renderer.toneMapping,
+        bloomThreshold: bloomThresholdEffective,
+      };
+    }
+
+    /** A lighting snapshot in the exact shape gradeCandidatesFor's `baseline`
+     * argument needs (exposure/key/rim/fill) — the live equivalent of
+     * `__BIRB.setLighting({})`'s read-only readback, reachable without
+     * `?debug` since the panel that needs it is unconditional. */
+    function captureLightingSnapshot() {
+      return {
+        exposure: renderer.toneMappingExposure,
+        key: lightingRig.keyLight.intensity,
+        rim: lightingRig.rimLight.intensity,
+        fill: lightingRig.fillLight.intensity,
+      };
     }
 
     function panelOnRequest(request) {
@@ -8518,6 +8858,27 @@
           // sway, no particle, no draw call, no triangle. A ceiling the system cannot
           // reach is a promise the panel cannot keep.
           qualitySettings.request({ source: src, key: 'decorativeDensity', value: 1 });
+        } else if (request.action === 'gradeNextCandidate') {
+          // perf-grade PANEL wave: cycles gradeCandidatesFor(biome, baseline)
+          // (src/environment/grade-candidates.js) — the SAME list
+          // tools/birb-lighting.mjs --grades renders to a sheet. Baseline is
+          // captured lazily on the first press per biome (see the state's
+          // own declaration/comment above) so every subsequent press applies
+          // its candidate from the same starting point rather than
+          // compounding onto the previous one.
+          const biomeId = environmentState.id;
+          if (gradeCandidateBiomeId !== biomeId || !gradeCandidateBaseline) {
+            gradeCandidateBaseline = captureLightingSnapshot();
+            gradeCandidateBiomeId = biomeId;
+            gradeCandidateIndex = -1;
+          }
+          const list = gradeCandidatesFor(biomeId, gradeCandidateBaseline);
+          gradeCandidateIndex = (gradeCandidateIndex + 1) % list.length;
+          const candidate = list[gradeCandidateIndex];
+          applyLightingSettings(gradeCandidateBaseline);
+          applyLightingSettings(candidate.settings);
+          gradeCandidateName = candidate.name;
+          gradeCandidateTotal = list.length;
         }
         // 'export' and 'compare' are handled entirely inside the panel
         // (Blob/anchor-click, an in-memory A/B diff) — nothing to route here.
@@ -10475,6 +10836,11 @@
         setBloom: ({ enabled, threshold, strength, rays, view } = {}) => {
           if (enabled !== undefined) bloomEnabled = !!enabled;
           if (bloomPass) {
+            // threshold here is the momentary debug-view lever (pairs with
+            // `view`, for "what crosses the knee RIGHT NOW") — it does not
+            // persist across an environment switch. A grade's own knee is
+            // `setLighting({ bloomThreshold })`, which does (CONTRACT §7.1
+            // adapter contract — see below).
             if (Number.isFinite(threshold)) bloomPass.setThreshold(threshold);
             if (Number.isFinite(strength)) bloomPass.setStrength(strength);
             if (Number.isFinite(rays)) bloomPass.setRays(rays);
@@ -10482,63 +10848,24 @@
           }
           return { enabled: bloomEnabled, present: !!bloomPass, tier: adaptiveTier.getTier() };
         },
-        // Lighting overrides for side-by-side comparison captures. The brief
-        // asks for palette tuning on physical phones against FIXED views; this
-        // is how those views get generated from one world build, so the only
-        // difference between two frames is the setting under test.
-        setLighting: ({ exposure, ambient: amb, key, rim, fill, fog, tone, atmos, hemiSky } = {}) => {
-          // Atmosphere master (cloud shadows, mist, sun rim) and the
-          // hemisphere light's sky colour, both isolatable: "the ground looks
-          // wrong" has half a dozen candidate causes and turning one off is
-          // the only way to name which.
-          if (Number.isFinite(atmos)) visualUniforms.atmosphere.value = atmos;
-          if (hemiSky !== undefined && lightingRig.ambient?.color) {
-            lightingRig.ambient.color.setHex(hemiSky);
-          }
-          if (Number.isFinite(exposure)) renderer.toneMappingExposure = exposure;
-          if (tone !== undefined) {
-            const map = {
-              aces: THREE.ACESFilmicToneMapping,
-              agx: THREE.AgXToneMapping,
-              neutral: THREE.NeutralToneMapping,
-              reinhard: THREE.ReinhardToneMapping,
-              cineon: THREE.CineonToneMapping,
-              linear: THREE.LinearToneMapping,
-            };
-            // Accept the numeric constant too. The baseline snapshot reads
-            // renderer.toneMapping back as a NUMBER, and a string-only setter
-            // silently ignored it — so the comparison tool never restored the
-            // baseline and every variant after the first inherited the
-            // previous one's tone mapping. A sheet that leaks state between
-            // tiles reports differences that are not there.
-            const resolved = typeof tone === 'number' ? tone : map[tone];
-            if (resolved !== undefined) {
-              renderer.toneMapping = resolved;
-              // Every material's program embeds the tone-mapping function, so
-              // switching it needs a recompile or the change does nothing.
-              scene.traverse((o) => {
-                if (o.material) {
-                  const list = Array.isArray(o.material) ? o.material : [o.material];
-                  for (const m of list) m.needsUpdate = true;
-                }
-              });
-            }
-          }
-          if (Number.isFinite(amb)) lightingRig.ambient.intensity = amb;
-          if (Number.isFinite(key)) lightingRig.keyLight.intensity = key;
-          if (Number.isFinite(rim)) lightingRig.rimLight.intensity = rim;
-          if (Number.isFinite(fill)) lightingRig.fillLight.intensity = fill;
-          if (Number.isFinite(fog) && scene.fog) scene.fog.density = fog;
-          return {
-            exposure: renderer.toneMappingExposure,
-            ambient: lightingRig.ambient.intensity,
-            key: lightingRig.keyLight.intensity,
-            rim: lightingRig.rimLight.intensity,
-            fill: lightingRig.fillLight.intensity,
-            fog: scene.fog ? scene.fog.density : null,
-            tone: renderer.toneMapping,
-          };
-        },
+        // Lighting + colour-grade overrides for side-by-side comparison
+        // captures. The brief asks for palette tuning on physical phones
+        // against FIXED views; this is how those views get generated from one
+        // world build, so the only difference between two frames is the
+        // setting under test.
+        //
+        // tone/exposure/bloomThreshold route through qualitySettings.request
+        // (CONTRACT §7.2: "Existing setLighting/setBloom hooks remain
+        // adapters onto the settings API") rather than touching the renderer
+        // directly — the same path the panel's Look Grade controls use, so a
+        // request made here survives an environment switch exactly the way
+        // a panel request must (CONTRACT §7.1), instead of being silently
+        // overwritten the next time applyColorGrade runs. The body itself now
+        // lives in applyLightingSettings (perf-grade PANEL wave) — shared with
+        // the panel's own "Next candidate" action, which is not behind
+        // `?debug` and so cannot call this debug-gated method directly; this
+        // is a one-line adapter onto it, not a second copy.
+        setLighting: (opts) => applyLightingSettings(opts),
         // Pin the adaptive quality tier, so a capture is not judged against
         // whatever DPR the sampler happened to settle on.
         pinTier: (tier = 0) => { adaptiveTier.pin(tier); return adaptiveTier.getTier(); },
