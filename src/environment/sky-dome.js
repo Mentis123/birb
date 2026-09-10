@@ -38,6 +38,14 @@ export function createSkyDome(options = {}) {
     uniform vec3 uHorizonColor;
     uniform vec3 uBottomColor;
     uniform vec3 uSunDirection;
+    // An authored equirectangular sky, mixed OVER the gradient rather than
+    // replacing it. uSkyMix is the whole point: the stylised four-stop
+    // gradient and a photographic panorama are two different art directions,
+    // and which one this game wants is an eye's call, not a number this file
+    // can settle. 0 is exactly today's sky, so the flag is safe by default.
+    uniform sampler2D uSkyTexture;
+    uniform float uSkyMix;
+    uniform float uSkyRotation;
     uniform vec3 uSunColor;
     uniform vec3 uCenter;
     uniform vec3 uSkyUp;
@@ -64,6 +72,19 @@ export function createSkyDome(options = {}) {
         color = mix(uMidColor, uTopColor, t);
       }
 
+      // The authored sky replaces the gradient's COLOUR only. Everything below
+      // -- horizon band, sun disc, halo, stars -- still runs on top, so the
+      // sky's sun and the scene's key light cannot drift apart just because a
+      // panorama was dropped in.
+      if (uSkyMix > 0.0) {
+        // three's own equirect convention, so a map authored for
+        // scene.environment and one authored for this dome are the same file.
+        float su = atan(dir.z, dir.x) * 0.15915494 + 0.5 + uSkyRotation;
+        float sv = asin(clamp(dir.y, -1.0, 1.0)) * 0.31830989 + 0.5;
+        vec3 texSky = texture2D(uSkyTexture, vec2(fract(su), clamp(sv, 0.0, 1.0))).rgb;
+        color = mix(color, texSky, uSkyMix);
+      }
+
       // ── Self-limiting glows ──────────────────────────────────────────
       // How much room the sky still has before it clips. Both the horizon
       // band and the sun's broad halo are ADDITIVE, and additive light onto a
@@ -77,7 +98,13 @@ export function createSkyDome(options = {}) {
       float skyRoom = 1.0 - clamp(dot(color, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 
       // Subtle warm horizon glow peak (non-photoreal golden-hour bloom).
-      float horizonBand = exp(-pow((h - 0.02) * 8.0, 2.0)) * 0.22;
+      //
+      // Faded out as an authored sky takes over, because a photographed or
+      // painted panorama ALREADY contains its own horizon glow -- adding this
+      // on top applies it twice, which measured as a 9/255 mean error against
+      // a placeholder generated from this very function. The stylised gradient
+      // needs the band; a real sky brought its own.
+      float horizonBand = exp(-pow((h - 0.02) * 8.0, 2.0)) * 0.22 * (1.0 - uSkyMix);
       color += uHorizonColor * horizonBand * skyRoom;
 
       // Sun: soft disc + two-lobe atmospheric halo. Pure shader math on the
@@ -90,7 +117,12 @@ export function createSkyDome(options = {}) {
       // The tight lobe is the sun's own corona and stays; the broad one is
       // atmospheric scatter and is what smears across a pale sky, so it is
       // both narrower than it was and pays the headroom tax.
-      float halo = pow(sd, 160.0) * 0.55 + pow(sd, 30.0) * 0.20 * skyRoom;
+      // The tight lobe is the DISC and it always draws: it is the anchor that
+      // keeps the sky's sun and the scene's key light in the same place, which
+      // matters more once an authored panorama has its own bright quadrant
+      // somewhere else. The broad lobe is atmospheric haze, which a real sky
+      // already has, so it fades out with the gradient.
+      float halo = pow(sd, 160.0) * 0.55 + pow(sd, 30.0) * 0.20 * skyRoom * (1.0 - uSkyMix);
       // The disc is deliberately HDR — over 1.0 in scene-linear, before tone
       // mapping. It has to be: the bloom pass thresholds the TONE-MAPPED
       // frame, and Neutral tone mapping rolls anything near 1.0 back under
@@ -128,6 +160,9 @@ export function createSkyDome(options = {}) {
       uSkyUp: { value: new THREE.Vector3(0, 1, 0) },
       uOffset: { value: offset },
       uTime: { value: 0 },
+      uSkyTexture: { value: null },
+      uSkyMix: { value: 0 },
+      uSkyRotation: { value: 0 },
       uRadius: { value: radius },
     },
     side: THREE.BackSide,
@@ -194,6 +229,31 @@ export function createSkyDome(options = {}) {
     setSunDirection(direction) {
       if (!direction) return;
       material.uniforms.uSunDirection.value.copy(direction).normalize();
+    },
+
+    /**
+     * Point the dome at an authored equirectangular sky.
+     *
+     * `mix` 0 is exactly the shipped gradient, so this is inert until asked
+     * for. `rotation` is in TURNS and exists because an authored panorama has
+     * its bright quadrant wherever the artist put it, while this game's sun is
+     * wherever `keyLight` is -- and a sky whose glow disagrees with the light
+     * on the ground reads as a bug even when both halves are lovely.
+     */
+    setSkyTexture(texture, { mix = 1, rotation = 0 } = {}) {
+      material.uniforms.uSkyTexture.value = texture || null;
+      material.uniforms.uSkyMix.value = texture ? Math.max(0, Math.min(1, mix)) : 0;
+      material.uniforms.uSkyRotation.value = rotation;
+      material.needsUpdate = true;
+    },
+
+    /** Read back what is actually in force, for the harness and the panel. */
+    skyTextureState() {
+      return {
+        present: !!material.uniforms.uSkyTexture.value,
+        mix: material.uniforms.uSkyMix.value,
+        rotation: material.uniforms.uSkyRotation.value,
+      };
     },
 
     /** Expose mid color so the scene can tint fog to match the sky. */

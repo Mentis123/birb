@@ -3491,6 +3491,7 @@
       // header for why this is being proved with a procedural map before the
       // authored biome skies (ASSET_JOBS.md job 02) are wired to it.
       var { installSkyEnvironment, iblRequested } = await import("./src/environment/sky-environment.js");
+      var { loadTexture: loadAuthoredTexture } = await import("./src/environment/authored-textures.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { createDevGesture } = await import("./src/ui/dev-gesture.js");
       var { createDevQualityPanel, sentinel: qualitySentinel, SENTINEL_REASONS: QUALITY_SENTINEL_REASONS } =
@@ -3659,7 +3660,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v48-2026-09-11-sky-ibl';
+    const BIRB_BUILD = 'v49-2026-09-11-sky-texture';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -6333,6 +6334,34 @@
       if (skyDome && definition.sky) {
         skyDome.setColors(definition.sky);
       }
+      // An authored equirectangular sky on the dome, behind ?skytex=1. Missing
+      // files are the EXPECTED case until the panoramas land: loadTexture's
+      // error path warns and the dome keeps its gradient, so the flag is safe
+      // to hand someone before the art exists.
+      if (skyDome && typeof skyDome.setSkyTexture === 'function') {
+        const skyTexReq = /[?&]skytex=([0-9.]+)/.exec(window.location?.search || '');
+        if (skyTexReq) {
+          const mix = Math.max(0, Math.min(1, Number(skyTexReq[1]) || 1));
+          try {
+            const url = `./assets/env/${variantId}_sky.png`;
+            const tex = loadAuthoredTexture(THREE, url, {
+              onError: () => skyDome.setSkyTexture(null),
+            });
+            // A sky is a picture, so it decodes as sRGB -- unlike every other
+            // authored map in this game, which is data. It also must not
+            // repeat vertically: ClampToEdge stops the horizon wrapping onto
+            // the zenith at the poles.
+            tex.colorSpace = THREE.SRGBColorSpace;
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.ClampToEdgeWrapping;
+            skyDome.setSkyTexture(tex, { mix });
+          } catch (err) {
+            console.warn('[skytex] authored sky failed; keeping the gradient', err);
+            skyDome.setSkyTexture(null);
+          }
+        }
+      }
+
       // The reflected sky follows the drawn sky, and is rebuilt per biome so
       // the two can never disagree. PMREM runs HERE, once per environment
       // switch -- never per frame, which the backlog names explicitly.
@@ -10753,19 +10782,42 @@
         // to put the bird back rather than ask it to stay. The chase camera
         // damps toward the bird, so restoring the same pose and waiting
         // reconverges the camera to the same viewpoint every time.
+        // Returns the FULL record, not just a position summary, so a harness
+        // can carry a pose ACROSS page loads. That is the difference between
+        // an A/B and two photographs of different places: the seed, sun and
+        // tier were already pinnable, but the camera was not, and three
+        // separate measurements in one session were spoiled by comparing
+        // frames whose triangle counts did not even match.
         capturePose: () => {
           if (!flightController) return null;
           __birbSavedPose = {
             position: flightController.position.clone(),
             quaternion: flightController.quaternion ? flightController.quaternion.clone() : null,
           };
-          return __birbSavedPose.position.toArray().map((n) => +n.toFixed(2));
+          return {
+            position: __birbSavedPose.position.toArray(),
+            quaternion: __birbSavedPose.quaternion ? __birbSavedPose.quaternion.toArray() : null,
+          };
         },
-        restorePose: () => {
-          if (!__birbSavedPose || !flightController) return false;
-          flightController.position.copy(__birbSavedPose.position);
-          if (__birbSavedPose.quaternion && typeof flightController.setOrientation === 'function') {
-            flightController.setOrientation(__birbSavedPose.quaternion);
+        // With a record: replay it, whoever captured it and whenever. Without:
+        // the in-memory one, which is the original same-page behaviour and is
+        // what the comparison sheet still uses.
+        restorePose: (record = null) => {
+          if (!flightController) return false;
+          let pose = __birbSavedPose;
+          if (record && Array.isArray(record.position)) {
+            pose = {
+              position: new THREE.Vector3().fromArray(record.position),
+              quaternion: Array.isArray(record.quaternion)
+                ? new THREE.Quaternion().fromArray(record.quaternion)
+                : null,
+            };
+            __birbSavedPose = pose;
+          }
+          if (!pose) return false;
+          flightController.position.copy(pose.position);
+          if (pose.quaternion && typeof flightController.setOrientation === 'function') {
+            flightController.setOrientation(pose.quaternion);
           }
           if (flightController.velocity) flightController.velocity.set(0, 0, 0);
           return true;

@@ -16,7 +16,7 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v48-2026-09-11-sky-ibl';
+const CACHE_VERSION = 'v49-2026-09-11-sky-texture';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
