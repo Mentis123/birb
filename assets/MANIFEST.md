@@ -19,7 +19,13 @@ Rules, in short:
 
 | File | Kind | Target (material + slot) | World tile | Source (model + prompt, or tool) | Licence | Commit |
 |---|---|---|---|---|---|---|
-| _(none yet)_ | | | | | | |
+| `textures/bark_pine_albedo.png` | sRGB albedo | `barkMat.map` (forest landmark trunk + fallen log) | ~4.3 m square | OpenAI image generation; prompt "seamless, unlit grey-brown weathered pine bark plates with deep vertical fissures"; from scratch, resized to 512² RGB with Pillow 12.3.0 | ISC | `e20a04b` |
+| `textures/bark_pine_normal.png` | linear tangent-space normal, OpenGL +Y | `barkMat.normalMap` | ~4.3 m square | Offline from the albedo with Pillow 12.3.0 + NumPy 2.3.5: wrap-aware multiscale luminance height proxy, circular gradients | ISC | `e20a04b` |
+
+`bark_pine_rough.png` was delivered in the same commit and **is not here**: it spans
+0.145 across 37 of 256 values, which the gate rejects as a constant wearing a
+texture's filename, and `MeshLambertMaterial` — which is every tree material in
+this game — has no `roughnessMap` slot to put it in anyway.
 
 **Target** names the material and the slot the asset is for — `barkMat.map`, not "trees".
 A slot the material class does not have is a silent no-op: `MeshLambertMaterial` has no

@@ -1,6 +1,12 @@
 import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
+import { applyAuthoredBark, authoredBarkRequested } from './authored-textures.js';
+
+// Set when ?bark=1 dressed the forest landmark material; called on the next
+// world teardown. A texture created per setEnvironment() and never disposed
+// leaks once per environment switch.
+let disposeAuthoredBark = null;
 import { createSlalomRun } from "./slalom-run.js";
 import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
@@ -1472,6 +1478,33 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   const landmarks = [];
   const TRUNK_HEIGHT = 88;
   const NEST_HEIGHT = 34; // Same perch band as every other nest in the game.
+
+  // Authored bark, behind ?bark=1 on the ?glb=1 precedent: the procedural
+  // barkMat above is built first and unconditionally, and this only dresses it
+  // once the images actually load. It must sit AFTER TRUNK_HEIGHT — `const` is
+  // not hoisted, so calling this beside barkMat's declaration reads it inside
+  // its temporal dead zone and throws.
+  //
+  // barkMat dresses the landmark trunk and the fallen log, both plain Meshes.
+  // NOT the instanced forest trunks: their per-instance scale lives in the
+  // instance matrix rather than the UVs, so one shared `map.repeat` would have
+  // to serve a tile aspect spanning 12.5x, and no value serves that.
+  //
+  // 34.7 is the circumference at NEST_HEIGHT, where the perch camera sits ~3
+  // units off the bark — the view this texture was bought for.
+  if (typeof window !== 'undefined' && authoredBarkRequested(window.location?.search)) {
+    try {
+      disposeAuthoredBark = applyAuthoredBark(THREE, barkMat, {
+        circumference: 34.7,
+        height: TRUNK_HEIGHT,
+      });
+    } catch (err) {
+      // A rendering world is not a working world: this whole builder runs
+      // inside a try/catch that only console.warns, so a throw here would
+      // leave the forest standing and its nests missing. Contain it.
+      console.warn('[forest] authored bark failed; keeping the procedural material', err);
+    }
+  }
 
   // Three of them, spread roughly a third of the planet apart, so no matter
   // where the player is at least one is within its horizon range.
@@ -3251,6 +3284,13 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       // Remove from scene first to prevent visual artifacts during environment switch
       scene.remove(root);
 
+      // Authored textures first: this releases them AND restores the procedural
+      // material, so the traverse below finds no map to double-dispose.
+      if (disposeAuthoredBark) {
+        try { disposeAuthoredBark(); } catch (e) { console.warn('Error disposing authored bark:', e); }
+        disposeAuthoredBark = null;
+      }
+
       // Then dispose geometries and materials
       try {
         root.traverse((child) => {
@@ -3267,6 +3307,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
               // material.dispose() alone leaks them on environment swaps.
               if (m.map) m.map.dispose();
               if (m.emissiveMap) m.emissiveMap.dispose();
+              // normalMap joined this list when authored textures arrived. It
+              // had never been set on anything in this world before, which is
+              // exactly how a leak ships unnoticed the first time a slot is used.
+              if (m.normalMap) m.normalMap.dispose();
               m.dispose();
             });
           }

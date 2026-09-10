@@ -16,7 +16,7 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v46-2026-09-10-ultra-panel';
+const CACHE_VERSION = 'v47-2026-09-10-authored-bark';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -43,6 +43,11 @@ const CORE_ASSETS = [
   // NOT precached (install-weight diet, ~7.3 MB saved):
   // - ./birb.glb (1.7 MB) — only loads behind the ?glb=1 A/B flag; the
   //   runtime cache picks it up on demand for whoever uses that flag.
+  // - ./assets/textures/bark_pine_*.png (1.0 MB) — only fetched behind the
+  //   ?bark=1 A/B flag, exactly like birb.glb above; the runtime cache picks
+  //   them up for whoever uses it. Move them here into CORE_ASSETS the day
+  //   authored bark becomes the shipping default, or the first offline load
+  //   after that renders an untextured trunk with no warning.
   // - ./sound/ambient-mountain.mp3 (5.6 MB) — setAmbientMusic deliberately
   //   pins the forest track (users asked for the original back), so the
   //   mountain track is currently unplayed. Re-add here if track switching
@@ -71,6 +76,12 @@ const CORE_ASSETS = [
   './src/controls/thumbstick.js',
   './src/controls/virtual-thumbstick.js',
   './src/environment/world-shell.js',
+  './src/environment/authored-textures.js',
+  // Pre-existing gap, caught by SW-3 when authored-textures.js was added: this
+  // is dynamically imported by the dev panel's grade cycler (index.html:3451),
+  // so offline it would have thrown a failed import rather than a blank page —
+  // quieter than the /AR failure, same class.
+  './src/environment/grade-candidates.js',
   './src/environment/spherical-world.js',
   './src/environment/landmark-valley.js',
   './src/environment/slalom-run.js',
