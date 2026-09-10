@@ -78,18 +78,55 @@ The general lesson, and the reason this was worth two hours: **prove the consume
 
 ---
 
-## The queue after that, re-costed with the roughness correction applied
+## Job 03 — reference imagery and the acceptance rubric — **LIVE, and it needs no code at all**
 
-| # | Job | Files | Resident cost | Why it is here |
-|---|---|---:|---:|---|
-| **03 — NOW LIVE** | Forest ground and rock: `forest_soil`, `forest_rock`, `forest_litter`, `river_gravel`, each `_albedo` + `_normal` | 8 | 10.7 MB | The first production scene is a forest river valley and its terrain is flat-shaded noise with a tint. **These land on `map` and `normalMap`, which Lambert samples per pixel at full frequency** — unlike an environment map, detail here survives all the way to the screen. Same rules as the bark: tileable, unlit, POT, world tile size declared |
-| 04 | `foliage_needle` — albedo **with alpha**, RGBA | 1 | 1.3 MB | The hero tree's canopy. First cut-out asset, so the gate needs an alpha-coverage check written before it lands, not after |
-| 05 | `feather_wing_normal` — detail map for the bird | 1 | 1.3 MB | A detail map riding on the existing blue/cyan, **not** a colour map. The blue/cyan identity is a fixed decision; do not repaint the bird |
-| 06 | Reference imagery — concept boards, geology, plumage, a lighting key | — | 0 | Committed to `docs/realism/reference/` where **nothing imports it**. Evidence, never a runtime dependency. This is also the missing half of the whole programme: there is currently no reference image of anything being aimed at |
+**This is the job with the highest value and the lowest risk on the whole list, and it is the one thing here an image model is unambiguously the right tool for.**
 
-Note what dropped out: item 03 was twelve files and is now eight; every `_rough` in the original list is gone.
+`docs/realism/` contains six documents and five PNGs of the **current** build. There is no reference image of a bluebird, a forest river, or any look this programme is aiming at. Every art stage therefore accepts against a memory, which is exactly the failure `/sculpture` records twice in this repo: *green gate, worse render*.
 
-**Job 06 is more valuable than its position suggests.** `/sculpture` solved a likeness problem in this repo with matched photographs and a rubric committed *before* the work. This programme has neither, and every art stage currently accepts against a memory. If you have capacity beyond job 02, that is the one to volunteer for.
+`/sculpture` solved it with matched photographs, a side-by-side compositor, and `LIKENESS.md` — 41 binary checks committed **before** the work, each citing the image that settles it. This programme has neither half.
+
+**Deliver into `docs/realism/reference/`** — evidence only, never imported by the running page, so no format or budget rules apply beyond "readable":
+
+| File | What it has to settle |
+|---|---|
+| `bird-*.jpg/png` (4–6) | Real bluebird plumage, wing structure in flight and folded, foot/perch contact, head shape. The blue/cyan identity is fixed; this is about *anatomy and feather structure*, not recolouring |
+| `forest-river-*.jpg/png` (4–6) | The first production scene: a forest river valley, canopy-to-water, bank geology, how light falls through a canopy |
+| `bark-and-ground-*.jpg/png` (3–4) | Pine bark at reading distance, forest floor litter, wet river gravel, exposed rock |
+| `lighting-key-*.jpg/png` (2–3) | The time of day and mood being aimed at, one per biome where they differ |
+
+**And the rubric, `docs/realism/LIKENESS_BIRB.md`:** 20–30 **binary** checks, each citing the reference image that settles it, in `/sculpture`'s exact form. *"The wing has visible primary/secondary separation at chase distance — ref bird-03"*, not *"the wings look good"*. Written **before** the art it judges, so it cannot be negotiated afterwards by the person who just spent three weeks on it.
+
+If you do nothing else on this list, do this one.
+
+---
+
+## Job 04 — stone for the landmark arch — **LIVE, small, and the consumer is proven**
+
+Deliberately shaped like the bark job, because that pattern is now known to work end to end.
+
+**Deliver:** `assets/textures/stone_rock_albedo.png` and `stone_rock_normal.png`, 512², tileable, unlit, RGB.
+
+**Target:** `stoneMat` — a plain `MeshLambertMaterial` on the canyon landmark's stone arch, `TorusGeometry(13, 2.4, 6, 14, PI)`. Current colour `#6b6257`, a flat grey-brown.
+
+**World tile: 4.3 units square**, the same as the bark, so the two read at one scale. That solves to `repeat (9, 4)` on that torus — arc length is π×13 = 40.8 units, tube circumference 2π×2.4 = 15.1 — giving a 4.5 × 3.8 tile. Put the number in the manifest row; the integrator sets the repeat.
+
+Weathered sandstone to match the canyons: warm grey-brown, bedding planes, wind-scour. Unlit, no baked ambient occlusion beyond what the material itself has, no directional highlight.
+
+---
+
+## Why the forest GROUND is not on this list yet
+
+The earlier draft of this file had "forest ground and rock, 8 files" as the next job. It is deferred, and the reason is worth writing down because it is the third instance of the same mistake.
+
+The terrain is a `SphereGeometry` of radius 120 with `MeshLambertMaterial`. Its UVs run once around the whole planet:
+
+- **0.68 texels per world unit** at 512², which is unusable. A 4-unit tile would need `repeat (188, 94)`.
+- **Every u converges at both poles**, so any texture smears into a singularity at each — twice visible on a planet you fly all over.
+
+A ground texture needs a **triplanar projection** first — a shader injection costing three samples per pixel, on the single largest surface in the game, on a phone. That is a rendering decision with a real fill-rate cost, not an asset. The good news is that `ground-detail.js` composes multiplicatively (`outgoingLight *= gdTint`), so a `map` would survive alongside it once the projection exists.
+
+**Commission the ground the day the projection lands, not before.** The pattern by now is unmistakable: a roughness map for a material class with no roughness slot, four sky maps whose detail integrates away, and very nearly a ground texture for UVs that cannot carry it. **Prove the consumer before making the asset.**
 
 ---
 
