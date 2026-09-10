@@ -1,5 +1,14 @@
 # Birb: realism within a measured frame budget
 
+> **Next-phase update, 10 September 2026:** the workbench and above-baseline
+> rendering levers now exist on main. See [realism/README.md](realism/README.md)
+> for the current-state review and approved realism rebuild direction,
+> [realism/PROFILES.md](realism/PROFILES.md) for iPhone 16 Pro experiments,
+> and [realism/BUILD_BACKLOG.md](realism/BUILD_BACKLOG.md) for build order.
+> The replacement adaptive controller is still future implementation work;
+> do not infer its completion from skipped default tests. This older plan
+> remains historical context and does not replace the performance contract.
+
 Research and implementation plan · 9 September 2026
 
 > **Execution plan:** [ULTRACODE_PERFORMANCE_PLAN.md](ULTRACODE_PERFORMANCE_PLAN.md)

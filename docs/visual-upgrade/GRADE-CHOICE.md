@@ -1,5 +1,14 @@
 # Per-biome colour grade — pick one, Claude ships it
 
+> **Evidence superseded, 10 September 2026:** the sheets and preview status
+> below describe the grade wave before main's `e724235` tone-mapping fix.
+> They must be regenerated on current main before choosing numerical grades.
+> `docs/perf/gates/G-GRADE.md` records why the older comparisons were not
+> reliable evidence of their advertised tone/exposure changes. The current
+> executive direction is [../realism/README.md](../realism/README.md): retain
+> Neutral as the baseline, build coherent per-biome lighting, then validate
+> fresh comparisons on the primary iPhone. Historical content follows.
+
 This is the "needs an owner on a real phone" item from
 `docs/VISUAL_UPGRADE_BUILD_PLAN.md` §16.10. The grade *system* is built
 (`world-shell.js`'s `grade` block per biome, wired through `index.html`'s

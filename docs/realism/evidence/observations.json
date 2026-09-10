@@ -1,0 +1,791 @@
+{
+  "commit": "f3f7c17",
+  "platform": "Windows Chromium, mobile viewport; not an iPhone result",
+  "frames": [
+    {
+      "biome": "forest",
+      "stats": {
+        "calls": 68,
+        "triangles": 75962,
+        "sunUv": [
+          0,
+          0,
+          0
+        ],
+        "programs": 22,
+        "tier": 0,
+        "fps": 60,
+        "recovery": "flying",
+        "nesting": "flying",
+        "environment": "spherical-world-forest",
+        "altitudeAboveBase": 3.02,
+        "altitudeAboveGround": 15.32,
+        "elapsed": 1.14,
+        "pinned": true,
+        "sprintActive": false
+      },
+      "effective": {
+        "rendererPixelRatio": 1,
+        "drawingBufferWidth": 390,
+        "drawingBufferHeight": 844,
+        "bloom": {
+          "sceneTarget": {
+            "width": 390,
+            "height": 844
+          },
+          "blurA": {
+            "width": 195,
+            "height": 422
+          },
+          "blurB": {
+            "width": 195,
+            "height": 422
+          },
+          "rayTarget": {
+            "width": 195,
+            "height": 422
+          },
+          "downscale": 2,
+          "sceneSamples": 0
+        },
+        "weatherPixelRatio": 1,
+        "resizeStatePixelRatio": 1,
+        "statsPath": "bloom-frameStats"
+      },
+      "quality": {
+        "build": {
+          "requested": "v46-2026-09-10-ultra-panel",
+          "serving": "v46-2026-09-10-ultra-panel",
+          "stale": false
+        },
+        "mode": "auto",
+        "pinned": true,
+        "requested": {
+          "dpr": null,
+          "postQuality": null,
+          "shafts": null,
+          "bloomStrength": null,
+          "weatherDensity": null,
+          "mistBudget": null,
+          "decorativeDensity": null,
+          "antialiasing": null,
+          "shadowsEnabled": null,
+          "shadowType": null,
+          "shadowMapSize": null,
+          "anisotropy": null,
+          "terrainResolution": null,
+          "tone": null,
+          "exposure": null,
+          "bloomThreshold": null
+        },
+        "effective": {
+          "mode": "auto",
+          "dpr": {
+            "requested": null,
+            "effective": 1
+          },
+          "postQuality": {
+            "requested": null,
+            "effective": "half"
+          },
+          "shafts": {
+            "requested": null,
+            "effective": true
+          },
+          "bloomStrength": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "weatherDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "mistBudget": {
+            "requested": null,
+            "effective": 1
+          },
+          "decorativeDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "antialiasing": {
+            "requested": null,
+            "effective": "off"
+          },
+          "targetRate": {
+            "requested": 60,
+            "effective": 60
+          },
+          "surfaceDetail": {
+            "requested": "baseline",
+            "effective": "baseline"
+          },
+          "shadowsEnabled": {
+            "requested": null,
+            "effective": false
+          },
+          "shadowType": {
+            "requested": null,
+            "effective": "pcf"
+          },
+          "shadowMapSize": {
+            "requested": null,
+            "effective": "medium"
+          },
+          "anisotropy": {
+            "requested": null,
+            "effective": 1
+          },
+          "terrainResolution": {
+            "requested": null,
+            "effective": "standard"
+          },
+          "tone": {
+            "requested": null,
+            "effective": "neutral"
+          },
+          "exposure": {
+            "requested": null,
+            "effective": 1.12
+          },
+          "bloomThreshold": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "grade": {
+            "biome": "forest",
+            "source": "biome",
+            "tone": "neutral",
+            "exposure": 1.12,
+            "bloomThreshold": 0.78,
+            "candidate": null
+          }
+        },
+        "cooldown": {
+          "value": null,
+          "state": "unavailable",
+          "reason": "not-implemented"
+        },
+        "lastAdjustment": {
+          "reason": {
+            "value": null,
+            "state": "unavailable",
+            "reason": "not-implemented"
+          }
+        },
+        "activeMode": {
+          "value": "auto",
+          "state": "ok",
+          "reason": null
+        },
+        "sentinelFields": [
+          "cooldown",
+          "lastAdjustment.reason"
+        ]
+      },
+      "totals": {
+        "calls": 72,
+        "triangles": 75966,
+        "passes": 5,
+        "scene": {
+          "calls": 68,
+          "triangles": 75962
+        },
+        "tier": 0
+      },
+      "landmarks": [
+        "giant-tree",
+        "giant-tree-north",
+        "giant-tree-far",
+        "fallen-log",
+        "stone-arch"
+      ]
+    },
+    {
+      "biome": "canyons",
+      "stats": {
+        "calls": 64,
+        "triangles": 54120,
+        "sunUv": [
+          0,
+          0,
+          0
+        ],
+        "programs": 23,
+        "tier": 0,
+        "fps": 60,
+        "recovery": "flying",
+        "nesting": "flying",
+        "environment": "spherical-world-canyons",
+        "altitudeAboveBase": 3.02,
+        "altitudeAboveGround": 10.04,
+        "elapsed": 1.92,
+        "pinned": true,
+        "sprintActive": false
+      },
+      "effective": {
+        "rendererPixelRatio": 1,
+        "drawingBufferWidth": 390,
+        "drawingBufferHeight": 844,
+        "bloom": {
+          "sceneTarget": {
+            "width": 390,
+            "height": 844
+          },
+          "blurA": {
+            "width": 195,
+            "height": 422
+          },
+          "blurB": {
+            "width": 195,
+            "height": 422
+          },
+          "rayTarget": {
+            "width": 195,
+            "height": 422
+          },
+          "downscale": 2,
+          "sceneSamples": 0
+        },
+        "weatherPixelRatio": 1,
+        "resizeStatePixelRatio": 1,
+        "statsPath": "bloom-frameStats"
+      },
+      "quality": {
+        "build": {
+          "requested": "v46-2026-09-10-ultra-panel",
+          "serving": "v46-2026-09-10-ultra-panel",
+          "stale": false
+        },
+        "mode": "auto",
+        "pinned": true,
+        "requested": {
+          "dpr": null,
+          "postQuality": null,
+          "shafts": null,
+          "bloomStrength": null,
+          "weatherDensity": null,
+          "mistBudget": null,
+          "decorativeDensity": null,
+          "antialiasing": null,
+          "shadowsEnabled": null,
+          "shadowType": null,
+          "shadowMapSize": null,
+          "anisotropy": null,
+          "terrainResolution": null,
+          "tone": null,
+          "exposure": null,
+          "bloomThreshold": null
+        },
+        "effective": {
+          "mode": "auto",
+          "dpr": {
+            "requested": null,
+            "effective": 1
+          },
+          "postQuality": {
+            "requested": null,
+            "effective": "half"
+          },
+          "shafts": {
+            "requested": null,
+            "effective": true
+          },
+          "bloomStrength": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "weatherDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "mistBudget": {
+            "requested": null,
+            "effective": 1
+          },
+          "decorativeDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "antialiasing": {
+            "requested": null,
+            "effective": "off"
+          },
+          "targetRate": {
+            "requested": 60,
+            "effective": 60
+          },
+          "surfaceDetail": {
+            "requested": "baseline",
+            "effective": "baseline"
+          },
+          "shadowsEnabled": {
+            "requested": null,
+            "effective": false
+          },
+          "shadowType": {
+            "requested": null,
+            "effective": "pcf"
+          },
+          "shadowMapSize": {
+            "requested": null,
+            "effective": "medium"
+          },
+          "anisotropy": {
+            "requested": null,
+            "effective": 1
+          },
+          "terrainResolution": {
+            "requested": null,
+            "effective": "standard"
+          },
+          "tone": {
+            "requested": null,
+            "effective": "neutral"
+          },
+          "exposure": {
+            "requested": null,
+            "effective": 1.12
+          },
+          "bloomThreshold": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "grade": {
+            "biome": "canyons",
+            "source": "biome",
+            "tone": "neutral",
+            "exposure": 1.12,
+            "bloomThreshold": 0.78,
+            "candidate": null
+          }
+        },
+        "cooldown": {
+          "value": null,
+          "state": "unavailable",
+          "reason": "not-implemented"
+        },
+        "lastAdjustment": {
+          "reason": {
+            "value": null,
+            "state": "unavailable",
+            "reason": "not-implemented"
+          }
+        },
+        "activeMode": {
+          "value": "auto",
+          "state": "ok",
+          "reason": null
+        },
+        "sentinelFields": [
+          "cooldown",
+          "lastAdjustment.reason"
+        ]
+      },
+      "totals": {
+        "calls": 68,
+        "triangles": 54124,
+        "passes": 5,
+        "scene": {
+          "calls": 64,
+          "triangles": 54120
+        },
+        "tier": 0
+      },
+      "landmarks": [
+        "leaning-monolith"
+      ]
+    },
+    {
+      "biome": "mountain",
+      "stats": {
+        "calls": 66,
+        "triangles": 53782,
+        "sunUv": [
+          0,
+          0,
+          0
+        ],
+        "programs": 22,
+        "tier": 0,
+        "fps": 60,
+        "recovery": "flying",
+        "nesting": "flying",
+        "environment": "spherical-world-mountain",
+        "altitudeAboveBase": 3.03,
+        "altitudeAboveGround": 3.03,
+        "elapsed": 2.88,
+        "pinned": true,
+        "sprintActive": false
+      },
+      "effective": {
+        "rendererPixelRatio": 1,
+        "drawingBufferWidth": 390,
+        "drawingBufferHeight": 844,
+        "bloom": {
+          "sceneTarget": {
+            "width": 390,
+            "height": 844
+          },
+          "blurA": {
+            "width": 195,
+            "height": 422
+          },
+          "blurB": {
+            "width": 195,
+            "height": 422
+          },
+          "rayTarget": {
+            "width": 195,
+            "height": 422
+          },
+          "downscale": 2,
+          "sceneSamples": 0
+        },
+        "weatherPixelRatio": 1,
+        "resizeStatePixelRatio": 1,
+        "statsPath": "bloom-frameStats"
+      },
+      "quality": {
+        "build": {
+          "requested": "v46-2026-09-10-ultra-panel",
+          "serving": "v46-2026-09-10-ultra-panel",
+          "stale": false
+        },
+        "mode": "auto",
+        "pinned": true,
+        "requested": {
+          "dpr": null,
+          "postQuality": null,
+          "shafts": null,
+          "bloomStrength": null,
+          "weatherDensity": null,
+          "mistBudget": null,
+          "decorativeDensity": null,
+          "antialiasing": null,
+          "shadowsEnabled": null,
+          "shadowType": null,
+          "shadowMapSize": null,
+          "anisotropy": null,
+          "terrainResolution": null,
+          "tone": null,
+          "exposure": null,
+          "bloomThreshold": null
+        },
+        "effective": {
+          "mode": "auto",
+          "dpr": {
+            "requested": null,
+            "effective": 1
+          },
+          "postQuality": {
+            "requested": null,
+            "effective": "half"
+          },
+          "shafts": {
+            "requested": null,
+            "effective": true
+          },
+          "bloomStrength": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "weatherDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "mistBudget": {
+            "requested": null,
+            "effective": 1
+          },
+          "decorativeDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "antialiasing": {
+            "requested": null,
+            "effective": "off"
+          },
+          "targetRate": {
+            "requested": 60,
+            "effective": 60
+          },
+          "surfaceDetail": {
+            "requested": "baseline",
+            "effective": "baseline"
+          },
+          "shadowsEnabled": {
+            "requested": null,
+            "effective": false
+          },
+          "shadowType": {
+            "requested": null,
+            "effective": "pcf"
+          },
+          "shadowMapSize": {
+            "requested": null,
+            "effective": "medium"
+          },
+          "anisotropy": {
+            "requested": null,
+            "effective": 1
+          },
+          "terrainResolution": {
+            "requested": null,
+            "effective": "standard"
+          },
+          "tone": {
+            "requested": null,
+            "effective": "neutral"
+          },
+          "exposure": {
+            "requested": null,
+            "effective": 1.12
+          },
+          "bloomThreshold": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "grade": {
+            "biome": "mountain",
+            "source": "biome",
+            "tone": "neutral",
+            "exposure": 1.12,
+            "bloomThreshold": 0.78,
+            "candidate": null
+          }
+        },
+        "cooldown": {
+          "value": null,
+          "state": "unavailable",
+          "reason": "not-implemented"
+        },
+        "lastAdjustment": {
+          "reason": {
+            "value": null,
+            "state": "unavailable",
+            "reason": "not-implemented"
+          }
+        },
+        "activeMode": {
+          "value": "auto",
+          "state": "ok",
+          "reason": null
+        },
+        "sentinelFields": [
+          "cooldown",
+          "lastAdjustment.reason"
+        ]
+      },
+      "totals": {
+        "calls": 70,
+        "triangles": 53786,
+        "passes": 5,
+        "scene": {
+          "calls": 66,
+          "triangles": 53782
+        },
+        "tier": 0
+      },
+      "landmarks": [
+        "summit-arch"
+      ]
+    },
+    {
+      "biome": "city",
+      "stats": {
+        "calls": 70,
+        "triangles": 59106,
+        "sunUv": [
+          0,
+          0,
+          0
+        ],
+        "programs": 26,
+        "tier": 0,
+        "fps": 60,
+        "recovery": "flying",
+        "nesting": "flying",
+        "environment": "spherical-world-city",
+        "altitudeAboveBase": 3.03,
+        "altitudeAboveGround": 6.46,
+        "elapsed": 3.13,
+        "pinned": true,
+        "sprintActive": false
+      },
+      "effective": {
+        "rendererPixelRatio": 1,
+        "drawingBufferWidth": 390,
+        "drawingBufferHeight": 844,
+        "bloom": {
+          "sceneTarget": {
+            "width": 390,
+            "height": 844
+          },
+          "blurA": {
+            "width": 195,
+            "height": 422
+          },
+          "blurB": {
+            "width": 195,
+            "height": 422
+          },
+          "rayTarget": {
+            "width": 195,
+            "height": 422
+          },
+          "downscale": 2,
+          "sceneSamples": 0
+        },
+        "weatherPixelRatio": 1,
+        "resizeStatePixelRatio": 1,
+        "statsPath": "bloom-frameStats"
+      },
+      "quality": {
+        "build": {
+          "requested": "v46-2026-09-10-ultra-panel",
+          "serving": "v46-2026-09-10-ultra-panel",
+          "stale": false
+        },
+        "mode": "auto",
+        "pinned": true,
+        "requested": {
+          "dpr": null,
+          "postQuality": null,
+          "shafts": null,
+          "bloomStrength": null,
+          "weatherDensity": null,
+          "mistBudget": null,
+          "decorativeDensity": null,
+          "antialiasing": null,
+          "shadowsEnabled": null,
+          "shadowType": null,
+          "shadowMapSize": null,
+          "anisotropy": null,
+          "terrainResolution": null,
+          "tone": null,
+          "exposure": null,
+          "bloomThreshold": null
+        },
+        "effective": {
+          "mode": "auto",
+          "dpr": {
+            "requested": null,
+            "effective": 1
+          },
+          "postQuality": {
+            "requested": null,
+            "effective": "half"
+          },
+          "shafts": {
+            "requested": null,
+            "effective": true
+          },
+          "bloomStrength": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "weatherDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "mistBudget": {
+            "requested": null,
+            "effective": 1
+          },
+          "decorativeDensity": {
+            "requested": null,
+            "effective": 1
+          },
+          "antialiasing": {
+            "requested": null,
+            "effective": "off"
+          },
+          "targetRate": {
+            "requested": 60,
+            "effective": 60
+          },
+          "surfaceDetail": {
+            "requested": "baseline",
+            "effective": "baseline"
+          },
+          "shadowsEnabled": {
+            "requested": null,
+            "effective": false
+          },
+          "shadowType": {
+            "requested": null,
+            "effective": "pcf"
+          },
+          "shadowMapSize": {
+            "requested": null,
+            "effective": "medium"
+          },
+          "anisotropy": {
+            "requested": null,
+            "effective": 1
+          },
+          "terrainResolution": {
+            "requested": null,
+            "effective": "standard"
+          },
+          "tone": {
+            "requested": null,
+            "effective": "neutral"
+          },
+          "exposure": {
+            "requested": null,
+            "effective": 1.12
+          },
+          "bloomThreshold": {
+            "requested": null,
+            "effective": 0.78
+          },
+          "grade": {
+            "biome": "city",
+            "source": "biome",
+            "tone": "neutral",
+            "exposure": 1.12,
+            "bloomThreshold": 0.78,
+            "candidate": null
+          }
+        },
+        "cooldown": {
+          "value": null,
+          "state": "unavailable",
+          "reason": "not-implemented"
+        },
+        "lastAdjustment": {
+          "reason": {
+            "value": null,
+            "state": "unavailable",
+            "reason": "not-implemented"
+          }
+        },
+        "activeMode": {
+          "value": "auto",
+          "state": "ok",
+          "reason": null
+        },
+        "sentinelFields": [
+          "cooldown",
+          "lastAdjustment.reason"
+        ]
+      },
+      "totals": {
+        "calls": 74,
+        "triangles": 59110,
+        "passes": 5,
+        "scene": {
+          "calls": 70,
+          "triangles": 59106
+        },
+        "tier": 0
+      },
+      "landmarks": [
+        "broadcast-mast"
+      ]
+    }
+  ],
+  "problems": []
+}
