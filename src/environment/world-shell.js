@@ -672,7 +672,9 @@ const ENVIRONMENT_VARIANTS = [
     },
     // Default = today's global (see DEFAULT_GRADE above). Untouched until an
     // owner picks a grade on a real phone.
-    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // brighter — lift the canopy out of its own shade.
+    grade: { tone: 'neutral', exposure: 1.2096, bloomThreshold: 0.78 },
     builder: buildForestEnvironment,
   },
   {
@@ -705,7 +707,9 @@ const ENVIRONMENT_VARIANTS = [
     },
     // Default = today's global (see DEFAULT_GRADE above). Untouched until an
     // owner picks a grade on a real phone.
-    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // darker — hold the red rock instead of blowing it out.
+    grade: { tone: 'neutral', exposure: 1.008, bloomThreshold: 0.78 },
     builder: buildCanyonEnvironment,
   },
   {
@@ -750,7 +754,9 @@ const ENVIRONMENT_VARIANTS = [
     },
     // Default = today's global (see DEFAULT_GRADE above). Untouched until an
     // owner picks a grade on a real phone.
-    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // brightest — snow wants the headroom.
+    grade: { tone: 'neutral', exposure: 1.2544, bloomThreshold: 0.78 },
     builder: buildMountainEnvironment,
   },
   {
@@ -787,7 +793,9 @@ const ENVIRONMENT_VARIANTS = [
     },
     // Default = today's global (see DEFAULT_GRADE above). Untouched until an
     // owner picks a grade on a real phone.
-    grade: { tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 },
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // slightly down — protect the lit windows at dusk.
+    grade: { tone: 'neutral', exposure: 1.0528, bloomThreshold: 0.78 },
     builder: buildCityEnvironment,
   },
 ];
