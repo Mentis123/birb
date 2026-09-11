@@ -235,7 +235,15 @@ export async function startGame(page, timeout = 30000) {
     // The button self-disables and reads "Loading…" if the scene module has
     // not finished importing. Waiting for __BIRB_READY avoids that race.
     await page.waitForFunction('window.__BIRB_READY === true', null, { timeout });
-    await page.click('[data-title-start]', { timeout: 5000 });
+    // NOT 5000. The click's own handler is fast — measured at 2.6 ms, so there
+    // is no hitch under the player's thumb — but the two frames after it cost
+    // 2.1 s compiling the world's shaders under SwiftShader, and Playwright's
+    // action budget covers the page settling around the click, not just the
+    // dispatch. Run several harnesses at once on a loaded box and 5 s is not
+    // enough: `birb-quality.mjs` failed this way roughly one run in three,
+    // reporting a TimeoutError with zero assertions run, which reads exactly
+    // like a product regression and is not one. Share the caller's timeout.
+    await page.click('[data-title-start]', { timeout });
     // A revealed <main> is not a rendered frame. The elapsed clock only
     // advances inside renderFrame, so this waits for real animation frames.
     await page.waitForFunction(

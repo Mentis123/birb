@@ -315,6 +315,43 @@
 > 754-unit planet, and with the decode gate in place a missing texture now
 > leaves the procedural material standing rather than rendering wrong.
 
+> **The mountain's pines got bark for free, and two harness flakes turned out
+> to be clocks** (2026-09-11). The pine trunks are the same instanced unit
+> cylinder as the forest's, and `bark_pine_*` is already in the service
+> worker's core cache — so a second biome gained an authored surface with no
+> new asset and no new download. Two details make it work rather than
+> almost-work. **`addInstancedUvScale` had to learn `unitRadius`**: it derived
+> the circumference as `2*PI*instanceScaleX`, which is only right because the
+> forest's unit cylinder has a bottom radius of exactly 1.0. The pine's is 0.6,
+> so its bark would have tiled 1.67x too finely and read as a different, finer
+> material on a tree meant to match. **And the tint is NOT the forest's.**
+> Reproducing `pineTrunkMat`'s own 0x33422f exactly lands the trunk at
+> luminance 0.048 against the forest trunk's 0.162 — the black slab, for the
+> third time by a third route. `PINE_BARK_TINT` targets #7a7264: the forest
+> trunk's VALUE so it cannot read as a hole, desaturated and cool so the
+> mountain keeps its own palette.
+>
+> **"forest: landing never reached NESTED" was a clock, not a collider.** The
+> contact sheet reported it after 90 seconds and CLAUDE.md's own nesting note
+> makes a blocked approach the obvious suspect. Instrumented, the bird was
+> moving the whole time at a steady ~20 units per two-second sample and landed
+> in 22 s in a freshly booted browser. The landing auto-fly advances PER FRAME,
+> so at three frames a second it crawls against the wall clock.
+> `forceNest(null)` already closed the gap before landing and said so in its
+> comment; the INDEXED path never got that fix, and the sheet calls
+> `forceNest(0)`. Both share one body now — 22 s to 3 s.
+>
+> **Playwright's 5 s click budget was the other clock.** `birb-quality.mjs`
+> failed about one run in three with a TimeoutError on Tap-to-Start and ZERO
+> assertions run, which reads exactly like a product regression. Measured: the
+> click handler itself is **2.6 ms** — there is no hitch under the player's
+> thumb — but the two frames after it cost 2.1 s compiling the world's shaders,
+> and Playwright's action budget covers the page settling around a click, not
+> just its dispatch. The click now shares the caller's timeout. **Before
+> treating a harness timeout as a regression, measure the handler and the
+> frames after it separately** — they are different numbers with different
+> meanings.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.

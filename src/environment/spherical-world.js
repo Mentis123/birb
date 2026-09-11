@@ -1,7 +1,7 @@
 import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
-import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested, applyAuthoredBarkInstanced } from './authored-textures.js';
+import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested, applyAuthoredBarkInstanced, PINE_BARK_TINT } from './authored-textures.js';
 
 // Set when ?bark=1 dressed the forest landmark material; called on the next
 // world teardown. A texture created per setEnvironment() and never disposed
@@ -9,6 +9,7 @@ import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredS
 let disposeAuthoredBark = null;
 let disposeAuthoredStone = null;
 let disposeAuthoredTrunks = null;
+let disposeAuthoredPine = null;
 import { createSlalomRun } from "./slalom-run.js";
 import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
@@ -898,7 +899,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // weathered-grove variation survives the texture.
   if (typeof window !== 'undefined' && authoredBarkRequested(window.location?.search)) {
     try {
-      disposeAuthoredTrunks = applyAuthoredBarkInstanced(THREE, trunkMat);
+      // unitRadius 1.0 is this cylinder's own bottom radius. It was implicit
+      // before and is stated now, because the mountain's pine uses 0.6 and the
+      // difference is a texture tiled 1.67x too finely.
+      disposeAuthoredTrunks = applyAuthoredBarkInstanced(THREE, trunkMat, { unitRadius: 1.0 });
     } catch (err) {
       console.warn('[forest] authored trunk bark failed; keeping the procedural material', err);
     }
@@ -2248,6 +2252,25 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   const stoneMat = new THREE.MeshLambertMaterial({ color: 0x646c7c, flatShading: true, vertexColors: true });
   const snowMat = new THREE.MeshLambertMaterial({ color: 0xe6f1ff, flatShading: true });
   const pineTrunkMat = new THREE.MeshLambertMaterial({ color: 0x33422f, flatShading: true });
+  // The SAME bark file the forest uses, on the mountain's pines. No new asset
+  // and no new download: bark_pine_albedo/normal are already in sw.js's core
+  // cache, so this costs a second material's worth of program and nothing else.
+  //
+  // A different TINT though, and that is the whole care here. Reproducing
+  // 0x33422f exactly would land the trunk at luminance 0.048 against the forest
+  // trunk's 0.162, which is the black slab this repo has now met three times.
+  // PINE_BARK_TINT targets #7a7264: the forest trunk's VALUE, the mountain's
+  // temperature. unitRadius 0.6 is this cylinder's own bottom radius.
+  if (typeof window !== 'undefined' && authoredBarkRequested(window.location?.search)) {
+    try {
+      disposeAuthoredPine = applyAuthoredBarkInstanced(THREE, pineTrunkMat, {
+        tint: PINE_BARK_TINT,
+        unitRadius: 0.6,
+      });
+    } catch (err) {
+      console.warn('[mountain] authored pine bark failed; keeping the procedural material', err);
+    }
+  }
   // Pine canopy carries vertexColors for the baked base→tip gradient.
   const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x32623e, flatShading: true, vertexColors: true });
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x4a505a, flatShading: true });
@@ -3469,6 +3492,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       if (disposeAuthoredStone) {
         try { disposeAuthoredStone(); } catch (e) { console.warn('Error disposing authored stone:', e); }
         disposeAuthoredStone = null;
+      }
+      if (disposeAuthoredPine) {
+        try { disposeAuthoredPine(); } catch (e) { console.warn('Error disposing authored pine bark:', e); }
+        disposeAuthoredPine = null;
       }
       if (disposeAuthoredTrunks) {
         try { disposeAuthoredTrunks(); } catch (e) { console.warn('Error disposing authored trunk bark:', e); }

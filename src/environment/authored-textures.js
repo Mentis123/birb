@@ -72,6 +72,23 @@ export const BARK_TILE_METRES = 4.3;
 export const BARK_TINT = Object.freeze({ r: 1.78, g: 1.05, b: 0.51 });
 
 /**
+ * The same bark file, tinted for the MOUNTAIN's pines. No new asset, no new
+ * download -- bark_pine_albedo is already in the service worker's core cache.
+ *
+ * Solved rather than picked, and NOT by reproducing the procedural colour the
+ * way the forest's was. `pineTrunkMat` is 0x33422f, a dark cold green, and
+ * reproducing it exactly lands the textured trunk at luminance 0.048 against
+ * the forest trunk's 0.162 -- three times darker, which is the black-slab
+ * defect this repo keeps paying for, arriving by yet another route.
+ *
+ * So the target is #7a7264: luminance 0.171, within 6% of the forest trunk, so
+ * it cannot read as a hole -- but desaturated and cool, so the mountain keeps
+ * its own palette instead of borrowing the forest's brown. The ratio to the
+ * albedo's mean is (1.222, 1.301, 1.128), and nothing clips.
+ */
+export const PINE_BARK_TINT = Object.freeze({ r: 1.222, g: 1.301, b: 1.128 });
+
+/**
  * Load one authored texture with every convention applied.
  *
  * `anisotropy` is deliberately over-asked at 16: three clamps it to the
@@ -327,15 +344,27 @@ export function applyAuthoredStone(THREE, material, {
  * the material's own map.repeat stays (1,1) and this is the only thing setting
  * density.
  */
-export function addInstancedUvScale(material, THREE, { tileMetres = BARK_TILE_METRES } = {}) {
+export function addInstancedUvScale(material, THREE, {
+  tileMetres = BARK_TILE_METRES,
+  // The UNIT geometry's radius at its widest, before the instance scale.
+  // `birbSx` is the instance's X scale, and the world circumference is
+  // 2*PI*unitRadius*Sx -- not 2*PI*Sx. The forest trunk's unit cylinder has a
+  // bottom radius of exactly 1.0, so this was invisible there and wrong
+  // everywhere else: the mountain pine's is 0.6, which would have tiled its
+  // bark 1.67x too densely around the trunk and read as a different, finer
+  // material on a tree that is meant to match.
+  unitRadius = 1,
+} = {}) {
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
 
   material.onBeforeCompile = (shader, renderer) => {
     if (typeof previous === 'function') previous.call(material, shader, renderer);
     shader.uniforms.uBirbTileMetres = { value: tileMetres };
+    shader.uniforms.uBirbUnitRadius = { value: unitRadius };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n\tuniform float uBirbTileMetres;`)
+      .replace('#include <common>',
+        `#include <common>\n\tuniform float uBirbTileMetres;\n\tuniform float uBirbUnitRadius;`)
       .replace('#include <uv_vertex>', `#include <uv_vertex>
       #ifdef USE_INSTANCING
         {
@@ -343,7 +372,7 @@ export function addInstancedUvScale(material, THREE, { tileMetres = BARK_TILE_ME
           float birbSx = length(instanceMatrix[0].xyz);
           float birbSy = length(instanceMatrix[1].xyz);
           vec2 birbRepeat = vec2(
-            6.28318530718 * birbSx / uBirbTileMetres,
+            6.28318530718 * uBirbUnitRadius * birbSx / uBirbTileMetres,
             birbSy / uBirbTileMetres
           );
           #ifdef USE_MAP
@@ -360,7 +389,7 @@ export function addInstancedUvScale(material, THREE, { tileMetres = BARK_TILE_ME
   // carrying an identical onBeforeCompile closure, and every one of them gets
   // the first material's uniforms. Icon3D paid for that lesson already.
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => `${base}-instuv-${tileMetres}`;
+  material.customProgramCacheKey = () => `${base}-instuv-${tileMetres}-${unitRadius}`;
   return material;
 }
 
@@ -371,19 +400,23 @@ export function addInstancedUvScale(material, THREE, { tileMetres = BARK_TILE_ME
  * one physical scale; the difference is entirely in how the UVs are derived.
  * map.repeat stays (1,1) here -- addInstancedUvScale owns density.
  */
-export function applyAuthoredBarkInstanced(THREE, material, { basePath = './assets/textures' } = {}) {
+export function applyAuthoredBarkInstanced(THREE, material, {
+  basePath = './assets/textures',
+  tint = BARK_TINT,
+  unitRadius = 1,
+} = {}) {
   const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
   let map = null;
   let normalMap = null;
   const gate = commitWhenDecoded(2, () => {
     material.map = map;
     material.normalMap = normalMap;
-    material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
+    material.color.setRGB(tint.r, tint.g, tint.b);
     // The injection is installed WITH the maps, not before them. It reads
     // USE_MAP / USE_NORMALMAP, which are only defined once a map is attached,
     // so installing it early compiles a program with a dead branch in it and
     // then needs a second compile anyway.
-    addInstancedUvScale(material, THREE);
+    addInstancedUvScale(material, THREE, { unitRadius });
     material.needsUpdate = true;
   });
   map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`, { onLoad: gate.onOne });
