@@ -201,7 +201,19 @@ export function createFollowCameraRig(three, options = {}) {
         state.up.normalize();
       }
     } else if (state.sphereCenter) {
-      // Flying: use radial up from sphere center
+      // Flying: use radial up from sphere center.
+      //
+      // DEAD AS SHIPPED, and worth knowing before tuning anything here.
+      // `velocity` reaches this function from camera-state.js, which reads
+      // `flightController?.velocity` -- and BirdFlight has no velocity vector
+      // ("it has no separate velocity vector", bird-flight.js:319; its
+      // _poseOutput.velocity is hardcoded to zero behind a "Todo: calc
+      // velocity if needed"). So `velocity` is always null, isStationary is
+      // always true, and this branch has never run. Verified by probing
+      // flightController.velocity live: null.
+      //
+      // The two branches differ by tens of degrees of ROLL about the view
+      // axis, so waking this one up is a visible change, not a cleanup.
       state.up.copy(pose.position).sub(state.sphereCenter);
       if (state.up.lengthSq() < 1e-6) {
         state.up.set(0, 1, 0);
@@ -420,44 +432,39 @@ export function createFollowCameraRig(three, options = {}) {
   }
 
   /**
-   * Collapse every damped term onto its target, immediately.
+   * Collapse the rig onto its target on the next update.
    *
-   * The rig lerps position, lookAt and orientation toward their desired values
-   * each frame, so after a teleport the camera is somewhere between where it
-   * was and where it belongs -- and WHICH somewhere depends on how many frames
-   * have elapsed. That makes two captures of "the same" pose different
-   * pictures, which spoiled three separate A/B measurements before this
-   * existed.
+   * The first version of this recomputed the snap by hand from
+   * state.desiredPosition -- which is only valid if computeTargets has run
+   * THIS frame. Called from outside the render loop it therefore collapsed
+   * onto values from before the pose changed, and measured as the camera
+   * sitting at its spawn default while the bird was 86 units away.
    *
-   * `_breathTime` is reset for the same reason and it is the subtler half: the
-   * breathing sway accumulates from page load, so two runs are never at the
-   * same phase and the camera sits up to a full CAMERA_BREATH_AMPLITUDE apart
-   * even when everything else agrees.
+   * reset() already does exactly this and does it correctly, because it runs
+   * inside updateFromPose AFTER computeTargets. So rather than re-implement
+   * it, drop the initialized flag and let the next update take the reset
+   * branch: no damping, exact target, right order, one line.
    *
-   * Call it AFTER at least one updateFromPose, or the desired values it
-   * collapses onto have never been computed.
+   * _breathTime is zeroed for a separate reason and it is the subtler half.
+   * The breathing sway accumulates from page load, so two runs are never at
+   * the same phase and the camera sits up to a full CAMERA_BREATH_AMPLITUDE
+   * apart even when every other term agrees.
    */
   function snap() {
-    // `perspective` is local to attach/updateFromPose; the rig keeps the
-    // attached camera on state.camera, which is what is reachable from here.
-    const cam = state.camera;
-    if (!cam) return null;
-    state.position.copy(state.desiredPosition);
-    state.lookAt.copy(state.desiredLookAt);
+    state.initialized = false;
     _breathTime = 0;
-    cam.position.copy(state.position);
-    const upForLookAt = computeStableUp(state.position, state.lookAt, state.up, state.orientation);
-    scratch.lookMatrix.lookAt(state.position, state.lookAt, upForLookAt);
-    state.targetOrientation.setFromRotationMatrix(scratch.lookMatrix);
-    state.orientation.copy(state.targetOrientation);
-    cam.quaternion.copy(state.orientation);
-    scratch.lookDirection.set(0, 0, -1).applyQuaternion(state.orientation);
-    scratch.lookTarget.copy(state.position).add(scratch.lookDirection);
-    cam.lookAt(scratch.lookTarget);
-    return {
-      position: state.position.toArray().map((n) => +n.toFixed(4)),
-      lookAt: state.lookAt.toArray().map((n) => +n.toFixed(4)),
-    };
+    // travelDirection is the one term inside computeTargets that carries
+    // history: it lerps 25% toward the instantaneous direction each frame, so
+    // two runs that reached the same pose by different routes compute
+    // different camera offsets from it. Measured as identical bird poses
+    // producing camera quaternions of [0.351, 0.905, 0.070, 0.231] and
+    // [-0.018, 0.970, -0.025, 0.239].
+    //
+    // Zeroing it takes the branch computeTargets already has for a cold start,
+    // which copies the instantaneous direction instead of blending -- so the
+    // camera becomes a pure function of the current pose, with no past.
+    state.travelDirection.set(0, 0, 0);
+    return { pending: true };
   }
 
   return {

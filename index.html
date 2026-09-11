@@ -3660,7 +3660,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v51-2026-09-11-pose-orientation';
+    const BIRB_BUILD = 'v52-2026-09-11-camera-probe';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -9634,10 +9634,11 @@
         } else {
           // Use Legacy Camera State (supports FPV, Sequence, Fixed)
           cameraState.updateActiveCamera({ pose, ambientOffsets: null, delta });
-          // Harness-only: collapse the rig's damping once the update above has
-          // recomputed the desired position from the restored pose. Two frames
-          // because updateFromPose derives the desired values from the pose it
-          // is handed, and the first one after a teleport is still blending.
+          // Harness-only. snap() only drops the rig's initialized flag, so the
+          // NEXT updateFromPose takes its reset branch and lands exactly on
+          // target with no damping. Marking it after the update above means
+          // the reset happens on the following frame, by which time the pose
+          // it computes from is the restored one.
           if (__birbPendingCameraSnap > 0) {
             __birbPendingCameraSnap -= 1;
             if (typeof cameraState.snap === 'function') cameraState.snap();
@@ -10873,12 +10874,32 @@
           // Speed 0 and a zeroed stick, or the controller integrates the bird
           // out from under the pose that was just set.
           B.freeze(true);
+          // Velocity must be pinned too, and this is the subtle one: the
+          // follow rig picks its UP VECTOR by branching on
+          // `velocity.lengthSq() < 0.01` -- bird-frame up when stationary,
+          // radial-from-sphere-centre when flying. Those differ by tens of
+          // degrees of ROLL about the view axis, so two runs that reached the
+          // same place by different routes framed the same subject rotated
+          // relative to each other: measured at 0.13 degrees apart in look
+          // direction and 44.57 degrees apart in up.
+          //
+          // restorePose already zeroes velocity, goToLandmark does not, which
+          // is exactly why an A/B of the two disagreed. Zero it here so the
+          // branch is decided the same way every time.
+          // NOTE: there is nothing to zero. BirdFlight has no velocity vector at
+          // all -- its own comment says "it has no separate velocity vector",
+          // and _poseOutput.velocity is hardcoded to (0,0,0) behind a "Todo:
+          // calc velocity if needed". So camera-state.js:337 always reads null,
+          // the rig's `isStationary` is ALWAYS true, and follow-camera's
+          // "Flying: use radial up from sphere center for natural flight feel"
+          // branch has never executed. Same family as the bloom pass gated off
+          // on every iPhone. Left as a comment rather than a no-op guard.
           // The rig's desiredPosition is computed inside updateFromPose, which
           // only runs in the render loop -- so snapping right here collapses
           // onto whatever it held BEFORE the pose changed, which measured as
           // the camera sitting at its spawn default in both runs. Defer it:
           // the loop snaps once, after the next update has seen the new pose.
-          __birbPendingCameraSnap = 2;
+          __birbPendingCameraSnap = 1;
           const cam = cameraState && typeof cameraState.snap === 'function' ? cameraState.snap() : null;
           return {
             seed: B.worldSeed(),
@@ -10905,6 +10926,10 @@
             position: c.position.toArray().map((n) => +n.toFixed(4)),
             quaternion: c.quaternion.toArray().map((n) => +n.toFixed(5)),
             fov: c.fov,
+            // The rig picks its up vector by branching on this, so it is the
+            // difference between bird-frame up and radial up -- tens of
+            // degrees of roll. Probe it or the roll looks like magic.
+            speed2: flightController?.velocity ? +flightController.velocity.lengthSq().toFixed(6) : null,
           };
         },
         freeze: (on = true) => {
