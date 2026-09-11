@@ -160,15 +160,21 @@ test('the arch stone is solved from the torus, and barely needs a tint', () => {
   assert.equal(mat.roughnessMap, undefined, 'Lambert has no roughnessMap slot');
 
   // repeat is solved from the geometry, exactly as the bark's is: the
-  // half-torus arc is PI*13 and the tube is 2*PI*2.4, at the same 4.3-unit
+  // half-torus arc is PI*R and the tube is 2*PI*tube, at the same 4.3-unit
   // tile so stone and bark read at one physical scale.
   const rep = repeatForCylinder(ARCH_ARC_UNITS, ARCH_TUBE_UNITS, BARK_TILE_METRES);
-  assert.deepEqual(rep, { x: 9, y: 4 });
-  assert.equal(T.loaded[0].repeat.x, 9);
+  assert.deepEqual(rep, { x: 12, y: 4 });
+  assert.equal(T.loaded[0].repeat.x, 12);
   assert.equal(T.loaded[0].repeat.y, 4);
   const tileU = ARCH_ARC_UNITS / rep.x;
   const tileV = ARCH_TUBE_UNITS / rep.y;
   assert.ok(Math.abs(tileU - tileV) < 1, `tile ${tileU.toFixed(2)} x ${tileV.toFixed(2)} must be near-square`);
+  // Within 20% of the bark's tile, or the arch and the trees stop reading as
+  // one world however good each looks alone.
+  for (const tile of [tileU, tileV]) {
+    assert.ok(Math.abs(tile - BARK_TILE_METRES) / BARK_TILE_METRES < 0.2,
+      `tile ${tile.toFixed(2)} must be near the bark's ${BARK_TILE_METRES}`);
+  }
 
   // Near-white, unlike the bark's (1.78, 1.05, 0.51): this albedo was authored
   // to the procedural material's own tone, so it needs almost no correction.
@@ -179,4 +185,22 @@ test('the arch stone is solved from the torus, and barely needs a tint', () => {
   dispose();
   assert.equal(mat.color.getHex(), 0x6b6257);
   assert.ok(T.loaded.every(t => t.disposed));
+});
+
+test('the arch builder owns the dimensions, and they reach the tiling', () => {
+  // Regression guard with teeth: the constants used to be hard-coded in the
+  // texture module against a 13-unit arch. The arch was then rebuilt at 17 --
+  // it had shipped lying FLAT on the ground and had to be stood up -- and
+  // nothing anywhere would have said the tiles were now stretched 31%.
+  const T = fakeThree();
+  const mat = fakeMaterial();
+  const dispose = applyAuthoredStone(T, mat, {
+    arcUnits: Math.PI * 40,
+    tubeUnits: 2 * Math.PI * 6,
+  });
+  const expected = repeatForCylinder(Math.PI * 40, 2 * Math.PI * 6, BARK_TILE_METRES);
+  assert.deepEqual({ x: T.loaded[0].repeat.x, y: T.loaded[0].repeat.y }, expected);
+  assert.notDeepEqual(expected, { x: ARCH_ARC_UNITS, y: ARCH_TUBE_UNITS });
+  assert.ok(expected.x > 12, 'a bigger arch must take more tiles, not the same number');
+  dispose();
 });

@@ -184,17 +184,29 @@ export function applyAuthoredBark(THREE, material, { circumference, height, base
  * the old tone is (0.97, 0.97, 0.96) -- the art was made to the right target
  * and needs almost no correction. The bark needed (1.78, 1.05, 0.51).
  *
- * TorusGeometry(13, 2.4, 6, 14, PI): u runs the half-torus arc, PI * 13 = 40.8
- * units, and v runs the tube, 2 * PI * 2.4 = 15.1. At the bark's 4.3-unit tile
- * that is repeat (9, 4), giving 4.54 x 3.77 -- near-square, and the same
- * physical scale as the bark so the two read as one world.
+ * TorusGeometry(R, tube, .., PI): u runs the half-torus arc, PI * R units, and
+ * v runs the tube, 2 * PI * tube. At the bark's 4.3-unit tile the arch's
+ * 17 / 2.9 works out near-square, and at the same physical scale as the bark
+ * so the two read as one world.
+ *
+ * The DEFAULTS below are only a fallback -- the arch's real dimensions are
+ * passed in from the builder that owns the geometry. Hard-coding them here
+ * means the day someone resizes the arch, the tiles stretch silently and the
+ * only symptom is a texture that looks slightly wrong in a screenshot nobody
+ * takes.
  */
 export const STONE_TINT = Object.freeze({ r: 0.97, g: 0.97, b: 0.96 });
-export const ARCH_ARC_UNITS = Math.PI * 13;
-export const ARCH_TUBE_UNITS = 2 * Math.PI * 2.4;
+export const ARCH_RADIUS_UNITS = 17;
+export const ARCH_TUBE_RADIUS_UNITS = 2.9;
+export const ARCH_ARC_UNITS = Math.PI * ARCH_RADIUS_UNITS;
+export const ARCH_TUBE_UNITS = 2 * Math.PI * ARCH_TUBE_RADIUS_UNITS;
 
-export function applyAuthoredStone(THREE, material, { basePath = './assets/textures' } = {}) {
-  const repeat = repeatForCylinder(ARCH_ARC_UNITS, ARCH_TUBE_UNITS, BARK_TILE_METRES);
+export function applyAuthoredStone(THREE, material, {
+  basePath = './assets/textures',
+  arcUnits = ARCH_ARC_UNITS,
+  tubeUnits = ARCH_TUBE_UNITS,
+} = {}) {
+  const repeat = repeatForCylinder(arcUnits, tubeUnits, BARK_TILE_METRES);
   const map = loadTexture(THREE, `${basePath}/stone_rock_albedo.png`, { repeat });
   const normalMap = loadTexture(THREE, `${basePath}/stone_rock_normal.png`, { repeat });
 

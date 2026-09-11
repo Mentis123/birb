@@ -10471,6 +10471,113 @@
     // called from the Tap-to-Start handler on the Title page. Flag is hoisted
     // to the top of the script so the visibility-change listener (defined
     // earlier) can safely read it.
+    // ─── Landmark seek (production path) ─────────────────────────────────
+    // Deliberately OUTSIDE the ?debug block below. Every landmark in this
+    // game is a single object on a 754-unit planet, and the owner's review
+    // loop is "open the URL on a phone and look at the new material" -- so a
+    // seek reachable only from a desktop console is a seek that does not
+    // help the one person who has to sign the art off. He could not find the
+    // stone arch; that is what this is for.
+    function seekLandmark(id, back = null) {
+      const found = (sphericalWorld?.landmarks || []).find((l) => l.id === id);
+      if (!found || !flightController?.position) return null;
+      // Each landmark carries its own stand-off; 34 is only the fallback for
+      // one that does not. A 74-unit mast at 34 units is a black wall.
+      back = back ?? found.viewDistance ?? 34;
+      const up = found.position.clone().normalize();
+      // Offset sideways along the surface so the landmark is in front of
+      // the bird rather than inside it.
+      const side = new THREE.Vector3(0, 1, 0).cross(up);
+      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+      side.normalize();
+      const target = found.position.clone().addScaledVector(side, back);
+      const dir = target.clone().normalize();
+      const terrain = (typeof sampleTerrainHeight === 'function')
+        ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
+      flightController.position.copy(dir).multiplyScalar(sphericalWorld.sphereRadius + terrain + 16);
+      // AIM at it. The first version called a setForward() that does not
+      // exist on this controller, so the bird kept whatever heading it had
+      // and the landmark was usually behind the camera — which is how three
+      // 130-unit trees could be built, reported, and never seen in a single
+      // capture. The controller orients purely by quaternion, so build the
+      // basis directly: forward toward the target, up radial.
+      const eye = flightController.position;
+      const radial = eye.clone().normalize();
+      const fwd = found.position.clone().sub(eye);
+      fwd.addScaledVector(radial, -fwd.dot(radial)).normalize();  // into the tangent plane
+      const rightAxis = new THREE.Vector3().crossVectors(fwd, radial).normalize();
+      const basis = new THREE.Matrix4().makeBasis(
+        rightAxis, radial, fwd.clone().multiplyScalar(-1),  // model faces -Z
+      );
+      flightController.quaternion.setFromRotationMatrix(basis);
+      return found.id;
+    }
+
+    // A toast of its own rather than the nest one: that element lives inside
+    // the nest UI container, whose own .is-visible gate would decide whether
+    // this message is ever seen.
+    let __birbGotoToastTimer = null;
+    function showGotoToast(text) {
+      let el = document.getElementById('birb-goto-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'birb-goto-toast';
+        el.style.cssText = [
+          'position:fixed', 'left:50%', 'top:max(4.5rem,env(safe-area-inset-top))',
+          'transform:translateX(-50%)', 'z-index:9000', 'pointer-events:none',
+          'padding:0.55rem 1rem', 'border-radius:999px', 'max-width:90vw',
+          'background:rgba(12,16,24,0.92)', 'color:rgba(255,235,215,0.96)',
+          'border:1px solid rgba(255,180,120,0.35)', 'text-align:center',
+          'font-size:clamp(0.72rem,2.4vw,0.88rem)',
+          'opacity:0', 'transition:opacity 300ms ease',
+        ].join(';');
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      // The lifecycle is recorded on the element because it cannot be
+      // photographed: the capture harness takes ~18 seconds of wall clock to
+      // reach the shutter, so the toast has always faded by then and a
+      // screenshot can only ever show it absent. `state` lets a check assert
+      // that it was actually raised and then dismissed.
+      el.dataset.state = 'pending';
+      requestAnimationFrame(() => { el.style.opacity = '1'; el.dataset.state = 'shown'; });
+      if (__birbGotoToastTimer) clearTimeout(__birbGotoToastTimer);
+      __birbGotoToastTimer = setTimeout(() => {
+        el.style.opacity = '0';
+        el.dataset.state = 'faded';
+      }, 5000);
+    }
+
+    // ?env=<biome>&goto=<landmark-id>, applied once when the loop starts.
+    // Landmarks are built per biome, so ?goto=stone-arch is only satisfiable
+    // in the forest -- hence ?env=. Both are no-ops when absent.
+    function applyStartupLocation() {
+      const params = new URLSearchParams(location.search);
+      const envId = params.get('env');
+      const gotoId = params.get('goto');
+      if (!envId && !gotoId) return null;
+      if (envId) {
+        if (getEnvironmentDefinition(envId)) {
+          setEnvironment(envId);
+        } else {
+          showGotoToast(`No biome "${envId}". Try: ${ENVIRONMENT_VARIANTS.map((v) => v.id).join(', ')}`);
+          return null;
+        }
+      }
+      if (!gotoId) return { env: envId, landmark: null };
+      const hit = seekLandmark(gotoId);
+      if (hit) {
+        // The chase camera damps toward the bird, so without a snap the first
+        // seconds are a swoop in from wherever spawn was -- across the planet.
+        __birbPendingCameraSnap = 1;
+        showGotoToast(`Flew you to: ${hit}`);
+      } else {
+        const here = (sphericalWorld?.landmarks || []).map((l) => l.id).join(', ');
+        showGotoToast(`No landmark "${gotoId}" in this biome. Here: ${here || 'none'}`);
+      }
+      return { env: envId, landmark: hit };
+    }
+
     // ─── Verification hook ───────────────────────────────────────────────
     // Exposed ONLY when the page is loaded with ?debug=1, so production never
     // carries a scriptable handle on the game. tools/birb-shot.mjs drives this
@@ -10519,37 +10626,9 @@
           return p.toArray().map((n) => +n.toFixed(1));
         },
         // Fly to a named landmark and look at it from a sensible distance.
-        goToLandmark: (id, back = 34) => {
-          const found = (sphericalWorld?.landmarks || []).find((l) => l.id === id);
-          if (!found || !flightController?.position) return null;
-          const up = found.position.clone().normalize();
-          // Offset sideways along the surface so the landmark is in front of
-          // the bird rather than inside it.
-          const side = new THREE.Vector3(0, 1, 0).cross(up);
-          if (side.lengthSq() < 0.01) side.set(1, 0, 0);
-          side.normalize();
-          const target = found.position.clone().addScaledVector(side, back);
-          const dir = target.clone().normalize();
-          const terrain = (typeof sampleTerrainHeight === 'function')
-            ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
-          flightController.position.copy(dir).multiplyScalar(sphericalWorld.sphereRadius + terrain + 16);
-          // AIM at it. The first version called a setForward() that does not
-          // exist on this controller, so the bird kept whatever heading it had
-          // and the landmark was usually behind the camera — which is how three
-          // 130-unit trees could be built, reported, and never seen in a single
-          // capture. The controller orients purely by quaternion, so build the
-          // basis directly: forward toward the target, up radial.
-          const eye = flightController.position;
-          const radial = eye.clone().normalize();
-          const fwd = found.position.clone().sub(eye);
-          fwd.addScaledVector(radial, -fwd.dot(radial)).normalize();  // into the tangent plane
-          const rightAxis = new THREE.Vector3().crossVectors(fwd, radial).normalize();
-          const basis = new THREE.Matrix4().makeBasis(
-            rightAxis, radial, fwd.clone().multiplyScalar(-1),  // model faces -Z
-          );
-          flightController.quaternion.setFromRotationMatrix(basis);
-          return found.id;
-        },
+        // The body lives outside this block so ?goto= can reach it in
+        // production -- see seekLandmark().
+        goToLandmark: (id, back = null) => seekLandmark(id, back),
         // Paint the lakes flat magenta and unlit. When water cannot be found
         // in a frame there are two very different reasons — it is not being
         // drawn, or it is being drawn and looks like the misted ground around
@@ -10636,6 +10715,40 @@
           sprintState.active = !!on;
           flightController.speed = on ? sprintState.sprintSpeed : sprintState.baseSpeed;
           return sprintState.active;
+        },
+        // Where a named object actually IS, measured rather than argued
+        // from the source. Returns the world AABB plus, for each local point
+        // you name, its radius and the terrain radius beneath it -- so
+        // "is this standing up or lying flat" and "are its feet on the
+        // ground" are numbers, not readings of a render. The AABB alone is
+        // not enough on a sphere: every prop is tilted relative to the world
+        // axes, so an axis-aligned box around a thin arch is a fat blob.
+        bbox: (name, localPoints = []) => {
+          let hit = null;
+          sphericalWorld?.root?.traverse((o) => {
+            if (!hit && o.name && o.name.includes(name) && o.geometry) hit = o;
+          });
+          if (!hit) return null;
+          hit.updateWorldMatrix(true, false);
+          const box = new THREE.Box3().setFromObject(hit);
+          const r = (n) => +n.toFixed(2);
+          const groundR = (v) => {
+            const d = v.clone().normalize();
+            return sphericalWorld.sphereRadius
+              + (typeof sampleTerrainHeight === 'function' ? sampleTerrainHeight(d.x, d.y, d.z) : 0);
+          };
+          const probes = localPoints.map((p) => {
+            const w = new THREE.Vector3(p[0], p[1], p[2]).applyMatrix4(hit.matrixWorld);
+            const g = groundR(w);
+            return { local: p, radius: r(w.length()), groundRadius: r(g), aboveGround: r(w.length() - g) };
+          });
+          return {
+            name: hit.name,
+            worldSize: box.getSize(new THREE.Vector3()).toArray().map(r),
+            origin: hit.getWorldPosition(new THREE.Vector3()).toArray().map(r),
+            originRadius: r(hit.getWorldPosition(new THREE.Vector3()).length()),
+            probes,
+          };
         },
         goToProp: (name, index = 0, back = 34, lift = 12) => {
           if (!sphericalWorld?.root || !flightController?.position) return null;
@@ -11290,6 +11403,21 @@
       gameLoopStarted = true;
       scheduleRendererResize(true);
       renderer.setAnimationLoop(renderFrame);
+      // Deferred out of the Tap-to-Start handler rather than run inline.
+      // `?env=` rebuilds the entire world synchronously, and this function is
+      // called straight from the click listener: run inline, the click does
+      // not return until the rebuild finishes. Measured, not guessed -- the
+      // capture harness's 5s click timeout expired on `?env=city`, and on a
+      // phone that is the title screen sitting frozen under your thumb.
+      // One frame later the loop is running and the seek still lands before
+      // the camera has damped anywhere.
+      requestAnimationFrame(() => {
+        try {
+          applyStartupLocation();
+        } catch (err) {
+          console.warn('[goto] startup location failed', err);
+        }
+      });
       if (pendingDevPanelOpen) {
         pendingDevPanelOpen = false;
         openDevWorkbench();

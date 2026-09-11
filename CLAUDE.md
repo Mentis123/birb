@@ -177,6 +177,46 @@
 > dark material far more than a bright one, which is how a sun rim turned the
 > city's 0.09-linear asphalt into pale snow.
 
+> **Reviewing art on the phone: `?goto=` and `?env=`** (2026-09-11). Every
+> landmark in this game is one object on a 754-unit planet, and the review
+> loop is "open the URL on your phone and look". `birbmobile.vercel.app/?goto=stone-arch`
+> flies you there before the first frame and names what it did in a toast;
+> `?env=forest|canyons|mountain|city` switches biome first, since landmarks are
+> per-biome. An unknown id lists what this biome actually has. These are
+> PRODUCTION paths, not `?debug=1` hooks — a seek reachable only from a desktop
+> console does not help the one person who has to sign the art off. Each
+> landmark carries its own `viewDistance`: one stand-off cannot serve a 74-unit
+> broadcast mast and an 18-unit summit arch, and at the old flat 34 the mast
+> filled the frame as a black wall. `applyStartupLocation` runs in a
+> `requestAnimationFrame`, NOT inline — `?env=` rebuilds the whole world
+> synchronously and this is called straight from the Tap-to-Start listener, so
+> inline it froze the title screen under your thumb (measured: the harness's
+> 5s click timeout expired).
+>
+> **The forest's stone arch was a flat ribbon on the ground** — the canyon-arch
+> defect from §17, reproduced here and shipped. `TorusGeometry`'s ring lies in
+> the XY plane, so rotating local Y onto `up` already stands the arc up; the
+> extra `PI/2` about local X laid it flat, and it read as a low stone curb you
+> fly over without noticing. It is a 17-unit half torus on its own two feet now,
+> and the colliders follow the ARC (a post at ±R is only on the stone at h = 0 —
+> nine units up the arch has already curved 2.5 units inward, so vertical
+> colliders guarded air beside a leg you could fly straight through). Two
+> things cost a round each and are worth keeping. **Levelling a 34-unit span
+> to its lowest foot buries the arch**: one of three terrain samples landed in a
+> pit and put the whole thing 20 units under the hill — pick the SITE instead,
+> scanning for flat ground. And **scan in surface UNITS, not in `(angle,
+> bearing)`**: `angle` is arc from the valley anchor, so the same ±0.22 wobble
+> moves 26 units on one and 5 on the other — it walked the arch onto the
+> giant-tree site and the capture opened inside a canopy.
+>
+> `__BIRB.bbox(name, localPoints)` is why both were found in minutes rather
+> than argued from the source: it reports each named local point's height above
+> its own ground. The source was right about the geometry and wrong about what
+> was on screen, twice. `tools/birb-shot.mjs` gained `--query` for the same
+> reason — flags used to be smuggled in via `--page index.html?bark=1`, which
+> appends a SECOND `?debug=1` and leaves `__BIRB` undefined while the flag's own
+> regex still matched, so the capture looked like it proved the flagged path.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.

@@ -1490,7 +1490,12 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   // term still gives it form. Legibility beats texture on a landmark.
   const crownMat = new THREE.MeshLambertMaterial({ color: 0xf0b83c, flatShading: true });
   addFoliageWind(crownMat);
-  const stoneMat = new THREE.MeshLambertMaterial({ color: 0x6b6257, flatShading: true });
+  // Pale warm limestone, for the same reason the landmark trunk is 0x8a6440
+  // and not 0x5a4028: the arch is 34 units across and 22 tall, and at 0x6b6257
+  // every face the sun does not reach came out near black -- captured, from
+  // both sides. A big dark mass against a bright sky reads as a hole, not as
+  // stone.
+  const stoneMat = new THREE.MeshLambertMaterial({ color: 0xa4907a, flatShading: true });
   const crownGeometry = createCanopyGeometry(THREE, 1);
 
   const landmarks = [];
@@ -1532,9 +1537,15 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
     { angle: 2.30, bearing: -1.7, id: 'giant-tree-far' },
   ];
 
+  // Where the arch must NOT go. The champion trees are 88 units of trunk
+  // under four stacked crowns; put the arch inside one and the landmark is
+  // invisible from every angle AND the seek camera opens inside foliage.
+  const keepClear = [];
+
   for (const site of SITES) {
     const dir = along(site.angle, site.bearing);
     const { position: base, up } = groundAt(dir);
+    keepClear.push({ position: base.clone(), radius: 46 });
 
     const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 7.5, TRUNK_HEIGHT, 9), barkMat);
     trunk.position.copy(base).addScaledVector(up, TRUNK_HEIGHT / 2);
@@ -1596,7 +1607,11 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
       radius: 26,
       tint: 0xf0dda0,
     });
-    landmarks.push({ id: site.id, position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.6) });
+    landmarks.push({
+      id: site.id,
+      position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.6),
+      viewDistance: TRUNK_HEIGHT,
+    });
   }
 
   // Two smaller silhouettes near the valley, for close-range orientation.
@@ -1607,41 +1622,149 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   const logAxis = new THREE.Vector3().crossVectors(log.up, forward).normalize();
   logMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), logAxis);
   group.add(logMesh);
+  keepClear.push({ position: logMesh.position.clone(), radius: 24 });
   proximityTargets.push({ position: logMesh.position.clone(), radius: 12, tint: 0xd8c9a4 });
+
+  const ARCH_RADIUS = 17;
+  const ARCH_TUBE = 2.9;
 
   // Authored sandstone on the arch, behind ?stone=1 (or ?authored=1 for every
   // authored texture at once). stoneMat is a plain Mesh material, which is the
   // pattern the bark proved: no per-instance UV problem, one solved repeat.
+  // The arch's dimensions are passed in rather than duplicated in the texture
+  // module: the repeat is solved FROM them, so a resize here has to reach the
+  // tiling or the stone silently stretches.
   if (typeof window !== 'undefined' && authoredStoneRequested(window.location?.search)) {
     try {
-      disposeAuthoredStone = applyAuthoredStone(THREE, stoneMat);
+      disposeAuthoredStone = applyAuthoredStone(THREE, stoneMat, {
+        arcUnits: Math.PI * ARCH_RADIUS,
+        tubeUnits: 2 * Math.PI * ARCH_TUBE,
+      });
     } catch (err) {
       console.warn('[landmark] authored stone failed; keeping the procedural material', err);
     }
   }
 
-  const archDir = along(0.22, -1.05);
-  const arch = groundAt(archDir);
-  const archMesh = new THREE.Mesh(new THREE.TorusGeometry(13, 2.4, 6, 14, Math.PI), stoneMat);
-  archMesh.position.copy(arch.position).addScaledVector(arch.up, 0.5);
-  archMesh.quaternion
-    .setFromUnitVectors(new THREE.Vector3(0, 1, 0), arch.up)
-    .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+  // An arch is a half torus ON ITS OWN TWO FEET. This one shipped with an
+  // extra PI/2 about local X, which is the exact defect recorded for the
+  // canyons' arches: TorusGeometry's ring lies in the XY plane, so rotating
+  // Y onto `up` already stands the arc up, and the extra turn laid it flat.
+  // Soloed, it rendered as a semicircular ribbon of stone on the ground —
+  // a low curb you fly over without noticing, which is why the owner went
+  // looking for an arch in the forest and did not find one. It was also
+  // where the authored sandstone was landing.
+  // A 34-unit span needs 34 units of level ground, and this terrain rolls:
+  // measured at the authored spot, the ground fell 5 and 12 units away from
+  // the centre within one span. Levelling the mesh to its lowest foot buried
+  // the whole arch 20 units under the hill (measured, not guessed:
+  // __BIRB.bbox('stone-arch', [[0,0,0],[17,0,0],[-17,0,0],[0,17,0]]) reports
+  // every springing point's height above its own ground). So pick the SITE
+  // instead: scan a small patch around the authored direction and take the
+  // flattest place a 34-unit span will sit on.
+  const archSpan = (dir) => {
+    const up = dir.clone().normalize();
+    const side = new THREE.Vector3().crossVectors(up, forward).normalize();
+    const at = (sign) => {
+      const d = up.clone().addScaledVector(side, sign * ARCH_RADIUS / sphereRadius).normalize();
+      return terrainHeightDir(d.x, d.y, d.z);
+    };
+    const centre = terrainHeightDir(up.x, up.y, up.z);
+    const a = at(-1);
+    const b = at(1);
+    return {
+      up,
+      side,
+      // Sit on the mean of the three, so a small dip buries a foot slightly
+      // rather than lifting the whole arch off the ground.
+      height: (centre + a + b) / 3,
+      roughness: Math.max(Math.abs(a - centre), Math.abs(b - centre), Math.abs(a - b)),
+    };
+  };
+  const archAuthored = along(0.22, -1.05);
+  // Offsets in UNITS on the surface, in the authored spot's own tangent
+  // plane. Perturbing (angle, bearing) instead is not a search of a disc:
+  // `angle` is arc from the valley anchor, so a +-0.22 wobble on it walks 26
+  // units while the same wobble on `bearing` moves 5 — and it walked the arch
+  // onto the giant-tree site at angle 0.30, where the capture opened inside a
+  // canopy.
+  const tangentA = new THREE.Vector3().crossVectors(archAuthored, forward).normalize();
+  const tangentB = new THREE.Vector3().crossVectors(archAuthored, tangentA).normalize();
+  const offsetDir = (dx, dy) => archAuthored.clone()
+    .addScaledVector(tangentA, dx / sphereRadius)
+    .addScaledVector(tangentB, dy / sphereRadius)
+    .normalize();
+  const clearOf = (dir) => {
+    const at = dir.clone().multiplyScalar(sphereRadius);
+    return keepClear.every((o) => at.distanceTo(o.position.clone().normalize()
+      .multiplyScalar(sphereRadius)) > o.radius);
+  };
+  let archSite = archSpan(archAuthored);
+  // 2.5 units of fall across a 34-unit span is about a 4-degree slope: below
+  // that the feet read as planted and the search does not run at all.
+  for (let i = 1; i <= 32 && archSite.roughness > 2.5; i++) {
+    const t = i / 32;
+    const rad = 6 + 26 * t;                       // units, not radians
+    const ang = i * 2.399963229728653;            // golden angle, well spread
+    const dir = offsetDir(rad * Math.cos(ang), rad * Math.sin(ang));
+    if (!clearOf(dir)) continue;
+    const candidate = archSpan(dir);
+    if (candidate.roughness < archSite.roughness) archSite = candidate;
+  }
+  const archDir = archSite.up;
+  const arch = { position: archDir.clone().multiplyScalar(sphereRadius + archSite.height), up: archDir.clone() };
+  // Pin the span direction instead of leaving it to setFromUnitVectors, which
+  // fixes local Y and says nothing about where local X ends up. The colliders
+  // below are placed along this axis; with the axis unpinned they sat in open
+  // air beside legs you could fly straight through.
+  const archSide = archSite.side;
+  const archFace = new THREE.Vector3().crossVectors(archSide, arch.up).normalize();
+  const archQuat = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(archSide, arch.up, archFace),
+  );
+  // The springing points sit ON the centre line, so the tube hangs a further
+  // ARCH_TUBE below it — lift by that much, less a metre of embed, or the
+  // feet are buried to the ankle and the arch looks planted in mud.
+  const archBase = archDir.clone().multiplyScalar(sphereRadius + archSite.height + ARCH_TUBE - 1);
+  const archMesh = new THREE.Mesh(
+    new THREE.TorusGeometry(ARCH_RADIUS, ARCH_TUBE, 8, 20, Math.PI), stoneMat,
+  );
+  archMesh.name = 'stone-arch';
+  archMesh.position.copy(archBase);
+  archMesh.quaternion.copy(archQuat);
   group.add(archMesh);
   // Legs only. A collider across the opening turns the one thing worth flying
   // through into a wall.
-  const archSide = new THREE.Vector3().crossVectors(arch.up, forward).normalize();
+  // Follow the ARC. A leg placed at (+/-R, h) is only on the stone at h = 0:
+  // by nine units up the arc has already curved two and a half units inward,
+  // so vertical-post colliders guard air beside a leg you fly through.
   for (const sign of [-1, 1]) {
-    collisionSystem.addCollider(
-      arch.position.clone().addScaledVector(archSide, sign * 13).addScaledVector(arch.up, 4), 3.2, 'rock',
-    );
+    for (const theta of [0.05, 0.28, 0.52]) {
+      collisionSystem.addCollider(
+        archBase.clone()
+          .addScaledVector(archSide, sign * ARCH_RADIUS * Math.cos(theta))
+          .addScaledVector(arch.up, ARCH_RADIUS * Math.sin(theta)),
+        ARCH_TUBE + 0.7, 'rock',
+      );
+    }
   }
-  proximityTargets.push({ position: archMesh.position.clone(), radius: 16, tint: 0xe0dcc8 });
+  // Aim the marker at the CROWN, not the base: the landmark ping and the
+  // minimap both read this position, and the crown is what you sight on.
+  proximityTargets.push({
+    position: archBase.clone().addScaledVector(arch.up, ARCH_RADIUS * 0.7),
+    radius: 20,
+    tint: 0xe0dcc8,
+  });
 
   root.add(group);
   landmarks.push(
-    { id: 'fallen-log', position: logMesh.position.clone() },
-    { id: 'stone-arch', position: archMesh.position.clone() },
+    { id: 'fallen-log', position: logMesh.position.clone(), viewDistance: 22 },
+    {
+      id: 'stone-arch',
+      position: archBase.clone().addScaledVector(arch.up, ARCH_RADIUS * 0.6),
+      // Far enough back that the whole span is in a portrait frame, close
+      // enough that it is not one more shape on the skyline.
+      viewDistance: ARCH_RADIUS * 2.6,
+    },
   );
   return landmarks;
 }
@@ -1723,7 +1846,14 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
     radius: 18,
     tint: 0xf0e6d0,
   });
-  return [{ id, position: base.clone().addScaledVector(up, apexHeight) }];
+  // How far back a seek should stand. A single default cannot serve both a
+  // 74-unit broadcast mast and an 18-unit summit arch: at 34 units the mast
+  // fills the frame edge to edge and the capture is a black wall.
+  return [{
+    id,
+    position: base.clone().addScaledVector(up, apexHeight),
+    viewDistance: Math.max(34, apexHeight * 1.6),
+  }];
 }
 
 function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proximityTargets }) {

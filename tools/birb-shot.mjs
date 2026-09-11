@@ -28,6 +28,8 @@
  *   --w --h --dpr    explicit viewport overrides
  *   --env      forest|canyon|mountain|city — switch after start
  *   --nest     land on nest N (default 0) — implies --start
+ *   --query    extra query string, e.g. "bark=1&goto=stone-arch" (?debug=1
+ *              is always appended, so a flagged path stays scriptable)
  *   --eval     JS evaluated in the page after start, BEFORE the settle wait
  *   --after    JS evaluated AFTER the settle, just before the shutter
  *   --afterSettle  ms to wait after --after (default 320)
@@ -277,7 +279,13 @@ async function main() {
 
     const { server, port } = await startServer(REPO_ROOT);
     const pagePath = String(args.page || 'index.html').replace(/^\/+/, '');
-    const url = `http://127.0.0.1:${port}/${pagePath}?debug=1`;
+    // --query rather than baking flags into --page: that path gets `?debug=1`
+    // appended verbatim, so `--page index.html?bark=1` produces a SECOND `?`
+    // and `debug` parses as part of the previous value. The flag's own regex
+    // still matched, so the capture looked like it proved the flagged path
+    // while `__BIRB` was absent and every hook silently did nothing.
+    const extra = String(args.query === true ? '' : (args.query || '')).replace(/^[?&]+/, '');
+    const url = `http://127.0.0.1:${port}/${pagePath}?debug=1${extra ? '&' + extra : ''}`;
 
     const browser = await chromium.launch({ executablePath: findChromium(), args: CHROMIUM_ARGS });
     // The iPhone descriptor carries the UA and touch flags the game's own
