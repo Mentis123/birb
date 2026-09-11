@@ -99,7 +99,12 @@ export function loadTexture(THREE, url, { repeat, anisotropy = 16, onError } = {
 
 /** `?bark=1`, on the `?glb=1` precedent. Off is the shipping default. */
 export function authoredBarkRequested(search) {
-  return /[?&]bark=1/.test(search || '');
+  return /[?&](bark|authored)=1/.test(search || '');
+}
+
+/** `?stone=1`, or `?authored=1` for every authored texture at once. */
+export function authoredStoneRequested(search) {
+  return /[?&](stone|authored)=1/.test(search || '');
 }
 
 /**
@@ -154,6 +159,49 @@ export function applyAuthoredBark(THREE, material, { circumference, height, base
   // MeshLambertMaterial.js independently declares only ten maps, none of them
   // roughnessMap, which is what the decision actually rested on.
   material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
+  material.needsUpdate = true;
+
+  return () => {
+    map.dispose();
+    normalMap.dispose();
+    material.map = previous.map;
+    material.normalMap = previous.normalMap;
+    material.color.setHex(previous.color);
+    material.needsUpdate = true;
+  };
+}
+
+/**
+ * Weathered sandstone on the landmark arch.
+ *
+ * Deliberately a sibling of applyAuthoredBark rather than a generalisation of
+ * it: the two differ only in numbers, and one shared function taking six
+ * options would be harder to read than two that each state their own geometry.
+ *
+ * The tint is near-white here and that is a fact about the delivery, not a
+ * shortcut. The authored albedo's linear mean is 0.1509/0.1254/0.0991 against
+ * the procedural material's 0.1470/0.1221/0.0953, so the ratio that reproduces
+ * the old tone is (0.97, 0.97, 0.96) -- the art was made to the right target
+ * and needs almost no correction. The bark needed (1.78, 1.05, 0.51).
+ *
+ * TorusGeometry(13, 2.4, 6, 14, PI): u runs the half-torus arc, PI * 13 = 40.8
+ * units, and v runs the tube, 2 * PI * 2.4 = 15.1. At the bark's 4.3-unit tile
+ * that is repeat (9, 4), giving 4.54 x 3.77 -- near-square, and the same
+ * physical scale as the bark so the two read as one world.
+ */
+export const STONE_TINT = Object.freeze({ r: 0.97, g: 0.97, b: 0.96 });
+export const ARCH_ARC_UNITS = Math.PI * 13;
+export const ARCH_TUBE_UNITS = 2 * Math.PI * 2.4;
+
+export function applyAuthoredStone(THREE, material, { basePath = './assets/textures' } = {}) {
+  const repeat = repeatForCylinder(ARCH_ARC_UNITS, ARCH_TUBE_UNITS, BARK_TILE_METRES);
+  const map = loadTexture(THREE, `${basePath}/stone_rock_albedo.png`, { repeat });
+  const normalMap = loadTexture(THREE, `${basePath}/stone_rock_normal.png`, { repeat });
+
+  const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
+  material.map = map;
+  material.normalMap = normalMap;
+  material.color.setRGB(STONE_TINT.r, STONE_TINT.g, STONE_TINT.b);
   material.needsUpdate = true;
 
   return () => {

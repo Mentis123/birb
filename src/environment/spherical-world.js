@@ -1,12 +1,13 @@
 import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
-import { applyAuthoredBark, authoredBarkRequested } from './authored-textures.js';
+import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested } from './authored-textures.js';
 
 // Set when ?bark=1 dressed the forest landmark material; called on the next
 // world teardown. A texture created per setEnvironment() and never disposed
 // leaks once per environment switch.
 let disposeAuthoredBark = null;
+let disposeAuthoredStone = null;
 import { createSlalomRun } from "./slalom-run.js";
 import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
@@ -1590,6 +1591,17 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   logMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), logAxis);
   group.add(logMesh);
   proximityTargets.push({ position: logMesh.position.clone(), radius: 12, tint: 0xd8c9a4 });
+
+  // Authored sandstone on the arch, behind ?stone=1 (or ?authored=1 for every
+  // authored texture at once). stoneMat is a plain Mesh material, which is the
+  // pattern the bark proved: no per-instance UV problem, one solved repeat.
+  if (typeof window !== 'undefined' && authoredStoneRequested(window.location?.search)) {
+    try {
+      disposeAuthoredStone = applyAuthoredStone(THREE, stoneMat);
+    } catch (err) {
+      console.warn('[landmark] authored stone failed; keeping the procedural material', err);
+    }
+  }
 
   const archDir = along(0.22, -1.05);
   const arch = groundAt(archDir);
@@ -3289,6 +3301,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       if (disposeAuthoredBark) {
         try { disposeAuthoredBark(); } catch (e) { console.warn('Error disposing authored bark:', e); }
         disposeAuthoredBark = null;
+      }
+      if (disposeAuthoredStone) {
+        try { disposeAuthoredStone(); } catch (e) { console.warn('Error disposing authored stone:', e); }
+        disposeAuthoredStone = null;
       }
 
       // Then dispose geometries and materials

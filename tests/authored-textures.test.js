@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   colorSpaceFor, repeatForCylinder, loadTexture, authoredBarkRequested,
   applyAuthoredBark, BARK_TILE_METRES, BARK_TINT,
+  applyAuthoredStone, STONE_TINT, ARCH_ARC_UNITS, ARCH_TUBE_UNITS, authoredStoneRequested,
 } from '../src/environment/authored-textures.js';
 
 /**
@@ -88,6 +89,12 @@ test('the flag is off by default and matches the ?glb=1 precedent', () => {
   assert.equal(authoredBarkRequested('?debug=1&bark=1'), true);
   assert.equal(authoredBarkRequested('?bark=0'), false);
   assert.equal(authoredBarkRequested('?embark=1'), false, 'must not match a substring of another param');
+  // ?authored=1 is the one flag that turns on every authored texture.
+  assert.equal(authoredBarkRequested('?authored=1'), true);
+  assert.equal(authoredStoneRequested('?authored=1'), true);
+  assert.equal(authoredStoneRequested('?stone=1'), true);
+  assert.equal(authoredStoneRequested('?bark=1'), false, 'bark must not drag stone in');
+  assert.equal(authoredStoneRequested(''), false);
 });
 
 test('a loaded texture carries every convention', () => {
@@ -141,4 +148,35 @@ test('a failed load warns and leaves the game playable', () => {
   } finally {
     console.warn = realWarn;
   }
+});
+
+test('the arch stone is solved from the torus, and barely needs a tint', () => {
+  const T = fakeThree();
+  const mat = fakeMaterial();
+  mat.color._v = 0x6b6257;
+  const dispose = applyAuthoredStone(T, mat);
+
+  assert.ok(mat.map && mat.normalMap);
+  assert.equal(mat.roughnessMap, undefined, 'Lambert has no roughnessMap slot');
+
+  // repeat is solved from the geometry, exactly as the bark's is: the
+  // half-torus arc is PI*13 and the tube is 2*PI*2.4, at the same 4.3-unit
+  // tile so stone and bark read at one physical scale.
+  const rep = repeatForCylinder(ARCH_ARC_UNITS, ARCH_TUBE_UNITS, BARK_TILE_METRES);
+  assert.deepEqual(rep, { x: 9, y: 4 });
+  assert.equal(T.loaded[0].repeat.x, 9);
+  assert.equal(T.loaded[0].repeat.y, 4);
+  const tileU = ARCH_ARC_UNITS / rep.x;
+  const tileV = ARCH_TUBE_UNITS / rep.y;
+  assert.ok(Math.abs(tileU - tileV) < 1, `tile ${tileU.toFixed(2)} x ${tileV.toFixed(2)} must be near-square`);
+
+  // Near-white, unlike the bark's (1.78, 1.05, 0.51): this albedo was authored
+  // to the procedural material's own tone, so it needs almost no correction.
+  // If a future delivery drifts, this is the assertion that notices.
+  assert.deepEqual(mat.color.rgb, { r: STONE_TINT.r, g: STONE_TINT.g, b: STONE_TINT.b });
+  for (const v of Object.values(STONE_TINT)) assert.ok(v > 0.9 && v <= 1.0);
+
+  dispose();
+  assert.equal(mat.color.getHex(), 0x6b6257);
+  assert.ok(T.loaded.every(t => t.disposed));
 });
