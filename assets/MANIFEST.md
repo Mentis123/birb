@@ -21,7 +21,7 @@ Rules, in short:
 |---|---|---|---|---|---|---|
 | `textures/bark_pine_albedo.png` | sRGB albedo | `barkMat.map` (forest landmark trunk + fallen log) | ~4.3 m square | OpenAI image generation; prompt "seamless, unlit grey-brown weathered pine bark plates with deep vertical fissures"; from scratch, resized to 512² RGB with Pillow 12.3.0 | ISC | `e20a04b` |
 | `textures/bark_pine_normal.png` | linear tangent-space normal, OpenGL +Y | `barkMat.normalMap` | ~4.3 m square | Offline from the albedo with Pillow 12.3.0 + NumPy 2.3.5: wrap-aware multiscale luminance height proxy, circular gradients | ISC | `e20a04b` |
-| `textures/stone_rock_albedo.png` | sRGB albedo → `stoneMat.map`, ~4.5 m tile, `?stone=1` | `stoneMat.map` (landmark arch) | ~4 m square | OpenAI image generation; prompt “seamless, orthographic weathered grey-brown sandstone with horizontal bedding, wind-scoured pitting and shallow cracks under flat ambient light”; generated from scratch, resized and mean-graded to `#6b6257` with Pillow 12.3.0 + NumPy 2.3.5 | ISC | `2df735c` |
+| `textures/stone_rock_albedo.png` | sRGB albedo → `stoneMat.map`, ~4.5 m tile, `?stone=1` | `stoneMat.map` (landmark arch) | ~4 m square | OpenAI image generation; prompt “seamless, orthographic weathered grey-brown sandstone with horizontal bedding, wind-scoured pitting and shallow cracks under flat ambient light”; generated from scratch, resized and mean-graded to `#6b6257` with Pillow 12.3.0 + NumPy 2.3.5. **Runtime tint lifts it to `#b5a58c`** — as delivered its mean sits 6.6 sRGB units from the bark's and the arch read as timber; the arch's UVs are also swapped so its bedding rings the tube instead of running down the leg | ISC | `2df735c` |
 | `textures/stone_rock_normal.png` | linear tangent-space normal, OpenGL +Y | `stoneMat.normalMap` (landmark arch) | ~4 m square | Offline from `stone_rock_albedo.png` with Pillow 12.3.0 + NumPy 2.3.5: wrap-aware multiscale luminance height proxy and circular gradients; independently generated normal rejected because its surface features did not align | ISC | `2df735c` |
 | `env/forest_sky.png` | RGB LDR equirectangular environment | `scene.environment` (authored candidate; not wired) | n/a — equirectangular | OpenAI image generation; prompt “seamless full-sphere humid forest atmosphere, blue-green sky, warm horizon, broad directional brightening, no sun disc or landscape”; generated from scratch, resized to 1024×512 RGB with Pillow 12.3.0 | ISC | `59b3cbf` |
 | `env/canyons_sky.png` | RGB LDR equirectangular environment | `scene.environment` (authored candidate; not wired) | n/a — equirectangular | OpenAI image generation; prompt “seamless full-sphere high-desert atmosphere, mauve upper air, peach horizon, subtle dust and cirrus, no sun disc or terrain”; generated from scratch, resized to 1024×512 RGB with Pillow 12.3.0 | ISC | `59b3cbf` |
@@ -49,3 +49,14 @@ set it.
 | `assets/textures/` | Tiling material maps: albedo, normal, roughness, AO, packed ORM |
 | `assets/env/` | Equirectangular sky/environment maps, 2:1, one per biome |
 | `docs/realism/reference/` | Concept and reference imagery. **Evidence only — never imported by the running page.** |
+
+
+## Cross-asset acceptance
+
+`tools/asset-check.mjs` scores each file on its own and cannot see the scene.
+Two of these albedos are graded browns whose means land 6.6 sRGB units apart —
+structurally perfect, and the arch shipped looking like a wooden bridge. The
+check that covers this lives in `tests/authored-textures.test.js`: it reads the
+shipped PNGs, applies each material's tint, and asserts the two render far
+apart with the stone the lighter. **Before accepting a new albedo, look at what
+else is in the same frame**, not only at the file.

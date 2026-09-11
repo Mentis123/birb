@@ -1636,9 +1636,11 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   // tiling or the stone silently stretches.
   if (typeof window !== 'undefined' && authoredStoneRequested(window.location?.search)) {
     try {
+      // u/v are SWAPPED on the geometry below, so u spans the tube and v the
+      // arc. Pass them in that order or every tile is stretched 3:1.
       disposeAuthoredStone = applyAuthoredStone(THREE, stoneMat, {
-        arcUnits: Math.PI * ARCH_RADIUS,
-        tubeUnits: 2 * Math.PI * ARCH_TUBE,
+        uUnits: 2 * Math.PI * ARCH_TUBE,
+        vUnits: Math.PI * ARCH_RADIUS,
       });
     } catch (err) {
       console.warn('[landmark] authored stone failed; keeping the procedural material', err);
@@ -1725,9 +1727,24 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   // ARCH_TUBE below it — lift by that much, less a metre of embed, or the
   // feet are buried to the ankle and the arch looks planted in mud.
   const archBase = archDir.clone().multiplyScalar(sphereRadius + archSite.height + ARCH_TUBE - 1);
-  const archMesh = new THREE.Mesh(
-    new THREE.TorusGeometry(ARCH_RADIUS, ARCH_TUBE, 8, 20, Math.PI), stoneMat,
-  );
+  const archGeometry = new THREE.TorusGeometry(ARCH_RADIUS, ARCH_TUBE, 8, 20, Math.PI);
+  // Swap u and v. TorusGeometry runs u along the arc, and the authored
+  // sandstone's structure is horizontal bedding (measured: variance across
+  // its rows is 6.7x the variance across its columns), so unswapped those
+  // bands run LENGTHWISE down a standing leg -- which is precisely how bark
+  // fissures run, on a texture whose mean colour is 6.6 sRGB units from the
+  // bark's. It read as a wooden bridge. Swapped, the bands ring the tube as
+  // level strata: what sedimentary rock does, and what the canyon walls
+  // already do by banding on RADIUS.
+  {
+    const uv = archGeometry.attributes.uv;
+    for (let i = 0; i < uv.count; i++) {
+      const u = uv.getX(i);
+      uv.setXY(i, uv.getY(i), u);
+    }
+    uv.needsUpdate = true;
+  }
+  const archMesh = new THREE.Mesh(archGeometry, stoneMat);
   archMesh.name = 'stone-arch';
   archMesh.position.copy(archBase);
   archMesh.quaternion.copy(archQuat);
