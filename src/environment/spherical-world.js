@@ -1,13 +1,14 @@
 import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
-import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested } from './authored-textures.js';
+import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested, applyAuthoredBarkInstanced } from './authored-textures.js';
 
 // Set when ?bark=1 dressed the forest landmark material; called on the next
 // world teardown. A texture created per setEnvironment() and never disposed
 // leaks once per environment switch.
 let disposeAuthoredBark = null;
 let disposeAuthoredStone = null;
+let disposeAuthoredTrunks = null;
 import { createSlalomRun } from "./slalom-run.js";
 import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
@@ -886,6 +887,22 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // Bark base nudged ~15% brighter than the old 0x3a2a1a so the per-instance
   // jitter (which multiplies, mean ~1.0) averages back to the original tone.
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x43301e, flatShading: true });
+  // Authored bark on the WHOLE forest, behind ?bark=1 / ?authored=1. The
+  // landmark trunk solves its repeat once from known dimensions; these cannot,
+  // because their per-instance scale spans a 12.5x tile aspect. The shader
+  // injection derives the repeat from each instance matrix instead, so one
+  // material serves an undergrowth sapling and a 42-unit emergent snag at the
+  // same physical bark scale.
+  //
+  // applyInstanceColorJitter still runs below and still multiplies in, so the
+  // weathered-grove variation survives the texture.
+  if (typeof window !== 'undefined' && authoredBarkRequested(window.location?.search)) {
+    try {
+      disposeAuthoredTrunks = applyAuthoredBarkInstanced(THREE, trunkMat);
+    } catch (err) {
+      console.warn('[forest] authored trunk bark failed; keeping the procedural material', err);
+    }
+  }
   // Canopy mats carry vertexColors so the baked base→tip gradient reads; the
   // gradient averages ~0.85 so the hues are lifted slightly to compensate.
   const canopyMats = [
@@ -3305,6 +3322,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       if (disposeAuthoredStone) {
         try { disposeAuthoredStone(); } catch (e) { console.warn('Error disposing authored stone:', e); }
         disposeAuthoredStone = null;
+      }
+      if (disposeAuthoredTrunks) {
+        try { disposeAuthoredTrunks(); } catch (e) { console.warn('Error disposing authored trunk bark:', e); }
+        disposeAuthoredTrunks = null;
       }
 
       // Then dispose geometries and materials

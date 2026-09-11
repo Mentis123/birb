@@ -213,3 +213,92 @@ export function applyAuthoredStone(THREE, material, { basePath = './assets/textu
     material.needsUpdate = true;
   };
 }
+
+/**
+ * Per-instance UV scale for an InstancedMesh, derived from the instance matrix.
+ *
+ * This is what unlocks bark on the FOREST at large. The instanced trunks share
+ * one material and therefore one `map.repeat`, but their per-instance scale
+ * lives in the instance matrix rather than the UVs -- and the aspect of a
+ * texture tile across that mesh spans 1.27:1 to 15.92:1, a 12.5x range, because
+ * trunkHeight and trunkRadiusBottom are independent randomInRange draws. No
+ * single repeat serves that: whichever is chosen, some class is smeared.
+ *
+ * A CylinderGeometry's UVs run 0..1 around and 0..1 up regardless of world
+ * size, so the fix is to scale them per instance in the vertex shader. The
+ * instance matrix's basis vector lengths ARE the scale, so it costs two
+ * length() calls per vertex and no extra draw call, attribute or texture.
+ *
+ * The unit trunk is CylinderGeometry(0.4, 1.0, 1.0, 6): radiusBottom 1 and
+ * height 1, scaled per instance to (radius, height, radius). So the world
+ * circumference at the base is 2*PI*scaleX and the world height is scaleY.
+ *
+ * Injected at <uv_vertex>, which is where three computes vMapUv and
+ * vNormalMapUv from the UV transform -- scaling the varyings after it means
+ * the material's own map.repeat stays (1,1) and this is the only thing setting
+ * density.
+ */
+export function addInstancedUvScale(material, THREE, { tileMetres = BARK_TILE_METRES } = {}) {
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    shader.uniforms.uBirbTileMetres = { value: tileMetres };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n\tuniform float uBirbTileMetres;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+      #ifdef USE_INSTANCING
+        {
+          // The basis vector lengths of the instance matrix are its scale.
+          float birbSx = length(instanceMatrix[0].xyz);
+          float birbSy = length(instanceMatrix[1].xyz);
+          vec2 birbRepeat = vec2(
+            6.28318530718 * birbSx / uBirbTileMetres,
+            birbSy / uBirbTileMetres
+          );
+          #ifdef USE_MAP
+            vMapUv *= birbRepeat;
+          #endif
+          #ifdef USE_NORMALMAP
+            vNormalMapUv *= birbRepeat;
+          #endif
+        }
+      #endif`);
+  };
+
+  // Without its own key this shares a compiled program with any other material
+  // carrying an identical onBeforeCompile closure, and every one of them gets
+  // the first material's uniforms. Icon3D paid for that lesson already.
+  const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => `${base}-instuv-${tileMetres}`;
+  return material;
+}
+
+/**
+ * Authored bark on the INSTANCED forest trunks.
+ *
+ * Same two files as the landmark trunk, so the forest reads as one material at
+ * one physical scale; the difference is entirely in how the UVs are derived.
+ * map.repeat stays (1,1) here -- addInstancedUvScale owns density.
+ */
+export function applyAuthoredBarkInstanced(THREE, material, { basePath = './assets/textures' } = {}) {
+  const map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`);
+  const normalMap = loadTexture(THREE, `${basePath}/bark_pine_normal.png`);
+
+  const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
+  material.map = map;
+  material.normalMap = normalMap;
+  material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
+  addInstancedUvScale(material, THREE);
+  material.needsUpdate = true;
+
+  return () => {
+    map.dispose();
+    normalMap.dispose();
+    material.map = previous.map;
+    material.normalMap = previous.normalMap;
+    material.color.setHex(previous.color);
+    material.needsUpdate = true;
+  };
+}
