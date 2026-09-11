@@ -3660,7 +3660,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v50-2026-09-11-pin-checkpoint';
+    const BIRB_BUILD = 'v51-2026-09-11-pose-orientation';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -3668,6 +3668,9 @@
     // rebalancing hides the answer.
     const IBL_INTENSITY = 1;
     let disposeSkyEnvironment = null;
+    // Frames remaining before the follow rig's damping is collapsed. Set by
+    // __BIRB.pinCheckpoint; zero on every normal path.
+    let __birbPendingCameraSnap = 0;
 
     // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
     // Adaptive quality further drops this to 1.0 below 55 FPS.
@@ -9631,6 +9634,14 @@
         } else {
           // Use Legacy Camera State (supports FPV, Sequence, Fixed)
           cameraState.updateActiveCamera({ pose, ambientOffsets: null, delta });
+          // Harness-only: collapse the rig's damping once the update above has
+          // recomputed the desired position from the restored pose. Two frames
+          // because updateFromPose derives the desired values from the pose it
+          // is handed, and the first one after a teleport is still blending.
+          if (__birbPendingCameraSnap > 0) {
+            __birbPendingCameraSnap -= 1;
+            if (typeof cameraState.snap === 'function') cameraState.snap();
+          }
         }
 
         // 4. Visual Update
@@ -10816,8 +10827,17 @@
           }
           if (!pose) return false;
           flightController.position.copy(pose.position);
-          if (pose.quaternion && typeof flightController.setOrientation === 'function') {
-            flightController.setOrientation(pose.quaternion);
+          // BirdFlight exposes `quaternion` as a PROPERTY and has no
+          // setOrientation method, so the old guard was never true and the
+          // orientation was silently never restored -- measured as a captured
+          // quaternion of [0.38, 0.91, -0.06, 0.18] coming back as identity.
+          // A method is still preferred if a controller ever grows one.
+          if (pose.quaternion) {
+            if (typeof flightController.setOrientation === 'function') {
+              flightController.setOrientation(pose.quaternion);
+            } else if (flightController.quaternion) {
+              flightController.quaternion.copy(pose.quaternion);
+            }
           }
           if (flightController.velocity) flightController.velocity.set(0, 0, 0);
           return true;
@@ -10853,6 +10873,12 @@
           // Speed 0 and a zeroed stick, or the controller integrates the bird
           // out from under the pose that was just set.
           B.freeze(true);
+          // The rig's desiredPosition is computed inside updateFromPose, which
+          // only runs in the render loop -- so snapping right here collapses
+          // onto whatever it held BEFORE the pose changed, which measured as
+          // the camera sitting at its spawn default in both runs. Defer it:
+          // the loop snaps once, after the next update has seen the new pose.
+          __birbPendingCameraSnap = 2;
           const cam = cameraState && typeof cameraState.snap === 'function' ? cameraState.snap() : null;
           return {
             seed: B.worldSeed(),
@@ -10862,6 +10888,23 @@
             pose: B.capturePose(),
             camera: cam,
             build: BIRB_BUILD,
+          };
+        },
+        /**
+         * Where the camera ACTUALLY is at this instant.
+         *
+         * pinCheckpoint's own record is captured before the deferred snap
+         * fires, so it reports the pre-snap camera and is useless for telling
+         * whether two runs agree. This reads the live camera, which is the
+         * only thing that decides what is in frame.
+         */
+        cameraProbe: () => {
+          const c = cameraState && cameraState.camera;
+          if (!c) return null;
+          return {
+            position: c.position.toArray().map((n) => +n.toFixed(4)),
+            quaternion: c.quaternion.toArray().map((n) => +n.toFixed(5)),
+            fov: c.fov,
           };
         },
         freeze: (on = true) => {
