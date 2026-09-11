@@ -16,7 +16,7 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v55-2026-09-11-authored-sky';
+const CACHE_VERSION = 'v56-2026-09-11-authored-bark';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -47,15 +47,22 @@ const CORE_ASSETS = [
   // 1.4 MB of install weight for biomes most sessions never visit, and
   // cacheFirst picks each up the first time its biome is opened online.
   './assets/env/forest_sky.png',
-  // NOT precached (install-weight diet, ~7.3 MB saved):
+  // Authored bark, promoted the day it became the shipping default — which is
+  // what the note that used to sit here said to do. 1.0 MB, and it buys the
+  // most-looked-at surface in the game: every trunk in the default biome.
+  './assets/textures/bark_pine_albedo.png',
+  './assets/textures/bark_pine_normal.png',
+  // NOT precached (install-weight diet):
   // - ./assets/env/{canyons,mountain,city}_sky.png (1.4 MB) — see above.
   // - ./birb.glb (1.7 MB) — only loads behind the ?glb=1 A/B flag; the
   //   runtime cache picks it up on demand for whoever uses that flag.
-  // - ./assets/textures/bark_pine_*.png (1.0 MB) — only fetched behind the
-  //   ?bark=1 A/B flag, exactly like birb.glb above; the runtime cache picks
-  //   them up for whoever uses it. Move them here into CORE_ASSETS the day
-  //   authored bark becomes the shipping default, or the first offline load
-  //   after that renders an untextured trunk with no warning.
+  // - ./assets/textures/stone_rock_*.png (1.0 MB) — the arch is ONE object on
+  //   a 754-unit planet, so a megabyte of install weight for it is the wrong
+  //   trade where bark's was the right one. Offline it falls back to the
+  //   procedural pale limestone, which is a degradation and not a defect:
+  //   every applier now leaves the procedural material standing until its
+  //   images decode, so "no texture" renders the old material rather than a
+  //   black slab.
   // - ./sound/ambient-mountain.mp3 (5.6 MB) — setAmbientMusic deliberately
   //   pins the forest track (users asked for the original back), so the
   //   mountain track is currently unplayed. Re-add here if track switching

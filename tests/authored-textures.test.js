@@ -14,6 +14,7 @@ import {
  */
 function fakeThree({ fail = false } = {}) {
   const loaded = [];
+  const pending = [];
   class Texture {
     constructor(url) {
       this.url = url;
@@ -31,10 +32,18 @@ function fakeThree({ fail = false } = {}) {
       load(url, onLoad, onProgress, onError) {
         const t = new Texture(url);
         loaded.push(t);
+        // The fake does NOT fire onLoad by hand -- the caller does, via
+        // decodeAll/decodeOne. That is the whole point: a TextureLoader
+        // returns its Texture immediately and fills the image in later, and
+        // a fake that hides the gap cannot test the bug the gap causes.
+        if (onLoad) pending.push(() => onLoad(t));
         if (fail) onError(new Error('404'));
         return t;
       }
     },
+    pending,
+    decodeOne() { const fn = pending.shift(); if (fn) fn(); },
+    decodeAll() { while (pending.length) pending.shift()(); },
   };
 }
 
@@ -82,19 +91,27 @@ test('repeat is solved from the geometry so the tile stays square', () => {
   assert.deepEqual(repeatForCylinder(0.5, 0.5, BARK_TILE_METRES), { x: 1, y: 1 });
 });
 
-test('the flag is off by default and matches the ?glb=1 precedent', () => {
-  assert.equal(authoredBarkRequested(''), false);
-  assert.equal(authoredBarkRequested(undefined), false);
+test('the authored textures are ON by default, and ?bark=0 opts out', () => {
+  // Inverted from `?bark=1` once the art was accepted on a real phone. The
+  // escape hatch stays because the A/B is how every one of these was judged.
+  assert.equal(authoredBarkRequested(''), true);
+  assert.equal(authoredBarkRequested(undefined), true);
   assert.equal(authoredBarkRequested('?bark=1'), true);
-  assert.equal(authoredBarkRequested('?debug=1&bark=1'), true);
+  assert.equal(authoredBarkRequested('?debug=1'), true);
   assert.equal(authoredBarkRequested('?bark=0'), false);
-  assert.equal(authoredBarkRequested('?embark=1'), false, 'must not match a substring of another param');
-  // ?authored=1 is the one flag that turns on every authored texture.
+  assert.equal(authoredBarkRequested('?debug=1&bark=0'), false);
+  assert.equal(authoredBarkRequested('?authored=0'), false, 'one switch for the lot');
+  assert.equal(authoredStoneRequested('?authored=0'), false);
+  assert.equal(authoredStoneRequested('?stone=0'), false);
+  assert.equal(authoredStoneRequested('?bark=0'), true, 'and the two stay independent');
+  assert.equal(authoredBarkRequested('?disembark=0'), true, 'must not match a substring of another param');
+  // ?authored=1 stays legible rather than being an error: it was the old
+  // turn-everything-on switch and now simply agrees with the default.
   assert.equal(authoredBarkRequested('?authored=1'), true);
   assert.equal(authoredStoneRequested('?authored=1'), true);
   assert.equal(authoredStoneRequested('?stone=1'), true);
-  assert.equal(authoredStoneRequested('?bark=1'), false, 'bark must not drag stone in');
-  assert.equal(authoredStoneRequested(''), false);
+  assert.equal(authoredStoneRequested('?bark=1'), true, 'the two are independent in both directions');
+  assert.equal(authoredStoneRequested(''), true);
 });
 
 test('a loaded texture carries every convention', () => {
@@ -117,6 +134,18 @@ test('applying the bark whitens the colour, because map MULTIPLIES it', () => {
   const mat = fakeMaterial();
   const dispose = applyAuthoredBark(T, mat, { circumference: 34.7, height: 88 });
 
+  // NOTHING is applied until both images decode. A Texture is not an image:
+  // assigning `map` at call time defines USE_MAP against an empty upload, and
+  // captured with the PNGs held in flight every trunk in the forest rendered
+  // as a solid black slab.
+  assert.equal(mat.map, null, 'no map before the image decodes');
+  assert.equal(mat.normalMap, null);
+  assert.equal(mat.color.rgb, null, 'and no tint either, or the trunk goes pale');
+
+  T.decodeOne();
+  assert.equal(mat.map, null, 'one of two is not enough — a lone normalMap is its own wrong frame');
+
+  T.decodeAll();
   assert.ok(mat.map && mat.normalMap);
   assert.equal(mat.needsUpdate, true);
   // Keeping 0x8a6440 would land the trunk at ~14% of its brightness (two
@@ -155,6 +184,8 @@ test('the arch stone is solved from the torus, and barely needs a tint', () => {
   const mat = fakeMaterial();
   mat.color._v = 0x6b6257;
   const dispose = applyAuthoredStone(T, mat);
+  assert.equal(mat.map, null, 'the stone waits for its images too');
+  T.decodeAll();
 
   assert.ok(mat.map && mat.normalMap);
   assert.equal(mat.roughnessMap, undefined, 'Lambert has no roughnessMap slot');
@@ -263,4 +294,36 @@ test('the rendered stone is not the rendered bark', async () => {
   // same lesson the landmark trunk's 0x8a6440 records.
   const luma = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   assert.ok(luma(renderedStone) > luma(renderedBark), 'the arch must not be darker than the trees');
+});
+
+
+// ---------------------------------------------------------------------------
+// The half of the decode gate that only shows up on an environment switch.
+test('a disposer that runs before the images land cancels the swap', () => {
+  const T = fakeThree();
+  const mat = fakeMaterial();
+  const dispose = applyAuthoredBark(T, mat, { circumference: 34.7, height: 88 });
+
+  dispose();                       // biome switched mid-download
+  assert.ok(T.loaded.every((t) => t.disposed), 'the textures are released');
+  assert.equal(mat.map, null);
+  assert.equal(mat.color.getHex(), 0x8a6440, 'the procedural colour is untouched');
+
+  // And the late arrival must not paint a disposed texture onto a material
+  // the world has already rebuilt.
+  T.decodeAll();
+  assert.equal(mat.map, null, 'a load that lands after dispose applies nothing');
+  assert.equal(mat.color.rgb, null);
+});
+
+test('the stone disposer restores only what it actually changed', () => {
+  const T = fakeThree();
+  const mat = fakeMaterial();
+  mat.color._v = 0xa4907a;
+  const dispose = applyAuthoredStone(T, mat);
+  T.decodeAll();
+  assert.deepEqual(mat.color.rgb, { r: STONE_TINT.r, g: STONE_TINT.g, b: STONE_TINT.b });
+  dispose();
+  assert.equal(mat.color.getHex(), 0xa4907a);
+  assert.equal(mat.map, null);
 });

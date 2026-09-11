@@ -102,14 +102,57 @@ export function loadTexture(THREE, url, { repeat, anisotropy = 16, onError, onLo
   return texture;
 }
 
-/** `?bark=1`, on the `?glb=1` precedent. Off is the shipping default. */
+/**
+ * Authored textures are ON by default; `?bark=0` / `?stone=0` opt out, and
+ * `?authored=0` opts out of both at once.
+ *
+ * Inverted from `?bark=1` once the art was accepted on a real phone. The
+ * escape hatch stays because the A/B is how every one of these was judged,
+ * and a comparison you cannot re-run is a comparison nobody re-runs.
+ */
 export function authoredBarkRequested(search) {
-  return /[?&](bark|authored)=1/.test(search || '');
+  return !/[?&](bark|authored)=0/.test(search || '');
 }
 
-/** `?stone=1`, or `?authored=1` for every authored texture at once. */
+/** `?stone=0`, or `?authored=0` for every authored texture at once. */
 export function authoredStoneRequested(search) {
-  return /[?&](stone|authored)=1/.test(search || '');
+  return !/[?&](stone|authored)=0/.test(search || '');
+}
+
+/**
+ * Run `commit` once EVERY texture in a set has decoded, and give the caller a
+ * way to cancel it.
+ *
+ * This exists because a Texture is not an image. `TextureLoader.load` returns
+ * the object immediately and fills its `image` in later, so a material that
+ * assigns `map` at call time has `USE_MAP` defined against an empty upload for
+ * the whole download. Captured, with the bark PNGs held in flight by a route
+ * delay: every trunk in the forest renders as a SOLID BLACK SLAB -- which is
+ * word for word the defect `spherical-world.js`'s own barkMat comment was
+ * written to memorialise. The sky had the identical bug and the identical
+ * symptom, so this is the shared fix rather than a third copy of it.
+ *
+ * ALL of them, not each as it lands: attaching a normalMap whose image has not
+ * arrived perturbs the lighting on a surface whose albedo is still procedural,
+ * which is a different wrong frame rather than no wrong frame.
+ */
+function commitWhenDecoded(total, commit) {
+  let remaining = total;
+  let state = 'waiting';
+  return {
+    onOne() {
+      if (state !== 'waiting') return;
+      remaining -= 1;
+      if (remaining > 0) return;
+      state = 'committed';
+      commit();
+    },
+    cancel() {
+      const wasCommitted = state === 'committed';
+      state = 'cancelled';
+      return wasCommitted;
+    },
+  };
 }
 
 /**
@@ -146,12 +189,21 @@ export function authoredStoneRequested(search) {
  */
 export function applyAuthoredBark(THREE, material, { circumference, height, basePath = './assets/textures' } = {}) {
   const repeat = repeatForCylinder(circumference, height, BARK_TILE_METRES);
-  const map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`, { repeat });
-  const normalMap = loadTexture(THREE, `${basePath}/bark_pine_normal.png`, { repeat });
-
   const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
-  material.map = map;
-  material.normalMap = normalMap;
+  // `let`, not `const`: the commit closure below is created before these are
+  // assigned, and a cached image whose onLoad fired synchronously would read
+  // them inside a const's temporal dead zone.
+  let map = null;
+  let normalMap = null;
+  const gate = commitWhenDecoded(2, () => {
+    material.map = map;
+    material.normalMap = normalMap;
+    material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
+    material.needsUpdate = true;
+  });
+  map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`, { repeat, onLoad: gate.onOne });
+  normalMap = loadTexture(THREE, `${basePath}/bark_pine_normal.png`, { repeat, onLoad: gate.onOne });
+
   // NOT roughnessMap: MeshLambertMaterial has no such slot. Assigning one
   // uploads a texture, perturbs the program cache key into a fresh compile that
   // produces an identical shader, and samples nothing.
@@ -163,12 +215,14 @@ export function applyAuthoredBark(THREE, material, { circumference, height, base
   // for anything). The real 3,253-byte file contains "roughness" zero times.
   // MeshLambertMaterial.js independently declares only ten maps, none of them
   // roughnessMap, which is what the decision actually rested on.
-  material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
-  material.needsUpdate = true;
-
   return () => {
-    map.dispose();
-    normalMap.dispose();
+    const wasApplied = gate.cancel();
+    map?.dispose();
+    normalMap?.dispose();
+    // Restore ONLY what was actually changed. A disposer that runs before the
+    // images land would otherwise write `previous` over a material nothing had
+    // touched -- harmless here, and a silent way to clobber a later edit.
+    if (!wasApplied) return;
     material.map = previous.map;
     material.normalMap = previous.normalMap;
     material.color.setHex(previous.color);
@@ -225,18 +279,23 @@ export function applyAuthoredStone(THREE, material, {
   vUnits = ARCH_ARC_UNITS,
 } = {}) {
   const repeat = repeatForCylinder(uUnits, vUnits, BARK_TILE_METRES);
-  const map = loadTexture(THREE, `${basePath}/stone_rock_albedo.png`, { repeat });
-  const normalMap = loadTexture(THREE, `${basePath}/stone_rock_normal.png`, { repeat });
-
   const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
-  material.map = map;
-  material.normalMap = normalMap;
-  material.color.setRGB(STONE_TINT.r, STONE_TINT.g, STONE_TINT.b);
-  material.needsUpdate = true;
+  let map = null;
+  let normalMap = null;
+  const gate = commitWhenDecoded(2, () => {
+    material.map = map;
+    material.normalMap = normalMap;
+    material.color.setRGB(STONE_TINT.r, STONE_TINT.g, STONE_TINT.b);
+    material.needsUpdate = true;
+  });
+  map = loadTexture(THREE, `${basePath}/stone_rock_albedo.png`, { repeat, onLoad: gate.onOne });
+  normalMap = loadTexture(THREE, `${basePath}/stone_rock_normal.png`, { repeat, onLoad: gate.onOne });
 
   return () => {
-    map.dispose();
-    normalMap.dispose();
+    const wasApplied = gate.cancel();
+    map?.dispose();
+    normalMap?.dispose();
+    if (!wasApplied) return;
     material.map = previous.map;
     material.normalMap = previous.normalMap;
     material.color.setHex(previous.color);
@@ -313,19 +372,28 @@ export function addInstancedUvScale(material, THREE, { tileMetres = BARK_TILE_ME
  * map.repeat stays (1,1) here -- addInstancedUvScale owns density.
  */
 export function applyAuthoredBarkInstanced(THREE, material, { basePath = './assets/textures' } = {}) {
-  const map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`);
-  const normalMap = loadTexture(THREE, `${basePath}/bark_pine_normal.png`);
-
   const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
-  material.map = map;
-  material.normalMap = normalMap;
-  material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
-  addInstancedUvScale(material, THREE);
-  material.needsUpdate = true;
+  let map = null;
+  let normalMap = null;
+  const gate = commitWhenDecoded(2, () => {
+    material.map = map;
+    material.normalMap = normalMap;
+    material.color.setRGB(BARK_TINT.r, BARK_TINT.g, BARK_TINT.b);
+    // The injection is installed WITH the maps, not before them. It reads
+    // USE_MAP / USE_NORMALMAP, which are only defined once a map is attached,
+    // so installing it early compiles a program with a dead branch in it and
+    // then needs a second compile anyway.
+    addInstancedUvScale(material, THREE);
+    material.needsUpdate = true;
+  });
+  map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`, { onLoad: gate.onOne });
+  normalMap = loadTexture(THREE, `${basePath}/bark_pine_normal.png`, { onLoad: gate.onOne });
 
   return () => {
-    map.dispose();
-    normalMap.dispose();
+    const wasApplied = gate.cancel();
+    map?.dispose();
+    normalMap?.dispose();
+    if (!wasApplied) return;
     material.map = previous.map;
     material.normalMap = previous.normalMap;
     material.color.setHex(previous.color);

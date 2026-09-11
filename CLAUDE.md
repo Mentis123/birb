@@ -282,6 +282,39 @@
 > for biomes most sessions never open, and `cacheFirst` picks each up the
 > first time its biome is visited online.
 
+> **Every authored texture is now the shipping default** (2026-09-11). Bark on
+> the landmark trunk, the fallen log and every instanced forest trunk; sandstone
+> on the arch; the four skies. `?bark=0`, `?stone=0`, `?skytex=0` and
+> `?authored=0` opt out — the escape hatches stay because the A/B is how each of
+> these was judged, and a comparison you cannot re-run is one nobody re-runs.
+>
+> **The black-slab bug was real, and it was the same bug three times.** Held in
+> flight by a Playwright route delay, `?bark=1` rendered EVERY TRUNK IN THE
+> FOREST as a solid black slab — word for word the defect `barkMat`'s own
+> comment in `spherical-world.js` was written to memorialise, arriving by a
+> completely different route. A Texture is not an image: `TextureLoader.load`
+> returns the object immediately and fills `image` in later, so assigning `map`
+> at call time defines `USE_MAP` against an empty upload for the whole
+> download. `commitWhenDecoded` in `authored-textures.js` is the one shared fix
+> — bark, stone and sky all wait for EVERY image in their set before swapping
+> anything. Not each as it lands: a normalMap attached over a still-procedural
+> albedo is a different wrong frame, not fewer wrong frames.
+>
+> The disposer had to learn the same thing. It now cancels a pending swap and
+> restores **only what was actually changed**, because an environment switch
+> mid-download would otherwise write the saved `previous` over a material
+> nothing had touched, and a load landing afterwards would paint a disposed
+> texture onto a world that had already been rebuilt.
+>
+> **Budgets, measured at a fixed pose twice each**: 64-69 draw calls with the
+> textures on, 65-69 with them off — the difference is frustum noise, not cost.
+> Standing in a champion grove is the tight view at 93-96 calls and 79.4k
+> triangles, and it measures 93 with every authored texture DISABLED, so that
+> pressure is the grove, not the art. `sw.js` (v56) precaches bark but not
+> stone: bark is every trunk in the default biome, the arch is one object on a
+> 754-unit planet, and with the decode gate in place a missing texture now
+> leaves the procedural material standing rather than rendering wrong.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.
