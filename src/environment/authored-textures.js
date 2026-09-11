@@ -178,16 +178,29 @@ export function applyAuthoredBark(THREE, material, { circumference, height, base
  * it: the two differ only in numbers, and one shared function taking six
  * options would be harder to read than two that each state their own geometry.
  *
- * The tint is near-white here and that is a fact about the delivery, not a
- * shortcut. The authored albedo's linear mean is 0.1509/0.1254/0.0991 against
- * the procedural material's 0.1470/0.1221/0.0953, so the ratio that reproduces
- * the old tone is (0.97, 0.97, 0.96) -- the art was made to the right target
- * and needs almost no correction. The bark needed (1.78, 1.05, 0.51).
+ * The tint used to be near-white, on the reasoning that the albedo had been
+ * graded to the procedural material's own tone and so needed no correction.
+ * That was true and it was the wrong target, because the procedural tone was
+ * itself a brown: measured, the bark albedo's mean is #6f655e and the stone's
+ * is #6c6359 -- 6.6 sRGB units apart, which is no distance at all. Shipped,
+ * the arch read as a wooden bridge, and the owner said so on sight.
  *
- * TorusGeometry(R, tube, .., PI): u runs the half-torus arc, PI * R units, and
- * v runs the tube, 2 * PI * tube. At the bark's 4.3-unit tile the arch's
- * 17 / 2.9 works out near-square, and at the same physical scale as the bark
- * so the two read as one world.
+ * So the tint takes the stone to a pale limestone instead. Solved, not picked:
+ * the stone's linear mean is 0.1509/0.1254/0.0991, the target #b5a58c is
+ * 0.4621/0.3762/0.2622, and the ratio is (3.062, 3.000, 2.647). Brighter
+ * targets were measured too and rejected on clipping -- #c2ab86 blows 1.68%
+ * of the texture's pixels against #b5a58c's 0.51%. Rendered, bark and stone
+ * now sit 101.6 sRGB units apart, and `authored-textures.test.js` asserts that
+ * separation against the shipped files so the next delivery cannot quietly be
+ * the same brown again.
+ *
+ * TorusGeometry(R, tube, .., PI) with its UVs SWAPPED by the builder, so u
+ * runs the tube (2*PI*tube) and v runs the arc (PI*R). The swap is not
+ * cosmetic: this albedo's structure is horizontal bedding -- measured, rowVar
+ * 10.0 against colVar 1.5 -- so unswapped the bands run lengthwise down a
+ * standing leg, which is exactly how bark fissures run. Swapped they ring the
+ * tube as level strata, which is both what sedimentary rock does and what the
+ * canyons already do (§16.13 bands their walls by RADIUS for the same reason).
  *
  * The DEFAULTS below are only a fallback -- the arch's real dimensions are
  * passed in from the builder that owns the geometry. Hard-coding them here
@@ -195,7 +208,7 @@ export function applyAuthoredBark(THREE, material, { circumference, height, base
  * only symptom is a texture that looks slightly wrong in a screenshot nobody
  * takes.
  */
-export const STONE_TINT = Object.freeze({ r: 0.97, g: 0.97, b: 0.96 });
+export const STONE_TINT = Object.freeze({ r: 3.062, g: 3.000, b: 2.647 });
 export const ARCH_RADIUS_UNITS = 17;
 export const ARCH_TUBE_RADIUS_UNITS = 2.9;
 export const ARCH_ARC_UNITS = Math.PI * ARCH_RADIUS_UNITS;
@@ -203,10 +216,10 @@ export const ARCH_TUBE_UNITS = 2 * Math.PI * ARCH_TUBE_RADIUS_UNITS;
 
 export function applyAuthoredStone(THREE, material, {
   basePath = './assets/textures',
-  arcUnits = ARCH_ARC_UNITS,
-  tubeUnits = ARCH_TUBE_UNITS,
+  uUnits = ARCH_TUBE_UNITS,
+  vUnits = ARCH_ARC_UNITS,
 } = {}) {
-  const repeat = repeatForCylinder(arcUnits, tubeUnits, BARK_TILE_METRES);
+  const repeat = repeatForCylinder(uUnits, vUnits, BARK_TILE_METRES);
   const map = loadTexture(THREE, `${basePath}/stone_rock_albedo.png`, { repeat });
   const normalMap = loadTexture(THREE, `${basePath}/stone_rock_normal.png`, { repeat });
 

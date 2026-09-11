@@ -11094,6 +11094,30 @@
           canFire: rocketSystem ? rocketSystem.canFire() : null,
         }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // What this GPU will actually allow, and what we are asking it for.
+        // A GL error that names a size limit is unanswerable without both
+        // halves, and the one report of this class came from a device this
+        // repo's SwiftShader harness cannot imitate.
+        glLimits: () => {
+          const ctx = renderer.getContext();
+          const p = (name) => { try { return ctx.getParameter(ctx[name]); } catch { return null; } };
+          const target = renderer.getRenderTarget();
+          const size = renderer.getSize(new THREE.Vector2());
+          return {
+            maxRenderbuffer: p('MAX_RENDERBUFFER_SIZE'),
+            maxTexture: p('MAX_TEXTURE_SIZE'),
+            maxSamples: p('MAX_SAMPLES'),
+            maxViewport: p('MAX_VIEWPORT_DIMS'),
+            devicePixelRatio: window.devicePixelRatio,
+            rendererPixelRatio: renderer.getPixelRatio(),
+            cssSize: [size.x, size.y],
+            drawingBuffer: [ctx.drawingBufferWidth, ctx.drawingBufferHeight],
+            boundTarget: target ? [target.width, target.height, target.samples ?? 0] : 'default',
+            shadows: renderer.shadowMap.enabled
+              ? [shadowLight?.shadow?.mapSize?.x ?? null, shadowLight?.shadow?.mapSize?.y ?? null]
+              : false,
+          };
+        },
         // How the current biome's ground is actually distributed, as decile
         // heights below the base radius. Sea level is a number that has to be
         // chosen against this, not guessed: the same value floods a third of

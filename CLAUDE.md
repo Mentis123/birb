@@ -217,6 +217,42 @@
 > appends a SECOND `?debug=1` and leaves `__BIRB` undefined while the flag's own
 > regex still matched, so the capture looked like it proved the flagged path.
 
+> **The sandstone arch read as a wooden bridge, and the numbers said so
+> before the eye did** (2026-09-11). Two authored albedos, one scene, and
+> nobody had ever compared them to each other: the bark's mean colour is
+> `#6f655e` and the stone's is `#6c6359` — **6.6 sRGB units apart**. Each file
+> passes `tools/asset-check.mjs` on its own, and no structural check has any
+> opinion about the OTHER texture in the same frame. The stone's tint was
+> near-white on the reasoning that the art had been graded to the procedural
+> material's own tone, which was true and was the wrong target, because that
+> tone was itself a brown. It is a solved lift to a pale limestone now
+> (`#b5a58c`, tint 3.062/3.000/2.647) — chosen against measured clipping,
+> 0.51% of pixels against `#c2ab86`'s 1.68% — and `authored-textures.test.js`
+> asserts the two materials render **101.6 sRGB units apart** and that the arch
+> is the lighter of the two. It fails at 43.1 on what shipped.
+>
+> **The second half of "it looks like wood" was the grain direction.** The
+> stone albedo is horizontal bedding (variance across its rows is 6.7x the
+> variance across its columns), `TorusGeometry` runs u along the arc, so the
+> bands ran LENGTHWISE down a standing leg — which is exactly how bark fissures
+> run. The arch's uv attribute is swapped at build time so they ring the tube
+> as level strata. Same principle the canyon walls already use, banding on
+> RADIUS so layers stay level.
+>
+> **A GL error naming a size limit needs both halves of the comparison.** A
+> real browser reported `glRenderbufferStorage: Desired resource size is
+> greater than max renderbuffer size`, followed by bursts of `Framebuffer is
+> incomplete: Attachment has zero size` — which is one failure, not two: a
+> rejected renderbuffer keeps its previous 0x0 size and every draw into that
+> framebuffer then fails. NOT reproducible here (SwiftShader,
+> `MAX_RENDERBUFFER_SIZE` 8192, largest size this game ever requested measured
+> at 612x1258, zero GL errors), so `bloom-pass.js` now clamps rather than
+> trusts. Note the trap the clamp exists for: **`Math.max(1, NaN)` is NaN**, so
+> `Math.max(1, Math.floor(width * ratio))` hands GL a non-finite size the moment
+> `ratio` is undefined — and a device-toolbar toggle is enough to do that.
+> `__BIRB.glLimits()` reports the device's limits beside what is actually being
+> asked for, because that report is unanswerable with only one side of it.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.

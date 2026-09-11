@@ -159,15 +159,16 @@ test('the arch stone is solved from the torus, and barely needs a tint', () => {
   assert.ok(mat.map && mat.normalMap);
   assert.equal(mat.roughnessMap, undefined, 'Lambert has no roughnessMap slot');
 
-  // repeat is solved from the geometry, exactly as the bark's is: the
-  // half-torus arc is PI*R and the tube is 2*PI*tube, at the same 4.3-unit
-  // tile so stone and bark read at one physical scale.
-  const rep = repeatForCylinder(ARCH_ARC_UNITS, ARCH_TUBE_UNITS, BARK_TILE_METRES);
-  assert.deepEqual(rep, { x: 12, y: 4 });
-  assert.equal(T.loaded[0].repeat.x, 12);
-  assert.equal(T.loaded[0].repeat.y, 4);
-  const tileU = ARCH_ARC_UNITS / rep.x;
-  const tileV = ARCH_TUBE_UNITS / rep.y;
+  // repeat is solved from the geometry, exactly as the bark's is, at the same
+  // 4.3-unit tile so stone and bark read at one physical scale. u spans the
+  // TUBE and v the ARC: the arch's uv attribute is swapped by the builder so
+  // the albedo's bedding rings the leg instead of running down it.
+  const rep = repeatForCylinder(ARCH_TUBE_UNITS, ARCH_ARC_UNITS, BARK_TILE_METRES);
+  assert.deepEqual(rep, { x: 4, y: 12 });
+  assert.equal(T.loaded[0].repeat.x, 4);
+  assert.equal(T.loaded[0].repeat.y, 12);
+  const tileU = ARCH_TUBE_UNITS / rep.x;
+  const tileV = ARCH_ARC_UNITS / rep.y;
   assert.ok(Math.abs(tileU - tileV) < 1, `tile ${tileU.toFixed(2)} x ${tileV.toFixed(2)} must be near-square`);
   // Within 20% of the bark's tile, or the arch and the trees stop reading as
   // one world however good each looks alone.
@@ -176,11 +177,12 @@ test('the arch stone is solved from the torus, and barely needs a tint', () => {
       `tile ${tile.toFixed(2)} must be near the bark's ${BARK_TILE_METRES}`);
   }
 
-  // Near-white, unlike the bark's (1.78, 1.05, 0.51): this albedo was authored
-  // to the procedural material's own tone, so it needs almost no correction.
-  // If a future delivery drifts, this is the assertion that notices.
   assert.deepEqual(mat.color.rgb, { r: STONE_TINT.r, g: STONE_TINT.g, b: STONE_TINT.b });
-  for (const v of Object.values(STONE_TINT)) assert.ok(v > 0.9 && v <= 1.0);
+  // The tint LIFTS this albedo rather than reproducing it. It was near-white
+  // once, on the reasoning that the art had been graded to the procedural
+  // material's own tone -- which was true, and wrong, because that tone was a
+  // brown 6.6 sRGB units from the bark's. See the separation test below.
+  for (const v of Object.values(STONE_TINT)) assert.ok(v > 2.0 && v < 4.0);
 
   dispose();
   assert.equal(mat.color.getHex(), 0x6b6257);
@@ -195,12 +197,70 @@ test('the arch builder owns the dimensions, and they reach the tiling', () => {
   const T = fakeThree();
   const mat = fakeMaterial();
   const dispose = applyAuthoredStone(T, mat, {
-    arcUnits: Math.PI * 40,
-    tubeUnits: 2 * Math.PI * 6,
+    uUnits: Math.PI * 40,
+    vUnits: 2 * Math.PI * 6,
   });
   const expected = repeatForCylinder(Math.PI * 40, 2 * Math.PI * 6, BARK_TILE_METRES);
+  // (u/v naming aside, this checks only that what goes in reaches the repeat.)
   assert.deepEqual({ x: T.loaded[0].repeat.x, y: T.loaded[0].repeat.y }, expected);
   assert.notDeepEqual(expected, { x: ARCH_ARC_UNITS, y: ARCH_TUBE_UNITS });
   assert.ok(expected.x > 12, 'a bigger arch must take more tiles, not the same number');
   dispose();
+});
+
+
+// ---------------------------------------------------------------------------
+// The check that would have caught the wooden arch.
+//
+// Both authored albedos are graded browns and they landed 6.6 sRGB units
+// apart -- no distance at all. The arch shipped looking like a timber bridge
+// and the only thing that noticed was the owner, on his phone, after a
+// deploy. Nothing structural could have: each file passes the asset gate on
+// its own, and neither `tiling` nor `bakedLight` nor `channelSpan` has any
+// opinion about the OTHER texture in the same frame.
+//
+// So assert the thing the player actually sees: albedo x tint, per material,
+// far apart. This reads the shipped PNGs, so a future delivery that is the
+// same brown again fails here rather than on a phone.
+test('the rendered stone is not the rendered bark', async () => {
+  const { decodePng } = await import('../tools/lib/asset-analysis.mjs');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const dir = path.join(import.meta.dirname, '..', 'assets', 'textures');
+  if (!fs.existsSync(path.join(dir, 'bark_pine_albedo.png'))) return;   // assets are optional
+
+  const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const toSrgb = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055);
+  const meanLinear = (file) => {
+    const png = decodePng(fs.readFileSync(path.join(dir, file)), file);
+    const { width: w = png.w, height: h = png.h } = png;
+    const n = (png.w ?? w) * (png.h ?? h);
+    const mu = [0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      for (let c = 0; c < 3; c++) mu[c] += toLinear(png.data[i * png.ch + c] / 255);
+    }
+    return mu.map((v) => v / n);
+  };
+
+  const bark = meanLinear('bark_pine_albedo.png');
+  const stone = meanLinear('stone_rock_albedo.png');
+
+  // Raw, the two albedos are effectively the same colour. Assert that too, so
+  // the reason this test exists stays legible if someone reads it cold.
+  const rawGap = Math.hypot(...bark.map((v, i) => (toSrgb(v) - toSrgb(stone[i])) * 255));
+  assert.ok(rawGap < 20, `albedos are ${rawGap.toFixed(1)} apart; the tints below are what separates them`);
+
+  const lit = (mu, tint) => [mu[0] * tint.r, mu[1] * tint.g, mu[2] * tint.b];
+  const renderedBark = lit(bark, BARK_TINT);
+  const renderedStone = lit(stone, STONE_TINT);
+  const gap = Math.hypot(...renderedBark.map(
+    (v, i) => (toSrgb(Math.min(1, v)) - toSrgb(Math.min(1, renderedStone[i]))) * 255,
+  ));
+  assert.ok(gap > 60, `rendered bark and stone are only ${gap.toFixed(1)} sRGB units apart`);
+
+  // And the stone must be the LIGHTER of the two: it is a 34-unit arch read
+  // against a bright sky, and a dark mass there reads as a hole, which is the
+  // same lesson the landmark trunk's 0x8a6440 records.
+  const luma = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  assert.ok(luma(renderedStone) > luma(renderedBark), 'the arch must not be darker than the trees');
 });

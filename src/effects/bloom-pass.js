@@ -255,6 +255,25 @@ const COMPOSITE_FRAG = `
   }
 `;
 
+/**
+ * Floor a render-target dimension into [1, limit], rejecting non-finite input.
+ *
+ * Pure and exported because it is the whole of the guard and the only part
+ * worth a test: building a fake THREE complete enough to construct the pass
+ * would test the fake.
+ *
+ * `Math.max(1, NaN)` is NaN, not 1 -- which is why the obvious clamp is not
+ * one. A non-finite size reaches GL unchanged, and a momentarily undefined
+ * `devicePixelRatio` (a device-toolbar toggle will do it) is enough to
+ * produce one from ordinary-looking inputs.
+ */
+export function clampTargetSize(value, limit) {
+  const cap = Number.isFinite(limit) && limit >= 1 ? Math.floor(limit) : 4096;
+  const n = Math.floor(value);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return n > cap ? cap : n;
+}
+
 export function createBloomPass(THREE, renderer, {
   threshold = 0.72,
   softness = 0.26,
@@ -399,16 +418,51 @@ export function createBloomPass(THREE, renderer, {
   quadMesh.frustumCulled = false;
   quadScene.add(quadMesh);
 
+  // The GL limit these targets must respect, read once. `sceneTarget` carries
+  // a depth RENDERBUFFER, and a renderbuffer over MAX_RENDERBUFFER_SIZE fails
+  // allocation outright -- leaving the attachment at its previous 0x0 size, so
+  // every draw into that framebuffer then fails too. That is the exact pair
+  // seen in the wild:
+  //   GL_INVALID_VALUE: glRenderbufferStorage: Desired resource size is
+  //     greater than max renderbuffer size
+  //   GL_INVALID_FRAMEBUFFER_OPERATION: glClear/glDrawElements: Framebuffer is
+  //     incomplete: Attachment has zero size
+  // reported on a real browser and NOT reproducible in this repo's harness
+  // (SwiftShader, MAX_RENDERBUFFER_SIZE 8192, largest request ever measured
+  // 612x1258, zero GL errors). So this is a guard, not a diagnosis: it makes
+  // the failure impossible and, when it fires, prints the numbers that say
+  // which input was wrong.
+  const glLimit = (() => {
+    try {
+      const ctx = renderer.getContext();
+      return Math.max(1, Math.min(
+        ctx.getParameter(ctx.MAX_RENDERBUFFER_SIZE) || 4096,
+        ctx.getParameter(ctx.MAX_TEXTURE_SIZE) || 4096,
+      ));
+    } catch { return 4096; }
+  })();
+  let limitWarned = false;
+
+  function safeSize(value, label) {
+    const n = clampTargetSize(value, glLimit);
+    if (n !== Math.floor(value) && !limitWarned) {
+      limitWarned = true;
+      console.warn(`[bloom] ${label} came out ${value}; clamped to ${n}. `
+        + `size=${lastWidth}x${lastHeight} ratio=${lastRatio} limit=${glLimit}`);
+    }
+    return n;
+  }
+
   function setSize(width, height, ratio) {
     lastWidth = width;
     lastHeight = height;
     lastRatio = ratio;
     hasSizeBeenSet = true;
-    const w = Math.max(1, Math.floor(width * ratio));
-    const h = Math.max(1, Math.floor(height * ratio));
+    const w = safeSize(width * ratio, 'scene width');
+    const h = safeSize(height * ratio, 'scene height');
     sceneTarget.setSize(w, h);
-    const bw = Math.max(1, Math.floor(w / currentDownscale));
-    const bh = Math.max(1, Math.floor(h / currentDownscale));
+    const bw = safeSize(w / currentDownscale, 'blur width');
+    const bh = safeSize(h / currentDownscale, 'blur height');
     blurA.setSize(bw, bh);
     blurB.setSize(bw, bh);
     rayTarget.setSize(bw, bh);
