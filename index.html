@@ -11270,29 +11270,39 @@
         forceNest: (index = null) => {
           const list = nestPointsSystem?.nests;
           if (!nestingSystem || !list || !list.length) return false;
+          let nest;
           if (index === null || index === true) {
-            const best = list.reduce((acc, nest) => {
-              const d = nest.getWorldPosition(new THREE.Vector3()).distanceToSquared(flightController.position);
-              return (!acc || d < acc.d) ? { nest, d } : acc;
+            const best = list.reduce((acc, candidate) => {
+              const d = candidate.getWorldPosition(new THREE.Vector3()).distanceToSquared(flightController.position);
+              return (!acc || d < acc.d) ? { nest: candidate, d } : acc;
             }, null);
             if (!best) return false;
-            // Close the gap first. A player only ever lands from inside
-            // proximity range; the harness was auto-flying a straight line at
-            // 16 units/s across a 754-unit circumference, which takes most of
-            // a minute and reads as a hung state machine. Move to just outside
-            // the nest, as if the player had flown there, then land.
-            const target = best.nest.getWorldPosition(new THREE.Vector3());
-            if (best.d > 40 * 40) {
-              const up = target.clone().normalize();
-              const side = new THREE.Vector3(0, 1, 0).cross(up);
-              if (side.lengthSq() < 0.01) side.set(1, 0, 0);
-              side.normalize();
-              flightController.position.copy(target).addScaledVector(side, 22);
-            }
-            return nestingSystem.tryLandOnNest(flightController.position)
-              || nestingSystem.forceNestAt(best.nest);
+            nest = best.nest;
+          } else {
+            nest = list[Math.min(index, list.length - 1)];
           }
-          return nestingSystem.forceNestAt(list[Math.min(index, list.length - 1)]);
+
+          // Close the gap FIRST, on both paths. A player only ever lands from
+          // inside proximity range; the landing state auto-flies a straight
+          // line and advances PER FRAME, so on a software renderer at three
+          // frames a second it covers a fraction of the ground per wall-clock
+          // second. The nearest-nest path got this fix; the indexed path did
+          // not, and `tools/birb-sheet.mjs` calls forceNest(0) -- which is why
+          // the sheet reported "forest: landing never reached NESTED" after
+          // ninety seconds while the same landing completed in twenty-two in a
+          // freshly booted browser. Not a game bug and not a blocked approach:
+          // the bird was moving the whole time, measured at a steady ~20 units
+          // per two-second sample, just not fast enough against the clock.
+          const target = nest.getWorldPosition(new THREE.Vector3());
+          if (target.distanceToSquared(flightController.position) > 40 * 40) {
+            const up = target.clone().normalize();
+            const side = new THREE.Vector3(0, 1, 0).cross(up);
+            if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+            side.normalize();
+            flightController.position.copy(target).addScaledVector(side, 22);
+          }
+          return nestingSystem.tryLandOnNest(flightController.position)
+            || nestingSystem.forceNestAt(nest);
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
         stats: () => ({
