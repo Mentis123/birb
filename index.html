@@ -3671,6 +3671,9 @@
     // Frames remaining before the follow rig's damping is collapsed. Set by
     // __BIRB.pinCheckpoint; zero on every normal path.
     let __birbPendingCameraSnap = 0;
+    // Bumped per authored-sky request so a load that lands after the player
+    // has switched biome is dropped instead of painting the wrong sky.
+    let skyTexToken = 0;
 
     // DPR cap: 1.2 on mobile (halves pixel count vs 1.8), 1.8 on desktop.
     // Adaptive quality further drops this to 1.0 below 55 FPS.
@@ -6337,18 +6340,35 @@
       if (skyDome && definition.sky) {
         skyDome.setColors(definition.sky);
       }
-      // An authored equirectangular sky on the dome, behind ?skytex=1. Missing
-      // files are the EXPECTED case until the panoramas land: loadTexture's
-      // error path warns and the dome keeps its gradient, so the flag is safe
-      // to hand someone before the art exists.
+      // The authored equirectangular sky, ON by default now that the four
+      // panoramas have landed. `?skytex=0` turns it off and `?skytex=0.5`
+      // half-mixes it against the gradient, so the comparison the decision was
+      // made on stays reproducible. A missing or failed file warns and leaves
+      // the gradient standing, which is also the whole no-assets fallback.
       if (skyDome && typeof skyDome.setSkyTexture === 'function') {
         const skyTexReq = /[?&]skytex=([0-9.]+)/.exec(window.location?.search || '');
-        if (skyTexReq) {
-          const mix = Math.max(0, Math.min(1, Number(skyTexReq[1]) || 1));
+        const mix = skyTexReq ? Math.max(0, Math.min(1, Number(skyTexReq[1]))) : 1;
+        // Clear whatever the previous biome was showing FIRST. The dome
+        // survives an environment switch, so without this the old biome's sky
+        // stays on screen until the new one decodes.
+        skyDome.setSkyTexture(null);
+        if (mix > 0) {
+          // A load that is still in flight when the player switches biome
+          // must not apply when it lands. The dome is shared, so the forest's
+          // sky would arrive and paint itself over the city.
+          const token = (skyTexToken += 1);
           try {
             const url = `./assets/env/${variantId}_sky.png`;
             const tex = loadAuthoredTexture(THREE, url, {
-              onError: () => skyDome.setSkyTexture(null),
+              onError: () => { if (token === skyTexToken) skyDome.setSkyTexture(null); },
+              // Raise the mix ONLY once the image has decoded. TextureLoader
+              // hands back the Texture immediately and fills it in later, so
+              // switching the dome on at call time switches it to an EMPTY
+              // texture: captured with the PNG held in flight, the entire
+              // upper half of the screen renders SOLID BLACK for the length
+              // of the download. Invisible on a dev box off localhost, and
+              // several seconds of void on a phone on a cold connection.
+              onLoad: () => { if (token === skyTexToken) skyDome.setSkyTexture(tex, { mix }); },
             });
             // A sky is a picture, so it decodes as sRGB -- unlike every other
             // authored map in this game, which is data. It also must not
@@ -6357,7 +6377,6 @@
             tex.colorSpace = THREE.SRGBColorSpace;
             tex.wrapS = THREE.RepeatWrapping;
             tex.wrapT = THREE.ClampToEdgeWrapping;
-            skyDome.setSkyTexture(tex, { mix });
           } catch (err) {
             console.warn('[skytex] authored sky failed; keeping the gradient', err);
             skyDome.setSkyTexture(null);

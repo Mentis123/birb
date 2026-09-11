@@ -78,10 +78,15 @@ export const BARK_TINT = Object.freeze({ r: 1.78, g: 1.05, b: 0.51 });
  * device's real maximum on upload, and grazing-angle filtering on a near
  * vertical trunk is the largest quality win available here for zero memory.
  */
-export function loadTexture(THREE, url, { repeat, anisotropy = 16, onError } = {}) {
+export function loadTexture(THREE, url, { repeat, anisotropy = 16, onError, onLoad } = {}) {
   const texture = new THREE.TextureLoader().load(
     url,
-    undefined,
+    // `onLoad` is not decoration. TextureLoader returns the Texture object
+    // immediately and fills its image in later, so anything that switches a
+    // material ON at call time is switching to an EMPTY texture for the
+    // length of the download. Captured, with the sky held in flight: the
+    // whole upper half of the screen renders solid black.
+    onLoad ? (tex) => onLoad(tex) : undefined,
     undefined,
     (err) => {
       console.warn(`[authored-textures] ${url} failed to load; keeping the procedural material`, err);

@@ -16,7 +16,7 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v54-2026-09-11-instanced-bark';
+const CACHE_VERSION = 'v55-2026-09-11-authored-sky';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -40,7 +40,15 @@ const CORE_ASSETS = [
   './icons/apple-touch-icon.png',
   './splash.jpg',
   './info.jpg',
+  // The FOREST sky only. The authored panorama is the shipping default now,
+  // and forest is the biome a cold start always builds, so without this the
+  // first offline load shows the flat gradient with no warning -- the same
+  // trap this list's own note below describes for bark. The other three are
+  // 1.4 MB of install weight for biomes most sessions never visit, and
+  // cacheFirst picks each up the first time its biome is opened online.
+  './assets/env/forest_sky.png',
   // NOT precached (install-weight diet, ~7.3 MB saved):
+  // - ./assets/env/{canyons,mountain,city}_sky.png (1.4 MB) — see above.
   // - ./birb.glb (1.7 MB) — only loads behind the ?glb=1 A/B flag; the
   //   runtime cache picks it up on demand for whoever uses that flag.
   // - ./assets/textures/bark_pine_*.png (1.0 MB) — only fetched behind the

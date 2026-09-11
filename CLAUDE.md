@@ -253,6 +253,35 @@
 > `__BIRB.glLimits()` reports the device's limits beside what is actually being
 > asked for, because that report is unanswerable with only one side of it.
 
+> **The authored skies landed and are the shipping default** (2026-09-11).
+> Four 1024x512 equirect panoramas, one per biome, on the sky dome. The
+> decision was not close: captured side by side, the canyons' upper half
+> without them is a flat beige wash with nothing in it at all, and with them
+> it has cirrus, a violet-to-orange gradient and depth. `?skytex=0` turns them
+> off and `?skytex=0.5` half-mixes, so the comparison stays reproducible.
+> The dome's own procedural sun disc still draws on top — the panoramas were
+> commissioned with "no sun disc" precisely so the sun can stay aligned with
+> the real keyLight instead of being baked at a fixed spot.
+>
+> **A texture is not loaded when TextureLoader returns it, and switching a
+> material on at call time is switching it to an EMPTY texture.** The sky
+> raised `uSkyMix` to 1 the moment it asked for the file, so for the length of
+> the download the dome sampled a blank — and the entire upper half of the
+> screen rendered **solid black**. Invisible on a dev box off localhost, and
+> several seconds of void on a phone on a cold connection. Reproduced by
+> holding the PNG in flight with a Playwright route delay, which is the only
+> way this class of bug is ever seen before a user sees it: the mix is raised
+> from `onLoad` now, and the gradient holds until the image decodes. The same
+> request also carries a TOKEN — the dome survives an environment switch, so
+> a forest sky still downloading when the player jumps to the city would
+> otherwise land and paint itself over the city.
+>
+> `sw.js` precaches the FOREST sky only. Its own note about bark says why:
+> a shipping default that is not in `CORE_ASSETS` renders wrong on the first
+> offline load with no warning. The other three are 1.4 MB of install weight
+> for biomes most sessions never open, and `cacheFirst` picks each up the
+> first time its biome is visited online.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.
