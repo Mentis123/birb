@@ -113,6 +113,19 @@ jobs:
         # collision.
         run: node tools/birb-walk.mjs
 
+      - name: Flight v2 rolls, loops, turns from the bank, rights itself and crashes inverted
+        # docs/realism/FLIGHT_V2_PLAN.md's `?flight=v2`: bank-to-turn instead
+        # of yaw-with-cosmetic-bank, unlimited pitch instead of an 80° clamp,
+        # and an energy model instead of a constant cruise speed. The FIRST
+        # thing this checks is that the flag reached a v2 controller at
+        # all — v1 + aerobatics.js already rolls and loops as scripted
+        # moves, so a silently-ignored flag would pass a bank/loop check for
+        # the wrong reason. Everything after that drives `setStick`/
+        # `setAltitude` and reads `flightProbe()` on the live page, frame by
+        # frame (SwiftShader is too slow for this at the Ultra default, so
+        # this step — like birb-walk above — boots `?quality=amazing`).
+        run: node tools/birb-flight-v2.mjs
+
       - name: Every shader compiles, in every environment
         # Three logs a shader error and then quietly draws NOTHING for that
         # material, so the page still renders and a screenshot still exits

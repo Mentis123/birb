@@ -3407,6 +3407,12 @@
       });
     });
 
+    // Flight v2 — bank to turn, `?flight=v2` (docs/realism/FLIGHT_V2_PLAN.md).
+    // Declared up here because the import below is GATED on it: the module is
+    // in sw.js CORE_ASSETS so an offline v2 boot is safe either way, but a boot
+    // that is never going to fly v2 should not pay a fetch for it.
+    const flightV2 = /[?&]flight=v2(?:&|$)/.test(window.location?.search || '');
+
     let THREE,
       GLTFLoader,
       createCameraState,
@@ -3419,7 +3425,7 @@
       getEnvironmentDefinition,
       DEFAULT_GRADE,
       nipplejs,
-      BirdFlight, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
+      BirdFlight, BirdFlightV2, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
 
     try {
       THREE = await import("https://esm.sh/three@0.183.2");
@@ -3427,6 +3433,9 @@
       // New Flight System Imports
       const birdFlightMod = await import("./src/flight/bird-flight.js");
       BirdFlight = birdFlightMod.BirdFlight;
+      if (flightV2) {
+        BirdFlightV2 = (await import("./src/flight/bird-flight-v2.js")).BirdFlightV2;
+      }
       const birdCameraMod = await import("./src/flight/bird-camera.js");
       BirdCamera = birdCameraMod.BirdCamera;
       const birdVisualMod = await import("./src/flight/bird-visual.js");
@@ -3695,7 +3704,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v69-2026-09-13-ultra-max-panel';
+    const BIRB_BUILD = 'v70-2026-09-13-flight-v2';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5036,6 +5045,15 @@
     const _aeroHeading = new THREE.Vector3(0, 0, -1);
     const _aeroUp = new THREE.Vector3(0, 1, 0);
     const _aeroScratch = new THREE.Vector3();
+    // Flight v2's camera hold and its attitude-at-contact test. Module scope,
+    // filled per frame, never allocated in the loop.
+    const _v2Up = new THREE.Vector3();
+    const _v2Fwd = new THREE.Vector3();
+    const _v2Tan = new THREE.Vector3();
+    const _v2BodyUp = new THREE.Vector3();
+    // The smoothed LEVEL heading the chase camera stands behind under v2.
+    // Persists across frames — that is the whole point of it.
+    const _v2Heading = new THREE.Vector3();
     // The stick as the MODEL sees it around a move. bird-visual.js banks the
     // model by input.x and tilts it by input.y; this is that input with the
     // wind-up folded in (see AERO_WINDUP below). One object, filled per
@@ -9359,7 +9377,10 @@
 
     // 2. Flight Physics (BirdFlight)
     // Base speed bumped 4 -> 11 (~2.75×) so traversal feels right on the 4× world.
-    const flight = new BirdFlight(THREE, {
+    // One options object, either controller. BirdFlightV2 is a drop-in (same
+    // constructor options, same pose output) and ignores `levelTurns` — it has
+    // no other axis to turn about, since the turn comes out of the bank.
+    const flightOptions = {
       sphereCenter: new THREE.Vector3(0, 0, 0),
       sphereRadius: SPHERE_RADIUS,
       speed: 11,
@@ -9377,12 +9398,38 @@
       // the A/B is how this was judged and a comparison you cannot re-run is
       // one nobody re-runs.
       levelTurns: !/[?&]levelturn=0/.test(window.location?.search || ''),
-    });
+    };
+    // `?v2tune=rightingRate:2,turnGain:1.8` overrides FLIGHT_V2_DEFAULTS at
+    // boot, one number at a time. The A/B is flown on a phone at an airport;
+    // without this every re-tune is a push and a deploy, and the numbers in
+    // that table are starting points, not measurements — the crossover
+    // between "a held bank" and "a roll" (rightingRate) is the one the owner
+    // has to feel. Reported back by flightProbe().tuning so a capture says
+    // what it was flown with. Ignored under v1.
+    const V2_TUNE_KEYS = ['rollRate', 'pitchRate', 'turnGain', 'yawAssist', 'rightingRate',
+      'rightingSoftBank', 'pitchStability', 'gSpeed', 'drag', 'minMul', 'maxMul', 'deadzone'];
+    if (flightV2) {
+      const tune = (/[?&]v2tune=([^&]+)/.exec(window.location?.search || '') || [])[1];
+      if (tune) {
+        for (const pair of decodeURIComponent(tune).split(',')) {
+          const [k, v] = pair.split(':');
+          const n = Number.parseFloat(v);
+          if (V2_TUNE_KEYS.includes(k) && Number.isFinite(n)) flightOptions[k] = n;
+        }
+      }
+    }
+    const flight = flightV2
+      ? new BirdFlightV2(THREE, flightOptions)
+      : new BirdFlight(THREE, flightOptions);
 
     // 3. Visuals
+    // Under v2 the FLIGHT FRAME rolls for real, so this layer is cut to a small
+    // aileron/elevator lean (7 / 4.6 degrees). Left at v1's 63/36 the model
+    // would carry a full cosmetic bank on top of a frame that is already
+    // banked, and the bird would sit a bank's worth off its own turn.
     const visual = new BirdVisual(THREE, {
-      maxBankAngle: Math.PI * 0.35,
-      maxPitchTilt: Math.PI * 0.2,
+      maxBankAngle: flightV2 ? 0.12 : Math.PI * 0.35,
+      maxPitchTilt: flightV2 ? 0.08 : Math.PI * 0.2,
     });
 
     const aimRig = new AimRig(THREE);
@@ -9391,8 +9438,14 @@
     // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
     flightController = flight;
     flightControllerInitialized = true;
-    aerobatics = createAerobatics(AEROBATIC_MOVES);
-    aeroTrigger = createStickEdgeTrigger();
+    // Committed aerobatics are exactly what v2 deletes: a roll is the stick
+    // held over and a loop is the stick held back. Both stay null under v2 —
+    // the per-frame block is already null-guarded, so `_aeroWindup` keeps its
+    // initial 0 and the visual layer sees the plain stick.
+    if (!flightV2) {
+      aerobatics = createAerobatics(AEROBATIC_MOVES);
+      aeroTrigger = createStickEdgeTrigger();
+    }
 
     // Set sphere center on flight controller for spherical world support
     if (sphericalWorld && typeof flightController.setSphereCenter === 'function') {
@@ -10974,7 +11027,15 @@
             flight.speed = FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed;
           } else {
             // Forward boost surges cruise speed; otherwise normal cruise.
-            flight.speed = boostTimer > 0 ? resumeSpeed * BOOST_CONFIG.speedMult : resumeSpeed;
+            // Under v2 this is the TARGET, not the speed: the energy model owns
+            // `speed` (a dive gains, a climb bleeds) and chases `cruise`, so
+            // writing speed here every frame would flatten the whole model back
+            // to v1's constant. The grounded and falling branches above still
+            // write `speed` directly — those are commanded speeds, and v2
+            // honours a direct write as both the speed and the target.
+            const target = boostTimer > 0 ? resumeSpeed * BOOST_CONFIG.speedMult : resumeSpeed;
+            if (flightV2) flight.cruise = target;
+            else flight.speed = target;
           }
         }
 
@@ -11147,9 +11208,30 @@
           if (groundResult.collided) {
             pose.position.copy(groundResult.correctedPosition);
             flight.position.copy(groundResult.correctedPosition);
-            applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
-            if (statusMetric) {
-              statusMetric.textContent = "Grounded. Push to walk, pull back to reverse — tap Fly to take off.";
+            // Under v2 the bird can reach the ground inverted or far too fast —
+            // there is no pitch clamp and no constant cruise any more — and a
+            // bird that lands on its back and starts WALKING reads as a bug.
+            // Anything but an upright, unhurried arrival routes into the same
+            // knockdown a tree impact and a drone strike already use. 0.5 is 60
+            // degrees off upright; 1.4x cruise is more than level flight can
+            // build, so only a dive (which tops out at maxMul 1.9) trips it.
+            let v2Crash = false;
+            if (flightV2 && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+              _v2Up.copy(pose.position).normalize();
+              _v2BodyUp.set(0, 1, 0).applyQuaternion(pose.quaternion).normalize();
+              const cruise = Number.isFinite(flight.cruise) && flight.cruise > 0 ? flight.cruise : flight.speed;
+              v2Crash = _v2BodyUp.dot(_v2Up) < 0.5 || flight.speed > 1.4 * cruise;
+            }
+            if (v2Crash) {
+              applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
+              if (statusMetric) {
+                statusMetric.textContent = "Crashed! You're going down.";
+              }
+            } else {
+              applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
+              if (statusMetric) {
+                statusMetric.textContent = "Grounded. Push to walk, pull back to reverse — tap Fly to take off.";
+              }
             }
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Keep grounded movement hugging the surface while walking/sliding.
@@ -11161,6 +11243,49 @@
         if (nestedAimQuaternion) {
           pose.quaternion.copy(nestedAimQuaternion);
           flight.quaternion.copy(nestedAimQuaternion);
+        }
+
+        // Flight v2's chase frame. BirdCamera stands behind the bird along the
+        // bird's OWN forward, and in a loop that forward points up, then
+        // backwards, then down — so the rig swings under the bird and out the
+        // far side and the world reads as going backwards. Under v1 that was an
+        // event (a committed move asked for a hold); under v2 the bird can loop
+        // at any moment because there is no move to detect, so the hold is on
+        // EVERY frame, along the level heading, with radial up. In ordinary
+        // level flight the held heading IS the bird's forward, so this changes
+        // nothing there — it only bites where the old rig was already wrong.
+        if (flightV2) {
+          const v2Flying = !isNested && !nestingControlsBird
+            && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
+          if (v2Flying) {
+            _v2Up.copy(pose.position).normalize();
+            _v2Fwd.set(0, 0, -1).applyQuaternion(pose.quaternion).normalize();
+            _v2Tan.copy(_v2Fwd).addScaledVector(_v2Up, -_v2Fwd.dot(_v2Up));
+            // FREEZE the heading while the nose is near vertical: the tangent
+            // projection is short there and its direction is mostly noise, so a
+            // rig that followed it would flip the frame at the top of a loop.
+            // 0.25 of a unit forward is 75 degrees of pitch.
+            if (_v2Tan.length() >= 0.25) {
+              _v2Tan.normalize();
+              if (_v2Heading.lengthSq() < 1e-6) _v2Heading.copy(_v2Tan);
+              // ~0.25 s exponential, written against delta so it is the same
+              // smoothing at 60 fps and in a 3 fps capture harness.
+              else _v2Heading.lerp(_v2Tan, 1 - Math.exp(-delta / 0.25)).normalize();
+            }
+            if (_v2Heading.lengthSq() > 1e-6) {
+              // Stand further off the steeper the bird points, so a loop whose
+              // radius (speed / pitchRate ~ 5 units) is smaller than the 5-unit
+              // stand-off does not go over the top on top of the lens.
+              const distanceMul = 1 + 0.6 * Math.abs(_v2Fwd.dot(_v2Up));
+              bCam.setHold({ weight: 1, heading: _v2Heading, distanceMul });
+              cameraState?.setFollowHold?.({ weight: 1, heading: _v2Heading, up: _v2Up, distanceMul });
+            }
+          } else {
+            // Landing, nested or knocked down: hand the frame straight back, so
+            // those paths behave exactly as they do under v1.
+            bCam.setHold({ weight: 0 });
+            cameraState?.setFollowHold?.({ weight: 0 });
+          }
         }
 
         // 3. Camera Update
@@ -13246,6 +13371,31 @@
             // The input the RIG is seeing, which is not always the input the
             // stick was set to: nesting, grounded and falling each rewrite it.
             stick: { x: d3(lastWingInput.x), y: d3(lastWingInput.y), active: lastWingInput.active },
+            // Which mapping is flying (docs/realism/FLIGHT_V2_PLAN.md). The
+            // three below are v2's and are NULL under v1 rather than 0, so a
+            // harness can tell "this build has no energy model" from "the
+            // energy model reads zero".
+            controller: flightV2 ? 'v2' : 'v1',
+            // The simulation clock (sum of the clamped per-frame deltas the
+            // flight actually integrated). A harness that counts frames and
+            // multiplies by 0.05 is guessing; this is the number.
+            simTime: d3(motionState.elapsed),
+            // The numbers this bird is flying with (v2 only), so a capture or a
+            // phone report can name its tuning instead of assuming the table.
+            tuning: flightV2 ? {
+              rollRate: fc.rollRate, pitchRate: fc.pitchRate, turnGain: fc.turnGain, yawAssist: fc.yawAssist,
+              rightingRate: fc.rightingRate, rightingSoftBank: fc.rightingSoftBank,
+              pitchStability: fc.pitchStabilityRate, gSpeed: fc.gSpeed, drag: fc.drag,
+              minMul: fc.minMul, maxMul: fc.maxMul, deadzone: fc.deadzone,
+            } : null,
+            // The bank the FLIGHT FRAME is holding, full circle. Under v1 the
+            // only bank is the cosmetic one on the model (visualBankDeg above).
+            bankDeg: (flightV2 && typeof fc.bankAngle === 'function')
+              ? d3(fc.bankAngle() * 180 / Math.PI) : null,
+            // The target the energy model chases, and speed as a fraction of
+            // it: > 1 means the bird has dived into the bank.
+            cruise: (flightV2 && Number.isFinite(fc.cruise)) ? d3(fc.cruise) : null,
+            energy: (flightV2 && typeof fc.energy === 'function') ? d3(fc.energy()) : null,
           };
         },
         flapPhase: (phase01 = null) => {

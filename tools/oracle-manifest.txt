@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-13 at commit 187f11e by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-13 at commit 25c0b89 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -57,11 +57,12 @@ f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-ch
 7fcdbfcda1406cb603f084ccf4e76a021fa54ff05166bdaf0e14da16e9414cdc  tests/authored-tints.test.js
 6f9c92d3b927330062190fff2cba727c271bf215da99fe594aa79f359609ce01  tests/bird-camera-hold.test.js
 b8096b78960e23a6ae729f5e2af859d6a823749975b2ae78f417e1aefec2411f  tests/bird-contract.test.js
+01bc13b667eb638e2d467c553de53bff152b5cc48f8c5e85451eb8fafee9106f  tests/bird-flight-v2.test.js
 be4fae20f590fc230dd2ee1968983087ab01c1d9a13fc86c5bbfc7b6fc613313  tests/bird-flight.test.js
 33af5b622a024647ac5ff84b5d7d6ad44e7f5992baa2c0a906117dd55f3111d0  tests/bird-plumage.test.js
 3a8ad03216c2600b6ad326c8c50583a471acab94365bb2234774b3583b625396  tests/bird-pose.test.js
 7ae9a937490a119b0d3f5771ed82a857eaaaac1020db9769b23929755888e039  tests/bloom-target-size.test.js
-8600569ba83d9a333d69216dc66e493597895cd7f2ea8550ab1276b774cc0320  tests/boot-flags.test.js
+1c1a5c0652cc5550c1e4cb16121a4307a991ee58ef962bc87d8abfac671b3806  tests/boot-flags.test.js
 4a0bd676e6294603c030d9f0643310a8dee8b12f8b0941a32f5213238f6b2555  tests/build-identity.test.js
 376a5c9c8234dccec3485fac62311cfd7457172f2cac4532269e4a858c3962a0  tests/city-windows.test.js
 1763c7b34412af9f769037fb1925b4b9ac1a8af9fb5ea819f592bf9ca6683cdd  tests/collider-grid.test.js

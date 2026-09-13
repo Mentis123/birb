@@ -32,7 +32,7 @@ test('the table names the opt-outs the game actually reads', () => {
   // which CLAUDE.md's own note spells `concrete`. The table has to follow the
   // code, because the code is what the reload will do.
   for (const key of ['authored', 'bark', 'stone', 'canyon', 'granite', 'snow', 'city', 'ground', 'groundbump',
-    'feathers', 'feathernormals', 'skytex', 'smooth', 'leaves', 'snowline', 'levelturn', 'pionus', 'wing', 'bird', 'ibl']) {
+    'feathers', 'feathernormals', 'skytex', 'smooth', 'leaves', 'snowline', 'levelturn', 'pionus', 'wing', 'bird', 'ibl', 'flight']) {
     assert.ok(bootFlagByKey(key), `no flag for ?${key}`);
   }
   for (const child of ['bark', 'stone', 'canyon', 'granite', 'snow', 'city', 'ground', 'groundbump', 'feathers']) {
@@ -63,6 +63,21 @@ test('a select reads its value, and an unknown value reads as the default', () =
   assert.deepEqual(readBootFlag('?wing=banana', 'wing'), { value: null });
   assert.deepEqual(readBootFlag('?skytex=0.5', 'skytex'), { value: '0.5' });
   assert.deepEqual(readBootFlag('?bird=v2', 'bird'), { value: 'v2' });
+});
+
+test('the flight flag defaults to v1 (null) and offers v2', () => {
+  const flag = bootFlagByKey('flight');
+  assert.ok(flag, 'no flag for ?flight');
+  assert.equal(flag.kind, 'select');
+  assert.deepEqual(flag.options.map((o) => o.value), [null, 'v2']);
+  assert.deepEqual(readBootFlag('', 'flight'), { value: null });
+  assert.deepEqual(readBootFlag('?flight=v2', 'flight'), { value: 'v2' });
+  // Same convention as every other select: an unknown value is the default,
+  // not an error — the reload is what the panel navigates to, and the game's
+  // own `/[?&]flight=v2(?:&|$)/` regex treats anything else as v1 too.
+  assert.deepEqual(readBootFlag('?flight=v3', 'flight'), { value: null });
+  assert.equal(withBootFlag('', 'flight', 'v2'), 'flight=v2');
+  assert.equal(withBootFlag('?flight=v2', 'flight', null), '');
 });
 
 test('withBootFlag turns a toggle off by writing =0 and on by REMOVING the key', () => {

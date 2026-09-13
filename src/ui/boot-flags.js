@@ -88,6 +88,12 @@ export const BOOT_FLAGS = Object.freeze([
   // ---- Flight ----
   { key: 'levelturn', group: 'Flight', kind: 'toggle', label: 'Level turns (yaw about the planet)',
     hint: 'Off yaws about the bird’s own up — the before, where a held dive spiralled and looped out of itself.' },
+  { key: 'flight', group: 'Flight', kind: 'select', label: 'Flight model',
+    options: [
+      { value: null, label: 'v1 (yaw + cosmetic bank)' },
+      { value: 'v2', label: 'v2 (bank to turn)' },
+    ],
+    hint: 'v2 replaces the yaw+clamp mapping with bank-to-turn, unlimited pitch and an energy model — see docs/realism/FLIGHT_V2_PLAN.md.' },
 ]);
 
 export function bootFlagByKey(key) {

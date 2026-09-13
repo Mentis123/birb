@@ -956,6 +956,42 @@
 > Do not quote either. A real number needs the pose pinned the way the feather
 > A/B pins it (`restorePose` + `freeze` + `setSunTime` + `pinTier`).
 
+> **Flight v2 — proper flight, behind `?flight=v2`** (2026-09-13, night):
+> [docs/realism/FLIGHT_V2_PLAN.md](docs/realism/FLIGHT_V2_PLAN.md) is the
+> brief, [docs/perf/gates/G-FLIGHT-V2.md](docs/perf/gates/G-FLIGHT-V2.md)
+> the measurements. The owner's verdict on the committed aerobatics: "klugy
+> workarounds instead of proper flight like an airplane or bird. Why can't
+> we have proper flight?" We can; the reasons recorded against it were about
+> work, not physics. What made v1 feel scripted is the INPUT MAPPING on a
+> controller that is already quaternion 6DOF: stick x is yaw with a cosmetic
+> bank painted on the model, pitch is clamped at 80°, speed is constant, so
+> a roll or a loop could only ever be a canned move with a trigger, a dwell,
+> a wind-up and a camera hold. `src/flight/bird-flight-v2.js` (extends
+> BirdFlight, so the terrain floor and parallel transport have one
+> definition) replaces the mapping: stick x is a ROLL rate, turning comes
+> from the bank (`turnGain * sin(bank)` about the radial, plus a small direct
+> assist), pitch is unlimited, hands-off rights the bird and settles the
+> nose, and speed is ENERGY — a dive gains, a climb bleeds, drag returns it
+> to cruise. Everything scripted is off under v2. Measured on the sim clock
+> (`flightProbe().simTime` — a harness that counts frames × 0.05 was
+> guessing, and the first sheet read a 0.85 s roll that was 2.05): full roll
+> 2.05 s, righting from inverted 2.42 s, loops 3.7 s at a 12–13 unit altitude
+> span with speed 7.4–14.3 through them, inverted ground contact is a crash
+> (the existing knockdown) and an upright slow arrival still lands.
+> **Two things the phone must judge**: stick x is a RATE, so past a crossover
+> a held stick rolls forever — in-game (the input pipeline shapes the stick
+> first) raw 0.25 settles at 14° and 0.33 at 24°; `rightingRate` moves that
+> crossover, and `?v2tune=rightingRate:2,turnGain:1.8` overrides any of the
+> twelve `FLIGHT_V2_DEFAULTS` at boot without a deploy, reported back by
+> `flightProbe().tuning`. And a full-stick dive is a push-over (120° in a
+> second), not a dive: the evidence tool learned to dive at half stick.
+> `tools/birb-flight-v2.mjs` is in Browser Health; `?flight=v2` is one tap on
+> the panel's Flags tab. v1 stays the default until both have been flown.
+> The self-righting term is NOT `-sin(bank)`: that is zero at 180° and an
+> inverted bird would hang there — it is constant-rate outside
+> `rightingSoftBank` (0.7 rad) and proportional inside, scaled by
+> (1−|x|)(1−|y|) so a held loop is never rolled into an Immelmann at the top.
+
 > **ULTRA IS THE OLD MAX REALISM, the panel is a preset strip, and the
 > harnesses boot at the baseline** (2026-09-13, night):
 > [docs/perf/gates/G-ULTRA-DEFAULT.md](docs/perf/gates/G-ULTRA-DEFAULT.md).
