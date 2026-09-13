@@ -3536,7 +3536,7 @@
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
-      var { createAerobatics, moveFromStick, AEROBATIC_MOVES } = await import("./src/flight/aerobatics.js");
+      var { createAerobatics, createStickEdgeTrigger, AEROBATIC_MOVES } = await import("./src/flight/aerobatics.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -3695,7 +3695,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v66-2026-09-13-aerobatics-ultra';
+    const BIRB_BUILD = 'v67-2026-09-13-edge-moves-shadows';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5012,18 +5012,15 @@
     const BOOST_CONFIG = { speedMult: 2.4, duration: 0.6, cooldown: 1.1 };
     let boostTimer = 0;
     let boostCooldown = 0;
-    // Committed aerobatics (src/flight/aerobatics.js). The trigger is a
-    // DOUBLE TAP on the boost pill, because there is no third control on this
-    // screen and adding one would cost the thumb that is already on the two
-    // that exist. The first tap still boosts — roll out of a dash is a better
-    // move than roll from a standstill anyway.
+    // Committed aerobatics (src/flight/aerobatics.js). The trigger lives at
+    // the EDGES OF THE STICK: pin it hard over and hold and the bank becomes
+    // a roll, pin it hard up and the climb goes over the top. This replaced a
+    // double tap on the boost pill, which failed on the only test that
+    // matters — the owner could not tell whether it was working or not. A
+    // gesture that has to be explained, on a screen with nowhere to explain
+    // it, is a feature nobody finds.
     let aerobatics = null;
-    let lastBoostTapAt = -1e9;
-    // How long after the first tap a second one counts as the gesture. 340ms
-    // is the low end of the usual double-tap window: this shares its surface
-    // with a single tap that DOES something, so a long window would make
-    // every rapid double-boost an accidental barrel roll.
-    const AEROBATIC_DOUBLE_TAP_MS = 340;
+    let aeroTrigger = null;
     // How hard a live move WOULD have the chase camera follow the bird's own
     // roll, 0..1. Reported through `aeroState()` and deliberately NOT wired to
     // the camera: captured at 2-frame intervals, both moves read clearly
@@ -9372,6 +9369,7 @@
     flightController = flight;
     flightControllerInitialized = true;
     aerobatics = createAerobatics(AEROBATIC_MOVES);
+    aeroTrigger = createStickEdgeTrigger();
 
     // Set sphere center on flight controller for spherical world support
     if (sphericalWorld && typeof flightController.setSphereCenter === 'function') {
@@ -9693,28 +9691,6 @@
             return;
           }
           if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FLYING) return; // not mid-fall
-          // DOUBLE TAP = aerobatic. Checked before the boost cooldown, and on
-          // purpose: the first tap has just spent the cooldown, so testing it
-          // first would make the gesture impossible to perform.
-          const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-          const isDoubleTap = (now - lastBoostTapAt) <= AEROBATIC_DOUBLE_TAP_MS;
-          lastBoostTapAt = now;
-          if (isDoubleTap && aerobatics) {
-            const stick = lastWingInput;
-            const { move, direction } = moveFromStick(stick.x, stick.y);
-            const probe = __BIRB_ALTITUDE_ABOVE_GROUND();
-            const r = aerobatics.start(move, { direction, altitude: probe });
-            if (r.started) {
-              if (preloadedSounds?.speedBoost) playFromPool(preloadedSounds.speedBoost);
-              if (statusMetric) statusMetric.textContent = r.label + '!';
-              triggerHaptic(18);
-            } else if (r.reason === 'too-low' && statusMetric) {
-              // Never swallow a deliberate gesture. "Nothing happened" is the
-              // worst feedback there is for one.
-              statusMetric.textContent = 'Too low!';
-            }
-            return;
-          }
           if (boostTimer > 0 || boostCooldown > 0) return;
           boostTimer = BOOST_CONFIG.duration;
           boostCooldown = BOOST_CONFIG.duration + BOOST_CONFIG.cooldown;
@@ -11015,6 +10991,33 @@
         // that takes the bird out of the flight envelope has to be inside the
         // frame the envelope is checked in.
         if (aerobatics) {
+          // Earn a move from the stick before advancing one. Only while
+          // genuinely flying: a pinned stick during a landing approach or a
+          // knockdown is the player steering, not asking to roll.
+          if (aeroTrigger) {
+            const flying = !isNested
+              && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING
+              && !nestingControlsBird;
+            if (!flying) {
+              aeroTrigger.reset();
+            } else {
+              const ask = aeroTrigger.update(resolvedInput.x, resolvedInput.y, delta);
+              if (ask) {
+                const r = aerobatics.start(ask.move, {
+                  direction: ask.direction,
+                  altitude: __BIRB_ALTITUDE_ABOVE_GROUND(),
+                });
+                if (r.started) {
+                  if (statusMetric) statusMetric.textContent = r.label + '!';
+                  triggerHaptic(18);
+                } else if (r.reason === 'too-low' && statusMetric) {
+                  // Never swallow a deliberate hold. "Nothing happened" is
+                  // the worst feedback there is for one.
+                  statusMetric.textContent = 'Too low!';
+                }
+              }
+            }
+          }
           const aero = aerobatics.update(delta);
           if (aero.active && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
             flight.aerobatic(aero.rollDelta, aero.pitchDelta);
@@ -12068,15 +12071,15 @@
     // the worst device.
     const QUALITY_PRESETS = [
       {
-        id: 'ultra', label: 'Ultra', tier: 0, dprCap: 2.4,
-        hint: 'Everything on, full resolution. For a phone that is keeping up.',
+        id: 'ultra', label: 'Ultra', tier: 0, dprCap: 2.4, shadows: true,
+        hint: 'Real shadows, full resolution. For a phone that is keeping up.',
       },
       {
-        id: 'amazing', label: 'Amazing', tier: null, dprCap: null,
-        hint: 'Everything on, resolution managed automatically. The default.',
+        id: 'amazing', label: 'Amazing', tier: null, dprCap: null, shadows: false,
+        hint: 'Everything on, resolution managed automatically, faked shadows.',
       },
-      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, hint: 'Lighter resolution, steadier frame rate.' },
-      { id: 'light', label: 'Light', tier: 2, dprCap: null, hint: 'Lowest cost. For an old or hot device.' },
+      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, shadows: false, hint: 'Lighter resolution, steadier frame rate.' },
+      { id: 'light', label: 'Light', tier: 2, dprCap: null, shadows: false, hint: 'Lowest cost. For an old or hot device.' },
     ];
     // Bumped from `birbQuality` when the default moved to Ultra. A stored
     // preference from before that change would otherwise silently defeat the
@@ -12101,6 +12104,32 @@
       // Ultra's raised ceiling would not reach the renderer until the next
       // real resize — which on a phone is never.
       updateRendererSize(true);
+      // REAL SHADOW MAPS, tied to the Ultra preset rather than defaulted
+      // separately. Two reasons it belongs here and not in its own hidden
+      // switch. It routes through `qualitySettings.request` — CONTRACT §7.1
+      // says shadow state changes by that path and no other, and a boot-time
+      // poke at `shadowsSetEnabled` would be the per-frame-writer failure
+      // A10 exists to catch. And it gives the escape hatch for free: one tap
+      // to Amazing drops the resolution pin AND the shadows together, which
+      // is what someone whose phone is struggling actually wants to do.
+      //
+      // PCF at 2048, not the workbench's VSM. VSM is the softest of the four
+      // filters and is what MAX REALISM reaches for, but it wants float
+      // targets and a blur pass and has never been measured on a phone;
+      // PCF at the highest map size is a real shadow that will render
+      // correctly everywhere. VSM is still one tap away on the Ultra tab.
+      //
+      // Ordering note: restoreQualityPreset() runs long after the world and
+      // the bird exist, so shadowsSetEnabled's traversals have something to
+      // traverse. Moving this call earlier would half-apply it.
+      if (typeof qualitySettings !== 'undefined' && qualitySettings) {
+        const src = REQUEST_SOURCES.PANEL;
+        if (preset.shadows) {
+          qualitySettings.request({ source: src, key: 'shadowType', value: 'pcf' });
+          qualitySettings.request({ source: src, key: 'shadowMapSize', value: 'high' });
+        }
+        qualitySettings.request({ source: src, key: 'shadowsEnabled', value: !!preset.shadows });
+      }
       if (qualityLabelEl) qualityLabelEl.textContent = preset.label;
       if (settingsQualityButton) settingsQualityButton.setAttribute('title', preset.hint);
       if (persist) {

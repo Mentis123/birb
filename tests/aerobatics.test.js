@@ -12,7 +12,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  AEROBATIC_MOVES, AEROBATIC_REFUSALS, createAerobatics, sweptAngle, moveFromStick,
+  AEROBATIC_MOVES, AEROBATIC_REFUSALS, createAerobatics, sweptAngle,
+  moveFromStick, createStickEdgeTrigger, STICK_EDGE,
 } from '../src/flight/aerobatics.js';
 
 const TAU = Math.PI * 2;
@@ -151,16 +152,73 @@ test('update on an idle machine is inert, not an error', () => {
   );
 });
 
-// ── the gesture ──────────────────────────────────────────────────────────
-test('the stick decides the move, and every stick position means something', () => {
-  assert.deepEqual(moveFromStick(0.9, 0), { move: 'roll', direction: 1 });
-  assert.deepEqual(moveFromStick(-0.9, 0), { move: 'roll', direction: -1 });
-  assert.deepEqual(moveFromStick(0, 0.9), { move: 'loop', direction: 1 });
-  // A neutral stick must still DO something: a default that does nothing is a
-  // gesture the player decides is broken.
-  assert.deepEqual(moveFromStick(0, 0), { move: 'roll', direction: 1 });
-  // A hard bank wins over a climb — you cannot loop and roll at once, and the
-  // bank is the more deliberate of the two to be holding.
-  assert.equal(moveFromStick(0.9, 0.9).move, 'roll');
-  assert.equal(moveFromStick(NaN, undefined).move, 'roll');
+// ── the trigger: the edges of the stick ──────────────────────────────────
+test('only a stick pinned to the rail asks for anything', () => {
+  assert.deepEqual(moveFromStick(1, 0), { move: 'roll', direction: 1 });
+  assert.deepEqual(moveFromStick(-1, 0), { move: 'roll', direction: -1 });
+  assert.deepEqual(moveFromStick(0, 1), { move: 'loop', direction: 1 });
+  // THE IMPORTANT HALF. A virtual stick reads 0.6-0.8 through an ordinary
+  // hard turn; if those asked for a move the player could not turn hard
+  // without rolling, and the feature would read as a bug.
+  assert.equal(moveFromStick(0.8, 0), null);
+  assert.equal(moveFromStick(0, 0.8), null);
+  assert.equal(moveFromStick(0, 0), null);
+  assert.equal(moveFromStick(NaN, undefined), null);
+  // A hard bank wins over a hard climb: a stick in a corner is far more
+  // likely to be a committed turn than a deliberate diagonal.
+  assert.equal(moveFromStick(1, 1).move, 'roll');
+});
+
+test('a normal hard turn never earns a move, however long it is held', () => {
+  const trigger = createStickEdgeTrigger();
+  let fired = 0;
+  for (let i = 0; i < 600; i += 1) if (trigger.update(0.8, 0, 1 / 60)) fired += 1;
+  assert.equal(fired, 0, 'ten seconds of an ordinary hard turn must not roll the bird');
+});
+
+test('the rail has to be HELD, and then it fires once', () => {
+  const trigger = createStickEdgeTrigger();
+  // Short of the dwell, nothing.
+  for (let i = 0; i < Math.floor(STICK_EDGE.dwell * 60) - 2; i += 1) {
+    assert.equal(trigger.update(1, 0, 1 / 60), null);
+  }
+  let fires = 0;
+  for (let i = 0; i < 4; i += 1) if (trigger.update(1, 0, 1 / 60)) fires += 1;
+  assert.equal(fires, 1, 'one hold must earn exactly one move, not one per frame');
+});
+
+test('leaving the rail forgets the hold entirely', () => {
+  const trigger = createStickEdgeTrigger();
+  for (let i = 0; i < 30; i += 1) trigger.update(1, 0, 1 / 60);
+  trigger.update(0, 0, 1 / 60);                       // thumb comes off
+  assert.equal(trigger.progress(), 0);
+  for (let i = 0; i < 30; i += 1) {
+    assert.equal(trigger.update(1, 0, 1 / 60), null, 'credit carried across a release');
+  }
+});
+
+test('changing which move you are asking for restarts the hold', () => {
+  // Easing from a hard left into a hard climb must not bank a roll's worth of
+  // dwell into a loop — they are different requests.
+  const trigger = createStickEdgeTrigger();
+  for (let i = 0; i < 30; i += 1) trigger.update(-1, 0, 1 / 60);
+  const r = trigger.update(0, 1, 1 / 60);
+  assert.equal(r, null);
+  assert.equal(trigger.progress() < 0.1, true);
+});
+
+test('holding the rail keeps asking, so a long hold rolls more than once', () => {
+  // The owner's own words: "banking way left can roll around". Staying pinned
+  // should keep rolling, not fire once and go quiet.
+  const trigger = createStickEdgeTrigger();
+  let fired = 0;
+  for (let i = 0; i < 600; i += 1) if (trigger.update(1, 0, 1 / 60)) fired += 1;
+  assert.ok(fired >= 2, `ten seconds pinned earned only ${fired} move(s)`);
+});
+
+test('reset clears a hold — for a knockdown, a landing or a nest', () => {
+  const trigger = createStickEdgeTrigger();
+  for (let i = 0; i < 30; i += 1) trigger.update(1, 0, 1 / 60);
+  trigger.reset();
+  assert.equal(trigger.progress(), 0);
 });

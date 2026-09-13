@@ -182,18 +182,69 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
 }
 
 /**
- * Which move a tap means, from the stick the player is already holding.
+ * THE MOVES LIVE AT THE EDGES OF THE STICK YOU ALREADY HAVE.
  *
- * There is no third button to add, so the gesture has to carry the choice.
- * A held bank is the most natural thing to mean "roll THAT way", and pulling
- * up is the most natural thing to mean "go over the top". Everything else is
- * a roll, because a default that does nothing is a gesture the player will
- * decide is broken.
+ * This replaced a double-tap on the BOOST pill, and the reason is the whole
+ * point: the first thing the owner said about that trigger was "I'm not
+ * getting how this works — or isn't". A gesture that has to be explained,
+ * on a control surface with no room to explain it, is a feature nobody
+ * finds. Pin the stick hard over and keep it there and the bank becomes a
+ * ROLL; pin it hard up and the climb goes OVER THE TOP. Both are the
+ * continuation of something the player was already doing, so there is
+ * nothing to discover — the move is what happens when you ask for more of
+ * what you have got.
+ *
+ * `edge` is deliberately close to 1. A virtual stick reads 0.6-0.8 through
+ * an ordinary hard turn; only a thumb pressed to the rail sustains 0.94, so
+ * the move cannot fire out of normal flying. `dwell` then asks for that rail
+ * to be HELD, which is what separates "I am turning hard" from "I meant it":
+ * the climb has already reached the 80-degree pitch ceiling by then and the
+ * bank has already reached full deflection, so in both cases the aircraft
+ * has visibly run out of the ordinary control before the extraordinary one
+ * takes over.
+ *
+ * Returns null when the stick is not asking for anything.
  */
-export function moveFromStick(x = 0, y = 0, { bankThreshold = 0.35, climbThreshold = 0.45 } = {}) {
+export const STICK_EDGE = Object.freeze({ edge: 0.94, dwell: 0.55 });
+
+export function moveFromStick(x = 0, y = 0, { edge = STICK_EDGE.edge } = {}) {
   const sx = Number.isFinite(x) ? x : 0;
   const sy = Number.isFinite(y) ? y : 0;
-  if (sy > climbThreshold && Math.abs(sx) < bankThreshold) return { move: 'loop', direction: 1 };
-  if (Math.abs(sx) > bankThreshold) return { move: 'roll', direction: sx > 0 ? 1 : -1 };
-  return { move: 'roll', direction: 1 };
+  // A hard bank wins over a hard climb: you cannot roll and loop at once,
+  // and a stick held into a corner is far more likely to be a turn the
+  // player is committed to than a deliberate diagonal.
+  if (Math.abs(sx) >= edge) return { move: 'roll', direction: sx > 0 ? 1 : -1 };
+  if (sy >= edge) return { move: 'loop', direction: 1 };
+  return null;
+}
+
+/**
+ * Track how long the stick has been pinned, and say when a move is earned.
+ *
+ * Stateful because a dwell is, and separate from the machine above because
+ * the machine has no business knowing what an input is. Reset the moment the
+ * stick leaves the rail OR changes which move it is asking for, so easing
+ * from a hard left into a hard climb does not bank a roll's worth of credit
+ * into a loop.
+ */
+export function createStickEdgeTrigger({ edge = STICK_EDGE.edge, dwell = STICK_EDGE.dwell } = {}) {
+  let held = 0;
+  let heldMove = null;
+  /** @returns the earned move, or null. Fires ONCE per hold. */
+  function update(x, y, delta) {
+    const ask = moveFromStick(x, y, { edge });
+    if (!ask) { held = 0; heldMove = null; return null; }
+    const key = `${ask.move}:${ask.direction}`;
+    if (key !== heldMove) { heldMove = key; held = 0; }
+    held += Math.max(0, Math.min(Number.isFinite(delta) ? delta : 0, 0.1));
+    if (held < dwell) return null;
+    // Zero rather than subtract: holding the rail through a whole move and
+    // out the other side should ask for the NEXT one from scratch, not bank
+    // the time the move itself took and fire again the instant it ends.
+    held = 0;
+    return ask;
+  }
+  function reset() { held = 0; heldMove = null; }
+  function progress() { return Math.min(1, held / dwell); }
+  return { update, reset, progress };
 }

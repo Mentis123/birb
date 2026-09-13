@@ -837,11 +837,28 @@
 > anchor would have jumped a third of the hand inboard. It tracks the
 > furthest-reaching primary now.
 
-> **Aerobatics shipped, and ULTRA IS THE DEFAULT** (2026-09-13, night).
-> `src/flight/aerobatics.js` + `tests/aerobatics.test.js`; the trigger is a
-> **DOUBLE TAP on the BOOST pill**, direction from the stick you are already
-> holding (bank = barrel roll that way, pull up = loop, neutral = roll).
-> `__BIRB.aero(move, dir)` and `__BIRB.aeroState()` drive and report it.
+> **Aerobatics shipped, ULTRA IS THE DEFAULT, and REAL SHADOWS ARE ON**
+> (2026-09-13, night). `src/flight/aerobatics.js` +
+> `tests/aerobatics.test.js`. `__BIRB.aero(move, dir)` and
+> `__BIRB.aeroState()` drive and report it.
+>
+> **THE TRIGGER LIVES AT THE EDGES OF THE STICK, and the first one did not.**
+> It shipped as a double tap on the BOOST pill and the owner's first words
+> back were "I'm not getting how this double-tap boost thing works — or
+> isn't". That is the only test a trigger has to pass. It is now: pin the
+> stick hard over and HOLD and the bank becomes a roll; pin it hard up and the
+> climb goes over the top. Both are the continuation of something the player
+> was already doing, so there is nothing to discover — the move is what
+> happens when you ask for more of what you have got. Two numbers make it
+> work. `edge` is **0.94**, because a virtual stick reads 0.6-0.8 through an
+> ordinary hard turn and a move that fires there reads as a bug, not a
+> feature — measured live, a 0.8 stick held for ten seconds never fires.
+> `dwell` is **0.55 s**, which is long enough that the climb has already hit
+> the 80-degree pitch ceiling and the bank has already reached full
+> deflection: in both cases the aircraft has visibly run out of the ordinary
+> control before the extraordinary one takes over. Holding the rail keeps
+> asking, so a sustained full bank rolls about every 1.7 s — the move's own
+> cooldown, not the trigger, is what paces that.
 >
 > **They are COMMITTED moves, not free 6DOF, and that is the design not a
 > shortcut.** Free inverted flight would have to answer for the nesting state
@@ -884,10 +901,32 @@
 > the same change: a preference stored under the old key would have silently
 > defeated the new default for every returning player.
 >
-> NOT flipped: the `perf-ascend` workbench levers (real shadow maps,
-> anisotropy, densities past 1.0). Those have never been measured on a device,
-> and G-ASCEND records that MAX REALISM's partner BACK TO SHIPPING DEFAULT is
-> not reversible — so they stay opt-in from the three-finger panel.
+> **Real shadow maps are ON at the Ultra preset** — `PCF at 2048`, 20 shadow
+> casters, verified at boot with `__BIRB.setShadows({})` reporting
+> `{enabled: true, type: 1, mapSize: 2048, casterCount: 20}` without anything
+> touching the panel. Captured at a champion tree with a low sun, the
+> difference is not subtle: the canopy and trunk get their shaded sides back
+> and the grove reads as having form instead of being flatly lit.
+>
+> Two things about how it is wired. It hangs off the PRESET rather than its
+> own hidden default, so one tap to Amazing drops the resolution pin AND the
+> shadows together — which is what someone whose phone is struggling actually
+> wants to do, and it means the escape hatch is the control they already know.
+> And it routes through `qualitySettings.request`, because CONTRACT §7.1 says
+> shadow state changes by that path and no other; a boot-time poke at
+> `shadowsSetEnabled` is the per-frame-writer failure A10 exists to catch.
+>
+> **PCF, not the workbench's VSM.** VSM is the softest of the four filters and
+> is what MAX REALISM reaches for, but it wants float targets and a blur pass
+> and has never been measured on a phone. PCF at the highest map size is a
+> real shadow that renders correctly everywhere. VSM is still one tap away on
+> the Ultra tab. Still not flipped: anisotropy and densities past 1.0.
+>
+> **The shadow cost was NOT cleanly measured** and the reason is worth
+> keeping: `--after` captures drift, so the frustum differs between the two
+> shots and the draw counts came back 25-vs-31 one way and 44-vs-30 the other.
+> Do not quote either. A real number needs the pose pinned the way the feather
+> A/B pins it (`restorePose` + `freeze` + `setSunTime` + `pinTier`).
 
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
