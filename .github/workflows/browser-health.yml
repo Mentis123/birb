@@ -77,14 +77,23 @@ jobs:
       # birb-quality steps with no guard, so the job died before reaching
       # any of the four below on every push touching index.html/src/**/sw.js.)
 
+      - name: The production default is Ultra, every lever at its ceiling, and a preset switch is reversible
+        # Boots with NO quality flag — the path a player takes — and reads the
+        # EFFECTIVE renderer state back: native DPR, VSM 2048, 4x MSAA, post
+        # Full, terrain High, anisotropy at the device max. Then Amazing must
+        # equal the baseline exactly and Ultra again must equal boot. Every
+        # other browser step below boots at `?quality=amazing`, because under
+        # SwiftShader an Ultra frame is 2.6 s (docs/perf/gates/G-ULTRA-DEFAULT.md).
+        run: node tools/birb-default.mjs
+
       - name: Game starts and is actually playable
         # Asserts a rendered frame AND that the nesting and collectibles
         # systems exist, on the plain-start path a player takes. Exits
         # non-zero on any page error or console error.
-        run: node tools/birb-shot.mjs --out /tmp/start.png --start
+        run: node tools/birb-shot.mjs --out /tmp/start.png --start --query quality=amazing
 
       - name: A nest can be landed on
-        run: node tools/birb-shot.mjs --out /tmp/nest.png --start --nest
+        run: node tools/birb-shot.mjs --out /tmp/nest.png --start --nest --query quality=amazing
 
       - name: Every game mode enters, reports sane state and exits
         # Ring Rush's win condition must equal the spawner's ring count, and

@@ -222,3 +222,113 @@ test('reset clears a hold — for a knockdown, a landing or a nest', () => {
   trigger.reset();
   assert.equal(trigger.progress(), 0);
 });
+
+// ---------------------------------------------------------------------------
+// The wider loop and the loop under (2026-09-13, from the phone: "have the
+// radius of the turn wider — it's almost pivoting on its own axis", "the
+// nose dive into inverted isn't working yet", "smoother and a little slower").
+// ---------------------------------------------------------------------------
+
+test('ease 0.5 IS the original raised cosine, to the last bit', () => {
+  for (let i = 0; i <= 200; i++) {
+    const t = i / 200;
+    const expected = 2 * Math.PI * t - Math.sin(2 * Math.PI * t);
+    assert.ok(Math.abs(sweptAngle(1, t, 0.5) - expected) < 1e-12, `t=${t}`);
+    assert.ok(Math.abs(sweptAngle(1, t) - expected) < 1e-12, `default ease at t=${t}`);
+  }
+});
+
+test('an eased trapezoid still closes exactly, never rewinds, and rests at both ends', () => {
+  for (const ease of [0.05, 0.15, 0.22, 0.35, 0.49]) {
+    assert.equal(sweptAngle(1, 0, ease), 0);
+    assert.ok(Math.abs(sweptAngle(1, 1, ease) - TAU) < 1e-12, `ease ${ease} closes at ${sweptAngle(1, 1, ease)}`);
+    assert.ok(Math.abs(sweptAngle(-2, 1, ease) + 2 * TAU) < 1e-12, `ease ${ease}, two turns the other way`);
+    let prev = 0;
+    for (let i = 1; i <= 1000; i++) {
+      const a = sweptAngle(1, i / 1000, ease);
+      assert.ok(a >= prev - 1e-12, `ease ${ease}: rewound at ${i / 1000}`);
+      prev = a;
+    }
+    const e = 1e-4;
+    const rateAtStart = (sweptAngle(1, e, ease) - sweptAngle(1, 0, ease)) / e;
+    const rateAtEnd = (sweptAngle(1, 1, ease) - sweptAngle(1, 1 - e, ease)) / e;
+    const rateAtMid = (sweptAngle(1, 0.5 + e, ease) - sweptAngle(1, 0.5, ease)) / e;
+    assert.ok(rateAtStart < 0.01 * rateAtMid, `ease ${ease}: starts at rest`);
+    assert.ok(rateAtEnd < 0.01 * rateAtMid, `ease ${ease}: ends at rest`);
+  }
+});
+
+test('the plateau rate is 2PI / (1 - ease): a flatter profile turns SLOWER at its fastest', () => {
+  const e = 1e-4;
+  const peak = (ease) => (sweptAngle(1, 0.5 + e, ease) - sweptAngle(1, 0.5, ease)) / e;
+  assert.ok(Math.abs(peak(0.22) - TAU / 0.78) < 1e-3, `plateau ${peak(0.22)}`);
+  assert.ok(Math.abs(peak(0.5) - 2 * TAU) < 1e-3, `raised cosine peaks at twice the average, got ${peak(0.5)}`);
+  assert.ok(peak(0.22) < peak(0.5) / 1.5, 'the trapezoid must peak well below the raised cosine');
+  // Out-of-range ease is clamped, never a NaN or an open circle.
+  assert.ok(Math.abs(sweptAngle(1, 1, 0) - TAU) < 1e-12);
+  assert.ok(Math.abs(sweptAngle(1, 1, 0.9) - TAU) < 1e-12);
+  assert.ok(Math.abs(sweptAngle(1, 1, NaN) - TAU) < 1e-12);
+});
+
+test('the loop is wide enough not to pivot: radius at cruise is at least 5 units', () => {
+  // Radius = speed / angular rate, at the plateau, at the speed the move
+  // actually flies (cruise 11, bird-flight.js FLIGHT_DEFAULTS.speed).
+  const loop = AEROBATIC_MOVES.loop;
+  const plateauRate = (loop.pitchTurns * TAU) / (loop.duration * (1 - loop.ease));
+  const radius = (11 * loop.speedMul) / plateauRate;
+  assert.ok(radius >= 5, `loop radius ${radius.toFixed(2)} at cruise; the raised-cosine 2.0 s loop was 1.75`);
+  assert.ok(loop.ease < 0.5, 'the loop needs a plateau, or the middle of it pivots');
+  assert.ok(loop.speedMul > 1, 'a loop carries speed');
+  // And the roll is what got slower: "smoother and a little slower".
+  assert.ok(AEROBATIC_MOVES.roll.duration >= 1.2, `roll duration ${AEROBATIC_MOVES.roll.duration}`);
+  assert.equal(AEROBATIC_MOVES.roll.speedMul, 1, 'a roll does not change speed');
+});
+
+test('a loop under needs more room than a loop over, and says how much', () => {
+  const loop = AEROBATIC_MOVES.loop;
+  assert.ok(loop.minAltitudeDown > loop.minAltitude);
+  // At least the diameter at cruise-with-boost plus the bird.
+  const plateauRate = (loop.pitchTurns * TAU) / (loop.duration * (1 - loop.ease));
+  const diameter = 2 * (11 * loop.speedMul) / plateauRate;
+  assert.ok(loop.minAltitudeDown >= diameter + 2, `gate ${loop.minAltitudeDown} vs diameter ${diameter.toFixed(1)}`);
+  const a = createAerobatics();
+  const under = a.start('loop', { direction: -1, altitude: loop.minAltitude + 1 });
+  assert.equal(under.started, false);
+  assert.equal(under.reason, AEROBATIC_REFUSALS.TOO_LOW);
+  assert.equal(under.need, loop.minAltitudeDown);
+  const over = a.start('loop', { direction: 1, altitude: loop.minAltitude + 1 });
+  assert.equal(over.started, true, 'the same altitude is enough going over');
+});
+
+test('a pinned dive asks for the loop under; a merely hard dive asks for nothing', () => {
+  assert.deepEqual(moveFromStick(0, -1), { move: 'loop', direction: -1 });
+  assert.deepEqual(moveFromStick(0, -0.95), { move: 'loop', direction: -1 });
+  assert.equal(moveFromStick(0, -0.8), null);
+  // A hard bank still wins over a hard dive in the corner.
+  assert.equal(moveFromStick(-1, -1).move, 'roll');
+});
+
+test('update reports the speed multiplier and the angle swept so far', () => {
+  const a = createAerobatics();
+  a.start('loop', { direction: -1 });
+  let last = 0;
+  let sawMul = false;
+  for (let i = 0; i < 400; i++) {
+    const r = a.update(1 / 60);
+    if (!r.active) break;
+    assert.equal(r.speedMul, AEROBATIC_MOVES.loop.speedMul);
+    assert.equal(r.direction, -1);
+    assert.ok(r.swept >= last, 'swept is monotonic');
+    assert.ok(r.pitchDelta <= 0, 'a loop under pitches nose-down throughout');
+    last = r.swept;
+    sawMul = true;
+  }
+  assert.ok(sawMul);
+  assert.ok(Math.abs(last - TAU) < 1e-6, `swept ${last}`);
+  const idle = a.update(1 / 60);
+  assert.equal(idle.speedMul, 1);
+  assert.equal(idle.swept, 0);
+  const b = createAerobatics();
+  b.start('roll');
+  assert.equal(b.update(1 / 60).speedMul, 1);
+});

@@ -15,13 +15,20 @@
  * angle arithmetic and the state machine only, so the timing can be tested
  * without a renderer — the same split `bird-pose.js` uses.
  *
- * THE ANGLE PROFILE IS AN INTEGRATED RAISED COSINE, and that is not
+ * THE ANGLE PROFILE IS A TRAPEZOID WITH RAISED-COSINE ENDS, and that is not
  * decoration. A linear sweep starts and stops at full angular rate, which is
- * a hard jerk of the bird at both ends. Rate `turns * 2PI * (1 - cos(2PI t))` is zero at t=0 and t=1
- * and its integral over the move is EXACTLY `turns * 2PI`, so the move eases
- * in and out and still closes the circle to the last radian. A profile that
- * merely looks smooth and lands at 359 degrees leaves the bird permanently
- * off-level.
+ * a hard jerk of the bird at both ends; a pure raised cosine (the first
+ * version) eases beautifully but concentrates the whole turn in the middle
+ * of the move, and the LOOP paid for that: its radius is speed over angular
+ * rate, the raised cosine's peak rate is twice the average, and at cruise
+ * that put the bird on a 1.75-unit circle — "almost pivoting on its own
+ * axis", from the phone. Each move now names how much of its duration is
+ * ease (`ease`, each end); the rate ramps up over that fraction, holds a
+ * plateau, ramps down, and its integral is EXACTLY `turns * 2PI` whatever
+ * the ease, so the move still closes the circle to the last radian. A
+ * profile that merely looks smooth and lands at 359 degrees leaves the bird
+ * permanently off-level. `ease = 0.5` has no plateau and IS the raised
+ * cosine, which is what the roll still uses — a roll has no radius to widen.
  */
 
 /**
@@ -42,7 +49,14 @@ export const AEROBATIC_MOVES = Object.freeze({
   roll: Object.freeze({
     id: 'roll',
     label: 'Barrel roll',
-    duration: 0.95,
+    // 1.3, from 0.95: "smoother and a little slower", after the freeze at
+    // the start was fixed elsewhere (index.html keeps the model's own bank
+    // through the move instead of muting it — the mute unwinding a 63-degree
+    // bank while the sweep was still easing in read as the bird stopping).
+    duration: 1.3,
+    // Full raised cosine: no plateau. A roll has no radius to widen.
+    ease: 0.5,
+    speedMul: 1,
     rollTurns: 1,
     pitchTurns: 0,
     cooldown: 0.7,
@@ -63,31 +77,66 @@ export const AEROBATIC_MOVES = Object.freeze({
   loop: Object.freeze({
     id: 'loop',
     label: 'Loop',
-    duration: 2.0,
+    // The radius is speed over angular rate, and both halves of that were
+    // moved to widen it: 2.6 s (from 2.0) with a plateau (ease 0.22, so the
+    // peak rate is 2PI / (2.6 * 0.78) = 3.1 rad/s against the raised cosine's
+    // 6.3), and the bird flies the loop at 1.5x cruise the way a real loop
+    // entry carries speed. At cruise 11 that is a 5.3-unit minimum radius —
+    // three times the 1.75 that read as pivoting.
+    duration: 2.6,
+    ease: 0.22,
+    speedMul: 1.5,
     rollTurns: 0,
     pitchTurns: 1,
     cooldown: 1.1,
     minAltitude: 14,
+    // Going OVER (direction +1) the bird climbs first and comes back to its
+    // own altitude. Going UNDER (direction -1 — the nose-down "into inverted"
+    // from a pinned dive) it descends by the whole diameter first: two
+    // radii of about 5.3 at cruise, more with boost, plus the bird. The
+    // flight floor is a hard clamp that would catch it mid-arc and leave the
+    // manoeuvre deformed, so the gate is the diameter with a margin.
+    minAltitudeDown: 24,
     // Same reasoning, and MORE so: a loop is two seconds, which is long
     // enough for the damped rig to swing all the way round behind the
     // inverted bird.
     stableCamera: 1,
-    // Stand twice as far back: the loop's radius is smaller than the normal
+    // Stand well back: the loop's radius is of the order of the normal
     // stand-off, so at 1x the bird goes over the top almost directly above
-    // the lens. See follow-camera.js hold.distanceMul.
-    cameraDistance: 2.0,
+    // the lens. See follow-camera.js hold.distanceMul. 2.6 keeps the whole
+    // wider circle in frame.
+    cameraDistance: 2.6,
   }),
 });
 
 /** Seconds over which the camera hold eases in at move start and out at its end. */
 export const CAMERA_HOLD_RAMP = Object.freeze({ in: 0.15, out: 0.25 });
 
-/** Total angle swept by `turns` full turns at normalised time `t`. */
-export function sweptAngle(turns, t) {
+/**
+ * Total angle swept by `turns` full turns at normalised time `t`.
+ *
+ * `ease` is the fraction of the move spent ramping at EACH end (0.01..0.5).
+ * The rate is a half raised cosine up over [0, ease], a plateau over
+ * [ease, 1 - ease], and a half raised cosine down over [1 - ease, 1]; with
+ * the plateau rate P, the integral is P * (ease/2 + (1 - 2 ease) + ease/2) =
+ * P * (1 - ease), so P = turns * 2PI / (1 - ease) closes the circle exactly.
+ * At ease = 0.5 the two ramps meet with no plateau and the expression
+ * reduces to spin * (2PI u - sin 2PI u) — the original raised cosine, to
+ * the last bit, which the tests check.
+ */
+export function sweptAngle(turns, t, ease = 0.5) {
   const u = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
   const spin = Number.isFinite(turns) ? turns : 0;
-  // Integral of spin * 2PI * (1 - cos(2PI u)) du from 0 to u.
-  return spin * (2 * Math.PI * u - Math.sin(2 * Math.PI * u));
+  const e = Math.min(0.5, Math.max(0.01, Number.isFinite(ease) ? ease : 0.5));
+  const plateau = (spin * 2 * Math.PI) / (1 - e);
+  if (u <= e) {
+    // Integral of plateau * (1 - cos(PI u / e)) / 2.
+    return plateau * (u / 2 - (e / (2 * Math.PI)) * Math.sin((Math.PI * u) / e));
+  }
+  if (u <= 1 - e) return plateau * (e / 2 + (u - e));
+  const v = u - (1 - e);
+  // Integral of plateau * (1 + cos(PI v / e)) / 2 from the plateau's end.
+  return plateau * (e / 2 + (1 - 2 * e) + v / 2 + (e / (2 * Math.PI)) * Math.sin((Math.PI * v) / e));
 }
 
 /**
@@ -121,8 +170,11 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
     if (!move) return { started: false, reason: AEROBATIC_REFUSALS.UNKNOWN_MOVE };
     if (active) return { started: false, reason: AEROBATIC_REFUSALS.ALREADY_ACTIVE };
     if (cooldown > 0) return { started: false, reason: AEROBATIC_REFUSALS.COOLING_DOWN, wait: cooldown };
-    if (Number.isFinite(altitude) && altitude < move.minAltitude) {
-      return { started: false, reason: AEROBATIC_REFUSALS.TOO_LOW, need: move.minAltitude, have: altitude };
+    // The gate depends on which way the move goes: a loop UNDER descends
+    // by its whole diameter before it climbs (see minAltitudeDown).
+    const need = dir < 0 && Number.isFinite(move.minAltitudeDown) ? move.minAltitudeDown : move.minAltitude;
+    if (Number.isFinite(altitude) && altitude < need) {
+      return { started: false, reason: AEROBATIC_REFUSALS.TOO_LOW, need, have: altitude };
     }
     active = move;
     elapsed = 0;
@@ -144,11 +196,16 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
   function update(delta) {
     const dt = Math.max(0, Math.min(Number.isFinite(delta) ? delta : 0, 0.1));
     if (cooldown > 0) cooldown = Math.max(0, cooldown - dt);
-    if (!active) return { active: false, rollDelta: 0, pitchDelta: 0, stableCamera: 0, cameraDistance: 1, t: 0, move: null };
+    if (!active) {
+      return {
+        active: false, move: null, t: 0, direction: 0, swept: 0,
+        rollDelta: 0, pitchDelta: 0, stableCamera: 0, cameraDistance: 1, speedMul: 1,
+      };
+    }
 
     elapsed += dt;
     const t = Math.min(1, elapsed / active.duration);
-    const total = sweptAngle(active.rollTurns + active.pitchTurns, t);
+    const total = sweptAngle(active.rollTurns + active.pitchTurns, t, active.ease);
     const step = total - swept;
     swept = total;
 
@@ -167,12 +224,18 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
       active: true,
       move: active.id,
       t,
+      direction,
+      // Angle delivered so far, unsigned. index.html unwinds the visual
+      // wind-up against this so the two motions can never fight.
+      swept: total,
       // Positive is a roll INTO a right bank (right wing down). The flight
       // controller owns the axis convention that makes that true.
       rollDelta: active.rollTurns ? step * direction : 0,
       pitchDelta: active.pitchTurns ? step * direction : 0,
       stableCamera: active.stableCamera * ramp,
       cameraDistance: active.cameraDistance ?? 1,
+      // Cruise multiplier for the duration of the move; 1 leaves it alone.
+      speedMul: active.speedMul ?? 1,
     };
 
     if (t >= 1) {
@@ -212,7 +275,8 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
  * getting how this works — or isn't". A gesture that has to be explained,
  * on a control surface with no room to explain it, is a feature nobody
  * finds. Pin the stick hard over and keep it there and the bank becomes a
- * ROLL; pin it hard up and the climb goes OVER THE TOP. Both are the
+ * ROLL; pin it hard up and the climb goes OVER THE TOP; pin it hard down
+ * and the dive goes UNDER through inverted. All three are the
  * continuation of something the player was already doing, so there is
  * nothing to discover — the move is what happens when you ask for more of
  * what you have got.
@@ -238,6 +302,11 @@ export function moveFromStick(x = 0, y = 0, { edge = STICK_EDGE.edge } = {}) {
   // player is committed to than a deliberate diagonal.
   if (Math.abs(sx) >= edge) return { move: 'roll', direction: sx > 0 ? 1 : -1 };
   if (sy >= edge) return { move: 'loop', direction: 1 };
+  // Pinned DOWN: the dive goes on through the vertical into inverted and
+  // round — a loop under. "The nose dive into inverted isn't working yet"
+  // was this line not existing: a held dive sat at the 80-degree ceiling
+  // for as long as the rail was held, asking for more and getting nothing.
+  if (sy <= -edge) return { move: 'loop', direction: -1 };
   return null;
 }
 

@@ -956,6 +956,79 @@
 > Do not quote either. A real number needs the pose pinned the way the feather
 > A/B pins it (`restorePose` + `freeze` + `setSunTime` + `pinTier`).
 
+> **ULTRA IS THE OLD MAX REALISM, the panel is a preset strip, and the
+> harnesses boot at the baseline** (2026-09-13, night):
+> [docs/perf/gates/G-ULTRA-DEFAULT.md](docs/perf/gates/G-ULTRA-DEFAULT.md).
+> The owner pressed MAX REALISM, said it looked better, and asked for the
+> best view on by default. The Ultra preset had been a SUBSET of that button
+> (tier 0, DPR ceiling 2.4, PCF 2048) and he could see the difference. A
+> preset is a complete visual state now: `applyQualityPreset` starts from
+> `resetVisualOverridesToShipping()` — the true before — and applies the
+> preset's own lever list through `qualitySettings.request`; Ultra's list
+> IS the MAX set (post Full, VSM 2048, 4x MSAA, anisotropy at the device
+> max, terrain High, decorative 1) and Amazing/Okay/Light are the baseline
+> plus a tier pin. **Native DPR is reached through the tier's CEILING
+> (`dprCap: Infinity`), never a `dpr` override**: an override takes the ratio
+> away from the tier, and the frozen A3 oracle's self-check (pin 0, pin 1,
+> expect the drawing buffer to move) would read false on every fresh boot.
+> `?quality=ultra|amazing|okay|light` boots a preset by URL, not remembered.
+>
+> **Under SwiftShader an Ultra frame is 2.6 s; Amazing is 0.13 s.** Measured
+> lever by lever and no single one owns it (DPR 3 -> 1.7 saves 1.1 s, then
+> shadows, post and MSAA about 0.4 s each), so the harnesses cannot run at
+> the default and the preset was not weakened to suit them. Three frozen
+> boot lines (`birb-modes`, `birb-walk`, `birb-quality`) gained
+> `&quality=amazing` under R5 — which RESTORES the state every quality
+> oracle was frozen against, since the old shipping default was exactly
+> Amazing — and `tools/birb-default.mjs` is the one Browser Health step that
+> boots with no flag and proves the production default is Ultra at its
+> ceiling, reversible, with the tier still owning the ratio.
+> `tools/birb-shaders.mjs` stays at Ultra on purpose (the VSM depth and
+> multisample programs exist only there) and waits for RENDERED frames per
+> biome now: its old 2200 ms wait was shorter than one Ultra frame, which
+> would have reported "ok" for materials never submitted. **The phone is
+> unmeasured**: the tier is pinned at Ultra, so nothing sheds if the iPhone
+> cannot hold it; Amazing is one tap away in the gear menu or the panel.
+>
+> **The three-finger panel was rebuilt for a thumb.** Every target is 44 px,
+> selects with four options or fewer are rows of buttons, toggles are
+> switches, the four presets sit in the header of every tab with the live
+> fps and draw-call line, and a **Flags** tab (`src/ui/boot-flags.js`, unit
+> tested) renders every boot-time A/B (`?smooth=0`, `?feathers=0`,
+> `?wing=`, `?bird=`, `?levelturn=0`, the authored-texture opt-outs...) as a
+> switch that RELOADS with the flag in the URL — `?goto`/`?env`/`?debug`
+> survive the reload. The oracle's selectors are untouched
+> (`#birb-dev-quality-panel`, `.bqp-tab` text, `.bqp-control` +
+> `.bqp-control-label` text, `input[type=range]`, `.bqp-stale-banner`) and
+> `decorativeDensity` is still on the Performance tab after "Weather
+> density". Also fixed on the way: the panel size never persisted, because
+> `win` was never declared and the ReferenceError was swallowed by its own
+> try/catch.
+
+> **The roll's freeze, the loop's radius and the loop under** (2026-09-13,
+> night): [docs/perf/gates/G-AERO-FEEL.md](docs/perf/gates/G-AERO-FEEL.md).
+> "Freezes position on the wing tilt before it rolls" was the 0.55 s dwell
+> at a bank that had already saturated, followed by the visual bank being
+> MUTED the frame the move fired — a 63-degree bank unwinding against a
+> sweep still easing in from zero. The bank is kept through the move now (a
+> constant offset, continuous at both ends), and the dwell is motion:
+> `AERO_WINDUP` deepens the bank past its ceiling (63 -> 88 degrees) in
+> proportion to the hold, hands it over intact, and unwinds it against the
+> angle SWEPT, so the apparent rotation is bounded never to reverse.
+> Measured with `flightProbe().rollFullDeg + visualBankDeg`: monotonic from
+> the first frame on the rail. Roll duration 0.95 -> 1.3 s.
+>
+> **"Almost pivoting on its own axis" was the raised cosine.** Radius is
+> speed over angular rate and the raised cosine's peak rate is twice its
+> average; at cruise that was a 1.75-unit circle. `sweptAngle` takes an
+> `ease` per move now — a trapezoid with raised-cosine ends whose integral
+> is still exactly `turns * 2PI`, and `ease 0.5` is the old profile to the
+> last bit (the roll keeps it). The loop is 2.6 s at `ease 0.22` and flies
+> at 1.5x cruise: measured diameter 11.7 against about 3.5. **Pin the stick
+> DOWN and the dive goes under** — `moveFromStick(0, -1)` is a loop with
+> direction -1, gated at `minAltitudeDown` 24 because it descends by the
+> whole diameter before it climbs (measured dip 13.5).
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose

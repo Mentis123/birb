@@ -71,7 +71,9 @@ async function main() {
         if (m.type() === 'error' || m.type() === 'warning') noise.push(`${m.type()}: ${m.text().slice(0, 200)}`);
     });
 
-    await page.goto(`http://127.0.0.1:${port}/index.html?debug=1`, { waitUntil: 'domcontentloaded' });
+    // `quality=amazing`: the baseline preset — this harness counts FRAMES, and at the
+    // Ultra default a SwiftShader frame is 2.6 s. See docs/perf/gates/G-ULTRA-DEFAULT.md.
+    await page.goto(`http://127.0.0.1:${port}/index.html?debug=1&quality=amazing`, { waitUntil: 'domcontentloaded' });
     await startGame(page, 45000);
     if (env !== 'forest') {
         await page.evaluate((id) => window.__BIRB.setEnvironment(id), env);

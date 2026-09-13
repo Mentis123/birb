@@ -36,7 +36,7 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v68-2026-09-13-aero-camera';
+const CACHE_VERSION = 'v69-2026-09-13-ultra-max-panel';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -156,6 +156,9 @@ const CORE_ASSETS = [
   './src/ui/minimap.js',
   './src/ui/dev-quality-panel.js',
   './src/ui/dev-gesture.js',
+  // The panel's Flags tab table; imported by dev-quality-panel.js on the
+  // boot path, so an offline launch without it dies on a dynamic import.
+  './src/ui/boot-flags.js',
   './src/nesting/nest-points.js',
   './src/nesting/nesting-system.js',
   './src/nesting/aim-rig.js',

@@ -3695,7 +3695,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v68-2026-09-13-aero-camera';
+    const BIRB_BUILD = 'v69-2026-09-13-ultra-max-panel';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5036,7 +5036,24 @@
     const _aeroHeading = new THREE.Vector3(0, 0, -1);
     const _aeroUp = new THREE.Vector3(0, 1, 0);
     const _aeroScratch = new THREE.Vector3();
-    const _aeroNoInput = Object.freeze({ x: 0, y: 0, active: false });
+    // The stick as the MODEL sees it around a move. bird-visual.js banks the
+    // model by input.x and tilts it by input.y; this is that input with the
+    // wind-up folded in (see AERO_WINDUP below). One object, filled per
+    // frame — zero-allocation loop.
+    const _aeroVisualInput = { x: 0, y: 0, active: false };
+    // How far past its ordinary ceiling the model banks (or tilts) while the
+    // stick is held on the rail EARNING a move, as a fraction of the ordinary
+    // amount: 0.4 takes the 63-degree bank to 88. The freeze the owner saw
+    // ("freezes position on the wing tilt before it rolls") was the dwell —
+    // 0.55 s at a bank that had already saturated — followed by the old code
+    // MUTING the visual bank the moment the move fired, so a 63-degree bank
+    // unwound while the sweep was still easing in from zero. Now the bank is
+    // kept for the whole move and the dwell is MOTION: the bank keeps
+    // deepening until the roll takes over from it, and the extra unwinds in
+    // step with the sweep — never faster than 0.4/PI of the roll rate, so
+    // the apparent rotation cannot reverse. Measured: see G-AERO-FEEL.
+    const AERO_WINDUP = 0.4;
+    let _aeroWindup = 0;
 
     /**
      * The bird's clearance above the terrain it is over, or Infinity before
@@ -10002,6 +10019,10 @@
       const bloomSizes = bloomPass ? bloomPass.getSizes() : null;
       return {
         mode: snap.mode,
+        // The active gear-menu preset, for the panel's strip. Guarded because
+        // QUALITY_PRESETS is declared further down this module: an evidence
+        // export taken before it exists reports null rather than throwing.
+        preset: (() => { try { return readQualityPresetState(); } catch (_) { return null; } })(),
         dpr: { requested: panelOverrides.dpr, effective: renderer.getPixelRatio() },
         postQuality: {
           requested: panelOverrides.postQuality,
@@ -10338,48 +10359,29 @@
         qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: request.key, value: request.value });
         return;
       }
+      if (request.kind === 'preset') {
+        // The strip at the top of every panel tab — the same four presets the
+        // gear menu cycles, addressed by id (or index) instead of by cycling.
+        const idx = typeof request.index === 'number'
+          ? request.index
+          : QUALITY_PRESETS.findIndex((p) => p.id === request.id);
+        if (idx >= 0) applyQualityPreset(idx);
+        return;
+      }
       if (request.kind === 'action') {
         if (request.action === 'resumeAuto') {
           qualitySettings.setMode(QUALITY_MODES.AUTO);
           adaptiveTier.unpin();
         } else if (request.action === 'reset' || request.action === 'backToShipping') {
-          resetVisualOverridesToShipping();
+          // The baseline preset, NOT persisted: this is a measurement step
+          // (the true before), not a preference. Routed through the preset so
+          // the gear menu's label, the panel's strip and the levers agree.
+          applyQualityPreset(QUALITY_PRESET_BASELINE, { persist: false });
         } else if (request.action === 'maxRealism') {
-          // One tap, every above-baseline lever to its ceiling. Each call is
-          // a REQUEST through the exact same qualitySettings.request() path
-          // a manual slider drag uses (CONTRACT §7.1) — this function has no
-          // rendering side effect that isn't also reachable by hand, one
-          // control at a time; it only saves fourteen taps on a phone in
-          // bright sunlight (the brief's own words).
-          const src = REQUEST_SOURCES.PANEL;
-          qualitySettings.request({ source: src, key: 'dpr', value: Math.max(1, window.devicePixelRatio || 1) });
-          qualitySettings.request({ source: src, key: 'postQuality', value: 'full' });
-          qualitySettings.request({ source: src, key: 'shadowsEnabled', value: true });
-          // VSM is the softest/highest-quality of the four filters this game
-          // exposes — the ceiling of shadowType's own enum, same reasoning
-          // as "highest map size" for shadowMapSize just below.
-          qualitySettings.request({ source: src, key: 'shadowType', value: 'vsm' });
-          qualitySettings.request({ source: src, key: 'shadowMapSize', value: 'high' });
-          qualitySettings.request({ source: src, key: 'antialiasing', value: '4x' });
-          qualitySettings.request({ source: src, key: 'anisotropy', value: renderer.capabilities.getMaxAnisotropy() });
-          // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
-          // 80k-triangle budget on desktop (85,504 tris — see spherical-
-          // world.js's own GROUND_RESOLUTION_PRESETS comment), which is a
-          // deliberate one-lever-at-a-time choice, not the one-tap "show me
-          // the envelope" preset's job. Ultra is still reachable by hand from
-          // the Terrain mesh resolution control right above this button.
-          qualitySettings.request({ source: src, key: 'terrainResolution', value: 'high' });
-          // decorativeDensity's new ceiling (this wave) is 2.0; weatherDensity/
-          // mistBudget were NOT extended (they'd need a bigger pre-allocated
-          // particle buffer this wave did not build), so they are left alone
-          // here rather than requesting a "new maximum" that is really just
-          // their unchanged shipping value.
-          // 1, not 2. The gate measured this above 1.0 and found a label: clamp()'s
-          // fallthrough capped it at 1 while the readout showed "2.00", and even
-          // unclamped the value only scales visualUniforms.wind — 14 mm more foliage
-          // sway, no particle, no draw call, no triangle. A ceiling the system cannot
-          // reach is a promise the panel cannot keep.
-          qualitySettings.request({ source: src, key: 'decorativeDensity', value: 1 });
+          // Alias for the Ultra preset — its lever list IS the old MAX
+          // REALISM set (see QUALITY_PRESETS). Kept so anything that still
+          // dispatches the old action lands on the same state as the strip.
+          applyQualityPreset(0);
         } else if (request.action === 'gradeNextCandidate') {
           // perf-grade PANEL wave: cycles gradeCandidatesFor(biome, baseline)
           // (src/environment/grade-candidates.js) — the SAME list
@@ -10419,6 +10421,9 @@
       closeEventName: DEV_PANEL_CLOSE_EVENT,
       getTelemetry: panelGetTelemetry,
       getControlState: panelGetControlState,
+      // Lazy: QUALITY_PRESETS is declared after this construction and the
+      // panel only reads the list when it renders (on open), long after boot.
+      getPresets: () => QUALITY_PRESETS.map((p, index) => ({ id: p.id, label: p.label, hint: p.hint, index })),
       getEvidence: panelGetEvidence,
       getBuildStale: () => buildIdentity().stale,
       onRequest: panelOnRequest,
@@ -11032,8 +11037,18 @@
             }
           }
           const aero = aerobatics.update(delta);
+          // Wind-up: rises with the hold while a move is being earned, is
+          // handed over intact the frame the move starts, and unwinds with
+          // the sweep — gone by the half-way point, when the move is what
+          // the eye is following.
+          _aeroWindup = aero.active
+            ? AERO_WINDUP * Math.max(0, 1 - aero.swept / Math.PI)
+            : (aeroTrigger ? aeroTrigger.progress() * AERO_WINDUP : 0);
           if (aero.active && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
             flight.aerobatic(aero.rollDelta, aero.pitchDelta);
+            // A loop carries speed. `flight.speed` was assigned from cruise a
+            // few lines up and is again next frame, so this cannot compound.
+            if (aero.speedMul !== 1) flight.speed *= aero.speedMul;
             aerobaticStable = aero.stableCamera;
             // Re-project the held heading onto THIS frame's tangent plane —
             // parallel transport has moved the radial since the move began.
@@ -11197,7 +11212,15 @@
         // the model would sit a bank's worth off the manoeuvre at every point
         // of it. The move owns the model's attitude; the visual bank resumes
         // when it ends.
-        visualQuat = visual.update(pose.quaternion, flight.aerobaticActive ? _aeroNoInput : resolvedInput, delta);
+        // The stick reaches the model through the wind-up, and it is NOT
+        // muted during a move: a bank of 63 degrees held through a 360-degree
+        // roll is a constant offset that starts and ends continuous, whereas
+        // muting it unwound the bank against the sweep's ease-in and read as
+        // the bird freezing before it rolled.
+        _aeroVisualInput.x = resolvedInput.x * (1 + _aeroWindup);
+        _aeroVisualInput.y = resolvedInput.y * (1 + _aeroWindup);
+        _aeroVisualInput.active = resolvedInput.active;
+        visualQuat = visual.update(pose.quaternion, _aeroVisualInput, delta);
 
         // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
@@ -12100,24 +12123,60 @@
     // stuttering, were both stuck with whatever the controller decided.
     //
     // So a preset PINS the tier (or hands control back to the controller), and
-    // Ultra additionally raises the DPR CEILING. Note which way round that is:
-    // the ceiling is the most the renderer may ask for, and the adaptive tier
-    // still drops to 1.0 and 0.85 underneath it on measured FPS. So Ultra
-    // cannot pin a struggling phone at a resolution it cannot hold — it only
-    // stops a phone that is coasting from being held back by a cap chosen for
-    // the worst device.
+    // it is also a COMPLETE visual state: every lever the panel exposes, set
+    // in one go. It starts from resetVisualOverridesToShipping() — the
+    // baseline every lever is measured against (every override null, the
+    // tier unpinned, shadows off, bloom at 0.78, PCF, terrain standard) —
+    // and then applies its own lever list through qualitySettings.request,
+    // the same path a thumb on the panel takes (CONTRACT §7.1). That is what
+    // makes a preset REVERSIBLE: G-ASCEND measured the old BACK TO SHIPPING
+    // landing 0.07 above shipping bloom because it restored by intent rather
+    // than from a list; a preset switch always goes through the list.
+    //
+    // ULTRA IS THE OLD MAX REALISM, EXACTLY. The owner pressed that button,
+    // said it looked better, and asked for the best view on by default. So
+    // Ultra's lever list is the panel's MAX REALISM set, the MAX REALISM
+    // action is an alias for this preset, and Amazing is the baseline.
+    //
+    // One deliberate difference from the button's old body: Ultra reaches
+    // native DPR through the tier's CEILING (dprCap Infinity, tier pinned 0
+    // -> getQualityPixelRatio returns the device ratio), not through a
+    // `dpr` panel OVERRIDE. Same pixels on screen; different plumbing, and
+    // the plumbing matters: an override takes the ratio away from the tier
+    // entirely, so `__BIRB.pinTier(1)` would no longer move the drawing
+    // buffer and the frozen A3 oracle's own self-check (pin 0, pin 1, expect
+    // the ratio to differ) would read false on every fresh boot.
     const QUALITY_PRESETS = [
       {
-        id: 'ultra', label: 'Ultra', tier: 0, dprCap: 2.4, shadows: true,
-        hint: 'Real shadows, full resolution. For a phone that is keeping up.',
+        id: 'ultra', label: 'Ultra', tier: 0, dprCap: Infinity,
+        hint: 'Max realism: native resolution, soft real shadows, 4x MSAA, dense terrain. For a phone that is keeping up.',
+        levers: () => [
+          ['postQuality', 'full'],
+          ['shadowsEnabled', true],
+          // VSM is the softest of the four filters this game exposes — the
+          // ceiling of shadowType's own enum, same reasoning as 'high' for
+          // the map size just below.
+          ['shadowType', 'vsm'],
+          ['shadowMapSize', 'high'],
+          ['antialiasing', '4x'],
+          ['anisotropy', renderer.capabilities.getMaxAnisotropy()],
+          // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
+          // 80k-triangle budget on desktop (85,504 tris — see spherical-
+          // world.js's GROUND_RESOLUTION_PRESETS). Ultra terrain is still
+          // one tap away on the panel's Ultra tab.
+          ['terrainResolution', 'high'],
+          ['decorativeDensity', 1],
+        ],
       },
       {
-        id: 'amazing', label: 'Amazing', tier: null, dprCap: null, shadows: false,
-        hint: 'Everything on, resolution managed automatically, faked shadows.',
+        id: 'amazing', label: 'Amazing', tier: null, dprCap: null, levers: () => [],
+        hint: 'The baseline: everything on, resolution managed automatically, faked shadows.',
       },
-      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, shadows: false, hint: 'Lighter resolution, steadier frame rate.' },
-      { id: 'light', label: 'Light', tier: 2, dprCap: null, shadows: false, hint: 'Lowest cost. For an old or hot device.' },
+      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, levers: () => [], hint: 'Lighter resolution, steadier frame rate.' },
+      { id: 'light', label: 'Light', tier: 2, dprCap: null, levers: () => [], hint: 'Lowest cost. For an old or hot device.' },
     ];
+    /** The preset every lever is measured against; the panel's reset lands here. */
+    const QUALITY_PRESET_BASELINE = 1;
     // Bumped from `birbQuality` when the default moved to Ultra. A stored
     // preference from before that change would otherwise silently defeat the
     // new default for every returning player, including the one who asked for
@@ -12131,41 +12190,30 @@
       const preset = QUALITY_PRESETS[i];
       qualityPresetIndex = i;
       qualityDprCap = preset.dprCap;
-      // `tier: null` means AUTO — hand the tier back to the controller that
-      // measures frame rate, rather than leaving it wherever it happened to be.
-      if (preset.tier === null) adaptiveTier.unpin();
-      else adaptiveTier.pin(preset.tier);
-      // The pin/unpin above may not have moved the tier at all (pinning 0 when
-      // already at 0), and the DPR ceiling is not a tier change, so force the
-      // one sizing function every quality change routes through. Without this,
-      // Ultra's raised ceiling would not reach the renderer until the next
-      // real resize — which on a phone is never.
+      // 1. The true before. Every override null, every lever at its shipping
+      //    value, the tier handed back to the controller, mode AUTO. Cheap
+      //    where nothing changed: setGroundResolution no-ops on an equal key,
+      //    and a material's needsUpdate before its first render is free.
+      resetVisualOverridesToShipping();
+      // 2. The tier. `tier: null` means AUTO, and the reset above already
+      //    unpinned it, so only a pin is a change here — and the pin may not
+      //    move the tier at all (pinning 0 when already at 0) while the DPR
+      //    ceiling is not a tier change, so force the one sizing function
+      //    every quality change routes through. Without this, Ultra's ceiling
+      //    would not reach the renderer until the next real resize — which on
+      //    a phone is never.
+      if (preset.tier !== null) adaptiveTier.pin(preset.tier);
       updateRendererSize(true);
-      // REAL SHADOW MAPS, tied to the Ultra preset rather than defaulted
-      // separately. Two reasons it belongs here and not in its own hidden
-      // switch. It routes through `qualitySettings.request` — CONTRACT §7.1
-      // says shadow state changes by that path and no other, and a boot-time
-      // poke at `shadowsSetEnabled` would be the per-frame-writer failure
-      // A10 exists to catch. And it gives the escape hatch for free: one tap
-      // to Amazing drops the resolution pin AND the shadows together, which
-      // is what someone whose phone is struggling actually wants to do.
-      //
-      // PCF at 2048, not the workbench's VSM. VSM is the softest of the four
-      // filters and is what MAX REALISM reaches for, but it wants float
-      // targets and a blur pass and has never been measured on a phone;
-      // PCF at the highest map size is a real shadow that will render
-      // correctly everywhere. VSM is still one tap away on the Ultra tab.
-      //
-      // Ordering note: restoreQualityPreset() runs long after the world and
-      // the bird exist, so shadowsSetEnabled's traversals have something to
-      // traverse. Moving this call earlier would half-apply it.
-      if (typeof qualitySettings !== 'undefined' && qualitySettings) {
-        const src = REQUEST_SOURCES.PANEL;
-        if (preset.shadows) {
-          qualitySettings.request({ source: src, key: 'shadowType', value: 'pcf' });
-          qualitySettings.request({ source: src, key: 'shadowMapSize', value: 'high' });
-        }
-        qualitySettings.request({ source: src, key: 'shadowsEnabled', value: !!preset.shadows });
+      // 3. The levers, through the panel's own request path — CONTRACT §7.1
+      //    says shadow state (and the rest) changes by that path and no other,
+      //    and a boot-time poke at shadowsSetEnabled would be the per-frame-
+      //    writer failure A10 exists to catch. Ordering note:
+      //    restoreQualityPreset() runs long after the world and the bird
+      //    exist, so shadowsSetEnabled's traversals have something to
+      //    traverse. Moving this call earlier would half-apply it.
+      const src = REQUEST_SOURCES.PANEL;
+      for (const [key, value] of preset.levers()) {
+        qualitySettings.request({ source: src, key, value });
       }
       if (qualityLabelEl) qualityLabelEl.textContent = preset.label;
       if (settingsQualityButton) settingsQualityButton.setAttribute('title', preset.hint);
@@ -12177,19 +12225,39 @@
       return preset;
     }
 
+    /** What the gear menu, the panel strip and the debug hook all report. */
+    function readQualityPresetState() {
+      const p = QUALITY_PRESETS[qualityPresetIndex];
+      return { id: p.id, index: qualityPresetIndex, label: p.label };
+    }
+
     function restoreQualityPreset() {
+      // `?quality=ultra|amazing|okay|light` wins over the remembered
+      // preference and is NOT remembered itself. A production review URL,
+      // like `?env=` and `?goto=`: the owner can send a phone to a specific
+      // preset by link, and the harnesses use it to boot at the BASELINE.
+      // Why they must: under SwiftShader the Ultra default renders a frame
+      // in 2.6 s against Amazing's 0.13 s (measured, G-ULTRA-DEFAULT), and
+      // every frozen quality oracle was written against the Amazing state —
+      // shadows off, tier auto, no overrides — before Ultra became the
+      // default. Booting them there RESTORES their frozen conditions;
+      // tools/birb-default.mjs is the one check that boots with no flag and
+      // proves the production default is Ultra with every lever at its
+      // ceiling.
+      const fromUrl = (/[?&]quality=(ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
       let saved = null;
       try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
-      const found = QUALITY_PRESETS.findIndex((q) => q.id === saved);
-      // Default ULTRA (index 0), by the owner's explicit call: everything on,
-      // DPR ceiling 2.4, tier PINNED at 0.
+      const found = QUALITY_PRESETS.findIndex((q) => q.id === (fromUrl || saved));
+      // Default ULTRA (index 0), by the owner's explicit call: the old MAX
+      // REALISM set, tier PINNED at 0, native resolution.
       //
       // Know what the pin costs before moving this back. `adaptiveTier.pin(0)`
       // takes the tier away from the controller that measures frame rate, so a
       // device that cannot hold full resolution no longer sheds it — it just
       // runs slow. That is the deliberate trade of a preset called Ultra, and
-      // it is two taps to undo from the gear menu, which is why it is an
-      // acceptable default and would not be an acceptable hard-coding.
+      // it is two taps to undo from the gear menu (or one on the panel's
+      // strip), which is why it is an acceptable default and would not be an
+      // acceptable hard-coding.
       applyQualityPreset(found >= 0 ? found : 0, { persist: false });
     }
 
@@ -13143,9 +13211,30 @@
               ? sampleTerrainHeight(up.x, up.y, up.z) : 0)
             : 0;
           const d3 = (n) => +n.toFixed(3);
+          // Full-circle versions for the aerobatics: asin folds at 90, so a
+          // roll through inverted reads as 90 -> 0 and a loop over the top as
+          // 90 -> 0 too. Roll about forward is atan2(up.right, up.bodyUp)
+          // (exact while the pitch is level); pitch is atan2(up.fwd, up.bodyUp)
+          // (exact while the roll is zero) — each valid for its own move.
+          const rollFull = Math.atan2(up.dot(right), up.dot(bodyUp));
+          const pitchFull = Math.atan2(up.dot(fwd), up.dot(bodyUp));
+          const vis = typeof visual !== 'undefined' && visual ? visual : null;
           return {
             pitchDeg: d3(pitch * 180 / Math.PI),
             rollDeg: d3(roll * 180 / Math.PI),
+            rollFullDeg: d3(rollFull * 180 / Math.PI),
+            pitchFullDeg: d3(pitchFull * 180 / Math.PI),
+            // The MODEL's cosmetic bank/tilt (bird-visual.js), degrees. Both
+            // are rotations about the SAME body axis as the flight-frame
+            // angle above them (bank about forward, tilt about the wing
+            // axis), applied after it, so what the eye sees is the SUM:
+            // rollFullDeg + visualBankDeg, pitchFullDeg + visualPitchDeg. The
+            // signs agree by construction — a right stick banks the model
+            // right wing down (negative about forward) and rolls the frame
+            // the same way (aerobatic() negates for exactly this reason).
+            visualBankDeg: vis ? d3(vis.bank * 180 / Math.PI) : null,
+            visualPitchDeg: vis ? d3(vis.pitchTilt * 180 / Math.PI) : null,
+            windup: d3(typeof _aeroWindup === 'number' ? _aeroWindup : 0),
             headingDeg: heading === null ? null : d3(heading * 180 / Math.PI),
             radius: d3(fc.position.length()),
             aboveGround: d3(fc.position.length() - groundR),
@@ -13324,6 +13413,40 @@
         // as A1/A2 before their capturers existed: unreachable from the harness means
         // ungraded.
         resetOverrides: () => { resetVisualOverridesToShipping(); return true; },
+        // The preset, scriptable: `qualityPreset()` reads, `qualityPreset('amazing')`
+        // applies (without persisting) and reads back. Reads EFFECTIVE values
+        // through panelGetControlState, never the preset table — a preset that
+        // did not reach the renderer must report as not having reached it.
+        qualityPreset: (id) => {
+          if (id !== undefined && id !== null) {
+            const idx = typeof id === 'number' ? id : QUALITY_PRESETS.findIndex((p) => p.id === id);
+            if (idx < 0) return { error: `unknown preset ${id}`, presets: QUALITY_PRESETS.map((p) => p.id) };
+            applyQualityPreset(idx, { persist: false });
+          }
+          const cs = panelGetControlState();
+          const effective = {};
+          const requested = {};
+          for (const [k, v] of Object.entries(cs)) {
+            if (v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, 'effective')) {
+              effective[k] = v.effective;
+              requested[k] = v.requested === undefined ? null : v.requested;
+            }
+          }
+          return {
+            ...readQualityPresetState(),
+            tier: adaptiveTier.getTier(),
+            pinned: adaptiveTier.isPinned(),
+            mode: qualitySettings.mode,
+            dprCap: qualityDprCap,
+            pixelRatio: renderer.getPixelRatio(),
+            shadowMapType: renderer.shadowMap.type,
+            shadowMapSize: shadowLight.shadow.mapSize.x,
+            bloomStrength: bloomPass ? bloomPass.getStrength() : null,
+            groundResolution: sphericalWorld ? sphericalWorld.groundResolution : null,
+            requested,
+            effective,
+          };
+        },
         setShadows: ({ enabled, type, mapSize } = {}) => {
           if (enabled !== undefined) {
             qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'shadowsEnabled', value: !!enabled });
