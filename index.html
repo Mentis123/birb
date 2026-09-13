@@ -7665,14 +7665,427 @@
       return birbModel;
     };
 
+
+    // ── Phase 1b (v3): the JOINTED bird ─────────────────────────────────────
+    //
+    // docs/realism/BIRD_PLAN.md Phase 1, second attempt, and the reason there
+    // is a second attempt is measured rather than felt. v2 rebuilt the wing as
+    // feather plates but kept it ONE rigid group, and when the twist and the
+    // trailing hand landed in the rig (src/flight/bird-pose.js) the bird sheet
+    // measured their effect at 0.32-0.54 of 255 mean absolute difference on
+    // seven of ten views. A plate has no thickness, so rolling it about its own
+    // span changes how it catches light and almost nothing else.
+    //
+    // So the thing this constructor adds over v2 is not detail, it is a JOINT.
+    // Each wing is an arm group (coverts + secondaries, shoulder to wrist) with
+    // a `hand` group nested at the wrist (primaries, wrist to tip). The rig
+    // already drives `userData.hand` with a stroke lagged 0.08 of a beat; until
+    // a model supplies that group the lag has nothing to move.
+    //
+    // The other change is the UVs. v2 laid out a baked ATLAS, which assumed the
+    // eventual feather art would be one bird-shaped image. It is not: the two
+    // authored sheets (assets/textures/feather_{contour,vane}_albedo.png) are
+    // TILING materials, because tools/asset-check.mjs rejects any albedo whose
+    // wrap seam exceeds 3x the steepest ordinary transition and only `sky` is
+    // exempt. So v3's UVs repeat in surface units — u across a feather's width
+    // or around the body's girth, v along its length — and the tile rate is set
+    // per part at build time rather than by carving one image into rectangles.
+    //
+    // Budget: 9 draw calls against Phase 0's 8. The two extra ARE the joints,
+    // one hand mesh per wing, and that is the entire point of the rebuild. Nine
+    // calls is 9% of the frame's 100-call budget spent on the one object that
+    // is never off screen. BIRD_BUDGET (the Phase 0 contract) is untouched;
+    // BIRD_BUDGET_PHASE1 is its own number in src/flight/bird-contract.js, tied
+    // to the plan's own Phase 1 section by the same doc test.
+    const createProceduralBirbV3 = () => {
+      const birbModel = new THREE.Group();
+
+      // -- Palette ---------------------------------------------------------
+      // Unchanged from Phase 0 on purpose: the owner has signed these off, and
+      // changing the form and the colour in one step makes an A/B unreadable.
+      const backColor = new THREE.Color(0x2b5dcc);
+      const bodyColor = new THREE.Color(0x4a7cf0);
+      const bellyColor = new THREE.Color(0xe6efff);
+      const headTint = new THREE.Color(0x5a8cf5);
+      const beakColor = new THREE.Color(0xf5b942);
+      const beakDark = new THREE.Color(0xdb9a2e);
+      const featherEdge = new THREE.Color(0x4df0ff);
+      const footColor = new THREE.Color(0x1a2438);
+
+      // -- Materials: 4 --------------------------------------------------
+      // contour (body/head/beak) and vane (wings/tail) are separate ONLY so
+      // each can carry its own authored sheet; they cost no extra draw calls,
+      // because every part they cover is a separate mesh anyway — the wings and
+      // tail have to be, since they rotate independently.
+      const contourMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, metalness: 0.12, roughness: 0.55, emissive: 0x0f1f45, emissiveIntensity: 0.34,
+      });
+      const vaneMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, metalness: 0.16, roughness: 0.48, emissive: 0x0f1f45, emissiveIntensity: 0.34,
+        side: THREE.DoubleSide,
+      });
+      const footMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, metalness: 0.2, roughness: 0.6,
+      });
+      const eyeMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+
+      // Tiling rate, in tiles per world unit. The bird is ~1.5 units long and
+      // renders about 400 device pixels wide on the owner's phone (measured at
+      // the chase camera, world hidden), so a tile every ~0.25 units puts a
+      // feather cluster at roughly 60 px — visible as texture, not as pattern.
+      const TILES_PER_UNIT = 4.0;
+
+      // Rewrites a geometry's 0..1 UV to repeat at TILES_PER_UNIT over the
+      // part's own extent, so a tiling sheet lands at the same physical scale
+      // on a 0.1-unit covert and a 0.45-unit primary. The alternative — leaving
+      // every part at 0..1 — stretches one tile across whatever the part
+      // happens to be, which is exactly how the pine bark read 1.67x too fine
+      // until addInstancedUvScale learned `unitRadius`.
+      const tileUV = (geometry, uSpanUnits, vSpanUnits) => {
+        const uv = geometry.attributes.uv;
+        if (!uv) return geometry;
+        const uRep = Math.max(0.35, uSpanUnits * TILES_PER_UNIT);
+        const vRep = Math.max(0.35, vSpanUnits * TILES_PER_UNIT);
+        for (let i = 0; i < uv.count; i++) {
+          uv.setXY(i, uv.getX(i) * uRep, uv.getY(i) * vRep);
+        }
+        uv.needsUpdate = true;
+        return geometry;
+      };
+
+      const FULL_UV = { u0: 0, v0: 0, u1: 1, v1: 1 };
+
+      // -- Body: one loft, rump -> back -> neck -> head, beak merged in -----
+      //
+      // Proportions are the passerine ones the plan asked for rather than the
+      // chibi egg: the body is a teardrop widest at the SHOULDERS (x ~ -0.1)
+      // and tapering both ways, with a real neck between the chest and the
+      // head instead of two spheres touching. The head stays large — it is the
+      // character and it is signed off — but it now sits ON something.
+      const buildBody = () => {
+        const rows = [
+          { x: -0.88, y: -0.14, r: 0.045 },
+          { x: -0.72, y: -0.10, r: 0.26 },
+          { x: -0.52, y: -0.05, r: 0.40 },
+          { x: -0.28, y: 0.00, r: 0.475 },
+          { x: -0.06, y: 0.05, r: 0.485 },
+          { x: 0.14, y: 0.09, r: 0.44 },
+          { x: 0.30, y: 0.10, r: 0.34 },
+          { x: 0.40, y: 0.13, r: 0.235 },
+          { x: 0.47, y: 0.20, r: 0.20 },
+          { x: 0.54, y: 0.30, r: 0.235 },
+          { x: 0.60, y: 0.40, r: 0.225 },
+          { x: 0.62, y: 0.50, r: 0.16 },
+          { x: 0.60, y: 0.57, r: 0.06 },
+        ];
+        const segs = 14;
+        const zScale = 0.84;
+        const positions = [], uvs = [], colors = [], indices = [];
+        const ringColor = (topness, rowT) => {
+          const c = bodyColor.clone();
+          if (topness > 0.35) c.lerp(backColor, Math.min(1, (topness - 0.35) / 0.65));
+          else if (topness < -0.30) c.lerp(bellyColor, Math.min(0.78, (-0.30 - topness) / 0.70));
+          if (rowT > 0.62) c.lerp(headTint, Math.min(1, (rowT - 0.62) / 0.2) * 0.55);
+          return c;
+        };
+        // Length along the body, accumulated row to row, so v tiles at a
+        // constant physical rate rather than being stretched by row spacing.
+        let run = 0;
+        const runs = rows.map((row, i) => {
+          if (i > 0) {
+            const p = rows[i - 1];
+            run += Math.hypot(row.x - p.x, row.y - p.y);
+          }
+          return run;
+        });
+        const girth = 2 * Math.PI * 0.45;
+        for (let ri = 0; ri < rows.length; ri++) {
+          const row = rows[ri];
+          const rowT = ri / (rows.length - 1);
+          for (let k = 0; k <= segs; k++) {
+            const a = (k / segs) * Math.PI * 2;
+            const cosA = Math.cos(a), sinA = Math.sin(a);
+            positions.push(row.x, row.y + row.r * cosA, row.r * zScale * sinA);
+            uvs.push((k / segs) * girth * TILES_PER_UNIT, runs[ri] * TILES_PER_UNIT);
+            const c = ringColor(cosA, rowT);
+            colors.push(c.r, c.g, c.b);
+          }
+        }
+        const stride = segs + 1;
+        for (let ri = 0; ri < rows.length - 1; ri++) {
+          for (let k = 0; k < segs; k++) {
+            const a = ri * stride + k, b = a + 1, c = a + stride, d = c + 1;
+            indices.push(a, c, b, b, c, d);
+          }
+        }
+        // Rump cap and crown cap: both end radii are small but not zero, so
+        // each would leave a pinhole the chase camera eventually finds.
+        const capOf = (ri, flip) => {
+          const centre = positions.length / 3;
+          positions.push(rows[ri].x, rows[ri].y, 0);
+          uvs.push(0.5 * girth * TILES_PER_UNIT, runs[ri] * TILES_PER_UNIT);
+          const c = ringColor(0, ri / (rows.length - 1));
+          colors.push(c.r, c.g, c.b);
+          for (let k = 0; k < segs; k++) {
+            const a = ri * stride + k, b = a + 1;
+            if (flip) indices.push(centre, b, a); else indices.push(centre, a, b);
+          }
+        };
+        capOf(0, false);
+        capOf(rows.length - 1, true);
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+        return geo;
+      };
+
+      const bodyParts = [buildBody()];
+
+      // Beak: two short cones, merged into the body mesh with vertex colour
+      // rather than carrying a material of their own. At ~30 px on screen a
+      // separate draw call for the beak buys nothing; the colour break does
+      // all the work.
+      const beakUpper = new THREE.ConeGeometry(0.10, 0.30, 8);
+      const beakLower = new THREE.ConeGeometry(0.085, 0.22, 8);
+      bodyParts.push(paintGeometryColor(
+        bakeGeometryTRS(tileUV(remapUV(beakUpper, FULL_UV), 0.2, 0.3),
+          { position: [0.78, 0.40, 0], rotation: [0, 0, -Math.PI / 2] }), beakColor));
+      bodyParts.push(paintGeometryColor(
+        bakeGeometryTRS(tileUV(remapUV(beakLower, FULL_UV), 0.2, 0.22),
+          { position: [0.74, 0.33, 0], rotation: [0, 0, -Math.PI / 2 - 0.10] }), beakDark));
+
+      const bodyMesh = new THREE.Mesh(mergeAndDispose(bodyParts), contourMat);
+      bodyMesh.name = 'birbBody';
+      birbModel.add(bodyMesh);
+
+      // -- Eyes: one unlit mesh ---------------------------------------------
+      const eyeParts = [];
+      for (const z of [0.132, -0.132]) {
+        const ball = new THREE.SphereGeometry(0.092, 12, 10);
+        eyeParts.push(paintGeometryColor(
+          bakeGeometryTRS(ball, { position: [0.575, 0.425, z] }), new THREE.Color(0x0a0a12)));
+        const glint = new THREE.SphereGeometry(0.035, 8, 6);
+        eyeParts.push(paintGeometryColor(
+          bakeGeometryTRS(glint, { position: [0.625, 0.462, z + 0.028] }), new THREE.Color(0xffffff)));
+      }
+      const eyeMesh = new THREE.Mesh(mergeAndDispose(eyeParts), eyeMat);
+      eyeMesh.name = 'birbEyes';
+      birbModel.add(eyeMesh);
+
+      // -- Wings: arm group with a nested hand group ------------------------
+      //
+      // THE JOINT. `leftWing` is the ARM: coverts over secondaries, running
+      // shoulder to wrist. `hand` hangs at the wrist and carries the primaries.
+      // The rig rotates the arm at the shoulder and the hand at the wrist, one
+      // lagging the other, which is what makes a wing read as jointed instead
+      // of as a board that happens to be feather-shaped.
+      const WRIST_Z = 0.86;   // along the wing's span axis, from the shoulder
+      const buildWingV3 = (side) => {
+        const arm = new THREE.Group();
+
+        // Secondaries: the inner flight feathers, trailing off the arm. Short,
+        // broad, and overlapping so the arm reads as one continuous surface
+        // from above rather than as a comb.
+        const armParts = [];
+        const SEC = 5;
+        for (let i = 0; i < SEC; i++) {
+          const t = i / (SEC - 1);
+          const len = 0.56 + t * 0.22;
+          const plate = buildFeatherPlateGeometry({
+            length: len, frontW: 0.135, backW: 0.195, tipTaper: 0.30, segments: 3,
+            bow: 0.018, axis: 'z', uvRect: FULL_UV,
+          });
+          tileUV(plate, 0.18, len);
+          armParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
+            position: [-0.03 - t * 0.10, 0.005, 0.08 + t * (WRIST_Z - 0.14)],
+            rotation: [0, -0.16 - t * 0.10, -0.04],
+          }), bodyColor.clone().lerp(backColor, 0.25 + t * 0.3)));
+        }
+        // Coverts: the short shingle feathers that lie OVER the secondaries'
+        // bases. Without them the arm shows the secondaries' roots and reads
+        // as a fan stapled to a shoulder.
+        const COV = 4;
+        for (let i = 0; i < COV; i++) {
+          const t = i / (COV - 1);
+          const len = 0.30 + t * 0.10;
+          const plate = buildFeatherPlateGeometry({
+            length: len, frontW: 0.115, backW: 0.145, tipTaper: 0.34, segments: 2,
+            bow: 0.012, axis: 'z', uvRect: FULL_UV,
+          });
+          tileUV(plate, 0.13, len);
+          armParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
+            position: [0.05, 0.06, 0.06 + t * (WRIST_Z - 0.16)],
+            rotation: [0, -0.13 - t * 0.08, -0.10],
+          }), backColor.clone().lerp(bodyColor, 0.15 + t * 0.25)));
+        }
+        const armMesh = new THREE.Mesh(mergeAndDispose(armParts), vaneMat);
+        armMesh.name = 'birbWingArm';
+        arm.add(armMesh);
+
+        // The hand. Its own group so the rig can lag it; its own mesh because
+        // a group that rotates cannot be merged into its parent.
+        const hand = new THREE.Group();
+        hand.name = 'hand';
+        hand.position.set(-0.05, 0.0, WRIST_Z);
+        hand.userData.baseRotation = new THREE.Euler(0, 0, 0);
+
+        const handParts = [];
+        const PRIM = 7;
+        let outermost = null;
+        for (let i = 0; i < PRIM; i++) {
+          const t = i / (PRIM - 1);
+          // Primaries lengthen outward and SPLAY: the gap between tips widens
+          // toward the outside, which is the finger separation a real wing
+          // shows against the sky and the single most recognisable thing about
+          // a bird's wing tip.
+          const len = 0.92 + t * 0.34;
+          const plate = buildFeatherPlateGeometry({
+            length: len, frontW: 0.095, backW: 0.135, tipTaper: 0.16, segments: 4,
+            bow: 0.022, axis: 'z', uvRect: FULL_UV,
+          });
+          tileUV(plate, 0.13, len);
+          const trs = {
+            position: [-t * 0.13, t * 0.02, t * 0.085],
+            rotation: [0, -0.05 - t * 0.30, -0.02 - t * 0.05],
+          };
+          handParts.push(paintGeometryColor(bakeGeometryTRS(plate, trs),
+            backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
+          if (i === PRIM - 1) outermost = transformedLocalPoint(tipPointOfFeather({ length: len, axis: 'z' }), trs);
+        }
+        const handMesh = new THREE.Mesh(mergeAndDispose(handParts), vaneMat);
+        handMesh.name = 'birbWingHand';
+        hand.add(handMesh);
+        arm.add(hand);
+
+        // tipFeather lives inside the HAND, so the ribbon trail's anchor
+        // travels with the lagging outer wing instead of with the shoulder.
+        const tip = new THREE.Object3D();
+        tip.name = 'tipFeather';
+        tip.position.copy(outermost);
+        hand.add(tip);
+
+        const secondary = new THREE.Object3D();
+        secondary.name = 'secondaryFeather';
+        secondary.position.set(-0.08, 0.005, 0.46);
+        arm.add(secondary);
+
+        arm.userData.tipFeather = tip;
+        arm.userData.secondaryFeather = secondary;
+        arm.userData.hand = hand;
+        arm.scale.z = side;
+        return arm;
+      };
+
+      const leftWing = buildWingV3(1);
+      leftWing.name = 'leftWing';
+      leftWing.position.set(-0.06, 0.19, 0.30);
+      leftWing.rotation.set(-0.08, -0.20, 0.14);
+      leftWing.userData.baseRotation = leftWing.rotation.clone();
+      birbModel.add(leftWing);
+
+      // Same mirror derivation the Phase 0 constructor states: with scale.z=-1
+      // and Euler XYZ, R_right = S x R_left x S gives (-aL, -bL, +cL).
+      const rightWing = buildWingV3(-1);
+      rightWing.name = 'rightWing';
+      rightWing.position.set(-0.06, 0.19, -0.30);
+      rightWing.rotation.set(0.08, 0.20, 0.14);
+      rightWing.userData.baseRotation = rightWing.rotation.clone();
+      birbModel.add(rightWing);
+
+      // -- Tail: a fan of 9 feathers ---------------------------------------
+      const tailGroup = new THREE.Group();
+      tailGroup.name = 'tail';
+      tailGroup.position.set(-0.86, -0.02, 0);
+      tailGroup.userData.baseRotation = new THREE.Euler(0, 0, 0.05);
+      tailGroup.rotation.copy(tailGroup.userData.baseRotation);
+      const tailParts = [];
+      const TAILN = 9;
+      for (let i = 0; i < TAILN; i++) {
+        const t = i / (TAILN - 1);
+        const spread = (t - 0.5) * 2;              // -1 .. 1 across the fan
+        // Centre feathers longest, outer ones shorter — a rounded tail rather
+        // than a square paddle. The overlap is what makes it read as a fan
+        // from above instead of as nine separate sticks.
+        const len = 0.78 - Math.abs(spread) * 0.18;
+        const plate = buildFeatherPlateGeometry({
+          length: len, frontW: 0.055, backW: 0.070, tipTaper: 0.22, segments: 3,
+          bow: 0.016, axis: '-x', uvRect: FULL_UV,
+        });
+        tileUV(plate, 0.12, len);
+        tailParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
+          position: [0, -Math.abs(spread) * 0.010, spread * 0.052],
+          rotation: [spread * 0.24, 0, 0],
+        }), backColor.clone().lerp(featherEdge, 0.05 + Math.abs(spread) * 0.18)));
+      }
+      const tailMesh = new THREE.Mesh(mergeAndDispose(tailParts), vaneMat);
+      tailMesh.name = 'birbTail';
+      tailGroup.add(tailMesh);
+      birbModel.add(tailGroup);
+
+      // -- Feet: one mesh each, so the walk cycle can still alternate them ---
+      const buildFoot = (z) => {
+        const g = new THREE.Group();
+        const parts = [];
+        const leg = new THREE.CylinderGeometry(0.022, 0.018, 0.11, 6);
+        parts.push(paintGeometryColor(bakeGeometryTRS(leg, { position: [0, -0.055, 0] }), footColor));
+        for (const [dx, dz, rot] of [[0.05, 0, 0], [0.038, 0.032, 0.5], [0.038, -0.032, -0.5]]) {
+          const toe = new THREE.CylinderGeometry(0.012, 0.007, 0.065, 5);
+          parts.push(paintGeometryColor(bakeGeometryTRS(toe, {
+            position: [dx, -0.115, dz], rotation: [0, rot, Math.PI / 2 - 0.35],
+          }), footColor));
+        }
+        const mesh = new THREE.Mesh(mergeAndDispose(parts), footMat);
+        mesh.name = 'birbFootMesh';
+        g.add(mesh);
+        g.position.set(-0.40, -0.20, z);
+        g.rotation.set(0, 0, -1.15);
+        return g;
+      };
+      const leftFoot = buildFoot(0.10);
+      leftFoot.name = 'leftFoot';
+      birbModel.add(leftFoot);
+      const rightFoot = buildFoot(-0.10);
+      rightFoot.name = 'rightFoot';
+      birbModel.add(rightFoot);
+
+      // Rim light, deduped per material exactly as Phase 0 does — an
+      // onBeforeCompile registered twice on one material pushes two uniform
+      // handles and the second one never updates.
+      const seenRimMaterialsV3 = new Set();
+      birbModel.traverse((child) => {
+        if (!child.material) return;
+        const list = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of list) {
+          if (seenRimMaterialsV3.has(m)) continue;
+          seenRimMaterialsV3.add(m);
+          const u = addRimLight(m, THREE, { color: 0x9fe8ff, power: 3.0, strength: 0.42 });
+          if (u) birbRimUniforms.push(u);
+        }
+      });
+
+      // The two authored sheets, if this session wants them. Decode-gated and
+      // reversible like every other authored surface in this repo.
+      birbModel.userData.featherMaterials = { contour: contourMat, vane: vaneMat };
+      return birbModel;
+    };
+
     // ?bird=v2 selects the Phase 1 candidate above; every other session keeps
     // the Phase 0 default. Read once at boot, not per frame — this is a
     // build-time choice of constructor, not something the running game ever
     // toggles.
-    const useBirdV2 = typeof window !== 'undefined'
-      && /[?&]bird=v2(?:&|$)/.test(window.location?.search || '');
+    const birdVariant = typeof window !== 'undefined'
+      ? (/[?&]bird=(v2|v3)(?:&|$)/.exec(window.location?.search || '') || [])[1] || null
+      : null;
 
-    positionBirbModel(useBirdV2 ? createProceduralBirbV2() : createProceduralBirb());
+    positionBirbModel(
+      birdVariant === 'v3' ? createProceduralBirbV3()
+        : birdVariant === 'v2' ? createProceduralBirbV2()
+          : createProceduralBirb(),
+    );
 
     // Default to the procedural birb — it's richer, animates per-part (wings +
     // feet are named groups), and behaves identically on iOS. The GLB path is

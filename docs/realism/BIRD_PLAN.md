@@ -21,8 +21,25 @@ all five named nodes missing). The ten-tile sheet from
 exits 1 on a tile that is only background, because its first evidence sheet
 was exactly that and nothing noticed.
 
-**Phase 1 is built as a flagged candidate, `?bird=v2`, and is NOT the
-default.** 8 calls / 2,202 tris, contract green, ten tiles intact
+**Phase 1 went to a second attempt, `?bird=v3`, and that one is a bird.**
+9 draw calls / 1,414 triangles / 4 materials, rig contract green. What it
+adds over v2 is a JOINT, not detail: each wing is an arm group (coverts
+over secondaries, shoulder to wrist) with a `hand` group nested at the
+wrist carrying seven splayed primaries, so the rig's lagging hand and its
+twist have something to move. Proportions are the passerine ones — span
+2.35 against a 1.36 body, a ratio of 1.73, where Phase 0 measured 1.03
+and v3's own first pass measured 0.84 and read as a fish. Three rounds of
+capture fixed the span, then eyes that sat on the head like goggles, then
+feet that hung like landing gear and a belly washed to white. The two
+extra draw calls over Phase 0's eight ARE the two hands.
+
+Its UVs are tiling in surface units, NOT a baked atlas: the authored
+sheets are tiling materials because `tools/asset-check.mjs` rejects any
+albedo whose wrap seam exceeds 3x the steepest ordinary transition, and
+only `sky` is exempt. v2's atlas assumed a bird-shaped image that the
+pipeline will never produce.
+
+**v2 remains available at `?bird=v2` and is superseded.** 8 calls / 2,202 tris, contract green, ten tiles intact
 (`node tools/birb-bird-sheet.mjs --query bird=v2`). Its two adversarial
 verifiers never ran (session limit), so the only review it has had is one
 pair of eyes on the two sheets side by side, and that review says: sound,
