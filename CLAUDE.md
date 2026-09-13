@@ -352,7 +352,7 @@
 > frames after it separately** — they are different numbers with different
 > meanings.
 
-> **The bird rebuild is planned, not built** (2026-09-13):
+> **The bird rebuild is planned, not built** (2026-09-13, morning — Phase 0 shipped that afternoon, see the entry after this one):
 > [docs/realism/BIRD_PLAN.md](docs/realism/BIRD_PLAN.md). The number that
 > sets its order: measured with the new `__BIRB.birdStats()`, the bird is
 > **44 meshes = 44 draw calls — 65% of the 68 scene calls at spawn** — and
@@ -370,6 +370,76 @@
 > chase camera from behind and above. Routes are procedural v2 → authored
 > feather textures through this week's pipeline → a rigged-GLB go/no-go
 > gated by the contract test, in that order.
+
+> **Ultracode pass: the bird rebuilt to budget, five biome surfaces authored,
+> and a granite tint refuted by capture** (2026-09-13). Two agent fleets ran
+> in parallel under `docs/ULTRACODE_REALISM_PLAN.md`'s ownership rules (bird:
+> `index.html` plus new `src/flight`/`tests`/`tools` files; textures:
+> `src/environment/*`, `sw.js`, `assets/`), each with adversarial Opus
+> verifiers. What follows is what they found and what survived integration.
+>
+> **Phase 0 of the bird plan shipped: 44 → 8 draw calls, 11,780 → 3,408
+> triangles, 14 → 3 materials, same silhouette.** Whole-frame draw calls at
+> spawn fell 64 → 27 in an apples-to-apples A/B where only `index.html`
+> differed. Parts are baked by their TRS into vertex-coloured merged
+> geometry; `tipFeather`/`secondaryFeather` are real empties so the ribbon
+> still anchors; `src/flight/bird-contract.js` + `tests/bird-contract.test.js`
+> pin the rig contract, and `?glb=1` now falls back with a warning when a GLB
+> fails it (the shipped `birb.glb` does: all five named nodes missing). Two
+> things a verifier caught that green tests did not. The contract module was
+> imported UNCONDITIONALLY on the boot path and was not in `sw.js`
+> `CORE_ASSETS`, so the first offline launch after a cache bump died on a
+> dynamic import — `BIRB_PERF_IMPL=1 node --test tests/build-identity.test.js`
+> is the oracle plain `npm test` skips, and it is worth running by hand
+> whenever a `src/` module is added. And the first Phase 0 evidence sheet had
+> EMPTY `back` and `left-profile` tiles, from `freeze()` and `birdStudio()`
+> landing on different frames; `tools/birb-bird-sheet.mjs` now counts
+> non-background pixels per tile and exits 1 below a floor. **A sheet that
+> cannot fail is not evidence.**
+>
+> **Phase 1 is a flagged candidate, not the default: `?bird=v2`** (8 calls,
+> 2,202 tris, contract green, ten tiles intact). Its two verifiers never ran
+> (session limit), so it was measured and eyeballed at integration only, and
+> the sheets side by side say: sound, and not obviously better — the
+> feather-plate wings are thinner than the Phase 0 cones at chase distance
+> and the lofted body reads as a smooth capsule where Phase 0 kept a pale
+> belly. That is exactly the question the blind paired A/B on the phone is
+> for; until it runs, Phase 0 ships. `node tools/birb-bird-sheet.mjs --query
+> bird=v2` reproduces the comparison.
+>
+> **Five authored surfaces landed, all on by default with an opt-out**
+> (`?canyon=0`, `?granite=0`, `?snow=0`, `?concrete=0`, `?ground=0`, or
+> `?authored=0` for the lot): sandstone on both canyon spire materials,
+> granite on the mountain peaks with snow on their caps, concrete on all
+> three city facades, and a triplanar ground map on the forest sphere. Every
+> swap is decode-gated through `commitWhenDecoded` and every disposer restores
+> only what it changed. Two lessons cost a round each. **`addInstancedUvScale`
+> grew a box path**: the cylinder-circumference formula on a `BoxGeometry`
+> tiles a facade by a number that means nothing, so the box branch chooses
+> its repeat from the object-space normal. **A sphere's UVs are unusable for
+> ground** (pinched at the poles, stretched at the equator), so
+> `ground-detail.js` samples the map triplanar, blended by the facet normal it
+> already computes — three samples, zero draw calls. `tools/asset-check.mjs`
+> now models residency PER BIOME (worst biome 20.0 MB of a 24 MB ceiling): the
+> 1024² deliveries were downscaled to 512² because the directory summed to
+> 42.7 MB and no biome ever has all of it resident. The 24 must not be raised.
+>
+> **The granite tint was solved, refuted and re-solved — by capture, not by
+> taste.** The first solve lifted the peaks to 1.73x their procedural
+> luminance to clear 60 sRGB units from the pine bark, and a pinned-pose
+> capture measured the SNOW CAP losing 39% of its contrast against the
+> granite it physically sits on (128.4 units → 78.8): snow is already at its
+> clipping ceiling and cannot answer by getting brighter. `GRANITE_TINT` now
+> targets `#5c6372`, 0.87x the procedural peak, and
+> `tests/authored-textures.test.js` guards the snow:granite ratio. The
+> pine-vs-granite gap is 36.3 and has its own test with a measured floor,
+> because the authored pine bark already sat 34.9 from the PROCEDURAL peak
+> before any granite existed — the procedural pair only read 98.7 because the
+> procedural pine trunk was the near-black slab. **A separation rule a
+> material was never going to satisfy is not a rule that material broke.**
+> Also fixed on the way through: the sky panorama was never disposed on an
+> environment switch, so every lap of the four biomes leaked four 1024x512
+> textures.
 
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what

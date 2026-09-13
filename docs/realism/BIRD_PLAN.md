@@ -1,10 +1,38 @@
 # The bird rebuild — plan (2026-09-13)
 
 This is R1 from [BUILD_BACKLOG.md](BUILD_BACKLOG.md), planned against what
-the bird actually is rather than what the backlog assumed. Nothing here is
-built. Every number below was measured on main `1c810b7` with
+the bird actually is rather than what the backlog assumed. Phase 0 has since
+shipped and Phase 1 is flagged — see **Status** below. Every number in the
+plan body was measured on main `1c810b7` with
 `__BIRB.birdStats()`, which this plan adds so the next session can re-measure
 instead of trusting this page.
+
+## Status (2026-09-13, later the same day)
+
+**Phase 0 shipped.** Measured live with `__BIRB.birdStats()` on the merged
+tree: **8 meshes / 8 draw calls / 3,408 triangles / 3 materials** (from
+44 / 44 / 11,780 / 14), same silhouette, same albedo hexes part for part.
+Whole-frame draw calls at spawn fell 64 → 27 in an apples-to-apples A/B where
+only `index.html` differed. `src/flight/bird-contract.js` and
+`tests/bird-contract.test.js` exist; `?glb=1` runs the contract and falls
+back to the procedural bird with a warning (the shipped `birb.glb` fails it —
+all five named nodes missing). The ten-tile sheet from
+`node tools/birb-bird-sheet.mjs` is intact at every angle and the tool now
+exits 1 on a tile that is only background, because its first evidence sheet
+was exactly that and nothing noticed.
+
+**Phase 1 is built as a flagged candidate, `?bird=v2`, and is NOT the
+default.** 8 calls / 2,202 tris, contract green, ten tiles intact
+(`node tools/birb-bird-sheet.mjs --query bird=v2`). Its two adversarial
+verifiers never ran (session limit), so the only review it has had is one
+pair of eyes on the two sheets side by side, and that review says: sound,
+and not obviously better. The feather-plate wings are thinner than the
+Phase 0 cones at chase distance, and the lofted body reads as a smooth
+capsule where Phase 0 kept a pale belly. That is the question the blind
+paired forced-choice on the phone exists to answer, and it has not run.
+Until it does, Phase 0 is what ships.
+
+Phases 2 and 3 are unchanged: not started.
 
 ## The measurement that changes the order of work
 
