@@ -707,6 +707,92 @@ export function addRimLight(material, THREE, { color = 0x9fe8ff, power = 3.0, st
 }
 
 /**
+ * Iridescent sheen for the bird's wing surfaces.
+ *
+ * A Bronze-winged Pionus's coverts are STRUCTURALLY coloured: the bronze
+ * flashes gold when the light is behind you and goes green-black at a grazing
+ * angle. That is a view-dependent hue shift, which no vertex colour and no
+ * albedo texture can express — both are fixed the moment the geometry is
+ * built. It is one fresnel term and no extra draw calls.
+ *
+ * Two things about the form are deliberate:
+ *
+ *  - It MULTIPLIES the light already there rather than adding a flat term.
+ *    A flat additive lifts a dark material far more than a bright one — that
+ *    is how a sun rim once turned the city's 0.09-linear asphalt into pale
+ *    snow — and here it would wash the dark flight feathers to grey while
+ *    doing nothing visible on the bronze.
+ *  - It CHAINS, and it extends the program cache key. `addRimLight` sets a
+ *    CONSTANT key ('birb-rim-v1'), so a material carrying this patch and one
+ *    carrying only the rim would otherwise share a compiled program and one
+ *    of them would silently render the other's shader.
+ *
+ * @param warm   the face-on colour the sheen pushes toward (gold)
+ * @param cool   the grazing-angle colour (green, for a bronze wing)
+ * @param power  fresnel exponent; higher keeps the shift to the very edge
+ */
+export function addFeatherSheen(material, THREE, {
+  warm = 0xffd27a, cool = 0x4fb488, power = 2.2, strength = 0.55,
+} = {}) {
+  if (!material) return null;
+  if (material.userData?.birbSheen) return material.userData.birbSheen;
+  const lit = material.isMeshStandardMaterial || material.isMeshPhysicalMaterial
+    || material.isMeshPhongMaterial || material.isMeshLambertMaterial;
+  if (!lit) return null;
+  const uniforms = {
+    uSheenWarm: { value: new THREE.Color(warm) },
+    uSheenCool: { value: new THREE.Color(cool) },
+    uSheenPower: { value: power },
+    uSheenStrength: { value: strength },
+  };
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function (shader, renderer) {
+    if (typeof previous === 'function') previous.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader =
+      'uniform vec3 uSheenWarm; uniform vec3 uSheenCool; uniform float uSheenPower; uniform float uSheenStrength;\n'
+      + shader.fragmentShader;
+    const anchor = shader.fragmentShader.includes('#include <opaque_fragment>')
+      ? '#include <opaque_fragment>'
+      : '#include <output_fragment>';
+    shader.fragmentShader = shader.fragmentShader.replace(anchor, `
+      // vViewPosition runs from the fragment TO the camera, so this is N·V.
+      float sheenFacing = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+      // The band PEAKS across the surface and falls back to zero at the
+      // silhouette, instead of growing monotonically to the edge. Two reasons,
+      // and the second is the one that showed up in a capture: iridescence is
+      // a shift that travels across a covert, not a halo on its outline; and
+      // addRimLight already owns the silhouette, so a monotonic term stacks
+      // with it. A feather plate seen near edge-on is almost ALL silhouette —
+      // with the monotonic form the whole wing washed to grey against a bright
+      // sky, which is the opposite of what a sheen is for.
+      float sheenF = 1.0 - sheenFacing;
+      float sheenP = pow(sheenF, uSheenPower);
+      float sheenBand = sheenP * (1.0 - sheenP * sheenP * sheenP);
+      // Face-on is gold, grazing is green — the way a real structural colour
+      // travels across a curved covert as the bird banks.
+      vec3 sheenTint = mix(uSheenWarm, uSheenCool, sheenBand);
+      outgoingLight += outgoingLight * sheenTint * sheenBand * uSheenStrength;
+      ${anchor}
+    `);
+  };
+  material.customProgramCacheKey = function () {
+    const base = typeof previousKey === 'function' ? previousKey.call(this) : '';
+    return `${base}-sheen`;
+  };
+  material.needsUpdate = true;
+  material.userData = material.userData || {};
+  material.userData.birbSheen = uniforms;
+  return uniforms;
+}
+
+/** `?pionus=0` puts the old blue jay palette and the flat wings back. */
+export function pionusPlumageRequested(search) {
+  return !/[?&]pionus=0/.test(search || '');
+}
+
+/**
  * Cap how large a Points material may draw a single particle.
  *
  * `sizeAttenuation` scales a point by `scale / -mvPosition.z`, with no upper

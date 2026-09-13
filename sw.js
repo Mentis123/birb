@@ -36,7 +36,7 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v63-2026-09-13-grounded-bird';
+const CACHE_VERSION = 'v64-2026-09-13-pionus-level-turns';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

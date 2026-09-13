@@ -741,6 +741,71 @@
 > screen. **Frames, never milliseconds** — the walk advances per frame and
 > this harness runs at a few frames a second under SwiftShader.
 
+> **The bank had no bank in it, the dive had a spiral in it, and the bird is a
+> Bronze-winged Pionus now** (2026-09-13, night). All three reported from the
+> phone; all three measured before anything was changed.
+>
+> **"Banks left both wings go straight, banks right both wings go down."**
+> The bank dip was written with the two wings OPPOSITE-signed, which under the
+> right wing's `scale.z = -1` is a symmetric FLAP, not a roll. A bank is the
+> one motion in the whole rig that is not mirror-symmetric, so it is the one
+> term that must be SAME-signed. Measured with the new `birdPose().leftTip` /
+> `.rightTip` (each wingtip in the BIRD'S OWN frame, which is the only frame
+> where "that wing is high" means anything): at five stick positions the two
+> tips were equal **to four decimal places** — zero bank, all of the amplitude
+> going into a phantom flap that then stacked with the correctly-symmetric
+> `glideSweep`, adding one way and cancelling the other. That is the report,
+> exactly. Fixed, it measures antisymmetric: bank -1.31 / +1.31 at full stick
+> either way, collective dip the same -0.12 in both. **A rotation.x pair does
+> not tell you which wing is up; evaluating the tip position does.**
+>
+> **A held dive spiralled and looped out of itself because yaw turned about
+> the BIRD'S up.** Correct for an aircraft in open sky, wrong on a planet: at
+> 60-70 degrees nose-down the bird's own up points backward along the ground,
+> so a yaw input is a world-space ROLL — and roll was never corrected, because
+> `_applyZenAutoLevelRoll` ran only in Zen AND only on a near-centred stick,
+> which is exactly when roll does not accumulate. Measured holding (x 0.25,
+> y -1) from 200 units up: roll 0.5 -> **40 degrees**, heading through more
+> than a full turn, pitch carried from -70 round to **+55 — the bird pulled
+> out of its own dive and started climbing.** Yawing about the PLANET'S up
+> instead: roll **0.0 throughout**, the full -80 held for the whole run, a
+> smooth constant-rate descending turn. With no yaw input the two are
+> identical, which is the property that makes it safe. `?levelturn=0` is the
+> before; `docs/perf/gates/G-FLIGHT-LEVEL.md` has the table. `maxPitch` is 80
+> degrees now, not 72 — and deliberately not 90, where the tangent-plane
+> heading is undefined and auto-level has no sign to work with.
+> `__BIRB.flightProbe()` reports pitch, roll and heading against the local
+> radial, which is what made any of this arguable from numbers.
+>
+> **Aerobatics are still off the table and this is what it would take:** the
+> pitch clamp lifted entirely, an explicit roll input (roll is currently
+> cosmetic — `bird-visual.js` rolls the MODEL, not the flight frame), a chase
+> camera that survives inversion, and a ground floor that behaves when the
+> bird is upside down. The controller is quaternion-based 6DOF underneath, so
+> it is work, not a rewrite.
+>
+> **The bird is a Bronze-winged Pionus** (`?pionus=0` for the old blue).
+> Bronze mantle and coverts, dusky violet body, dark blue-green flight
+> feathers, a pink-white chin band, and the Pionus signature red. Two things
+> worth keeping. **The red went on the TAIL ROOT, not the undertail coverts
+> where the real bird carries it** — this bird is only ever seen from the
+> chase camera, behind and above, and a marking on the underside is a marking
+> nobody will ever see; banded along each tail feather's own length it flashes
+> from exactly the angle the player is watching from. And **the first
+> iridescence washed the whole wing to grey against a bright sky**: a fresnel
+> that grows monotonically to the silhouette stacks with `addRimLight`, which
+> already owns the silhouette, and a feather plate seen near edge-on is almost
+> ALL silhouette. `addFeatherSheen`'s band now PEAKS across the surface and
+> returns to zero at the edge, which is also what a structural colour actually
+> does. It multiplies the light rather than adding a flat term, and it extends
+> the program cache key — `addRimLight` returns a CONSTANT key, so a sheened
+> wing and a rim-only body would otherwise share one compiled program.
+>
+> Also: `node_modules/three/index.js`, the repo's tracked hand-written stub,
+> gained `Quaternion.conjugate`/`invert`. Bringing a world axis into the
+> bird's frame needs the inverse and the stub lacked a method three has always
+> had — two existing flight tests failed on it before it was added.
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose

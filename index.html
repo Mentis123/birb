@@ -3494,7 +3494,7 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
-      var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
+      var { visualUniforms, getQualityPixelRatio, addRimLight, addFeatherSheen, pionusPlumageRequested } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       // Image-based lighting from the same gradient the dome paints, behind
       // ?ibl=1. scene.environment is null on the shipping path; see the module
@@ -3694,7 +3694,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v63-2026-09-13-grounded-bird';
+    const BIRB_BUILD = 'v64-2026-09-13-pionus-level-turns';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5070,6 +5070,11 @@
     // rather than snapped: switching pose on the frame the nesting state flips
     // reads as a dropped frame, not as a bird settling onto a nest.
     let perchBlend = 0;
+    // The input the rig actually resolved this frame, so __BIRB.flightProbe()
+    // can report what drove the wings rather than what the stick was set to.
+    // Reused, never allocated in the loop.
+    const lastWingInput = { x: 0, y: 0, active: false };
+
     // Scratch for the walk bob's radial up. Module scope, reused, never
     // allocated in the loop.
     const _walkUp = new THREE.Vector3();
@@ -6765,14 +6770,51 @@
     // Paints every vertex of a geometry one flat colour so several
     // differently-coloured parts can share ONE vertexColors:true material
     // instead of one material (and one draw call) each.
-    const paintGeometryColor = (geometry, colorHex) => {
+    // Optional `band` paints a second colour across the ROOT end of the part,
+    // measured along its own bounding box rather than in any parent frame, so
+    // it works the same whether it is called before or after bakeGeometryTRS.
+    // `axis` names the direction the part EXTENDS in ('-x' means the tip is at
+    // minimum x, so the root is at maximum x); `until` is how far down the
+    // part the band reaches, 0..1; `softness` is the fade width in the same
+    // units. One extra pass over an attribute that is being written anyway —
+    // no extra geometry, no second material, no draw call.
+    const paintGeometryColor = (geometry, colorHex, band = null) => {
       const c = new THREE.Color(colorHex);
-      const count = geometry.attributes.position.count;
+      const position = geometry.attributes.position;
+      const count = position.count;
       const colors = new Float32Array(count * 3);
+      let bandColor = null; let comp = 0; let rootAt = 0; let span = 0;
+      if (band && band.color) {
+        bandColor = new THREE.Color(band.color);
+        const negative = String(band.axis || 'z').startsWith('-');
+        const letter = String(band.axis || 'z').replace('-', '');
+        comp = letter === 'x' ? 0 : letter === 'y' ? 1 : 2;
+        let lo = Infinity; let hi = -Infinity;
+        for (let i = 0; i < count; i++) {
+          const v = position.array[i * 3 + comp];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        span = hi - lo;
+        rootAt = negative ? hi : lo;
+        // A part with no extent along its own axis cannot carry a band, and
+        // dividing by that span would write NaN into every vertex colour.
+        if (!(span > 1e-6)) bandColor = null;
+      }
       for (let i = 0; i < count; i++) {
-        colors[i * 3] = c.r;
-        colors[i * 3 + 1] = c.g;
-        colors[i * 3 + 2] = c.b;
+        let r = c.r; let g = c.g; let b = c.b;
+        if (bandColor) {
+          const t = Math.abs(position.array[i * 3 + comp] - rootAt) / span;
+          const until = band.until ?? 0.25;
+          const soft = Math.max(1e-4, band.softness ?? 0.1);
+          const w = Math.max(0, Math.min(1, (until - t) / soft + 1));
+          r += (bandColor.r - r) * w;
+          g += (bandColor.g - g) * w;
+          b += (bandColor.b - b) * w;
+        }
+        colors[i * 3] = r;
+        colors[i * 3 + 1] = g;
+        colors[i * 3 + 2] = b;
       }
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       return geometry;
@@ -7717,16 +7759,49 @@
     const createProceduralBirbV3 = () => {
       const birbModel = new THREE.Group();
 
-      // -- Palette ---------------------------------------------------------
-      // Unchanged from Phase 0 on purpose: the owner has signed these off, and
-      // changing the form and the colour in one step makes an A/B unreadable.
-      const backColor = new THREE.Color(0x2b5dcc);
-      const bodyColor = new THREE.Color(0x4a7cf0);
-      const bellyColor = new THREE.Color(0xe6efff);
-      const headTint = new THREE.Color(0x5a8cf5);
-      const beakColor = new THREE.Color(0xf5b942);
-      const beakDark = new THREE.Color(0xdb9a2e);
-      const featherEdge = new THREE.Color(0x4df0ff);
+      // -- Palette: Bronze-winged Pionus ------------------------------------
+      // `?pionus=0` restores the Phase 0 blue, because that is how this was
+      // judged and the old bird is the only honest before.
+      //
+      // The real bird, and which of it is worth spending pixels on at chase
+      // distance: dusky violet-blue body, a BRONZE mantle and wing coverts
+      // (the name, and the loudest thing about it), dark blue-green flight
+      // feathers, a pink-white band across the chin and forecrown, and the
+      // Pionus signature — bright RED undertail coverts. The red and the
+      // bronze are the two a viewer can name from behind and above, which is
+      // the only angle this bird is ever seen from, so those are the two that
+      // get pushed hardest.
+      const pionus = pionusPlumageRequested(window.location?.search || '');
+      // Mantle, scapulars and wing coverts. Warm copper rather than the true
+      // olive-bronze: the procedural material is lit by one key at emissive
+      // 0.34 and a literal transcription of the bird's own mantle lands as
+      // mud at this size.
+      const backColor = new THREE.Color(pionus ? 0x8a6c39 : 0x2b5dcc);
+      // Breast and flanks: dusky violet.
+      const bodyColor = new THREE.Color(pionus ? 0x6b6494 : 0x4a7cf0);
+      // Underside lift. NOT the near-white of the blue bird — a Pionus belly
+      // is violet-grey, and a white belly under a bronze wing reads as a
+      // different species from every angle.
+      const bellyColor = new THREE.Color(pionus ? 0xa89fc0 : 0xe6efff);
+      // Crown and nape: the darkest thing on the bird.
+      const headTint = new THREE.Color(pionus ? 0x3a3260 : 0x5a8cf5);
+      // The chin/forecrown band. Pink-white, and the one warm light note at
+      // the front of the bird.
+      const chinBand = new THREE.Color(0xf0c9d2);
+      // Undertail coverts. The Pionus signature, and the only saturated red
+      // on the model.
+      const ventRed = new THREE.Color(0xd4343c);
+      // Bill: pale horn with a darker base, not the blue bird's marigold.
+      const beakColor = new THREE.Color(pionus ? 0xe8dcb4 : 0xf5b942);
+      const beakDark = new THREE.Color(pionus ? 0xad9764 : 0xdb9a2e);
+      // Flight feathers: dark blue-green, with a teal edge at the tips.
+      const flightFeather = new THREE.Color(pionus ? 0x1e3f52 : 0x2b5dcc);
+      const featherEdge = new THREE.Color(pionus ? 0x2f8378 : 0x4df0ff);
+      // The lit edge of a bronze covert. Blending the coverts toward the
+      // flight feathers' teal instead is what made the first capture read as
+      // khaki: a bronze greyed toward green is not a duller bronze, it is a
+      // different colour.
+      const bronzeLit = new THREE.Color(0xc79a4e);
       const footColor = new THREE.Color(0x1a2438);
 
       // -- Materials: 4 --------------------------------------------------
@@ -7735,10 +7810,24 @@
       // because every part they cover is a separate mesh anyway — the wings and
       // tail have to be, since they rotate independently.
       const contourMat = new THREE.MeshStandardMaterial({
-        vertexColors: true, metalness: 0.12, roughness: 0.55, emissive: 0x0f1f45, emissiveIntensity: 0.34,
+        vertexColors: true, metalness: 0.12, roughness: 0.55,
+        // The ambient lift has to move with the palette. 0x0f1f45 is a blue,
+        // and a blue lift under a violet-and-bronze bird tints every shadow
+        // on it back toward the bird this one replaced.
+        emissive: pionus ? 0x1c1828 : 0x0f1f45,
+        emissiveIntensity: 0.34,
       });
+      // The wings carry the bronze, and bronze is a metal: it wants a tighter,
+      // brighter specular than a blue jay's flat vane did. Held at 0.34 rather
+      // than pushed further because there is no envMap on the shipping path —
+      // past about that, three's metal has nothing to reflect and the wing
+      // goes DARK between highlights, which is the opposite of the ask.
       const vaneMat = new THREE.MeshStandardMaterial({
-        vertexColors: true, metalness: 0.16, roughness: 0.48, emissive: 0x0f1f45, emissiveIntensity: 0.34,
+        vertexColors: true,
+        metalness: pionus ? 0.34 : 0.16,
+        roughness: pionus ? 0.36 : 0.48,
+        emissive: pionus ? 0x1c1828 : 0x0f1f45,
+        emissiveIntensity: 0.34,
         side: THREE.DoubleSide,
       });
       const footMat = new THREE.MeshStandardMaterial({
@@ -7831,11 +7920,32 @@
         ];
         const segs = 16;
         const positions = [], uvs = [], colors = [], indices = [];
+        // `topness` is where the vertex sits on its ring, +1 at the spine and
+        // -1 at the keel. `rowT` runs 0 at the tail to 1 at the brow. Between
+        // them they are enough to place every marking this bird needs without
+        // a texture, a second material or a single extra triangle.
         const ringColor = (topness, rowT) => {
           const c = bodyColor.clone();
           if (topness > 0.35) c.lerp(backColor, Math.min(1, (topness - 0.35) / 0.65));
           else if (topness < -0.30) c.lerp(bellyColor, Math.min(0.78, (-0.30 - topness) / 0.70));
           if (rowT > 0.70) c.lerp(headTint, Math.min(1, (rowT - 0.70) / 0.18) * 0.55);
+          if (!pionus) return c;
+          // UNDERTAIL COVERTS — the Pionus signature. Only on the underside
+          // (topness < 0) and only at the rump, which is exactly where the
+          // chase camera is looking from. Wrapping it round the whole rump
+          // would paint the bird's back red on the one view that matters.
+          if (rowT < 0.16 && topness < 0.10) {
+            const along = 1 - rowT / 0.16;
+            const under = Math.min(1, (0.10 - topness) / 0.55);
+            c.lerp(ventRed, Math.min(1, along * under) * 0.92);
+          }
+          // The pink-white chin and forecrown band, low and forward: it sits
+          // under the eye and round the base of the bill, not over the crown.
+          if (rowT > 0.74 && topness < 0.42) {
+            const along = Math.min(1, (rowT - 0.74) / 0.20);
+            const low = Math.min(1, (0.42 - topness) / 0.80);
+            c.lerp(chinBand, along * low * 0.80);
+          }
           return c;
         };
         // v tiles by accumulated arc length along the body, so the sheet does
@@ -7979,7 +8089,12 @@
           armParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
             position: [-0.03 - t * 0.10, 0.005, 0.08 + t * (WRIST_Z - 0.14)],
             rotation: [0, -0.16 - t * 0.10, -0.04],
-          }), bodyColor.clone().lerp(backColor, 0.25 + t * 0.3)));
+          }), pionus
+            // Secondaries run bronze at the root and darken into the flight
+            // feathers' blue-green toward the tip, which is where a real
+            // bronze wing's colour actually changes.
+            ? backColor.clone().lerp(flightFeather, 0.18 + t * 0.42)
+            : bodyColor.clone().lerp(backColor, 0.25 + t * 0.3)));
         }
         // Coverts: the short shingle feathers that lie OVER the secondaries'
         // bases. Without them the arm shows the secondaries' roots and reads
@@ -7996,7 +8111,13 @@
           armParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
             position: [0.05, 0.06, 0.06 + t * (WRIST_Z - 0.16)],
             rotation: [0, -0.13 - t * 0.08, -0.10],
-          }), backColor.clone().lerp(bodyColor, 0.15 + t * 0.25)));
+          }), pionus
+            // THE bronze. These shingle over the secondaries' roots and are
+            // the largest unbroken patch of it on the bird, so they get the
+            // brightest copper and the sheen has the most surface to travel
+            // across.
+            ? backColor.clone().lerp(bronzeLit, 0.10 + t * 0.30)
+            : backColor.clone().lerp(bodyColor, 0.15 + t * 0.25)));
         }
         const armMesh = new THREE.Mesh(mergeAndDispose(armParts), vaneMat);
         armMesh.name = 'birbWingArm';
@@ -8029,7 +8150,9 @@
             rotation: [0, -0.04 - t * 0.26, -0.02 - t * 0.05],
           };
           handParts.push(paintGeometryColor(bakeGeometryTRS(plate, trs),
-            backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
+            pionus
+              ? flightFeather.clone().lerp(featherEdge, 0.10 + t * 0.30)
+              : backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
           if (i === PRIM - 1) outermost = transformedLocalPoint(tipPointOfFeather({ length: len, axis: 'z' }), trs);
         }
         const handMesh = new THREE.Mesh(mergeAndDispose(handParts), vaneMat);
@@ -8095,7 +8218,17 @@
         tailParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
           position: [0, -Math.abs(spread) * 0.012, spread * 0.105],
           rotation: [spread * 0.40, 0, 0],
-        }), backColor.clone().lerp(featherEdge, 0.05 + Math.abs(spread) * 0.18)));
+        }), pionus
+          ? flightFeather.clone().lerp(featherEdge, 0.08 + Math.abs(spread) * 0.22)
+          : backColor.clone().lerp(featherEdge, 0.05 + Math.abs(spread) * 0.18),
+          // The red is banded along each tail feather's own LENGTH rather than
+          // painted on the undertail coverts where the real bird carries it.
+          // Anatomically that is a compromise and it is a deliberate one: this
+          // bird is only ever seen from the chase camera, behind and above,
+          // and a marking on the underside is a marking nobody will ever see.
+          // Banded at the root it flashes red at the base of the fanned tail
+          // from exactly the angle the player is watching from.
+          pionus ? { color: ventRed, until: 0.30, softness: 0.12, axis: '-x' } : null));
       }
       // Uppertail coverts: four short feathers lying OVER the tail's roots,
       // built into the tail mesh so they cost nothing and swing with it.
@@ -8110,7 +8243,11 @@
         tailParts.push(paintGeometryColor(bakeGeometryTRS(cov, {
           position: [0.06, 0.055 - t * 0.02, side * t * 0.075],
           rotation: [side * t * 0.30, 0, -0.16],
-        }), backColor.clone().lerp(bodyColor, 0.30 - t * 0.18)));
+        }), pionus
+          // Bronze over the tail's roots, so the red underneath reads as a
+          // separate marking rather than bleeding into the tail.
+          ? backColor.clone().lerp(bodyColor, 0.18 - t * 0.10)
+          : backColor.clone().lerp(bodyColor, 0.30 - t * 0.18)));
       }
       const tailMesh = new THREE.Mesh(mergeAndDispose(tailParts), vaneMat);
       tailMesh.name = 'birbTail';
@@ -8166,6 +8303,12 @@
           if (u) birbRimUniforms.push(u);
         }
       });
+
+      // Iridescence, on the WINGS only — it is a bronze-WINGED pionus, and a
+      // whole bird that shimmers reads as a bauble rather than a bird. Chained
+      // after the rim so both run; see addFeatherSheen for why it also has to
+      // extend the program cache key.
+      if (pionus) addFeatherSheen(vaneMat, THREE, { warm: 0xffc266, cool: 0x3f8f6e, power: 1.9, strength: 0.72 });
 
       // The two authored sheets, if this session wants them. Decode-gated and
       // reversible like every other authored surface in this repo.
@@ -9103,7 +9246,13 @@
       // Same clearance the ground-collision check uses, so the flight floor keeps
       // the bird's body ABOVE the carved mesh (no sinking-in then force-grounding
       // against rises) and the two stay one source of truth. See _floorAt().
-      birdRadius: FLIGHT_RECOVERY_CONFIG.birdRadius
+      birdRadius: FLIGHT_RECOVERY_CONFIG.birdRadius,
+      // Turn about the planet's up and roll back to level — the fix for a
+      // held dive spiralling and looping out of itself. `?levelturn=0`
+      // restores the old local-up yaw and leaves roll uncorrected, because
+      // the A/B is how this was judged and a comparison you cannot re-run is
+      // one nobody re-runs.
+      levelTurns: !/[?&]levelturn=0/.test(window.location?.search || ''),
     });
 
     // 3. Visuals
@@ -10668,6 +10817,9 @@
               ? { x: 0, y: 0, active: false }
               : inputState;
         wingInputState = resolvedInput;
+        lastWingInput.x = resolvedInput.x || 0;
+        lastWingInput.y = resolvedInput.y || 0;
+        lastWingInput.active = !!resolvedInput.active;
 
         const sprintingNow = Boolean(sprintState?.active);
         const cruiseSpeed = sprintingNow
@@ -10887,10 +11039,31 @@
         const pitchInput = wingInputState?.y ?? 0;
         const wingDipAmount = 0.4; // Max wing dip angle in radians
 
-        // Left turn (negative yaw): left wing dips down, right wing rises
-        // Right turn (positive yaw): right wing dips down, left wing rises
-        const leftDip = yawInput * wingDipAmount;  // Positive yaw = left rises
-        const rightDip = -yawInput * wingDipAmount; // Positive yaw = right dips
+        // Left turn (negative yaw): left wing dips down, right wing rises.
+        // Right turn (positive yaw): right wing dips down, left wing rises.
+        //
+        // BOTH TERMS CARRY THE SAME SIGN, and that is not a slip — it is the
+        // opposite of what the mirror rule does for every other term here, for
+        // the reason spelled out in the block below. A bank is the ONE motion
+        // that is not mirror-symmetric: one wing goes up while the other goes
+        // down. The right wing's `scale.z = -1` puts its tip at local -Z while
+        // the left's is at +Z (measured: leftTip.z +1.64, rightTip.z -1.64 in
+        // the bird's own frame), and a rotation about X sends +Z down while it
+        // sends -Z up. So the SAME rotation.x on both wings is a roll, and
+        // OPPOSITE rotations are a symmetric flap.
+        //
+        // This shipped with the two opposite, which meant the bank dip
+        // contributed EXACTLY ZERO bank and all of its amplitude to a
+        // collective flap — measured at five stick positions, leftTip.y and
+        // rightTip.y were equal to four decimal places at every one of them.
+        // Worse, that phantom flap then stacked with `glideSweep`, which is
+        // correctly symmetric: turning right the two added (both wings drove
+        // hard down), turning left they cancelled (both wings sat flat). That
+        // is exactly how it was reported from the phone — "banks left both
+        // wings go straight, banks right both wings go down".
+        const dip = -yawInput * wingDipAmount;
+        const leftDip = dip;   // Positive yaw (right turn): left wing rises
+        const rightDip = dip;  // Positive yaw (right turn): right wing drops
 
         // Flight-phase wing behavior:
         // - Grounded/falling/downward/banking: wings hold a steady glide posture.
@@ -10899,9 +11072,8 @@
         // of rotation.x — so any motion meant to look mirror-symmetric in world
         // space MUST be applied with opposite signs to the two rotation.x
         // values. That's why flap is +/- (both wings flap up together) AND
-        // glide-sweep is now +/- (both wings dip down together). Banking dip
-        // (leftDip / rightDip) is already opposite-sign so it preserves mirror
-        // too — wings stay glued in mirror-image at every frame.
+        // glide-sweep is +/- (both wings dip down together). The banking dip is
+        // the deliberate exception and is SAME-signed: see its own comment.
         const isFallingVisual = flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING;
         const isAirborneVisual = !isGroundedVisual && !isFallingVisual;
         const bankingHard = Math.abs(yawInput) > 0.25;
@@ -12637,6 +12809,14 @@
           const g = (n) => birbAnchor.getObjectByName(n);
           const rot = (o) => (o ? { x: +o.rotation.x.toFixed(4), y: +o.rotation.y.toFixed(4), z: +o.rotation.z.toFixed(4) } : null);
           const lw = g('leftWing'); const rw = g('rightWing');
+          const tipLocal = (wing) => {
+            const tip = wing?.userData?.tipFeather;
+            if (!tip) return null;
+            birbAnchor.updateWorldMatrix(true, true);
+            const w = tip.getWorldPosition(new THREE.Vector3());
+            birbAnchor.worldToLocal(w);
+            return w.toArray().map((n) => +n.toFixed(4));
+          };
           return {
             recovery: flightRecoveryState,
             nested: !!nestingSystem?.isNested?.(),
@@ -12652,6 +12832,68 @@
             // World position, so a caller can measure that walking moves it.
             position: birbAnchor.position.toArray().map((n) => +n.toFixed(3)),
             radius: +birbAnchor.position.length().toFixed(3),
+            // Each wingtip in the BIRD'S OWN frame, which is the only frame in
+            // which "that wing is high" means anything. A rotation.x pair does
+            // NOT tell you this: the right wing carries scale.z = -1, so the
+            // same rotation on the two wings is a BANK and opposite rotations
+            // are a symmetric flap — the reverse of what reading the numbers
+            // suggests, and the reason the bank dip shipped with its signs
+            // swapped. `y` is the bird's own up.
+            leftTip: tipLocal(lw), rightTip: tipLocal(rw),
+          };
+        },
+        // The flight state in the only terms that mean anything on a sphere:
+        // pitch and roll against the LOCAL radial up, and a heading bearing in
+        // the local tangent plane. `birdPose()` describes the model; this
+        // describes where the bird is actually pointing and which way it is
+        // actually going, which is what a question like "why does a dive turn
+        // into a spiral" needs and what no screenshot can answer.
+        flightProbe: () => {
+          const fc = flightController;
+          if (!fc?.position || !fc?.quaternion) return null;
+          const up = fc.position.clone().normalize();
+          const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(fc.quaternion).normalize();
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(fc.quaternion).normalize();
+          const bodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(fc.quaternion).normalize();
+          // Pitch: positive is nose-up away from the planet. Same quantity the
+          // controller's own auto-level and maxPitch clamp are written against.
+          const pitch = Math.asin(Math.max(-1, Math.min(1, fwd.dot(up))));
+          // Roll: how far the bird's own up has tipped off radial, signed by
+          // which way. Nothing outside Zen mode ever corrects this.
+          const roll = Math.asin(Math.max(-1, Math.min(1, up.dot(right))));
+          // Heading, as a bearing in the tangent plane from a fixed reference
+          // (the world +Y pole projected down), so a run can see the track
+          // rotating even while pitch holds steady.
+          const poleRef = new THREE.Vector3(0, 1, 0).addScaledVector(up, -up.y);
+          let heading = null;
+          if (poleRef.lengthSq() > 1e-6) {
+            poleRef.normalize();
+            const tangentFwd = fwd.clone().addScaledVector(up, -fwd.dot(up));
+            if (tangentFwd.lengthSq() > 1e-6) {
+              tangentFwd.normalize();
+              const side = new THREE.Vector3().crossVectors(up, poleRef);
+              heading = Math.atan2(tangentFwd.dot(side), tangentFwd.dot(poleRef));
+            }
+          }
+          const groundR = sphericalWorld
+            ? sphericalWorld.sphereRadius + (typeof sampleTerrainHeight === 'function'
+              ? sampleTerrainHeight(up.x, up.y, up.z) : 0)
+            : 0;
+          const d3 = (n) => +n.toFixed(3);
+          return {
+            pitchDeg: d3(pitch * 180 / Math.PI),
+            rollDeg: d3(roll * 180 / Math.PI),
+            headingDeg: heading === null ? null : d3(heading * 180 / Math.PI),
+            radius: d3(fc.position.length()),
+            aboveGround: d3(fc.position.length() - groundR),
+            speed: d3(fc.speed ?? 0),
+            // The two things that bound a dive, reported beside it so a
+            // measured ceiling is never mistaken for a bug elsewhere.
+            maxPitchDeg: d3((fc.maxPitch ?? 0) * 180 / Math.PI),
+            recovery: flightRecoveryState,
+            // The input the RIG is seeing, which is not always the input the
+            // stick was set to: nesting, grounded and falling each rewrite it.
+            stick: { x: d3(lastWingInput.x), y: d3(lastWingInput.y), active: lastWingInput.active },
           };
         },
         flapPhase: (phase01 = null) => {
