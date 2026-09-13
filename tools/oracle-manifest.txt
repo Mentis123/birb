@@ -19,11 +19,19 @@
 # for). That is a GATE DECISION recorded in docs/perf/gates/G<n>.md, and the manifest is
 # then regenerated in the same commit as the change it blesses, never before it:
 #
-#     cd /path/to/birb && { find tests -type f | sort; \
-#       printf '%s\n' tools/birb-shot.mjs tools/birb-sheet.mjs tools/birb-lighting.mjs \
-#                     tools/birb-modes.mjs tools/birb-shaders.mjs docs/perf/CONTRACT.md; \
-#     } | xargs sha256sum
-#   (then splice the result under this header)
+#     cd /path/to/birb && node tools/oracle-manifest-regen.mjs
+#     cd /path/to/birb && node tools/oracle-manifest-regen.mjs --check   # CI: 1 if stale
+#
+# Use THAT, never a hand-written path list. The command documented here until
+# 2026-09-13 named its non-tests paths literally and had fallen SEVEN behind the
+# file it regenerates: running it would have silently unfrozen req-verify.mjs,
+# birb-quality.mjs, lib/quality-assertions.mjs, lib/quality-captures.mjs,
+# docs/perf/EXPECTED-RED.md, docs/perf/ASSERTIONS.md and seeded-random.js —
+# including the one file G-A5-DRIFT is currently blocked on. A regeneration step
+# that can quietly drop oracles is this manifest's own failure mode one level up.
+# The script is ADDITIVE: it re-hashes exactly what is listed (never fewer), picks
+# up new tests/** automatically, and treats a listed-but-absent path as a hard
+# error rather than a silent drop. See docs/perf/gates/G-R5-DRIFT.md.
 #
 # DELIBERATELY NOT LISTED, with reasons — absence here is a decision, not an oversight:
 #   docs/perf/requirements.json  — rules[3] says "A wave may add rows". Pinning its hash
@@ -34,16 +42,53 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-09 on branch claude/ultracode-sub-agents-plan-c9qmba at commit 63959d6.
+# Generated 2026-09-13 at commit 54332ef by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
+6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
+4deed1af6bb07606594214cb55313c159b7ce2abf8aae58aeb8ef99dceafded2  tests/adaptive-quality-traces.test.js
+0ac41b4d162af55f267b3cdfc207227ef9fbc89969be85ecea34154fee63acef  tests/adaptive-quality.test.js
 792aea6eb28c9974d79b64b84e27952517cedcfc31869e8194b9460e3b7914b8  tests/aim-rig.test.js
+f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-check.test.js
+3922615670f130b65326a1bc03d07f23cfae0a9fc552aa95ea980cb884ba3ea3  tests/asset-residency.test.js
+481310ecfcc59989fd52b27d397c0993b69ad1196afa8bce9ac8c30dcd1db275  tests/authored-feathers.test.js
+526bccb0e9f5bbc8cb65e8bcfe0bef58ff22c6b1604f41ad30814b01e7d2ade6  tests/authored-textures.test.js
+7fcdbfcda1406cb603f084ccf4e76a021fa54ff05166bdaf0e14da16e9414cdc  tests/authored-tints.test.js
+b8096b78960e23a6ae729f5e2af859d6a823749975b2ae78f417e1aefec2411f  tests/bird-contract.test.js
 9cae8aea0b94686678097382c4ae991f967fe6cfe0f4c701b1ba6eb6139e511f  tests/bird-flight.test.js
-18afd8643ae406cfa4c6c866f64a7ec74bbfae956185ed708b263dfbef2bcab7  tests/bird-pose.test.js
+4f4f7249e48c116c6a16325664559fa3cc2a429316f0d3565905d8c1a01c7e3d  tests/bird-pose.test.js
+7ae9a937490a119b0d3f5771ed82a857eaaaac1020db9769b23929755888e039  tests/bloom-target-size.test.js
+4a0bd676e6294603c030d9f0643310a8dee8b12f8b0941a32f5213238f6b2555  tests/build-identity.test.js
 376a5c9c8234dccec3485fac62311cfd7457172f2cac4532269e4a858c3962a0  tests/city-windows.test.js
 1763c7b34412af9f769037fb1925b4b9ac1a8af9fb5ea819f592bf9ca6683cdd  tests/collider-grid.test.js
 603943bd794314ed552cf97526e1de4e4f12a24870f4abf9d97ea700000c83ab  tests/contact-shadow.test.js
+b9b8797eb0183edb581e5b25f09a7ea5e8942138294e9c6f07ebc26c5324d209  tests/effect-verification.test.js
 32a5999b516021c0f5da8a69a0e1b3d0cadaef6db8e371061bc08dcd9851a2d2  tests/energy-ring.test.js
+7075a4f7a329af8e042278b9d5ffae82ed5ccf7fdcbb71196ae31d4f407d59a1  tests/evidence-record.test.js
+3703c3091fcc00589d3db2e0c5b2b79e8aafb81b307d4a97911aa0a29d3b3dd8  tests/fixtures/perf-traces/README.md
+abf9ec530386b4b9fd5cf2345c21bf83ad8a3e8647cb5641a094f90e93aef09a  tests/fixtures/perf-traces/driver.js
+d5d139bcacab9e6ab0fad6adeb73f0e1d4579b782a15cb69fa8ead3b60005b28  tests/fixtures/perf-traces/holdout.js
+0d0b4a1896b90518d492e4402bebe9e92a63fd0e80a677b44573616add7d5011  tests/fixtures/perf-traces/index.js
+b64b7865b817bf6624f4f24feded3fd296bf376e98ba1755d4da10caf91b0b95  tests/fixtures/perf-traces/invariants.js
+d12c575eee56e47a94466f628edf66625f2cdd9c0d78f5f537c6b3d1f64c3a46  tests/fixtures/perf-traces/ladder.js
+a70b41cb41db8f1d2c7f103268a114e4dcdbcdd66f25218382a8f7e7a8640db3  tests/fixtures/perf-traces/reference-policies.js
+bcac6e4c83010d6dd4c6c9bd2456402b51ccb472b27a37b17c68674961de1401  tests/fixtures/perf-traces/scenarios/absent-gpu-timer.js
+ecbf751c662e861992f62e515f660559633c7ada4f3bd55c2e27e6bcedc23c01  tests/fixtures/perf-traces/scenarios/boundary-interleaved-with-recurrent-hitch.js
+686ea59baacb3ae01bef73eae7a7b33c292adca3629830102cf026b56df57292  tests/fixtures/perf-traces/scenarios/cold-start-from-persisted-profile.js
+66b56b5bc62efc05870b8ebd86b1437762bb2258383e67bcbac107bfe3dfdaa1  tests/fixtures/perf-traces/scenarios/corrupt-store-clamped.js
+1a9869296541cb302a847ef9c9a1ec9ea4b037e2ac266c6e46087b36fb74d4e2  tests/fixtures/perf-traces/scenarios/delayed-regression.js
+32b17bbe0f14c0ebba8823a1b60112741004c9698eddad3af764710eadd49f50  tests/fixtures/perf-traces/scenarios/disjoint-gpu-results.js
+acb343294dc62b22b7f489da3cfc9c3536254944d7afa3d1cb6469887acf0a53  tests/fixtures/perf-traces/scenarios/first-use-shader-compilation.js
+f7f480ee539a013b80520d402b82101056999dcb47aa4c688c1ba242d5db3846  tests/fixtures/perf-traces/scenarios/instrumentation-pair.js
+50d712813a9250d9f736fcba5b85cad6c9502ff64cc57442bed9fab958bddf2a  tests/fixtures/perf-traces/scenarios/manual-to-auto.js
+1e340e7153c9384d77a6a3a59998d2c336b724562f6cdd5460b9dd5cd55cb35c  tests/fixtures/perf-traces/scenarios/misleading-plateau.js
+601ebf68dc6465de0d18a529625b2474c86d9a65e9cad9c606702489153582ae  tests/fixtures/perf-traces/scenarios/oscillation-bait.js
+d51c67fb25073f30551d91260546244ee7ff0b704d1dcc8fe6bd74d2a989dacf  tests/fixtures/perf-traces/scenarios/overload.js
+fc09ea0bb34ebf48e6c238c912194d5b5758baa8bb2d8b37b2592a3d74bc9810  tests/fixtures/perf-traces/scenarios/recovery-when-capacity-returns.js
+78c4139db40d1e16773ff66053eb1e816e676064f485fad71bd24168e46ad544  tests/fixtures/perf-traces/scenarios/resume.js
+1cdb852d11727d3edbf3a6d3169e3ce575bf63d875ff7a98253482de9a0c7cfc  tests/fixtures/perf-traces/scenarios/scene-change.js
+49417b158df1a04a1d20e70ab8051a733db67a150e084fb5f793eca53f8e7d36  tests/fixtures/perf-traces/scenarios/stuck-quality.js
+dde809691258654681f49c08bf7d9f83e62561957ca6efcbcc42441cfc885851  tests/fixtures/perf-traces/schema.js
 3e774634a06053250d406419f03a7130524c5df0de79b5af16f3afb73362ce28  tests/flight-controller.test.js
 92a319b600c83e33015bea300b415d32bfd2e586dbe9be25d961f9ab6ab73b8c  tests/flight-recovery.test.js
 6ac758f8cfbcae68718519bd6ed4e8074bf9db2055ff404655e98b92179c5f47  tests/frame-metrics.test.js
@@ -54,6 +99,8 @@ f71e006ab5b11c70d955ac276e696149757e37d90f7870653116c9ff33ae63d4  tests/gauntlet
 8e2f97f48106aedffd46178934e3ae1f69c6c4ef71250c9430189d7485ef6980  tests/gauntlet-nesting.test.js
 7b53936a8ce0ad20ebcd15ebf26f91d451fb8ba15d81a19480fd2ef02afdb1dd  tests/gauntlet-qr.test.js
 e5b46a8520b5e7fafc5360eb6cc202e0ca905ce99e680386a0ef11cf99d55848  tests/gauntlet-race-logic.test.js
+14b4ffdb2a9569e76b06eecf8e2210436263987bca8687cc116656479df90579  tests/grade-candidates.test.js
+e3b92a6eb8d5f9a8c09ac610b5f75f454a5e7e8cb2fada6d2bf74b4f322ed791  tests/ground-triplanar.test.js
 aab1f981ae6e073443e3b433b56ad06b350d257deb924a96e50fbfd5f7009f2e  tests/helpers/flight-harness.js
 ff5d33d4d198922eba742b16faa85a98bcce6dfd48f094613695d7b81c8298d1  tests/helpers/sculpture-three.js
 074d4c9154550febacaef681825d56ee8c3fc06237022795a0189af3848d83f1  tests/icon3d-catalogue.test.js
@@ -63,21 +110,28 @@ e471a880af274fe84721ff480fcd73d9f31c0f6f4ccb97f0ee9958e9f10ee433  tests/icon3d-r
 ea9b4554855b3d4fef3249c74039de74433b94737ed391abb11ce905a5ddcbc4  tests/icon3d-svg.test.js
 9cfd0eb4a5bb4130fa0b625183a8b5cecfe7152952ee79415ad158843233b1b3  tests/icon3d-sweep.test.js
 d3e78c8a5935ef0db24939757676842d16cefc3035f2681b87c4052740be5c1f  tests/input-shaping.test.js
+a4d2a9302fbdea465e0ef4ddd1b8fbf3d176672b52941c8914667118ad5b3ea3  tests/instanced-uv.test.js
+06b7cb61cb6c6d2f855cf70ccb9a43b45c661705f35d69654a27ab7196577e4a  tests/loop-health.test.js
 4390c9394ede5917e7d9b8500f1d0806aabb2c9a42b47dddc298d768cd9c070c  tests/minimap.test.js
 48db762919e8391e9e2cdff060911fc2c6fabee6744a745760338fbcbfd69539  tests/nesting-system.test.js
+03b54a5cf05ce47b8b7de6cd3c537b22e6ceb37b50dcefe2624b3fdb6e9be886  tests/oracle-manifest.test.js
 422ec28055458de741380a9deb1a1e1587c79fd60ce55329c50e3edf6a980955  tests/perch-horizon.test.js
+cdad347f4fd13d307927161f530cc6305b3df5161b17bbaf4eea76cd6a68ba40  tests/perf-learning.test.js
+a7b94cf4b0a5691c760a291acfe7997513caedd49270761aac74425373447e82  tests/perf-trace-corpus.test.js
 63bc1809cd953f2426f308aa2564f6b02517ec9c123d5e48f77a7721f0ba7f1d  tests/point-clamp.test.js
 1ba1304e789d8136a3eebf557fe3ddd5d1b2d8a0aa879ae445f4397804196671  tests/ribbon-trail.test.js
 0c73cc1ddf2dc1d8779397f4bd5a3aeedb0c76aadbaf0a9402046921eef2d3bc  tests/sculpture-figure-details.test.js
 7dd4a2b2d13e9eeac93a7f1eacd8950ea173ff2a1b635c189774581c944f17a1  tests/sculpture-orbit.test.js
 8eb840091a39ab075270908bada6ce232767af11b266146f9d22540b113a41c5  tests/sculpture-phase5.test.js
 1775aefd8d9f9155863cc1592b1e81ab0c983773fd155e029410eb6526649e56  tests/sculpture-surface-nets.test.js
+98df1acaa8ff953e9ad688266b42cceaa8a8bbc8011982b7fcd44112073aaa4a  tests/seeded-random.test.js
+819e20ab9b1bd1a66549d76b29b4e97d1be47971fdd650e52b2c30a0b212b12b  tests/sky-environment.test.js
 f9d96ad5dfb918df5985298b4e25c7daa639bb9c27e76785b0fc4c20c1fcbd07  tests/visual-upgrade.test.js
 7a62b70ff84fa8da8be84abefd92c6fed10a78c21581ac114b27bd994fdc3fa7  tests/wake.test.js
 b086039c1b8f9f55450f1637a3f385d328cb655cc6c7121a809f0e83a3747a18  tests/water.test.js
 651573cfedd60d6b5bb9c6a9883682a3c7cb8048629b73774e3fd7061d66b973  tests/weather.test.js
 # --- browser/visual harnesses ------------------------------------------------
-a8c11a1e313c1e33ae5329ed87245b4994a0759e3d2c63c3bc68ffc9f2ca8f41  tools/birb-shot.mjs
+1200188de68c43964ae0247df697f5907ec10be8f228251bdb6567bf0968594a  tools/birb-shot.mjs
 e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-sheet.mjs
 # tools/birb-lighting.mjs's line below was regenerated 2026-09-10 for the
 # VISUAL_UPGRADE_BUILD_PLAN §16.10 colour-grade wave (docs/visual-upgrade/,
