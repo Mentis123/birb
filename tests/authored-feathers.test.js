@@ -102,7 +102,10 @@ function fakeMaterial(name) {
     customProgramCacheKey() { return `rim-${name}`; },
   };
 }
-const FRAG = 'uniform vec3 diffuse;\n#ifdef USE_MAP\n\tvec4 sampledDiffuseColor = texture2D( map, vMapUv );\n\tdiffuseColor *= sampledDiffuseColor;\n#endif\n';
+// What three ACTUALLY hands onBeforeCompile: the include, unexpanded. The
+// first version of this file faked the EXPANDED chunk here, so the test
+// passed while the real material was skipped on every device.
+const FRAG = 'uniform vec3 diffuse;\n#include <map_fragment>\n#include <alphamap_fragment>\n';
 
 test('nothing is touched until EVERY image has decoded', () => {
   const T = fakeThree();
@@ -127,9 +130,10 @@ test('the shader patch CHAINS the rim light and extends its cache key', () => {
   contour.onBeforeCompile(shader, null);
   assert.deepEqual(shader.log, ['rim:contour'], 'the previous onBeforeCompile still ran, first');
   assert.ok(shader.uniforms.uFeatherTint && shader.uniforms.uFeatherStrength, 'feather uniforms installed');
-  assert.ok(!shader.fragmentShader.includes('diffuseColor *= sampledDiffuseColor;'), 'the raw multiply is gone');
-  assert.ok(shader.fragmentShader.includes('min(vec3(1.0), mix(vec3(1.0), sampledDiffuseColor.rgb * uFeatherTint, uFeatherStrength))'),
+  assert.ok(!shader.fragmentShader.includes('#include <map_fragment>'), 'the include was replaced, not left alongside');
+  assert.ok(shader.fragmentShader.includes('min(vec3(1.0), mix(vec3(1.0), featherSample.rgb * uFeatherTint, uFeatherStrength))'),
     'the clamped detail form is in');
+  assert.ok(shader.fragmentShader.includes('#include <alphamap_fragment>'), 'other includes are untouched');
   assert.equal(contour.customProgramCacheKey(), 'rim-contour|authored-feathers');
 });
 

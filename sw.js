@@ -36,7 +36,7 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v58-2026-09-13-ground-triplanar-granite-fix';
+const CACHE_VERSION = 'v59-2026-09-13-v3-bird-default-quality-presets';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -71,6 +71,10 @@ const CORE_ASSETS = [
   // what the note that used to sit here said to do. 1.0 MB, and it buys the
   // most-looked-at surface in the game: every trunk in the default biome.
   './assets/textures/bark_pine_albedo.png',
+  './assets/textures/feather_contour_albedo.png',
+  './assets/textures/feather_contour_normal.png',
+  './assets/textures/feather_vane_albedo.png',
+  './assets/textures/feather_vane_normal.png',
   './assets/textures/bark_pine_normal.png',
   // The forest ground's triplanar overlay, same promotion. It is now wired
   // (?ground=0 opts out) and forest is the biome a cold start always builds.

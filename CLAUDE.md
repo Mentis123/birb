@@ -446,6 +446,47 @@
 > seconds long, it is not measuring what it names unless something proves the
 > rest of the frame held still.**
 
+> **v3 IS THE BIRD, and the feather sheets had never once run** (2026-09-13,
+> evening). `?bird=v3` is gone as a flag — it is the default; `?bird=v1` builds
+> the Phase 0 bird and `?bird=v2` the one-plate candidate, for the A/B.
+>
+> **The shader patch anchored on the wrong thing and silently disabled itself
+> on every device.** `installFeatherDetail` looked for
+> `diffuseColor *= sampledDiffuseColor;` — the BODY of three's map_fragment
+> chunk — but at `onBeforeCompile` time the fragment shader still contains the
+> literal `#include <map_fragment>`; three expands its includes afterwards. So
+> the guard fired every time and the sheets were never applied at all. Found
+> on the owner's phone console, not here. Worse, the unit test FAKED an
+> already-expanded shader, so it was green against a string three never
+> passes. **A fake that is more convenient than the real input tests the
+> fake.** It anchors on the include now and replaces it with a self-contained
+> block, which also stops caring what three does inside the chunk.
+>
+> **The body was a football because it was a tube of revolution.** Circular
+> sections, widest at mid-length, tapering symmetrically. Three things fixed
+> it and all three live in the row table: the mass moved FORWARD onto a keel
+> about a third back from the throat; the sections became eggs (`rT`/`rB`,
+> separate radii above and below the section centre, blended smoothly so the
+> silhouette does not crease at the equator); and a NECK row pinches to half
+> the throat's radius with the head FORWARD of it rather than stacked on top —
+> the previous version moved x by 0.13 while y climbed 0.37, which is what
+> makes a head read as a ball on a ball. Also: primaries at 1.26 long by 0.23
+> of chord are 5.5:1, which renders as pale threads; they are 4:1 and
+> overlapping now. The tail was nine feathers fanned across 0.10 of width — a
+> spike, not a fan — and the rump had no uppertail coverts, which is the whole
+> of "his butt and legs and tail are still funny".
+>
+> **Graphics quality is a setting now**: Ultra / Amazing / Okay / Light in the
+> gear menu, persisted to localStorage. A preset PINS the adaptive tier (or
+> unpins it, which is Amazing) and Ultra additionally raises the DPR CEILING to
+> 2.4. Note which way round that is: the ceiling is the most the renderer may
+> ask for and the tier still drops to 1.0 and 0.85 underneath it on measured
+> FPS, so Ultra cannot pin a struggling phone at a resolution it cannot hold.
+> `applyQualityPreset` calls `updateRendererSize(true)` because pinning a tier
+> that is already current changes nothing and a ceiling change is not a tier
+> change — without the force, Ultra would not reach the renderer until the next
+> real resize, which on a phone is never.
+
 > **The bird got a joint, the sky got a horizon, and the feather sheets are
 > detail maps** (2026-09-13, later). Three things, each with a number.
 >

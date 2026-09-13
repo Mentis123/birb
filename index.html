@@ -2648,6 +2648,13 @@
               </svg>
               <span data-environment-label>Forest</span>
             </button>
+            <!-- Quality preset -->
+            <button type="button" class="settings-button" data-control="quality" aria-label="Cycle graphics quality">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3l2.6 5.6 6.1.8-4.5 4.2 1.2 6.1L12 16.8 6.6 19.7l1.2-6.1L3.3 9.4l6.1-.8z" />
+              </svg>
+              <span data-quality-label>Amazing</span>
+            </button>
             <!-- Game Mode -->
             <button type="button" class="settings-button" data-control="game-mode" aria-label="Select game mode">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -3280,6 +3287,8 @@
     const settingsFullscreenButton = document.querySelector('[data-control="fullscreen"]');
     const settingsInfoButton = document.querySelector('[data-control="info"]');
     const settingsGameModeButton = document.querySelector('[data-control="game-mode"]');
+    const settingsQualityButton = document.querySelector('[data-control="quality"]');
+    const qualityLabelEl = document.querySelector('[data-quality-label]');
     const infoOverlay = document.querySelector('[data-info-overlay]');
     const infoCloseButton = document.querySelector('[data-control="info-close"]');
     const gameModeOverlay = document.querySelector('[data-game-mode-overlay]');
@@ -3684,7 +3693,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v58-2026-09-13-ground-triplanar-granite-fix';
+    const BIRB_BUILD = 'v59-2026-09-13-v3-bird-default-quality-presets';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -3717,6 +3726,12 @@
     // 'reset to default' restoring 0.85.
     const SHIPPING_BLOOM_STRENGTH = 0.78;
     const DPR_CAP = isMobile ? 1.7 : 1.8;
+    // Raised only by the Ultra quality preset (see QUALITY_PRESETS). null means
+    // "use DPR_CAP", which is every preset but one — this is a CEILING the
+    // adaptive tier still drops to 1.0 and 0.85 under a measured frame rate,
+    // so raising it cannot pin a struggling phone at a resolution it cannot
+    // hold. It only stops a phone that is coasting from being held back.
+    let qualityDprCap = null;
     if (_perfDebug) {
       console.log(`[perf] isMobile=${isMobile} isLowEnd=${isLowEnd} DPR_CAP=${DPR_CAP} antialias=${!isMobile}`);
     }
@@ -7767,70 +7782,90 @@
       // head instead of two spheres touching. The head stays large — it is the
       // character and it is signed off — but it now sits ON something.
       const buildBody = () => {
+        // WHY THIS IS NOT A TUBE OF REVOLUTION.
+        //
+        // v3's first body was circular sections around a spindle whose widest
+        // point sat mid-length and tapered symmetrically to both ends. That is
+        // a rugby ball, and the owner said so: "he still looks kinda like a
+        // football". Three things separate a bird from one, and all three are
+        // in this table rather than in any shader.
+        //
+        //  1. THE MASS IS FORWARD. A bird's bulk is the flight muscle, and it
+        //     hangs off a keel at roughly a third back from the throat, not at
+        //     the middle. Behind it the body tapers a long way to the rump.
+        //  2. THE SECTION IS NOT ROUND. The back is flat and broad; the belly
+        //     is deep and rounded. `rT`/`rB` are separate radii above and
+        //     below the section's own centre, so the profile can be an egg
+        //     standing on its narrow end rather than a circle.
+        //  3. THERE IS A NECK. A smooth join from body to head is what makes
+        //     the head read as a ball stuck on a ball. The neck row pinches to
+        //     about half the throat's radius, and the head sits FORWARD of it
+        //     rather than stacked on top, which is where the previous version
+        //     put it (x barely moved while y climbed 0.37).
+        //
+        // x runs tail -> beak, y is the section centre, rZ is the half width.
         const rows = [
-          { x: -0.88, y: -0.14, r: 0.045 },
-          { x: -0.72, y: -0.10, r: 0.26 },
-          { x: -0.52, y: -0.05, r: 0.40 },
-          { x: -0.28, y: 0.00, r: 0.475 },
-          { x: -0.06, y: 0.05, r: 0.485 },
-          { x: 0.14, y: 0.09, r: 0.44 },
-          { x: 0.30, y: 0.10, r: 0.34 },
-          { x: 0.40, y: 0.13, r: 0.235 },
-          { x: 0.47, y: 0.20, r: 0.20 },
-          { x: 0.54, y: 0.30, r: 0.235 },
-          { x: 0.60, y: 0.40, r: 0.225 },
-          { x: 0.62, y: 0.50, r: 0.16 },
-          { x: 0.60, y: 0.57, r: 0.06 },
+          { x: -0.86, y: -0.03, rT: 0.050, rB: 0.050, rZ: 0.050 }, // rump tip
+          { x: -0.72, y: -0.03, rT: 0.150, rB: 0.140, rZ: 0.150 },
+          { x: -0.54, y: -0.02, rT: 0.245, rB: 0.250, rZ: 0.245 },
+          { x: -0.32, y:  0.00, rT: 0.305, rB: 0.345, rZ: 0.305 },
+          { x: -0.10, y:  0.02, rT: 0.335, rB: 0.425, rZ: 0.340 },
+          { x:  0.10, y:  0.05, rT: 0.335, rB: 0.450, rZ: 0.350 }, // the keel
+          { x:  0.27, y:  0.08, rT: 0.300, rB: 0.385, rZ: 0.315 },
+          { x:  0.40, y:  0.13, rT: 0.235, rB: 0.270, rZ: 0.245 }, // throat
+          { x:  0.50, y:  0.20, rT: 0.165, rB: 0.175, rZ: 0.170 }, // NECK
+          { x:  0.60, y:  0.27, rT: 0.205, rB: 0.215, rZ: 0.210 },
+          { x:  0.72, y:  0.32, rT: 0.225, rB: 0.215, rZ: 0.225 }, // head
+          { x:  0.84, y:  0.34, rT: 0.185, rB: 0.175, rZ: 0.185 },
+          { x:  0.93, y:  0.33, rT: 0.085, rB: 0.080, rZ: 0.085 }, // brow
         ];
-        const segs = 14;
-        const zScale = 0.84;
+        const segs = 16;
         const positions = [], uvs = [], colors = [], indices = [];
         const ringColor = (topness, rowT) => {
           const c = bodyColor.clone();
           if (topness > 0.35) c.lerp(backColor, Math.min(1, (topness - 0.35) / 0.65));
           else if (topness < -0.30) c.lerp(bellyColor, Math.min(0.78, (-0.30 - topness) / 0.70));
-          if (rowT > 0.62) c.lerp(headTint, Math.min(1, (rowT - 0.62) / 0.2) * 0.55);
+          if (rowT > 0.70) c.lerp(headTint, Math.min(1, (rowT - 0.70) / 0.18) * 0.55);
           return c;
         };
-        // Length along the body, accumulated row to row, so v tiles at a
-        // constant physical rate rather than being stretched by row spacing.
+        // v tiles by accumulated arc length along the body, so the sheet does
+        // not stretch where the rows happen to be far apart.
         let run = 0;
         const runs = rows.map((row, i) => {
-          if (i > 0) {
-            const p = rows[i - 1];
-            run += Math.hypot(row.x - p.x, row.y - p.y);
-          }
+          if (i > 0) run += Math.hypot(row.x - rows[i - 1].x, row.y - rows[i - 1].y);
           return run;
         });
-        const girth = 2 * Math.PI * 0.45;
-        for (let ri = 0; ri < rows.length; ri++) {
+        const girth = 2 * Math.PI * 0.32;
+        for (let ri = 0; ri < rows.length; ri += 1) {
           const row = rows[ri];
           const rowT = ri / (rows.length - 1);
-          for (let k = 0; k <= segs; k++) {
+          for (let k = 0; k <= segs; k += 1) {
             const a = (k / segs) * Math.PI * 2;
             const cosA = Math.cos(a), sinA = Math.sin(a);
-            positions.push(row.x, row.y + row.r * cosA, row.r * zScale * sinA);
+            // Smooth blend between the upper and lower radius rather than a
+            // hard switch at the equator, which would crease the silhouette
+            // exactly where the eye follows it.
+            const rV = row.rB + (row.rT - row.rB) * (cosA * 0.5 + 0.5);
+            positions.push(row.x, row.y + rV * cosA, row.rZ * sinA);
             uvs.push((k / segs) * girth * TILES_PER_UNIT, runs[ri] * TILES_PER_UNIT);
             const c = ringColor(cosA, rowT);
             colors.push(c.r, c.g, c.b);
           }
         }
         const stride = segs + 1;
-        for (let ri = 0; ri < rows.length - 1; ri++) {
-          for (let k = 0; k < segs; k++) {
+        for (let ri = 0; ri < rows.length - 1; ri += 1) {
+          for (let k = 0; k < segs; k += 1) {
             const a = ri * stride + k, b = a + 1, c = a + stride, d = c + 1;
             indices.push(a, c, b, b, c, d);
           }
         }
-        // Rump cap and crown cap: both end radii are small but not zero, so
-        // each would leave a pinhole the chase camera eventually finds.
         const capOf = (ri, flip) => {
           const centre = positions.length / 3;
           positions.push(rows[ri].x, rows[ri].y, 0);
           uvs.push(0.5 * girth * TILES_PER_UNIT, runs[ri] * TILES_PER_UNIT);
           const c = ringColor(0, ri / (rows.length - 1));
           colors.push(c.r, c.g, c.b);
-          for (let k = 0; k < segs; k++) {
+          for (let k = 0; k < segs; k += 1) {
             const a = ri * stride + k, b = a + 1;
             if (flip) indices.push(centre, b, a); else indices.push(centre, a, b);
           }
@@ -7857,10 +7892,10 @@
       const beakLower = new THREE.ConeGeometry(0.085, 0.22, 8);
       bodyParts.push(paintGeometryColor(
         bakeGeometryTRS(tileUV(remapUV(beakUpper, FULL_UV), 0.2, 0.3),
-          { position: [0.78, 0.40, 0], rotation: [0, 0, -Math.PI / 2] }), beakColor));
+          { position: [1.02, 0.325, 0], rotation: [0, 0, -Math.PI / 2 + 0.06] }), beakColor));
       bodyParts.push(paintGeometryColor(
         bakeGeometryTRS(tileUV(remapUV(beakLower, FULL_UV), 0.2, 0.22),
-          { position: [0.74, 0.33, 0], rotation: [0, 0, -Math.PI / 2 - 0.10] }), beakDark));
+          { position: [0.99, 0.268, 0], rotation: [0, 0, -Math.PI / 2 - 0.05] }), beakDark));
 
       const bodyMesh = new THREE.Mesh(mergeAndDispose(bodyParts), contourMat);
       bodyMesh.name = 'birbBody';
@@ -7875,16 +7910,16 @@
       // looking back at the camera. A lens is a sphere squashed to 0.42 in
       // its own x and rotated to face forward-and-out along the head's own
       // surface normal, so from the rear the crown and cheeks occlude it.
-      for (const z of [0.135, -0.135]) {
+      for (const z of [0.166, -0.166]) {
         const sign = Math.sign(z);
         const lens = new THREE.SphereGeometry(0.070, 12, 10);
         eyeParts.push(paintGeometryColor(
           bakeGeometryTRS(lens, {
-            position: [0.652, 0.418, z], rotation: [0, -sign * 0.55, 0], scale: [0.42, 1, 1],
+            position: [0.790, 0.395, z], rotation: [0, -sign * 0.50, 0], scale: [0.42, 1, 1],
           }), new THREE.Color(0x0a0a12)));
         const glint = new THREE.SphereGeometry(0.024, 8, 6);
         eyeParts.push(paintGeometryColor(
-          bakeGeometryTRS(glint, { position: [0.676, 0.440, z + sign * 0.016] }), new THREE.Color(0xffffff)));
+          bakeGeometryTRS(glint, { position: [0.822, 0.418, z + sign * 0.018] }), new THREE.Color(0xffffff)));
       }
       const eyeMesh = new THREE.Mesh(mergeAndDispose(eyeParts), eyeMat);
       eyeMesh.name = 'birbEyes';
@@ -7908,9 +7943,9 @@
         const SEC = 5;
         for (let i = 0; i < SEC; i++) {
           const t = i / (SEC - 1);
-          const len = 0.56 + t * 0.22;
+          const len = 0.54 + t * 0.22;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.135, backW: 0.205, tipTaper: 0.12, segments: 4,
+            length: len, frontW: 0.165, backW: 0.250, tipTaper: 0.14, segments: 4,
             bow: 0.018, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.18, len);
@@ -7956,15 +7991,15 @@
           // toward the outside, which is the finger separation a real wing
           // shows against the sky and the single most recognisable thing about
           // a bird's wing tip.
-          const len = 0.92 + t * 0.34;
+          const len = 0.74 + t * 0.26;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.095, backW: 0.135, tipTaper: 0.16, segments: 4,
+            length: len, frontW: 0.150, backW: 0.215, tipTaper: 0.16, segments: 4,
             bow: 0.022, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.13, len);
           const trs = {
-            position: [-t * 0.13, t * 0.02, t * 0.085],
-            rotation: [0, -0.05 - t * 0.30, -0.02 - t * 0.05],
+            position: [-t * 0.15, t * 0.02, t * 0.055],
+            rotation: [0, -0.04 - t * 0.26, -0.02 - t * 0.05],
           };
           handParts.push(paintGeometryColor(bakeGeometryTRS(plate, trs),
             backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
@@ -7996,7 +8031,7 @@
 
       const leftWing = buildWingV3(1);
       leftWing.name = 'leftWing';
-      leftWing.position.set(-0.06, 0.19, 0.30);
+      leftWing.position.set(0.02, 0.29, 0.28);
       leftWing.rotation.set(-0.08, -0.20, 0.14);
       leftWing.userData.baseRotation = leftWing.rotation.clone();
       birbModel.add(leftWing);
@@ -8005,7 +8040,7 @@
       // and Euler XYZ, R_right = S x R_left x S gives (-aL, -bL, +cL).
       const rightWing = buildWingV3(-1);
       rightWing.name = 'rightWing';
-      rightWing.position.set(-0.06, 0.19, -0.30);
+      rightWing.position.set(0.02, 0.29, -0.28);
       rightWing.rotation.set(0.08, 0.20, 0.14);
       rightWing.userData.baseRotation = rightWing.rotation.clone();
       birbModel.add(rightWing);
@@ -8013,7 +8048,7 @@
       // -- Tail: a fan of 9 feathers ---------------------------------------
       const tailGroup = new THREE.Group();
       tailGroup.name = 'tail';
-      tailGroup.position.set(-0.86, -0.02, 0);
+      tailGroup.position.set(-0.84, -0.02, 0);
       tailGroup.userData.baseRotation = new THREE.Euler(0, 0, 0.05);
       tailGroup.rotation.copy(tailGroup.userData.baseRotation);
       const tailParts = [];
@@ -8024,16 +8059,31 @@
         // Centre feathers longest, outer ones shorter — a rounded tail rather
         // than a square paddle. The overlap is what makes it read as a fan
         // from above instead of as nine separate sticks.
-        const len = 0.78 - Math.abs(spread) * 0.18;
+        const len = 0.86 - Math.abs(spread) * 0.20;
         const plate = buildFeatherPlateGeometry({
-          length: len, frontW: 0.055, backW: 0.070, tipTaper: 0.22, segments: 3,
+          length: len, frontW: 0.105, backW: 0.130, tipTaper: 0.30, segments: 3,
           bow: 0.016, axis: '-x', uvRect: FULL_UV,
         });
         tileUV(plate, 0.12, len);
         tailParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
-          position: [0, -Math.abs(spread) * 0.010, spread * 0.052],
-          rotation: [spread * 0.24, 0, 0],
+          position: [0, -Math.abs(spread) * 0.012, spread * 0.105],
+          rotation: [spread * 0.40, 0, 0],
         }), backColor.clone().lerp(featherEdge, 0.05 + Math.abs(spread) * 0.18)));
+      }
+      // Uppertail coverts: four short feathers lying OVER the tail's roots,
+      // built into the tail mesh so they cost nothing and swing with it.
+      for (let i = 0; i < 4; i += 1) {
+        const t = i / 3;
+        const side = i % 2 === 0 ? 1 : -1;
+        const cov = buildFeatherPlateGeometry({
+          length: 0.30 - t * 0.07, frontW: 0.105, backW: 0.125, tipTaper: 0.34,
+          segments: 2, bow: 0.012, axis: '-x', uvRect: FULL_UV,
+        });
+        tileUV(cov, 0.11, 0.30);
+        tailParts.push(paintGeometryColor(bakeGeometryTRS(cov, {
+          position: [0.06, 0.055 - t * 0.02, side * t * 0.075],
+          rotation: [side * t * 0.30, 0, -0.16],
+        }), backColor.clone().lerp(bodyColor, 0.30 - t * 0.18)));
       }
       const tailMesh = new THREE.Mesh(mergeAndDispose(tailParts), vaneMat);
       tailMesh.name = 'birbTail';
@@ -8055,14 +8105,14 @@
         const mesh = new THREE.Mesh(mergeAndDispose(parts), footMat);
         mesh.name = 'birbFootMesh';
         g.add(mesh);
-        g.position.set(-0.40, -0.20, z);
-        g.rotation.set(0, 0, -1.15);
+        g.position.set(-0.20, -0.34, z);
+        g.rotation.set(0, 0, -1.35);
         return g;
       };
-      const leftFoot = buildFoot(0.10);
+      const leftFoot = buildFoot(0.085);
       leftFoot.name = 'leftFoot';
       birbModel.add(leftFoot);
-      const rightFoot = buildFoot(-0.10);
+      const rightFoot = buildFoot(-0.085);
       rightFoot.name = 'rightFoot';
       birbModel.add(rightFoot);
 
@@ -8091,14 +8141,18 @@
     // the Phase 0 default. Read once at boot, not per frame — this is a
     // build-time choice of constructor, not something the running game ever
     // toggles.
+    // v3 IS THE BIRD NOW. `?bird=v1` still builds the Phase 0 merge-and-
+    // decimate bird and `?bird=v2` the one-plate-wing candidate, because the
+    // A/B is how each of these was judged and a comparison you cannot re-run
+    // is one nobody re-runs.
     const birdVariant = typeof window !== 'undefined'
-      ? (/[?&]bird=(v2|v3)(?:&|$)/.exec(window.location?.search || '') || [])[1] || null
-      : null;
+      ? ((/[?&]bird=(v1|v2|v3)(?:&|$)/.exec(window.location?.search || '') || [])[1] || 'v3')
+      : 'v3';
 
     positionBirbModel(
-      birdVariant === 'v3' ? createProceduralBirbV3()
+      birdVariant === 'v1' ? createProceduralBirb()
         : birdVariant === 'v2' ? createProceduralBirbV2()
-          : createProceduralBirb(),
+          : createProceduralBirbV3(),
     );
 
     // The authored feather sheets, on the v3 bird only (its UVs tile in
@@ -8106,7 +8160,7 @@
     // not). Decode-gated on all four images and reversible, like every other
     // authored surface. `?feathers=0` opts out for the A/B.
     let __birbFeatherDisposer = null;
-    if (birdVariant === 'v3' && authoredFeathersRequested(window.location?.search || '')) {
+    if (birdVariant !== 'v1' && birdVariant !== 'v2' && authoredFeathersRequested(window.location?.search || '')) {
       const builtBird = birbAnchor.children[0];
       const featherMaterials = builtBird?.userData?.featherMaterials;
       if (featherMaterials) {
@@ -8819,7 +8873,7 @@
       // through, so it trusts what already reached `panelOverrides.dpr`.
       const pixelRatio = panelOverrides.dpr != null
         ? panelOverrides.dpr
-        : getQualityPixelRatio(window.devicePixelRatio, DPR_CAP, adaptiveTier.getTier());
+        : getQualityPixelRatio(window.devicePixelRatio, qualityDprCap ?? DPR_CAP, adaptiveTier.getTier());
 
       if (
         !force &&
@@ -11611,6 +11665,79 @@
     }
 
     // Environment toggle in settings
+    // ── Graphics quality preset ────────────────────────────────────────────
+    //
+    // The adaptive tier already existed and already works: it watches measured
+    // frame rate and sheds resolution when a phone struggles. What it could
+    // not do was take an instruction. A player on a cool phone who wants the
+    // best the game has, and a player on a hot one who wants it to stop
+    // stuttering, were both stuck with whatever the controller decided.
+    //
+    // So a preset PINS the tier (or hands control back to the controller), and
+    // Ultra additionally raises the DPR CEILING. Note which way round that is:
+    // the ceiling is the most the renderer may ask for, and the adaptive tier
+    // still drops to 1.0 and 0.85 underneath it on measured FPS. So Ultra
+    // cannot pin a struggling phone at a resolution it cannot hold — it only
+    // stops a phone that is coasting from being held back by a cap chosen for
+    // the worst device.
+    const QUALITY_PRESETS = [
+      {
+        id: 'ultra', label: 'Ultra', tier: 0, dprCap: 2.4,
+        hint: 'Everything on, full resolution. For a phone that is keeping up.',
+      },
+      {
+        id: 'amazing', label: 'Amazing', tier: null, dprCap: null,
+        hint: 'Everything on, resolution managed automatically. The default.',
+      },
+      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, hint: 'Lighter resolution, steadier frame rate.' },
+      { id: 'light', label: 'Light', tier: 2, dprCap: null, hint: 'Lowest cost. For an old or hot device.' },
+    ];
+    const QUALITY_STORAGE_KEY = 'birbQuality';
+    let qualityPresetIndex = 1; // Amazing
+
+    function applyQualityPreset(index, { persist = true } = {}) {
+      const i = ((index % QUALITY_PRESETS.length) + QUALITY_PRESETS.length) % QUALITY_PRESETS.length;
+      const preset = QUALITY_PRESETS[i];
+      qualityPresetIndex = i;
+      qualityDprCap = preset.dprCap;
+      // `tier: null` means AUTO — hand the tier back to the controller that
+      // measures frame rate, rather than leaving it wherever it happened to be.
+      if (preset.tier === null) adaptiveTier.unpin();
+      else adaptiveTier.pin(preset.tier);
+      // The pin/unpin above may not have moved the tier at all (pinning 0 when
+      // already at 0), and the DPR ceiling is not a tier change, so force the
+      // one sizing function every quality change routes through. Without this,
+      // Ultra's raised ceiling would not reach the renderer until the next
+      // real resize — which on a phone is never.
+      updateRendererSize(true);
+      if (qualityLabelEl) qualityLabelEl.textContent = preset.label;
+      if (settingsQualityButton) settingsQualityButton.setAttribute('title', preset.hint);
+      if (persist) {
+        // A private window or blocked site data throws here; a remembered
+        // preference is a convenience and must never be able to break boot.
+        try { window.localStorage?.setItem(QUALITY_STORAGE_KEY, preset.id); } catch (_) { /* ignore */ }
+      }
+      return preset;
+    }
+
+    function restoreQualityPreset() {
+      let saved = null;
+      try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
+      const found = QUALITY_PRESETS.findIndex((q) => q.id === saved);
+      applyQualityPreset(found >= 0 ? found : 1, { persist: false });
+    }
+
+    if (settingsQualityButton) {
+      settingsQualityButton.addEventListener('click', () => {
+        applyQualityPreset(qualityPresetIndex + 1);
+        // Repaint behind the semi-transparent settings overlay so the change
+        // is visible while the panel is still open, the way the environment
+        // toggle already does.
+        renderFrame(performance.now());
+      });
+    }
+    restoreQualityPreset();
+
     if (settingsEnvButton) {
       settingsEnvButton.addEventListener('click', () => {
         cycleEnvironment(1);

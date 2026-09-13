@@ -245,19 +245,36 @@ function installFeatherDetail(THREE, material, tint) {
   material.onBeforeCompile = function (shader, renderer) {
     if (typeof prev === 'function') prev.call(this, shader, renderer);
     Object.assign(shader.uniforms, uniforms);
-    const MULTIPLY = 'diffuseColor *= sampledDiffuseColor;';
-    if (!shader.fragmentShader.includes(MULTIPLY)) {
-      // A three upgrade that renames the chunk would otherwise let the raw
-      // albedo multiply the vertex colour: the black slab, by a fourth route.
+    // ANCHOR ON THE INCLUDE, NOT ON THE CHUNK'S CONTENTS.
+    //
+    // This shipped once looking for `diffuseColor *= sampledDiffuseColor;`,
+    // which is the BODY of three's map_fragment chunk — and at
+    // onBeforeCompile time the fragment shader still contains the literal
+    // `#include <map_fragment>`; three expands its includes afterwards. So the
+    // guard fired on every material, every session, and the feather sheets
+    // were never applied at all. Caught on the owner's phone console, not
+    // here: the harness saw a bird, the warning scrolled past in a console
+    // full of nest logs, and the textured bird and the plain bird were the
+    // same bird. A capture that cannot tell "applied" from "silently skipped"
+    // is not evidence of either.
+    //
+    // Replacing the include with a self-contained block also means this does
+    // not care what three does inside the chunk from one version to the next.
+    const ANCHOR = '#include <map_fragment>';
+    if (!shader.fragmentShader.includes(ANCHOR)) {
       // birb-modes treats console warnings as failures, so this cannot ship
-      // silently.
-      console.warn('authored feathers: map_fragment anchor not found; the sheet would multiply raw, so it is left unapplied');
+      // silently the way the last one did.
+      console.warn('authored feathers: no #include <map_fragment> in this material; sheet left unapplied');
       return;
     }
     shader.fragmentShader = shader.fragmentShader
       .replace('uniform vec3 diffuse;', 'uniform vec3 diffuse;\nuniform vec3 uFeatherTint;\nuniform float uFeatherStrength;')
-      .replace(MULTIPLY,
-        'diffuseColor.rgb *= min(vec3(1.0), mix(vec3(1.0), sampledDiffuseColor.rgb * uFeatherTint, uFeatherStrength));');
+      .replace(ANCHOR, [
+        '#ifdef USE_MAP',
+        '  vec4 featherSample = texture2D( map, vMapUv );',
+        '  diffuseColor.rgb *= min(vec3(1.0), mix(vec3(1.0), featherSample.rgb * uFeatherTint, uFeatherStrength));',
+        '#endif',
+      ].join('\n'));
   };
   const prevKey = material.customProgramCacheKey;
   material.customProgramCacheKey = function () {
