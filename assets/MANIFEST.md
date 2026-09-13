@@ -211,6 +211,10 @@ undercounted a real number:
 | `textures/mountain_granite_normal.png` | mountain |
 | `textures/mountain_snow_albedo.png` | mountain |
 | `textures/mountain_snow_normal.png` | mountain |
+| `textures/feather_contour_albedo.png` | forest, canyons, mountain, city |
+| `textures/feather_contour_normal.png` | forest, canyons, mountain, city |
+| `textures/feather_vane_albedo.png` | forest, canyons, mountain, city |
+| `textures/feather_vane_normal.png` | forest, canyons, mountain, city |
 | `textures/city_concrete_albedo.png` | city x3 |
 | `textures/city_concrete_normal.png` | city x3 |
 
