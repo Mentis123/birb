@@ -172,7 +172,7 @@ export const GROUND_PROFILES = {
  *                    defaults a missing one, the same contract
  *                    `addInstancedUvScale` uses for an unknown geometry shape.
  */
-export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false } = {}) {
+export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0 } = {}) {
   const profile = GROUND_PROFILES[biome];
   // The city's ground already carries a street grid and asphalt; mottling it
   // would fight the one thing that identifies it.
@@ -198,6 +198,9 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
     uGroundFacet: { value: 0.0 },
     uGroundGain: { value: new THREE.Vector3(groundMap.gain.r, groundMap.gain.g, groundMap.gain.b) },
     uGroundMix: { value: 0.0 },
+    // Bump strength. Live only on the smooth path: perturbing a normal that
+    // is about to be replaced by its own facet normal changes nothing.
+    uGroundBump: { value: smooth ? bump : 0.0 },
   } : null;
   if (texUniforms) material.userData.birbGroundTexUniforms = texUniforms;
 
@@ -253,10 +256,47 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       // own output and the rock term runs away with itself.
       vec3 gdSmoothW = inverseTransformDirection(normal, viewMatrix);
       float gdShadeSlope = 1.0 - clamp(dot(gdSmoothW, gdUpW), 0.0, 1.0);
-      normal = normalize(mix(
-        normal,
-        normalize((viewMatrix * vec4(gdFacetW, 0.0)).xyz),
+      vec3 gdShadeW = gdSmoothW;
+` + (texUniforms ? `
+      // The triplanar sample, HOISTED out of the tint block below so the
+      // bump and the colour share ONE set of fetches. Still three, exactly
+      // as before this existed.
+      vec3 gtN0 = normalize(mix(gdUpW, gdFacetW, uGroundFacet));
+      vec3 gtW0 = pow(abs(gtN0), vec3(uGroundSharp));
+      gtW0 /= max(gtW0.x + gtW0.y + gtW0.z, 1e-4);
+      vec3 gdTex = texture2D(uGroundMap, vBirbWorld.zy / uGroundTile).rgb * gtW0.x
+            + texture2D(uGroundMap, vBirbWorld.xz / uGroundTile).rgb * gtW0.y
+            + texture2D(uGroundMap, vBirbWorld.xy / uGroundTile).rgb * gtW0.z;
+
+      // The soil albedo's own luminance IS a height field, and its
+      // screen-space gradient is that field's slope — so relief costs no
+      // normal map and no extra fetch. Same construction as three's
+      // perturbNormalArb, done in world space because everything else here
+      // already is.
+      //
+      // Faded with view distance: at altitude one texel spans less than a
+      // pixel and an unfaded bump is just aliasing that crawls when the
+      // camera moves. It is a PERCH effect — a grazing camera three units
+      // off the ground, where the soil otherwise reads as a photograph laid
+      // flat — and it should be gone before it can shimmer.
+      if (uGroundBump > 0.0) {
+        float gdH = dot(gdTex, vec3(0.299, 0.587, 0.114));
+        vec3 gdSX = dFdx(vBirbWorld);
+        vec3 gdSY = dFdy(vBirbWorld);
+        vec3 gdR1 = cross(gdSY, gdShadeW);
+        vec3 gdR2 = cross(gdShadeW, gdSX);
+        float gdDet = dot(gdSX, gdR1);
+        // Solved, not picked. Wanted ~5 units of effective strength at a
+        // perch (4 units) and ~1 by ordinary flight altitude (25): the ratio
+        // fixes the rate at ln(5)/21 = 0.077, and the strength follows.
+        float gdFade = exp(-length(cameraPosition - vBirbWorld) * 0.08);
+        vec3 gdGrad = sign(gdDet) * (dFdx(gdH) * gdR1 + dFdy(gdH) * gdR2);
+        gdShadeW = normalize(abs(gdDet) * gdShadeW - gdGrad * uGroundBump * gdFade);
+      }
+` : ``) + `
+      gdShadeW = normalize(mix(gdShadeW, gdFacetW,
         smoothstep(uGdSlopeRange.x, uGdSlopeRange.y, gdShadeSlope)));
+      normal = normalize((viewMatrix * vec4(gdShadeW, 0.0)).xyz);
       `);
     }
 
@@ -268,6 +308,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       + (texUniforms
         ? 'uniform sampler2D uGroundMap; uniform float uGroundTile; uniform float uGroundSharp;\n'
           + 'uniform float uGroundFacet; uniform vec3 uGroundGain; uniform float uGroundMix;\n'
+          + 'uniform float uGroundBump;\n'
         : '')
       + `
       float gdHash(vec3 p) {
@@ -343,7 +384,11 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
           float gdBand = sin(gdR * uGdBand.y) * 0.68 + sin(gdR * uGdBand.y * 2.37 + 1.7) * 0.32;
           gdTint *= 1.0 + gdBand * uGdBand.x;
         }
-` + (texUniforms ? `
+` + (texUniforms && smooth ? `
+        // Already fetched at <normal_fragment_begin>, where the bump needed
+        // it. Three fetches for the frame, not six.
+        gdTint *= mix(vec3(1.0), gdTex * uGroundGain, uGroundMix);
+` : texUniforms ? `
         // Authored ground overlay, triplanar off world position. See the
         // function doc comment above for why sphere-normal blending, why the
         // weights are renormalised, and why uGroundMix (not a clamp) is what
@@ -371,7 +416,8 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}`;
+  material.customProgramCacheKey = () =>
+    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}`;
   material.needsUpdate = true;
   return material;
 }

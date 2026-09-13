@@ -1,6 +1,6 @@
 # The organic pass — smooth soil, pointy rocks, leafy crowns
 
-**Status: WAVE A SHIPPED 2026-09-13. B, C and D still planned.** Written after
+**Status: WAVES A AND B SHIPPED 2026-09-13. C and D still planned.** Written after
 the inside-out-bird fix and the slalom removal shipped (`54332ef`, `db87a94`).
 What Wave A actually did, and the two things it taught, is §11 at the end. The owner asked for
 less blocky leaves, a smoother ground that still has sharp rocks, and whatever
@@ -632,3 +632,85 @@ same drift `G-A5-DRIFT` documents; they are not a cost signal here.
   material's measured luminance (`PINE_BARK_TINT` targets the forest trunk's
   VALUE, and `authored-tints.test.js` pins the separations), so it is a change
   that has to be re-measured rather than flipped.
+
+
+---
+
+## 12. Wave B, as built (2026-09-13)
+
+All three items shipped, on by default, with `?leaves=0`, `?snowline=0` and
+`?groundbump=0`. Seventeen tests in `tests/organic-foliage.test.js`.
+
+### What landed
+
+| # | Built as |
+|---|---|
+| B1 | `addLeafEdge` in `visual-style.js`: world-space value noise thresholded near the silhouette, fed to three's own alpha test (`alphaTest = 0.5`, `alphaToCoverage = true`). On all three forest canopy buckets, the mountain pine crowns, and the opaque mobile cloud puffs. |
+| B2 | `addUpwardSnow`: one `smoothstep` on `dot(N, normalize(worldPos))`, written at `<color_fragment>`. On mountain boulders, cliff walls, scree and pine crowns, using `snowMat`'s own `0xe6f1ff`. |
+| B3 | The forest ground's authored albedo read as a height field. The triplanar sample is hoisted to `<normal_fragment_begin>` and shared, so it is still **three** `texture2D` calls, not six — pinned by a test that counts them. |
+
+### Four things worth keeping
+
+**The plan's own B1 snippet could not have compiled.** It used `normal.z` for
+the silhouette term at `<alphatest_fragment>` — but three's fragment order
+puts `<alphatest_fragment>` BEFORE `<normal_fragment_begin>`, so `normal` does
+not exist there. `vNormal` is no escape either: `FLAT_SHADED` compiles it away
+entirely, so anything built on it breaks under `?smooth=0`, which is the one
+path the A/B depends on. The rim comes from a carried world-normal varying and
+`cameraPosition` instead, which needs nothing three might have removed.
+
+**A facet normal cannot cut a silhouette on a low-poly mesh.** The first build
+derived the rim from `cross(dFdx(vBirbWorld), dFdy(vBirbWorld))` — constant
+across a facet, and a lathe canopy has seven of them. The capture is
+unmistakable: one clean straight edge on the left of the crown and the whole
+opposite third dissolved, because the threshold is a per-FACET decision.
+`ensureWorldNormalVarying` carries the interpolated vertex normal instead, and
+is per-material correct for free: three's polyhedra are non-indexed, so on a
+boulder `objectNormal` already IS the facet normal while on a lathe it is
+smooth. Neither call site has to choose.
+
+**Two latent bugs came out, and only one of them announced itself.**
+`addFoliageWind` ASSIGNED `onBeforeCompile` and set a CONSTANT
+`customProgramCacheKey`, so any patch already on a foliage material was erased
+without a word — nothing had caught it because the only other patch on those
+materials chains and happened to run afterwards. And `addAtmosphere` guarded
+its `varying` DECLARATION but replaced `<begin_vertex>` unconditionally, so a
+second patch wanting the same world position declared `birbWorldPos` twice:
+**140 shader compile failures**, caught by `tools/birb-shaders.mjs` and by
+nothing else, because three draws nothing for a material whose shader fails
+and the page still paints. Both patches now share one fully guarded helper.
+
+**The bump strength was ten times off, because the units are not three's.**
+`perturbNormalArb` expects `dHdxy` from a height map, where neighbouring
+texels differ by a large fraction of the range. Here the height is the
+albedo's LUMINANCE, which changes by roughly 0.01 per pixel — at the 0.35 a
+bump map would want, the frame is pixel-identical to no bump at all, which is
+indistinguishable from the feature not being wired. Proving it WAS wired took
+one capture at 20x (mean channel difference 25/255 against the off frame);
+the sweep then read 0.35 invisible, 5 correct, 9 noisy, 20 static. Strength
+and fade are solved as a pair from "~5 at a perch, ~1 by flight altitude":
+rate `ln(5)/21 = 0.077`, strength `5·e^(4·0.077) = 6.8`.
+
+### Measured
+
+| contact sheet, tier 0 pinned | Wave A | Wave B |
+|---|---|---|
+| forest flight | 26 calls / 58.1k | 26 / 58.6k |
+| canyons flight | 23 / 37.0k | 29 / 37.9k |
+| mountain flight | 45 / 38.0k | 28 / 37.0k |
+| city flight | 32 / 42.0k | 28 / 41.6k |
+
+No geometry changed, so the triangle movement is instance culling and the
+draw-call swing is rings and drones crossing the frustum, as in Wave A.
+
+**The one cost this cannot measure here is B1's.** An alpha-tested material
+loses early-Z, so canopy overdraw is paid in full, and the forest canopies are
+the largest instanced meshes in the frame. Under SwiftShader at one frame a
+second that number means nothing. It is a phone question: if the adaptive tier
+starts dropping where it did not before, gate the erosion on `tier < 2` the
+way the wingtip ribbons are. `?leaves=0` is the control.
+
+### Still open from Wave B
+
+The **blind paired A/B on the phone** for B1. A lacy crown is a taste call no
+contact sheet can make, and the sheet cannot see fill-rate cost either.

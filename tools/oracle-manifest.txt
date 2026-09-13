@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-13 at commit 0023ce0 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-13 at commit 4ee22d3 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -100,7 +100,7 @@ f71e006ab5b11c70d955ac276e696149757e37d90f7870653116c9ff33ae63d4  tests/gauntlet
 7b53936a8ce0ad20ebcd15ebf26f91d451fb8ba15d81a19480fd2ef02afdb1dd  tests/gauntlet-qr.test.js
 e5b46a8520b5e7fafc5360eb6cc202e0ca905ce99e680386a0ef11cf99d55848  tests/gauntlet-race-logic.test.js
 14b4ffdb2a9569e76b06eecf8e2210436263987bca8687cc116656479df90579  tests/grade-candidates.test.js
-e3b92a6eb8d5f9a8c09ac610b5f75f454a5e7e8cb2fada6d2bf74b4f322ed791  tests/ground-triplanar.test.js
+6a19dc426dd3e7aae6c72ee05f88d833fb1dbd74b2d5d164ac0ac5d49f9505bc  tests/ground-triplanar.test.js
 aab1f981ae6e073443e3b433b56ad06b350d257deb924a96e50fbfd5f7009f2e  tests/helpers/flight-harness.js
 ff5d33d4d198922eba742b16faa85a98bcce6dfd48f094613695d7b81c8298d1  tests/helpers/sculpture-three.js
 074d4c9154550febacaef681825d56ee8c3fc06237022795a0189af3848d83f1  tests/icon3d-catalogue.test.js
@@ -115,7 +115,8 @@ a4d2a9302fbdea465e0ef4ddd1b8fbf3d176672b52941c8914667118ad5b3ea3  tests/instance
 4390c9394ede5917e7d9b8500f1d0806aabb2c9a42b47dddc298d768cd9c070c  tests/minimap.test.js
 48db762919e8391e9e2cdff060911fc2c6fabee6744a745760338fbcbfd69539  tests/nesting-system.test.js
 03b54a5cf05ce47b8b7de6cd3c537b22e6ceb37b50dcefe2624b3fdb6e9be886  tests/oracle-manifest.test.js
-6a53fea99b7c41c082adf0ef6c82b10db56502b030983877589a3c506a599581  tests/organic-shading.test.js
+746de3703c02df09396cdcb6c2701d3ffab3a69bd271c802f435644cb4e89c66  tests/organic-foliage.test.js
+b1de9a59adfd975527b3582be639c3a9732e2a655ef5c858809f956cd97eebeb  tests/organic-shading.test.js
 422ec28055458de741380a9deb1a1e1587c79fd60ce55329c50e3edf6a980955  tests/perch-horizon.test.js
 cdad347f4fd13d307927161f530cc6305b3df5161b17bbaf4eea76cd6a68ba40  tests/perf-learning.test.js
 a7b94cf4b0a5691c760a291acfe7997513caedd49270761aac74425373447e82  tests/perf-trace-corpus.test.js

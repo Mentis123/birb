@@ -1,4 +1,8 @@
-import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere, smoothShadingRequested, treeLean, rockShape } from './visual-style.js';
+import {
+  createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere,
+  smoothShadingRequested, treeLean, rockShape,
+  addLeafEdge, addUpwardSnow, leafEdgeRequested, upwardSnowRequested,
+} from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import {
@@ -9,6 +13,7 @@ import {
   authoredSnowRequested, SNOW_TINT, SNOW_TILE_METRES,
   authoredCityRequested, CONCRETE_TINT, CITY_TILE_METRES, CITY_FACADE_SCALES,
   authoredGroundRequested, applyAuthoredGround, GROUND_TINT, GROUND_TILE_UNITS, GROUND_TRIPLANAR_SHARPNESS,
+  GROUND_BUMP_STRENGTH, authoredGroundBumpRequested,
 } from './authored-textures.js';
 
 // Set when ?bark=1 dressed the forest landmark material; called on the next
@@ -466,6 +471,10 @@ let _smoothShading = true;
 // tests/authored-tints.test.js pins the separations), so it is a change that
 // has to be re-measured rather than flipped. Next wave.
 function _softFlat() { return !_smoothShading; }
+
+// Wave B of the organic pass, resolved per world build like _smoothShading.
+let _leafEdge = true;
+let _upwardSnow = true;
 
 /**
  * Override the URL flag for the NEXT world build. `__BIRB.smooth()` sets this
@@ -1261,6 +1270,9 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     if (bucket.length === 0) continue;
     const canopyUnitGeom = createCanopyGeometry(THREE, c);
     addFoliageWind(canopyMats[c]);
+    // The leaves. Cut out of the crown's silhouette rather than modelled:
+    // 285 canopies are already 41% of this frame's triangles.
+    if (_leafEdge) addLeafEdge(canopyMats[c], THREE, { key: `canopy${c}` });
     const canopyInst = new THREE.InstancedMesh(canopyUnitGeom, canopyMats[c], bucket.length);
     canopyInst.name = `forest-canopies-${c}`;
     const dummy = new THREE.Object3D();
@@ -1452,6 +1464,12 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const cloudMat = new THREE.MeshLambertMaterial({
     color: 0xdfeeff, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.7, flatShading: _softFlat(),
   });
+  // Desktop clouds are already `transparent`, and an alpha TEST on a
+  // transparent material fights its own blend — the erosion is for the
+  // opaque mobile puffs, which are the ones that read as floating rocks.
+  if (_leafEdge && _isMobile()) {
+    addLeafEdge(cloudMat, THREE, { key: 'cloudF', cut: 0.34, rimStart: 0.30, rimEnd: 0.95, scale: 0.5 });
+  }
   const cloudCount = _isMobile() ? 4 : 20;
   const puffsPerCloud = _isMobile() ? 1 : 4;
   const cloudPuffs = []; // { pos, scale } — built once at env-build time
@@ -2451,8 +2469,20 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   }
   // Pine canopy carries vertexColors for the baked base→tip gradient.
   const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x32623e, flatShading: _softFlat(), vertexColors: true });
+  // A conifer's flanks sit ~72 degrees off the local up, so the 0.45 floor
+  // the rock materials use would put no snow on a pine at all. Opened right
+  // down and held to a light dusting: this is snow CAUGHT in needles, not a
+  // slab lying on a boulder.
+  if (_upwardSnow) addUpwardSnow(pineCanopyMat, THREE, { key: 'pine', amount: 0.42, start: 0.10, end: 0.62 });
+  if (_leafEdge) addLeafEdge(pineCanopyMat, THREE, { key: 'pine', cut: 0.40, scale: 1.7 });
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x4a505a, flatShading: true });
   const cliffWallMat = new THREE.MeshLambertMaterial({ color: 0x434953, flatShading: true });
+  // uSnowColor is snowMat's own 0xe6f1ff, so snow on a boulder is the same
+  // white as the cap on the peak beside it rather than a second, near-white.
+  if (_upwardSnow) {
+    addUpwardSnow(boulderMat, THREE, { key: 'boulder' });
+    addUpwardSnow(cliffWallMat, THREE, { key: 'cliff', amount: 0.6 });
+  }
   const pineCanopyCeilingMat = new THREE.MeshBasicMaterial({
     color: 0x2a5535,
     transparent: true,
@@ -2913,6 +2943,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   if (peakPlacements.length > 0) {
     const screeGeom = new THREE.IcosahedronGeometry(1, 0);
     const screeMat = new THREE.MeshLambertMaterial({ color: 0x555c68, flatShading: true });
+    if (_upwardSnow) addUpwardSnow(screeMat, THREE, { key: 'scree', amount: 0.8 });
     const screeInst = new THREE.InstancedMesh(screeGeom, screeMat, screeCount);
     screeInst.name = 'mountain-scree';
     const dummy = new THREE.Object3D();
@@ -3363,9 +3394,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // Read here, not at module load: an environment switch rebuilds the world
   // and must honour the flag the page was opened with, and `__BIRB.smooth()`
   // flips materials directly rather than rebuilding.
-  _smoothShading = typeof window !== 'undefined'
-    ? smoothShadingRequested(window.location?.search)
-    : true;
+  const _search = typeof window !== 'undefined' ? (window.location?.search || '') : '';
+  _smoothShading = typeof window !== 'undefined' ? smoothShadingRequested(_search) : true;
+  _leafEdge = typeof window !== 'undefined' ? leafEdgeRequested(_search) : true;
+  _upwardSnow = typeof window !== 'undefined' ? upwardSnowRequested(_search) : true;
   _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
   // One RNG for this build, drawn once and reused for every prop placed
@@ -3440,6 +3472,11 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     baseRadius: sphereRadius,
     biome: variant,
     smooth: _smoothShading,
+    // Relief from the albedo already being sampled. Smooth path only — a
+    // normal that is about to be replaced by its own facet normal cannot
+    // carry a bump.
+    bump: (wantsGroundTexture && typeof window !== 'undefined'
+      && authoredGroundBumpRequested(window.location?.search)) ? GROUND_BUMP_STRENGTH : 0,
     groundMap: wantsGroundTexture
       ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT }
       : null,

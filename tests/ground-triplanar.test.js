@@ -252,7 +252,10 @@ test('groundMap does not disturb the existing per-biome procedural detail', () =
     const stripped = withMap
       .replace(/\n\s*\/\/ Authored ground overlay[\s\S]*?uGroundMix\);\n/, '\n')
       .replace(/uniform sampler2D uGroundMap;[^\n]*\n/, '')
-      .replace(/uniform float uGroundFacet;[^\n]*\n/, '');
+      .replace(/uniform float uGroundFacet;[^\n]*\n/, '')
+      // uGroundBump belongs to the overlay too — the bump reads the overlay's
+      // own sample as a height field, so it cannot exist without one.
+      .replace(/uniform float uGroundBump;[^\n]*\n/, '');
     assert.equal(stripped, withoutMap, `${biome}: groundMap changed the existing procedural shader`);
   }
 });

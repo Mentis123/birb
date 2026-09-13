@@ -72,16 +72,21 @@ test('the smooth path bends the LIGHTING normal, which only works before lightin
   // At <opaque_fragment> three has already folded diffuse into the lighting,
   // so a normal written there changes nothing. It must land here.
   const atBegin = smooth.frag.indexOf('#include <normal_fragment_begin>');
-  const blend = smooth.frag.indexOf('normal = normalize(mix(');
+  // The WRITE to `normal` is the invariant, wherever the blend feeding it is
+  // spelled: Wave B moved the mix into world space so the ground bump could
+  // perturb the same vector before the rock blend consumes it.
+  const write = smooth.frag.indexOf('normal = normalize((viewMatrix');
   const atOpaque = smooth.frag.indexOf('#include <opaque_fragment>');
-  assert.ok(atBegin >= 0 && blend > atBegin, 'blend sits after normal_fragment_begin');
-  assert.ok(blend < atOpaque, 'blend sits BEFORE the lighting is resolved');
+  assert.ok(atBegin >= 0 && write > atBegin, 'normal is written after normal_fragment_begin');
+  assert.ok(write < atOpaque, 'normal is written BEFORE the lighting is resolved');
+  assert.match(smooth.frag, /gdShadeW = normalize\(mix\(gdShadeW, gdFacetW,/);
 });
 
 test('the smooth path reads the slope before it overwrites the normal', () => {
   // Otherwise the slope measures its own output and the rock term runs away.
   const f = compile({ smooth: true }).frag;
-  assert.ok(f.indexOf('float gdShadeSlope') < f.indexOf('normal = normalize(mix('));
+  assert.ok(f.indexOf('float gdShadeSlope') < f.indexOf('mix(gdShadeW, gdFacetW'));
+  assert.ok(f.indexOf('float gdShadeSlope') < f.indexOf('normal = normalize((viewMatrix'));
 });
 
 test('the smooth path takes its slope from the smooth normal, not the facet', () => {

@@ -584,9 +584,9 @@
 > A feature "added to every environment" is not paid for when it is used; it
 > is paid for always.
 
-> **The organic pass: Wave A shipped, B/C/D planned** (2026-09-13, late):
+> **The organic pass: Waves A and B shipped, C/D planned** (2026-09-13, late):
 > [docs/realism/ORGANIC_PASS_PLAN.md](docs/realism/ORGANIC_PASS_PLAN.md), §11
-> for what Wave A actually did.
+> and §12 for what they actually did.
 > The owner asked for less blocky leaves and a smoother ground that keeps its
 > sharp rocks. Two measurements set the plan's shape. **The forest's 285
 > canopies are 24k of its 58k triangles**, so "more segments" is +24k and off
@@ -627,6 +627,58 @@
 > Trunks were deliberately left flat — bark is not crystalline, but the
 > authored bark tints were solved against the flat material's measured
 > luminance, so it is a re-measurement, not a flip.
+
+> **Wave B: the leaves, snow on what faces up, and soil you can see the grain
+> of** (2026-09-13). `?leaves=0`, `?snowline=0`, `?groundbump=0`.
+>
+> **A crown's outline is what makes it read as solid, and adding segments
+> cannot fix that at any price this frame can pay** — 285 canopies are already
+> 41% of the forest's triangles. So the ragged edge is CUT OUT of the existing
+> mesh: world-space noise thresholded near the silhouette, fed to three's own
+> alpha test. Two traps in one feature. **The obvious `normal.z` silhouette
+> term cannot compile there** — three's fragment order puts
+> `<alphatest_fragment>` BEFORE `<normal_fragment_begin>`, and `vNormal` is
+> compiled away entirely under FLAT_SHADED, so anything built on it dies under
+> `?smooth=0`, the one path the A/B needs. And **a FACET normal cannot cut a
+> silhouette on a low-poly mesh**: it is constant across a facet, a lathe
+> canopy has seven, and the capture showed one clean straight edge with the
+> opposite third of the crown dissolved. `ensureWorldNormalVarying` carries
+> the interpolated normal and is per-material correct for free — three's
+> polyhedra are non-indexed, so on a boulder `objectNormal` already IS the
+> facet normal while on a lathe it is smooth.
+>
+> **Two latent bugs came out; only one announced itself.** `addFoliageWind`
+> ASSIGNED `onBeforeCompile` and set a CONSTANT cache key, so any patch already
+> on a foliage material was erased silently — nothing had caught it because the
+> only other patch there chains and happened to run second. And
+> `addAtmosphere` guarded its `varying` DECLARATION while replacing
+> `<begin_vertex>` unconditionally, so a second patch wanting the same world
+> position declared `birbWorldPos` twice: **140 compile failures**, caught by
+> `tools/birb-shaders.mjs` and by nothing else, because three draws nothing for
+> a failed material and the page still paints. One guarded helper now.
+>
+> **Snow settles by `dot(N, normalize(worldPos))`** — radial up, never world
+> +Y — written at `<color_fragment>`, and a boulder goes from a uniform dark
+> polyhedron to snow on its up-facing planes with bare rock on the sides. A
+> conifer flank sits ~72 degrees off up, so the 0.45 floor the rock materials
+> use puts no snow on a pine at all; theirs opens to 0.10.
+>
+> **The ground bump's strength was ten times off because the units are not
+> three's.** `perturbNormalArb` expects a height map's gradient; here the
+> height is the albedo's LUMINANCE, which changes ~0.01 per pixel, so at the
+> 0.35 a bump map would want the frame is pixel-identical to no bump — which
+> looks exactly like the feature not being wired. One capture at 20x proved it
+> was (mean channel difference 25/255), then the sweep read 0.35 invisible, 5
+> right, 9 noisy, 20 static. Strength and fade are solved as a PAIR from "~5 at
+> a perch, ~1 by flight altitude": rate ln(5)/21, strength 5·e^(4·rate). The
+> triplanar sample is hoisted and shared, so it is still three `texture2D`
+> calls and a test counts them.
+>
+> **The cost this could not measure is B1's.** An alpha-tested material loses
+> early-Z and the canopies are the biggest instanced meshes in the frame; under
+> SwiftShader at 1 fps that number is meaningless. If the phone's adaptive tier
+> starts dropping where it did not, gate the erosion on `tier < 2` like the
+> ribbons. `?leaves=0` is the control.
 
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
