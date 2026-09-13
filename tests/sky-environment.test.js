@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  hexToLinear, skyRadianceAt, rowUpComponent, buildEquirectSky, iblRequested,
+  hexToLinear, skyRadianceAt, rowUpComponent, buildEquirectSky, iblRequested, equirectUvLocal,
 } from '../src/environment/sky-environment.js';
 
 // The four shipped biome skies, copied from world-shell.js. If these drift the
@@ -115,3 +115,96 @@ test('the flag is off by default', () => {
   assert.equal(iblRequested('?debug=1&ibl=1'), true);
   assert.equal(iblRequested('?visible=1'), false, 'must not match a substring');
 });
+
+// ---------------------------------------------------------------------------
+// The panorama must sit on the LOCAL horizon. This is a spherical world: up is
+// radial and rotates as the bird flies, and the owner reported the sky texture
+// "sometimes vertical with what should be horizontal". Reproduced by capture at
+// the planet's equator, where the dome sampled the equirect against WORLD +Y
+// while its own gradient used the local up, so the cloud band ran top to
+// bottom of the frame. equirectUvLocal is the JS reference the GLSL mirrors.
+// ---------------------------------------------------------------------------
+
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+test('at the planet pole the local mapping IS three\'s equirect convention', () => {
+  // up = world +Y is the one place the old world-frame sampling was right, so
+  // the new mapping must reproduce it there exactly — a strict generalisation,
+  // not a different sky.
+  const up = [0, 1, 0];
+  for (const dir of [[1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 0, -1], [0.6, 0.8, 0], [0, -1, 0]]) {
+    const [u, v] = equirectUvLocal(dir, up, 0);
+    const classicU = Math.atan2(dir[2], dir[0]) / (2 * Math.PI) + 0.5;
+    const classicV = Math.asin(Math.max(-1, Math.min(1, dir[1]))) / Math.PI + 0.5;
+    assert.ok(near(((u % 1) + 1) % 1, ((classicU % 1) + 1) % 1), `u for ${dir}: ${u} vs classic ${classicU}`);
+    assert.ok(near(v, classicV), `v for ${dir}: ${v} vs classic ${classicV}`);
+  }
+});
+
+test('at the equator the horizon is the LOCAL horizon, not world y = 0', () => {
+  // Standing at world (R, 0, 0): local up is +X. World +Y is now a direction
+  // along the local HORIZON, and local up must read as the zenith.
+  const up = [1, 0, 0];
+  const [, vHorizon] = equirectUvLocal([0, 1, 0], up, 0);
+  const [, vZenith] = equirectUvLocal([1, 0, 0], up, 0);
+  const [, vNadir] = equirectUvLocal([-1, 0, 0], up, 0);
+  assert.ok(near(vHorizon, 0.5), `world +Y is on the local horizon here, got v=${vHorizon}`);
+  assert.ok(near(vZenith, 1.0), `local up is the zenith, got v=${vZenith}`);
+  assert.ok(near(vNadir, 0.0), `local down is the nadir, got v=${vNadir}`);
+  // And the OLD mapping would have put world +Y at the zenith — that is the bug.
+  const classicV = Math.asin(1) / Math.PI + 0.5;
+  assert.ok(!near(vHorizon, classicV), 'the local mapping must differ from the world mapping off the pole');
+});
+
+test('every direction on the local horizon lands on v = 0.5, all the way round the planet', () => {
+  // Sample the planet's surface directions and, at each, a ring of directions
+  // perpendicular to up. All must be on the panorama's horizon row.
+  for (let i = 0; i < 40; i += 1) {
+    const th = (i / 40) * Math.PI * 2;
+    const ph = ((i * 7) % 40) / 40 * Math.PI - Math.PI / 2;
+    const up = [Math.cos(ph) * Math.cos(th), Math.sin(ph), Math.cos(ph) * Math.sin(th)];
+    // Two perpendicular tangents.
+    const ref = Math.abs(up[1]) < 0.99 ? [0, 1, 0] : [1, 0, 0];
+    const east = cross(ref, up); normalise(east);
+    const north = cross(up, east);
+    for (let k = 0; k < 8; k += 1) {
+      const a = (k / 8) * Math.PI * 2;
+      const dir = [
+        Math.cos(a) * north[0] + Math.sin(a) * east[0],
+        Math.cos(a) * north[1] + Math.sin(a) * east[1],
+        Math.cos(a) * north[2] + Math.sin(a) * east[2],
+      ];
+      const [u, v] = equirectUvLocal(dir, up, 0);
+      assert.ok(near(v, 0.5, 1e-5), `horizon direction at up=${up.map((n) => n.toFixed(2))} gave v=${v}`);
+      assert.ok(Number.isFinite(u), 'u must be finite');
+    }
+  }
+});
+
+test('the rotation is in turns and only moves u', () => {
+  const up = [0.3, 0.9, 0.1]; normalise(up);
+  const dir = [0.5, 0.2, -0.7]; normalise(dir);
+  const [u0, v0] = equirectUvLocal(dir, up, 0);
+  const [u1, v1] = equirectUvLocal(dir, up, 0.25);
+  assert.ok(near(v0, v1), 'rotation must not tilt the sky');
+  assert.ok(near(((u1 - u0) % 1 + 1) % 1, 0.25), `a quarter turn moves u by 0.25, got ${u1 - u0}`);
+});
+
+test('the mapping is stable under yaw: it does not depend on where the camera looks', () => {
+  // The azimuth reference is derived from up and a WORLD axis, never from the
+  // view direction, so turning in place does not spin the clouds.
+  const up = [0.6, 0.64, 0.48]; normalise(up);
+  const dirA = [1, 0, 0];
+  const [uA] = equirectUvLocal(dirA, up, 0);
+  const [uA2] = equirectUvLocal(dirA, up, 0);
+  assert.ok(near(uA, uA2));
+});
+
+function cross(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function normalise(v) {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  v[0] /= l; v[1] /= l; v[2] /= l;
+  return v;
+}

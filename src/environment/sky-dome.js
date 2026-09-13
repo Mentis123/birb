@@ -77,10 +77,29 @@ export function createSkyDome(options = {}) {
       // sky's sun and the scene's key light cannot drift apart just because a
       // panorama was dropped in.
       if (uSkyMix > 0.0) {
-        // three's own equirect convention, so a map authored for
-        // scene.environment and one authored for this dome are the same file.
-        float su = atan(dir.z, dir.x) * 0.15915494 + 0.5 + uSkyRotation;
-        float sv = asin(clamp(dir.y, -1.0, 1.0)) * 0.31830989 + 0.5;
+        // Sampled in the LOCAL tangent frame, not against world +Y.
+        //
+        // This is a spherical world: up is radial and rotates as the bird
+        // flies. The gradient above already measures elevation against uSkyUp,
+        // but the panorama used to be sampled with three's world-frame equirect
+        // convention (atan(dir.z, dir.x), asin(dir.y)), so its horizon band
+        // stayed pinned to world y = 0 while the player's horizon went round
+        // the planet. At the equator the cloud band ran top to bottom of the
+        // frame — the owner's "sometimes vertical" report, reproduced by
+        // capture at __BIRB.teleport(1,0,0).
+        //
+        // The frame is built from uSkyUp and a WORLD axis, never from the view
+        // direction, so turning in place does not spin the clouds; the reference
+        // swaps to +X only where up is within ~8 degrees of +Y, which is the
+        // one place the cross product would otherwise vanish. At the pole this
+        // reduces EXACTLY to the classic formula, so a map authored for
+        // scene.environment still reads the same there. JS reference:
+        // equirectUvLocal in sky-environment.js, which the tests pin.
+        vec3 skyRef = abs(uSkyUp.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        vec3 skyEast = normalize(cross(skyRef, uSkyUp));
+        vec3 skyNorth = cross(uSkyUp, skyEast);
+        float su = atan(dot(dir, skyEast), dot(dir, skyNorth)) * 0.15915494 + 0.5 + uSkyRotation;
+        float sv = asin(clamp(dot(dir, uSkyUp), -1.0, 1.0)) * 0.31830989 + 0.5;
         vec3 texSky = texture2D(uSkyTexture, vec2(fract(su), clamp(sv, 0.0, 1.0))).rgb;
         color = mix(color, texSky, uSkyMix);
       }

@@ -91,6 +91,46 @@ export function rowUpComponent(row, rows) {
 }
 
 /**
+ * Equirectangular UV for a view direction, measured in the LOCAL tangent
+ * frame of `up` rather than against world +Y.
+ *
+ * This is the JS reference for the sampling in sky-dome.js's fragment shader
+ * and the two must agree line for line. Why it exists: the world is a sphere,
+ * so "up" is radial and rotates as the bird flies, and a panorama sampled with
+ * three's world-frame convention keeps its horizon at world y = 0 while the
+ * player's horizon goes round the planet — at the equator the cloud band runs
+ * top to bottom of the screen. Reproduced by capture; see the test file.
+ *
+ * The azimuth reference is a WORLD axis (+Y, or +X within ~8 degrees of the
+ * pole where the cross product would vanish), never the view direction, so
+ * turning in place does not spin the clouds. At up = +Y this reduces exactly
+ * to atan2(z, x) / asin(y), i.e. three's own equirectUv, which the tests pin:
+ * it is a generalisation of the old mapping, not a different sky.
+ *
+ * `dir` and `up` are unit vectors as [x, y, z]; `rotationTurns` shifts u.
+ * Returns [u, v] with u unwrapped (callers fract it) and v in 0..1.
+ */
+export function equirectUvLocal(dir, up, rotationTurns = 0) {
+  const ref = Math.abs(up[1]) < 0.99 ? [0, 1, 0] : [1, 0, 0];
+  // east = normalize(cross(ref, up))
+  let ex = ref[1] * up[2] - ref[2] * up[1];
+  let ey = ref[2] * up[0] - ref[0] * up[2];
+  let ez = ref[0] * up[1] - ref[1] * up[0];
+  const el = Math.hypot(ex, ey, ez) || 1;
+  ex /= el; ey /= el; ez /= el;
+  // north = cross(up, east)
+  const nx = up[1] * ez - up[2] * ey;
+  const ny = up[2] * ex - up[0] * ez;
+  const nz = up[0] * ey - up[1] * ex;
+  const dEast = dir[0] * ex + dir[1] * ey + dir[2] * ez;
+  const dNorth = dir[0] * nx + dir[1] * ny + dir[2] * nz;
+  const dUp = Math.max(-1, Math.min(1, dir[0] * up[0] + dir[1] * up[1] + dir[2] * up[2]));
+  const u = Math.atan2(dEast, dNorth) / (2 * Math.PI) + 0.5 + rotationTurns;
+  const v = Math.asin(dUp) / Math.PI + 0.5;
+  return [u, v];
+}
+
+/**
  * Bake the gradient into a float equirectangular texture.
  *
  * 64x32 is deliberate and is not a compromise. PMREM convolves this into
