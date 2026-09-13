@@ -584,6 +584,27 @@
 > A feature "added to every environment" is not paid for when it is used; it
 > is paid for always.
 
+> **The organic pass is planned, not built** (2026-09-13, late):
+> [docs/realism/ORGANIC_PASS_PLAN.md](docs/realism/ORGANIC_PASS_PLAN.md).
+> The owner asked for less blocky leaves and a smoother ground that keeps its
+> sharp rocks. Two measurements set the plan's shape. **The forest's 285
+> canopies are 24k of its 58k triangles**, so "more segments" is +24k and off
+> the table — leafiness has to come from shading (smooth normals, then an
+> alpha-tested world-noise rim that cuts a lacy edge out of the solid crown
+> at zero geometry cost). And **the ground already has smooth normals**:
+> `displaceSphereGeometry` calls `computeVertexNormals()` and `flatShading:
+> true` throws them away, on the ground and on thirty-three other materials.
+> The owner's "smooth soil, pointy rocks" is one shading rule, not two
+> meshes: blend the smooth normal toward the FACET normal by the slope mask
+> `ground-detail.js` already computes, so soil rolls and rock faces fracture
+> on the same draw call. The trap is that `ground-detail.js` derives its slope
+> from the facet normal on purpose and must switch sources with the shading,
+> or material boundaries snap per triangle across a smooth hill. Wave A of
+> the plan costs zero triangles and zero draw calls; the mountain (35k tris,
+> six-sided cone pines) is where the cheap geometry goes; shadows are a
+> five-minute phone measurement, not a plan item, because the lever exists
+> and no device number does.
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose
