@@ -463,6 +463,53 @@
 > environment switch, so every lap of the four biomes leaked four 1024x512
 > textures.
 
+> **That sky leak is now PROVED fixed, and its compensation has been retired**
+> (2026-09-13). The entry above was right that the dispose landed, and nothing
+> in the repo could tell: no check could see a GL texture leak at all. The
+> frame renders, the draw-call budget does not move (it is the same one dome),
+> `asset-check.mjs` reasons about files on disk rather than uploads in the
+> driver, and the growth is in GPU memory `performance.memory` does not report.
+> So `tools/birb-textures.mjs` hooks the driver's own
+> `createTexture`/`deleteTexture` before the page boots and drives all four
+> biomes for three laps: **flat at 16 live textures per lap, and +4 per lap —
+> one orphaned panorama per switch — with the three-line dispose removed
+> again.** It runs in Browser Health (~33 s).
+>
+> **A fix nobody can re-measure gets compensated for twice.** While the leak
+> stood, `assets/MANIFEST.md` charged every sky panorama to ALL FOUR biomes to
+> keep the 24 MB budget gate honest, and `tests/asset-residency.test.js`
+> asserted that over-charge with a test *named* for the leak. The code fix
+> landed in the same pass and neither was retired, so for several commits the
+> budget gate scored a worst biome of 23.33 MB against a runtime that was
+> actually holding 15.33 — 8 MB of invented pressure, on the one number that
+> decides whether new art fits. Both are corrected, and the 24 MB ceiling is
+> unchanged: **that headroom exists because a leak was closed, not because there
+> is budget to spend.** The test now asserts the one-sky charge and says, in the
+> failure message, that widening the rows back is the correct response if
+> `birb-textures.mjs` ever goes red — the two checks are halves of one claim and
+> neither is sufficient alone, because this one cannot see a leak and that one
+> cannot see a budget.
+>
+> **A leak check that samples on a timer measures the transient, not the leak.**
+> First version took one reading at a fixed delay after each lap and reported
+> `+7` between two laps and `-7` back again on the next, on a run whose resting
+> depth was 9 every single lap — it had simply caught an upload mid-flight. Laps
+> are sampled at REST now (poll until two consecutive identical readings). Same
+> trap as the A5 draw-call gate: **when a check's signal is a few units and its
+> window is seconds long, it is not measuring what it names unless something
+> proves the scene had stopped changing.**
+>
+> Two smaller things. A sampler uniform is the one place a texture can sit where
+> disposing everything around it still leaks it — `material.dispose()` frees the
+> PROGRAM, and three has no ownership relationship between a ShaderMaterial and
+> a uniform's value — so `skyDome.dispose()` now releases the bound panorama
+> too (latent: nothing calls it, because the dome outlives every switch). And
+> `skyTextureState()` had been described in its own comment as being "for the
+> harness and the panel" since the panoramas landed, while being reachable from
+> neither, because nothing forwarded it onto `__BIRB`. It is the control that
+> tells "the ledger is flat because disposal works" apart from "the ledger is
+> flat because no sky was ever bound" — the same number, opposite facts.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.
@@ -1275,6 +1322,7 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `docs/ULTRACODE_REALISM_PLAN.md` | How to run the realism backlog with an agent fleet: the tiering law + art corollary, the 16-wave plan, the cost model, and the blind paired forced-choice check that is the only thing able to catch a green stage that did not improve the game |
 | `docs/realism/AUTHORED_ASSETS.md` | The authored-asset contract + the brief an external image agent (Codex) works from. Root Birb only — the siblings keep their zero-asset rules |
 | `tools/asset-check.mjs` | Structural acceptance for authored textures (tiling, baked light, colour space by suffix, POT, budget). Runs in CI over `assets/`; empty root exits 0 |
+| `tools/birb-textures.mjs` | GL-texture leak gate: hooks the driver's `createTexture`/`deleteTexture`, drives all four biomes for three laps, fails if the live count keeps growing after lap 1. The runtime half of `assets/MANIFEST.md`'s per-biome budget; runs in Browser Health |
 | `CODEBASE_EVALUATION.md` | Four-domain evaluation: scorecard, findings, prioritized roadmap |
 | `gauntlet/ARCHITECTURE.md` | Birb Gauntlet (`/gauntlet`) — read before touching it |
 | `sculpture/ARCHITECTURE.md` | Bronze (`/sculpture`) — module map, invariants, verification, plan |

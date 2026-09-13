@@ -6398,7 +6398,15 @@
           try {
             const url = `./assets/env/${variantId}_sky.png`;
             const tex = loadAuthoredTexture(THREE, url, {
-              onError: () => { if (token === skyTexToken) skyDome.setSkyTexture(null); },
+              // A stale token means a later switch already owns the dome, so
+              // this load has nowhere to go. Release it rather than dropping
+              // the reference: the dome never took it, so nothing else is
+              // going to. See the onLoad note below for what that is and is
+              // not worth.
+              onError: () => {
+                if (token === skyTexToken) skyDome.setSkyTexture(null);
+                else tex.dispose();
+              },
               // Raise the mix ONLY once the image has decoded. TextureLoader
               // hands back the Texture immediately and fills it in later, so
               // switching the dome on at call time switches it to an EMPTY
@@ -6406,7 +6414,24 @@
               // upper half of the screen renders SOLID BLACK for the length
               // of the download. Invisible on a dev box off localhost, and
               // several seconds of void on a phone on a cold connection.
-              onLoad: () => { if (token === skyTexToken) skyDome.setSkyTexture(tex, { mix }); },
+              //
+              // The stale branch disposes. Scoped honestly: this is NOT the
+              // 34.7 MB GL leak (that was the dome rebinding without
+              // disposing, fixed in sky-dome.js). A panorama that lands stale
+              // was never bound to the uniform, so three never uploaded it and
+              // no GL texture exists to free -- measured with
+              // `tools/birb-textures.mjs --dwell 120`, which switches faster
+              // than the skies can decode and still rests at a flat ledger.
+              // What it frees is the DECODED IMAGE (1024x512x4 = 2 MB of JS
+              // heap) at a known moment instead of whenever GC next runs, on a
+              // path a player triggers by tapping through biomes on a slow
+              // connection -- exactly when the heap is least able to spare it.
+              // It also makes the ownership rule uniform: whoever asked for a
+              // sky releases it unless the dome took it off their hands.
+              onLoad: () => {
+                if (token === skyTexToken) skyDome.setSkyTexture(tex, { mix });
+                else tex.dispose();
+              },
             });
             // A sky is a picture, so it decodes as sRGB -- unlike every other
             // authored map in this game, which is data. It also must not
@@ -11834,6 +11859,14 @@
           visible: weather.points.visible,
           profile: weather.profile,
         } : null),
+        // What the dome is actually showing. sky-dome.js has exposed this
+        // since the panoramas landed, described in its own comment as being
+        // "for the harness and the panel" -- and it was reachable from
+        // neither, because nothing ever forwarded it onto __BIRB. The leak
+        // check (tools/birb-textures.mjs) wants it to tell "the ledger is flat
+        // because disposal works" apart from "the ledger is flat because no
+        // sky was ever bound", which are the same number and opposite facts.
+        skyTextureState: () => (skyDome?.skyTextureState ? skyDome.skyTextureState() : null),
         // Fly to the slalom course's first checkpoint gate and look down it.
         // The Run is at a fixed anchor, so without this a capture of it is a
         // matter of flying around until you find it.

@@ -180,6 +180,33 @@ export function createSkyDome(options = {}) {
   const _scratchHorizon = new THREE.Color();
   const _white = new THREE.Color(1, 1, 1);
 
+  /**
+   * Bind (or clear) the dome's authored panorama. Named closure rather than a
+   * method on the returned object so `dispose()` can reuse it without going
+   * through `this` -- `const { dispose } = createSkyDome()` is a perfectly
+   * ordinary thing for a caller to write, and a `this.setSkyTexture(null)` in
+   * dispose would throw on it.
+   */
+  function setSkyTexture(texture, { mix = 1, rotation = 0 } = {}) {
+    // Dispose the OUTGOING panorama before rebinding. Three frees a
+    // texture's GPU storage only on .dispose(), never on unbind, so without
+    // this every environment switch leaked the previous biome's 1024x512
+    // sky -- 2.67 MB decoded with mips -- and the "one biome resident at a
+    // time" model the asset budget rests on was quietly false. Found by an
+    // adversarial verifier auditing that model, not by a leak report; the
+    // regression oracle is `node tools/birb-textures.mjs`, which hooks the
+    // driver's own createTexture/deleteTexture and measures +4 live textures
+    // per four-biome lap with these three lines removed.
+    const previous = material.uniforms.uSkyTexture.value;
+    if (previous && previous !== texture && typeof previous.dispose === 'function') {
+      previous.dispose();
+    }
+    material.uniforms.uSkyTexture.value = texture || null;
+    material.uniforms.uSkyMix.value = texture ? Math.max(0, Math.min(1, mix)) : 0;
+    material.uniforms.uSkyRotation.value = rotation;
+    material.needsUpdate = true;
+  }
+
   return {
     mesh,
     /**
@@ -240,22 +267,7 @@ export function createSkyDome(options = {}) {
      * wherever `keyLight` is -- and a sky whose glow disagrees with the light
      * on the ground reads as a bug even when both halves are lovely.
      */
-    setSkyTexture(texture, { mix = 1, rotation = 0 } = {}) {
-      // Dispose the OUTGOING panorama before rebinding. Three frees a
-      // texture's GPU storage only on .dispose(), never on unbind, so without
-      // this every environment switch leaked the previous biome's 1024x512
-      // sky -- 2.67 MB decoded with mips -- and the "one biome resident at a
-      // time" model the asset budget rests on was quietly false. Found by an
-      // adversarial verifier auditing that model, not by a leak report.
-      const previous = material.uniforms.uSkyTexture.value;
-      if (previous && previous !== texture && typeof previous.dispose === 'function') {
-        previous.dispose();
-      }
-      material.uniforms.uSkyTexture.value = texture || null;
-      material.uniforms.uSkyMix.value = texture ? Math.max(0, Math.min(1, mix)) : 0;
-      material.uniforms.uSkyRotation.value = rotation;
-      material.needsUpdate = true;
-    },
+    setSkyTexture,
 
     /** Read back what is actually in force, for the harness and the panel. */
     skyTextureState() {
@@ -286,6 +298,21 @@ export function createSkyDome(options = {}) {
     dispose() {
       geometry.dispose();
       material.dispose();
+      // The bound panorama too. `material.dispose()` frees the PROGRAM, not the
+      // textures its uniforms point at -- three has no ownership relationship
+      // between a ShaderMaterial and a sampler uniform's value, so a uniform is
+      // the one place a texture can sit where disposing everything around it
+      // still leaks it. Routed through setSkyTexture(null) rather than repeating
+      // the dispose here, so there is exactly ONE place in this file that knows
+      // how to let a sky go and it cannot drift from the rebind path.
+      //
+      // Latent today: nothing calls this, because the dome deliberately outlives
+      // every environment switch (it is added straight to `scene`, not to the
+      // world `spherical-world.js` tears down) and the page is gone by the time
+      // it would matter. It is here so that whoever DOES start disposing the dome
+      // -- a teardown for the mode-switch path, a test that builds domes in a
+      // loop -- does not have to rediscover the leak that cost this file a pass.
+      setSkyTexture(null);
     }
   };
 }

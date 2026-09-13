@@ -160,8 +160,10 @@ decisive either way — noted by the checker, not a failure.
 `tools/asset-check.mjs`'s plain directory sum charges every authored texture
 at once, but the runtime never holds more than one biome's *world props* at
 once: environment switches in `spherical-world.js` dispose the previous
-biome's prop textures before building the next. The directory total below
-(29.33 MB) is therefore not the number the 24 MB budget was ever meant to
+biome's prop textures before building the next, and `sky-dome.js` disposes the
+outgoing panorama on rebind (it has to do its own — the dome is added straight
+to `scene`, so the world teardown never sees it). The directory total below
+(32.67 MB) is therefore not the number the 24 MB budget was ever meant to
 bound — the worst SINGLE biome's resident set is, and that is what
 `tools/asset-check.mjs` computes and fails on, from this table. A file
 present under `assets/` but missing from this table is charged in EVERY
@@ -170,10 +172,12 @@ a file that ships but is never fetched at runtime gets the literal cell
 `none` instead of a biome list, so it is not silently over-charged either
 (`textures/forest_ground_normal.png` below).
 
-**REFUTED and corrected here, twice.** A prior pass of this table charged
-each file once per biome regardless of how many materials in that biome
-actually load it, and charged each sky panorama to exactly one biome. Both
-undercounted a real number:
+**REFUTED twice, and one of the two corrections has since been retired.** A
+prior pass of this table charged each file once per biome regardless of how
+many materials in that biome actually load it — that undercount was real and
+the fix stands. It also charged each sky panorama to exactly one biome, which
+was an undercount only for as long as the dome leaked; that charge has now gone
+back to one biome each, because the runtime earned it. Both, in order:
 
 - **`loadTexture` creates a fresh `Texture` — a fresh GPU upload — per
   `apply*` call.** A file two materials in the same biome each call it for
@@ -182,23 +186,30 @@ undercounted a real number:
   forest (the landmark trunk's `barkMat` + every instanced trunk's
   `trunkMat` — bark_pine in mountain is a single consumer, `pineTrunkMat`,
   and stays x1 there). Marked below as `biome xN`.
-- **The sky panoramas leak.** `skyDome.setSkyTexture(null)` only nulls the
-  uniform; it never disposes the outgoing texture, and the dome sits outside
-  the world teardown `spherical-world.js` runs on every switch. Measured by
-  hooking `createTexture`/`deleteTexture` across 12 environment switches: the
-  default path holds 13 more live GL textures than a `?skytex=0` run after
-  four biomes — ~34.7 MB of leaked panoramas, already past this budget on its
-  own. That fix is `sky-dome.js`/`index.html`, outside this file's
-  ownership, so until it lands every sky row below lists all four biomes —
-  the honest worst case is "every sky ever opened this session may still be
-  resident," not "only the current one is."
+- **The sky panoramas leaked, and no longer do — so this table was corrected
+  back.** `skyDome.setSkyTexture(null)` used to only null the uniform, never
+  disposing the outgoing texture, and the dome sits outside the world teardown
+  `spherical-world.js` runs on every switch — so every sky a session had ever
+  opened stayed resident. Measured at the time by hooking
+  `createTexture`/`deleteTexture` across 12 environment switches: 13 more live
+  GL textures than a `?skytex=0` run, ~34.7 MB of leaked panoramas. While that
+  stood, every sky row below listed all four biomes, because the honest worst
+  case really was "every sky ever opened may still be resident."
+  `setSkyTexture` now disposes the outgoing panorama before rebinding, so each
+  row is back to its own biome. **That is a claim about the runtime, not about
+  this file, and it is re-checkable:** `node tools/birb-textures.mjs` hooks the
+  driver's texture ledger and drives all four biomes for three laps. It
+  measures a flat 16 live textures per lap today, and **+4 per lap — one
+  orphaned panorama per switch — with the three-line dispose removed again.**
+  If that tool ever goes red, these four rows are lying and must go back to
+  all-four until it is green.
 
 | File | Biomes |
 |---|---|
-| `env/forest_sky.png` | forest, canyons, mountain, city |
-| `env/canyons_sky.png` | forest, canyons, mountain, city |
-| `env/mountain_sky.png` | forest, canyons, mountain, city |
-| `env/city_sky.png` | forest, canyons, mountain, city |
+| `env/forest_sky.png` | forest |
+| `env/canyons_sky.png` | canyons |
+| `env/mountain_sky.png` | mountain |
+| `env/city_sky.png` | city |
 | `textures/bark_pine_albedo.png` | forest x2, mountain |
 | `textures/bark_pine_normal.png` | forest x2, mountain |
 | `textures/stone_rock_albedo.png` | forest |
@@ -218,23 +229,33 @@ undercounted a real number:
 | `textures/city_concrete_albedo.png` | city x3 |
 | `textures/city_concrete_normal.png` | city x3 |
 
-**Worst biome, honestly recomputed: forest at ~20.00 MB** (four skies at
-2.67 MB each = 10.67 MB, shared across every biome by the leak; + bark_pine
-albedo/normal at 2 uploads each = 2.67 MB each; + stone_rock albedo/normal at
-1.33 MB each; + forest_ground_albedo at 1.33 MB — forest_ground_normal is
-`none` and adds nothing). Mountain follows at ~18.66 MB (skies 10.67 + one
-bark_pine upload each 1.33 + granite albedo/normal 1.33 each + snow
-albedo/normal 1.33 each). City is ~18.67 MB (skies 10.67 + concrete
-albedo/normal at 3 uploads each, 4.0 MB each). Canyons is ~16.00 MB (skies
-10.67 + sandstone albedo/normal at 2 uploads each, 2.67 MB each). All four
-are still inside the unchanged 24 MB budget — correcting the two undercounts
-above did not blow it, it just closed the gap between the number this table
-reported and the number a real session can actually reach. **Watched fail,
-not assumed to fail**: temporarily reverting a sky row to one biome, or a
-`x2`/`x3` cell back to a bare biome name, undercounts exactly as the refuted
-version did; temporarily listing every file under a single `forest` row
-pushes it to the full 29.33 MB and `asset-check` goes red, both exactly as
-they should — the table above is the corrected mapping.
+**Worst biome: forest at ~15.33 MB of a 24 MB budget**, as
+`node tools/asset-check.mjs assets/` reports it. Every total below carries a
+flat **+3.33 MB bird tax** that no biome can shed, because the bird is in all
+four: feather_contour and feather_vane albedo at 1.33 MB each plus their 256
+normals at 0.33 MB each. Split out rather than folded in, so a reader can see
+which part of each number belongs to the world and which to the one object
+that is always on screen.
+
+| Biome | World | + bird | Reported | Made of |
+|---|---|---|---|---|
+| forest | 12.00 | 3.33 | **15.33** | own sky 2.67 + bark_pine albedo/normal at 2 uploads each (2.67 each) + stone_rock albedo/normal (1.33 each) + forest_ground_albedo 1.33 (forest_ground_normal is `none`) |
+| mountain | 10.67 | 3.33 | **14.00** | own sky 2.67 + one bark_pine upload each (1.33 each) + granite albedo/normal (1.33 each) + snow albedo/normal (1.33 each) |
+| city | 10.67 | 3.33 | **14.00** | own sky 2.67 + concrete albedo/normal at 3 uploads each (4.0 each) |
+| canyons | 8.00 | 3.33 | **11.33** | own sky 2.67 + sandstone albedo/normal at 2 uploads each (2.67 each) |
+
+Each biome now carries **its own sky only** (2.67 MB), not all four — that is
+the dispose fix above, and it took ~8 MB off every row. The headroom is real
+but it is **not budget to spend**: it exists because a leak was closed, and the
+24 MB ceiling stays where it is. A session revisiting biomes must return to the
+same resident set, which is what `tools/birb-textures.mjs` exists to assert.
+
+**Watched fail, not assumed to fail**: temporarily charging a sky row to all
+four biomes again pushes forest to 23.33 MB, and a `x2`/`x3` cell reverted to a
+bare biome name undercounts exactly as the refuted version did; temporarily
+listing every file under a single `forest` row pushes it to the full 32.67 MB
+and `asset-check` goes red. All three move the number, which is how this table
+is known to be load-bearing rather than decorative.
 
 `bark_pine_rough.png` was delivered in the same commit and **is not here**: it spans
 0.145 across 37 of 256 values, which the gate rejects as a constant wearing a

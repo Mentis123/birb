@@ -9,7 +9,8 @@ name: Browser Health
 #
 # This job runs the real page in a real browser and asserts the game is
 # working, not merely painting. It is deliberately short: one start, one
-# nested landing, and all five game modes.
+# nested landing, all five game modes, every shader compiled, and a session
+# that revisits biomes without accumulating GL textures.
 
 on:
   pull_request:
@@ -41,6 +42,8 @@ jobs:
     #   birb-shot --start --nest ~40s
     #   birb-modes                ~46s
     #   birb-shaders               ~26s
+    # plus one added since (measured on this tree, 2026-09-13, single run):
+    #   birb-textures --laps 3   ~33s
     # (docs/perf/gates/G2c.md §3.3 measured 60s/21s/31s for the same three
     # birb-quality steps on its own run; the numbers move a little between
     # runs on this box, neither set was invented, and both are well inside
@@ -101,6 +104,27 @@ jobs:
         # visited because a material that lives in one of them is exactly the
         # kind nothing else covers.
         run: node tools/birb-shaders.mjs
+
+      - name: A session that revisits biomes does not accumulate GL textures
+        # The sky dome is added straight to `scene`, so the per-switch world
+        # teardown in spherical-world.js has never had an opinion about the
+        # panorama bound to its uniform. When that rebind did not dispose, every
+        # environment switch leaked a 1024x512 sky (2.67 MB decoded with mips)
+        # and NOTHING here could see it: the frame renders, the draw-call budget
+        # does not move (it is the same one dome), asset-check.mjs reasons about
+        # files on disk rather than uploads in the driver, and the growth is in
+        # GPU memory that performance.memory does not report. This step hooks
+        # the driver's own createTexture/deleteTexture and drives all four
+        # biomes for three laps: lap 1 may populate, every lap after it revisits
+        # and must return to the same resident set. Measured on this tree: flat
+        # at 16 live textures per lap, ~33s, and +4 per lap with the three-line
+        # dispose in sky-dome.js removed again.
+        #
+        # It is also the runtime half of assets/MANIFEST.md's per-biome budget,
+        # which charges each sky to ONE biome. That charge is only honest while
+        # this step is green; tests/asset-residency.test.js says so too, and
+        # says what to do if it goes red.
+        run: node tools/birb-textures.mjs --laps 3
 
       # --- Wave 2 quality-assertion checks. Added after the four steps
       # above on purpose (see the comment block at the top of this list).

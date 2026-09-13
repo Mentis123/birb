@@ -27,13 +27,26 @@ import path from 'node:path';
  *      one). A prior pass of the table always charged x1 regardless, which
  *      undercounted canyon_sandstone (2 materials), city_concrete (3) and
  *      forest's own bark_pine (2).
- *   2. Every sky panorama is charged to ALL FOUR biomes, not one, because
- *      `skyDome.setSkyTexture(null)` never disposes the outgoing texture and
- *      the dome sits outside spherical-world.js's per-switch teardown — so
- *      a session that has opened every biome once can be holding all four
- *      sky textures no matter which one it is standing in now. Charging one
- *      sky per biome (the prior table) was true only of a runtime that does
- *      not leak, and this one measurably does.
+ *   2. Each sky panorama is charged to EXACTLY ONE biome — its own — because
+ *      `setSkyTexture` disposes the outgoing panorama before rebinding, so a
+ *      session that has opened every biome holds only the sky it is standing
+ *      in. This row was briefly the opposite: while the dome leaked (it only
+ *      nulled the uniform, and it sits outside spherical-world.js's per-switch
+ *      teardown), every sky was charged to all four biomes, because the honest
+ *      worst case was "every sky ever opened may still be resident."
+ *
+ *      THAT COMPENSATION IS NOW RETIRED, AND THIS TEST IS ITS OTHER HALF.
+ *      A one-sky-per-biome charge is only honest if the runtime really does
+ *      dispose, and nothing in this file can see the runtime — it reads a
+ *      markdown table and a CLI's arithmetic. The runtime half is
+ *      `node tools/birb-textures.mjs`, which hooks the driver's own
+ *      createTexture/deleteTexture and asserts the live count goes flat once
+ *      a session starts revisiting biomes (measured: flat at 16 live across
+ *      three laps; +4 per lap with the dispose removed). If that tool goes
+ *      red, the four sky rows in MANIFEST.md are lying and must go back to
+ *      listing all four biomes until it is green again. Neither check is
+ *      sufficient alone: this one cannot see a leak, and that one cannot see
+ *      a budget.
  */
 
 const ROOT = path.join(import.meta.dirname, '..');
@@ -75,33 +88,73 @@ test('a file consumed by two or three materials in one biome is charged that man
   // reader can see which part of each number belongs to the world and which
   // part belongs to the one object that is always on screen.
   const BIRD = 3.333;
-  // canyons: canyon_sandstone x2 (spireMat + darkSpireMat), 1.333 MB each file
-  // x2 files x2 uploads = 5.33 MB of canyon_sandstone alone, plus 4 leaked
-  // skies at 2.667 MB = 10.67 MB -> 16.00 MB of world, not the 13.33 MB an x1
-  // charge (or a non-leaking single sky) would give.
-  assert.ok(Math.abs(biomeTotals.canyons - (16.00 + BIRD)) < 0.05,
-    `canyons resident ${biomeTotals.canyons} MB -- expected ~${(16.00 + BIRD).toFixed(2)} (x2 sandstone charge missing?)`);
-  // city: city_concrete x3 (three buildingMats), same shape.
-  assert.ok(Math.abs(biomeTotals.city - (18.67 + BIRD)) < 0.05,
-    `city resident ${biomeTotals.city} MB -- expected ~${(18.67 + BIRD).toFixed(2)} (x3 concrete charge missing?)`);
+  // Every biome also carries its OWN sky and no other, which is the dispose
+  // fix (see the header). Named so the x2/x3 arithmetic below stays readable
+  // and so a sky-charge regression moves these numbers somewhere visible
+  // rather than hiding inside a literal.
+  const OWN_SKY = 2.667;
+  // Each literal below is the biome's PROP textures only -- no sky, no bird --
+  // so the three terms stay separately checkable. Fold the sky into the prop
+  // figure and a sky regression and a prop regression become the same number.
+  // canyons: canyon_sandstone x2 (spireMat + darkSpireMat), 1.333 MB per file
+  // x2 files x2 uploads = 5.33 MB of sandstone alone, not the 2.67 MB an x1
+  // charge would give.
+  assert.ok(Math.abs(biomeTotals.canyons - (5.333 + OWN_SKY + BIRD)) < 0.05,
+    `canyons resident ${biomeTotals.canyons} MB -- expected ~${(5.333 + OWN_SKY + BIRD).toFixed(2)} (x2 sandstone charge missing?)`);
+  // city: city_concrete x3 (three buildingMats), same shape -- 1.333 per file
+  // x2 files x3 uploads = 8.00 MB.
+  assert.ok(Math.abs(biomeTotals.city - (8.00 + OWN_SKY + BIRD)) < 0.05,
+    `city resident ${biomeTotals.city} MB -- expected ~${(8.00 + OWN_SKY + BIRD).toFixed(2)} (x3 concrete charge missing?)`);
   // forest: bark_pine x2 (landmark trunk + every instanced trunk) + stone_rock
   // x1 (the arch) + forest_ground_albedo x1 (the triplanar overlay, forest
   // only) + forest_ground_normal x0 (`none` -- never fetched). This is the
   // worst biome and therefore the one the 24 MB gate actually scores.
-  assert.ok(Math.abs(biomeTotals.forest - (20.00 + BIRD)) < 0.05,
-    `forest resident ${biomeTotals.forest} MB -- expected ~${(20.00 + BIRD).toFixed(2)}`);
+  assert.ok(Math.abs(biomeTotals.forest - (9.333 + OWN_SKY + BIRD)) < 0.05,
+    `forest resident ${biomeTotals.forest} MB -- expected ~${(9.333 + OWN_SKY + BIRD).toFixed(2)}`);
 });
 
-test('every biome carries all four skies, because the sky texture leaks across environment switches', skip, () => {
-  const { biomeTotals } = run();
-  // Each biome's total must be at least 4 * 2.667 MB just from sky panoramas
-  // (they cannot dip below that floor regardless of what else is in the
-  // biome), which is only true if every sky row lists all four biomes.
-  const SKY_FLOOR = 4 * 2.667 - 0.05;
+test('each sky panorama is charged to its own biome and no other', skip, () => {
+  const manifestPath = path.join(ROOT, 'assets', 'MANIFEST.md');
+  const whole = fs.readFileSync(manifestPath, 'utf8');
+  // Scoped to the residency section. Every sky appears TWICE in this file: once
+  // in the provenance table at the top, whose second column is a description --
+  // so an unscoped match reads the biome cell as "RGB LDR equirectangular
+  // environment" and the assertion fails for a reason that has nothing to do
+  // with residency.
+  const cut = whole.indexOf('## Per-biome resident set');
+  assert.ok(cut > 0, 'the "## Per-biome resident set" heading moved -- this test is reading the wrong table');
+  const manifest = whole.slice(cut);
+  // Read the rows rather than inferring from the totals: four skies charged one
+  // each and one sky charged to four biomes differ by 8 MB in the totals, but a
+  // total is a sum and a sum can be made to agree by accident. The row is the
+  // claim.
   for (const biome of ['forest', 'canyons', 'mountain', 'city']) {
-    assert.ok(biomeTotals[biome] >= SKY_FLOOR,
-      `biome ${biome} is ${biomeTotals[biome]} MB, below the 4-sky floor ${SKY_FLOOR.toFixed(2)} -- `
-      + 'a sky row regressed to listing fewer than all four biomes');
+    const row = new RegExp(`\\|\\s*\`env/${biome}_sky\\.png\`\\s*\\|([^|]*)\\|`);
+    const m = manifest.match(row);
+    assert.ok(m, `no residency row for env/${biome}_sky.png`);
+    const cell = m[1].trim();
+    assert.equal(cell, biome,
+      `env/${biome}_sky.png is charged to "${cell}", expected exactly "${biome}". `
+      + 'If the dome started leaking again, this row going back to all four biomes is '
+      + 'the CORRECT response -- but fix tools/birb-textures.mjs red first, and flip '
+      + 'this assertion deliberately rather than to make a suite green.');
+  }
+});
+
+test('the sky charge is what separates the budget from the leak, and it is worth 8 MB', skip, () => {
+  // The compensation this test replaced cost every biome 8 MB (three foreign
+  // skies at 2.667). Asserting the SIZE of that gap, not just the current
+  // totals, is what stops the sky rows being quietly widened again as cheap
+  // headroom relief: doing so is a 32 MB worst case, and the 24 MB ceiling
+  // would catch it -- but only while somebody knows that is what happened.
+  const { biomeTotals, worstMb } = run();
+  const FOREIGN_SKIES = 3 * 2.667;
+  assert.ok(worstMb < 24 - FOREIGN_SKIES + 0.05,
+    `worst biome ${worstMb} MB is within 8 MB of the 24 MB ceiling -- either a sky row `
+    + 'widened back to all four biomes, or the authored set genuinely grew. Check which.');
+  for (const biome of ['forest', 'canyons', 'mountain', 'city']) {
+    assert.ok(biomeTotals[biome] >= 2.667 - 0.05,
+      `biome ${biome} is ${biomeTotals[biome]} MB, below one sky's 2.67 -- its own sky row went missing`);
   }
 });
 
@@ -120,24 +173,26 @@ test('a file the manifest marks `none` costs nothing anywhere, and is not treate
 // Watched failing, not assumed to fail: a direct sabotage of the manifest
 // table, run against a temp copy so the real file is never touched, proves
 // the two REFUTED undercounts really do move the reported number.
-test('reverting a sky row to one biome measurably undercounts every OTHER biome', skip, () => {
+test('widening a sky row back to all four biomes measurably overcharges every OTHER biome', skip, () => {
   const manifestPath = path.join(ROOT, 'assets', 'MANIFEST.md');
   const original = fs.readFileSync(manifestPath, 'utf8');
   const sabotaged = original.replace(
-    '| `env/forest_sky.png` | forest, canyons, mountain, city |',
     '| `env/forest_sky.png` | forest |',
+    '| `env/forest_sky.png` | forest, canyons, mountain, city |',
   );
   assert.notEqual(sabotaged, original, 'the row to sabotage was not found -- test is stale');
   fs.writeFileSync(manifestPath, sabotaged);
   try {
     const { biomeTotals } = run();
-    // canyons/mountain/city each lose one sky's worth (2.667 MB) they should
-    // still be charged for, since the leak means forest_sky can still be
-    // resident when standing in any of them.
-    // 16.00 of world + 3.33 of bird, less one sky's 2.667: the threshold moves
-    // with the baseline it is measured against, or this stops testing the sky.
-    assert.ok(biomeTotals.canyons < 16.00 + 3.333 - 2.0,
-      `sabotaged canyons total ${biomeTotals.canyons} did not drop -- the fix has no effect`);
+    // canyons/mountain/city each gain forest_sky's 2.667 MB they no longer
+    // carry. Proves the table is load-bearing: the one-biome cell really is
+    // what takes 8 MB off each row, not a coincidence of the arithmetic.
+    // Baseline canyons is 5.333 props + 2.667 own sky + 3.333 bird = 11.33;
+    // gaining forest_sky takes it to ~14.00. The 2.0 margin is most of one
+    // sky, so a no-op edit cannot satisfy it.
+    assert.ok(biomeTotals.canyons > 5.333 + 2.667 + 3.333 + 2.0,
+      `sabotaged canyons total ${biomeTotals.canyons} did not rise -- the sky row has no effect, `
+      + 'so the one-biome charge this suite asserts is not actually what produces the number');
   } finally {
     fs.writeFileSync(manifestPath, original); // restore even if an assertion above throws
   }
