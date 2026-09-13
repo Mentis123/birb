@@ -806,6 +806,37 @@
 > bird's frame needs the inverse and the stub lacked a method three has always
 > had — two existing flight tests failed on it before it was added.
 
+> **"An airplane more than a bird" — and MEASURE THE RENDER, NOT THE
+> CONSTANTS** (2026-09-13, night). The wing planform is a table now
+> (`WING_PROFILES`, `?wing=v3|slim|parrot|stocky`), default `parrot`.
+>
+> The first diagnosis was wrong and worth recording. Computing aspect ratio
+> (span squared over area) from the feather plates' own width constants gives
+> **9.1** — glider territory, a tidy story, and false: the plates FAN and
+> OVERLAP, so the wing's real chord is far deeper than any single plate.
+> Measured off a top-down capture instead (span and chord in pixels, sampled
+> at three stations along each wing), the shipped wing is **AR 6.3** — already
+> inside the range a parrot occupies. A plan built on the 9.1 would have cut
+> the span about twice as hard as it needed cutting.
+>
+> **The pointed tip was most of the aircraft read, not the slenderness.**
+> Primary length rose monotonically outward (0.74 -> 1.00), so the OUTERMOST
+> feather was the longest and the wing swept to a dart. A round wing's longest
+> primary sits about a third of the way out and the tips curve back in from
+> there; `round` switches that length from a ramp to a hump, and in the
+> top-down tile it is the first thing you see change. Measured across the four
+> profiles: span 3.55/3.40/3.15/2.89, AR 6.3/5.7/5.1/4.6, and **1,518
+> triangles in every one of them** — planform is free. `stocky` (4.6) goes too
+> far: the wings start to read as too small for the body rather than as a
+> stocky parrot's. `parrot` (5.1) also hands the bronze coverts most of the
+> wing's area, which is the point of a bronze-WINGED bird.
+>
+> One trap the change introduced and closed: `tipFeather` (the ribbon trail's
+> anchor, and what `birdPose().leftTip` reports) was taken from the LAST
+> primary in the loop. With a rounded tip that is the SHORTEST one, so the
+> anchor would have jumped a third of the hand inboard. It tracks the
+> furthest-reaching primary now.
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose

@@ -3694,7 +3694,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v64-2026-09-13-pionus-level-turns';
+    const BIRB_BUILD = 'v65-2026-09-13-parrot-wing';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -8069,7 +8069,55 @@
       // The rig rotates the arm at the shoulder and the hand at the wrist, one
       // lagging the other, which is what makes a wing read as jointed instead
       // of as a board that happens to be feather-shaped.
-      const WRIST_Z = 0.86;   // along the wing's span axis, from the shoulder
+      // -- Wing planform ----------------------------------------------------
+      //
+      // Reported as "an airplane more than a bird". It measures, and the
+      // useful number is ASPECT RATIO — span squared over area — not span.
+      //
+      // MEASURE THE RENDER, NOT THE CONSTANTS. Computing AR from the feather
+      // plates' own widths gives 9.1 for the shipped wing, which is glider
+      // territory and is WRONG: the plates fan and overlap, so the wing's
+      // real chord is much deeper than any one plate. Measured off a
+      // top-down capture instead (span and chord in pixels, sampled at three
+      // stations along each wing), the shipped wing is **AR 6.3** — already
+      // inside the range a parrot occupies (~5-6). So raw slenderness was
+      // only part of it, and a plan built on the 9.1 would have cut the span
+      // roughly twice as hard as it needed to be cut.
+      //
+      // The rest of the aircraft read is SHAPE, and the pointed tip is most
+      // of it:
+      //
+      //  - **The tip came to a point.** Primary length rose monotonically
+      //    outward (0.74 -> 1.00), so the OUTERMOST feather was the longest
+      //    and the wing swept to a dart. A round wing's longest primary sits
+      //    about a third of the way out and the tips curve back in from
+      //    there. `round` switches that length from a ramp to a hump, and in
+      //    the top-down capture it is the single change you see first.
+      //  - **Constant chord.** A rectangle is a wing plan nothing alive has.
+      //    `chord` scales every plate's width, and the secondaries widen more
+      //    than the primaries do, which tapers the planform on its own.
+      //
+      // Span, chord and AR measured off the top-down tile of each profile;
+      // triangle count is IDENTICAL across all four (1,518), so this costs
+      // nothing. `?wing=<key>` selects one; `?wing=v3` is the shipped-before.
+      const WING_PROFILES = {
+        // span 3.55, AR 6.3 — what shipped. Long, thin, pointed.
+        v3:    { wrist: 0.86, chord: 1.00, prim: 1.00, round: 0 },
+        // span 3.40, AR 5.7 — rounded tip, barely shorter. Still a dart.
+        slim:  { wrist: 0.78, chord: 1.14, prim: 0.93, round: 1 },
+        // span 3.15, AR 5.1 — THE DEFAULT. Broad, round-tipped, and the
+        // bronze coverts now own most of the wing, which is the whole point
+        // of a bronze-WINGED bird.
+        parrot:{ wrist: 0.70, chord: 1.26, prim: 0.86, round: 1 },
+        // span 2.89, AR 4.6 — stubby; the wings start to read as too small
+        // for the body rather than as a stocky parrot's.
+        stocky:{ wrist: 0.62, chord: 1.38, prim: 0.78, round: 1 },
+      };
+      const wingProfile = WING_PROFILES[
+        (/[?&]wing=([a-z0-9]+)/i.exec(window.location?.search || '') || [])[1]
+      ] || WING_PROFILES.parrot;
+      const WRIST_Z = wingProfile.wrist;   // along the wing's span axis, from the shoulder
+      const WING_CHORD = wingProfile.chord;
       const buildWingV3 = (side) => {
         const arm = new THREE.Group();
 
@@ -8082,7 +8130,11 @@
           const t = i / (SEC - 1);
           const len = 0.54 + t * 0.22;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.165, backW: 0.250, tipTaper: 0.14, segments: 4,
+            // The secondaries widen MORE than the primaries do (the extra
+            // 0.10), because a wing that deepens uniformly is still a
+            // rectangle. This is what puts the taper in the planform.
+            length: len, frontW: 0.165 * (WING_CHORD + 0.10), backW: 0.250 * (WING_CHORD + 0.10),
+            tipTaper: 0.14, segments: 4,
             bow: 0.018, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.18, len);
@@ -8104,7 +8156,8 @@
           const t = i / (COV - 1);
           const len = 0.30 + t * 0.10;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.115, backW: 0.150, tipTaper: 0.16, segments: 3,
+            length: len, frontW: 0.115 * (WING_CHORD + 0.10), backW: 0.150 * (WING_CHORD + 0.10),
+            tipTaper: 0.16, segments: 3,
             bow: 0.012, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.13, len);
@@ -8135,13 +8188,21 @@
         let outermost = null;
         for (let i = 0; i < PRIM; i++) {
           const t = i / (PRIM - 1);
-          // Primaries lengthen outward and SPLAY: the gap between tips widens
-          // toward the outside, which is the finger separation a real wing
-          // shows against the sky and the single most recognisable thing about
-          // a bird's wing tip.
-          const len = 0.74 + t * 0.26;
+          // Primaries SPLAY: the gap between tips widens toward the outside,
+          // which is the finger separation a real wing shows against the sky
+          // and the single most recognisable thing about a bird's wing tip.
+          //
+          // Their LENGTH is either a ramp or a hump. The ramp (what shipped)
+          // makes the outermost feather the longest, which draws the wing to
+          // a swept point — an aircraft's planform. The hump peaks about a
+          // third of the way out and the tips curve back in from there, which
+          // is what makes a parrot's wing tip ROUND.
+          const ramp = 0.74 + t * 0.26;
+          const hump = 1.00 * (1 - 0.42 * Math.pow(Math.abs(t - 0.32) / 0.68, 1.6));
+          const len = (wingProfile.round ? hump : ramp) * wingProfile.prim;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.150, backW: 0.215, tipTaper: 0.16, segments: 4,
+            length: len, frontW: 0.150 * WING_CHORD, backW: 0.215 * WING_CHORD,
+            tipTaper: 0.16, segments: 4,
             bow: 0.022, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.13, len);
@@ -8153,7 +8214,12 @@
             pionus
               ? flightFeather.clone().lerp(featherEdge, 0.10 + t * 0.30)
               : backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
-          if (i === PRIM - 1) outermost = transformedLocalPoint(tipPointOfFeather({ length: len, axis: 'z' }), trs);
+          // Anchor on the primary that actually reaches furthest, not on the
+          // last one in the loop: with a rounded tip the outermost feather is
+          // the SHORTEST, and anchoring the ribbon trail there would move its
+          // origin inboard by a third of the hand.
+          const reach = transformedLocalPoint(tipPointOfFeather({ length: len, axis: 'z' }), trs);
+          if (!outermost || reach.z > outermost.z) outermost = reach;
         }
         const handMesh = new THREE.Mesh(mergeAndDispose(handParts), vaneMat);
         handMesh.name = 'birbWingHand';
