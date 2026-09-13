@@ -92,6 +92,18 @@ jobs:
         # count as failures: that is how the setup bug announced itself.
         run: node tools/birb-modes.mjs
 
+      - name: The bird can stand, walk, stop, reverse and steer
+        # The grounded state had a walk cycle and walk controls for months
+        # and nothing in the repo drove them, so two defects sat in the
+        # shipped build: the perch fold targeted `isNested` alone (a bird
+        # walking on the ground held the full spread-wing glide) and the
+        # walk bob moved along world +Y on a planet where up is radial.
+        # Neither is visible in a screenshot of a bird that happens to be
+        # flying, and neither is reachable from a unit test — the rig lives
+        # in index.html and the state only exists after a real ground
+        # collision.
+        run: node tools/birb-walk.mjs
+
       - name: Every shader compiles, in every environment
         # Three logs a shader error and then quietly draws NOTHING for that
         # material, so the page still renders and a screenshot still exits

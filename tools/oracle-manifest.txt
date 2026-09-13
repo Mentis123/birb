@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-13 at commit 4ee22d3 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-13 at commit a5f28dd by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -56,7 +56,7 @@ f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-ch
 7fcdbfcda1406cb603f084ccf4e76a021fa54ff05166bdaf0e14da16e9414cdc  tests/authored-tints.test.js
 b8096b78960e23a6ae729f5e2af859d6a823749975b2ae78f417e1aefec2411f  tests/bird-contract.test.js
 9cae8aea0b94686678097382c4ae991f967fe6cfe0f4c701b1ba6eb6139e511f  tests/bird-flight.test.js
-4f4f7249e48c116c6a16325664559fa3cc2a429316f0d3565905d8c1a01c7e3d  tests/bird-pose.test.js
+3a8ad03216c2600b6ad326c8c50583a471acab94365bb2234774b3583b625396  tests/bird-pose.test.js
 7ae9a937490a119b0d3f5771ed82a857eaaaac1020db9769b23929755888e039  tests/bloom-target-size.test.js
 4a0bd676e6294603c030d9f0643310a8dee8b12f8b0941a32f5213238f6b2555  tests/build-identity.test.js
 376a5c9c8234dccec3485fac62311cfd7457172f2cac4532269e4a858c3962a0  tests/city-windows.test.js
@@ -150,6 +150,14 @@ e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-she
 61a9d9a531d706cbd740ef062f0616e39acf29b1a1c28dc063f4a0e556238df9  tools/birb-lighting.mjs
 1e76f9c9bffdcbb14a8be5d5f16eebf32ffa9c1312feba3933894a2c4f97889f  tools/birb-modes.mjs
 708d15c40998957495c2548394cd806d602c4255ee7776ac509f64639ff9e76b  tools/birb-shaders.mjs
+# tools/birb-walk.mjs added 2026-09-13 (G-TUCK). It is a Browser Health gate
+# like the two above, and its thresholds are the whole oracle: it is the only
+# thing in the repo that drives the GROUNDED state, and every number in it was
+# set by a measurement (perchBlend > 0.8, wing fold and sweep deltas > 0.3,
+# span < 0.75, idle drift < 0.5 units, walked > 0.8, foot swing > 0.15 rad,
+# foot at rest < 0.05). Loosening any of them to make a red run green is
+# exactly the move R5 exists to make loud.
+007c6528dfb26efeb1e5dab457a21e62ccef8c9dc1db52bf86eefbc99afb34da  tools/birb-walk.mjs
 # --- the contract ------------------------------------------------------------
 edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONTRACT.md
 # --- the coverage oracle (G0: R5 was not enforced on it) ---------------------

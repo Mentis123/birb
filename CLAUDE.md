@@ -530,13 +530,35 @@
 > four images, chained under the rim light's own onBeforeCompile, `?feathers=0`
 > and `?feathernormals=0` for the A/B, v3 only (its UVs tile in surface units;
 > the atlas v2 built assumed a bird-shaped image `asset-check` will never
-> accept). **Measured on the sheet it darkens the rendered bird 18-49%, far
-> more than the 7% the offline solve predicts, with or without normals** — the
-> reading is that the plain bird's belly and back were BLOWN OUT (rim + emissive
-> + key on a near-white vertex colour) and the multiply removes a clipped
-> highlight, which is nonlinear; that is inferred from the composite, not yet
-> measured, and the phone decides. First capture at 4 tiles/unit minified the
+> accept). First capture at 4 tiles/unit minified the
 > 512 sheet 8-20x into mush (detail x0.85-1.29); it is 1.8 now.
+>
+> **CORRECTED 2026-09-13 (evening): the "darkens the bird 18-49%" reading was
+> an artefact of comparing two separate browser boots.** Re-measured against
+> a CONTROL — two boots with the sheets ON in both — the control's own
+> luminance spread is 0.1-3.2% and its mean absolute pixel difference 1.2-3.4
+> of 255, which is the same size as everything that had been attributed to
+> the feathers. Boot-to-boot, the bird's world orientation at freeze differs,
+> so the key light lands at a different angle; `pinTier(0)`, `setSunEnabled
+> (false)`, `setSunTime`, `setBloom({enabled:false})`, `freeze(true)`,
+> `restorePose({position, quaternion})` and `flapPhase()` together pin most
+> of it and the residual (idle flutter, tail sway — both sub-degree, both
+> enough to shift a silhouette by a pixel) still floors the method at about
+> 2/255. **A difference you cannot separate from your own control is not a
+> measurement.**
+>
+> What the sheets actually do, measured with the same control: at a 1.05-unit
+> stand-off the body carries **+40.8% high-frequency detail** against
+> feathers=0 (control +4.2%) and the back +18.8% (control -9.4%) — visibly
+> scalloped contour feathers across the breast and flank. At the 4.2-unit
+> chase stand-off the game actually uses, the difference is -3.8% detail
+> against a -2.4% control: **indistinguishable from noise.** Luminance moves
+> under 3.4% at every distance, so they do not darken the bird meaningfully
+> either. The sheets are real, they are on, and at play distance you cannot
+> see them — the limit is the bird's ~140 px on screen against a 512 sheet at
+> 1.8 tiles/unit, which is a TILING RATE problem (fewer, larger feathers),
+> not a strength problem. Reproduce with the deterministic A/B described
+> above; `?feathers=0` is the off side.
 
 > **The bird was inside out, and the slalom was two yellow towers**
 > (2026-09-13, evening). Both found by the owner flying the shipped build on
@@ -679,6 +701,45 @@
 > SwiftShader at 1 fps that number is meaningless. If the phone's adaptive tier
 > starts dropping where it did not, gate the erosion on `tier < 2` like the
 > ribbons. `?leaves=0` is the control.
+
+> **The bird on its feet: a pose nothing had ever driven** (2026-09-13,
+> late). The owner asked for wings tucked and a walk animation on the ground.
+> Both already existed in the source. Neither had ever run.
+>
+> **`perchBlend` targeted `isNested` alone**, so the fold, the pulled-in span
+> and the dropped tail could only happen in a nest — and **the bird is
+> INVISIBLE at the perch** (`birbAnchor.visible = mode !== FPV`). So the perch
+> pose had shipped for months, was unit-tested in `bird-pose.js`, and had
+> never been seen by anyone. A bird walking on the ground held the full
+> spread-wing glide. It now targets `isNested || isGroundedVisual`.
+>
+> **A tuck is TWO rotations and the pose only had one.** `fold` is dihedral —
+> it drops the wing toward the flank — and a wing that is still standing
+> straight out sideways just becomes a wide V pointing at the ground.
+> `perchPose` gained `sweep`, the ONLY term in the whole rig that writes
+> `rotation.y`, which lays the folded wing back ALONG the body so the
+> primaries trail past the tail. Solved by capture at four fixed poses, not
+> chosen: 0.95 fold / 0 sweep hangs the wing plate below the belly line and
+> the rear view is two thin blades either side of the body; 0.50 / 0.80 swings
+> it back out again, because past ~0.7 rad of sweep the wing points astern
+> rather than lying on the bird. 0.70 / 0.65 absorbs it into the silhouette
+> from every angle the chase camera can reach.
+>
+> **The walk bob moved along WORLD +Y** — `birbAnchor.position.y += sin(...)`
+> — on a planet where up is radial. Correct within sight of the north pole
+> and a progressively sideways shuffle everywhere else. Same rule the ground
+> shader, the flight floor and Wave B's snow term all already follow.
+>
+> **`tools/birb-walk.mjs` is the guard, and it is in CI.** It lands the bird
+> through a real ground collision and then asserts the pose and the controls:
+> wings fold and sweep (and mirror), span pulls in, a bird with no input does
+> not drift, forward moves it and swings the feet, the feet settle when the
+> stick is released, reverse comes back, steering moves it. Mutation-tested by
+> reverting the `perchBlend` fix — three failures, each naming the defect.
+> `__BIRB.birdPose()` is what made any of it checkable: without it, "the wings
+> tuck when grounded" is a claim about source rather than about the bird on
+> screen. **Frames, never milliseconds** — the walk advances per frame and
+> this harness runs at a few frames a second under SwiftShader.
 
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural

@@ -3694,7 +3694,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v62-2026-09-13-organic-pass-wave-b';
+    const BIRB_BUILD = 'v63-2026-09-13-grounded-bird';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5070,6 +5070,9 @@
     // rather than snapped: switching pose on the frame the nesting state flips
     // reads as a dropped frame, not as a bird settling onto a nest.
     let perchBlend = 0;
+    // Scratch for the walk bob's radial up. Module scope, reused, never
+    // allocated in the loop.
+    const _walkUp = new THREE.Vector3();
 
     // Set once the nest launch handler is defined, so the ?debug=1 harness can
     // fire through the same path the on-screen button uses.
@@ -10942,7 +10945,11 @@
         // Perch fold and knockdown tumble. Both mix into the SAME formula
         // rather than running as a parallel animation path, so the mirror
         // rule above still holds for every term.
-        perchBlend = blendToward(perchBlend, isNested ? 1 : 0, delta, 5);
+        // A bird on its feet folds its wings. This targeted `isNested`
+        // alone, so a bird walking on the ground held the full spread-wing
+        // glide posture — the fold, the pulled-in span and the dropped tail
+        // all existed and none of them ever ran outside a nest.
+        perchBlend = blendToward(perchBlend, (isNested || isGroundedVisual) ? 1 : 0, delta, 5);
         const perch = perchPose(perchBlend);
         const tumble = isFallingVisual ? tumbleFlap(motionState.elapsed) : null;
 
@@ -10952,6 +10959,21 @@
         rightWing.rotation.x = rightWing.userData.baseRotation.x
           + rightDip - glideSweep - flapOffset - idleFlutter
           - perch.fold - (tumble ? tumble.right : 0);
+
+        // SWEEP, about the wing's own vertical (local Y). The ONLY term that
+        // writes rotation.y — every other pose term is dihedral or twist —
+        // and it exists because a fold alone cannot tuck a wing: dropping a
+        // wing that is still standing straight out sideways gives a wide V
+        // pointing at the ground, not a bird with its wings away. Laying it
+        // BACK is what puts the folded wing over the flank with its
+        // primaries trailing past the tail.
+        //
+        // Negative is aft for the left wing: the model faces local +X with
+        // the span along +Z, so a positive rotation about Y carries the
+        // wingtip toward the nose. The right wing takes the mirror sign for
+        // the same reason every other term here does.
+        leftWing.rotation.y = leftWing.userData.baseRotation.y - perch.sweep;
+        rightWing.rotation.y = rightWing.userData.baseRotation.y + perch.sweep;
 
         // TWIST, about the wing's own long axis (local Z, which is the span
         // axis — it is the one `scale.z` stretches and mirrors).
@@ -11058,8 +11080,17 @@
         // the right way. Same threshold as the grounded walk-speed logic.
         const walkDir = (inputState?.y ?? 0) < -FLIGHT_RECOVERY_CONFIG.walkBackThreshold ? -1 : 1;
         const walkPhase = motionState.elapsed * 9 * walkDir;
-        // Body bob at 2× step cadence so it bobs on each step.
-        birbAnchor.position.y += Math.sin(walkPhase * 2) * 0.04;
+        // Body bob at 2x step cadence so it bobs on each step — along the
+        // RADIAL up, not world +Y. This is a planet: `position.y` is only
+        // "up" within sight of the north pole, and everywhere else the bob
+        // was a sideways shuffle that got more sideways the further the bird
+        // walked from it. Same rule the ground shader, the flight floor and
+        // the snow term all already follow.
+        const bob = Math.sin(walkPhase * 2) * 0.04;
+        _walkUp.copy(birbAnchor.position);
+        if (_walkUp.lengthSq() > 1e-6) {
+          birbAnchor.position.addScaledVector(_walkUp.normalize(), bob);
+        }
         if (leftFoot) leftFoot.rotation.x = Math.sin(walkPhase) * 0.35;
         if (rightFoot) rightFoot.rotation.x = Math.sin(walkPhase + Math.PI) * 0.35;
       } else {
@@ -12595,6 +12626,34 @@
         // resumes. Exists so tools/birb-bird-sheet.mjs can capture three
         // deterministic flap poses instead of whatever phase the envelope
         // happens to be in at the moment of the shutter.
+        // What the rig is actually doing, read off the live model.
+        // Without this, "the wings tuck when grounded" and "the feet animate
+        // while walking" are claims about source rather than about the bird
+        // on screen — and this repo has shipped a rig term that never once
+        // executed (the perch fold, until 2026-09-13) precisely because
+        // nothing could see it.
+        birdPose: () => {
+          if (!birbAnchor) return null;
+          const g = (n) => birbAnchor.getObjectByName(n);
+          const rot = (o) => (o ? { x: +o.rotation.x.toFixed(4), y: +o.rotation.y.toFixed(4), z: +o.rotation.z.toFixed(4) } : null);
+          const lw = g('leftWing'); const rw = g('rightWing');
+          return {
+            recovery: flightRecoveryState,
+            nested: !!nestingSystem?.isNested?.(),
+            perchBlend: +perchBlend.toFixed(4),
+            leftWing: rot(lw),
+            rightWing: rot(rw),
+            // Span carries the perch pull-in; a tucked wing is shorter as
+            // well as folded, and only one of those is a rotation.
+            leftWingSpanZ: lw ? +lw.scale.z.toFixed(4) : null,
+            leftFoot: rot(g('leftFoot')),
+            rightFoot: rot(g('rightFoot')),
+            tail: rot(g('tail')),
+            // World position, so a caller can measure that walking moves it.
+            position: birbAnchor.position.toArray().map((n) => +n.toFixed(3)),
+            radius: +birbAnchor.position.length().toFixed(3),
+          };
+        },
         flapPhase: (phase01 = null) => {
           __birbFlapPhaseOverride = (phase01 === null || phase01 === undefined) ? null : Number(phase01);
           return __birbFlapPhaseOverride;
