@@ -2,7 +2,7 @@
  * A ring that reads as energy rather than as a plastic hoop.
  *
  * Two things in this game are torus-shaped and meant to look powered — the
- * drones' gyro ring and the slalom course's checkpoint gates — and both
+ * drones' gyro ring and the Ring Rush collectibles — and both
  * shipped the same way: a flat colour, `transparent`, `AdditiveBlending`, at
  * an opacity under one. That combination has a specific failure mode, and it
  * is not subtle once you know it.

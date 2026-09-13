@@ -129,10 +129,10 @@ export function addDroneShell(material, THREE, timeUniform, options = {}) {
 /**
  * The drone's gyro ring — the shared energy ring in the drone's own colours.
  *
- * It used to have its own copy of this shader. The slalom course's checkpoint
- * gates had the same problem for the same reason (flat colour, additive, under
- * an opacity of one, washing to grey against a bright sky), so the treatment
- * lives in one place now and both call sites take it.
+ * It used to have its own copy of this shader. Every ring in the game had the
+ * same problem for the same reason (flat colour, additive, under an opacity of
+ * one, washing to grey against a bright sky), so the treatment lives in one
+ * place now and every call site takes it.
  */
 export function addDroneRing(material, THREE, timeUniform, options = {}) {
   const config = { ...DRONE_LOOK, ...options };

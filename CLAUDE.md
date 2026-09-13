@@ -137,7 +137,10 @@
 > feature gated so tightly the shipping device never satisfies it does not
 > ship. New capture hooks: `__BIRB.boost(on)`, `__BIRB.goToProp()`.
 >
-> **The slalom's tunnel came out** (§16.17). It was a seven-unit lane walled by
+> **The slalom's tunnel came out** (§16.17). **The whole Run came out on
+> 2026-09-13 — see the inside-out-bird note below — so this is history, not a
+> map of the code. The transferable lessons still hold for any course built
+> on this sphere.** It was a seven-unit lane walled by
 > trees, roofed with arch ribs, wrapped in a backdrop tube and signed three ways
 > — six systems competing for the same seven units against a two-unit bird — and
 > the tell had been sitting in the tooling for a session: `goToSlalom` needed a
@@ -535,6 +538,52 @@
 > measured, and the phone decides. First capture at 4 tiles/unit minified the
 > 512 sheet 8-20x into mush (detail x0.85-1.29); it is 1.8 now.
 
+> **The bird was inside out, and the slalom was two yellow towers**
+> (2026-09-13, evening). Both found by the owner flying the shipped build on
+> his phone; both were one-line diagnoses once something MEASURED them.
+>
+> **Three complaints — eyes and beak visible from the back, feet showing
+> through the belly — were ONE inverted winding.** `buildBody()` lathes the v3
+> hull ring by ring and pushed `(a, c, b)`. At the top of a ring that is
+> `(+Z) x (+X)` reversed, i.e. INWARD, and `contourMat` is `FrontSide`, so the
+> renderer culled the near surface and drew the interior of the far side —
+> putting the beak, the eye lenses and the tucked feet, every one of them a
+> correctly-wound separate mesh, in plain view through the bird's own back.
+> Both caps were wound to agree with it, so both flip flags swapped too.
+> **Staring at a render cannot tell "never rasterised" from "drew facing
+> away"; evaluating the cross product at one known vertex is four lines and is
+> decisive.**
+>
+> **An eye must be PROUD of its own section and INSIDE the one behind it.**
+> Fixing the winding did not hide the eyes: a lens flush with its section does
+> not read as an eye, so the only thing that can hide it from the rear is a
+> section further back that is wider still. Measured, the lens reached z 0.229
+> against a best rear cover of 0.212 — visible by 0.017, exactly the two black
+> marks on the crown. The head is wider than it is deep now (rZ 0.225 ->
+> 0.248, which is also true of a songbird): cover 0.240 against an eye at
+> 0.222, hidden by 0.017 and still 0.007 proud of its own ring.
+>
+> **The foot tuck was a constant the builder never got to set.** `buildFoot`
+> ends with `rotation.set(0, 0, -1.35)` and it never survived a frame — the
+> pose loop ASSIGNS `rotation.z` from a shared `footTuck = -0.85`, leaving the
+> toes 0.128 below the belly as two prongs of landing gear. At -2.20 the drop
+> is 0.008 and the toes just break the belly feathers by the rump; past -2.30
+> they vanish into the hull. It rides on the foot group as `userData.tuck`
+> now, because v1/v2's legs are longer and one angle cannot serve both.
+>
+> **The "weird yellow tower pole things" were the slalom's gold finish arch** —
+> two 42-unit neon pillars built into EVERY environment unconditionally,
+> whether or not anyone had opened a mini-game. The whole Run is deleted:
+> module, `sw.js` entry, `SLALOM_ANCHOR`, the `goToSlalom` hook and the
+> `window.playRingSynthChime` bridge that existed only for its ring-gates
+> (Ring Rush calls the local function and is unaffected). **What it cost is
+> the part worth keeping**: same poses, tier 0 pinned, before -> after —
+> forest flight 33 -> 26 calls and 64.9k -> 59.3k tris, canyons 32 -> 29,
+> mountain 29 -> 24, city 34 -> 27. Five to seven draw calls and up to 6.8k
+> triangles in every biome, permanently, for a course most sessions never fly.
+> A feature "added to every environment" is not paid for when it is used; it
+> is paid for always.
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose
@@ -566,7 +615,9 @@
 > adaptive tier still drops to 1.0 and 0.85 on measured frame rate. Budgets
 > after all of it: 62-65 draw calls, 76-77k triangles, every biome.
 
-> **The drones and the slalom gates got a pass** (§16.16). Both were flat
+> **The drones and the slalom gates got a pass** (§16.16). **The slalom is
+> deleted as of 2026-09-13; `energy-ring.js` still serves the drones and the
+> Ring Rush rings, and everything below still applies to them.** Both were flat
 > colours on primitives with `transparent` + `AdditiveBlending` + opacity under
 > one, and **additive light on a bright sky is grey** — which is how the
 > checkpoint gates, the most important things to see on that course, rendered

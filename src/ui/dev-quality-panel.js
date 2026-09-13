@@ -387,7 +387,7 @@ export const CONTROL_REGISTRY = Object.freeze([
     // the index.html side regardless of what this slider allows, exactly
     // like the dpr control's native-vs-requested pattern above.
     min: 0, max: 16, step: 1, requestKey: 'anisotropy',
-    hint: 'Only ground/prop-adjacent textures that exist — water surfaces, the bird’s contact-shadow decal, slalom signage, the desktop cloud shell — everything else in this game has no sampled texture to sharpen. 0 = shipping (cloudTex=2, everything else untouched).',
+    hint: 'Only ground/prop-adjacent textures that exist — water surfaces, the bird’s contact-shadow decal, the authored surfaces, the desktop cloud shell — everything else in this game has no sampled texture to sharpen. 0 = shipping (cloudTex=2, everything else untouched).',
   },
   {
     id: 'terrainResolution', view: PANEL_VIEWS.ULTRA, kind: 'select', label: 'Terrain mesh resolution',

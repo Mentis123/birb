@@ -1516,3 +1516,101 @@ best frame in the game — a lit skyline seen from a rooftop. The black cell is 
 landing that timed out, not a rendering defect, and the fix belongs to the
 landing path rather than here. Worth keeping in view: the harness reported it
 honestly instead of printing a cell and moving on.
+
+---
+
+## 18. The bird was inside out, and the slalom was two yellow towers
+
+2026-09-13, after the v3 bird shipped as the default. Both findings came from
+the owner flying the real build on his phone, and both were one-line diagnoses
+once something measured them instead of arguing from the source.
+
+### 18.1 One inverted winding, three symptoms
+
+The report was three separate complaints: *"flying straight and flying up we
+can see his eyes and beak from the back"*, *"sometimes we see his feet THROUGH
+the body when we should just see his back"*. They are one bug.
+
+`buildBody()` builds the v3 hull as a ring-by-ring lathe and pushed its
+triangles as `(a, c, b)`. At `k = 0` the ring vertex `a` is at the TOP of the
+section (+Y), `b` steps round toward +Z, and `c` steps forward toward the beak
+(+X), so
+
+```
+(b - a) x (c - a) = (+Z) x (+X) = +Y      // OUTWARD
+```
+
+and the reverse order is inward. `contourMat` is `FrontSide`, so the whole hull
+was being culled on the NEAR side and the renderer drew the interior of the far
+side — which puts the beak, the eye lenses and the tucked feet, all of them
+separate correctly-wound meshes, in plain view through the bird's own back.
+`computeVertexNormals()` had been lighting it inside out to match.
+
+Both caps were wound to agree with the inverted body, so both flip flags had to
+swap with it: `(centre, a, b)` winds to +X, which is outward at the BEAK end and
+inward at the tail.
+
+**The lesson is the diagnosis method, not the fix.** Staring at the render says
+"the bird is see-through"; it cannot say whether a surface was never rasterised
+or drew and lost a depth test or drew facing away. Evaluating the cross product
+at one known vertex is four lines of arithmetic and it is decisive.
+
+### 18.2 An eye has to be proud of its own section and inside the one behind it
+
+Fixing the winding did not hide the eyes. They were still two black marks on
+the crown from directly behind, because a lens that is flush with its own
+section does not read as an eye at all — it has to protrude — and the only
+thing that can then hide it from the rear is a section BEHIND it that is wider
+still.
+
+Measured against the row table: the lens reached z 0.229 while the widest cover
+anywhere behind it was 0.212 at the head row. Visible by 0.017, which is
+exactly the two marks in the capture. Squashing the lens buries it; the fix is
+that **the head is wider than it is deep**, which is also true of a songbird.
+At `rZ` 0.248 the cover is 0.240 against an eye reaching 0.222 — hidden by
+0.017, still 0.007 proud of its own ring. Front and profile captures confirm
+the eye still catches its glint.
+
+### 18.3 The foot tuck was a constant the builder never got to set
+
+`buildFoot` ended with `g.rotation.set(0, 0, -1.35)`, which is a decent tuck.
+It never survived a frame: the pose loop **assigns** `rotation.z` every frame
+from a shared `footTuck = -0.85`, so the built-in value is only the first
+frame's. At -0.85 the toes hang 0.128 below the belly line — two black prongs
+of landing gear from directly behind.
+
+Rotation alone could not fix it at that angle and the sweep says why: the
+attachment is already near the belly and the leg plus toes is 0.127 long, so
+nothing under about -2.1 rad gets the drop near zero. At **-2.20** the measured
+drop is 0.008 and 9 of 48 sampled extreme points still break the silhouette —
+the toes just showing through the belly feathers near the rump, which is what a
+bird in flight looks like. Past -2.30 the feet vanish into the hull entirely.
+
+The value now rides on the foot group as `userData.tuck`, because v1/v2's legs
+are longer and rooted further forward and one shared angle cannot serve both.
+
+### 18.4 The slalom came out, and it was never free
+
+The *"weird yellow tower pole things"* were the slalom Run's **gold finish
+arch**: two 42-unit neon pillars with additive glow tubes and halo sprites,
+built by `createSlalomRun` into **every environment, unconditionally**, whether
+or not anyone had ever opened a mini-game. A mini-game's set dressing does not
+get to stand in the free-flight world full time.
+
+It is deleted — module, service-worker entry, `SLALOM_ANCHOR`, the `goToSlalom`
+capture hook and the `window.playRingSynthChime` bridge that existed only for
+its ring-gates (Ring Rush calls the local function directly and is unaffected).
+
+**The budget it was spending is the part worth recording.** Measured on the
+contact sheet, same poses, tier 0 pinned, before and after:
+
+| view | calls before | calls after | tris before | tris after |
+|---|---|---|---|---|
+| forest flight | 33 | **26** | 64,902 | **59,278** |
+| canyons flight | 32 | **29** | 44,046 | **37,578** |
+| mountain flight | 29 | **24** | 42,912 | **36,096** |
+| city flight | 34 | **27** | 47,984 | **40,588** |
+
+Five to seven draw calls and up to 6.8k triangles, in every biome, permanently,
+for a course most sessions never fly. That is the real cost of "added to EVERY
+environment" — it is not paid when the feature is used, it is paid always.

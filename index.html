@@ -3472,7 +3472,6 @@
       var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
       var sampleTerrainMeshHeight = sphericalWorldModule.sampleTerrainMeshHeight;
       var sampleBasinHeight = sphericalWorldModule.sampleBasinHeight;
-      var SLALOM_ANCHOR = sphericalWorldModule.SLALOM_ANCHOR;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -3693,7 +3692,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v59-2026-09-13-v3-bird-default-quality-presets';
+    const BIRB_BUILD = 'v60-2026-09-13-solid-bird-slalom-removed';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -4079,8 +4078,7 @@
     // Synthesized ring chime (Web Audio) — a satisfying bell "ding" that climbs
     // a semitone per quick successive ring (combo feel) and resets after a beat.
     // No asset needed; respects the sfx/master volume settings. Called when the
-    // bird flies through a ring (RING_RUSH rings AND the slalom Run ring-gates,
-    // via window.playRingSynthChime). Lazily creates one AudioContext on first
+    // bird flies through a RING_RUSH ring. Lazily creates one AudioContext on first
     // use — by then the user has tapped Start, so autoplay policy is satisfied.
     let _ringAudioCtx = null;
     let _ringChimeStep = 0;
@@ -4118,8 +4116,6 @@
         });
       } catch (e) { /* audio not available — fail silent */ }
     };
-    // Expose for the slalom Run ring-gates (a separate ES module).
-    window.playRingSynthChime = playRingSynthChime;
 
     // Play speed boost sound
     const playSpeedBoostSound = () => {
@@ -5978,8 +5974,8 @@
     // scatter is flat-shaded vertex colour, so anisotropy has nothing to act
     // on there. The textures that DO exist and DO get viewed at a grazing
     // angle in flight are the landmark valley's water surface (foam/caustic/
-    // ripple, every biome), the bird's own contact-shadow decal, the slalom
-    // signage/ribbons and — desktop only — the cloud shell; cloudTex is the
+    // ripple, every biome), the bird's own contact-shadow decal, the authored
+    // surfaces and — desktop only — the cloud shell; cloudTex is the
     // one texture in the whole repo that already sets anisotropy (2), which
     // this lever supersedes only once the panel asks for something else.
     // Walking `scene` rather than importing a registry from each of those
@@ -7815,8 +7811,17 @@
           { x:  0.40, y:  0.13, rT: 0.235, rB: 0.270, rZ: 0.245 }, // throat
           { x:  0.50, y:  0.20, rT: 0.165, rB: 0.175, rZ: 0.170 }, // NECK
           { x:  0.60, y:  0.27, rT: 0.205, rB: 0.215, rZ: 0.210 },
-          { x:  0.72, y:  0.32, rT: 0.225, rB: 0.215, rZ: 0.225 }, // head
-          { x:  0.84, y:  0.34, rT: 0.185, rB: 0.175, rZ: 0.185 },
+          // The head is WIDER than it is deep, which is both true of a
+          // songbird and load-bearing here: an eye has to stand proud of its
+          // own section to read as an eye, so the only thing that can hide it
+          // from directly behind is a section BEHIND it that is wider still.
+          // At rZ 0.225 the widest cover behind the eye was 0.212 against an
+          // eye reaching 0.229 — visible by 0.017, which is the two black
+          // marks on the crown in the rear capture. At 0.248 the cover is
+          // 0.240 against 0.222, hidden by 0.017, and the eye is still 0.007
+          // proud of its own ring.
+          { x:  0.72, y:  0.32, rT: 0.225, rB: 0.215, rZ: 0.248 }, // head
+          { x:  0.84, y:  0.34, rT: 0.185, rB: 0.175, rZ: 0.202 },
           { x:  0.93, y:  0.33, rT: 0.085, rB: 0.080, rZ: 0.085 }, // brow
         ];
         const segs = 16;
@@ -7856,7 +7861,14 @@
         for (let ri = 0; ri < rows.length - 1; ri += 1) {
           for (let k = 0; k < segs; k += 1) {
             const a = ri * stride + k, b = a + 1, c = a + stride, d = c + 1;
-            indices.push(a, c, b, b, c, d);
+            // Winding: at k = 0 the ring vertex is at the TOP (+Y), b steps
+            // round toward +Z and c steps forward toward the beak (+X), so
+            // (b-a) x (c-a) = (+Z) x (+X) = +Y — OUTWARD. The reverse order
+            // shipped first and turned the whole hull inside out: with
+            // FrontSide culling the near surface is discarded and you see
+            // into the interior, which is why the beak and eyes showed
+            // through the back of the head and the feet through the belly.
+            indices.push(a, b, c, b, d, c);
           }
         }
         const capOf = (ri, flip) => {
@@ -7870,8 +7882,10 @@
             if (flip) indices.push(centre, b, a); else indices.push(centre, a, b);
           }
         };
-        capOf(0, false);
-        capOf(rows.length - 1, true);
+        // The tail cap faces -X and the beak cap faces +X; (centre, a, b)
+        // winds to +X, so it is the TAIL that needs the flip.
+        capOf(0, true);
+        capOf(rows.length - 1, false);
 
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -7909,17 +7923,25 @@
       // z=0.224 against a head half-width of ~0.197 and read as a face
       // looking back at the camera. A lens is a sphere squashed to 0.42 in
       // its own x and rotated to face forward-and-out along the head's own
-      // surface normal, so from the rear the crown and cheeks occlude it.
-      for (const z of [0.166, -0.166]) {
+      // surface normal.
+      //
+      // That was not enough on its own and the second capture proved it: the
+      // lens still reached z 0.229 while the widest section BEHIND it covered
+      // only 0.212. Squashing it further would have buried the eye; the head
+      // row above is wider instead, and the eye sits 0.017 lower and 0.003
+      // further in, where the section is nearer its widest. Measured: 0.007
+      // proud of its own ring (so it still catches light from the front and
+      // the side), 0.017 inside the crown's cover from the rear.
+      for (const z of [0.163, -0.163]) {
         const sign = Math.sign(z);
         const lens = new THREE.SphereGeometry(0.070, 12, 10);
         eyeParts.push(paintGeometryColor(
           bakeGeometryTRS(lens, {
-            position: [0.790, 0.395, z], rotation: [0, -sign * 0.50, 0], scale: [0.42, 1, 1],
+            position: [0.790, 0.378, z], rotation: [0, -sign * 0.62, 0], scale: [0.42, 1, 1],
           }), new THREE.Color(0x0a0a12)));
         const glint = new THREE.SphereGeometry(0.024, 8, 6);
         eyeParts.push(paintGeometryColor(
-          bakeGeometryTRS(glint, { position: [0.822, 0.418, z + sign * 0.018] }), new THREE.Color(0xffffff)));
+          bakeGeometryTRS(glint, { position: [0.824, 0.401, z + sign * 0.018] }), new THREE.Color(0xffffff)));
       }
       const eyeMesh = new THREE.Mesh(mergeAndDispose(eyeParts), eyeMat);
       eyeMesh.name = 'birbEyes';
@@ -8107,6 +8129,15 @@
         g.add(mesh);
         g.position.set(-0.20, -0.34, z);
         g.rotation.set(0, 0, -1.35);
+        // How far the leg folds back in flight. The pose loop ASSIGNS
+        // rotation.z every frame, so the value set above is only the first
+        // frame's — the shared -0.85 it used to be assigned left the toes
+        // 0.128 below the belly line, which from directly behind is two
+        // black prongs of landing gear. At -2.20 the measured drop is 0.008:
+        // the toes just break the belly feathers near the rump, which is
+        // what a bird in flight actually looks like. Buried further (-2.30
+        // and beyond) the feet disappear into the hull entirely.
+        g.userData.tuck = -2.20;
         return g;
       };
       const leftFoot = buildFoot(0.085);
@@ -10284,9 +10315,7 @@
         particleSystem.setSuspended(isNested);
       }
 
-      // Animate the landmark valley water + slalom Run neon, and drive the Run's
-      // ring-gate chime. Runs every frame, every mode, so the Run works in free
-      // flight in every environment.
+      // Animate the landmark valley water. Runs every frame, every mode.
       if (sphericalWorld?.features) {
         sphericalWorld.features.update(flightController.position, delta, time);
       }
@@ -11036,7 +11065,10 @@
         if (rightFoot) rightFoot.rotation.x = 0;
       }
 
-      const footTuck = !isGroundedVisual && flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING ? -0.85 : 0;
+      // Each bird carries its own tuck: the v3 legs are shorter and rooted
+      // further forward than v1/v2's, so one shared angle cannot serve both.
+      const footTuckRest = leftFoot?.userData?.tuck ?? -0.85;
+      const footTuck = !isGroundedVisual && flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING ? footTuckRest : 0;
       if (leftFoot) leftFoot.rotation.z += (footTuck - leftFoot.rotation.z) * (1 - Math.exp(-delta * 7));
       if (rightFoot) rightFoot.rotation.z += (footTuck - rightFoot.rotation.z) * (1 - Math.exp(-delta * 7));
 
@@ -11991,14 +12023,11 @@
           visible: weather.points.visible,
           profile: weather.profile,
         } : null),
-        // Fly to the slalom course's first checkpoint gate and look down it.
-        // The Run is at a fixed anchor, so without this a capture of it is a
-        // matter of flying around until you find it.
         // Hide everything in the world except objects whose name matches, so
-        // one system can be looked at on its own. The slalom course is walled
-        // by a dense tree tunnel and the chase camera lands inside it, so
-        // "does this gate render correctly" is otherwise a question of luck
-        // with the framing. Same idea as sculpture/dev/probe-parts.html.
+        // one system can be looked at on its own — "does this prop render
+        // correctly" is otherwise a question of luck with the framing, since
+        // every landmark here is one object on a 754-unit planet. Same idea
+        // as sculpture/dev/probe-parts.html.
         solo: (match = null) => {
           const root = sphericalWorld?.root;
           if (!root) return null;
@@ -12095,32 +12124,6 @@
             new THREE.Matrix4().makeBasis(right, eyeUp, fwd.clone().multiplyScalar(-1)),
           );
           return { name: mesh.name, count: mesh.count, index };
-        },
-        goToSlalom: (index = 0, back = 30, lift = 0) => {
-          const gates = sphericalWorld?.features?.slalom?.gates;
-          if (!gates?.length || !flightController?.position) return null;
-          const gate = gates[Math.min(index, gates.length - 1)];
-          const next = gates[Math.min(index + 1, gates.length - 1)];
-          // Stand back ALONG the course, so the shot looks down the run
-          // rather than at a gate edge-on.
-          const along = next === gate
-            ? new THREE.Vector3(0, 1, 0).cross(gate.center).normalize()
-            : next.center.clone().sub(gate.center).normalize();
-          // Lift as well as stand back. The corridor is walled with dense
-          // gate trees, so a camera at the player's own altitude sits inside
-          // one and photographs bark.
-          const radial = gate.center.clone().normalize();
-          flightController.position.copy(gate.center)
-            .addScaledVector(along, -back).addScaledVector(radial, lift);
-          const eye = flightController.position;
-          const up = eye.clone().normalize();
-          const fwd = gate.center.clone().sub(eye);
-          fwd.addScaledVector(up, -fwd.dot(up)).normalize();
-          const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
-          flightController.quaternion.setFromRotationMatrix(
-            new THREE.Matrix4().makeBasis(right, up, fwd.clone().multiplyScalar(-1)),
-          );
-          return { gates: gates.length, index };
         },
         // Fly to the nearest live drone and look at it. Drones orbit the whole
         // planet, so a capture of one is otherwise a matter of luck.

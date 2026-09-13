@@ -24,7 +24,6 @@ let disposeAuthoredGranite = null;
 let disposeAuthoredSnow = null;
 let disposeAuthoredCityFacades = []; // one disposer per buildingMats[i] that loaded
 let disposeAuthoredGround = null;
-import { createSlalomRun } from "./slalom-run.js";
 import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
@@ -482,9 +481,8 @@ const CONTINENT_BIAS = 0.35;
 // terrainDisplacement's Math.min(0,…), so the carve-down invariant holds (the
 // bird flies DOWN into the valley; the floor never rises). The overlaid water
 // (pool/waterfall/river) lives in landmark-valley.js and rides this carve via a
-// heightAt() probe. The slalom Run is anchored separately (SLALOM_ANCHOR).
+// heightAt() probe.
 const VALLEY_ANCHOR = (() => { const x = 0.35, y = 0.78, z = 0.52; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
-export const SLALOM_ANCHOR = (() => { const x = -0.55, y = 0.62, z = -0.58; const l = Math.hypot(x, y, z); return { x: x / l, y: y / l, z: z / l }; })();
 // riverDepth 7 (was 4): the inflow brook must out-carve the forest detail
 // noise or the water reads as buried slivers on the plateau.
 const VALLEY_PARAMS = { radiusAng: 0.16, depth: 28, riverHalfAng: 0.05, riverReachAng: 0.30, riverDepth: 7, poolRadius: 11, canyonReachAng: 0.52, canyonHalfAng: 0.062, canyonDepth: 22 };
@@ -3505,46 +3503,40 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
 
   console.log(`[SphericalWorld] Builder returned ${nestablePositions.length} nestable positions, ${proximityTargets.length} proximity targets`);
 
-  // ── Landmark valley water + slalom Run (added to EVERY environment) ──
-  // Added to root so they rotate with the world and are disposed with it. The
-  // returned `features.update(birdPos, delta, timeMs)` animates the water +
-  // neon and drives the ring-gate chime; index.html calls it once per frame.
+  // ── Landmark valley water (added to EVERY environment) ──
+  // Added to root so it rotates with the world and is disposed with it. The
+  // returned `features.update(birdPos, delta, timeMs)` animates the water;
+  // index.html calls it once per frame.
+  //
+  // The slalom Run used to be built here too. It came out on 2026-09-13: its
+  // gold finish arch was two 42-unit neon pillars standing in EVERY biome,
+  // permanently, whether or not anyone was running the course — the "weird
+  // yellow tower pole things" in the owner's own words. A mini-game's set
+  // dressing does not get to stand in the free-flight world full time.
   let features = null;
   try {
     const mobile = _isMobile();
-    const slalomFrame = _tangentFrame(THREE, SLALOM_ANCHOR);
     const heightAt = (nx, ny, nz) => terrainHeightDir(nx, ny, nz);
     const valley = createValleyFeature({
       THREE, sphereRadius, anchor: VALLEY_ANCHOR,
       forward: _valleyFrame.forward, right: _valleyFrame.right,
       params: VALLEY_PARAMS, heightAt, isMobile: mobile,
     });
-    const slalom = createSlalomRun({
-      THREE, sphereRadius, collisionSystem, anchor: SLALOM_ANCHOR,
-      forward: slalomFrame.forward, right: slalomFrame.right, heightAt, isMobile: mobile,
-    });
     root.add(valley.group);
-    root.add(slalom.group);
-    // Exclude the decorative landmark subtrees (waterfall/pool/river/mist +
-    // slalom corridor tube/gates/trees/banners) from raycasting. The rocket
-    // system raycasts [root] RECURSIVELY every frame per live shot; the slalom
-    // corridor alone is a ~2.7k-tri non-instanced TubeGeometry whose bounding
-    // sphere spans the whole course, so nearly every shot fell through to a full
-    // brute-force triangle sweep — that stacked with the dense prop world froze
-    // mobile a moment after firing (the muzzle corridor arms the raycast at 28u).
-    // Rockets should never detonate on a waterfall sheet or a translucent gate
-    // anyway, so this is correct as well as fast. Matches sphereGround/cloud/
-    // canopy `raycast = () => {}`. Bird collision is unaffected — it uses the
+    // Exclude the decorative landmark subtree (waterfall/pool/river/mist) from
+    // raycasting. The rocket system raycasts [root] RECURSIVELY every frame per
+    // live shot, and a waterfall sheet's bounding sphere spans the whole
+    // feature, so a shot near it fell through to a brute-force triangle sweep.
+    // Rockets should never detonate on a waterfall sheet anyway, so this is
+    // correct as well as fast. Matches sphereGround/cloud/canopy
+    // `raycast = () => {}`. Bird collision is unaffected — it uses the
     // spatial-hash collisionSystem, not the Raycaster.
     const _noRaycast = () => {};
     valley.group.traverse((o) => { o.raycast = _noRaycast; });
-    slalom.group.traverse((o) => { o.raycast = _noRaycast; });
     features = {
       valley,
-      slalom,
       update(birdPos, delta, timeMs) {
         valley.update(delta, timeMs, birdPos);
-        slalom.update(birdPos, delta, timeMs);
       },
     };
   } catch (e) {

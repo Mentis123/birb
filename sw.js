@@ -36,7 +36,7 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v59-2026-09-13-v3-bird-default-quality-presets';
+const CACHE_VERSION = 'v60-2026-09-13-solid-bird-slalom-removed';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -139,7 +139,6 @@ const CORE_ASSETS = [
   './src/environment/grade-candidates.js',
   './src/environment/spherical-world.js',
   './src/environment/landmark-valley.js',
-  './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
   './src/environment/sun-cycle.js',
   './src/environment/water.js',
