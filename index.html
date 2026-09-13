@@ -11113,6 +11113,32 @@
           canFire: rocketSystem ? rocketSystem.canFire() : null,
         }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // What the bird costs, measured from the live anchor rather than
+        // reasoned from the constructor. Every phase of a bird rebuild starts
+        // by asking this, and the world budget it has to fit inside is 80k
+        // triangles with the forest already at 75-79k.
+        birdStats: () => {
+          if (!birbAnchor) return null;
+          let meshes = 0; let tris = 0;
+          const mats = new Set(); const geos = new Set();
+          birbAnchor.traverse((o) => {
+            if (!o.isMesh) return;
+            meshes += 1;
+            geos.add(o.geometry.uuid);
+            const g = o.geometry;
+            tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+            for (const m of (Array.isArray(o.material) ? o.material : [o.material])) mats.add(m.uuid);
+          });
+          const size = new THREE.Box3().setFromObject(birbAnchor).getSize(new THREE.Vector3());
+          return {
+            meshes, uniqueMaterials: mats.size, uniqueGeometries: geos.size,
+            triangles: Math.round(tris),
+            // Draw calls are one per mesh here: nothing on the bird is
+            // instanced or merged, so meshes IS the draw-call cost.
+            drawCalls: meshes,
+            worldSize: size.toArray().map((v) => +v.toFixed(2)),
+          };
+        },
         // What this GPU will actually allow, and what we are asking it for.
         // A GL error that names a size limit is unanswerable without both
         // halves, and the one report of this class came from a device this

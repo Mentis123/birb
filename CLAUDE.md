@@ -352,6 +352,25 @@
 > frames after it separately** — they are different numbers with different
 > meanings.
 
+> **The bird rebuild is planned, not built** (2026-09-13):
+> [docs/realism/BIRD_PLAN.md](docs/realism/BIRD_PLAN.md). The number that
+> sets its order: measured with the new `__BIRB.birdStats()`, the bird is
+> **44 meshes = 44 draw calls — 65% of the 68 scene calls at spawn** — and
+> 11,780 triangles on an object about 140 px tall (the body alone is a
+> `SphereGeometry(0.5, 36, 28)`, 2,016 triangles drawn as a 60-pixel egg). So
+> Phase 0 is merge-and-decimate, not art: ≤ 8 calls, ≤ 4,000 tris, same
+> silhouette, plus a **rig-contract test**. The rig drives the model by NAME —
+> `leftWing`/`rightWing`/`tail`/`leftFoot`/`rightFoot`, `userData.baseRotation`,
+> `userData.tipFeather` (which also anchors the ribbon trail), and the right
+> wing mirrored with `scale.z = -1` — and that contract is exactly why the
+> shipped `birb.glb` lost its A/B: one mesh, no nodes, no skin, 1.37 MB of
+> baked JPEG. It cannot flap. An authored bird without the rig is a statue.
+> Also worth knowing before spending fidelity: **the bird is invisible at the
+> perch** (`birbAnchor.visible = mode !== FPV`), so its only customer is the
+> chase camera from behind and above. Routes are procedural v2 → authored
+> feather textures through this week's pipeline → a rigged-GLB go/no-go
+> gated by the contract test, in that order.
+
 > **First real-device pass** (§16.15). Three findings from an iPhone running
 > the shipped build. **The flock is deleted** — playtest could not tell what
 > the chevrons in the sky were, after two rounds of trying to make them read.
