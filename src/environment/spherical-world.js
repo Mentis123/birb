@@ -1,7 +1,15 @@
 import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
-import { applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested, applyAuthoredBarkInstanced, PINE_BARK_TINT } from './authored-textures.js';
+import {
+  applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested,
+  applyAuthoredBarkInstanced, applyAuthoredSurfaceInstanced, PINE_BARK_TINT,
+  authoredCanyonRequested, CANYON_TINT, CANYON_TILE_METRES, CANYON_DARK_SPIRE_SCALE,
+  authoredGraniteRequested, GRANITE_TINT, GRANITE_TILE_METRES,
+  authoredSnowRequested, SNOW_TINT, SNOW_TILE_METRES,
+  authoredCityRequested, CONCRETE_TINT, CITY_TILE_METRES, CITY_FACADE_SCALES,
+  authoredGroundRequested, applyAuthoredGround, GROUND_TINT, GROUND_TILE_UNITS, GROUND_TRIPLANAR_SHARPNESS,
+} from './authored-textures.js';
 
 // Set when ?bark=1 dressed the forest landmark material; called on the next
 // world teardown. A texture created per setEnvironment() and never disposed
@@ -10,6 +18,12 @@ let disposeAuthoredBark = null;
 let disposeAuthoredStone = null;
 let disposeAuthoredTrunks = null;
 let disposeAuthoredPine = null;
+let disposeAuthoredCanyonSpire = null;
+let disposeAuthoredCanyonDarkSpire = null;
+let disposeAuthoredGranite = null;
+let disposeAuthoredSnow = null;
+let disposeAuthoredCityFacades = []; // one disposer per buildingMats[i] that loaded
+let disposeAuthoredGround = null;
 import { createSlalomRun } from "./slalom-run.js";
 import { addGroundDetail } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
@@ -1887,6 +1901,51 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x7a3c23, flatShading: true });
   const wallMat = new THREE.MeshLambertMaterial({ color: 0x6e3520, flatShading: true, vertexColors: true });
 
+  // Authored sandstone on the spires, behind ?canyon=1 (or ?authored=1 for
+  // every authored texture at once). Both spire buckets are InstancedMesh on
+  // the SAME unit CylinderGeometry(0.3, 1.0, 1.0, 6, 4) — bottom radius 1.0
+  // is `unitRadius` — so the per-instance UV scale from addInstancedUvScale
+  // (installed inside applyAuthoredSurfaceInstanced's decode gate) is what
+  // makes one 4.3m tile serve spires whose baseRadius*scale ranges roughly
+  // 2 to 16 units. u runs around, v runs up on this geometry (proven, not
+  // assumed — a Node capture of the two unit geometries showed the cone/
+  // cylinder UV rows step from v=1 to v=0 top-to-bottom); the albedo's
+  // bedding is HORIZONTAL (rowVar 137.4 vs colVar 1.8, i.e. constant along a
+  // row = constant along u, varying along v), so the unswapped default
+  // mapping already rings the tube level — no UV swap, unlike the arch's
+  // TorusGeometry. darkSpireMat gets the same tint scaled by
+  // CANYON_DARK_SPIRE_SCALE so the two spire buckets stay two materials
+  // (see the constant's own comment in authored-textures.js), not one.
+  if (typeof window !== 'undefined' && authoredCanyonRequested(window.location?.search)) {
+    try {
+      disposeAuthoredCanyonSpire = applyAuthoredSurfaceInstanced(THREE, spireMat, {
+        albedoFile: 'canyon_sandstone_albedo.png',
+        normalFile: 'canyon_sandstone_normal.png',
+        tint: CANYON_TINT,
+        unitRadius: 1.0,
+        tileMetres: CANYON_TILE_METRES,
+        shape: 'cylinder',
+      });
+      disposeAuthoredCanyonDarkSpire = applyAuthoredSurfaceInstanced(THREE, darkSpireMat, {
+        albedoFile: 'canyon_sandstone_albedo.png',
+        normalFile: 'canyon_sandstone_normal.png',
+        tint: {
+          r: CANYON_TINT.r * CANYON_DARK_SPIRE_SCALE,
+          g: CANYON_TINT.g * CANYON_DARK_SPIRE_SCALE,
+          b: CANYON_TINT.b * CANYON_DARK_SPIRE_SCALE,
+        },
+        unitRadius: 1.0,
+        tileMetres: CANYON_TILE_METRES,
+        shape: 'cylinder',
+      });
+    } catch (err) {
+      // A rendering world is not a working world: this builder runs inside a
+      // try/catch that only console.warns, so a throw here must be contained
+      // rather than left to abort the canyon build.
+      console.warn('[canyon] authored sandstone failed; keeping the procedural material', err);
+    }
+  }
+
   // --- Ridge clusters (parallel lines of tall spires) ---
   // Denser corridor field (desktop 9 / mobile 8 — both > the old 7); wide
   // ridgeLength keeps them distinct. Spires batched via 2 InstancedMesh per tint.
@@ -2269,6 +2328,53 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       });
     } catch (err) {
       console.warn('[mountain] authored pine bark failed; keeping the procedural material', err);
+    }
+  }
+
+  // Authored granite on the peak bodies, behind ?granite=1 (or ?authored=1).
+  // bodyUnitGeom below is CylinderGeometry(0.2, 1.0, 1.0, 7, 3) — bottom
+  // radius 1.0 is unitRadius, same cylinder UV convention as the spires (u
+  // around, v up). Tile 8.0: the brief sized granite at that tile because
+  // peaks run far larger than spires. GRANITE_TINT is NOT value-matched to
+  // stoneMat's current 0x646c7c — it is forced brighter to clear a 60-unit
+  // separation from the mountain's own textured pine bark; see the constant's
+  // header comment in authored-textures.js for the sweep that produced it.
+  if (typeof window !== 'undefined' && authoredGraniteRequested(window.location?.search)) {
+    try {
+      disposeAuthoredGranite = applyAuthoredSurfaceInstanced(THREE, stoneMat, {
+        albedoFile: 'mountain_granite_albedo.png',
+        normalFile: 'mountain_granite_normal.png',
+        tint: GRANITE_TINT,
+        unitRadius: 1.0,
+        tileMetres: GRANITE_TILE_METRES,
+        shape: 'cylinder',
+      });
+    } catch (err) {
+      console.warn('[mountain] authored granite failed; keeping the procedural material', err);
+    }
+  }
+
+  // Authored snow on the caps, behind ?snow=1 (or ?authored=1). snowUnitGeom
+  // below is `new THREE.ConeGeometry(1, 1, 6)`, and ConeGeometry IS a
+  // CylinderGeometry with radiusTop 0 (verified in a real browser, not
+  // assumed: `cone instanceof THREE.CylinderGeometry` is true and its UV
+  // attribute steps v from 1 at the tip to 0 at the base exactly like the
+  // unit cylinder, once translated so the base sits at y=0). So the same
+  // 'cylinder' path applies, unitRadius 1.0 (this cone's own base radius
+  // before instance scale), tile 8.0. SNOW_TINT is solved from the file's
+  // OWN clipping ceiling, not a target colour — see the constant's comment.
+  if (typeof window !== 'undefined' && authoredSnowRequested(window.location?.search)) {
+    try {
+      disposeAuthoredSnow = applyAuthoredSurfaceInstanced(THREE, snowMat, {
+        albedoFile: 'mountain_snow_albedo.png',
+        normalFile: 'mountain_snow_normal.png',
+        tint: SNOW_TINT,
+        unitRadius: 1.0,
+        tileMetres: SNOW_TILE_METRES,
+        shape: 'cylinder',
+      });
+    } catch (err) {
+      console.warn('[mountain] authored snow failed; keeping the procedural material', err);
     }
   }
   // Pine canopy carries vertexColors for the baked base→tip gradient.
@@ -2820,6 +2926,41 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   // Every tower gets a lit window grid. Zero geometry, zero draw calls, and
   // it is the whole difference between a skyline and a field of slabs.
   for (const m of buildingMats) addWindowLights(m, THREE);
+
+  // Authored concrete on the facades, behind ?city=1 (or ?authored=1).
+  // bodyUnitGeom (declared below, shared by all three buckets) is
+  // BoxGeometry(1, 1, 1, 1, 3, 1), so this is shape: 'box' — each face's UV
+  // patch spans its own two world-size axes, not a circumference, which is
+  // what addInstancedUvScale's box branch exists for. One CONCRETE_TINT
+  // serves all three buildingMats, scaled per material by CITY_FACADE_SCALES
+  // (the three navies are the same hue at three values); the addWindowLights
+  // call above already installed each material's onBeforeCompile, so the
+  // per-instance UV injection — added inside the decode gate below, once the
+  // images land — chains on top of the window shader rather than replacing
+  // it, the same composition the forest's authored bark already proved.
+  disposeAuthoredCityFacades = [];
+  if (typeof window !== 'undefined' && authoredCityRequested(window.location?.search)) {
+    for (let mi = 0; mi < buildingMats.length; mi++) {
+      const scale = CITY_FACADE_SCALES[mi] ?? 1;
+      try {
+        const dispose = applyAuthoredSurfaceInstanced(THREE, buildingMats[mi], {
+          albedoFile: 'city_concrete_albedo.png',
+          normalFile: 'city_concrete_normal.png',
+          tint: {
+            r: CONCRETE_TINT.r * scale,
+            g: CONCRETE_TINT.g * scale,
+            b: CONCRETE_TINT.b * scale,
+          },
+          tileMetres: CITY_TILE_METRES,
+          shape: 'box',
+        });
+        disposeAuthoredCityFacades.push(dispose);
+      } catch (err) {
+        console.warn(`[city] authored concrete failed on facade ${mi}; keeping the procedural material`, err);
+      }
+    }
+  }
+
   const glowMat = new THREE.MeshBasicMaterial({ color: 0x74d4ff, transparent: true, opacity: 0.15 });
   const antennaMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
 
@@ -3196,7 +3337,29 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // faces in the mountains. Derived from the fragment's own world position and
   // the facet normal, so it is zero geometry, zero textures and zero draw
   // calls — the same trade the city's windows make.
-  addGroundDetail(sphereMaterial, THREE, { baseRadius: sphereRadius, biome: variant });
+  //
+  // Only the FOREST gets the authored triplanar overlay: forest_ground_*.png
+  // is the only ground albedo this repo has, forest is the default biome a
+  // cold start always builds, and the planet's own UVs converge at the poles
+  // (addGroundDetail's own doc comment explains why triplanar rather than a
+  // seam-free tiling UV). ?ground=1 is on by default, following bark/stone/
+  // canyon/granite/snow/city; ?ground=0 or ?authored=0 opts out.
+  const wantsGroundTexture = variant === 'forest'
+    && typeof window !== 'undefined' && authoredGroundRequested(window.location?.search);
+  addGroundDetail(sphereMaterial, THREE, {
+    baseRadius: sphereRadius,
+    biome: variant,
+    groundMap: wantsGroundTexture
+      ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT }
+      : null,
+  });
+  if (wantsGroundTexture) {
+    try {
+      disposeAuthoredGround = applyAuthoredGround(THREE, sphereMaterial);
+    } catch (err) {
+      console.warn('[forest] authored ground failed; keeping the procedural material', err);
+    }
+  }
 
   const sphereGround = new THREE.Mesh(sphereGeometry, sphereMaterial);
   sphereGround.name = 'sphere-ground';
@@ -3500,6 +3663,32 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       if (disposeAuthoredTrunks) {
         try { disposeAuthoredTrunks(); } catch (e) { console.warn('Error disposing authored trunk bark:', e); }
         disposeAuthoredTrunks = null;
+      }
+      if (disposeAuthoredCanyonSpire) {
+        try { disposeAuthoredCanyonSpire(); } catch (e) { console.warn('Error disposing authored canyon spire sandstone:', e); }
+        disposeAuthoredCanyonSpire = null;
+      }
+      if (disposeAuthoredCanyonDarkSpire) {
+        try { disposeAuthoredCanyonDarkSpire(); } catch (e) { console.warn('Error disposing authored canyon dark spire sandstone:', e); }
+        disposeAuthoredCanyonDarkSpire = null;
+      }
+      if (disposeAuthoredGranite) {
+        try { disposeAuthoredGranite(); } catch (e) { console.warn('Error disposing authored granite:', e); }
+        disposeAuthoredGranite = null;
+      }
+      if (disposeAuthoredSnow) {
+        try { disposeAuthoredSnow(); } catch (e) { console.warn('Error disposing authored snow:', e); }
+        disposeAuthoredSnow = null;
+      }
+      if (disposeAuthoredCityFacades.length) {
+        for (const d of disposeAuthoredCityFacades) {
+          try { d(); } catch (e) { console.warn('Error disposing authored city facade:', e); }
+        }
+        disposeAuthoredCityFacades = [];
+      }
+      if (disposeAuthoredGround) {
+        try { disposeAuthoredGround(); } catch (e) { console.warn('Error disposing authored ground:', e); }
+        disposeAuthoredGround = null;
       }
 
       // Then dispose geometries and materials

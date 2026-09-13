@@ -16,7 +16,27 @@
 // literal to equal index.html's BIRB_BUILD exactly, so bumping one without
 // the other would fail that check rather than pass it. Whoever next edits
 // index.html should bump CACHE_VERSION then, picking up this file too.
-const CACHE_VERSION = 'v56-2026-09-11-authored-bark';
+// Bumped for the four new authored surfaces wired this session (canyon
+// sandstone spires, mountain granite peaks, mountain snow caps, city
+// concrete facades). None of them join CORE_ASSETS below -- see the note
+// beside stone_rock's own entry for why the same reasoning applies to all
+// four, restated per-file there.
+//
+// Bumped again: forest_ground_albedo.png joins CORE_ASSETS below, the same
+// day the triplanar ground overlay that consumes it actually got wired (it
+// shipped once already with nothing calling it -- `?ground=1` was a verified
+// no-op, pixel-identical to `?ground=0`). It is the forest's DEFAULT ground
+// texture now, same promotion bark got when it became the shipping default.
+//
+// NOTE this widens a PRE-EXISTING mismatch, not a new one: this literal is
+// supposed to equal index.html's BIRB_BUILD (tests/build-identity.test.js
+// SW-2 enforces both halves), and the two were already out of sync (v57 vs
+// index.html's 'v54-2026-09-11-instanced-bark') before this edit, because a
+// concurrent workflow owns index.html and this one is forbidden from
+// touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
+// is skipped rather than failing either way -- but it is a real, visible
+// divergence for whoever next edits index.html to reconcile.
+const CACHE_VERSION = 'v58-2026-09-13-ground-triplanar-granite-fix';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -52,6 +72,12 @@ const CORE_ASSETS = [
   // most-looked-at surface in the game: every trunk in the default biome.
   './assets/textures/bark_pine_albedo.png',
   './assets/textures/bark_pine_normal.png',
+  // The forest ground's triplanar overlay, same promotion. It is now wired
+  // (?ground=0 opts out) and forest is the biome a cold start always builds.
+  // The NORMAL is deliberately absent: ground-detail.js's overlay declares
+  // one uGroundMap sampler and no normal slot, so forest_ground_normal.png is
+  // never fetched by anything and would just be 1.33 MB of dead weight here.
+  './assets/textures/forest_ground_albedo.png',
   // NOT precached (install-weight diet):
   // - ./assets/env/{canyons,mountain,city}_sky.png (1.4 MB) — see above.
   // - ./birb.glb (1.7 MB) — only loads behind the ?glb=1 A/B flag; the
@@ -63,6 +89,15 @@ const CORE_ASSETS = [
   //   every applier now leaves the procedural material standing until its
   //   images decode, so "no texture" renders the old material rather than a
   //   black slab.
+  // - ./assets/textures/{canyon_sandstone,mountain_granite,mountain_snow,
+  //   city_concrete}_{albedo,normal}.png (1.0 MB each, 4.0 MB together) —
+  //   same reasoning as stone_rock above, generalised: none of these four are
+  //   props in the FOREST biome (the one a cold start always builds), so
+  //   none of them belong in the install-weight budget the way bark does.
+  //   `cacheFirst` (see the fetch handler below) picks each one up the first
+  //   time a player actually opens that biome online, and every applier
+  //   leaves its procedural material standing until the images decode --
+  //   the same degrade-not-fail path stone_rock already proved.
   // - ./sound/ambient-mountain.mp3 (5.6 MB) — setAmbientMusic deliberately
   //   pins the forest track (users asked for the original back), so the
   //   mountain track is currently unplayed. Re-add here if track switching

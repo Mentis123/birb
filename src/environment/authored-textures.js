@@ -89,6 +89,108 @@ export const BARK_TINT = Object.freeze({ r: 1.78, g: 1.05, b: 0.51 });
 export const PINE_BARK_TINT = Object.freeze({ r: 1.222, g: 1.301, b: 1.128 });
 
 /**
+ * Four more authored albedos, on the canyon spires, the mountain peaks and
+ * snow caps, and the city facades. Same rule as every tint above: `map`
+ * MULTIPLIES `color`, so a tint is the quotient of a STATED target and the
+ * file's own measured linear mean, never picked by eye. The full derivation
+ * — clipping ceilings, the black-slab check, the same-frame separation
+ * numbers — lives in `tests/authored-tints.test.js`, which is the oracle
+ * these six constants exist to satisfy; this comment gives the short form.
+ *
+ * CANYON_TINT — target #a05a34, a warm rust-sandstone. Keeps the current
+ * spire's VALUE (the canyon floor is the same sandstone, so the spires must
+ * not visually darken against it) while dropping its saturation from a
+ * poster-paint 15:3.4:1 to a sandstone 9:2.8:1. Solved against
+ * canyon_sandstone_albedo's measured mean and the spire's own baked 4-band
+ * vertical gradient (bakeVerticalGradient in spherical-world.js ~1992).
+ *
+ * CANYON_DARK_SPIRE_SCALE — one tint, two spire materials. darkSpireMat
+ * (0x763923) and spireMat (0x99502e) are the same rock at two procedural
+ * values so the ridges don't read as one cloned cone; a single absolute
+ * tint on both would erase that. The scale is darkSpireMat's linear luma
+ * over spireMat's own, applied to CANYON_TINT for the dark bucket only.
+ *
+ * GRANITE_TINT — REVISED. The first solve (target #7f899d, forced to 1.73x
+ * the procedural peak's own luminance) was refuted: a real in-game capture at
+ * a pinned pose measured the snow cap losing 39% of its contrast against the
+ * granite it sits on (78.8 sRGB units against a 128.4-unit floor with either
+ * texture disabled), because lifting the peak that far pulls it up TOWARD the
+ * snow rather than staying beneath it — snow cannot compensate by getting
+ * brighter, it is already at its own clipping ceiling (see SNOW_TINT below).
+ * A 60-unit separation from the mountain's pine bark is real but the wrong
+ * thing to solve for: the pine sits 40+ altitude-units below the peaks and is
+ * rarely in the same frame, while the snow cap physically sits ON the granite
+ * in every frame that shows either.
+ *
+ * So this is now a target NEARER stoneMat's own value (#5c6372, close kin of
+ * the procedural 0x646c7c) rather than brighter than it: 0.867x the peak's
+ * own procedural luminance, comfortably inside the black-slab floor (0.6x)
+ * and the new granite ceiling (1.3x — a peak may not be lifted far enough to
+ * threaten the cap it carries). That recovers
+ * `luma(snowCap)/luma(granitePeak)` to 2.36x its OWN procedural ratio's 81%
+ * (was 40%) — see tests/authored-textures.test.js (`the snow cap does not lose its
+ * contrast ratio against the granite peak`), the oracle this stage owns, and
+ * the re-pinned solve in tests/authored-tints.test.js.
+ *
+ * SNOW_TINT — not solved from a target colour at all. mountain_snow_albedo's
+ * own histogram (98.5th percentile at 1.55x its mean) means no tint can push
+ * the mean past ~0.646 linear without blowing the 1.5% clipping budget, so
+ * this is that ceiling — half of snowMat's own cool cast (0xe6f1ff), scaled
+ * until 1.5% of texels saturate. Reaching the originally-specified luma 0.8
+ * would cost 31.6% of the texture, a third of it flat white.
+ *
+ * CONCRETE_TINT — target #17243b, which IS buildingMats[1]'s (0x18263c)
+ * current render, unmoved. city-windows.js adds light for the lit windows
+ * and the street lamps on TOP of this facade, and a lifted facade is what
+ * turned the city's own asphalt to pale snow once already (§16.13).
+ *
+ * CITY_FACADE_SCALES — one tint, three facades. buildingMats[0]/[1]/[2]
+ * (0x141f33 / 0x18263c / 0x101a2c) are the same dusk navy hue at three
+ * values — measured, their linear r:g:b ratios agree to within 2 sRGB units
+ * once rendered — so a single scalar per material (its own luma over
+ * buildingMats[1]'s, the CONCRETE_TINT reference) reproduces all three
+ * without flattening them into one slab.
+ *
+ * GROUND_TINT / GROUND_MAP_STRENGTH — the forest ground's material carries
+ * NO colour of its own (spherical-world.js ~3185 sets only vertexColors), so
+ * GROUND_TINT is a NORMALISATION (1/mean per channel, product with the
+ * albedo's mean is exactly 1) rather than a lift, and GROUND_MAP_STRENGTH is
+ * how much of the map's own contrast is allowed to show through
+ * (`mix(1, albedo x GROUND_TINT, strength)`) before the vegetated stops clip
+ * — 0.8 is the largest value under the 1.5% budget.
+ *
+ * GROUND_TILE_UNITS / GROUND_TRIPLANAR_SHARPNESS — the two remaining fields
+ * `ground-detail.js`'s `groundMap` option requires. Tile 18: the forest's
+ * ground-character noise cells already read at ~18 units (GROUND_PROFILES.
+ * forest.noiseScale === 0.055, i.e. 1/0.055), so the authored map's own grain
+ * sits at the same macro scale as the procedural mottling it is layered over
+ * instead of introducing a second, competing frequency. Sharpness 4: the
+ * triplanar blend weight is `pow(|N|, sharpness)` renormalised to sum to 1 —
+ * at 4 the dominant axis (near a flat ground facet, that is the sphere-up
+ * axis almost everywhere) claims essentially all the weight, so the ground
+ * reads as one coherent top-down projection rather than a visible three-way
+ * blend seam near the rare steep facet.
+ */
+export const GROUND_TILE_UNITS = 18;
+export const GROUND_TRIPLANAR_SHARPNESS = 4;
+export const CANYON_TILE_METRES = 4.3;
+export const CANYON_TINT = Object.freeze({ r: 1.549, g: 0.632, b: 0.299 });
+export const CANYON_DARK_SPIRE_SCALE = 0.5429;
+
+export const GRANITE_TILE_METRES = 8.0;
+export const GRANITE_TINT = Object.freeze({ r: 0.407, g: 0.479, b: 0.637 });
+
+export const SNOW_TILE_METRES = 8.0;
+export const SNOW_TINT = Object.freeze({ r: 1.561, g: 1.640, b: 1.731 });
+
+export const CITY_TILE_METRES = 6.0;
+export const CONCRETE_TINT = Object.freeze({ r: 0.029, g: 0.061, b: 0.147 });
+export const CITY_FACADE_SCALES = Object.freeze([0.7173, 1.0000, 0.5406]);
+
+export const GROUND_TINT = Object.freeze({ r: 5.213, g: 5.962, b: 7.030 });
+export const GROUND_MAP_STRENGTH = 0.8;
+
+/**
  * Load one authored texture with every convention applied.
  *
  * `anisotropy` is deliberately over-asked at 16: three clamps it to the
@@ -136,6 +238,43 @@ export function authoredStoneRequested(search) {
   return !/[?&](stone|authored)=0/.test(search || '');
 }
 
+/** `?canyon=0`, or `?authored=0` for every authored texture at once. */
+export function authoredCanyonRequested(search) {
+  return !/[?&](canyon|authored)=0/.test(search || '');
+}
+
+/** `?granite=0`, or `?authored=0` for every authored texture at once. */
+export function authoredGraniteRequested(search) {
+  return !/[?&](granite|authored)=0/.test(search || '');
+}
+
+/** `?snow=0`, or `?authored=0` for every authored texture at once. */
+export function authoredSnowRequested(search) {
+  return !/[?&](snow|authored)=0/.test(search || '');
+}
+
+/**
+ * `?city=0` (or `?authored=0`) opts out, exactly like the other four.
+ *
+ * Kept as its own named function rather than folded into the generic pattern
+ * so the wiring in spherical-world.js reads the same as every other authored
+ * surface: the A/B is how the owner judges the city facade on real glass, and
+ * this is the one line that flips if that judgement goes the other way.
+ */
+export function authoredCityRequested(search) {
+  return !/[?&](city|authored)=0/.test(search || '');
+}
+
+/**
+ * `?ground=0` (or `?authored=0`) opts out of the forest ground's triplanar
+ * texture overlay — same pattern as the other five, and the same reason: the
+ * A/B against the pure procedural ground is how the owner judges it on real
+ * glass.
+ */
+export function authoredGroundRequested(search) {
+  return !/[?&](ground|authored)=0/.test(search || '');
+}
+
 /**
  * Run `commit` once EVERY texture in a set has decoded, and give the caller a
  * way to cancel it.
@@ -153,7 +292,7 @@ export function authoredStoneRequested(search) {
  * arrived perturbs the lighting on a surface whose albedo is still procedural,
  * which is a different wrong frame rather than no wrong frame.
  */
-function commitWhenDecoded(total, commit) {
+export function commitWhenDecoded(total, commit) {
   let remaining = total;
   let state = 'waiting';
   return {
@@ -343,6 +482,25 @@ export function applyAuthoredStone(THREE, material, {
  * vNormalMapUv from the UV transform -- scaling the varyings after it means
  * the material's own map.repeat stays (1,1) and this is the only thing setting
  * density.
+ *
+ * `shape` (default 'cylinder', UNCHANGED behaviour) also takes 'box'. A
+ * BoxGeometry gives every face its own 0..1 UV patch, so the world size a tile
+ * must cover is that FACE's size, not a circumference -- the cylinder formula
+ * fed through a box is wrong on all six faces, not just wrong by an aspect.
+ * Which face a vertex belongs to is read from its object-space normal, so the
+ * three faces of an axis-aligned box (|n.x|, |n.y| or |n.z| the largest
+ * component) each get the two OTHER instance-scale axes as their repeat:
+ * left/right faces span Z and Y, front/back span X and Y, top/bottom span X
+ * and Z.
+ *
+ * That normal has to be the raw `normal` ATTRIBUTE, not `objectNormal`: in the
+ * pinned three@0.183.2 meshlambert vertex template (this material has no other
+ * consumer here), the main() body runs `<uv_vertex>` -- where this injects --
+ * BEFORE `<beginnormal_vertex>`, which is the chunk that assigns
+ * `objectNormal` from `normal` in the first place. Reading `objectNormal` at
+ * this injection point would read a variable that does not exist yet; `normal`
+ * itself is declared unconditionally for any lit material and is available
+ * from the top of main().
  */
 export function addInstancedUvScale(material, THREE, {
   tileMetres = BARK_TILE_METRES,
@@ -352,22 +510,44 @@ export function addInstancedUvScale(material, THREE, {
   // bottom radius of exactly 1.0, so this was invisible there and wrong
   // everywhere else: the mountain pine's is 0.6, which would have tiled its
   // bark 1.67x too densely around the trunk and read as a different, finer
-  // material on a tree that is meant to match.
+  // material on a tree that is meant to match. Meaningless for shape: 'box'.
   unitRadius = 1,
+  // 'cylinder' (default, unchanged) or 'box'. Anything else throws rather than
+  // silently falling back to a formula that does not match the geometry.
+  shape = 'cylinder',
 } = {}) {
+  if (shape !== 'cylinder' && shape !== 'box') {
+    throw new Error(`addInstancedUvScale: unknown shape "${shape}" (want 'cylinder' or 'box')`);
+  }
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
+  const isBox = shape === 'box';
 
-  material.onBeforeCompile = (shader, renderer) => {
-    if (typeof previous === 'function') previous.call(material, shader, renderer);
-    shader.uniforms.uBirbTileMetres = { value: tileMetres };
-    shader.uniforms.uBirbUnitRadius = { value: unitRadius };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>',
-        `#include <common>\n\tuniform float uBirbTileMetres;\n\tuniform float uBirbUnitRadius;`)
-      .replace('#include <uv_vertex>', `#include <uv_vertex>
-      #ifdef USE_INSTANCING
-        {
+  // The two formulas are mutually exclusive on purpose -- emitting both and
+  // branching on a runtime uniform would mean every box-shaped material also
+  // carries dead cylinder math (and vice versa) and a shader diff that hides
+  // which one actually ran. `shape` is fixed at material-build time, never
+  // per-frame, so a compile-time choice of source string costs nothing.
+  const scaleGlsl = isBox
+    ? `
+          // BoxGeometry: a face's UV patch spans its own two world-size axes,
+          // picked by which component of the raw object-space normal is
+          // largest. |n.x| -> left/right face (spans Z, Y). |n.z| -> front/back
+          // (spans X, Y). Otherwise top/bottom (spans X, Z).
+          float birbSx = length(instanceMatrix[0].xyz);
+          float birbSy = length(instanceMatrix[1].xyz);
+          float birbSz = length(instanceMatrix[2].xyz);
+          vec3 birbN = abs(normal);
+          vec2 birbRepeat;
+          if (birbN.x > birbN.y && birbN.x > birbN.z) {
+            birbRepeat = vec2(birbSz, birbSy) / uBirbTileMetres;
+          } else if (birbN.z > birbN.x && birbN.z > birbN.y) {
+            birbRepeat = vec2(birbSx, birbSy) / uBirbTileMetres;
+          } else {
+            birbRepeat = vec2(birbSx, birbSz) / uBirbTileMetres;
+          }
+    `
+    : `
           // The basis vector lengths of the instance matrix are its scale.
           float birbSx = length(instanceMatrix[0].xyz);
           float birbSy = length(instanceMatrix[1].xyz);
@@ -375,6 +555,19 @@ export function addInstancedUvScale(material, THREE, {
             6.28318530718 * uBirbUnitRadius * birbSx / uBirbTileMetres,
             birbSy / uBirbTileMetres
           );
+    `;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    shader.uniforms.uBirbTileMetres = { value: tileMetres };
+    if (!isBox) shader.uniforms.uBirbUnitRadius = { value: unitRadius };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>',
+        `#include <common>\n\tuniform float uBirbTileMetres;${isBox ? '' : '\n\tuniform float uBirbUnitRadius;'}`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+      #ifdef USE_INSTANCING
+        {
+${scaleGlsl}
           #ifdef USE_MAP
             vMapUv *= birbRepeat;
           #endif
@@ -387,23 +580,37 @@ export function addInstancedUvScale(material, THREE, {
 
   // Without its own key this shares a compiled program with any other material
   // carrying an identical onBeforeCompile closure, and every one of them gets
-  // the first material's uniforms. Icon3D paid for that lesson already.
+  // the first material's uniforms. Icon3D paid for that lesson already. `shape`
+  // is in the key too: a cylinder-shaped and a box-shaped material must never
+  // share a compiled program, since one branch is dead code in the other.
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => `${base}-instuv-${tileMetres}-${unitRadius}`;
+  material.customProgramCacheKey = () => `${base}-instuv-${shape}-${tileMetres}-${unitRadius}`;
   return material;
 }
 
 /**
- * Authored bark on the INSTANCED forest trunks.
+ * Authored surface on an arbitrary InstancedMesh material — the general form
+ * `applyAuthoredBarkInstanced` was pulled out of once a fourth and fifth
+ * consumer (the canyon spires, the mountain peaks and snow caps, the city
+ * facades) needed the same decode-gate + per-instance-UV-scale + disposer
+ * shape with only the files, the tint and the geometry differing.
  *
- * Same two files as the landmark trunk, so the forest reads as one material at
- * one physical scale; the difference is entirely in how the UVs are derived.
- * map.repeat stays (1,1) here -- addInstancedUvScale owns density.
+ * `shape` and `unitRadius` pass straight through to `addInstancedUvScale`, so
+ * the same rules apply: `shape: 'box'` for a BoxGeometry face, `unitRadius`
+ * is the UNIT geometry's own radius before instance scale (meaningless for
+ * `'box'`). The injection is installed WITH the maps, inside the commit, not
+ * before them — it reads `USE_MAP` / `USE_NORMALMAP`, which only exist once a
+ * map is attached, so installing it early compiles a program with a dead
+ * branch and then needs a second compile anyway.
  */
-export function applyAuthoredBarkInstanced(THREE, material, {
+export function applyAuthoredSurfaceInstanced(THREE, material, {
   basePath = './assets/textures',
-  tint = BARK_TINT,
+  albedoFile,
+  normalFile,
+  tint,
   unitRadius = 1,
+  tileMetres = BARK_TILE_METRES,
+  shape = 'cylinder',
 } = {}) {
   const previous = { color: material.color.getHex(), map: material.map, normalMap: material.normalMap };
   let map = null;
@@ -412,15 +619,11 @@ export function applyAuthoredBarkInstanced(THREE, material, {
     material.map = map;
     material.normalMap = normalMap;
     material.color.setRGB(tint.r, tint.g, tint.b);
-    // The injection is installed WITH the maps, not before them. It reads
-    // USE_MAP / USE_NORMALMAP, which are only defined once a map is attached,
-    // so installing it early compiles a program with a dead branch in it and
-    // then needs a second compile anyway.
-    addInstancedUvScale(material, THREE, { unitRadius });
+    addInstancedUvScale(material, THREE, { unitRadius, tileMetres, shape });
     material.needsUpdate = true;
   });
-  map = loadTexture(THREE, `${basePath}/bark_pine_albedo.png`, { onLoad: gate.onOne });
-  normalMap = loadTexture(THREE, `${basePath}/bark_pine_normal.png`, { onLoad: gate.onOne });
+  map = loadTexture(THREE, `${basePath}/${albedoFile}`, { onLoad: gate.onOne });
+  normalMap = loadTexture(THREE, `${basePath}/${normalFile}`, { onLoad: gate.onOne });
 
   return () => {
     const wasApplied = gate.cancel();
@@ -431,5 +634,83 @@ export function applyAuthoredBarkInstanced(THREE, material, {
     material.normalMap = previous.normalMap;
     material.color.setHex(previous.color);
     material.needsUpdate = true;
+  };
+}
+
+/**
+ * Authored bark on the INSTANCED forest trunks.
+ *
+ * Same two files as the landmark trunk, so the forest reads as one material at
+ * one physical scale; the difference is entirely in how the UVs are derived.
+ * map.repeat stays (1,1) here -- addInstancedUvScale owns density.
+ *
+ * A thin, byte-behaviour-preserving wrapper over `applyAuthoredSurfaceInstanced`
+ * now: same default tint, same default tile, same default shape.
+ */
+export function applyAuthoredBarkInstanced(THREE, material, {
+  basePath = './assets/textures',
+  tint = BARK_TINT,
+  unitRadius = 1,
+} = {}) {
+  return applyAuthoredSurfaceInstanced(THREE, material, {
+    basePath,
+    albedoFile: 'bark_pine_albedo.png',
+    normalFile: 'bark_pine_normal.png',
+    tint,
+    unitRadius,
+    tileMetres: BARK_TILE_METRES,
+    shape: 'cylinder',
+  });
+}
+
+/**
+ * Authored ground overlay on the forest sphere's triplanar `groundMap`.
+ *
+ * The sixth consumer, and the odd one out: every other `apply*` here owns
+ * `material.map` / `material.normalMap` directly, because every other
+ * material is Lambert-lit with a real UV set. The forest ground has neither
+ * — `ground-detail.js`'s `addGroundDetail` already declares the whole
+ * triplanar sampler, its three axis-pair UVs and the mean-preserving weight
+ * math (see that file's own header for why), and exposes exactly the knob a
+ * loader needs at `material.userData.birbGroundTexUniforms`: `uGroundMap`
+ * (starts `null`) and `uGroundMix` (starts `0`, a bit-identical no-op). This
+ * function's whole job is to wait for the decode and then set those two —
+ * it does not touch `.map`/`.normalMap` and never calls `addInstancedUvScale`
+ * (the sphere is not instanced and the projection is triplanar, not a
+ * per-instance repeat).
+ *
+ * ONE texture, not two: `ground-detail.js`'s shader declares a single
+ * `uGroundMap` sampler and no normal slot, so loading a normal map here would
+ * download 1.3 MB that is never bound to anything — the classic
+ * `MeshLambertMaterial` has-no-`roughnessMap` trap from `applyAuthoredBark`'s
+ * own comment, one level up: a slot that does not exist in the consumer is a
+ * silent no-op for whatever tries to fill it.
+ *
+ * Returns `null` (not a disposer) when the material was never given a
+ * `groundMap` option by `addGroundDetail` — i.e. the caller asked for the
+ * overlay but `spherical-world.js` didn't pass `groundMap` for this biome
+ * (today: everything except forest). That is a caller error, not a load
+ * failure, so it is surfaced by return value rather than swallowed into the
+ * same warn-and-continue path a real decode failure takes.
+ */
+export function applyAuthoredGround(THREE, material, { basePath = './assets/textures' } = {}) {
+  const texUniforms = material.userData?.birbGroundTexUniforms;
+  if (!texUniforms) return null;
+  let map = null;
+  const gate = commitWhenDecoded(1, () => {
+    texUniforms.uGroundMap.value = map;
+    texUniforms.uGroundMix.value = GROUND_MAP_STRENGTH;
+  });
+  map = loadTexture(THREE, `${basePath}/forest_ground_albedo.png`, { onLoad: gate.onOne });
+
+  return () => {
+    const wasApplied = gate.cancel();
+    map?.dispose();
+    // Restore ONLY what was actually changed -- same rule as every other
+    // disposer here. Before the decode lands both uniforms are still at
+    // their addGroundDetail defaults (null / 0), so there is nothing to undo.
+    if (!wasApplied) return;
+    texUniforms.uGroundMap.value = null;
+    texUniforms.uGroundMix.value = 0.0;
   };
 }

@@ -113,16 +113,73 @@ export const GROUND_PROFILES = {
 };
 
 /**
+ * Optional authored-texture overlay for the ground, projected TRIPLANAR off
+ * the world position — the planet's own UVs run once around the sphere and
+ * converge at the poles, so there is no seam-free UV to tile a texture on.
+ * Triplanar has no pole singularity and needs no attribute.
+ *
+ * Blending is by the SPHERE normal (`gdUp`), not the facet normal (`gdN`):
+ * `gdN` is constant per triangle, so blending by it would snap the projection
+ * at every triangle edge that straddles the 45-degree crossover and the seam
+ * would show up in the mesh itself. `gdUp` varies per fragment for free.
+ * `uGroundFacet` (default 0, i.e. fully sphere-normal) exists as an A/B knob
+ * only — nobody has looked at facet-blended output yet.
+ *
+ * The three projections are weighted by `pow(|N|, sharpness)`, RENORMALISED
+ * to sum to 1. That normalisation is load-bearing: a weighted average of three
+ * samples of the same texture has the texture's own mean only if the weights
+ * sum to 1, and mean-preservation is the entire point of `uGroundGain`
+ * (1 / the file's measured linear mean, so `mean(sample * gain) == 1` by
+ * construction — the map can only add structure, never shift the ground's
+ * hue or value).
+ *
+ * `uGroundMix` is driven from a decode gate (see authored-textures.js's
+ * `commitWhenDecoded`) and starts at 0, so a texture bound but not yet
+ * decoded contributes `mix(1, ..., 0) == 1` — bit-identical to the map being
+ * absent. That is what stands in for the black-slab guard here: this module
+ * never touches `map`, so there is no "TextureLoader returned an object with
+ * an empty `image`" moment to protect against directly, but the same shape of
+ * bug (switching a sampler on before its upload lands) is closed the same way.
+ *
  * @param material   the terrain mesh's material (Lambert, flat-shaded)
  * @param biome      key into GROUND_PROFILES; anything else is a no-op
+ * @param groundMap  optional { tile, sharpness, gain: {r,g,b} }. Omitted (the
+ *                    default), this function emits exactly the shader it
+ *                    always has — no sampler declared, no fetches, no dead
+ *                    branch — so every biome and every existing caller is
+ *                    byte-for-byte unchanged. Passed, and only for a truthy
+ *                    call, every field is required: this throws rather than
+ *                    defaults a missing one, the same contract
+ *                    `addInstancedUvScale` uses for an unknown geometry shape.
  */
-export function addGroundDetail(material, THREE, { baseRadius = 120, biome } = {}) {
+export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null } = {}) {
   const profile = GROUND_PROFILES[biome];
   // The city's ground already carries a street grid and asphalt; mottling it
   // would fight the one thing that identifies it.
   if (!material || !profile || material.userData?.birbGroundDetail) return material;
+  if (groundMap) {
+    for (const field of ['tile', 'sharpness', 'gain']) {
+      if (groundMap[field] === undefined) {
+        throw new Error(`addGroundDetail: groundMap.${field} is required when groundMap is passed`);
+      }
+    }
+  }
   material.userData = material.userData || {};
   material.userData.birbGroundDetail = true;
+
+  // Created here, in the closure, so the loader can raise uGroundMix at any
+  // time — before or after the material's first compile, which is when
+  // onBeforeCompile actually runs — with no needsUpdate and no recompile.
+  // Assigned into shader.uniforms (the same object, not a copy) below.
+  const texUniforms = groundMap ? {
+    uGroundMap: { value: null },
+    uGroundTile: { value: groundMap.tile },
+    uGroundSharp: { value: groundMap.sharpness },
+    uGroundFacet: { value: 0.0 },
+    uGroundGain: { value: new THREE.Vector3(groundMap.gain.r, groundMap.gain.g, groundMap.gain.b) },
+    uGroundMix: { value: 0.0 },
+  } : null;
+  if (texUniforms) material.userData.birbGroundTexUniforms = texUniforms;
 
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
@@ -140,6 +197,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome } = {
     shader.uniforms.uGdDampDepth = { value: profile.dampDepth };
     shader.uniforms.uGdDetail = { value: new THREE.Vector2(profile.detailScale, profile.detail) };
     shader.uniforms.uGdBand = { value: new THREE.Vector2(profile.band, profile.bandScale) };
+    if (texUniforms) Object.assign(shader.uniforms, texUniforms);
 
     // Shared with addAtmosphere and the city's street grid; whichever runs
     // first declares it. Declared twice the shader does not compile, Three
@@ -160,6 +218,10 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome } = {
       + 'uniform vec3 uGdMoss; uniform vec3 uGdSoil; uniform vec3 uGdSlope;\n'
       + 'uniform vec2 uGdSlopeRange; uniform vec3 uGdDamp;\n'
       + 'uniform float uGdDampDepth; uniform vec2 uGdDetail; uniform vec2 uGdBand;\n'
+      + (texUniforms
+        ? 'uniform sampler2D uGroundMap; uniform float uGroundTile; uniform float uGroundSharp;\n'
+          + 'uniform float uGroundFacet; uniform vec3 uGroundGain; uniform float uGroundMix;\n'
+        : '')
       + `
       float gdHash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
@@ -228,7 +290,26 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome } = {
           float gdBand = sin(gdR * uGdBand.y) * 0.68 + sin(gdR * uGdBand.y * 2.37 + 1.7) * 0.32;
           gdTint *= 1.0 + gdBand * uGdBand.x;
         }
-
+` + (texUniforms ? `
+        // Authored ground overlay, triplanar off world position. See the
+        // function doc comment above for why sphere-normal blending, why the
+        // weights are renormalised, and why uGroundMix (not a clamp) is what
+        // keeps this at the file's own mean.
+        vec3 gtN = normalize(mix(gdUp, gdN, uGroundFacet));
+        vec3 gtW = pow(abs(gtN), vec3(uGroundSharp));
+        gtW /= max(gtW.x + gtW.y + gtW.z, 1e-4);
+        vec2 gtUvX = gdP.zy / uGroundTile;
+        vec2 gtUvY = gdP.xz / uGroundTile;
+        vec2 gtUvZ = gdP.xy / uGroundTile;
+        // texture2D returns LINEAR here: SRGBColorSpace decodes in hardware
+        // (the texture's internal format), not in map_fragment, so this is
+        // correct for any sampler, not only the map slot. gdTint is already
+        // linear, so the two multiply directly with no extra conversion.
+        vec3 gtTex = texture2D(uGroundMap, gtUvX).rgb * gtW.x
+                   + texture2D(uGroundMap, gtUvY).rgb * gtW.y
+                   + texture2D(uGroundMap, gtUvZ).rgb * gtW.z;
+        gdTint *= mix(vec3(1.0), gtTex * uGroundGain, uGroundMix);
+` : '') + `
         outgoingLight *= gdTint;
       }
 
@@ -237,7 +318,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome } = {
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => `${base}-ground-${biome}`;
+  material.customProgramCacheKey = () => `${base}-ground-${biome}${texUniforms ? '-tex' : ''}`;
   material.needsUpdate = true;
   return material;
 }

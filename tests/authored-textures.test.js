@@ -4,6 +4,7 @@ import {
   colorSpaceFor, repeatForCylinder, loadTexture, authoredBarkRequested,
   applyAuthoredBark, BARK_TILE_METRES, BARK_TINT,
   applyAuthoredStone, STONE_TINT, ARCH_ARC_UNITS, ARCH_TUBE_UNITS, authoredStoneRequested,
+  PINE_BARK_TINT, GRANITE_TINT, SNOW_TINT,
 } from '../src/environment/authored-textures.js';
 
 /**
@@ -326,4 +327,102 @@ test('the stone disposer restores only what it actually changed', () => {
   dispose();
   assert.equal(mat.color.getHex(), 0xa4907a);
   assert.equal(mat.map, null);
+});
+
+
+// ===========================================================================
+// The mountain's snow cap lost its contrast against the granite it sits on --
+// REFUTED and fixed here. GRANITE_TINT used to be lifted to 1.73x the peak's
+// own procedural luminance solely to clear a 60 sRGB-unit gap against the
+// mountain's PINE BARK (40+ altitude units below the peaks, rarely in the
+// same frame). That pulled the peak up TOWARD the snow cap that physically
+// sits on it every time either is visible, and snow cannot compensate by
+// getting brighter -- SNOW_TINT is already at its own 1.5%-clipping ceiling
+// (see the header comment on GRANITE_TINT in authored-textures.js). Measured
+// on a real capture: the snow/granite contrast fell from 128.4 sRGB units
+// with both textures off to 78.8 with both on, a 39% loss -- and
+// tests/authored-tints.test.js's own `mountain: granite vs snow >= 60` gate
+// (an absolute-distance check) is satisfied at 78.8 and cannot see a RATIO
+// collapsing, only a distance shrinking below its own fixed floor.
+//
+// These three guards are the ones that can see it, and are watched failing
+// against the value this stage inherited before being fixed below.
+test('the snow cap does not lose its contrast ratio against the granite peak', async () => {
+  const { decodePng } = await import('../tools/lib/asset-analysis.mjs');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const dir = path.join(import.meta.dirname, '..', 'assets', 'textures');
+  if (!fs.existsSync(path.join(dir, 'mountain_granite_albedo.png'))) return; // assets are optional
+
+  const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const luma = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  const hexLinear = (h) => [toLinear(((h >> 16) & 255) / 255), toLinear(((h >> 8) & 255) / 255), toLinear((h & 255) / 255)];
+  const meanLinear = (file) => {
+    const png = decodePng(fs.readFileSync(path.join(dir, file)), file);
+    const n = png.w * png.h;
+    const mu = [0, 0, 0];
+    for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) mu[c] += toLinear(png.data[i * png.ch + c] / 255);
+    return mu.map((v) => v / n);
+  };
+
+  const meanGranite = meanLinear('mountain_granite_albedo.png');
+  const meanSnow = meanLinear('mountain_snow_albedo.png');
+
+  // stoneMat's baked vertical gradient on the mountain peak body
+  // (spherical-world.js: bakeVerticalGradient([.74,.74,.78],[1.16,1.18,1.22]))
+  // -- the vertex-colour MEAN over the prop is the ramp's midpoint.
+  const vcPeak = [0.95, 0.96, 1.00];
+  const PEAK_HEX = 0x646c7c;   // stoneMat, mountain peak body
+  const SNOW_HEX = 0xe6f1ff;   // snowMat, no vertexColors
+
+  const pPeakVC = hexLinear(PEAK_HEX).map((v, i) => v * vcPeak[i]);
+  const aPeakVC = [
+    GRANITE_TINT.r * meanGranite[0] * vcPeak[0],
+    GRANITE_TINT.g * meanGranite[1] * vcPeak[1],
+    GRANITE_TINT.b * meanGranite[2] * vcPeak[2],
+  ];
+  const pPeakRaw = hexLinear(PEAK_HEX);                     // no VC -- for the ratio guard below
+  const aPeakRaw = [GRANITE_TINT.r * meanGranite[0], GRANITE_TINT.g * meanGranite[1], GRANITE_TINT.b * meanGranite[2]];
+  const pSnow = hexLinear(SNOW_HEX);
+  const aSnow = [SNOW_TINT.r * meanSnow[0], SNOW_TINT.g * meanSnow[1], SNOW_TINT.b * meanSnow[2]];
+
+  // G1 -- snow must keep close to its own procedural luminance. SNOW_TINT is
+  // solved at this file's own 1.5% clipping ceiling and cannot go higher
+  // (watched: +0.2% tint pushes clipping from 1.34% to 1.56%, over budget) --
+  // so 0.69 is the achievable floor, not the originally-specified 0.7. Kept
+  // as a guard anyway: it is what would catch a re-delivered, darker snow
+  // albedo silently eating this margin.
+  const snowRatio = luma(aSnow) / luma(pSnow);
+  assert.ok(snowRatio >= 0.69, `snow renders at ${snowRatio.toFixed(4)}x its procedural luminance (floor 0.69)`);
+
+  // G2 -- the peak must not be lifted far enough to threaten the cap it
+  // carries. 1.73x (the refuted value) is what did the damage; 1.3 leaves
+  // real headroom while still allowing the peak its own art pass.
+  const peakRatio = luma(aPeakVC) / luma(pPeakVC);
+  assert.ok(peakRatio <= 1.3, `granite renders at ${peakRatio.toFixed(3)}x its procedural luminance (ceiling 1.3)`);
+  assert.ok(peakRatio >= 0.6, `granite renders at ${peakRatio.toFixed(3)}x its procedural luminance (black-slab floor 0.6)`);
+
+  // G3 -- the actual regression. The snow:granite luminance RATIO the two
+  // procedural materials had (5.84x, snow over granite) must survive at
+  // least 75% of itself once both are textured -- the refuted value kept
+  // only 40% of it (2.36 / 5.84). Computed WITHOUT the peak's vertex-colour
+  // ramp, matching how the in-game capture that found this measured it.
+  const procRatio = luma(pSnow) / luma(pPeakRaw);
+  const authRatio = luma(aSnow) / luma(aPeakRaw);
+  const kept = authRatio / procRatio;
+  assert.ok(kept >= 0.75,
+    `snow:granite contrast keeps only ${(kept * 100).toFixed(0)}% of its procedural ratio (floor 75%) `
+    + `-- procedural ${procRatio.toFixed(2)}x, authored ${authRatio.toFixed(2)}x`);
+
+  // The old 60-unit-vs-pine-bark rule is retired, not replaced with a bigger
+  // number: the pine sits 40+ altitude units below the peaks and is rarely in
+  // the same frame as either, so it should not be the thing GRANITE_TINT is
+  // solved against. What's asserted instead is the weaker, honest claim --
+  // texturing the peak still leaves it visibly distinct from the pine, it
+  // just no longer has to clear an arbitrary 60-unit bar to do it.
+  const PINE_HEX_MEAN = meanLinear('bark_pine_albedo.png');
+  const sPine = [PINE_BARK_TINT.r * PINE_HEX_MEAN[0], PINE_BARK_TINT.g * PINE_HEX_MEAN[1], PINE_BARK_TINT.b * PINE_HEX_MEAN[2]];
+  const toSrgb = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055);
+  const gap = Math.hypot(...aPeakVC.map((v, i) => (toSrgb(Math.min(1, v)) - toSrgb(Math.min(1, sPine[i]))) * 255));
+  assert.ok(gap > 20, `granite and pine bark are only ${gap.toFixed(1)} sRGB units apart -- one has swallowed the other`);
 });

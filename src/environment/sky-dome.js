@@ -241,6 +241,16 @@ export function createSkyDome(options = {}) {
      * on the ground reads as a bug even when both halves are lovely.
      */
     setSkyTexture(texture, { mix = 1, rotation = 0 } = {}) {
+      // Dispose the OUTGOING panorama before rebinding. Three frees a
+      // texture's GPU storage only on .dispose(), never on unbind, so without
+      // this every environment switch leaked the previous biome's 1024x512
+      // sky -- 2.67 MB decoded with mips -- and the "one biome resident at a
+      // time" model the asset budget rests on was quietly false. Found by an
+      // adversarial verifier auditing that model, not by a leak report.
+      const previous = material.uniforms.uSkyTexture.value;
+      if (previous && previous !== texture && typeof previous.dispose === 'function') {
+        previous.dispose();
+      }
       material.uniforms.uSkyTexture.value = texture || null;
       material.uniforms.uSkyMix.value = texture ? Math.max(0, Math.min(1, mix)) : 0;
       material.uniforms.uSkyRotation.value = rotation;
