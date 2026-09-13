@@ -3695,7 +3695,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v67-2026-09-13-edge-moves-shadows';
+    const BIRB_BUILD = 'v68-2026-09-13-aero-camera';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5021,16 +5021,22 @@
     // it, is a feature nobody finds.
     let aerobatics = null;
     let aeroTrigger = null;
-    // How hard a live move WOULD have the chase camera follow the bird's own
-    // roll, 0..1. Reported through `aeroState()` and deliberately NOT wired to
-    // the camera: captured at 2-frame intervals, both moves read clearly
-    // against a STABLE horizon — the roll shows the bird knife-edge, the loop
-    // shows the world upside down over the top — and rolling a chase camera
-    // through 360 degrees on a phone is the one change this repo's own notes
-    // single out as causing motion sickness. Kept because the number is the
-    // move's own description and the next person to try it should not have to
-    // re-derive the ramp; delete it if the answer stays no.
-    let aerobaticCameraFollow = 0;
+    // How hard the chase camera is HOLDING A STABLE FRAME for a live move,
+    // 0..1. The harness capture read well without this because it samples at
+    // two-frame intervals and the damped rig had not caught up; the phone,
+    // at 60 fps, showed the rig doing exactly what it is built to do — follow
+    // the bird's own up and forward — which during a roll means the camera
+    // rolls too and the bird never visibly inverts, and during a loop means
+    // the offset swings round behind the inverted bird and the world reads
+    // as going backwards. Radial up + the heading at move start, ramped.
+    let aerobaticStable = 0;
+    // The level heading the bird had when the move began, in world space,
+    // re-projected onto the current tangent plane each frame. Scratch;
+    // reused; never allocated in the loop.
+    const _aeroHeading = new THREE.Vector3(0, 0, -1);
+    const _aeroUp = new THREE.Vector3(0, 1, 0);
+    const _aeroScratch = new THREE.Vector3();
+    const _aeroNoInput = Object.freeze({ x: 0, y: 0, active: false });
 
     /**
      * The bird's clearance above the terrain it is over, or Infinity before
@@ -11008,6 +11014,13 @@
                   altitude: __BIRB_ALTITUDE_ABOVE_GROUND(),
                 });
                 if (r.started) {
+                  // Capture the LEVEL heading now, before the move bends the
+                  // nose: forward with its radial component removed.
+                  _aeroUp.copy(flight.position).normalize();
+                  _aeroHeading.set(0, 0, -1).applyQuaternion(flight.quaternion);
+                  _aeroHeading.addScaledVector(_aeroUp, -_aeroHeading.dot(_aeroUp));
+                  if (_aeroHeading.lengthSq() < 1e-6) _aeroHeading.set(0, 0, -1);
+                  else _aeroHeading.normalize();
                   if (statusMetric) statusMetric.textContent = r.label + '!';
                   triggerHaptic(18);
                 } else if (r.reason === 'too-low' && statusMetric) {
@@ -11021,7 +11034,21 @@
           const aero = aerobatics.update(delta);
           if (aero.active && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
             flight.aerobatic(aero.rollDelta, aero.pitchDelta);
-            aerobaticCameraFollow = aero.cameraFollow;
+            aerobaticStable = aero.stableCamera;
+            // Re-project the held heading onto THIS frame's tangent plane —
+            // parallel transport has moved the radial since the move began.
+            _aeroUp.copy(flight.position).normalize();
+            _aeroScratch.copy(_aeroHeading).addScaledVector(_aeroUp, -_aeroHeading.dot(_aeroUp));
+            if (_aeroScratch.lengthSq() > 1e-6) _aeroHeading.copy(_aeroScratch).normalize();
+            // bCam (src/flight/bird-camera.js) is the LIVE chase rig — see
+            // "FLIGHT PORT" above. cameraState's follow rig is parked at
+            // spawn on this path (read back: its position never moved through
+            // a whole loop) and is held too only so the two cannot disagree
+            // if that rig is ever switched back in.
+            bCam.setHold({ weight: aerobaticStable, heading: _aeroHeading, distanceMul: aero.cameraDistance });
+            cameraState?.setFollowHold?.({
+              weight: aerobaticStable, heading: _aeroHeading, up: _aeroUp, distanceMul: aero.cameraDistance,
+            });
           } else {
             // Covers both "the move ended" and "the bird was knocked down or
             // landed mid-move" — a manoeuvre must never outlive the state it
@@ -11029,7 +11056,11 @@
             // is now falling.
             if (aero.active) aerobatics.cancel();
             flight.endAerobatic();
-            aerobaticCameraFollow = 0;
+            if (aerobaticStable !== 0) {
+              bCam.setHold({ weight: 0 });
+              cameraState?.setFollowHold?.({ weight: 0 });
+            }
+            aerobaticStable = 0;
           }
         }
 
@@ -11160,7 +11191,13 @@
         }
 
         // 4. Visual Update
-        visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
+        // During a committed move the stick is PINNED — that is the trigger —
+        // so the visual layer would add a full 63-degree bank and a pitch tilt
+        // on top of a flight frame that is already rolling or looping, and
+        // the model would sit a bank's worth off the manoeuvre at every point
+        // of it. The move owns the model's attitude; the visual bank resumes
+        // when it ends.
+        visualQuat = visual.update(pose.quaternion, flight.aerobaticActive ? _aeroNoInput : resolvedInput, delta);
 
         // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
@@ -13050,9 +13087,28 @@
             altitude: force ? Infinity : __BIRB_ALTITUDE_ABOVE_GROUND(),
           });
         },
+        // What the follow rig ITSELF reports holding, read back from the
+        // rig — so a hold the game believes it sent can be checked against
+        // one the camera actually has.
+        cameraHold: () => {
+          const live = newFlightSystem?.camera;
+          const d = cameraState?.getFollowDebug?.();
+          return {
+            // The rig that renders.
+            live: live && typeof live.getHold === 'function' ? {
+              weight: +live.getHold().weight.toFixed(3), distanceMul: live.getHold().distanceMul,
+              distance: live.distance, height: live.height,
+            } : null,
+            // The legacy follow rig, parked on this path.
+            follow: d ? { weight: d.hold?.weight, position: d.position?.toArray?.().map((n) => +n.toFixed(2)) } : null,
+            mode: cameraState?.getMode?.(),
+          };
+        },
         aeroState: () => (aerobatics ? {
           ...aerobatics.state(),
-          cameraFollow: +aerobaticCameraFollow.toFixed(3),
+          stableCamera: +aerobaticStable.toFixed(3),
+          heading: _aeroHeading.toArray().map((n) => +n.toFixed(4)),
+          up: _aeroUp.toArray().map((n) => +n.toFixed(4)),
           suspended: !!flightController?.aerobaticActive,
         } : null),
         flightProbe: () => {

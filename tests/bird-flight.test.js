@@ -157,3 +157,42 @@ test('a dive can reach 80 degrees and is still clamped short of vertical', () =>
   const deg = pitchOf(bird) * 180 / Math.PI;
   assert.ok(deg < -79.5 && deg > -80.5, `deepest dive measured ${deg.toFixed(2)} degrees`);
 });
+
+// ── aerobatics on the flight frame ──────────────────────────────────────
+test('a positive aerobatic roll drops the RIGHT wing — into a right bank', () => {
+  // Shipped the other way. Forward is local -Z, so a positive rotation about
+  // +Z carries +X (the right wing) UP: a hard right bank rolled the bird
+  // LEFT, against the visual bank the model was already holding. Reported
+  // from the phone as "hard bank left then does a right roll".
+  const bird = makeBird();
+  bird.aerobatic(0.4, 0);
+  const rightWing = new THREE.Vector3(1, 0, 0).applyQuaternion(bird.quaternion);
+  const up = bird.position.clone().normalize();
+  assert.ok(rightWing.dot(up) < -0.3, `right wing went ${rightWing.dot(up) > 0 ? 'UP' : 'down'} (${rightWing.dot(up).toFixed(3)})`);
+});
+
+test('a positive aerobatic pitch is nose-UP, the same sense as pitch()', () => {
+  const a = makeBird(); a.aerobatic(0, 0.4);
+  const b = makeBird(); b.pitch(1, 0.4 / b.pitchRate);
+  assert.ok(Math.abs(pitchOf(a) - pitchOf(b)) < 1e-6, `${pitchOf(a)} vs ${pitchOf(b)}`);
+  assert.ok(pitchOf(a) > 0.3, 'must be nose-up');
+});
+
+test('while a move is active, tick() applies neither the stick nor any stabiliser', () => {
+  const bird = makeBird();
+  // Pitch it past the 80-degree ceiling, as the first quarter of a loop
+  // does. (Not a full PI: that lands the nose level-and-backwards, where
+  // asin-measured pitch reads 0 and proves nothing about the clamp.)
+  bird.aerobatic(0, 1.5);
+  const before = bird.quaternion.clone();
+  bird.tick({ x: 1, y: -1 }, 1 / 60);   // hard stick, both axes
+  // Only the sphere transport may have touched the orientation, and at
+  // cruise that is a fraction of a degree per frame.
+  const dq = Math.abs(before.x - bird.quaternion.x) + Math.abs(before.y - bird.quaternion.y)
+    + Math.abs(before.z - bird.quaternion.z) + Math.abs(before.w - bird.quaternion.w);
+  assert.ok(dq < 0.01, `orientation moved ${dq} in one frame under a suspended stick`);
+  assert.ok(pitchOf(bird) > 1.45, `the 80-degree clamp must not fire mid-loop (pitch ${pitchOf(bird)})`);
+  bird.endAerobatic();
+  bird.tick({ x: 0, y: 0 }, 1 / 60);
+  assert.ok(Math.abs(pitchOf(bird)) <= bird.maxPitch + 0.05, 'the clamp resumes once the move ends');
+});

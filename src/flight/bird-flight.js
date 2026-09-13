@@ -180,8 +180,9 @@ export class BirdFlight {
      * Apply one frame of a committed aerobatic manoeuvre.
      *
      * `roll` is about the bird's own long axis (local Z — the same axis
-     * `_levelRoll` uses), `pitch` about its local right (local X, the same
-     * axis `pitch()` uses). Setting `aerobaticActive` is the load-bearing
+     * `_levelRoll` uses); positive rolls INTO a right bank. `pitch` is about
+     * its local right (local X, the same axis `pitch()` uses); positive is
+     * nose-up, so a positive full turn is a loop over the top. Setting `aerobaticActive` is the load-bearing
      * half: without it the auto-level, the roll leveller and the maxPitch
      * clamp all run in the same frame and undo the move as fast as it is
      * made. A loop in particular cannot exist while an 80-degree pitch
@@ -193,8 +194,16 @@ export class BirdFlight {
         const s = this._scratch;
         this.aerobaticActive = true;
         if (roll) {
+            // NEGATED. Forward is local -Z, so a POSITIVE rotation about +Z
+            // carries the right wing (+X) UP — which is a roll to the LEFT.
+            // Shipped un-negated, a hard right bank rolled the bird left,
+            // straight against the visual bank the model was already holding
+            // the other way: reported from the phone as "hard bank left then
+            // does a right roll and the other way". Positive `roll` here is
+            // a roll INTO a right bank, right wing down, matching
+            // bird-visual.js's own convention (input +1 -> negative bank).
             s.axis.set(0, 0, 1);
-            s.quat.setFromAxisAngle(s.axis, roll);
+            s.quat.setFromAxisAngle(s.axis, -roll);
             this.quaternion.multiply(s.quat);
         }
         if (pitch) {

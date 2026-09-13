@@ -24,7 +24,7 @@ const run = (aero, step = 1 / 60, limit = 600) => {
     const r = aero.update(step);
     if (!r.active) break;
     roll += r.rollDelta; pitch += r.pitchDelta; frames += 1;
-    peakFollow = Math.max(peakFollow, r.cameraFollow);
+    peakFollow = Math.max(peakFollow, r.stableCamera);
   }
   return { roll, pitch, frames, peakFollow };
 };
@@ -93,12 +93,12 @@ test('the total is exact whatever the frame rate — even a stuttering one', () 
   assert.ok(Math.abs(roll - TAU) < 1e-6, `a 5-second hitch left the roll at ${roll}`);
 });
 
-test('the camera-follow ramp rises and returns, so the horizon cannot snap', () => {
+test('the stable-camera ramp rises and returns, so the frame cannot snap', () => {
   const aero = createAerobatics();
   aero.start('roll');
   const first = aero.update(1 / 60);
   const { peakFollow } = run(aero);
-  assert.ok(first.cameraFollow < 0.2, `starts at ${first.cameraFollow}`);
+  assert.ok(first.stableCamera < 0.2, `starts at ${first.stableCamera}`);
   assert.ok(peakFollow > 0.9, `peaks at only ${peakFollow}`);
 });
 

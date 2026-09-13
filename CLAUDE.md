@@ -884,12 +884,40 @@
 > move also runs BEFORE `tick()`, because `tick()` ends by enforcing that
 > clamp against the orientation it finds.
 >
-> **The chase camera is deliberately NOT rolled.** `aerobaticCameraFollow` is
-> computed and reported and nothing consumes it: captured at 2-frame
-> intervals, both moves read clearly against a STABLE horizon — the roll shows
-> the bird knife-edge, the loop shows the world upside down over the top — and
-> rolling a chase camera through 360 degrees on a phone is the one change this
-> file already flags as causing motion sickness.
+> **The roll direction was reversed, and the loop's camera went "wild,
+> maybe backwards" — three facts settled it** (2026-09-13, later still).
+> Forward is local -Z, so a POSITIVE rotation about +Z carries the right wing
+> (+X) UP: `aerobatic()` un-negated rolled a hard right bank to the LEFT,
+> straight against the visual bank the model was already holding the other
+> way. Negated now, with a test that checks which way the right wing tip
+> actually goes. **The visual bank is muted during a move** — the stick is
+> pinned (that is the trigger), so `bird-visual.js` would otherwise add a
+> full 63-degree bank on top of a frame that is already rolling.
+>
+> **`src/camera/follow-camera.js` IS NOT THE LIVE CHASE CAMERA.** The game
+> runs `BirdCamera` (`src/flight/bird-camera.js`, "FLIGHT PORT" in
+> index.html); cameraState's follow rig is parked at spawn on this path —
+> read back through a whole loop, its position never moved. The first camera
+> hold was wired into that parked rig, reached it (weight and distance read
+> back correctly), and changed nothing on screen. `__BIRB.cameraHold()` now
+> reports the LIVE rig's hold beside the parked one so this cannot be
+> mistaken twice. **A hold that arrives at the wrong rig is
+> indistinguishable from one that does not work, unless you read it back
+> from the rig that renders.**
+>
+> `BirdCamera` stands behind the bird along the bird's own FORWARD, and in a
+> loop that forward points up, then backwards, then down — so the camera
+> swung underneath the bird and out the far side. Under a hold it stands off
+> along the LEVEL heading the move began with (re-projected onto the tangent
+> plane each frame), 2x further back for a loop (radius ~3.5 at cruise is
+> smaller than the 5-unit stand-off, so at 1x the bird went over the top
+> almost directly above the lens), full weight for the whole move with 0.15 s
+> in / 0.25 s out ramps — a sin(PI t) ramp left the frame half-following the
+> tumble for most of the move. Measured on the live rig: **10.00 behind,
+> 4.00 up, 0.00 side, look angle -18.4 degrees, constant from t=0.09 to
+> 0.85** while the bird's pitch ran +48 -> +80 -> over the top -> back. Up
+> is already radial in that rig, which is why the barrel roll needed nothing
+> from it and always read against a level horizon.
 >
 > **Ultra is now the shipping default** (`QUALITY_PRESETS[0]`: tier PINNED at
 > 0, DPR ceiling 2.4), at the owner's explicit call. Know what the pin costs

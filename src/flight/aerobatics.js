@@ -16,10 +16,8 @@
  * without a renderer — the same split `bird-pose.js` uses.
  *
  * THE ANGLE PROFILE IS AN INTEGRATED RAISED COSINE, and that is not
- * decoration. A linear sweep starts and stops at full angular rate, which on
- * a chase camera that follows the bird's own up (it does — see the dead
- * radial-up branch in follow-camera.js) is a hard jerk of the whole horizon
- * at both ends. Rate `turns * 2PI * (1 - cos(2PI t))` is zero at t=0 and t=1
+ * decoration. A linear sweep starts and stops at full angular rate, which is
+ * a hard jerk of the bird at both ends. Rate `turns * 2PI * (1 - cos(2PI t))` is zero at t=0 and t=1
  * and its integral over the move is EXACTLY `turns * 2PI`, so the move eases
  * in and out and still closes the circle to the last radian. A profile that
  * merely looks smooth and lands at 359 degrees leaves the bird permanently
@@ -49,11 +47,18 @@ export const AEROBATIC_MOVES = Object.freeze({
     pitchTurns: 0,
     cooldown: 0.7,
     minAltitude: 5,
-    // How hard the chase camera follows the bird's roll, 0..1. A roll MUST
-    // carry the camera: the bird is about 140 px from behind, and with a
-    // level horizon a roll reads as the model spinning on a spit rather than
-    // as the world going round. This is the whole effect.
-    cameraFollow: 1,
+    // How hard the chase camera HOLDS A STABLE FRAME during the move, 0..1
+    // — radial up, and the heading the bird had when the move began. The
+    // first version reasoned the opposite way ("a roll must carry the
+    // camera"), and the phone said no: the chase rig derives its up and its
+    // offset from the bird's own orientation, so a camera left to follow the
+    // move rolls WITH the bird and the bird never visibly inverts, and in a
+    // loop the offset swings to the far side as the nose comes over the top
+    // and the whole world reads as going backwards. The move is only legible
+    // against something that does not move.
+    stableCamera: 1,
+    // A roll does not displace the bird, so the usual stand-off is right.
+    cameraDistance: 1,
   }),
   loop: Object.freeze({
     id: 'loop',
@@ -63,12 +68,19 @@ export const AEROBATIC_MOVES = Object.freeze({
     pitchTurns: 1,
     cooldown: 1.1,
     minAltitude: 14,
-    // A loop is the opposite case: you want to SEE the arc, and a camera
-    // that tumbles with the bird shows you a bird that never moves against a
-    // sky that does. Partial follow keeps enough horizon to read the shape.
-    cameraFollow: 0.35,
+    // Same reasoning, and MORE so: a loop is two seconds, which is long
+    // enough for the damped rig to swing all the way round behind the
+    // inverted bird.
+    stableCamera: 1,
+    // Stand twice as far back: the loop's radius is smaller than the normal
+    // stand-off, so at 1x the bird goes over the top almost directly above
+    // the lens. See follow-camera.js hold.distanceMul.
+    cameraDistance: 2.0,
   }),
 });
+
+/** Seconds over which the camera hold eases in at move start and out at its end. */
+export const CAMERA_HOLD_RAMP = Object.freeze({ in: 0.15, out: 0.25 });
 
 /** Total angle swept by `turns` full turns at normalised time `t`. */
 export function sweptAngle(turns, t) {
@@ -132,7 +144,7 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
   function update(delta) {
     const dt = Math.max(0, Math.min(Number.isFinite(delta) ? delta : 0, 0.1));
     if (cooldown > 0) cooldown = Math.max(0, cooldown - dt);
-    if (!active) return { active: false, rollDelta: 0, pitchDelta: 0, cameraFollow: 0, t: 0, move: null };
+    if (!active) return { active: false, rollDelta: 0, pitchDelta: 0, stableCamera: 0, cameraDistance: 1, t: 0, move: null };
 
     elapsed += dt;
     const t = Math.min(1, elapsed / active.duration);
@@ -140,16 +152,27 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
     const step = total - swept;
     swept = total;
 
-    // Ease the camera's follow in and out with the move, so the horizon does
-    // not snap back level on the frame the move ends.
-    const ramp = Math.sin(Math.PI * t);
+    // Camera hold: IN fast, OUT at the end, FULL in between. This was a
+    // sin(PI t) over the whole move and the loop was still wild, and the
+    // probe said why: at half weight the rig's frame is a blend of the held
+    // frame and the bird's own — which mid-loop is pointing straight up —
+    // so for most of the move the camera was half-following the tumble. A
+    // manoeuvre needs the frame held for its WHOLE duration; the ramps are
+    // only there so the two transitions are not single-frame snaps.
+    const seconds = elapsed;
+    const remaining = Math.max(0, active.duration - elapsed);
+    const ramp = Math.max(0, Math.min(1,
+      Math.min(seconds / CAMERA_HOLD_RAMP.in, remaining / CAMERA_HOLD_RAMP.out)));
     const result = {
       active: true,
       move: active.id,
       t,
+      // Positive is a roll INTO a right bank (right wing down). The flight
+      // controller owns the axis convention that makes that true.
       rollDelta: active.rollTurns ? step * direction : 0,
       pitchDelta: active.pitchTurns ? step * direction : 0,
-      cameraFollow: active.cameraFollow * ramp,
+      stableCamera: active.stableCamera * ramp,
+      cameraDistance: active.cameraDistance ?? 1,
     };
 
     if (t >= 1) {
