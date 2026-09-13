@@ -424,6 +424,28 @@
 > 1024² deliveries were downscaled to 512² because the directory summed to
 > 42.7 MB and no biome ever has all of it resident. The 24 must not be raised.
 >
+> **A5 in the quality board is measuring the clock, and a red main found it**
+> (2026-09-13, after the merge — FINDING, patch proposed, NOT applied; see
+> [docs/perf/gates/G-A5-DRIFT.md](docs/perf/gates/G-A5-DRIFT.md)). Browser
+> Health failed on main at `58e240a` with "A5: scene draw calls did not fall"
+> and PASSED on the SAME COMMIT on the branch four seconds earlier, which is
+> most of the diagnosis. The assertion compares two medians with a strict
+> `zero < one` and its whole signal is the weather's ONE draw call, while
+> `__BIRB.freeze(true)` freezes only the BIRD (it sets flight speed to 0).
+> Measured with the pose frozen, sun off, tier pinned: after a 40-frame
+> warm-up, four consecutive 15-frame windows had medians **34, 32, 28, 29** —
+> six draw calls of drift against one of signal, not a startup transient, and
+> still four in the drone-free Ring Rush, so the drones are not the whole of
+> it. The drift trends DOWN, and density 0 is always the later window, which
+> is exactly why the check usually passes and occasionally does not. The fix
+> (interleave the two densities, counterbalance the order, wait on frames
+> rather than milliseconds) measures 12/12 green with both A5 mutations still
+> caught — but `tools/lib/quality-captures.mjs` is hash-frozen in
+> `tools/oracle-manifest.txt` under R5, so it is written up as a gate decision
+> rather than applied. **When a check's signal is one unit and its window is
+> seconds long, it is not measuring what it names unless something proves the
+> rest of the frame held still.**
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose
