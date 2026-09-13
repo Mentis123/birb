@@ -3491,7 +3491,8 @@
       // header for why this is being proved with a procedural map before the
       // authored biome skies (ASSET_JOBS.md job 02) are wired to it.
       var { installSkyEnvironment, iblRequested } = await import("./src/environment/sky-environment.js");
-      var { loadTexture: loadAuthoredTexture } = await import("./src/environment/authored-textures.js");
+      var { loadTexture: loadAuthoredTexture, applyAuthoredFeathers, authoredFeathersRequested, authoredFeatherNormalsRequested } =
+        await import("./src/environment/authored-textures.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
       var { createDevGesture } = await import("./src/ui/dev-gesture.js");
       var { createDevQualityPanel, sentinel: qualitySentinel, SENTINEL_REASONS: QUALITY_SENTINEL_REASONS } =
@@ -7729,11 +7730,14 @@
       });
       const eyeMat = new THREE.MeshBasicMaterial({ vertexColors: true });
 
-      // Tiling rate, in tiles per world unit. The bird is ~1.5 units long and
+      // Tiling rate, in tiles per world unit. The bird is ~1.4 units long and
       // renders about 400 device pixels wide on the owner's phone (measured at
-      // the chase camera, world hidden), so a tile every ~0.25 units puts a
-      // feather cluster at roughly 60 px — visible as texture, not as pattern.
-      const TILES_PER_UNIT = 4.0;
+      // the chase camera, world hidden). At 4 tiles/unit the first capture put
+      // ~6 tiles across the bird and the 512 sheet was minified 8-20x into its
+      // mip chain: measured high-pass detail rose only 0.85-1.29x over the
+      // plain bird. 1.8 lands a tile at ~160 device px, where a feather row in
+      // the contour sheet is a few pixels — texture, not pattern, not mush.
+      const TILES_PER_UNIT = 1.8;
 
       // Rewrites a geometry's 0..1 UV to repeat at TILES_PER_UNIT over the
       // part's own extent, so a tiling sheet lands at the same physical scale
@@ -7864,13 +7868,23 @@
 
       // -- Eyes: one unlit mesh ---------------------------------------------
       const eyeParts = [];
-      for (const z of [0.132, -0.132]) {
-        const ball = new THREE.SphereGeometry(0.092, 12, 10);
+      // Lenses on the FRONT-SIDES of the head, not balls wrapped round it.
+      // The owner's real-phone chase shot showed two black discs at the top
+      // of the silhouette from BEHIND — r=0.092 balls at z=0.132 reached
+      // z=0.224 against a head half-width of ~0.197 and read as a face
+      // looking back at the camera. A lens is a sphere squashed to 0.42 in
+      // its own x and rotated to face forward-and-out along the head's own
+      // surface normal, so from the rear the crown and cheeks occlude it.
+      for (const z of [0.135, -0.135]) {
+        const sign = Math.sign(z);
+        const lens = new THREE.SphereGeometry(0.070, 12, 10);
         eyeParts.push(paintGeometryColor(
-          bakeGeometryTRS(ball, { position: [0.575, 0.425, z] }), new THREE.Color(0x0a0a12)));
-        const glint = new THREE.SphereGeometry(0.035, 8, 6);
+          bakeGeometryTRS(lens, {
+            position: [0.652, 0.418, z], rotation: [0, -sign * 0.55, 0], scale: [0.42, 1, 1],
+          }), new THREE.Color(0x0a0a12)));
+        const glint = new THREE.SphereGeometry(0.024, 8, 6);
         eyeParts.push(paintGeometryColor(
-          bakeGeometryTRS(glint, { position: [0.625, 0.462, z + 0.028] }), new THREE.Color(0xffffff)));
+          bakeGeometryTRS(glint, { position: [0.676, 0.440, z + sign * 0.016] }), new THREE.Color(0xffffff)));
       }
       const eyeMesh = new THREE.Mesh(mergeAndDispose(eyeParts), eyeMat);
       eyeMesh.name = 'birbEyes';
@@ -7896,7 +7910,7 @@
           const t = i / (SEC - 1);
           const len = 0.56 + t * 0.22;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.135, backW: 0.195, tipTaper: 0.30, segments: 3,
+            length: len, frontW: 0.135, backW: 0.205, tipTaper: 0.12, segments: 4,
             bow: 0.018, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.18, len);
@@ -7913,7 +7927,7 @@
           const t = i / (COV - 1);
           const len = 0.30 + t * 0.10;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.115, backW: 0.145, tipTaper: 0.34, segments: 2,
+            length: len, frontW: 0.115, backW: 0.150, tipTaper: 0.16, segments: 3,
             bow: 0.012, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.13, len);
@@ -8086,6 +8100,22 @@
         : birdVariant === 'v2' ? createProceduralBirbV2()
           : createProceduralBirb(),
     );
+
+    // The authored feather sheets, on the v3 bird only (its UVs tile in
+    // surface units for exactly this; Phase 0's inherited generator UVs do
+    // not). Decode-gated on all four images and reversible, like every other
+    // authored surface. `?feathers=0` opts out for the A/B.
+    let __birbFeatherDisposer = null;
+    if (birdVariant === 'v3' && authoredFeathersRequested(window.location?.search || '')) {
+      const builtBird = birbAnchor.children[0];
+      const featherMaterials = builtBird?.userData?.featherMaterials;
+      if (featherMaterials) {
+        __birbFeatherDisposer = applyAuthoredFeathers(THREE, featherMaterials, './assets/textures', {
+          normals: authoredFeatherNormalsRequested(window.location?.search || ''),
+          onError: (err) => console.warn('feather texture failed to load; keeping the procedural feathers', err),
+        });
+      }
+    }
 
     // Default to the procedural birb — it's richer, animates per-part (wings +
     // feet are named groups), and behaves identically on iOS. The GLB path is

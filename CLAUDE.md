@@ -446,6 +446,54 @@
 > seconds long, it is not measuring what it names unless something proves the
 > rest of the frame held still.**
 
+> **The bird got a joint, the sky got a horizon, and the feather sheets are
+> detail maps** (2026-09-13, later). Three things, each with a number.
+>
+> **`?bird=v3` is a bird with a WRIST.** Each wing is an arm group (coverts
+> over secondaries) with a `hand` group nested at the wrist carrying seven
+> splayed primaries, because the twist and lagging hand added to the rig
+> measured 0.32-0.54/255 on v2's one-plate wing: a plate has no thickness,
+> so the flap's realism was gated on the FORM. 9 draw calls / 1,414 tris,
+> contract green; the extra call over Phase 0's eight is the two hands.
+> Proportion came from capture, three rounds: span 1.02 against a 1.21 body
+> read as a FISH (a songbird is ~2; it is 1.73 now); eyes as r=0.092 balls at
+> z=0.132 stood 0.065 proud of a 0.197 head half-width and showed from BEHIND
+> on the owner's phone as a face looking back — they are flattened lenses on
+> the front-sides now; feet hung like landing gear. **Axis trap:**
+> `birdStats().worldSize` is reported under the orientation offset (+X built
+> → -Z forward), so `.x` is the SPAN and `.z` the length; read the other way
+> the wings appear never to change while they triple. Phase 0 still ships
+> until the blind phone A/B.
+>
+> **The authored sky stood on end at the equator.** This is a sphere, so up
+> is radial; the dome's gradient measured elevation against `uSkyUp` but the
+> panorama was sampled with three's WORLD-frame equirect (`asin(dir.y)`), so
+> its horizon stayed at world y = 0 while the player's went round the planet.
+> Reproduced at `__BIRB.teleport(1,0,0)`: the cloud band ran top to bottom.
+> It samples in the local tangent frame now (`equirectUvLocal` in
+> sky-environment.js is the JS reference the GLSL mirrors, five tests); at
+> the pole it reduces exactly to the classic formula. **Two halves of one
+> shader must agree on which way is up.**
+>
+> **The feather sheets are clamped DETAIL maps, not albedo, and the measure-
+> ment is why.** Solved as albedo (tint = 1/mean) they clip 24% of the body
+> and 54% of the belly against a 1.5% budget — their 1st-99th range is only
+> ~3x, so half of every sheet is above its own mean by construction — and
+> the belly/wingtips clip at 53.7% at EVERY strength, dead flat, because
+> those vertex colours carry blue at exactly 255. That is the palette. The
+> shader applies `min(1, mix(1, albedo x tint, 0.8))` (nothing can clip on
+> any vertex colour; detail is the shadow between vanes), decode-gated on all
+> four images, chained under the rim light's own onBeforeCompile, `?feathers=0`
+> and `?feathernormals=0` for the A/B, v3 only (its UVs tile in surface units;
+> the atlas v2 built assumed a bird-shaped image `asset-check` will never
+> accept). **Measured on the sheet it darkens the rendered bird 18-49%, far
+> more than the 7% the offline solve predicts, with or without normals** — the
+> reading is that the plain bird's belly and back were BLOWN OUT (rim + emissive
+> + key on a near-white vertex colour) and the multiply removes a clipped
+> highlight, which is nonlinear; that is inferred from the composite, not yet
+> measured, and the phone decides. First capture at 4 tiles/unit minified the
+> 512 sheet 8-20x into mush (detail x0.85-1.29); it is 1.8 now.
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose

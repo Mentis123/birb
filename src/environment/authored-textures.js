@@ -188,6 +188,140 @@ export const CONCRETE_TINT = Object.freeze({ r: 0.029, g: 0.061, b: 0.147 });
 export const CITY_FACADE_SCALES = Object.freeze([0.7173, 1.0000, 0.5406]);
 
 export const GROUND_TINT = Object.freeze({ r: 5.213, g: 5.962, b: 7.030 });
+
+/**
+ * FEATHER_CONTOUR_TINT / FEATHER_VANE_TINT / FEATHER_MAP_STRENGTH — the bird's
+ * two authored sheets (assets/textures/feather_{contour,vane}_albedo.png),
+ * consumed by createProceduralBirbV3's contourMat and vaneMat.
+ *
+ * These are DETAIL maps, not base colour, and the measurement is why. Solved
+ * the usual way (tint = 1/mean, so the map multiplies to unity) the sheets put
+ * 24% of the body's texels and 54% of the belly's over 1.0 against this
+ * repo's 1.5% clipping budget: their 1st-99th percentile range is only 2.7x
+ * and 3.3x, so half of every sheet sits above its own mean by construction.
+ * And the belly/wingtip clip at 53.7% at EVERY strength from 1.0 to 0.1 —
+ * dead flat across the sweep — because those vertex colours (0xe6efff,
+ * 0x4df0ff) carry blue at exactly 255 and any brightening at all clips them.
+ * That is the palette, not the art.
+ *
+ * So the shader applies `min(1, mix(1, albedo x tint, strength))`: nothing can
+ * clip on any vertex colour, ever, and the feather structure reads as the
+ * shadow between vanes, which is what it physically is. Measured at 0.8: mean
+ * effective luma 0.938 / 0.934 against the 0.60 black-slab floor, darkest 1%
+ * at 0.61 / 0.63, detail depth 39% / 37%. Same shape as GROUND_MAP_STRENGTH.
+ */
+export const FEATHER_CONTOUR_TINT = Object.freeze({ r: 2.904, g: 3.097, b: 3.126 });
+export const FEATHER_VANE_TINT = Object.freeze({ r: 2.798, g: 2.975, b: 3.015 });
+export const FEATHER_MAP_STRENGTH = 0.8;
+
+/** `?feathers=0`, or `?authored=0` for every authored texture at once. */
+export function authoredFeathersRequested(search) {
+  return !/[?&](feathers|authored)=0/.test(search || '');
+}
+
+/**
+ * `?feathernormals=0` keeps the albedo sheets and drops the derived normal
+ * maps. Exists because the first capture with all four images on measured the
+ * bird 13-30% DARKER than the offline solve predicted for the albedo alone,
+ * and the only way to attribute that is to turn one thing off.
+ */
+export function authoredFeatherNormalsRequested(search) {
+  return !/[?&]feathernormals=0/.test(search || '');
+}
+
+/**
+ * Patch a vertex-coloured MeshStandardMaterial so its `map` is a clamped
+ * detail layer over the vertex colour instead of a base albedo. CHAINS any
+ * onBeforeCompile already on the material (the bird's rim light registers
+ * one) rather than replacing it, and extends the program cache key so a
+ * feathered material never shares a compiled program with a bare one.
+ */
+function installFeatherDetail(THREE, material, tint) {
+  const uniforms = {
+    uFeatherTint: { value: new THREE.Vector3(tint.r, tint.g, tint.b) },
+    uFeatherStrength: { value: FEATHER_MAP_STRENGTH },
+  };
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = function (shader, renderer) {
+    if (typeof prev === 'function') prev.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    const MULTIPLY = 'diffuseColor *= sampledDiffuseColor;';
+    if (!shader.fragmentShader.includes(MULTIPLY)) {
+      // A three upgrade that renames the chunk would otherwise let the raw
+      // albedo multiply the vertex colour: the black slab, by a fourth route.
+      // birb-modes treats console warnings as failures, so this cannot ship
+      // silently.
+      console.warn('authored feathers: map_fragment anchor not found; the sheet would multiply raw, so it is left unapplied');
+      return;
+    }
+    shader.fragmentShader = shader.fragmentShader
+      .replace('uniform vec3 diffuse;', 'uniform vec3 diffuse;\nuniform vec3 uFeatherTint;\nuniform float uFeatherStrength;')
+      .replace(MULTIPLY,
+        'diffuseColor.rgb *= min(vec3(1.0), mix(vec3(1.0), sampledDiffuseColor.rgb * uFeatherTint, uFeatherStrength));');
+  };
+  const prevKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = function () {
+    const base = typeof prevKey === 'function' ? prevKey.call(this) : '';
+    return `${base}|authored-feathers`;
+  };
+  return uniforms;
+}
+
+/**
+ * Apply the two authored feather sheets to the v3 bird's materials.
+ *
+ * `materials` is `{ contour, vane }` (either may be absent). All four images
+ * — two albedos, two derived normals — are decode-gated together through
+ * commitWhenDecoded, for the reason every other authored surface here is: a
+ * normalMap over a still-procedural albedo is a different wrong frame, not a
+ * fewer-wrong-frames one. Returns a disposer that cancels a pending swap and
+ * restores only what it actually changed.
+ */
+export function applyAuthoredFeathers(THREE, materials, basePath = './assets/textures', { onError, normals = true } = {}) {
+  const sets = [
+    { material: materials?.contour, file: 'feather_contour', tint: FEATHER_CONTOUR_TINT },
+    { material: materials?.vane, file: 'feather_vane', tint: FEATHER_VANE_TINT },
+  ].filter((s) => s.material);
+  if (!sets.length) return () => {};
+
+  const loaded = [];
+  const previous = new Map();
+  const perSet = normals ? 2 : 1;
+  const gate = commitWhenDecoded(sets.length * perSet, () => {
+    for (const { set, map, normal } of loaded) {
+      const m = set.material;
+      previous.set(m, {
+        map: m.map, normalMap: m.normalMap,
+        onBeforeCompile: m.onBeforeCompile, customProgramCacheKey: m.customProgramCacheKey,
+      });
+      installFeatherDetail(THREE, m, set.tint);
+      m.map = map;
+      if (normal) m.normalMap = normal;
+      m.needsUpdate = true;
+    }
+  });
+  for (const set of sets) {
+    const entry = { set, map: null, normal: null };
+    entry.map = loadTexture(THREE, `${basePath}/${set.file}_albedo.png`, { onLoad: gate.onOne, onError });
+    if (normals) {
+      entry.normal = loadTexture(THREE, `${basePath}/${set.file}_normal.png`, { onLoad: gate.onOne, onError });
+    }
+    loaded.push(entry);
+  }
+
+  return () => {
+    const wasApplied = gate.cancel();
+    for (const { map, normal } of loaded) { map?.dispose(); normal?.dispose(); }
+    if (!wasApplied) return;
+    for (const [m, prev] of previous) {
+      m.map = prev.map;
+      m.normalMap = prev.normalMap;
+      m.onBeforeCompile = prev.onBeforeCompile;
+      m.customProgramCacheKey = prev.customProgramCacheKey;
+      m.needsUpdate = true;
+    }
+  };
+}
 export const GROUND_MAP_STRENGTH = 0.8;
 
 /**
