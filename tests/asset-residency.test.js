@@ -68,20 +68,28 @@ test('the residency gate still exits 0 against the real shipped assets', skip, (
 
 test('a file consumed by two or three materials in one biome is charged that many times', skip, () => {
   const { biomeTotals } = run();
+  // THE BIRD TAX. Every total below carries a flat +3.33 MB that no biome can
+  // shed, because the bird is in all four: feather_contour and feather_vane at
+  // 1.333 MB each (512 albedo) plus their 256 normals at 0.333 MB each. It is
+  // listed here rather than folded silently into the literals so that a future
+  // reader can see which part of each number belongs to the world and which
+  // part belongs to the one object that is always on screen.
+  const BIRD = 3.333;
   // canyons: canyon_sandstone x2 (spireMat + darkSpireMat), 1.333 MB each file
   // x2 files x2 uploads = 5.33 MB of canyon_sandstone alone, plus 4 leaked
-  // skies at 2.667 MB = 10.67 MB -> 16.00 MB total, not the 13.33 MB an x1
+  // skies at 2.667 MB = 10.67 MB -> 16.00 MB of world, not the 13.33 MB an x1
   // charge (or a non-leaking single sky) would give.
-  assert.ok(Math.abs(biomeTotals.canyons - 16.00) < 0.05,
-    `canyons resident ${biomeTotals.canyons} MB -- expected ~16.00 (x2 sandstone charge missing?)`);
+  assert.ok(Math.abs(biomeTotals.canyons - (16.00 + BIRD)) < 0.05,
+    `canyons resident ${biomeTotals.canyons} MB -- expected ~${(16.00 + BIRD).toFixed(2)} (x2 sandstone charge missing?)`);
   // city: city_concrete x3 (three buildingMats), same shape.
-  assert.ok(Math.abs(biomeTotals.city - 18.67) < 0.05,
-    `city resident ${biomeTotals.city} MB -- expected ~18.67 (x3 concrete charge missing?)`);
+  assert.ok(Math.abs(biomeTotals.city - (18.67 + BIRD)) < 0.05,
+    `city resident ${biomeTotals.city} MB -- expected ~${(18.67 + BIRD).toFixed(2)} (x3 concrete charge missing?)`);
   // forest: bark_pine x2 (landmark trunk + every instanced trunk) + stone_rock
   // x1 (the arch) + forest_ground_albedo x1 (the triplanar overlay, forest
-  // only) + forest_ground_normal x0 (`none` -- never fetched).
-  assert.ok(Math.abs(biomeTotals.forest - 20.00) < 0.05,
-    `forest resident ${biomeTotals.forest} MB -- expected ~20.00`);
+  // only) + forest_ground_normal x0 (`none` -- never fetched). This is the
+  // worst biome and therefore the one the 24 MB gate actually scores.
+  assert.ok(Math.abs(biomeTotals.forest - (20.00 + BIRD)) < 0.05,
+    `forest resident ${biomeTotals.forest} MB -- expected ~${(20.00 + BIRD).toFixed(2)}`);
 });
 
 test('every biome carries all four skies, because the sky texture leaks across environment switches', skip, () => {
@@ -126,7 +134,10 @@ test('reverting a sky row to one biome measurably undercounts every OTHER biome'
     // canyons/mountain/city each lose one sky's worth (2.667 MB) they should
     // still be charged for, since the leak means forest_sky can still be
     // resident when standing in any of them.
-    assert.ok(biomeTotals.canyons < 16.00 - 2.0, 'sabotaged canyons total did not drop -- the fix has no effect');
+    // 16.00 of world + 3.33 of bird, less one sky's 2.667: the threshold moves
+    // with the baseline it is measured against, or this stops testing the sky.
+    assert.ok(biomeTotals.canyons < 16.00 + 3.333 - 2.0,
+      `sabotaged canyons total ${biomeTotals.canyons} did not drop -- the fix has no effect`);
   } finally {
     fs.writeFileSync(manifestPath, original); // restore even if an assertion above throws
   }

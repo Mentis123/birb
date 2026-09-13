@@ -10386,6 +10386,8 @@
         // bird is never completely inert in the air.
         let flapOffset = 0;
         let beatSpan = 1;
+        let beatTwist = 0;
+        let beatHand = 0;
         if (isAirborneVisual && !bankingHard) {
           const drive = climbing ? 1 : 0.35;
           const envelope = beatEnvelope(motionState.elapsed) * drive;
@@ -10395,6 +10397,10 @@
             const beat = wingBeat(motionState.elapsed * rate);
             flapOffset = beat.angle * envelope;
             beatSpan = 1 - (1 - beat.span) * envelope;
+            // Both scaled by the same envelope as the sweep, so a gliding bird
+            // holds a flat, untwisted wing instead of wringing it in mid-air.
+            beatTwist = beat.twist * envelope;
+            beatHand = beat.handAngle * envelope;
           }
         }
 
@@ -10418,6 +10424,36 @@
         rightWing.rotation.x = rightWing.userData.baseRotation.x
           + rightDip - glideSweep - flapOffset - idleFlutter
           - perch.fold - (tumble ? tumble.right : 0);
+
+        // TWIST, about the wing's own long axis (local Z, which is the span
+        // axis — it is the one `scale.z` stretches and mirrors).
+        //
+        // The sign is the SAME on both wings, which is the opposite of every
+        // other term here and is not a slip. Three composes T x R x S, so the
+        // right wing's `scale.z = -1` mirrors its GEOMETRY and the rotation
+        // then happens in the parent frame. Both wings keep their leading edge
+        // at local +X, so the same rotation about parent Z pitches both
+        // leading edges the same way — which is what pronation is. A negated
+        // sign here gives one pronating wing and one supinating wing, which
+        // reads as a bird tearing itself in half. Verified by capture, not by
+        // this paragraph: see the flap frames on the bird sheet.
+        const twistAmount = reducedMotionState.enabled ? 0 : beatTwist;
+        leftWing.rotation.z = leftWing.userData.baseRotation.z + twistAmount;
+        rightWing.rotation.z = rightWing.userData.baseRotation.z + twistAmount;
+
+        // THE HAND — the outer wing, if this model has one. Phase 0's wing is
+        // a single merged plate with no wrist, so `userData.hand` is absent and
+        // this is a no-op; the rebuilt form supplies it. Kept here rather than
+        // in the new constructor so the articulation is part of the RIG, which
+        // is what every future bird has to satisfy, not part of one model.
+        if (leftWing.userData.hand) {
+          leftWing.userData.hand.rotation.x =
+            (leftWing.userData.hand.userData?.baseRotation?.x || 0) + beatHand;
+        }
+        if (rightWing.userData.hand) {
+          rightWing.userData.hand.rotation.x =
+            (rightWing.userData.hand.userData?.baseRotation?.x || 0) - beatHand;
+        }
         // Feather follow-through lags the shoulder. Both wings use the same
         // local offset because the right group mirrors its geometry in Z.
         const flex = reducedMotionState.enabled ? 0 : (isAirborneVisual
@@ -10443,6 +10479,18 @@
         const forcedBeat = wingBeat(__birbFlapPhaseOverride);
         leftWing.rotation.x = leftWing.userData.baseRotation.x + forcedBeat.angle;
         rightWing.rotation.x = rightWing.userData.baseRotation.x - forcedBeat.angle;
+        // Twist and hand are forced too, or the sheet's three flap frames
+        // photograph a pose the game never actually holds.
+        leftWing.rotation.z = leftWing.userData.baseRotation.z + forcedBeat.twist;
+        rightWing.rotation.z = rightWing.userData.baseRotation.z + forcedBeat.twist;
+        if (leftWing.userData.hand) {
+          leftWing.userData.hand.rotation.x =
+            (leftWing.userData.hand.userData?.baseRotation?.x || 0) + forcedBeat.handAngle;
+        }
+        if (rightWing.userData.hand) {
+          rightWing.userData.hand.rotation.x =
+            (rightWing.userData.hand.userData?.baseRotation?.x || 0) - forcedBeat.handAngle;
+        }
         leftWing.scale.z = forcedBeat.span;
         rightWing.scale.z = -forcedBeat.span;
         if (leftWing.userData.secondaryFeather) leftWing.userData.secondaryFeather.position.y = 0;
