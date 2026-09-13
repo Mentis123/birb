@@ -141,8 +141,28 @@ export const GROUND_PROFILES = {
  * an empty `image`" moment to protect against directly, but the same shape of
  * bug (switching a sampler on before its upload lands) is closed the same way.
  *
- * @param material   the terrain mesh's material (Lambert, flat-shaded)
+ * `smooth` is the 2026-09-13 organic pass and it changes TWO things, not one.
+ * The obvious half is that the material stops flat-shading. The half that is
+ * easy to miss: the slope term below — which decides soil against rock, and
+ * with it every material boundary this shader draws — was deliberately taken
+ * from the FACET normal, on the reasoning that it "agrees with the visible
+ * faceting". Once the visible surface is lit per fragment that reasoning
+ * inverts. A boundary that is constant per triangle, painted across a surface
+ * whose lighting is not, snaps at every triangle edge: hard-edged blotches on
+ * a soft hill. So the slope switches to the smooth normal with the shading.
+ *
+ * The facet normal does not go away — it becomes the thing the LIGHTING
+ * normal is blended back toward wherever that slope says rock. That is the
+ * whole of "smooth soil, pointy rocks": one mesh, one draw call, soil rolling
+ * and rock faces fracturing, with the transition following the material
+ * boundary the shader was already drawing.
+ *
+ * @param material   the terrain mesh's material (Lambert)
  * @param biome      key into GROUND_PROFILES; anything else is a no-op
+ * @param smooth     shade soil smoothly and keep facets on rock (see above).
+ *                    False emits EXACTLY the shader this module always has —
+ *                    same injections, same slope source, same cache key — so
+ *                    `?smooth=0` is a true before, not an approximation of it.
  * @param groundMap  optional { tile, sharpness, gain: {r,g,b} }. Omitted (the
  *                    default), this function emits exactly the shader it
  *                    always has — no sampler declared, no fetches, no dead
@@ -152,7 +172,7 @@ export const GROUND_PROFILES = {
  *                    defaults a missing one, the same contract
  *                    `addInstancedUvScale` uses for an unknown geometry shape.
  */
-export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null } = {}) {
+export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false } = {}) {
   const profile = GROUND_PROFILES[biome];
   // The city's ground already carries a street grid and asphalt; mottling it
   // would fight the one thing that identifies it.
@@ -213,6 +233,33 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       shader.fragmentShader = 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
     }
 
+    // Smooth path only: take the slope from the smooth normal and bend the
+    // LIGHTING normal back toward the facet on rock. This has to happen at
+    // <normal_fragment_begin> — `normal` is folded into the lighting long
+    // before <opaque_fragment>, so the tint block below cannot do it. The
+    // two values it computes are declared in main()'s scope, which is where
+    // <normal_fragment_begin> sits, so the tint block reads them for free.
+    //
+    // Derived in WORLD space off vBirbWorld rather than from vViewPosition:
+    // the varying is already here for the tint, and it costs this injection
+    // no assumption about which varyings the material happens to carry.
+    if (smooth) {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', `
+      #include <normal_fragment_begin>
+      vec3 gdUpW = normalize(vBirbWorld);
+      vec3 gdFacetW = normalize(cross(dFdx(vBirbWorld), dFdy(vBirbWorld)));
+      if (dot(gdFacetW, gdUpW) < 0.0) gdFacetW = -gdFacetW;
+      // Read BEFORE the blend below overwrites it, or the slope measures its
+      // own output and the rock term runs away with itself.
+      vec3 gdSmoothW = inverseTransformDirection(normal, viewMatrix);
+      float gdShadeSlope = 1.0 - clamp(dot(gdSmoothW, gdUpW), 0.0, 1.0);
+      normal = normalize(mix(
+        normal,
+        normalize((viewMatrix * vec4(gdFacetW, 0.0)).xyz),
+        smoothstep(uGdSlopeRange.x, uGdSlopeRange.y, gdShadeSlope)));
+      `);
+    }
+
     shader.fragmentShader =
       'uniform float uGdBase; uniform float uGdScale;\n'
       + 'uniform vec3 uGdMoss; uniform vec3 uGdSoil; uniform vec3 uGdSlope;\n'
@@ -253,7 +300,13 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       {
         vec3 gdP = vBirbWorld;
         vec3 gdUp = normalize(gdP);
-
+` + (smooth ? `
+        // Both already computed at <normal_fragment_begin>, from the SMOOTH
+        // normal — see the module doc for why the facet normal is the wrong
+        // slope source the moment the surface is lit per fragment.
+        vec3 gdN = gdFacetW;
+        float gdSlope = gdShadeSlope;
+` : `
         // The FACET normal, from the interpolated world position. Free, and
         // exactly right for flat-shaded low-poly ground: no attribute, no
         // tangent frame, and it agrees with the visible faceting rather than
@@ -261,7 +314,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
         vec3 gdN = normalize(cross(dFdx(gdP), dFdy(gdP)));
         if (dot(gdN, gdUp) < 0.0) gdN = -gdN;
         float gdSlope = 1.0 - clamp(dot(gdN, gdUp), 0.0, 1.0);
-
+`) + `
         // Macro patches, plus a finer cell mixed in. Two calls, not an octave
         // stack: the slope term below carries the structure and the noise only
         // has to break up the facets, so a third octave is fill rate spent on
@@ -318,7 +371,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => `${base}-ground-${biome}${texUniforms ? '-tex' : ''}`;
+  material.customProgramCacheKey = () => `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}`;
   material.needsUpdate = true;
   return material;
 }

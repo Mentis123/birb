@@ -584,8 +584,9 @@
 > A feature "added to every environment" is not paid for when it is used; it
 > is paid for always.
 
-> **The organic pass is planned, not built** (2026-09-13, late):
-> [docs/realism/ORGANIC_PASS_PLAN.md](docs/realism/ORGANIC_PASS_PLAN.md).
+> **The organic pass: Wave A shipped, B/C/D planned** (2026-09-13, late):
+> [docs/realism/ORGANIC_PASS_PLAN.md](docs/realism/ORGANIC_PASS_PLAN.md), §11
+> for what Wave A actually did.
 > The owner asked for less blocky leaves and a smoother ground that keeps its
 > sharp rocks. Two measurements set the plan's shape. **The forest's 285
 > canopies are 24k of its 58k triangles**, so "more segments" is +24k and off
@@ -603,7 +604,29 @@
 > the plan costs zero triangles and zero draw calls; the mountain (35k tris,
 > six-sided cone pines) is where the cheap geometry goes; shadows are a
 > five-minute phone measurement, not a plan item, because the lever exists
-> and no device number does.
+> and no device number does — it is **"Real shadows (shadow map)"** on the
+> **Ultra** tab of the three-finger quality panel, which works on production
+> without `?debug=1` (that is what assertion A1 exists to prove). Do not reach
+> for MAX REALISM to test it: G-ASCEND found its partner BACK TO SHIPPING
+> DEFAULT is not reversible.
+>
+> **Wave A shipped and is the default**, behind `?smooth=0` / `__BIRB.smooth()`:
+> the ground and eight soft materials (canopies, shrubs, ferns, the gold crown,
+> pine crowns, snow caps, both clouds) shade smooth while every rock, boulder,
+> scree, spire, peak, cliff and building keeps its facets; trees lean 1-3° off
+> radial unless they host a nest; rocks got three independent axes and sit
+> into the ground. **The canyons are where the rule is visible**: the plateau
+> top rolls and the wall below the rim fractures, on one mesh and one draw
+> call. Two things it taught. **The escape hatch had to be engineered to be a
+> true before** — the first splice emitted a shader one blank line longer than
+> the one it claims to reproduce, which is cosmetic in GLSL and worthless as
+> evidence, so the flat path is now diffed against HEAD's own output. And a
+> **radial fan of spokes across the snowfield was in BOTH frames**: the
+> teleport target sat within 18 degrees of the sphere's +Y pole, where all 128
+> meridians converge. A capture near a UV pole says nothing about shading.
+> Trunks were deliberately left flat — bark is not crystalline, but the
+> authored bark tints were solved against the flat material's measured
+> luminance, so it is a re-measurement, not a flip.
 
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural

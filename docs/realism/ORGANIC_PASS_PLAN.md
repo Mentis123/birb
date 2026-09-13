@@ -1,7 +1,8 @@
 # The organic pass — smooth soil, pointy rocks, leafy crowns
 
-**Status: PLANNED, NOT BUILT.** Written 2026-09-13 after the inside-out-bird
-fix and the slalom removal shipped (`54332ef`, `db87a94`). The owner asked for
+**Status: WAVE A SHIPPED 2026-09-13. B, C and D still planned.** Written after
+the inside-out-bird fix and the slalom removal shipped (`54332ef`, `db87a94`).
+What Wave A actually did, and the two things it taught, is §11 at the end. The owner asked for
 less blocky leaves, a smoother ground that still has sharp rocks, and whatever
 else is cheap and clever now that the frame has headroom. This is the plan for
 whichever session executes it. It assumes the reader has not seen the
@@ -557,3 +558,77 @@ node tools/birb-shot.mjs --start --env mountain --out pines.png --after "__BIRB.
 - **The slalom removal paid for this.** 5–7 draw calls and up to 6.8k
   triangles per biome came back on 2026-09-13. C1 and C3 spend about that.
   C4 spends more than that; hence "only if needed."
+
+
+---
+
+## 11. Wave A, as built (2026-09-13)
+
+All five items shipped, on by default, with `?smooth=0` and `__BIRB.smooth(on)`
+as the A/B. Zero new draw calls, zero new triangles, zero new assets.
+
+### What landed
+
+| # | Built as |
+|---|---|
+| A1 | `sphereMaterial.flatShading` now follows the flag, and `addGroundDetail({ smooth })` injects at `<normal_fragment_begin>`: slope from the smooth normal, lighting normal blended back toward the facet by `smoothstep(slopeStart, slopeEnd, slope)`. |
+| A2 | Eight soft materials follow the flag — three forest canopies, shrubs, ferns, the gold landmark crown, pine canopies, snow caps, both cloud puffs. Every rock/boulder/scree/spire/peak/cliff/building material passes `true` literally and is untouched. |
+| A3 | `treeLean()` in `visual-style.js`, 1–3° about a random bearing, `null` for a nest host. Composed `orientQ.multiply(leanQ)` — the same order the canyon spires have always used. Crowns ride the LEANED axis. |
+| A4 | `rockShape()`, three axes drawn separately plus a `0.30 × s` sink. Forest rocks' collider moved to `shape.max`; the boulders' `2.0 × s` bubble already covered the 1.30 long axis and was left alone. |
+| A5 | Vertex mottle `0.10 → 0.05` under smooth shading. |
+
+`treeLean` and `rockShape` live in `visual-style.js`, not in the builder —
+`spherical-world.js` cannot be imported in Node (its graph reaches a CDN URL),
+and `visual-style.js`'s own header says it exists so geometry stays testable
+there. Fifteen tests in `tests/organic-shading.test.js`.
+
+### Two things worth keeping
+
+**The flat path is byte-identical to what shipped, and that had to be
+engineered.** The first splice of the two shader branches left one stray blank
+line, so `?smooth=0` emitted a shader one line longer than the one it claims to
+reproduce. Cosmetic in GLSL and worthless as evidence: an escape hatch that
+emits *almost* the old shader is not a before. It is now verified by diffing
+the emitted fragment source against the module at `HEAD`, and the test suite
+pins the structural half of it.
+
+**The first mountain A/B was a false alarm, and the tell was that both frames
+had it.** A radial fan of ~20 spokes converged in the middle of the snowfield,
+which reads exactly like a smooth-shaded cone's pole. It was in the
+flat-shaded capture too: the teleport target was `(0.1, 0.95, 0.3)`, which is
+within 18° of the sphere's own +Y pole, where all 128 meridians of
+`SphereGeometry` converge. **A capture near a UV pole is not evidence about
+shading.** Re-shot at `(0.62, 0.38, 0.69)`.
+
+### Measured
+
+Smooth shading cannot add a draw call or a triangle — `flatShading` is a shader
+define on the same geometry, the same material and the same `InstancedMesh`.
+What *is* measurable is that the lean and the rock reshaping move instances, so
+frustum culling admits a slightly different set run to run:
+
+| pinned pose, tier 0, seed 16160 | smooth | flat | Δ tris |
+|---|---|---|---|
+| forest, valley pool | 105,368 | 106,160 | −0.7% |
+| mountain, ridge | 68,708 | 67,068 | +2.4% |
+
+Contact sheet, all four biomes: 13–45 calls, 35.1–58.1k triangles, every tile
+rendering, against budgets of 100 and 80k. Draw-call counts in the sheet swing
+±20 on framing alone (rings and drones moving through frame), which is the
+same drift `G-A5-DRIFT` documents; they are not a cost signal here.
+
+### What Wave A showed on screen
+
+- **The canyons are the proof of §2.** The plateau top rolls smoothly and the
+  wall below the rim keeps hard crystalline facets, with the transition landing
+  on the rim. One mesh, one draw call.
+- **The mountain gained the most.** It was a faceted golf ball; it is a
+  snow-covered ridge with form. Its `slopeStart 0.07 / slopeEnd 0.34` puts 92%
+  facet on a 45° face and 14% on a 30° one, so a rounded dome is *correctly*
+  smooth — that is the rule working, not the rule failing.
+- **Trunks were deliberately left flat** and are the obvious next candidate.
+  Bark is not crystalline and a six-sided cylinder shaded smooth is a rounder
+  tree — but the authored bark tints were solved against the flat-shaded
+  material's measured luminance (`PINE_BARK_TINT` targets the forest trunk's
+  VALUE, and `authored-tints.test.js` pins the separations), so it is a change
+  that has to be re-measured rather than flipped.

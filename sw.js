@@ -36,7 +36,7 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v60-2026-09-13-solid-bird-slalom-removed';
+const CACHE_VERSION = 'v61-2026-09-13-organic-pass-wave-a';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

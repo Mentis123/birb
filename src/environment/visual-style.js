@@ -193,6 +193,68 @@ export function addAtmosphere(material, THREE, {
   return material;
 }
 
+/**
+ * Smooth shading, the shipping default since 2026-09-13. `?smooth=0` restores
+ * the flat-shaded world for the A/B.
+ *
+ * `flatShading` is a MATERIAL property and this world had it on thirty-four
+ * materials, as if it were a rendering mode rather than a per-surface choice.
+ * The ground mesh has carried correct smooth normals the whole time —
+ * `displaceSphereGeometry` calls `computeVertexNormals()` and the material
+ * threw the result away every frame. Soft materials (soil, foliage, snow,
+ * cloud) shade smooth now; crystalline ones (rock, boulder, scree, spire,
+ * peak, cliff, building) keep their facets, which is the one place low-poly
+ * reads as a material rather than as a budget.
+ *
+ * The escape hatch stays for the same reason `?bark=0` and `?skytex=0` do: a
+ * comparison you cannot re-run is one nobody re-runs.
+ */
+export function smoothShadingRequested(search) {
+  return !/[?&]smooth=0/.test(search || '');
+}
+
+/**
+ * A small random lean for a decorative tree, as radians about its OWN local X
+ * and Z (local +Y is the trunk axis, before it is stood up on the sphere).
+ *
+ * Every tree in this world was oriented `setFromUnitVectors(defaultUp, up)` —
+ * exactly radial, plumb to the planet, all 294 of them. That is what makes a
+ * forest read as planted rather than grown.
+ *
+ * NULL for a nest host, and that is load-bearing: a nest is placed radially
+ * above the trunk base at `(trunkHeight + canopyHeight * 0.9) * scale`, so
+ * tilting a champion walks its own perch out of its crown. Three degrees on a
+ * 40-unit tree is ~2 units of lateral drift — well inside an 8-16 unit canopy
+ * collider, so the colliders do not move, but the perch would.
+ *
+ * Two draws from `rng`, always the same two, so a caller's seeded stream
+ * advances identically whether or not the tree ends up leaning.
+ */
+export function treeLean(rng, isNestHost) {
+  if (isNestHost) return null;
+  const angle = 0.017 + rng() * 0.035;    // 1-3 degrees
+  const bearing = rng() * Math.PI * 2;
+  return { x: Math.cos(bearing) * angle, z: Math.sin(bearing) * angle };
+}
+
+/**
+ * Independent per-axis proportions for a scattered rock, and how far to sink
+ * it. Every rock, boulder and scree chip in this world was a REGULAR solid at
+ * a uniform scale under a random rotation — which is a die, and a die at any
+ * orientation is still a die. Three axes drawn separately give each one its
+ * own shape; burying the base makes it something the ground has grown around
+ * rather than something resting on a tablecloth.
+ *
+ * `max` is the longest half-axis. A caller whose collider radius was the exact
+ * uniform extent must use it, or the long axis now escapes its own collider.
+ */
+export function rockShape(rng, s) {
+  const x = s * (0.72 + rng() * 0.58);
+  const y = s * (0.60 + rng() * 0.42);
+  const z = s * (0.72 + rng() * 0.58);
+  return { x, y, z, max: Math.max(x, y, z), sink: s * 0.30 };
+}
+
 export function createCanopyGeometry(THREE, kind = 0) {
   // All variants retain the old envelope: radius <= 1, base y=0, crown y=1.
   // This keeps placement, crown nests and collision proxies meaningful.

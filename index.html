@@ -3472,6 +3472,8 @@
       var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
       var sampleTerrainMeshHeight = sphericalWorldModule.sampleTerrainMeshHeight;
       var sampleBasinHeight = sphericalWorldModule.sampleBasinHeight;
+      var setSmoothShading = sphericalWorldModule.setSmoothShading;
+      var smoothShadingActive = sphericalWorldModule.smoothShadingActive;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -3692,7 +3694,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v60-2026-09-13-solid-bird-slalom-removed';
+    const BIRB_BUILD = 'v61-2026-09-13-organic-pass-wave-a';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -11949,6 +11951,22 @@
           return true;
         },
         environments: () => ENVIRONMENT_VARIANTS.map((v) => v.id),
+        // The organic pass, flipped at runtime for the A/B. This REBUILDS the
+        // world rather than just clearing `flatShading` on every material,
+        // and the rebuild is the point: the ground's slope source — which
+        // decides soil against rock, and with it every material boundary the
+        // terrain shader draws — is chosen when the shader compiles. Flip the
+        // material alone and you get per-fragment lighting under per-triangle
+        // material boundaries, which is neither the before nor the after.
+        //
+        // `?smooth=0` on a cold load is the same comparison without the
+        // rebuild, and is what the capture harness uses.
+        smooth: (on = true) => {
+          if (typeof setSmoothShading !== 'function') return null;
+          setSmoothShading(on);
+          setEnvironment(environmentState.id);
+          return smoothShadingActive();
+        },
         // Drop the bird to a given height above the real ground. Used by the
         // capture harness: the chase camera sits close behind the bird, so the
         // ground directly beneath it leaves the frame above roughly five

@@ -1,4 +1,4 @@
-import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere } from './visual-style.js';
+import { createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere, smoothShadingRequested, treeLean, rockShape } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import {
@@ -448,6 +448,36 @@ const TERRAIN_PROFILES = {
 // gradients) rather than snapping to flat mesas/cliffs — the world should read as
 // undulating terrain everywhere, not a flat plain with the odd sharp pit. Higher
 // = sharper faces; lower = rounder, rolling relief.
+// Smooth shading (the 2026-09-13 organic pass), resolved once per world build.
+// Module scope for the same reason `_activeTerrainProfile` is: the biome
+// builders are module-level functions and threading a boolean through every
+// one of them is a wider change than the boolean deserves.
+let _smoothShading = true;
+
+// `flatShading` for a SOFT surface — soil, foliage, snow, cloud. Crystalline
+// surfaces (rock, boulder, scree, spire, peak, cliff, building) pass `true`
+// literally and are deliberately untouched by the flag: low-poly faceting is
+// the one place this art style reads as a material rather than as a budget.
+//
+// Trunks are NOT in the soft set, though bark is not crystalline either. A
+// six-sided cylinder shaded smooth is a rounder tree and probably right, but
+// the authored bark tints were solved against the flat-shaded material's
+// measured luminance (`PINE_BARK_TINT` targets the forest trunk's VALUE, and
+// tests/authored-tints.test.js pins the separations), so it is a change that
+// has to be re-measured rather than flipped. Next wave.
+function _softFlat() { return !_smoothShading; }
+
+/**
+ * Override the URL flag for the NEXT world build. `__BIRB.smooth()` sets this
+ * and then rebuilds the current environment, because the ground's slope source
+ * is chosen at shader-compile time: flipping `flatShading` alone would leave
+ * the terrain lit per fragment while its material boundaries still snapped per
+ * triangle, which is not the "before" and not the "after" — it is the broken
+ * middle. A rebuild is the only honest runtime A/B.
+ */
+export function setSmoothShading(on) { _smoothShading = !!on; return _smoothShading; }
+export function smoothShadingActive() { return _smoothShading; }
+
 const FACE_STEEPNESS = 1.4;
 const TANH_FACE_NORM = Math.tanh(FACE_STEEPNESS);
 
@@ -507,6 +537,31 @@ function setActiveValley(anchor, forward, right, params) {
 }
 
 // Tangent frame (forward/right) at a unit anchor — the river axis + across axis.
+// Scratch for _orientTree. Lazily made because THREE is injected, not
+// imported, and this module has no THREE at load time. Build-time only.
+let _leanE = null, _leanQ = null;
+
+/**
+ * Compose a placement's radial orientation with its own lean.
+ *
+ * `multiply`, not `premultiply`: the lean is applied FIRST, in the tree's own
+ * frame (local +Y is the trunk), and the radial orientation then stands the
+ * already-leaning tree up on the sphere. The other order tilts about a fixed
+ * world axis, which is a different tilt at every point on a planet. Same
+ * composition the canyon spires have always used for their rotX/rotZ.
+ *
+ * A trunk and its crown MUST share one placement's lean, and the crown must
+ * then ride the leaned axis rather than the radial one — see the call site.
+ */
+function _orientTree(THREE, outQ, defaultUp, p) {
+  outQ.setFromUnitVectors(defaultUp, p.up);
+  if (!p.lean) return outQ;
+  if (!_leanE) { _leanE = new THREE.Euler(); _leanQ = new THREE.Quaternion(); }
+  _leanE.set(p.lean.x, 0, p.lean.z);
+  outQ.multiply(_leanQ.setFromEuler(_leanE));
+  return outQ;
+}
+
 function _tangentFrame(THREE, anchor) {
   const A = new THREE.Vector3(anchor.x, anchor.y, anchor.z).normalize();
   let f = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), A);
@@ -871,7 +926,11 @@ function displaceSphereGeometry(geometry, sphereRadius, variant = 'forest') {
     let normalizedHeight = 0.1 + 0.5 * depthN + patch * 0.07 + slopeBias;
     normalizedHeight = normalizedHeight < 0 ? 0 : normalizedHeight > 1 ? 1 : normalizedHeight;
     const col = sampleTerrainColor(palette, normalizedHeight);
-    const lum = 1 + mottle * 0.10; // ±10% per-vertex luminance for surface texture
+    // Halved under smooth shading. At ±10% it was tuned to break up FACETS,
+    // where a per-vertex step lands on a triangle edge and reads as surface
+    // grain. Interpolated across a smooth hill the same amplitude reads as
+    // soft camouflage blotches at the 6.7-unit vertex spacing instead.
+    const lum = 1 + mottle * (_smoothShading ? 0.05 : 0.10);
     let r = col[0] * lum, g = col[1] * lum, b = col[2] * lum;
     colors[i * 3] = r < 0 ? 0 : r > 1 ? 1 : r;
     colors[i * 3 + 1] = g < 0 ? 0 : g > 1 ? 1 : g;
@@ -922,12 +981,12 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // Canopy mats carry vertexColors so the baked base→tip gradient reads; the
   // gradient averages ~0.85 so the hues are lifted slightly to compensate.
   const canopyMats = [
-    new THREE.MeshLambertMaterial({ color: 0x1f6d39, flatShading: true, vertexColors: true }),
-    new THREE.MeshLambertMaterial({ color: 0x2a854c, flatShading: true, vertexColors: true }),
-    new THREE.MeshLambertMaterial({ color: 0x35a258, flatShading: true, vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x1f6d39, flatShading: _softFlat(), vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x2a854c, flatShading: _softFlat(), vertexColors: true }),
+    new THREE.MeshLambertMaterial({ color: 0x35a258, flatShading: _softFlat(), vertexColors: true }),
   ];
   const rockMat = new THREE.MeshLambertMaterial({ color: 0x2a3a3a, flatShading: true });
-  const shrubMat = new THREE.MeshLambertMaterial({ color: 0x2e7a48, flatShading: true });
+  const shrubMat = new THREE.MeshLambertMaterial({ color: 0x2e7a48, flatShading: _softFlat() });
 
   // Canopy ceiling material — translucent green, dappled feel when below.
   // One InstancedMesh across all groves keeps it to a single draw call.
@@ -1030,9 +1089,11 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
         scale = randomInRange(1.0, 2.0);
       }
 
-      trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
+      // One lean per TREE, shared by its trunk and its crown.
+      const lean = treeLean(_activeRng, isNestTree);
+      trunkPlacements.push({ pos, up, lean, trunkRadiusBottom, trunkHeight, treeScale: scale });
       canopyPlacementsByColor[canopyColorIdx].push({
-        pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight,
+        pos, up, lean, canopyRadius, canopyHeight, treeScale: scale, trunkHeight,
       });
 
       // Collision — trunk at base, plus a canopy sphere at tree-top altitude
@@ -1146,8 +1207,9 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const canopyRadius = randomInRange(3, 5.5);
     const scale = randomInRange(0.9, 2.0) * (0.78 + (1 - exposure) * 0.32); // dwarf tops, lush valleys
     const canopyColorIdx = Math.floor(_activeRng() * canopyMats.length);
-    trunkPlacements.push({ pos, up, trunkRadiusBottom, trunkHeight, treeScale: scale });
-    canopyPlacementsByColor[canopyColorIdx].push({ pos, up, canopyRadius, canopyHeight, treeScale: scale, trunkHeight });
+    const lean = treeLean(_activeRng, false);   // the scatter layer never hosts a nest
+    trunkPlacements.push({ pos, up, lean, trunkRadiusBottom, trunkHeight, treeScale: scale });
+    canopyPlacementsByColor[canopyColorIdx].push({ pos, up, lean, canopyRadius, canopyHeight, treeScale: scale, trunkHeight });
     collisionSystem.addCollider(pos, Math.min(trunkRadiusBottom * scale * 1.2, 3.5), 'tree');
     const scatterCanopyCenter = pos.clone().add(up.clone().multiplyScalar((trunkHeight + canopyHeight * 0.5) * scale));
     collisionSystem.addCollider(scatterCanopyCenter, canopyRadius * scale * 0.95, 'tree');
@@ -1167,7 +1229,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const orientQ = new THREE.Quaternion();
     for (let i = 0; i < trunkPlacements.length; i++) {
       const p = trunkPlacements[i];
-      orientQ.setFromUnitVectors(defaultUp, p.up);
+      _orientTree(THREE, orientQ, defaultUp, p);
       dummy.position.copy(p.pos);
       dummy.quaternion.copy(orientQ);
       // Non-uniform scale bakes trunkRadiusBottom / trunkHeight into the unit geom.
@@ -1205,7 +1267,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const orientQ = new THREE.Quaternion();
     for (let i = 0; i < bucket.length; i++) {
       const p = bucket[i];
-      orientQ.setFromUnitVectors(defaultUp, p.up);
+      _orientTree(THREE, orientQ, defaultUp, p);
       // Original: canopy's center was at local-y = trunkHeight + canopyHeight*0.4.
       // Original ConeGeometry was centered (base at -h/2, tip at +h/2).
       // So canopy BASE was at local-y = trunkHeight + canopyHeight*0.4 - canopyHeight*0.5
@@ -1213,7 +1275,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       // We use a unit cone with base at y=0, tip at y=1, scaled by canopyHeight.
       // So place the instance origin at pos + up * (trunkHeight - canopyHeight*0.1) * treeScale.
       const baseYWorld = (p.trunkHeight - p.canopyHeight * 0.1) * p.treeScale;
-      localUp.copy(p.up).multiplyScalar(baseYWorld);
+      // Up the LEANED trunk, not the radial up. With no lean the two are the
+      // same vector; with one they differ by ~2 units on a 40-unit tree,
+      // which is a crown hanging in the air beside its own trunk.
+      localUp.set(0, 1, 0).applyQuaternion(orientQ).multiplyScalar(baseYWorld);
       dummy.position.copy(p.pos).add(localUp);
       dummy.quaternion.copy(orientQ);
       dummy.scale.set(
@@ -1322,16 +1387,21 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const dummy = new THREE.Object3D();
     for (let i = 0; i < rockPoints.length; i++) {
       const point = rockPoints[i];
-      const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.15, 0.15), point.phi + randomInRange(-0.08, 0.08), -0.2);
       const baseRadius = randomInRange(0.8, 2.0);
       const scaleMul = randomInRange(1.0, 2.5);
       const s = baseRadius * scaleMul;
+      // Sized before it is placed, because how deep it sinks depends on how
+      // big it is.
+      const shape = rockShape(_activeRng, s);
+      const pos = placeOnSphere(THREE, sphereRadius, point.theta + randomInRange(-0.15, 0.15), point.phi + randomInRange(-0.08, 0.08), -0.2 - shape.sink);
       dummy.position.copy(pos);
       dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
-      dummy.scale.set(s, s, s);
+      dummy.scale.set(shape.x, shape.y, shape.z);
       dummy.updateMatrix();
       rockInst.setMatrixAt(i, dummy.matrix);
-      collisionSystem.addCollider(pos, 1.0 * s, 'rock');
+      // shape.max, not s: this collider was the rock's EXACT extent under a
+      // uniform scale, so the long axis would otherwise escape it.
+      collisionSystem.addCollider(pos, shape.max, 'rock');
     }
     rockInst.instanceMatrix.needsUpdate = true;
     rockInst.computeBoundingSphere();
@@ -1354,7 +1424,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   });
   if (fernPlacements.length > 0) {
     const fernUnitGeom = new THREE.IcosahedronGeometry(1, 0);
-    const fernMat = new THREE.MeshLambertMaterial({ color: 0x2c6e3a, flatShading: true });
+    const fernMat = new THREE.MeshLambertMaterial({ color: 0x2c6e3a, flatShading: _softFlat() });
     const fernInst = new THREE.InstancedMesh(fernUnitGeom, fernMat, fernPlacements.length);
     fernInst.name = 'forest-ferns';
     const dummy = new THREE.Object3D();
@@ -1380,7 +1450,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // keeps desktop forest under the <100 draw-call budget. Clouds stay SOLID:
   // a per-cloud collider is preserved so the bird can still bump into them.
   const cloudMat = new THREE.MeshLambertMaterial({
-    color: 0xdfeeff, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.7, flatShading: true,
+    color: 0xdfeeff, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.7, flatShading: _softFlat(),
   });
   const cloudCount = _isMobile() ? 4 : 20;
   const puffsPerCloud = _isMobile() ? 1 : 4;
@@ -1504,7 +1574,7 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   // navigation beacon: multiplied through, the gold came out near-black from
   // below, which is the angle you approach it from. Lambert's directional
   // term still gives it form. Legibility beats texture on a landmark.
-  const crownMat = new THREE.MeshLambertMaterial({ color: 0xf0b83c, flatShading: true });
+  const crownMat = new THREE.MeshLambertMaterial({ color: 0xf0b83c, flatShading: _softFlat() });
   addFoliageWind(crownMat);
   // Pale warm limestone, for the same reason the landmark trunk is 0x8a6440
   // and not 0x5a4028: the arch is 34 units across and 22 tall, and at 0x6b6257
@@ -2244,9 +2314,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const baseR = randomInRange(1.5, 4);
       const scaleMul = randomInRange(1.0, 2.0);
       const s = baseR * scaleMul;
+      const shape = rockShape(_activeRng, s);
+      // The collider below stays `2.0 * s` — a deliberately generous no-fly
+      // bubble, already twice the geometric extent, so the 1.3x long axis is
+      // still well inside it and the bubble does not need to grow.
       dummy.position.copy(pos);
       dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
-      dummy.scale.set(s, s, s);
+      dummy.scale.set(shape.x, shape.y, shape.z);
       dummy.updateMatrix();
       boulderInst.setMatrixAt(i, dummy.matrix);
       collisionSystem.addCollider(pos, 2.0 * s, 'boulder');
@@ -2307,7 +2381,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   const defaultUp = new THREE.Vector3(0, 1, 0);
   // Stone body carries vertexColors for a baked base→scree vertical gradient.
   const stoneMat = new THREE.MeshLambertMaterial({ color: 0x646c7c, flatShading: true, vertexColors: true });
-  const snowMat = new THREE.MeshLambertMaterial({ color: 0xe6f1ff, flatShading: true });
+  const snowMat = new THREE.MeshLambertMaterial({ color: 0xe6f1ff, flatShading: _softFlat() });
   const pineTrunkMat = new THREE.MeshLambertMaterial({ color: 0x33422f, flatShading: true });
   // The SAME bark file the forest uses, on the mountain's pines. No new asset
   // and no new download: bark_pine_albedo/normal are already in sw.js's core
@@ -2376,7 +2450,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     }
   }
   // Pine canopy carries vertexColors for the baked base→tip gradient.
-  const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x32623e, flatShading: true, vertexColors: true });
+  const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x32623e, flatShading: _softFlat(), vertexColors: true });
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x4a505a, flatShading: true });
   const cliffWallMat = new THREE.MeshLambertMaterial({ color: 0x434953, flatShading: true });
   const pineCanopyCeilingMat = new THREE.MeshBasicMaterial({
@@ -2656,8 +2730,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
         ? randomInRange(28, 38) / (trunkH + canopyH * 0.85)
         : randomInRange(1.0, 1.8);
 
-      pineTrunkPlacements.push({ pos, up, trunkH, scale });
-      pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
+      const pineLean = treeLean(_activeRng, t === championIdx);   // the champion hosts the nest
+      pineTrunkPlacements.push({ pos, up, lean: pineLean, trunkH, scale });
+      pineCanopyPlacements.push({ pos, up, lean: pineLean, canopyH, canopyR, trunkH, scale });
       collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
       // Canopy collider so pines collide at flight altitude.
       const pineCanopyCenter = pos.clone().add(
@@ -2708,8 +2783,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const canopyH = randomInRange(6, 11);
     const canopyR = randomInRange(2, 3.8);
     const scale = randomInRange(0.9, 1.8) * (0.8 + (1 - exposure) * 0.3); // dwarf tops, lush valleys
-    pineTrunkPlacements.push({ pos, up, trunkH, scale });
-    pineCanopyPlacements.push({ pos, up, canopyH, canopyR, trunkH, scale });
+    const pineLean = treeLean(_activeRng, false);
+    pineTrunkPlacements.push({ pos, up, lean: pineLean, trunkH, scale });
+    pineCanopyPlacements.push({ pos, up, lean: pineLean, canopyH, canopyR, trunkH, scale });
     collisionSystem.addCollider(pos, 0.8 * scale, 'pine');
     const scatterPineCanopy = pos.clone().add(up.clone().multiplyScalar((trunkH + canopyH * 0.5) * scale));
     collisionSystem.addCollider(scatterPineCanopy, canopyR * scale * 0.95, 'pine');
@@ -2727,7 +2803,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const orientQ = new THREE.Quaternion();
     for (let i = 0; i < pineTrunkPlacements.length; i++) {
       const p = pineTrunkPlacements[i];
-      orientQ.setFromUnitVectors(defaultUp, p.up);
+      _orientTree(THREE, orientQ, defaultUp, p);
       dummy.position.copy(p.pos);
       dummy.quaternion.copy(orientQ);
       dummy.scale.set(p.scale, p.trunkH * p.scale, p.scale);
@@ -2753,9 +2829,9 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const upShift = new THREE.Vector3();
     for (let i = 0; i < pineCanopyPlacements.length; i++) {
       const p = pineCanopyPlacements[i];
-      orientQ.setFromUnitVectors(defaultUp, p.up);
+      _orientTree(THREE, orientQ, defaultUp, p);
       const baseYWorld = (p.trunkH - p.canopyH * 0.15) * p.scale;
-      upShift.copy(p.up).multiplyScalar(baseYWorld);
+      upShift.set(0, 1, 0).applyQuaternion(orientQ).multiplyScalar(baseYWorld);
       dummy.position.copy(p.pos).add(upShift);
       dummy.quaternion.copy(orientQ);
       dummy.scale.set(p.canopyR * p.scale, p.canopyH * p.scale, p.canopyR * p.scale);
@@ -2813,9 +2889,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const baseR = randomInRange(1.5, 4);
       const scaleMul = randomInRange(1.0, 2.0);
       const s = baseR * scaleMul;
+      const shape = rockShape(_activeRng, s);
+      // The collider below stays `2.0 * s` — a deliberately generous no-fly
+      // bubble, already twice the geometric extent, so the 1.3x long axis is
+      // still well inside it and the bubble does not need to grow.
       dummy.position.copy(pos);
       dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
-      dummy.scale.set(s, s, s);
+      dummy.scale.set(shape.x, shape.y, shape.z);
       dummy.updateMatrix();
       boulderInst.setMatrixAt(i, dummy.matrix);
       collisionSystem.addCollider(pos, 2.0 * s, 'boulder');
@@ -2843,9 +2923,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
         .normalize().multiplyScalar(randomInRange(4, 16));
       const pos = peak.pos.clone().add(jitter).normalize().multiplyScalar(sphereRadius - 0.3);
       const s = randomInRange(0.8, 2.0);
+      const shape = rockShape(_activeRng, s);
       dummy.position.copy(pos);
       dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
-      dummy.scale.set(s, s * 0.7, s);
+      // Already flattened 0.7 in Y; rockShape's own Y draw keeps that read.
+      dummy.scale.set(shape.x, shape.y * 0.7, shape.z);
       dummy.updateMatrix();
       screeInst.setMatrixAt(i, dummy.matrix);
     }
@@ -2856,7 +2938,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   }
 
   // --- Mist clouds — instanced puffs (1 draw call; was up to 54). Stay SOLID. ---
-  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xe7eef9, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.6, flatShading: true });
+  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xe7eef9, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.6, flatShading: _softFlat() });
   const mtnCloudCount = _isMobile() ? 4 : 18;
   const mtnPuffsPer = _isMobile() ? 1 : 3;
   const mtnPuffs = [];
@@ -3278,6 +3360,12 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // placement (placeOnSphere) and ground collision all sample the same rolling
   // displacement. Set before anything is built.
   _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
+  // Read here, not at module load: an environment switch rebuilds the world
+  // and must honour the flag the page was opened with, and `__BIRB.smooth()`
+  // flips materials directly rather than rebuilding.
+  _smoothShading = typeof window !== 'undefined'
+    ? smoothShadingRequested(window.location?.search)
+    : true;
   _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
   // One RNG for this build, drawn once and reused for every prop placed
@@ -3323,7 +3411,11 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // shade and visually equivalent here under flat shading + vertex colors.
   const sphereMaterial = new THREE.MeshLambertMaterial({
     vertexColors: true,
-    flatShading: true,    // Low-poly aesthetic — every face visible
+    // Was unconditionally true. The mesh has carried correct smooth normals
+    // the whole time (displaceSphereGeometry calls computeVertexNormals) and
+    // the material discarded them every frame. addGroundDetail below keeps
+    // the facets where the slope says rock — see its module doc.
+    flatShading: _softFlat(),
     side: THREE.FrontSide,
   });
   // The city's ground gets a street grid. It is the one surface a person can
@@ -3347,6 +3439,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   addGroundDetail(sphereMaterial, THREE, {
     baseRadius: sphereRadius,
     biome: variant,
+    smooth: _smoothShading,
     groundMap: wantsGroundTexture
       ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT }
       : null,
