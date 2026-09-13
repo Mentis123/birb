@@ -39,9 +39,18 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const IMPL = process.env.BIRB_PERF_IMPL ? false
   : 'BIRB_PERF_IMPL unset — build-identity coverage depends on Wave 2 src/ modules (P2.1f)';
 
-// CONTRACT §8.1: the one deliberate, commented omission from CORE_ASSETS.
+// CONTRACT §8.1: deliberate, commented omissions from CORE_ASSETS.
 const DELIBERATE_OMISSIONS = Object.freeze([
   'src/controls/simple-flight-controller.js',
+  // The bird rig contract oracle (docs/realism/BIRD_PLAN.md Phase 0). It is
+  // fetched with a dynamic import() only from the ?glb=1 A/B path and the
+  // ?debug=1 __BIRB.contract() hook — never from the unconditional boot
+  // sequence — specifically so a first offline load never needs it cached:
+  // sw.js is owned by a concurrent workflow, and coordinating a CORE_ASSETS +
+  // CACHE_VERSION bump into that file's next commit was judged costlier than
+  // keeping this module fully optional. Revisit if it ever becomes a boot-path
+  // import again.
+  'src/flight/bird-contract.js',
 ]);
 
 function readIndexHtml() {

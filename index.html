@@ -3553,12 +3553,35 @@
 
       // GLTFLoader is only needed for the ?glb=1 A/B path (the shipped bird
       // is procedural) — skip the CDN module fetch on normal sessions.
+      //
+      // The bird rig contract oracle (src/flight/bird-contract.js) is loaded
+      // in the SAME gate, not unconditionally. It is a NEW module (added
+      // alongside this GLB gate work) that is not yet in sw.js's
+      // CORE_ASSETS — sw.js is owned by a concurrent workflow, so rather than
+      // coordinate a cache-manifest edit into this change, the module is kept
+      // out of the boot path entirely: an offline load, or an online load
+      // closed before this fetch lands, must not `import()` something the
+      // service worker never cached. Only the ?glb=1 A/B path (desktop/dev
+      // only, never the shipped default) and the ?debug=1 contract() hook
+      // (below) ever need it, so both fetch it themselves, on demand.
       if (/[?&]glb=1/.test(window.location?.search || '')) {
         const gltfLoaderModule = await import(
           "https://esm.sh/three@0.183.2/examples/jsm/loaders/GLTFLoader.js"
         );
         GLTFLoader = gltfLoaderModule.GLTFLoader;
+        var { birdRigContract } = await import("./src/flight/bird-contract.js");
       }
+
+      // BufferGeometryUtils.mergeGeometries is what merges the procedural
+      // bird's many small parts down to ~8 draw calls (docs/realism/
+      // BIRD_PLAN.md Phase 0) — needed on EVERY session, not just the
+      // ?glb=1 A/B path, so unlike GLTFLoader above this import is NOT
+      // gated.
+      const bufferGeometryUtilsModule = await import(
+        "https://esm.sh/three@0.183.2/examples/jsm/utils/BufferGeometryUtils.js"
+      );
+      var mergeGeometries = bufferGeometryUtilsModule.mergeGeometries;
+
       try {
         const nippleModule = await import("https://esm.sh/nipplejs@0.10.1");
         nipplejs = nippleModule?.default ?? nippleModule;
@@ -5044,6 +5067,21 @@
 
     // Set only by the ?debug=1 capture harness; null in production.
     let __birbStickOverride = null;
+
+    // Bird-studio state for tools/birb-bird-sheet.mjs — the bird alone against
+    // a neutral background. Non-null while active; holds what was hidden/
+    // changed so birdStudio(false) restores exactly that, not a guess.
+    let __birbStudioSaved = null;
+    // While true, the main loop's camera-update block (bCam / cameraState) is
+    // skipped entirely, so orbitBird()'s placement survives the frames between
+    // the capture harness's --after and the shutter instead of being
+    // overwritten the next time the render loop runs.
+    let __birbCameraOverride = false;
+    // Forces the wing-beat phase for a frame when non-null; released by
+    // flapPhase(null). Lets the bird sheet capture three deterministic flap
+    // frames instead of whatever the burst-and-glide envelope happens to be
+    // doing at the moment of capture.
+    let __birbFlapPhaseOverride = null;
 
     const sprintState = {
       active: false,
@@ -6647,9 +6685,6 @@
       });
 
       model.updateMatrixWorld(true);
-      const birbBounds = new THREE.Box3().setFromObject(model);
-      const birbCenter = new THREE.Vector3();
-      birbBounds.getCenter(birbCenter);
 
       // The shipped GLB model already faces -Z (forward). No rotation needed.
       // The procedural birb is built facing +X by construction — hardcode that
@@ -6660,13 +6695,181 @@
         ? new THREE.Vector3(0, 0, -1)
         : new THREE.Vector3(1, 0, 0);
       modelOrientationOffset.setFromUnitVectors(guessedForward, targetModelForward);
-      // Re-center the bird so yaw/roll rotations pivot around its body instead
-      // of an offset point in space.
-      model.position.sub(birbCenter);
+
+      if (isGLB) {
+        // The GLB asset contract is origin-at-feet, so re-center on the
+        // bounding-box centre so yaw/roll pivot on the body instead of an
+        // offset point in space.
+        const birbBounds = new THREE.Box3().setFromObject(model);
+        const birbCenter = new THREE.Vector3();
+        birbBounds.getCenter(birbCenter);
+        model.position.sub(birbCenter);
+      }
+      // The procedural bird does NOT get the bbox treatment (Phase 0 of
+      // docs/realism/BIRD_PLAN.md item 4). createProceduralBirb already
+      // builds every part relative to a body centred near the local origin
+      // (body.position is (-0.08, 0, 0), a few centimetres off (0,0,0)) —
+      // the constructor knows where the body is, so trust that instead of a
+      // bbox guess. A bbox guess drags the pivot toward whichever wing or
+      // tail feather extends furthest from the body, which moves further
+      // off-body every time the wingspan or tail length changes; the
+      // constructor's own origin does not.
 
       birbAnchor.clear();
       birbAnchor.add(model);
       birbAnchor.scale.setScalar(0.52);
+    };
+
+    // ── Phase 0 merge/decimate helpers ──────────────────────────────────────
+    // docs/realism/BIRD_PLAN.md Phase 0: the procedural bird shipped as 44
+    // meshes / 44 draw calls / 11,780 triangles / 14 materials — nothing
+    // merged, nothing decimated, drawn as a ~140px-tall object. These three
+    // helpers let each hand-authored part keep its own position/rotation/
+    // scale exactly as before, then bake that transform straight into the
+    // geometry's vertices (the same thing a Mesh's own matrix would do to it
+    // at render time) so BufferGeometryUtils.mergeGeometries can fold many
+    // parts into one draw call with per-part colour preserved as vertex
+    // colour, instead of one material — and one draw call — per part.
+    const _bakeMatrix = new THREE.Matrix4();
+    const _bakePos = new THREE.Vector3();
+    const _bakeQuat = new THREE.Quaternion();
+    const _bakeEuler = new THREE.Euler();
+    const _bakeScale = new THREE.Vector3();
+    const bakeGeometryTRS = (geometry, { position, rotation, scale } = {}) => {
+      _bakePos.set(...(position || [0, 0, 0]));
+      _bakeEuler.set(...(rotation || [0, 0, 0]));
+      _bakeQuat.setFromEuler(_bakeEuler);
+      _bakeScale.set(...(scale || [1, 1, 1]));
+      _bakeMatrix.compose(_bakePos, _bakeQuat, _bakeScale);
+      geometry.applyMatrix4(_bakeMatrix);
+      return geometry;
+    };
+
+    // Paints every vertex of a geometry one flat colour so several
+    // differently-coloured parts can share ONE vertexColors:true material
+    // instead of one material (and one draw call) each.
+    const paintGeometryColor = (geometry, colorHex) => {
+      const c = new THREE.Color(colorHex);
+      const count = geometry.attributes.position.count;
+      const colors = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      return geometry;
+    };
+
+    // Merges a list of already-baked, already-painted geometries into one
+    // and disposes the sources — they exist only as scratch inputs to the
+    // merge, never rendered on their own.
+    const mergeAndDispose = (geometries) => {
+      const merged = mergeGeometries(geometries, false);
+      for (const g of geometries) g.dispose();
+      return merged;
+    };
+
+    // ── Phase 1 (v2) feather-plate + atlas helpers ──────────────────────────
+    // docs/realism/BIRD_PLAN.md Phase 1: createProceduralBirbV2 below is a
+    // flagged candidate (?bird=v2) that replaces the flattened-cone wings/
+    // tail and the three-overlapping-spheres body with a real feather chain
+    // and a single lofted body profile, built for the chase camera. These
+    // four helpers are shared by every part of that constructor.
+
+    // Remaps a geometry's existing 0..1 UV into one rectangle of the shared
+    // atlas (see the table inside createProceduralBirbV2), so a built-in
+    // generator (Sphere/Cone/Cylinder/Capsule, already 0..1) lands in its own
+    // region instead of overlapping every other part at the same coordinates.
+    const remapUV = (geometry, rect) => {
+      const uv = geometry.attributes.uv;
+      if (!uv) return geometry;
+      for (let i = 0; i < uv.count; i++) {
+        const u = uv.getX(i), v = uv.getY(i);
+        uv.setXY(i, rect.u0 + u * (rect.u1 - rect.u0), rect.v0 + v * (rect.v1 - rect.v0));
+      }
+      uv.needsUpdate = true;
+      return geometry;
+    };
+
+    // One feather: a thin quad-strip plate with a LEADING edge (frontW) and a
+    // TRAILING edge (backW) tapering independently from base to tip, plus a
+    // slight bow so it isn't perfectly flat. `axis` picks which of the plate's
+    // own local axes carries "length" so the same builder serves wings
+    // (length along local +Z), the tail fan (length along local -X, matching
+    // the OLD tail cones' own convention so the rig's tail.rotation.x/y/z
+    // pose maths still points the right way) and the crest (length along
+    // local +Y). UV: local u runs trailing(0)->leading(1) across the width,
+    // local v runs base(0)->tip(1) along the length — remapped into the
+    // caller's own atlas rectangle, so every feather's flow is base-to-tip
+    // top-to-bottom of the shared image, per the plan.
+    const buildFeatherPlateGeometry = ({
+      length, frontW, backW, tipTaper = 0.12, segments = 3, bow = 0.02, axis = 'z', uvRect,
+    }) => {
+      const rows = segments + 1;
+      const positions = new Float32Array(rows * 2 * 3);
+      const uvs = new Float32Array(rows * 2 * 2);
+      for (let i = 0; i < rows; i++) {
+        const t = i / segments;
+        const shape = tipTaper + (1 - tipTaper) * Math.pow(1 - t, 0.85);
+        const fw = frontW * shape;
+        const bw = backW * shape;
+        const bowVal = bow * Math.sin(Math.PI * t);
+        const len = length * t;
+        let lead, trail;
+        if (axis === '-x') {
+          lead = [-len, bowVal, fw];
+          trail = [-len, bowVal, -bw];
+        } else if (axis === 'y') {
+          lead = [fw, len, bowVal];
+          trail = [-bw, len, bowVal];
+        } else {
+          lead = [fw, bowVal, len];
+          trail = [-bw, bowVal, len];
+        }
+        const li = i * 2, ti = i * 2 + 1;
+        positions[li * 3] = lead[0]; positions[li * 3 + 1] = lead[1]; positions[li * 3 + 2] = lead[2];
+        positions[ti * 3] = trail[0]; positions[ti * 3 + 1] = trail[1]; positions[ti * 3 + 2] = trail[2];
+        const v = uvRect.v0 + t * (uvRect.v1 - uvRect.v0);
+        uvs[li * 2] = uvRect.u1; uvs[li * 2 + 1] = v;
+        uvs[ti * 2] = uvRect.u0; uvs[ti * 2 + 1] = v;
+      }
+      const indices = [];
+      for (let i = 0; i < segments; i++) {
+        const a = i * 2, b = i * 2 + 1, c = (i + 1) * 2, d = (i + 1) * 2 + 1;
+        indices.push(a, b, c, b, d, c);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geo.setIndex(new THREE.BufferAttribute(new Uint16Array(indices), 1));
+      geo.computeVertexNormals();
+      return geo;
+    };
+
+    // The raw (pre-bake) tip point of a feather built with the same
+    // length/axis as buildFeatherPlateGeometry — used with transformedLocalPoint
+    // below to place tipFeather/secondaryFeather exactly at a feather's tip
+    // after that feather's own placement TRS, instead of a hand-guessed number
+    // that drifts the moment the feather's position/rotation is retuned.
+    const tipPointOfFeather = ({ length, axis = 'z' }) => {
+      if (axis === '-x') return [-length, 0, 0];
+      if (axis === 'y') return [0, length, 0];
+      return [0, 0, length];
+    };
+
+    // Applies the same position/rotation/scale bakeGeometryTRS would bake
+    // into a geometry's vertices to a single point instead, reusing the same
+    // scratch objects (safe: each call fully consumes its own `trs` argument
+    // before the next runs, and this only ever executes at model-construction
+    // time, never per frame).
+    const transformedLocalPoint = (point, trs) => {
+      _bakePos.set(...(trs.position || [0, 0, 0]));
+      _bakeEuler.set(...(trs.rotation || [0, 0, 0]));
+      _bakeQuat.setFromEuler(_bakeEuler);
+      _bakeScale.set(...(trs.scale || [1, 1, 1]));
+      _bakeMatrix.compose(_bakePos, _bakeQuat, _bakeScale);
+      return new THREE.Vector3(...point).applyMatrix4(_bakeMatrix);
     };
 
     const createProceduralBirb = () => {
@@ -6674,238 +6877,215 @@
       // detection rotates the whole model so forward is -Z at render time.
       // Chibi / stylized cute bird aesthetic: big head, big eyes, clearly
       // visible triangular wing silhouettes, prominent yellow beak, egg body.
+      //
+      // Phase 0 (docs/realism/BIRD_PLAN.md): decimated tessellation, merged
+      // by material into vertex-coloured meshes. Same silhouette, same named
+      // rig (leftWing/rightWing/tail/leftFoot/rightFoot, baseRotation,
+      // tipFeather/secondaryFeather, the right-wing scale.z=-1 mirror) as
+      // the 44-mesh original — src/flight/bird-contract.js is the oracle for
+      // that contract and this constructor is written to pass it.
       const birbModel = new THREE.Group();
 
-      // -- Materials ----------------------------------------------------------
-      const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0x4a7cf0,
+      // -- Materials ------------------------------------------------------
+      // 14 materials (one+ per part, each with its own rim-light injection)
+      // collapse to 3: one lit, vertex-coloured material for every feathered
+      // surface (body/head/wings/tail), one lit, vertex-coloured material
+      // for the hard keratin bits (beak + feet), and one unlit, vertex-
+      // coloured material for the eyes. Colour that used to come from a
+      // dedicated material (the saddle's darker blue, the cyan wingtip
+      // accents, the pale belly/cheek/highlights) now comes from per-vertex
+      // colour baked in below, part by part, exactly matching each part's
+      // original material.color.
+      const featherMaterial = new THREE.MeshStandardMaterial({
+        vertexColors: true,
         metalness: 0.15,
         roughness: 0.5,
-        emissive: 0x162a49,
-        emissiveIntensity: 0.15,
-      });
-
-      const headMaterial = new THREE.MeshStandardMaterial({
-        color: 0x5a8cf5,
-        metalness: 0.15,
-        roughness: 0.5,
-        emissive: 0x1a2f55,
-        emissiveIntensity: 0.18,
-      });
-
-      const bellyMaterial = new THREE.MeshStandardMaterial({
-        color: 0xe6efff,
-        metalness: 0.1,
-        roughness: 0.6,
-        emissive: 0x1c2230,
-        emissiveIntensity: 0.08,
-      });
-
-      const wingMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2b5dcc,
-        metalness: 0.15,
-        roughness: 0.48,
         emissive: 0x0f1f45,
         emissiveIntensity: 0.18,
+        // The wing blade is a thin flattened plate seen edge-on and from
+        // above/below both — DoubleSide is load-bearing for it and merges
+        // in harmlessly for the (fully enclosed) body/head/tail meshes too.
         side: THREE.DoubleSide,
       });
 
-      const wingTipMaterial = new THREE.MeshStandardMaterial({
-        color: 0x4df0ff,
-        metalness: 0.2,
-        roughness: 0.4,
-        emissive: 0x0a6b78,
-        emissiveIntensity: 0.4,
-      });
-
-      const tailMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2b5dcc,
-        metalness: 0.15,
+      const beakFeetMaterial = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        metalness: 0.16,
         roughness: 0.5,
-        emissive: 0x0f1f45,
-        emissiveIntensity: 0.18,
+        emissive: 0x2a1a04,
+        emissiveIntensity: 0.12,
       });
 
-      const beakMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf5b942,
-        metalness: 0.2,
-        roughness: 0.38,
-        emissive: 0x3b2406,
-        emissiveIntensity: 0.28,
-      });
+      // Pure pupil black / pure highlight white (unlit so eyes always read),
+      // now one mesh, vertex-coloured for the black pupils vs white
+      // highlights/sparkles.
+      const eyeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
 
-      const footMaterial = new THREE.MeshStandardMaterial({
-        color: 0x1a2438,
-        metalness: 0.1,
-        roughness: 0.65,
-      });
-
-      // Pure pupil black / pure highlight white (unlit so eyes always read)
-      const eyeBlackMaterial = new THREE.MeshBasicMaterial({ color: 0x0a0a12 });
-      const eyeWhiteMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
-      // -- Body (egg-shaped, taller than wide, tapered tail) ------------------
-      // Length:width ≈ 1.67:1 (was 1.21:1, which read as a sphere). The
-      // chibi head + big eyes still carry the cute vibe; the body just no
-      // longer competes for the "round" silhouette.
-      const bodyGeometry = new THREE.SphereGeometry(0.5, 36, 28);
-      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-      body.scale.set(1.30, 1.00, 0.78);
-      body.position.set(-0.08, 0, 0);
-      birbModel.add(body);
+      // -- Body group (body, belly, saddle, head, cheek, crest, nostrils) --
+      // Body (egg-shaped, taller than wide, tapered tail). Length:width ≈
+      // 1.67:1 (was 1.21:1, which read as a sphere). Decimated 36x28 -> 18x14
+      // per BIRD_PLAN.md item 1 ("body/head spheres").
+      const bodyGeo = new THREE.SphereGeometry(0.5, 18, 14);
+      paintGeometryColor(bodyGeo, 0x4a7cf0);
+      bakeGeometryTRS(bodyGeo, { position: [-0.08, 0, 0], scale: [1.30, 1.00, 0.78] });
 
       // Belly patch — lighter underside so side profile reads as "bird".
-      // Slimmed to match the slimmer body width.
-      const bellyGeometry = new THREE.SphereGeometry(0.46, 32, 24);
-      const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
-      belly.scale.set(1.08, 0.78, 0.62);
-      belly.position.set(0.04, -0.18, 0);
-      birbModel.add(belly);
+      const bellyGeo = new THREE.SphereGeometry(0.46, 18, 14);
+      paintGeometryColor(bellyGeo, 0xe6efff);
+      bakeGeometryTRS(bellyGeo, { position: [0.04, -0.18, 0], scale: [1.08, 0.78, 0.62] });
 
-      // Back saddle — a darker mid-blue band wrapping the upper body. Scaled
-      // to be slightly wider/longer than the body so a thin ring pokes out
-      // around the upper equator (visible as an epaulet stripe from any
-      // angle) while the top hemisphere stays tucked inside the body's
-      // silhouette. Reads as natural plumage shading.
-      const saddleMaterial = new THREE.MeshStandardMaterial({
-        color: 0x223f9a,
-        metalness: 0.18,
-        roughness: 0.5,
-        emissive: 0x0a1432,
-        emissiveIntensity: 0.20,
-      });
-      const saddleGeometry = new THREE.SphereGeometry(0.5, 28, 20);
-      const saddle = new THREE.Mesh(saddleGeometry, saddleMaterial);
-      saddle.scale.set(1.34, 0.42, 0.84);
-      saddle.position.set(-0.08, 0.18, 0);
-      birbModel.add(saddle);
+      // Back saddle — darker mid-blue band wrapping the upper body.
+      const saddleGeo = new THREE.SphereGeometry(0.5, 18, 14);
+      paintGeometryColor(saddleGeo, 0x223f9a);
+      bakeGeometryTRS(saddleGeo, { position: [-0.08, 0.18, 0], scale: [1.34, 0.42, 0.84] });
 
-      // -- Head (big, chibi-proportioned) ------------------------------------
-      const headGeometry = new THREE.SphereGeometry(0.45, 36, 28);
-      const head = new THREE.Mesh(headGeometry, headMaterial);
-      head.scale.set(1.0, 1.0, 1.02);
-      head.position.set(0.62, 0.36, 0);
-      birbModel.add(head);
+      // Head (big, chibi-proportioned).
+      const headGeo = new THREE.SphereGeometry(0.45, 18, 14);
+      paintGeometryColor(headGeo, 0x5a8cf5);
+      bakeGeometryTRS(headGeo, { position: [0.62, 0.36, 0], scale: [1.0, 1.0, 1.02] });
 
-      // Cheek highlight / chin patch — small accent that reads as a face line
-      const cheekGeometry = new THREE.SphereGeometry(0.18, 20, 16);
-      const cheek = new THREE.Mesh(cheekGeometry, bellyMaterial);
-      cheek.scale.set(0.7, 0.55, 1.6);
-      cheek.position.set(0.7, 0.2, 0);
-      birbModel.add(cheek);
+      // Cheek highlight / chin patch. Under 0.2 units -> 12x10-or-less; used
+      // here at 10x8 to build margin into the triangle budget.
+      const cheekGeo = new THREE.SphereGeometry(0.18, 10, 8);
+      paintGeometryColor(cheekGeo, 0xe6efff);
+      bakeGeometryTRS(cheekGeo, { position: [0.7, 0.2, 0], scale: [0.7, 0.55, 1.6] });
 
-      // Crest tuft — cyan spike on top of head for character
-      const crestGeometry = new THREE.ConeGeometry(0.09, 0.28, 12);
-      const crest = new THREE.Mesh(crestGeometry, wingTipMaterial);
-      crest.rotation.set(0, 0, -Math.PI / 7);
-      crest.position.set(0.5, 0.8, 0);
-      birbModel.add(crest);
+      // Crest tuft — cyan spike on top of head for character.
+      const crestGeo = new THREE.ConeGeometry(0.09, 0.28, 6);
+      paintGeometryColor(crestGeo, 0x4df0ff);
+      bakeGeometryTRS(crestGeo, { position: [0.5, 0.8, 0], rotation: [0, 0, -Math.PI / 7] });
 
-      // -- Beak (prominent, pointing forward along +X) -----------------------
-      // ConeGeometry points along +Y by default; rotate Z by -PI/2 so it points +X.
-      const upperBeakGeometry = new THREE.ConeGeometry(0.13, 0.42, 20);
-      upperBeakGeometry.rotateZ(-Math.PI / 2);
-      const upperBeak = new THREE.Mesh(upperBeakGeometry, beakMaterial);
-      upperBeak.scale.set(1.0, 0.85, 1.1);
-      upperBeak.position.set(1.14, 0.36, 0);
-      birbModel.add(upperBeak);
+      // Nostrils — tiny dark dots near the beak base. Under 0.05 units ->
+      // no more than 6 segments.
+      const nostrilLGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      paintGeometryColor(nostrilLGeo, 0x3a2207);
+      bakeGeometryTRS(nostrilLGeo, { position: [1.00, 0.40, 0.07] });
+      const nostrilRGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      paintGeometryColor(nostrilRGeo, 0x3a2207);
+      bakeGeometryTRS(nostrilRGeo, { position: [1.00, 0.40, -0.07] });
 
-      // Lower beak — slightly smaller, darker shade below for a "mouth line"
-      const lowerBeakGeometry = new THREE.ConeGeometry(0.1, 0.3, 18);
-      lowerBeakGeometry.rotateZ(-Math.PI / 2);
-      const lowerBeakMaterial = beakMaterial.clone();
-      lowerBeakMaterial.color = new THREE.Color(0xdb9a2e);
-      const lowerBeak = new THREE.Mesh(lowerBeakGeometry, lowerBeakMaterial);
-      lowerBeak.scale.set(1.0, 0.7, 0.95);
-      lowerBeak.position.set(1.06, 0.24, 0);
-      birbModel.add(lowerBeak);
+      const bodyMesh = new THREE.Mesh(
+        mergeAndDispose([bodyGeo, bellyGeo, saddleGeo, headGeo, cheekGeo, crestGeo, nostrilLGeo, nostrilRGeo]),
+        featherMaterial
+      );
+      birbModel.add(bodyMesh);
 
-      // Beak nostrils — two tiny dark dots near the beak base for character.
-      const nostrilGeometry = new THREE.SphereGeometry(0.018, 10, 8);
-      const nostrilMaterial = new THREE.MeshBasicMaterial({ color: 0x3a2207 });
-      const leftNostril = new THREE.Mesh(nostrilGeometry, nostrilMaterial);
-      leftNostril.position.set(1.00, 0.40, 0.07);
-      birbModel.add(leftNostril);
-      const rightNostril = new THREE.Mesh(nostrilGeometry, nostrilMaterial);
-      rightNostril.position.set(1.00, 0.40, -0.07);
-      birbModel.add(rightNostril);
+      // -- Beak (prominent, pointing forward along +X) --------------------
+      // ConeGeometry points along +Y by default; rotate Z by -PI/2 so it
+      // points +X. 20 radial segments -> 8 per BIRD_PLAN.md item 1.
+      const upperBeakGeo = new THREE.ConeGeometry(0.13, 0.42, 8);
+      upperBeakGeo.rotateZ(-Math.PI / 2);
+      paintGeometryColor(upperBeakGeo, 0xf5b942);
+      bakeGeometryTRS(upperBeakGeo, { position: [1.14, 0.36, 0], scale: [1.0, 0.85, 1.1] });
 
-      // -- Eyes (big, expressive — 30% of the charm) -------------------------
-      const eyeGeometry = new THREE.SphereGeometry(0.1, 20, 16);
-      const leftEye = new THREE.Mesh(eyeGeometry, eyeBlackMaterial);
-      leftEye.position.set(0.82, 0.48, 0.26);
-      birbModel.add(leftEye);
+      // Lower beak — slightly smaller, darker shade below for a "mouth line".
+      const lowerBeakGeo = new THREE.ConeGeometry(0.1, 0.3, 8);
+      lowerBeakGeo.rotateZ(-Math.PI / 2);
+      paintGeometryColor(lowerBeakGeo, 0xdb9a2e);
+      bakeGeometryTRS(lowerBeakGeo, { position: [1.06, 0.24, 0], scale: [1.0, 0.7, 0.95] });
 
-      const rightEye = new THREE.Mesh(eyeGeometry, eyeBlackMaterial);
-      rightEye.position.set(0.82, 0.48, -0.26);
-      birbModel.add(rightEye);
+      const beakMesh = new THREE.Mesh(mergeAndDispose([upperBeakGeo, lowerBeakGeo]), beakFeetMaterial);
+      birbModel.add(beakMesh);
 
-      // White highlights — offset up and forward so eyes feel alive
-      const highlightGeometry = new THREE.SphereGeometry(0.035, 14, 12);
-      const leftHighlight = new THREE.Mesh(highlightGeometry, eyeWhiteMaterial);
-      leftHighlight.position.set(0.89, 0.53, 0.31);
-      birbModel.add(leftHighlight);
+      // -- Eyes (big, expressive — 30% of the charm) -----------------------
+      const leftEyeGeo = new THREE.SphereGeometry(0.1, 10, 8);
+      paintGeometryColor(leftEyeGeo, 0x0a0a12);
+      bakeGeometryTRS(leftEyeGeo, { position: [0.82, 0.48, 0.26] });
+      const rightEyeGeo = new THREE.SphereGeometry(0.1, 10, 8);
+      paintGeometryColor(rightEyeGeo, 0x0a0a12);
+      bakeGeometryTRS(rightEyeGeo, { position: [0.82, 0.48, -0.26] });
 
-      const rightHighlight = new THREE.Mesh(highlightGeometry, eyeWhiteMaterial);
-      rightHighlight.position.set(0.89, 0.53, -0.31);
-      birbModel.add(rightHighlight);
+      // White highlights — offset up and forward so eyes feel alive.
+      const leftHighlightGeo = new THREE.SphereGeometry(0.035, 6, 4);
+      paintGeometryColor(leftHighlightGeo, 0xffffff);
+      bakeGeometryTRS(leftHighlightGeo, { position: [0.89, 0.53, 0.31] });
+      const rightHighlightGeo = new THREE.SphereGeometry(0.035, 6, 4);
+      paintGeometryColor(rightHighlightGeo, 0xffffff);
+      bakeGeometryTRS(rightHighlightGeo, { position: [0.89, 0.53, -0.31] });
 
-      // Secondary tiny highlight for extra sparkle
-      const sparkleGeometry = new THREE.SphereGeometry(0.018, 10, 8);
-      const leftSparkle = new THREE.Mesh(sparkleGeometry, eyeWhiteMaterial);
-      leftSparkle.position.set(0.87, 0.44, 0.33);
-      birbModel.add(leftSparkle);
-      const rightSparkle = new THREE.Mesh(sparkleGeometry, eyeWhiteMaterial);
-      rightSparkle.position.set(0.87, 0.44, -0.33);
-      birbModel.add(rightSparkle);
+      // Secondary tiny highlight for extra sparkle.
+      const leftSparkleGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      paintGeometryColor(leftSparkleGeo, 0xffffff);
+      bakeGeometryTRS(leftSparkleGeo, { position: [0.87, 0.44, 0.33] });
+      const rightSparkleGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      paintGeometryColor(rightSparkleGeo, 0xffffff);
+      bakeGeometryTRS(rightSparkleGeo, { position: [0.87, 0.44, -0.33] });
 
-      // -- Wings --------------------------------------------------------------
-      // Single flattened ConeGeometry per wing, built into a Group so banking
-      // animations can rotate the whole wing cleanly around the shoulder.
-      // Cone's default Y-axis becomes the wing's LENGTH. We rotate so the length
-      // points outward along local +Z, then flatten along local X (thickness).
+      const eyesMesh = new THREE.Mesh(
+        mergeAndDispose([leftEyeGeo, rightEyeGeo, leftHighlightGeo, rightHighlightGeo, leftSparkleGeo, rightSparkleGeo]),
+        eyeMaterial
+      );
+      birbModel.add(eyesMesh);
+
+      // -- Wings ------------------------------------------------------------
+      // Each wing stays a Group (so the rig can rotate/scale the whole wing
+      // at the shoulder) holding ONE merged blade mesh (blade + secondary
+      // feather + tip accent + shoulder covert, baked with per-part vertex
+      // colour) plus two empty Object3Ds — tipFeather and secondaryFeather —
+      // positioned exactly where their old meshes sat. The rig still writes
+      // flex into their position.y every frame and the ribbon trail still
+      // reads tipFeather's world position; only the (barely visible at
+      // ~140px) flex-driven mesh deformation is gone, traded for one draw
+      // call instead of three per wing.
       const buildWing = (side /* +1 left, -1 right */) => {
         const wingGroup = new THREE.Group();
 
-        // Main feather plate — long triangular blade laid FLAT (thin vertically).
-        // Scale Z (the pre-rotation depth axis) — after rotateX(PI/2) that
-        // becomes the cross-section's Y, so the blade is thin top-to-bottom
-        // and wide front-to-back like a real wing silhouette.
+        // Main feather plate — long triangular blade laid flat. Already a
+        // 4-segment cone (deliberately low-poly for a flat blade
+        // silhouette); BIRD_PLAN.md item 1 only forces 20-segment cones
+        // down to 8, so this stays as authored.
         const bladeGeom = new THREE.ConeGeometry(0.38, 0.95, 4, 1, false);
         bladeGeom.scale(1.0, 1.0, 0.2);
-        bladeGeom.rotateX(Math.PI / 2);      // tip points along +Z
-        bladeGeom.translate(0, 0, 0.42);     // shoulder at origin, tip at +Z ~0.9
-        const blade = new THREE.Mesh(bladeGeom, wingMaterial);
-        wingGroup.add(blade);
+        bladeGeom.rotateX(Math.PI / 2);
+        bladeGeom.translate(0, 0, 0.42);
+        paintGeometryColor(bladeGeom, 0x2b5dcc);
 
-        // Secondary feather — slightly shorter and offset inward/back
+        // Secondary feather — slightly shorter and offset inward/back.
         const secondaryGeom = new THREE.ConeGeometry(0.3, 0.7, 4, 1, false);
         secondaryGeom.scale(1.0, 1.0, 0.15);
         secondaryGeom.rotateX(Math.PI / 2);
         secondaryGeom.translate(-0.07, -0.05, 0.32);
-        const secondary = new THREE.Mesh(secondaryGeom, wingMaterial);
-        wingGroup.add(secondary);
-        wingGroup.userData.secondaryFeather = secondary;
+        paintGeometryColor(secondaryGeom, 0x2b5dcc);
 
-        // Cyan tip accent — small cone sitting at the wingtip
+        // Cyan tip accent — small cone sitting at the wingtip.
         const tipGeom = new THREE.ConeGeometry(0.12, 0.26, 4, 1, false);
         tipGeom.scale(1.0, 1.0, 0.2);
         tipGeom.rotateX(Math.PI / 2);
         tipGeom.translate(0.02, 0.02, 0.88);
-        const tip = new THREE.Mesh(tipGeom, wingTipMaterial);
-        wingGroup.add(tip);
-        wingGroup.userData.tipFeather = tip;
+        paintGeometryColor(tipGeom, 0x4df0ff);
 
-        // Larger rounded covert at the shoulder — a touch beefier than
-        // before so the seam between body and wing reads as a feathered
-        // joint, not a glued-on cone. Still hides the seam cleanly.
-        const covertGeom = new THREE.SphereGeometry(0.18, 16, 12);
-        const covert = new THREE.Mesh(covertGeom, wingMaterial);
-        covert.scale.set(0.7, 0.88, 0.78);
-        covert.position.set(0, 0.05, -0.02);
-        wingGroup.add(covert);
+        // Larger rounded covert at the shoulder — hides the body/wing seam.
+        // Under 0.2 units -> 12x10-or-less; used at 8x6 for margin.
+        const covertGeom = new THREE.SphereGeometry(0.18, 8, 6);
+        paintGeometryColor(covertGeom, 0x2b5dcc);
+        bakeGeometryTRS(covertGeom, { position: [0, 0.05, -0.02], scale: [0.7, 0.88, 0.78] });
 
-        // Mirror for right-side wing: flip along Z so tip points -Z
+        const blade = new THREE.Mesh(
+          mergeAndDispose([bladeGeom, secondaryGeom, tipGeom, covertGeom]),
+          featherMaterial
+        );
+        wingGroup.add(blade);
+
+        // tipFeather: REQUIRED by the rig contract. getWorldPosition on it
+        // anchors src/effects/ribbon-trail.js's wingtip ribbon — must sit at
+        // the wingtip, matching the merged tip cone's own translate above.
+        const tipFeather = new THREE.Object3D();
+        tipFeather.position.set(0.02, 0.02, 0.88);
+        wingGroup.add(tipFeather);
+        wingGroup.userData.tipFeather = tipFeather;
+
+        // secondaryFeather: the rig writes flex lag into its position.y —
+        // the wing's follow-through. Positioned to match the merged
+        // secondary cone's own translate above.
+        const secondaryFeather = new THREE.Object3D();
+        secondaryFeather.position.set(-0.07, -0.05, 0.32);
+        wingGroup.add(secondaryFeather);
+        wingGroup.userData.secondaryFeather = secondaryFeather;
+
+        // Mirror for right-side wing: flip along Z so tip points -Z. The
+        // rig contract requires exactly this — scale.z < 0 on the right
+        // wing, scale.z > 0 on the left — because it writes
+        // rightWing.scale.z = -span every frame.
         if (side < 0) {
           wingGroup.scale.z = -1;
         }
@@ -6928,8 +7108,6 @@
       // Working that through Three.js's matrix M = T·R·S gives the constraint
       // R_right = S · R_left · S, which in Euler XYZ means (-aL, -bL, +cL).
       // So left (-0.1, -0.35, 0.18)  →  right (+0.1, +0.35, +0.18).
-      // (The previous values (-0.1, 0.35, -0.18) flipped the wrong components
-      //  and left the right wing tip sitting ~0.17 units low at base.)
       const rightWing = buildWing(-1);
       rightWing.name = 'rightWing';
       rightWing.position.set(-0.08, 0.18, -0.38);
@@ -6937,29 +7115,24 @@
       rightWing.userData.baseRotation = rightWing.rotation.clone();
       birbModel.add(rightWing);
 
-      // -- Tail (5-feather fan trailing from body rear, along -X) -----------
-      // Wrapped in a group so the whole fan can sway/wag together. Feathers
-      // are thin triangular cones laid flat; the center feather is the
-      // longest, outer ones are slightly shorter for a graceful fan shape.
-      // Cone default +Y → rotate Z by +PI/2 so the tip points along -X.
-      const tailGroup = new THREE.Group();
-      tailGroup.name = 'tail';
-      tailGroup.position.set(-0.62, -0.04, 0);
-      tailGroup.userData.baseRotation = new THREE.Euler(0, 0, -0.12);
-      tailGroup.rotation.copy(tailGroup.userData.baseRotation);
+      // -- Tail (5-feather fan trailing from body rear, along -X) ---------
+      // The `tail` group is still the thing the rig rotates/scales as a
+      // whole; the five feathers (each previously its own Group with its
+      // own static splay/droop rotation) no longer need to be individually
+      // rotatable at runtime, so each feather + its cyan tip is baked with
+      // its splay/droop rotation directly into the geometry and all ten
+      // pieces merge into ONE fan mesh inside the `tail` group.
+      const tailFeatherColor = 0x2b5dcc;
+      const tailTipColor = 0x4df0ff;
 
-      const tailTipAccentMaterial = wingTipMaterial.clone();
-      tailTipAccentMaterial.emissiveIntensity = 0.55;
-
-      const buildTailFeather = (length, splay, droop, isCenter) => {
-        const featherGroup = new THREE.Group();
-
+      const buildTailFeatherGeoms = (length, splay, droop, isCenter) => {
+        // Cone default +Y → rotate Z by +PI/2 so the tip points along -X.
         const featherGeom = new THREE.ConeGeometry(0.08, length, 4, 1, false);
         featherGeom.scale(1.0, 1.0, 0.3);
         featherGeom.rotateZ(Math.PI / 2);            // tip points -X (rearward)
         featherGeom.translate(-length * 0.5, 0, 0);  // shoulder at origin
-        const feather = new THREE.Mesh(featherGeom, tailMaterial);
-        featherGroup.add(feather);
+        paintGeometryColor(featherGeom, tailFeatherColor);
+        bakeGeometryTRS(featherGeom, { rotation: [0, splay, droop] });
 
         // Cyan tip on each feather — slimmer than the main feather body.
         const tipLen = isCenter ? 0.22 : 0.16;
@@ -6967,72 +7140,87 @@
         tipGeom.scale(1.0, 1.0, 0.3);
         tipGeom.rotateZ(Math.PI / 2);
         tipGeom.translate(-length - tipLen * 0.4, 0, 0);
-        const tip = new THREE.Mesh(tipGeom, tailTipAccentMaterial);
-        featherGroup.add(tip);
+        paintGeometryColor(tipGeom, tailTipColor);
+        bakeGeometryTRS(tipGeom, { rotation: [0, splay, droop] });
 
-        // Splay around Y (fan spread) and slight droop around Z.
-        featherGroup.rotation.set(0, splay, droop);
-        return featherGroup;
+        return [featherGeom, tipGeom];
       };
 
       // Center feather (longest) plus two pairs splaying outward.
-      tailGroup.add(buildTailFeather(0.58, 0, 0, true));
-      tailGroup.add(buildTailFeather(0.52, +0.22, -0.04, false));
-      tailGroup.add(buildTailFeather(0.52, -0.22, -0.04, false));
-      tailGroup.add(buildTailFeather(0.44, +0.40, -0.08, false));
-      tailGroup.add(buildTailFeather(0.44, -0.40, -0.08, false));
+      const tailGeoms = [
+        ...buildTailFeatherGeoms(0.58, 0, 0, true),
+        ...buildTailFeatherGeoms(0.52, +0.22, -0.04, false),
+        ...buildTailFeatherGeoms(0.52, -0.22, -0.04, false),
+        ...buildTailFeatherGeoms(0.44, +0.40, -0.08, false),
+        ...buildTailFeatherGeoms(0.44, -0.40, -0.08, false),
+      ];
 
+      const tailGroup = new THREE.Group();
+      tailGroup.name = 'tail';
+      tailGroup.position.set(-0.62, -0.04, 0);
+      tailGroup.userData.baseRotation = new THREE.Euler(0, 0, -0.12);
+      tailGroup.rotation.copy(tailGroup.userData.baseRotation);
+      tailGroup.add(new THREE.Mesh(mergeAndDispose(tailGeoms), featherMaterial));
       birbModel.add(tailGroup);
 
-      // -- Feet (small, readable, tuckable via Group rotation) ---------------
-      const createFoot = () => {
-        const footGroup = new THREE.Group();
+      // -- Feet (small, readable, tuckable via Group rotation) -------------
+      // Each foot Group is still the thing the rig rotates as a whole (walk
+      // tilt + tuck); the leg/pad/three toes inside it never move relative
+      // to each other, so they merge into ONE mesh per foot.
+      const buildFootGeom = () => {
+        // Short cylinder leg. Radius 0.05 (at the "under 0.05" boundary) ->
+        // 6 segments, matching item 1's cap for tiny parts.
+        const legGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.22, 6);
+        paintGeometryColor(legGeom, 0x1a2438);
+        bakeGeometryTRS(legGeom, { position: [0, -0.11, 0] });
 
-        // Short cylinder leg
-        const legGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.22, 10);
-        const leg = new THREE.Mesh(legGeom, footMaterial);
-        leg.position.set(0, -0.11, 0);
-        footGroup.add(leg);
+        // Flat squashed foot pad, near-black. Under 0.2 units -> 8x6 here.
+        const padGeom = new THREE.SphereGeometry(0.1, 8, 6);
+        paintGeometryColor(padGeom, 0x1a2438);
+        bakeGeometryTRS(padGeom, { position: [0.04, -0.24, 0], scale: [1.4, 0.45, 1.1] });
 
-        // Flat squashed foot pad near-black
-        const padGeom = new THREE.SphereGeometry(0.1, 14, 10);
-        const pad = new THREE.Mesh(padGeom, footMaterial);
-        pad.scale.set(1.4, 0.45, 1.1);
-        pad.position.set(0.04, -0.24, 0);
-        footGroup.add(pad);
-
-        // Three tiny forward toes (small capsules, rotated to lie flat)
-        const toeGeom = new THREE.CapsuleGeometry(0.025, 0.1, 4, 8);
+        // Three tiny forward toes (small capsules, rotated to lie flat).
+        // Radius 0.025, well under 0.05 -> capped at 6 segments.
+        const toeGeoms = [];
         for (let i = -1; i <= 1; i++) {
-          const toe = new THREE.Mesh(toeGeom, footMaterial);
-          toe.rotation.set(0, 0, Math.PI / 2);
-          toe.position.set(0.14, -0.24, i * 0.06);
-          footGroup.add(toe);
+          const toeGeom = new THREE.CapsuleGeometry(0.025, 0.1, 2, 6);
+          paintGeometryColor(toeGeom, 0x1a2438);
+          bakeGeometryTRS(toeGeom, { position: [0.14, -0.24, i * 0.06], rotation: [0, 0, Math.PI / 2] });
+          toeGeoms.push(toeGeom);
         }
 
-        return footGroup;
+        return mergeAndDispose([legGeom, padGeom, ...toeGeoms]);
       };
 
-      const leftFoot = createFoot();
+      const leftFoot = new THREE.Group();
       leftFoot.name = 'leftFoot';
       leftFoot.position.set(0.04, -0.38, 0.18);
+      leftFoot.add(new THREE.Mesh(buildFootGeom(), beakFeetMaterial));
       birbModel.add(leftFoot);
 
-      const rightFoot = createFoot();
+      const rightFoot = new THREE.Group();
       rightFoot.name = 'rightFoot';
       rightFoot.position.set(0.04, -0.38, -0.18);
+      rightFoot.add(new THREE.Mesh(buildFootGeom(), beakFeetMaterial));
       birbModel.add(rightFoot);
 
       // ── Rim light ────────────────────────────────────────────────────────
       // Applied to every material the bird owns, in one traverse, so a part
       // added later cannot be quietly left out and read as a hole in the
-      // silhouette. The uniforms are collected so the environment switch can
-      // retint the rim to each biome's sky.
+      // silhouette. addRimLight itself guards against double-injecting the
+      // same material (material.userData.birbRim short-circuits it), but
+      // with only 3 materials now shared across 8 meshes each material is
+      // visited several times in this traverse — the `seen` set keeps
+      // birbRimUniforms from accumulating duplicate references to the exact
+      // same uniforms object.
       birbRimUniforms.length = 0;
+      const seenRimMaterials = new Set();
       birbModel.traverse((child) => {
         if (!child.material) return;
         const list = Array.isArray(child.material) ? child.material : [child.material];
         for (const m of list) {
+          if (seenRimMaterials.has(m)) continue;
+          seenRimMaterials.add(m);
           const u = addRimLight(m, THREE, { color: 0x9fe8ff, power: 3.0, strength: 0.42 });
           if (u) birbRimUniforms.push(u);
         }
@@ -7041,7 +7229,450 @@
       return birbModel;
     };
 
-    positionBirbModel(createProceduralBirb());
+    // ── Phase 1: procedural v2, flagged candidate (?bird=v2) ────────────────
+    // docs/realism/BIRD_PLAN.md Phase 1. Same rig contract as
+    // createProceduralBirb above (leftWing/rightWing/tail/leftFoot/rightFoot,
+    // both baseRotations, tipFeather/secondaryFeather on each wing, the
+    // right-wing scale.z=-1 mirror) and the same three materials/vertex-
+    // colour identity — src/flight/bird-contract.js is the oracle for the
+    // rig and this constructor is written to pass it. What changes is built
+    // for the chase camera per the plan: a shoulder->wrist->tip feather chain
+    // on each wing instead of one flattened cone, ONE lofted body profile
+    // (rump -> back -> S-curved neck) instead of three overlapping spheres,
+    // and a merged tail fan of overlapping feather plates. Head/eyes/beak
+    // keep Phase 0's exact signed-off proportions and positions.
+    const createProceduralBirbV2 = () => {
+      const birbModel = new THREE.Group();
+
+      // One shared 0..1 x 0..1 UV atlas for the whole bird, so a future
+      // feather albedo (Phase 2) has somewhere consistent to land. Feather
+      // flow runs BASE (top of the image, v=0) -> TIP (bottom, v=1) along
+      // every feather's own length, consistently — see buildFeatherPlateGeometry.
+      //
+      //   body   u 0.00-0.55  v 0.00-0.40   loft tube: rump -> back -> neck
+      //   head   u 0.55-0.80  v 0.00-0.40   head sphere + cheek + nostrils
+      //   beak   u 0.80-1.00  v 0.00-0.18   upper + lower beak cones
+      //   eyes   u 0.80-1.00  v 0.18-0.30   pupils + highlights (unlit material)
+      //   feet   u 0.80-1.00  v 0.30-0.40   legs + pads + toes, both feet
+      //   crest  u 0.55-0.80  v 0.40-0.55   2-3 crest feather plates
+      //   wings  u 0.00-1.00  v 0.55-0.80   coverts/secondaries/primaries,
+      //                                     both wings share this band
+      //                                     (mirrored by scale.z, not by UV)
+      //   tail   u 0.00-1.00  v 0.80-1.00   tail feather fan
+      const ATLAS = {
+        body: { u0: 0.00, v0: 0.00, u1: 0.55, v1: 0.40 },
+        head: { u0: 0.55, v0: 0.00, u1: 0.80, v1: 0.40 },
+        beak: { u0: 0.80, v0: 0.00, u1: 1.00, v1: 0.18 },
+        eyes: { u0: 0.80, v0: 0.18, u1: 1.00, v1: 0.30 },
+        feet: { u0: 0.80, v0: 0.30, u1: 1.00, v1: 0.40 },
+        crest: { u0: 0.55, v0: 0.40, u1: 0.80, v1: 0.55 },
+        wings: { u0: 0.00, v0: 0.55, u1: 1.00, v1: 0.80 },
+        tail: { u0: 0.00, v0: 0.80, u1: 1.00, v1: 1.00 },
+      };
+      // Slices one atlas rectangle into `count` equal columns (same v range,
+      // divided u range) so each feather in a group gets its own strip while
+      // every strip still flows base-to-tip top-to-bottom.
+      const sliceUV = (rect, i, count) => {
+        const step = (rect.u1 - rect.u0) / count;
+        return { u0: rect.u0 + i * step, u1: rect.u0 + (i + 1) * step, v0: rect.v0, v1: rect.v1 };
+      };
+
+      // -- Materials: same 3 as Phase 0 (feather / beak+feet / unlit eyes) --
+      const featherMaterial = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        metalness: 0.15,
+        roughness: 0.5,
+        emissive: 0x0f1f45,
+        emissiveIntensity: 0.18,
+        side: THREE.DoubleSide,
+      });
+      const beakFeetMaterial = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        metalness: 0.16,
+        roughness: 0.5,
+        emissive: 0x2a1a04,
+        emissiveIntensity: 0.12,
+      });
+      const eyeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
+
+      // -- Body: ONE lofted profile, rump -> back -> S-curved neck ---------
+      const bodyColor = new THREE.Color(0x4a7cf0);
+      const saddleColor = new THREE.Color(0x223f9a);
+      const bellyColor = new THREE.Color(0xe6efff);
+      const headTint = new THREE.Color(0x5a8cf5);
+
+      const buildBodyLoft = () => {
+        // Hand-authored profile rows (x = position along the body, y = the
+        // S-curve's vertical bend baked straight in, r = radius), rump to
+        // neck-top. BIRD_PLAN.md offers either a LatheGeometry displaced
+        // afterward or hand-built positions; building the bend straight into
+        // (x, y) per row is the same result with no separate displacement
+        // pass. Reading the y column top to bottom: -0.12 -> 0.08 (rump
+        // rising into the back, one bend) -> 0.10 (a slight chest tuck,
+        // bending the OTHER way) -> 0.34 (the neck's second, steeper rise
+        // into the head) — that dip-then-rise is the S.
+        const rows = [
+          { x: -0.85, y: -0.12, r: 0.05 },
+          { x: -0.66, y: -0.08, r: 0.32 },
+          { x: -0.34, y: 0.00, r: 0.47 },
+          { x: -0.04, y: 0.08, r: 0.46 },
+          { x: 0.20, y: 0.12, r: 0.40 },
+          { x: 0.38, y: 0.10, r: 0.30 },
+          { x: 0.50, y: 0.20, r: 0.20 },
+          { x: 0.60, y: 0.34, r: 0.11 },
+        ];
+        const segs = 10;
+        const zScale = 0.82; // slightly flatter than tall, matching Phase 0's egg
+        const positions = [];
+        const uvs = [];
+        const colors = [];
+        const ringColor = (topness, rowT) => {
+          const c = bodyColor.clone();
+          if (topness > 0.5) c.lerp(saddleColor, Math.min(1, (topness - 0.5) / 0.5));
+          else if (topness < -0.2) c.lerp(bellyColor, Math.min(1, (-0.2 - topness) / 0.8));
+          if (rowT > 0.75) c.lerp(headTint, ((rowT - 0.75) / 0.25) * 0.6);
+          return c;
+        };
+        for (let ri = 0; ri < rows.length; ri++) {
+          const row = rows[ri];
+          const rowT = ri / (rows.length - 1);
+          for (let k = 0; k < segs; k++) {
+            const a = (k / segs) * Math.PI * 2;
+            const cosA = Math.cos(a), sinA = Math.sin(a);
+            positions.push(row.x, row.y + row.r * cosA, row.r * zScale * sinA);
+            uvs.push(
+              ATLAS.body.u0 + (k / segs) * (ATLAS.body.u1 - ATLAS.body.u0),
+              ATLAS.body.v0 + rowT * (ATLAS.body.v1 - ATLAS.body.v0),
+            );
+            const c = ringColor(cosA, rowT);
+            colors.push(c.r, c.g, c.b);
+          }
+        }
+        // Rump cap — row 0's radius is tiny (0.05) but not zero, so close it
+        // rather than leave a pinhole nothing else covers.
+        const capIndex = rows.length * segs;
+        positions.push(rows[0].x, rows[0].y, 0);
+        uvs.push((ATLAS.body.u0 + ATLAS.body.u1) / 2, ATLAS.body.v0);
+        const capColor = ringColor(0, 0);
+        colors.push(capColor.r, capColor.g, capColor.b);
+
+        const indices = [];
+        for (let ri = 0; ri < rows.length - 1; ri++) {
+          for (let k = 0; k < segs; k++) {
+            const a = ri * segs + k;
+            const b = ri * segs + ((k + 1) % segs);
+            const c = (ri + 1) * segs + k;
+            const d = (ri + 1) * segs + ((k + 1) % segs);
+            indices.push(a, b, c, b, d, c);
+          }
+        }
+        for (let k = 0; k < segs; k++) {
+          indices.push(capIndex, k, (k + 1) % segs);
+        }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+        geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+        geo.setIndex(new THREE.BufferAttribute(new Uint16Array(indices), 1));
+        geo.computeVertexNormals();
+        return geo;
+      };
+
+      const bodyLoftGeo = buildBodyLoft();
+
+      // Head (Phase 0's exact size/position — signed off) + cheek + nostrils,
+      // remapped into the atlas's head rect.
+      const headGeo = new THREE.SphereGeometry(0.45, 18, 14);
+      remapUV(headGeo, ATLAS.head);
+      paintGeometryColor(headGeo, 0x5a8cf5);
+      bakeGeometryTRS(headGeo, { position: [0.62, 0.36, 0], scale: [1.0, 1.0, 1.02] });
+
+      const cheekGeo = new THREE.SphereGeometry(0.18, 10, 8);
+      remapUV(cheekGeo, ATLAS.head);
+      paintGeometryColor(cheekGeo, 0xe6efff);
+      bakeGeometryTRS(cheekGeo, { position: [0.7, 0.2, 0], scale: [0.7, 0.55, 1.6] });
+
+      const nostrilLGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      remapUV(nostrilLGeo, ATLAS.head);
+      paintGeometryColor(nostrilLGeo, 0x3a2207);
+      bakeGeometryTRS(nostrilLGeo, { position: [1.00, 0.40, 0.07] });
+      const nostrilRGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      remapUV(nostrilRGeo, ATLAS.head);
+      paintGeometryColor(nostrilRGeo, 0x3a2207);
+      bakeGeometryTRS(nostrilRGeo, { position: [1.00, 0.40, -0.07] });
+
+      // Crest: 2-3 small feather plates instead of one cone.
+      const crestCount = 3;
+      const crestGeoms = [];
+      for (let i = 0; i < crestCount; i++) {
+        const rect = sliceUV(ATLAS.crest, i, crestCount);
+        const g = buildFeatherPlateGeometry({
+          length: 0.22 - i * 0.03, frontW: 0.05, backW: 0.05, tipTaper: 0.1, segments: 2, bow: 0.01, axis: 'y', uvRect: rect,
+        });
+        paintGeometryColor(g, 0x4df0ff);
+        bakeGeometryTRS(g, { position: [0.46 + i * 0.03, 0.78, (i - 1) * 0.05], rotation: [0, 0, -Math.PI / 7 + (i - 1) * 0.12] });
+        crestGeoms.push(g);
+      }
+
+      const bodyMesh = new THREE.Mesh(
+        mergeAndDispose([bodyLoftGeo, headGeo, cheekGeo, nostrilLGeo, nostrilRGeo, ...crestGeoms]),
+        featherMaterial,
+      );
+      birbModel.add(bodyMesh);
+
+      // -- Beak (Phase 0's exact proportions — signed off) -------------------
+      const upperBeakGeo = new THREE.ConeGeometry(0.13, 0.42, 8);
+      upperBeakGeo.rotateZ(-Math.PI / 2);
+      remapUV(upperBeakGeo, ATLAS.beak);
+      paintGeometryColor(upperBeakGeo, 0xf5b942);
+      bakeGeometryTRS(upperBeakGeo, { position: [1.14, 0.36, 0], scale: [1.0, 0.85, 1.1] });
+
+      const lowerBeakGeo = new THREE.ConeGeometry(0.1, 0.3, 8);
+      lowerBeakGeo.rotateZ(-Math.PI / 2);
+      remapUV(lowerBeakGeo, ATLAS.beak);
+      paintGeometryColor(lowerBeakGeo, 0xdb9a2e);
+      bakeGeometryTRS(lowerBeakGeo, { position: [1.06, 0.24, 0], scale: [1.0, 0.7, 0.95] });
+
+      const beakMesh = new THREE.Mesh(mergeAndDispose([upperBeakGeo, lowerBeakGeo]), beakFeetMaterial);
+      birbModel.add(beakMesh);
+
+      // -- Eyes (Phase 0's exact size/placement — signed off) -----------------
+      const leftEyeGeo = new THREE.SphereGeometry(0.1, 10, 8);
+      remapUV(leftEyeGeo, ATLAS.eyes);
+      paintGeometryColor(leftEyeGeo, 0x0a0a12);
+      bakeGeometryTRS(leftEyeGeo, { position: [0.82, 0.48, 0.26] });
+      const rightEyeGeo = new THREE.SphereGeometry(0.1, 10, 8);
+      remapUV(rightEyeGeo, ATLAS.eyes);
+      paintGeometryColor(rightEyeGeo, 0x0a0a12);
+      bakeGeometryTRS(rightEyeGeo, { position: [0.82, 0.48, -0.26] });
+
+      const leftHighlightGeo = new THREE.SphereGeometry(0.035, 6, 4);
+      remapUV(leftHighlightGeo, ATLAS.eyes);
+      paintGeometryColor(leftHighlightGeo, 0xffffff);
+      bakeGeometryTRS(leftHighlightGeo, { position: [0.89, 0.53, 0.31] });
+      const rightHighlightGeo = new THREE.SphereGeometry(0.035, 6, 4);
+      remapUV(rightHighlightGeo, ATLAS.eyes);
+      paintGeometryColor(rightHighlightGeo, 0xffffff);
+      bakeGeometryTRS(rightHighlightGeo, { position: [0.89, 0.53, -0.31] });
+
+      const leftSparkleGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      remapUV(leftSparkleGeo, ATLAS.eyes);
+      paintGeometryColor(leftSparkleGeo, 0xffffff);
+      bakeGeometryTRS(leftSparkleGeo, { position: [0.87, 0.44, 0.33] });
+      const rightSparkleGeo = new THREE.SphereGeometry(0.018, 6, 4);
+      remapUV(rightSparkleGeo, ATLAS.eyes);
+      paintGeometryColor(rightSparkleGeo, 0xffffff);
+      bakeGeometryTRS(rightSparkleGeo, { position: [0.87, 0.44, -0.33] });
+
+      const eyesMesh = new THREE.Mesh(
+        mergeAndDispose([leftEyeGeo, rightEyeGeo, leftHighlightGeo, rightHighlightGeo, leftSparkleGeo, rightSparkleGeo]),
+        eyeMaterial,
+      );
+      birbModel.add(eyesMesh);
+
+      // -- Wings: shoulder -> wrist -> tip feather chain, one merged mesh ----
+      // Coverts near the shoulder, secondaries along the arm, primaries
+      // fanning from the wrist with an increasing splay so the tips separate
+      // ("finger" gaps) instead of overlapping into one solid fan.
+      const covertCount = 4;
+      const secondaryCount = 5;
+      const primaryCount = 7;
+      const totalWingFeathers = covertCount + secondaryCount + primaryCount;
+
+      const buildWingV2 = (side /* +1 left, -1 right */) => {
+        const wingGroup = new THREE.Group();
+        const geoms = [];
+        let tipLocal = null, tipTRS = null;
+        let secondaryLocal = null, secondaryTRS = null;
+
+        for (let i = 0; i < covertCount; i++) {
+          const rect = sliceUV(ATLAS.wings, i, totalWingFeathers);
+          const g = buildFeatherPlateGeometry({
+            length: 0.16 + i * 0.015, frontW: 0.11, backW: 0.09, segments: 2, bow: 0.015, axis: 'z', uvRect: rect,
+          });
+          paintGeometryColor(g, 0x2b5dcc);
+          bakeGeometryTRS(g, { position: [0.02 - i * 0.01, 0.04, 0.02 + i * 0.05], rotation: [0, 0.05 * i, 0] });
+          geoms.push(g);
+        }
+
+        for (let i = 0; i < secondaryCount; i++) {
+          const rect = sliceUV(ATLAS.wings, covertCount + i, totalWingFeathers);
+          const length = 0.28 + i * 0.015;
+          const g = buildFeatherPlateGeometry({
+            length, frontW: 0.15, backW: 0.11, segments: 4, bow: 0.02, axis: 'z', uvRect: rect,
+          });
+          paintGeometryColor(g, 0x2b5dcc);
+          const trs = { position: [-0.01 * i, 0.0, 0.16 + i * 0.05], rotation: [0, 0.02 * i, 0] };
+          bakeGeometryTRS(g, trs);
+          geoms.push(g);
+          if (i === 2) {
+            secondaryLocal = tipPointOfFeather({ length, axis: 'z' });
+            secondaryTRS = trs;
+          }
+        }
+
+        for (let i = 0; i < primaryCount; i++) {
+          const rect = sliceUV(ATLAS.wings, covertCount + secondaryCount + i, totalWingFeathers);
+          const length = 0.30 + i * 0.045;
+          const frontW = 0.14 - i * 0.011;
+          const backW = 0.10 - i * 0.009;
+          const g = buildFeatherPlateGeometry({
+            length, frontW, backW, tipTaper: 0.08, segments: 5, bow: 0.02, axis: 'z', uvRect: rect,
+          });
+          paintGeometryColor(g, i >= primaryCount - 2 ? 0x4df0ff : 0x2b5dcc);
+          const trs = { position: [0.0, -0.01 * i, 0.42 + i * 0.03], rotation: [0, -0.04 + i * 0.05, -0.01 * i] };
+          bakeGeometryTRS(g, trs);
+          geoms.push(g);
+          if (i === primaryCount - 1) {
+            tipLocal = tipPointOfFeather({ length, axis: 'z' });
+            tipTRS = trs;
+          }
+        }
+
+        const blade = new THREE.Mesh(mergeAndDispose(geoms), featherMaterial);
+        wingGroup.add(blade);
+
+        // tipFeather: REQUIRED by the rig contract — getWorldPosition on it
+        // anchors src/effects/ribbon-trail.js's wingtip ribbon. Placed at the
+        // outermost primary's own tip, computed rather than guessed, so it
+        // tracks that feather's actual placement TRS.
+        const tipFeather = new THREE.Object3D();
+        tipFeather.position.copy(transformedLocalPoint(tipLocal, tipTRS));
+        wingGroup.add(tipFeather);
+        wingGroup.userData.tipFeather = tipFeather;
+
+        // secondaryFeather: the rig writes flex lag (follow-through) into its
+        // position.y. Placed at the middle secondary's tip, the mid-arm point
+        // the old cone-based wing used for the same purpose.
+        const secondaryFeather = new THREE.Object3D();
+        secondaryFeather.position.copy(transformedLocalPoint(secondaryLocal, secondaryTRS));
+        wingGroup.add(secondaryFeather);
+        wingGroup.userData.secondaryFeather = secondaryFeather;
+
+        // Mirror for right-side wing: the rig contract requires scale.z < 0
+        // on the right wing, > 0 on the left, because it writes
+        // rightWing.scale.z = -span every frame.
+        if (side < 0) wingGroup.scale.z = -1;
+
+        return wingGroup;
+      };
+
+      const leftWing = buildWingV2(1);
+      leftWing.name = 'leftWing';
+      leftWing.position.set(-0.08, 0.18, 0.38);
+      leftWing.rotation.set(-0.1, -0.35, 0.18);
+      leftWing.userData.baseRotation = leftWing.rotation.clone();
+      birbModel.add(leftWing);
+
+      // Same mirror-rotation constraint as Phase 0 (see its own comment
+      // above): left (-0.1, -0.35, 0.18) -> right (+0.1, +0.35, +0.18).
+      const rightWing = buildWingV2(-1);
+      rightWing.name = 'rightWing';
+      rightWing.position.set(-0.08, 0.18, -0.38);
+      rightWing.rotation.set(0.1, 0.35, 0.18);
+      rightWing.userData.baseRotation = rightWing.rotation.clone();
+      birbModel.add(rightWing);
+
+      // -- Tail: fan of overlapping feather plates, merged ------------------
+      const tailFeatherCount = 7;
+      const tailGeoms = [];
+      for (let i = 0; i < tailFeatherCount; i++) {
+        const rect = sliceUV(ATLAS.tail, i, tailFeatherCount);
+        const centered = i - (tailFeatherCount - 1) / 2; // -3..3
+        const length = 0.58 - Math.abs(centered) * 0.035;
+        const splay = centered * 0.13;
+        const droop = -0.03 - Math.abs(centered) * 0.02;
+        const featherTRS = { rotation: [0, splay, droop] };
+
+        const g = buildFeatherPlateGeometry({
+          length, frontW: 0.075, backW: 0.075, tipTaper: 0.1, segments: 4, bow: 0.015, axis: '-x', uvRect: rect,
+        });
+        paintGeometryColor(g, 0x2b5dcc);
+        bakeGeometryTRS(g, featherTRS);
+        tailGeoms.push(g);
+
+        // Cyan tip accent overlapping the outer third of each feather —
+        // same two-tone motif as Phase 0's tail.
+        const tipLen = length * 0.32;
+        const tipOrigin = transformedLocalPoint([-(length * 0.7), 0, 0], featherTRS);
+        const tip = buildFeatherPlateGeometry({
+          length: tipLen, frontW: 0.045, backW: 0.045, tipTaper: 0.1, segments: 2, bow: 0.01, axis: '-x', uvRect: rect,
+        });
+        paintGeometryColor(tip, 0x4df0ff);
+        bakeGeometryTRS(tip, { position: tipOrigin.toArray(), rotation: [0, splay, droop] });
+        tailGeoms.push(tip);
+      }
+
+      const tailGroup = new THREE.Group();
+      tailGroup.name = 'tail';
+      tailGroup.position.set(-0.62, -0.04, 0);
+      tailGroup.userData.baseRotation = new THREE.Euler(0, 0, -0.12);
+      tailGroup.rotation.copy(tailGroup.userData.baseRotation);
+      tailGroup.add(new THREE.Mesh(mergeAndDispose(tailGeoms), featherMaterial));
+      birbModel.add(tailGroup);
+
+      // -- Feet (unchanged from Phase 0) -------------------------------------
+      const buildFootGeom = () => {
+        const legGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.22, 6);
+        remapUV(legGeom, ATLAS.feet);
+        paintGeometryColor(legGeom, 0x1a2438);
+        bakeGeometryTRS(legGeom, { position: [0, -0.11, 0] });
+
+        const padGeom = new THREE.SphereGeometry(0.1, 8, 6);
+        remapUV(padGeom, ATLAS.feet);
+        paintGeometryColor(padGeom, 0x1a2438);
+        bakeGeometryTRS(padGeom, { position: [0.04, -0.24, 0], scale: [1.4, 0.45, 1.1] });
+
+        const toeGeoms = [];
+        for (let i = -1; i <= 1; i++) {
+          const toeGeom = new THREE.CapsuleGeometry(0.025, 0.1, 2, 6);
+          remapUV(toeGeom, ATLAS.feet);
+          paintGeometryColor(toeGeom, 0x1a2438);
+          bakeGeometryTRS(toeGeom, { position: [0.14, -0.24, i * 0.06], rotation: [0, 0, Math.PI / 2] });
+          toeGeoms.push(toeGeom);
+        }
+
+        return mergeAndDispose([legGeom, padGeom, ...toeGeoms]);
+      };
+
+      const leftFoot = new THREE.Group();
+      leftFoot.name = 'leftFoot';
+      leftFoot.position.set(0.04, -0.38, 0.18);
+      leftFoot.add(new THREE.Mesh(buildFootGeom(), beakFeetMaterial));
+      birbModel.add(leftFoot);
+
+      const rightFoot = new THREE.Group();
+      rightFoot.name = 'rightFoot';
+      rightFoot.position.set(0.04, -0.38, -0.18);
+      rightFoot.add(new THREE.Mesh(buildFootGeom(), beakFeetMaterial));
+      birbModel.add(rightFoot);
+
+      // ── Rim light ────────────────────────────────────────────────────────
+      birbRimUniforms.length = 0;
+      const seenRimMaterials = new Set();
+      birbModel.traverse((child) => {
+        if (!child.material) return;
+        const list = Array.isArray(child.material) ? child.material : [child.material];
+        for (const m of list) {
+          if (seenRimMaterials.has(m)) continue;
+          seenRimMaterials.add(m);
+          const u = addRimLight(m, THREE, { color: 0x9fe8ff, power: 3.0, strength: 0.42 });
+          if (u) birbRimUniforms.push(u);
+        }
+      });
+
+      return birbModel;
+    };
+
+    // ?bird=v2 selects the Phase 1 candidate above; every other session keeps
+    // the Phase 0 default. Read once at boot, not per frame — this is a
+    // build-time choice of constructor, not something the running game ever
+    // toggles.
+    const useBirdV2 = typeof window !== 'undefined'
+      && /[?&]bird=v2(?:&|$)/.test(window.location?.search || '');
+
+    positionBirbModel(useBirdV2 ? createProceduralBirbV2() : createProceduralBirb());
 
     // Default to the procedural birb — it's richer, animates per-part (wings +
     // feet are named groups), and behaves identically on iOS. The GLB path is
@@ -7056,6 +7687,21 @@
         (gltf) => {
           const model = gltf.scene || gltf.scenes?.[0];
           if (!model) return;
+          // BIRD_PLAN.md Phase 0 item 5: a GLB that renders but does not
+          // expose the named rig (leftWing/rightWing/tail/leftFoot/
+          // rightFoot, baseRotation, tipFeather/secondaryFeather, the
+          // mirrored scale.z) is a statue — it looks plausible in a single
+          // screenshot and cannot flap. Gate it here so that ships as a
+          // console warning, not a silently frozen bird: the procedural
+          // model already in birbAnchor is left in place.
+          const { ok, failures } = birdRigContract(model);
+          if (!ok) {
+            console.warn(
+              "birb.glb failed the bird rig contract — keeping the procedural bird instead of a statue:",
+              failures
+            );
+            return;
+          }
           positionBirbModel(model, true);  // GLB model faces -Z
         },
         undefined,
@@ -9505,7 +10151,15 @@
         const nestingState = nestingSystem?.getState?.();
         const nestingControlsBird = nestingState === NESTING_STATES.LANDING
           || nestingState === NESTING_STATES.NESTED;
-        if (!isNested && !nestingControlsBird) {
+        // Also skip this reset while the bird-studio capture tool is active
+        // (__birbStudioSaved is non-null): __BIRB.freeze()'s own doc comment
+        // says plainly that it "does not actually hold the bird in place —
+        // the flight system rewrites speed each frame" — this is that
+        // rewrite. tools/birb-bird-sheet.mjs places the camera relative to
+        // the bird once per tile and needs it to actually STAY there across
+        // the settle wait, or every tile after the first frames a bird that
+        // has already flown off toward wherever cruise speed carried it.
+        if (!isNested && !nestingControlsBird && !__birbStudioSaved) {
           if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Walk only when the stick is engaged — no drift when idle.
             // Pull the stick back (y below the threshold) to walk backwards:
@@ -9637,7 +10291,13 @@
         // If cameraMode is FOLLOW, 'bCam' handles it.
         const currentMode = cameraState.getMode();
 
-        if (isNested && nestedAimQuaternion) {
+        // __birbCameraOverride: the bird-studio capture tool (orbitBird) places
+        // cameraState.camera directly and needs it to STAY there — every branch
+        // below rewrites the same camera object every frame, so without this
+        // gate the placement survives exactly zero frames past the call.
+        if (__birbCameraOverride) {
+          // no-op: camera stays wherever orbitBird() last put it.
+        } else if (isNested && nestedAimQuaternion) {
           // Turret mode: set camera directly from aim rig.
           // FPV camera's Euler roll-correction assumes world-Y-up which breaks
           // on a spherical world (misinterprets local-up rotation as "roll").
@@ -9772,6 +10432,25 @@
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
       }
 
+      // Harness-only. Forces a specific point in the beat cycle so the bird
+      // sheet's three flap frames (top of stroke / mid-downstroke / recovery)
+      // are the exact same pose every run, instead of whatever the
+      // burst-and-glide envelope happens to be doing at the moment of
+      // capture. Overrides AFTER the normal rig above rather than replacing
+      // it, so it applies regardless of flight/recovery state.
+      if (__birbFlapPhaseOverride !== null && leftWing && rightWing
+        && leftWing.userData.baseRotation && rightWing.userData.baseRotation) {
+        const forcedBeat = wingBeat(__birbFlapPhaseOverride);
+        leftWing.rotation.x = leftWing.userData.baseRotation.x + forcedBeat.angle;
+        rightWing.rotation.x = rightWing.userData.baseRotation.x - forcedBeat.angle;
+        leftWing.scale.z = forcedBeat.span;
+        rightWing.scale.z = -forcedBeat.span;
+        if (leftWing.userData.secondaryFeather) leftWing.userData.secondaryFeather.position.y = 0;
+        if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = 0;
+        if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = 0;
+        if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = 0;
+      }
+
       // Tail steering + idle sway — yaw input rotates the tail fan around Y
       // for a steering/rudder feel, with a tiny ambient sway so it never
       // feels frozen. Smoothed toward target via lerp to avoid jitter.
@@ -9895,7 +10574,12 @@
       }
 
       // Weather. Four uniform writes; the motion is all in the vertex shader.
-      if (weather && birdPos) {
+      // Also skipped entirely while bird-studio is active: setDensity() sets
+      // `points.visible = density > 0` itself every frame regardless of any
+      // external override, so birdStudio(true)'s one-time
+      // `weather.points.visible = false` was being undone the very next
+      // frame — measured via studioState(), which is why that hook exists.
+      if (weather && birdPos && !__birbStudioSaved) {
         const tier = adaptiveTier.getTier();
         // Sheds before resolution does, like every other optional layer, and
         // reduced motion turns it off outright — drifting particles across
@@ -11113,6 +11797,169 @@
           canFire: rocketSystem ? rocketSystem.canFire() : null,
         }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // The bird alone against a neutral background, for
+        // tools/birb-bird-sheet.mjs. Hides the world, sky, weather, drones and
+        // rings and swaps scene.background for a flat mid-grey; birdStudio(false)
+        // restores exactly what this call actually changed (not a blanket
+        // "turn everything back on"), so an environment switch mid-session can't
+        // be clobbered by a restore that assumes what used to be there.
+        birdStudio: (on = true) => {
+          if (on) {
+            // Returns what it actually found and hid, not just `true` — a
+            // studio shot with an unexpected background artifact is a
+            // question of which of these was null (nothing to hide) rather
+            // than something birdStudio failed to hide.
+            if (__birbStudioSaved) {
+              return {
+                applied: true, alreadyOn: true,
+                hadWorld: __birbStudioSaved.worldVisible !== null,
+                hadSky: __birbStudioSaved.skyVisible !== null,
+                hadWeather: __birbStudioSaved.weatherVisible !== null,
+                hadDrones: __birbStudioSaved.dronesVisible !== null,
+                hadRings: __birbStudioSaved.ringsVisible !== null,
+                hadCloudShell: __birbStudioSaved.cloudShellVisible !== null,
+              };
+            }
+            __birbStudioSaved = {
+              worldVisible: sphericalWorld?.root ? sphericalWorld.root.visible : null,
+              skyVisible: skyDome?.mesh ? skyDome.mesh.visible : null,
+              weatherVisible: weather?.points ? weather.points.visible : null,
+              dronesVisible: (droneSystem && typeof droneSystem.getContainer === 'function')
+                ? droneSystem.getContainer().visible : null,
+              ringsVisible: collectiblesSystem?.container ? collectiblesSystem.container.visible : null,
+              // Desktop-only (`cloudShell = isMobile ? null : (...)`) 380-unit
+              // cloud sphere, added straight to `scene` — not skyDome, not
+              // sphericalWorld.root — specifically so it survives an
+              // environment switch. Missing this was the actual source of a
+              // soft cloud-blotch pattern still showing over a "hidden world,
+              // flat grey background" studio shot: nothing else was left.
+              cloudShellVisible: cloudShell?.mesh ? cloudShell.mesh.visible : null,
+              background: (scene.background && typeof scene.background.clone === 'function')
+                ? scene.background.clone() : scene.background,
+              fog: scene.fog,
+            };
+            if (sphericalWorld?.root) sphericalWorld.root.visible = false;
+            if (skyDome?.mesh) skyDome.mesh.visible = false;
+            if (weather?.points) weather.points.visible = false;
+            if (droneSystem && typeof droneSystem.getContainer === 'function') droneSystem.getContainer().visible = false;
+            if (collectiblesSystem?.container) collectiblesSystem.container.visible = false;
+            if (cloudShell?.mesh) cloudShell.mesh.visible = false;
+            scene.background = new THREE.Color(0x808080);
+            scene.fog = null;
+            // Zero the speed the per-frame rewrite is being suppressed for
+            // (the `!__birbStudioSaved` gate above), not just suppress the
+            // rewrite: whatever `flight.speed`/`boostTimer` happened to be
+            // live on the frame this latched otherwise carries the bird
+            // forward for the rest of the studio session — a race with
+            // freeze()/orbitBird(), since which of the two runs on which
+            // frame decides whether the bird has already moved by the time a
+            // tile is captured. Latching this HERE, in the same call that
+            // starts suppressing the rewrite, removes the race instead of
+            // just narrowing its window.
+            if (newFlightSystem?.flight) newFlightSystem.flight.speed = 0;
+            boostTimer = 0;
+            return {
+              applied: true, alreadyOn: false,
+              hadWorld: __birbStudioSaved.worldVisible !== null,
+              hadSky: __birbStudioSaved.skyVisible !== null,
+              hadWeather: __birbStudioSaved.weatherVisible !== null,
+              hadDrones: __birbStudioSaved.dronesVisible !== null,
+              hadRings: __birbStudioSaved.ringsVisible !== null,
+              hadCloudShell: __birbStudioSaved.cloudShellVisible !== null,
+            };
+          }
+          if (!__birbStudioSaved) return false;
+          const saved = __birbStudioSaved;
+          if (sphericalWorld?.root && saved.worldVisible !== null) sphericalWorld.root.visible = saved.worldVisible;
+          if (skyDome?.mesh && saved.skyVisible !== null) skyDome.mesh.visible = saved.skyVisible;
+          if (weather?.points && saved.weatherVisible !== null) weather.points.visible = saved.weatherVisible;
+          if (cloudShell?.mesh && saved.cloudShellVisible !== null) cloudShell.mesh.visible = saved.cloudShellVisible;
+          if (droneSystem && typeof droneSystem.getContainer === 'function' && saved.dronesVisible !== null) {
+            droneSystem.getContainer().visible = saved.dronesVisible;
+          }
+          if (collectiblesSystem?.container && saved.ringsVisible !== null) collectiblesSystem.container.visible = saved.ringsVisible;
+          scene.background = saved.background;
+          scene.fog = saved.fog;
+          __birbStudioSaved = null;
+          __birbCameraOverride = false;
+          __birbFlapPhaseOverride = null;
+          return true;
+        },
+        // LIVE visibility, unlike birdStudio()'s return value which only ever
+        // reports what it changed at the moment it was called. Exists to
+        // answer "is something still rendering a studio shot has no business
+        // showing" without guessing — a saved-and-restored flag can't tell
+        // you that on its own.
+        studioState: () => ({
+          active: !!__birbStudioSaved,
+          worldVisible: sphericalWorld?.root ? sphericalWorld.root.visible : null,
+          skyVisible: skyDome?.mesh ? skyDome.mesh.visible : null,
+          weatherVisible: weather?.points ? weather.points.visible : null,
+          dronesVisible: (droneSystem && typeof droneSystem.getContainer === 'function')
+            ? droneSystem.getContainer().visible : null,
+          ringsVisible: collectiblesSystem?.container ? collectiblesSystem.container.visible : null,
+          cloudShellVisible: cloudShell?.mesh ? cloudShell.mesh.visible : null,
+          background: scene.background ? scene.background.getHexString?.() ?? String(scene.background) : null,
+          fog: !!scene.fog,
+          bloomEnabled,
+          postPassActive: isPostPassActive(),
+        }),
+        // Place the camera on a sphere around the bird for tools/birb-bird-sheet.mjs.
+        // azimuthRad is measured around the bird's own dorsal (local-up) axis
+        // from directly behind it (0 = chase framing, PI = nose-on); elevationRad
+        // tilts up from level. Bird-relative, not world-relative, because the
+        // bird can be anywhere on the sphere in any orientation when this is
+        // called and "front"/"back"/"left" have to mean the same thing regardless.
+        // Sets __birbCameraOverride so the render loop's own camera rigs (which
+        // rewrite the same camera object every frame) leave this placement alone
+        // until the next orbitBird call or birdStudio(false).
+        orbitBird: (azimuthRad = 0, elevationRad = 0, distance = 3) => {
+          const cam = cameraState?.camera;
+          if (!birbAnchor || !cam) return null;
+          const center = birbAnchor.position.clone();
+          // The procedural model is authored facing local +X with +Y up (see
+          // createProceduralBirb's own comment and confirmed by birdStats():
+          // worldSize's Z axis, the wingspan, measures LARGER than X, its
+          // length) — NOT the flight system's own (0,0,-1) forward, which only
+          // applies to appliedQuaternion before modelOrientationOffset folds
+          // the model's real local axes in. Getting this backwards points
+          // "front" at the tail.
+          const fwd = new THREE.Vector3(1, 0, 0).applyQuaternion(birbAnchor.quaternion);
+          const bodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(birbAnchor.quaternion);
+          const right = new THREE.Vector3().crossVectors(fwd, bodyUp).normalize();
+          const dir = new THREE.Vector3()
+            .addScaledVector(fwd, -Math.cos(azimuthRad) * Math.cos(elevationRad))
+            .addScaledVector(right, Math.sin(azimuthRad) * Math.cos(elevationRad))
+            .addScaledVector(bodyUp, Math.sin(elevationRad))
+            .normalize();
+          // Orthogonalise the up reference against the view direction rather
+          // than using bodyUp verbatim: a straight-down "top" shot has
+          // dir ~= bodyUp, which is the exact degenerate case lookAt() cannot
+          // resolve into a roll. Falling back to fwd (the bird's nose) keeps
+          // that one shot sensible (nose toward the top of frame) instead of
+          // producing an undefined/flickering orientation.
+          let upRef = bodyUp.clone().addScaledVector(dir, -bodyUp.dot(dir));
+          if (upRef.lengthSq() < 1e-6) upRef = fwd.clone().addScaledVector(dir, -fwd.dot(dir));
+          upRef.normalize();
+          cam.up.copy(upRef);
+          cam.position.copy(center).addScaledVector(dir, distance);
+          cam.lookAt(center);
+          __birbCameraOverride = true;
+          return {
+            center: center.toArray().map((n) => +n.toFixed(3)),
+            position: cam.position.toArray().map((n) => +n.toFixed(3)),
+          };
+        },
+        // Forces the wing-beat phase for one frame (0 = top of stroke, ~0.19 =
+        // mid-downstroke, >0.38 = recovery — see wingBeat() in bird-pose.js).
+        // null releases the override and the normal burst-and-glide rig
+        // resumes. Exists so tools/birb-bird-sheet.mjs can capture three
+        // deterministic flap poses instead of whatever phase the envelope
+        // happens to be in at the moment of the shutter.
+        flapPhase: (phase01 = null) => {
+          __birbFlapPhaseOverride = (phase01 === null || phase01 === undefined) ? null : Number(phase01);
+          return __birbFlapPhaseOverride;
+        },
         // What the bird costs, measured from the live anchor rather than
         // reasoned from the constructor. Every phase of a bird rebuild starts
         // by asking this, and the world budget it has to fit inside is 80k
@@ -11133,11 +11980,31 @@
           return {
             meshes, uniqueMaterials: mats.size, uniqueGeometries: geos.size,
             triangles: Math.round(tris),
-            // Draw calls are one per mesh here: nothing on the bird is
-            // instanced or merged, so meshes IS the draw-call cost.
+            // Draw calls are one per mesh here: even post-Phase-0 merge,
+            // nothing on the bird is INSTANCED, so meshes IS still the
+            // draw-call cost — merging just means far fewer meshes.
             drawCalls: meshes,
             worldSize: size.toArray().map((v) => +v.toFixed(2)),
           };
+        },
+        // Runs the rig contract oracle (src/flight/bird-contract.js)
+        // against whatever is actually live in birbAnchor right now — the
+        // procedural bird, or a GLB that made it past the ?glb=1 gate.
+        // findByName is a full DFS, so it doesn't matter that birbAnchor's
+        // real child is the model group one level down.
+        //
+        // ASYNC, and loads the module lazily: birdRigContract is only
+        // fetched eagerly on the ?glb=1 path (above), so a plain ?debug=1
+        // session (no ?glb=1) reaches here with it still undefined. Fetching
+        // it on demand — instead of unconditionally at boot — is exactly
+        // what keeps this module off the path that matters offline; see the
+        // comment at its import site.
+        contract: async () => {
+          if (!birbAnchor) return null;
+          if (!birdRigContract) {
+            ({ birdRigContract } = await import("./src/flight/bird-contract.js"));
+          }
+          return birdRigContract(birbAnchor);
         },
         // What this GPU will actually allow, and what we are asking it for.
         // A GL error that names a size limit is unanswerable without both
