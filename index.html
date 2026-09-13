@@ -3536,6 +3536,7 @@
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
+      var { createAerobatics, moveFromStick, AEROBATIC_MOVES } = await import("./src/flight/aerobatics.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -3694,7 +3695,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v65-2026-09-13-parrot-wing';
+    const BIRB_BUILD = 'v66-2026-09-13-aerobatics-ultra';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5011,6 +5012,43 @@
     const BOOST_CONFIG = { speedMult: 2.4, duration: 0.6, cooldown: 1.1 };
     let boostTimer = 0;
     let boostCooldown = 0;
+    // Committed aerobatics (src/flight/aerobatics.js). The trigger is a
+    // DOUBLE TAP on the boost pill, because there is no third control on this
+    // screen and adding one would cost the thumb that is already on the two
+    // that exist. The first tap still boosts — roll out of a dash is a better
+    // move than roll from a standstill anyway.
+    let aerobatics = null;
+    let lastBoostTapAt = -1e9;
+    // How long after the first tap a second one counts as the gesture. 340ms
+    // is the low end of the usual double-tap window: this shares its surface
+    // with a single tap that DOES something, so a long window would make
+    // every rapid double-boost an accidental barrel roll.
+    const AEROBATIC_DOUBLE_TAP_MS = 340;
+    // How hard a live move WOULD have the chase camera follow the bird's own
+    // roll, 0..1. Reported through `aeroState()` and deliberately NOT wired to
+    // the camera: captured at 2-frame intervals, both moves read clearly
+    // against a STABLE horizon — the roll shows the bird knife-edge, the loop
+    // shows the world upside down over the top — and rolling a chase camera
+    // through 360 degrees on a phone is the one change this repo's own notes
+    // single out as causing motion sickness. Kept because the number is the
+    // move's own description and the next person to try it should not have to
+    // re-derive the ramp; delete it if the answer stays no.
+    let aerobaticCameraFollow = 0;
+
+    /**
+     * The bird's clearance above the terrain it is over, or Infinity before
+     * the world exists. Reads `sphericalWorld.sphereRadius` rather than the
+     * literal 120 the stats block carries: a manoeuvre refused for being too
+     * low has to be measuring the ground this world actually has.
+     */
+    const __BIRB_ALTITUDE_ABOVE_GROUND = () => {
+      const p = flightController?.position;
+      if (!p || !sphericalWorld) return Infinity;
+      const base = sphericalWorld.sphereRadius;
+      const terrain = (typeof sampleTerrainHeight === 'function')
+        ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
+      return p.length() - base - terrain;
+    };
     const flightRecoveryScratch = {
       radial: new THREE.Vector3(),
     };
@@ -9333,6 +9371,7 @@
     // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
     flightController = flight;
     flightControllerInitialized = true;
+    aerobatics = createAerobatics(AEROBATIC_MOVES);
 
     // Set sphere center on flight controller for spherical world support
     if (sphericalWorld && typeof flightController.setSphereCenter === 'function') {
@@ -9654,6 +9693,28 @@
             return;
           }
           if (flightRecoveryState !== FLIGHT_RECOVERY_STATES.FLYING) return; // not mid-fall
+          // DOUBLE TAP = aerobatic. Checked before the boost cooldown, and on
+          // purpose: the first tap has just spent the cooldown, so testing it
+          // first would make the gesture impossible to perform.
+          const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+          const isDoubleTap = (now - lastBoostTapAt) <= AEROBATIC_DOUBLE_TAP_MS;
+          lastBoostTapAt = now;
+          if (isDoubleTap && aerobatics) {
+            const stick = lastWingInput;
+            const { move, direction } = moveFromStick(stick.x, stick.y);
+            const probe = __BIRB_ALTITUDE_ABOVE_GROUND();
+            const r = aerobatics.start(move, { direction, altitude: probe });
+            if (r.started) {
+              if (preloadedSounds?.speedBoost) playFromPool(preloadedSounds.speedBoost);
+              if (statusMetric) statusMetric.textContent = r.label + '!';
+              triggerHaptic(18);
+            } else if (r.reason === 'too-low' && statusMetric) {
+              // Never swallow a deliberate gesture. "Nothing happened" is the
+              // worst feedback there is for one.
+              statusMetric.textContent = 'Too low!';
+            }
+            return;
+          }
           if (boostTimer > 0 || boostCooldown > 0) return;
           boostTimer = BOOST_CONFIG.duration;
           boostCooldown = BOOST_CONFIG.duration + BOOST_CONFIG.cooldown;
@@ -10947,6 +11008,28 @@
           }
         }
 
+        // Aerobatics run BEFORE tick(), not after. tick() ends by re-deriving
+        // the pose and enforcing the pitch clamp against the orientation it
+        // finds, so a roll applied afterwards is a roll the controller has not
+        // seen and the clamp has not been told to stand down for. Anything
+        // that takes the bird out of the flight envelope has to be inside the
+        // frame the envelope is checked in.
+        if (aerobatics) {
+          const aero = aerobatics.update(delta);
+          if (aero.active && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+            flight.aerobatic(aero.rollDelta, aero.pitchDelta);
+            aerobaticCameraFollow = aero.cameraFollow;
+          } else {
+            // Covers both "the move ended" and "the bird was knocked down or
+            // landed mid-move" — a manoeuvre must never outlive the state it
+            // was legal in, or the stabilisers stay suspended on a bird that
+            // is now falling.
+            if (aero.active) aerobatics.cancel();
+            flight.endAerobatic();
+            aerobaticCameraFollow = 0;
+          }
+        }
+
         // 2. Physics Update
         // IMPORTANT: We pass delta even when nested!
         // BirdFlight.speed will be 0 when nested, preventing position change,
@@ -11995,8 +12078,13 @@
       { id: 'okay', label: 'Okay', tier: 1, dprCap: null, hint: 'Lighter resolution, steadier frame rate.' },
       { id: 'light', label: 'Light', tier: 2, dprCap: null, hint: 'Lowest cost. For an old or hot device.' },
     ];
-    const QUALITY_STORAGE_KEY = 'birbQuality';
-    let qualityPresetIndex = 1; // Amazing
+    // Bumped from `birbQuality` when the default moved to Ultra. A stored
+    // preference from before that change would otherwise silently defeat the
+    // new default for every returning player, including the one who asked for
+    // it — and "I set it to max and it did not change" is indistinguishable
+    // from the change not shipping.
+    const QUALITY_STORAGE_KEY = 'birbQuality2';
+    let qualityPresetIndex = 0; // Ultra — see restoreQualityPreset()
 
     function applyQualityPreset(index, { persist = true } = {}) {
       const i = ((index % QUALITY_PRESETS.length) + QUALITY_PRESETS.length) % QUALITY_PRESETS.length;
@@ -12027,7 +12115,16 @@
       let saved = null;
       try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
       const found = QUALITY_PRESETS.findIndex((q) => q.id === saved);
-      applyQualityPreset(found >= 0 ? found : 1, { persist: false });
+      // Default ULTRA (index 0), by the owner's explicit call: everything on,
+      // DPR ceiling 2.4, tier PINNED at 0.
+      //
+      // Know what the pin costs before moving this back. `adaptiveTier.pin(0)`
+      // takes the tier away from the controller that measures frame rate, so a
+      // device that cannot hold full resolution no longer sheds it — it just
+      // runs slow. That is the deliberate trade of a preset called Ultra, and
+      // it is two taps to undo from the gear menu, which is why it is an
+      // acceptable default and would not be an acceptable hard-coding.
+      applyQualityPreset(found >= 0 ? found : 0, { persist: false });
     }
 
     if (settingsQualityButton) {
@@ -12914,6 +13011,21 @@
         // describes where the bird is actually pointing and which way it is
         // actually going, which is what a question like "why does a dive turn
         // into a spiral" needs and what no screenshot can answer.
+        // Fire a committed manoeuvre from a harness. `force` skips the
+        // altitude gate, because a capture wants the move at whatever pose it
+        // has pinned, not wherever the terrain happens to allow one.
+        aero: (move = 'roll', direction = 1, force = true) => {
+          if (!aerobatics) return null;
+          return aerobatics.start(move, {
+            direction,
+            altitude: force ? Infinity : __BIRB_ALTITUDE_ABOVE_GROUND(),
+          });
+        },
+        aeroState: () => (aerobatics ? {
+          ...aerobatics.state(),
+          cameraFollow: +aerobaticCameraFollow.toFixed(3),
+          suspended: !!flightController?.aerobaticActive,
+        } : null),
         flightProbe: () => {
           const fc = flightController;
           if (!fc?.position || !fc?.quaternion) return null;

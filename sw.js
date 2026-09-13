@@ -36,7 +36,7 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v65-2026-09-13-parrot-wing';
+const CACHE_VERSION = 'v66-2026-09-13-aerobatics-ultra';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -116,6 +116,7 @@ const CORE_ASSETS = [
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
+  './src/flight/aerobatics.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',

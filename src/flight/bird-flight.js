@@ -58,6 +58,9 @@ export class BirdFlight {
         // a held dive turning into a spiral; see yaw() for the measurement.
         // Default ON; `?levelturn=0` restores the old model for the A/B.
         this.levelTurns = options.levelTurns ?? true;
+        // True only while a committed manoeuvre is mid-flight. Suspends every
+        // stabiliser; see aerobatic().
+        this.aerobaticActive = false;
         this.rollLevelRate = options.rollLevelRate ?? FLIGHT_DEFAULTS.rollLevelRate;
 
         // Cruise speed at full throttle. `throttle` (0..1) scales cruise so the
@@ -174,6 +177,39 @@ export class BirdFlight {
     }
 
     /**
+     * Apply one frame of a committed aerobatic manoeuvre.
+     *
+     * `roll` is about the bird's own long axis (local Z — the same axis
+     * `_levelRoll` uses), `pitch` about its local right (local X, the same
+     * axis `pitch()` uses). Setting `aerobaticActive` is the load-bearing
+     * half: without it the auto-level, the roll leveller and the maxPitch
+     * clamp all run in the same frame and undo the move as fast as it is
+     * made. A loop in particular cannot exist while an 80-degree pitch
+     * ceiling is being enforced — it is a 360-degree pitch by definition.
+     *
+     * The caller clears the flag when the move ends. Zero allocations.
+     */
+    aerobatic(roll = 0, pitch = 0) {
+        const s = this._scratch;
+        this.aerobaticActive = true;
+        if (roll) {
+            s.axis.set(0, 0, 1);
+            s.quat.setFromAxisAngle(s.axis, roll);
+            this.quaternion.multiply(s.quat);
+        }
+        if (pitch) {
+            s.axis.set(1, 0, 0);
+            s.quat.setFromAxisAngle(s.axis, pitch);
+            this.quaternion.multiply(s.quat);
+        }
+    }
+
+    /** End the manoeuvre and hand the bird back to the stabilisers. */
+    endAerobatic() {
+        this.aerobaticActive = false;
+    }
+
+    /**
      * Roll back toward level, about the bird's own long axis.
      *
      * A bird is not an aerobatic aircraft holding whatever attitude it is left
@@ -277,8 +313,10 @@ export class BirdFlight {
         this.quaternion.premultiply(s.transportQuat);
 
         // 4. Auto-Leveling (Pitch)
-        // Only auto-level if speed is sufficient (aerodynamic stability)
-        if (this.speed > 0.5) {
+        // Only auto-level if speed is sufficient (aerodynamic stability), and
+        // never during a manoeuvre — this term exists to return the nose to
+        // the horizon, which is precisely what a loop is not doing.
+        if (this.speed > 0.5 && !this.aerobaticActive) {
             s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
             s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
 
@@ -305,7 +343,7 @@ export class BirdFlight {
         s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
         const sinPitchNow = Math.max(-1, Math.min(1, s.forward.dot(s.sphereNormal)));
         const pitchNow = Math.asin(sinPitchNow);
-        if (Math.abs(pitchNow) > this.maxPitch) {
+        if (!this.aerobaticActive && Math.abs(pitchNow) > this.maxPitch) {
             const over = pitchNow - Math.sign(pitchNow) * this.maxPitch;
             s.axis.set(1, 0, 0);
             s.quat.setFromAxisAngle(s.axis, -over);
@@ -317,15 +355,21 @@ export class BirdFlight {
 
     tick(input, deltaTime) {
         const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
-        this.yaw(input.x, limitedDelta);
-        this.pitch(input.y, limitedDelta);
+        // A committed manoeuvre owns the orientation for its whole second.
+        // Leaving the stick live lets the player fight their own barrel roll,
+        // which does not produce a half-roll — it produces a manoeuvre that
+        // ends pointing somewhere nobody chose.
+        if (!this.aerobaticActive) {
+            this.yaw(input.x, limitedDelta);
+            this.pitch(input.y, limitedDelta);
+        }
 
         // Roll back toward level, always. This runs in every mode and at every
         // stick position: a held turn is exactly when roll accumulates under
         // the legacy yaw axis, and exactly when the Zen-only version was gated
         // off. Gentle enough that it never fights the player, because nothing
         // in this game asks the player to hold a roll.
-        if (this.levelTurns) {
+        if (this.levelTurns && !this.aerobaticActive) {
             this._levelRoll(limitedDelta, this.rollLevelRate);
         }
 

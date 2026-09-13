@@ -837,6 +837,58 @@
 > anchor would have jumped a third of the hand inboard. It tracks the
 > furthest-reaching primary now.
 
+> **Aerobatics shipped, and ULTRA IS THE DEFAULT** (2026-09-13, night).
+> `src/flight/aerobatics.js` + `tests/aerobatics.test.js`; the trigger is a
+> **DOUBLE TAP on the BOOST pill**, direction from the stick you are already
+> holding (bank = barrel roll that way, pull up = loop, neutral = roll).
+> `__BIRB.aero(move, dir)` and `__BIRB.aeroState()` drive and report it.
+>
+> **They are COMMITTED moves, not free 6DOF, and that is the design not a
+> shortcut.** Free inverted flight would have to answer for the nesting state
+> machine, the landing check, and a ground floor that is a MINIMUM RADIUS with
+> no opinion about which way up the bird is. A move that starts, runs on rails
+> for about a second and hands back a level bird never opens those questions.
+> There is also no spare input on this screen — one stick, one pill, both
+> already under a thumb.
+>
+> **The angle profile is an integrated raised cosine, and the reason is that a
+> move which does not CLOSE is invisible in every frame and permanent.** Rate
+> `turns * 2PI * (1 - cos(2PI t))` is zero at both ends and its integral is
+> exactly `turns * 2PI`. Deltas are DIFFERENCED from a swept total rather than
+> integrated from the rate, so frame rate cannot lose or gain angle — tested
+> at 120/60/30 fps and at a 5-second hitch, all closing to within 1e-6.
+> Measured on the real page: both moves return the bird to **-0.047 degrees of
+> roll**, and the loop's radius goes 206.2 -> 210.7 -> 206.2.
+>
+> **`aerobaticActive` suspending every stabiliser is the load-bearing half.**
+> A loop cannot exist while an 80-degree pitch ceiling is enforced — it is a
+> 360-degree pitch by definition — and the auto-level, the roll leveller and
+> the player's own stick would each undo the move as fast as it is made. The
+> move also runs BEFORE `tick()`, because `tick()` ends by enforcing that
+> clamp against the orientation it finds.
+>
+> **The chase camera is deliberately NOT rolled.** `aerobaticCameraFollow` is
+> computed and reported and nothing consumes it: captured at 2-frame
+> intervals, both moves read clearly against a STABLE horizon — the roll shows
+> the bird knife-edge, the loop shows the world upside down over the top — and
+> rolling a chase camera through 360 degrees on a phone is the one change this
+> file already flags as causing motion sickness.
+>
+> **Ultra is now the shipping default** (`QUALITY_PRESETS[0]`: tier PINNED at
+> 0, DPR ceiling 2.4), at the owner's explicit call. Know what the pin costs
+> before moving it back: `adaptiveTier.pin(0)` takes the tier away from the
+> controller that measures frame rate, so a device that cannot hold full
+> resolution no longer sheds it — it just runs slow. Two taps in the gear menu
+> undo it, which is what makes it an acceptable default and would not make it
+> an acceptable hard-coding. `QUALITY_STORAGE_KEY` moved to `birbQuality2` in
+> the same change: a preference stored under the old key would have silently
+> defeated the new default for every returning player.
+>
+> NOT flipped: the `perf-ascend` workbench levers (real shadow maps,
+> anisotropy, densities past 1.0). Those have never been measured on a device,
+> and G-ASCEND records that MAX REALISM's partner BACK TO SHIPPING DEFAULT is
+> not reversible — so they stay opt-in from the three-finger panel.
+
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural
 > luminance to clear 60 sRGB units from the pine bark, and a pinned-pose
