@@ -10,17 +10,29 @@
  *
  * v2 changes the MAPPING and nothing underneath it:
  *
- *   stick x  -> roll rate about the bird's own forward
- *   stick y  -> pitch rate about the bird's own right, NO clamp
+ *   stick x  -> a BANK to hold (up to maxBank), reached at rollRate; at the
+ *               RAIL (|x| >= edge) a continuous roll rate instead
+ *   stick y  -> a PITCH to hold (up to maxPitchHold); at the rail a
+ *               continuous pitch rate — a loop
  *   turning  -> falls out of the bank: yaw about the RADIAL at
  *               turnGain * sin(bank), plus a small direct assist so a
  *               thumbstick still bites before the bank has built
  *   speed    -> an energy model: dive gains, climb bleeds, hands-off
  *               returns to `cruise`
  *
- * Rolls, loops, split-S, Immelmann and inverted flight are then emergent: hold
- * the stick over and you keep rolling, pull and hold and you go over the top.
- * There is no move list, no trigger and no dwell.
+ * ATTITUDE below the rail, RATE at it. The first cut was a pure rate on both
+ * axes and the adversarial review measured what that does on a thumbstick:
+ * the only sustainable bank was where rollRate*|x| balanced the righting
+ * term, |x| < 0.29 SHAPED (raw 0.40), and CLAUDE.md's own number for an
+ * ordinary hard turn on this stick is raw 0.6-0.8 — so the first hard turn
+ * the owner asked for would have rolled the bird onto its back, and a held
+ * pitch had a trim band of about 12% of the stick. A stick that commands an
+ * attitude holds exactly the bank or climb you put it at, wings level when
+ * you let go, and the rail — the same 0.94 edge the old aerobatics trigger
+ * measured as "only a thumb pressed to the rail sustains this" — is where
+ * it becomes a rate: pin it and you keep rolling, pull it and you go over
+ * the top. Rolls, loops, split-S, Immelmann and inverted flight are still
+ * emergent; there is no move list, no trigger and no dwell.
  *
  * WHY IT EXTENDS BirdFlight rather than copying it. The sphere half of v1 is
  * correct and is NOT what feels scripted: parallel transport, the terrain
@@ -47,37 +59,44 @@ import { BirdFlight, ZEN_TUNING } from './bird-flight.js';
  * phone decides the final numbers, so keep them here rather than inline.
  */
 export const FLIGHT_V2_DEFAULTS = {
-    // 200 deg/s — a full roll in 1.8 s at full stick.
+    // 200 deg/s — a full roll in 1.8 s at the rail, and the most the bank
+    // command may roll at on its way to a held bank.
     rollRate: 3.5,
-    // 120 deg/s — a loop in 3 s. Deliberately unclamped: a loop IS a 360-degree
-    // pitch, so any ceiling makes one impossible by definition.
+    // 120 deg/s — a loop in 3 s at the rail. Deliberately unclamped there: a
+    // loop IS a 360-degree pitch, so any ceiling makes one impossible.
     pitchRate: 2.1,
-    // Yaw rate at a 90-degree bank. At 45 degrees that is ~65 deg/s against
-    // v1's flat 135 deg/s, so an ordinary turn is slower and a steep one is
-    // faster — which is the whole point of turning with the wing.
-    turnGain: 1.6,
+    // The rail. At or beyond this the stick commands a RATE (roll / loop);
+    // below it an ATTITUDE. 0.97, because a virtual stick reads 0.6-0.8
+    // through an ordinary hard turn and only a thumb pressed to the rail
+    // sustains more — and 0.94 was reported from the phone as rolling "too
+    // soon" on the v1 trigger; the rail is the same rail here.
+    edge: 0.97,
+    // The bank held with the stick just inside the rail: 70 degrees. Chosen
+    // against the ground-contact rule in index.html (a bank steeper than
+    // ~75 degrees on contact is a crash), so a maximum-bank turn that skims
+    // the floor still lands.
+    maxBank: 1.22,
+    // The climb / dive held just inside the rail: 70 degrees. Past the rail
+    // the pitch is a rate and goes round.
+    maxPitchHold: 1.22,
+    // Bank command: roll rate per radian of bank error, clamped to rollRate.
+    // 2.0 is a half-second time constant — hands-off from inverted rights in
+    // about 1.5 s (0.4 s at the rate clamp, then the exponential tail), and
+    // a held bank settles without overshoot.
+    bankGain: 2.0,
+    // Pitch command, likewise. Also the hands-off stability: with the stick
+    // centred the target is the horizon, and unlike a sin(2p) term this has
+    // full authority at the vertical — a bird teleported nose-up no longer
+    // hangs there.
+    pitchGain: 2.0,
+    // Yaw rate at a 90-degree bank. At the 70-degree maximum held bank, with
+    // the assist, that is 127 deg/s against v1's flat 135 — a hard turn feels
+    // like v1's; a half-stick 37-degree bank turns at about 80.
+    turnGain: 2.0,
     // Direct yaw per unit stick, on top of the bank's own turn. Without it a
     // small thumbstick nudge does nothing for the ~0.3 s the bank takes to
     // build, which reads as lag rather than as inertia.
     yawAssist: 0.35,
-    // Toward upright, a bird's dihedral. Scaled down by the stick so a held
-    // input is never fought — see the stability scaling in tick().
-    rightingRate: 1.4,
-    // Bank inside which the righting eases off proportionally instead of
-    // driving at full rate, so the roll-out ends in a settle rather than a stop
-    // and the term cannot chatter around level. It is ALSO the steepest bank a
-    // held stick can sit at: the equilibrium is rollRate*|x| = rightingRate*
-    // (1-|x|)*bank/soft, so a wider soft zone buys steeper sustained turns.
-    // 0.7 rad (40 deg) is the measured compromise — at 0.5 the steepest holdable
-    // bank was 29 deg, and past ~0.9 the recovery from inverted misses the
-    // 3-second budget (constant rate down to the soft zone, then exponential:
-    // 2.4 s at 0.7, 2.65 s at 0.9). Outside the zone the rate is CONSTANT, which
-    // is the half that matters — a -sin(bank) restoring term (v1's _levelRoll)
-    // is zero at 180 degrees, so an inverted bird sits there forever.
-    rightingSoftBank: 0.7,
-    // Toward the horizon by the shortest path (see _pitchStability). Gentle:
-    // this is trim, not an autopilot.
-    pitchStability: 0.6,
     // Dive gain / climb loss, units/s^2. At 60 degrees nose-down that is
     // +5.2 units/s each second.
     gSpeed: 6.0,
@@ -89,11 +108,19 @@ export const FLIGHT_V2_DEFAULTS = {
     // so a stopped bird would simply hang there).
     minMul: 0.55,
     maxMul: 1.9,
-    // Below this the stick counts as centred for the STABILITY SCALING only.
-    // The rates themselves use the raw value, which index.html has already run
-    // through shapeAxis (deadzone + expo) before it ever reaches a controller.
+    // Below this the stick counts as centred: the commanded attitude is the
+    // horizon, wings level. index.html has already run the stick through
+    // shapeAxis (deadzone + expo) before it reaches a controller.
     deadzone: 0.08,
 };
+
+/** Wrap an angle to (-PI, PI]. */
+function wrapPi(a) {
+    let r = a % (2 * Math.PI);
+    if (r > Math.PI) r -= 2 * Math.PI;
+    else if (r <= -Math.PI) r += 2 * Math.PI;
+    return r;
+}
 
 export class BirdFlightV2 extends BirdFlight {
     constructor(THREE, options = {}) {
@@ -106,11 +133,13 @@ export class BirdFlightV2 extends BirdFlight {
         // calls v1's pitch(), and one `pitchRate` a probe can read beats two
         // that disagree about which controller is flying.
         this.pitchRate = options.pitchRate ?? D.pitchRate;
+        this.edge = options.edge ?? D.edge;
+        this.maxBank = options.maxBank ?? D.maxBank;
+        this.maxPitchHold = options.maxPitchHold ?? D.maxPitchHold;
+        this.bankGain = options.bankGain ?? D.bankGain;
+        this.pitchGain = options.pitchGain ?? D.pitchGain;
         this.turnGain = options.turnGain ?? D.turnGain;
         this.yawAssist = options.yawAssist ?? D.yawAssist;
-        this.rightingRate = options.rightingRate ?? D.rightingRate;
-        this.rightingSoftBank = options.rightingSoftBank ?? D.rightingSoftBank;
-        this.pitchStabilityRate = options.pitchStability ?? D.pitchStability;
         this.gSpeed = options.gSpeed ?? D.gSpeed;
         this.drag = options.drag ?? D.drag;
         this.minMul = options.minMul ?? D.minMul;
@@ -250,54 +279,48 @@ export class BirdFlightV2 extends BirdFlight {
         this.quaternion.multiply(s.quat);
     }
 
-    /**
-     * How much of a stabiliser to apply, given how hard the stick is held.
-     * A held input is never fought: at full deflection both stabilisers are off
-     * entirely, which is what lets a held roll pass through inverted and a held
-     * pull go over the top instead of being levelled out halfway.
-     */
-    _deadzoned(v) {
+    /** The stick, with the deadzone applied and the sign kept. */
+    _stick(v) {
         const a = Math.abs(v || 0);
-        return a < this.deadzone ? 0 : Math.min(1, a);
+        if (a < this.deadzone) return 0;
+        return Math.sign(v) * Math.min(1, a);
     }
 
     /**
-     * Self-righting toward wings-level, a bird's dihedral.
+     * Roll toward the commanded bank. `target` is the bank to hold (0 with the
+     * stick centred — that is the dihedral); the rate is proportional to the
+     * error, wrapped to the short way round, and clamped to rollRate.
      *
-     * Constant rate outside `rightingSoftBank`, proportional inside it. The
-     * obvious -sin(bank) form (v1's `_levelRoll`) is NOT usable here: it goes
-     * to zero at 180 degrees, so an inverted bird sits in an equilibrium and
-     * never rights — measured against the 3-second recovery this has to hit,
-     * a sin-based term needs 4.3 s from inverted and this one 2.2 s.
+     * There is no sin(bank) in it, so inverted is not a fixed point: from
+     * exactly 180 the wrap picks a side and the bird comes round at the clamp.
      */
-    _selfRight(bank, scale, dt) {
-        if (scale <= 0) return;
-        const soft = Math.max(1e-3, this.rightingSoftBank);
-        const drive = Math.max(-1, Math.min(1, bank / soft));
-        this._rollBy(-drive * this.rightingRate * scale * dt);
+    _bankCommand(target, bank, dt) {
+        const err = wrapPi(target - bank);
+        const rate = Math.max(-this.rollRate, Math.min(this.rollRate, this.bankGain * err));
+        this._rollBy(rate * dt);
     }
 
     /**
-     * Pitch stability: return the nose to the horizon by the SHORTEST path.
-     *
-     * Rotating about local X moves forward toward the bird's own up, so the
-     * correction has to be signed by `up . bodyUp` as well as by the pitch —
-     * without that an INVERTED bird with the nose down gets pushed further
-     * over rather than back to level. The same product makes the term vanish at
-     * a knife edge (bodyUp perpendicular to the radial), where a rotation about
-     * local X does not change the pitch at all. Both are the shortest path,
-     * falling out of one multiplication.
+     * Pitch toward the commanded elevation (0 with the stick centred — the
+     * hands-off stability). Rotating about local X moves the nose toward the
+     * bird's OWN up, so the direction is signed by up . bodyUp: an inverted
+     * bird with the nose down is pushed back to the horizon, not further
+     * over. Only the SIGN — the magnitude is the error, so the term keeps its
+     * full authority at the vertical, where the earlier sin(2p) form was zero
+     * and a bird teleported nose-up stayed nose-up.
      */
-    _pitchStability(scale, dt) {
-        if (scale <= 0) return;
+    _pitchCommand(target, dt) {
         const s = this._scratch;
         s.up.copy(this.position).sub(this.sphereCenter);
         if (s.up.lengthSq() < 1e-12) return;
         s.up.normalize();
         s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
         s.bodyUp.set(0, 1, 0).applyQuaternion(this.quaternion);
-        const sinPitch = Math.max(-1, Math.min(1, s.forward.dot(s.up)));
-        this._pitchBy(-sinPitch * s.up.dot(s.bodyUp) * this.pitchStabilityRate * scale * dt);
+        const pitch = Math.asin(Math.max(-1, Math.min(1, s.forward.dot(s.up))));
+        const err = target - pitch;
+        const rate = Math.max(-this.pitchRate, Math.min(this.pitchRate, this.pitchGain * err));
+        const sign = s.up.dot(s.bodyUp) >= 0 ? 1 : -1;
+        this._pitchBy(rate * sign * dt);
     }
 
     /**
@@ -347,27 +370,38 @@ export class BirdFlightV2 extends BirdFlight {
         const rollMul = this.zenMode ? ZEN_TUNING.yawMul : 1;
         const pitchMul = this.zenMode ? ZEN_TUNING.pitchMul : 1;
 
-        // 1. Stick. Roll first, so the bank the turn is derived from is this
-        //    frame's bank and not last frame's.
-        this._rollBy(-x * this.rollRate * rollMul * dt);
-        this._pitchBy(y * this.pitchRate * pitchMul * dt);
+        // 1. Roll. At the rail a rate; below it a bank to hold. During a rail
+        //    PULL the bank command is off entirely: at the top of a loop the
+        //    bank reads 180 degrees by construction (the bird is upside down),
+        //    and a command that saw that would roll the loop into an Immelmann.
+        const sx = this._stick(x);
+        const sy = this._stick(y);
+        const railX = Math.abs(sx) >= this.edge;
+        const railY = Math.abs(sy) >= this.edge;
+        const bank = this.bankAngle();
+        if (railX) {
+            // Stick +1 (right) banks right wing DOWN: a negative rotation
+            // about +Z, the same negation v1's aerobatic() makes.
+            this._rollBy(-Math.sign(sx) * this.rollRate * rollMul * dt);
+        } else if (!railY) {
+            this._bankCommand(-(sx / this.edge) * this.maxBank, bank, dt);
+        }
 
-        // 2. Turn from the bank. sin(bank) is negative in a right bank and the
+        // 2. Pitch. At the rail (and not rolling) a rate — the loop. Below it
+        //    an elevation to hold, and with the stick centred that target is
+        //    the horizon. During a rail ROLL the pitch command is off: a barrel
+        //    roll holds its nose, and at a knife edge a rotation about local X
+        //    is a yaw, not a correction.
+        if (railY && !railX) {
+            this._pitchBy(Math.sign(sy) * this.pitchRate * pitchMul * dt);
+        } else if (!railX) {
+            this._pitchCommand((sy / this.edge) * this.maxPitchHold, dt);
+        }
+
+        // 3. Turn from the bank. sin(bank) is negative in a right bank and the
         //    yaw axis turns LEFT for a positive angle, so both terms carry the
         //    same sign and a right bank turns right.
-        const bank = this.bankAngle();
-        this._yawBy((this.turnGain * Math.sin(bank) - this.yawAssist * x) * rollMul * dt);
-
-        // 3. Stabilisers, scaled by how hard the stick is held. The plan scales
-        //    the righting by (1 - |x|) alone; it is scaled by the PITCH stick
-        //    too because at the top of a loop the bank reads 180 degrees by
-        //    construction (the bird is upside down), so a righting term that
-        //    ignored |y| would roll a held loop into an Immelmann and the
-        //    heading would not survive it.
-        const ax = this._deadzoned(x);
-        const ay = this._deadzoned(y);
-        this._selfRight(bank, (1 - ax) * (1 - ay), dt);
-        this._pitchStability(1 - ay, dt);
+        this._yawBy((this.turnGain * Math.sin(this.bankAngle()) - this.yawAssist * sx) * rollMul * dt);
 
         // 4. Energy, then move.
         this._integrateEnergy(dt);

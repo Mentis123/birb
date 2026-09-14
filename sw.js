@@ -44,7 +44,7 @@
 // requires every src/ module to be listed regardless. index.html's BIRB_BUILD
 // is bumped to the same literal in the same change, which closes the v57-vs-v54
 // divergence the note above records.
-const CACHE_VERSION = 'v70-2026-09-13-flight-v2';
+const CACHE_VERSION = 'v73-2026-09-14-walk-slope';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -271,8 +271,22 @@ self.addEventListener('fetch', (event) => {
   // instantly (fast, offline-safe) but always re-fetch in the background so
   // the NEXT load runs the freshest code even without a version bump. This is
   // the self-healing layer that stops iOS pinning old module code.
+  // Modules go NETWORK FIRST, like the shell, and this is a correctness rule,
+  // not a speed preference. The shell (a navigation) is networkFirst; the
+  // modules were stale-while-revalidate, which serves whatever the PREVIOUS
+  // build's cache holds and refreshes it afterwards. So the first load after
+  // every deploy was a NEW index.html driving OLD modules: on 2026-09-14 the
+  // owner's console showed `pionusPlumageRequested is not a function` at the
+  // title screen — index.html asking visual-style.js for an export the cached
+  // copy predated — and the module script died at top level, before Tap to
+  // Start. The page only heals when the new worker finishes installing and
+  // the update banner reloads it, seconds later. Fetching modules from the
+  // network whenever the network answers makes shell and modules come from
+  // the SAME deploy by construction (Vercel serves them with must-revalidate,
+  // so this is an If-None-Match round trip, not a re-download), and offline
+  // both fall back to the one core cache, which is coherent with itself.
   if (sameOrigin && url.pathname.endsWith('.js')) {
-    event.respondWith(staleWhileRevalidate(event));
+    event.respondWith(networkFirstModule(request));
     return;
   }
 
@@ -282,26 +296,19 @@ self.addEventListener('fetch', (event) => {
 // Serve from cache immediately, refresh the cache in the background. Heavy
 // media stays on cacheFirst — only code goes through here, so the extra
 // background fetches are small.
-async function staleWhileRevalidate(event) {
-  const { request } = event;
-  const cache = await caches.open(CORE_CACHE);
-  const cached = await cache.match(request, { ignoreSearch: false });
-  const network = fetch(request)
-    .then((response) => {
-      if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => {});
-      }
-      return response;
-    })
-    .catch(() => null);
-
-  if (cached) {
-    // Keep the worker alive long enough to finish the background refresh.
-    event.waitUntil(network);
-    return cached;
+async function networkFirstModule(request) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      const cache = await caches.open(CORE_CACHE);
+      cache.put(request, response.clone()).catch(() => {});
+    }
+    return response;
+  } catch (err) {
+    const cached = await caches.match(request, { ignoreSearch: false });
+    if (cached) return cached;
+    return new Response('', { status: 504, statusText: 'Offline' });
   }
-  const fresh = await network;
-  return fresh || new Response('', { status: 504, statusText: 'Offline' });
 }
 
 async function networkFirst(request) {

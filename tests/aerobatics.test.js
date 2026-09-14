@@ -302,7 +302,7 @@ test('a loop under needs more room than a loop over, and says how much', () => {
 
 test('a pinned dive asks for the loop under; a merely hard dive asks for nothing', () => {
   assert.deepEqual(moveFromStick(0, -1), { move: 'loop', direction: -1 });
-  assert.deepEqual(moveFromStick(0, -0.95), { move: 'loop', direction: -1 });
+  assert.deepEqual(moveFromStick(0, -0.98), { move: 'loop', direction: -1 });
   assert.equal(moveFromStick(0, -0.8), null);
   // A hard bank still wins over a hard dive in the corner.
   assert.equal(moveFromStick(-1, -1).move, 'roll');
@@ -331,4 +331,23 @@ test('update reports the speed multiplier and the angle swept so far', () => {
   const b = createAerobatics();
   b.start('roll');
   assert.equal(b.update(1 / 60).speedMul, 1);
+});
+
+test('the loop under needs a longer hold than a roll or a loop over, and progress is measured against it', () => {
+  assert.ok(STICK_EDGE.dwellUnder > STICK_EDGE.dwell, `dwellUnder ${STICK_EDGE.dwellUnder} vs dwell ${STICK_EDGE.dwell}`);
+  assert.ok(STICK_EDGE.dwell >= 1.0, `a dwell under a second fires inside an ordinary committed turn (got ${STICK_EDGE.dwell})`);
+  assert.ok(STICK_EDGE.edge >= 0.97, `edge ${STICK_EDGE.edge}: a virtual stick reads 0.6-0.8 through a hard turn`);
+  const t = createStickEdgeTrigger();
+  // Held exactly as long as a roll needs: a dive has not earned its loop yet.
+  let fired = null;
+  for (let i = 0; i < Math.round(STICK_EDGE.dwell * 60) + 1; i += 1) fired = t.update(0, -1, 1 / 60) || fired;
+  assert.equal(fired, null, 'a dive pinned for a roll-length hold must not flip');
+  assert.ok(t.progress() < 1 && t.progress() > 0.6, `progress ${t.progress().toFixed(2)} is measured against the longer hold`);
+  for (let i = 0; i < Math.round((STICK_EDGE.dwellUnder - STICK_EDGE.dwell) * 60) + 2; i += 1) fired = t.update(0, -1, 1 / 60) || fired;
+  assert.deepEqual(fired, { move: 'loop', direction: -1 });
+  // And the roll still fires at its own, shorter, dwell.
+  const r = createStickEdgeTrigger();
+  let roll = null;
+  for (let i = 0; i < Math.round(STICK_EDGE.dwell * 60) + 2; i += 1) roll = r.update(1, 0, 1 / 60) || roll;
+  assert.deepEqual(roll, { move: 'roll', direction: 1 });
 });

@@ -3704,7 +3704,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v70-2026-09-13-flight-v2';
+    const BIRB_BUILD = 'v73-2026-09-14-walk-slope';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5054,6 +5054,14 @@
     // The smoothed LEVEL heading the chase camera stands behind under v2.
     // Persists across frames — that is the whole point of it.
     const _v2Heading = new THREE.Vector3();
+    const _v2Hold = { weight: 1, heading: _v2Heading, distanceMul: 1 };
+    const _v2FollowHold = { weight: 1, heading: _v2Heading, up: _v2Up, distanceMul: 1 };
+    const _v2HoldOff = { weight: 0 };
+    // A teleport, a landmark seek or an environment switch moves the bird
+    // without flying it there; the smoothed heading would otherwise stand the
+    // camera off along the OLD direction for the first frames (and, near the
+    // vertical, indefinitely). Zeroed there; the next flying frame re-seeds it.
+    const v2ForgetHeading = () => { _v2Heading.set(0, 0, 0); };
     // The stick as the MODEL sees it around a move. bird-visual.js banks the
     // model by input.x and tilts it by input.y; this is that input with the
     // wind-up folded in (see AERO_WINDUP below). One object, filled per
@@ -6259,6 +6267,7 @@
     }
 
     function setEnvironment(variantId) {
+      if (typeof v2ForgetHeading === 'function') v2ForgetHeading();
       const definition = getEnvironmentDefinition(variantId);
       if (!definition) return;
 
@@ -9406,8 +9415,8 @@
     // between "a held bank" and "a roll" (rightingRate) is the one the owner
     // has to feel. Reported back by flightProbe().tuning so a capture says
     // what it was flown with. Ignored under v1.
-    const V2_TUNE_KEYS = ['rollRate', 'pitchRate', 'turnGain', 'yawAssist', 'rightingRate',
-      'rightingSoftBank', 'pitchStability', 'gSpeed', 'drag', 'minMul', 'maxMul', 'deadzone'];
+    const V2_TUNE_KEYS = ['rollRate', 'pitchRate', 'edge', 'maxBank', 'maxPitchHold', 'bankGain',
+      'pitchGain', 'turnGain', 'yawAssist', 'gSpeed', 'drag', 'minMul', 'maxMul', 'deadzone'];
     if (flightV2) {
       const tune = (/[?&]v2tune=([^&]+)/.exec(window.location?.search || '') || [])[1];
       if (tune) {
@@ -11219,8 +11228,18 @@
             if (flightV2 && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
               _v2Up.copy(pose.position).normalize();
               _v2BodyUp.set(0, 1, 0).applyQuaternion(pose.quaternion).normalize();
+              _v2Fwd.set(0, 0, -1).applyQuaternion(pose.quaternion).normalize();
               const cruise = Number.isFinite(flight.cruise) && flight.cruise > 0 ? flight.cruise : flight.speed;
-              v2Crash = _v2BodyUp.dot(_v2Up) < 0.5 || flight.speed > 1.4 * cruise;
+              // 0.25 is 75 degrees off upright: the 70-degree maximum HELD bank
+              // (bird-flight-v2.js maxBank) still lands, a rail roll does not.
+              // The speed half requires the nose to be DOWN (-0.2 is about 12
+              // degrees): the review measured a level, upright, hands-off bird
+              // above 1.4x cruise for 0.68 s after every boost ends (the
+              // target drops from 26.4 to 11 in one frame while the speed is
+              // still 19), so speed alone would have made a boosted skim a
+              // knockdown with the bird perfectly upright.
+              v2Crash = _v2BodyUp.dot(_v2Up) < 0.25
+                || (flight.speed > 1.4 * cruise && _v2Fwd.dot(_v2Up) < -0.2);
             }
             if (v2Crash) {
               applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
@@ -11268,23 +11287,31 @@
             if (_v2Tan.length() >= 0.25) {
               _v2Tan.normalize();
               if (_v2Heading.lengthSq() < 1e-6) _v2Heading.copy(_v2Tan);
-              // ~0.25 s exponential, written against delta so it is the same
-              // smoothing at 60 fps and in a 3 fps capture harness.
-              else _v2Heading.lerp(_v2Tan, 1 - Math.exp(-delta / 0.25)).normalize();
+              // ~0.08 s exponential, written against delta so it is the same
+              // smoothing at 60 fps and in a 3 fps capture harness. Not 0.25:
+              // the freeze above is what keeps the frame from flipping over
+              // the top, and at the 127 deg/s a maximum bank turns, a 0.25 s
+              // lag stood the camera 16 degrees outside every turn — 0.08 is
+              // 5, inside the rig's own damping.
+              else _v2Heading.lerp(_v2Tan, 1 - Math.exp(-delta / 0.08)).normalize();
             }
             if (_v2Heading.lengthSq() > 1e-6) {
               // Stand further off the steeper the bird points, so a loop whose
               // radius (speed / pitchRate ~ 5 units) is smaller than the 5-unit
               // stand-off does not go over the top on top of the lens.
-              const distanceMul = 1 + 0.6 * Math.abs(_v2Fwd.dot(_v2Up));
-              bCam.setHold({ weight: 1, heading: _v2Heading, distanceMul });
-              cameraState?.setFollowHold?.({ weight: 1, heading: _v2Heading, up: _v2Up, distanceMul });
+              // Pre-allocated option objects (setHold copies what it needs):
+              // two literals a frame on the live path was the one allocation
+              // the review found in v2.
+              _v2Hold.distanceMul = 1 + 0.6 * Math.abs(_v2Fwd.dot(_v2Up));
+              _v2FollowHold.distanceMul = _v2Hold.distanceMul;
+              bCam.setHold(_v2Hold);
+              cameraState?.setFollowHold?.(_v2FollowHold);
             }
           } else {
             // Landing, nested or knocked down: hand the frame straight back, so
             // those paths behave exactly as they do under v1.
-            bCam.setHold({ weight: 0 });
-            cameraState?.setFollowHold?.({ weight: 0 });
+            bCam.setHold(_v2HoldOff);
+            cameraState?.setFollowHold?.(_v2HoldOff);
           }
         }
 
@@ -12459,6 +12486,7 @@
     // help the one person who has to sign the art off. He could not find the
     // stone arch; that is what this is for.
     function seekLandmark(id, back = null) {
+      v2ForgetHeading();
       const found = (sphericalWorld?.landmarks || []).find((l) => l.id === id);
       if (!found || !flightController?.position) return null;
       // Each landmark carries its own stand-off; 34 is only the fallback for
@@ -12599,6 +12627,7 @@
         setAltitude: (aboveGround) => {
           const p = flightController?.position;
           if (!p) return null;
+          v2ForgetHeading();
           const terrain = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
           p.normalize().multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
           return p.length();
@@ -12612,6 +12641,7 @@
         // The landmark valley is the only place the water shader is visible
         // and spawn is nowhere near it.
         teleport: (x, y, z, aboveGround = 6) => {
+          v2ForgetHeading();
           const p = flightController?.position;
           if (!p || !sphericalWorld) return null;
           const len = Math.hypot(x, y, z) || 1;
@@ -13254,6 +13284,23 @@
             // World position, so a caller can measure that walking moves it.
             position: birbAnchor.position.toArray().map((n) => +n.toFixed(3)),
             radius: +birbAnchor.position.length().toFixed(3),
+            // Clearance above the CARVED ground under the bird, not the raw
+            // radius. On rolling terrain those are different questions and
+            // only this one answers "is it still on the surface": a bird
+            // walking up a slope gains radius without leaving the ground, and
+            // tools/birb-walk.mjs failed once on exactly that (landed at
+            // 105.86 where a typical run lands at 104.97, then walked 2.5
+            // units uphill for a 2.75 rise against a 2.5 tolerance). Same
+            // sampler the flight floor and the landing check use, so all
+            // three agree about where the ground is.
+            aboveGround: (() => {
+              const p = birbAnchor.position;
+              const r = p.length();
+              if (!(r > 1e-3) || !sphericalWorld) return null;
+              const terrain = (typeof sampleTerrainHeight === 'function')
+                ? sampleTerrainHeight(p.x / r, p.y / r, p.z / r) : 0;
+              return +(r - (sphericalWorld.sphereRadius + terrain)).toFixed(3);
+            })(),
             // Each wingtip in the BIRD'S OWN frame, which is the only frame in
             // which "that wing is high" means anything. A rotation.x pair does
             // NOT tell you this: the right wing carries scale.z = -1, so the
@@ -13383,9 +13430,9 @@
             // The numbers this bird is flying with (v2 only), so a capture or a
             // phone report can name its tuning instead of assuming the table.
             tuning: flightV2 ? {
-              rollRate: fc.rollRate, pitchRate: fc.pitchRate, turnGain: fc.turnGain, yawAssist: fc.yawAssist,
-              rightingRate: fc.rightingRate, rightingSoftBank: fc.rightingSoftBank,
-              pitchStability: fc.pitchStabilityRate, gSpeed: fc.gSpeed, drag: fc.drag,
+              rollRate: fc.rollRate, pitchRate: fc.pitchRate, edge: fc.edge, maxBank: fc.maxBank,
+              maxPitchHold: fc.maxPitchHold, bankGain: fc.bankGain, pitchGain: fc.pitchGain,
+              turnGain: fc.turnGain, yawAssist: fc.yawAssist, gSpeed: fc.gSpeed, drag: fc.drag,
               minMul: fc.minMul, maxMul: fc.maxMul, deadzone: fc.deadzone,
             } : null,
             // The bank the FLIGHT FRAME is holding, full circle. Under v1 the

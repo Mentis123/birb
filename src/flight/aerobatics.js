@@ -292,7 +292,14 @@ export function createAerobatics(moves = AEROBATIC_MOVES) {
  *
  * Returns null when the stick is not asking for anything.
  */
-export const STICK_EDGE = Object.freeze({ edge: 0.94, dwell: 0.55 });
+// 0.97 / 1.0 s / 1.4 s, from 0.94 / 0.55 s. The owner, on the shipped build:
+// "the barrel rolls and dives and stuff are too sensitive / trigger too
+// soon". Half a second at the rail is inside an ordinary committed turn, and
+// a pinned dive is the most common thing a player does with altitude — so
+// the loop UNDER, which fires from exactly that, asks for the longest hold.
+// The wind-up during the dwell (index.html AERO_WINDUP) is what makes a
+// one-second hold read as "asking" rather than as nothing happening.
+export const STICK_EDGE = Object.freeze({ edge: 0.97, dwell: 1.0, dwellUnder: 1.4 });
 
 export function moveFromStick(x = 0, y = 0, { edge = STICK_EDGE.edge } = {}) {
   const sx = Number.isFinite(x) ? x : 0;
@@ -319,7 +326,9 @@ export function moveFromStick(x = 0, y = 0, { edge = STICK_EDGE.edge } = {}) {
  * from a hard left into a hard climb does not bank a roll's worth of credit
  * into a loop.
  */
-export function createStickEdgeTrigger({ edge = STICK_EDGE.edge, dwell = STICK_EDGE.dwell } = {}) {
+export function createStickEdgeTrigger({
+  edge = STICK_EDGE.edge, dwell = STICK_EDGE.dwell, dwellUnder = STICK_EDGE.dwellUnder,
+} = {}) {
   let held = 0;
   let heldMove = null;
   /** @returns the earned move, or null. Fires ONCE per hold. */
@@ -329,7 +338,10 @@ export function createStickEdgeTrigger({ edge = STICK_EDGE.edge, dwell = STICK_E
     const key = `${ask.move}:${ask.direction}`;
     if (key !== heldMove) { heldMove = key; held = 0; }
     held += Math.max(0, Math.min(Number.isFinite(delta) ? delta : 0, 0.1));
-    if (held < dwell) return null;
+    // A pinned DIVE is ordinary flying; the loop under it earns needs the
+    // longest hold of the three.
+    const need = (ask.move === 'loop' && ask.direction < 0) ? dwellUnder : dwell;
+    if (held < need) return null;
     // Zero rather than subtract: holding the rail through a whole move and
     // out the other side should ask for the NEXT one from scratch, not bank
     // the time the move itself took and fire again the instant it ends.
@@ -337,6 +349,9 @@ export function createStickEdgeTrigger({ edge = STICK_EDGE.edge, dwell = STICK_E
     return ask;
   }
   function reset() { held = 0; heldMove = null; }
-  function progress() { return Math.min(1, held / dwell); }
+  function progress() {
+    const need = (heldMove && heldMove.startsWith('loop:-')) ? dwellUnder : dwell;
+    return Math.min(1, held / need);
+  }
   return { update, reset, progress };
 }

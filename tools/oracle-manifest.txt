@@ -42,13 +42,13 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-13 at commit 25c0b89 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-13 at commit 15472d9 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
 4deed1af6bb07606594214cb55313c159b7ce2abf8aae58aeb8ef99dceafded2  tests/adaptive-quality-traces.test.js
 0ac41b4d162af55f267b3cdfc207227ef9fbc89969be85ecea34154fee63acef  tests/adaptive-quality.test.js
-be941758b35462a40922f38ec44e2331f58055929f293b8ef47e20cef2d2b6cf  tests/aerobatics.test.js
+783657f4f721efc3681dc446daa73069cce8a8b869e9d2790ed6225528b7f53d  tests/aerobatics.test.js
 792aea6eb28c9974d79b64b84e27952517cedcfc31869e8194b9460e3b7914b8  tests/aim-rig.test.js
 f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-check.test.js
 3922615670f130b65326a1bc03d07f23cfae0a9fc552aa95ea980cb884ba3ea3  tests/asset-residency.test.js
@@ -57,7 +57,7 @@ f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-ch
 7fcdbfcda1406cb603f084ccf4e76a021fa54ff05166bdaf0e14da16e9414cdc  tests/authored-tints.test.js
 6f9c92d3b927330062190fff2cba727c271bf215da99fe594aa79f359609ce01  tests/bird-camera-hold.test.js
 b8096b78960e23a6ae729f5e2af859d6a823749975b2ae78f417e1aefec2411f  tests/bird-contract.test.js
-01bc13b667eb638e2d467c553de53bff152b5cc48f8c5e85451eb8fafee9106f  tests/bird-flight-v2.test.js
+09f941af20c7c72049676cb387d70bd13a4bc593a87b9d0a6c62ccd47cf605dc  tests/bird-flight-v2.test.js
 be4fae20f590fc230dd2ee1968983087ab01c1d9a13fc86c5bbfc7b6fc613313  tests/bird-flight.test.js
 33af5b622a024647ac5ff84b5d7d6ad44e7f5992baa2c0a906117dd55f3111d0  tests/bird-plumage.test.js
 3a8ad03216c2600b6ad326c8c50583a471acab94365bb2234774b3583b625396  tests/bird-pose.test.js
@@ -134,6 +134,7 @@ a7b94cf4b0a5691c760a291acfe7997513caedd49270761aac74425373447e82  tests/perf-tra
 1775aefd8d9f9155863cc1592b1e81ab0c983773fd155e029410eb6526649e56  tests/sculpture-surface-nets.test.js
 98df1acaa8ff953e9ad688266b42cceaa8a8bbc8011982b7fcd44112073aaa4a  tests/seeded-random.test.js
 819e20ab9b1bd1a66549d76b29b4e97d1be47971fdd650e52b2c30a0b212b12b  tests/sky-environment.test.js
+002eaeb611404dfc37efca851839638d25564390dcab61df592c21934314885a  tests/sw-modules.test.js
 f9d96ad5dfb918df5985298b4e25c7daa639bb9c27e76785b0fc4c20c1fcbd07  tests/visual-upgrade.test.js
 7a62b70ff84fa8da8be84abefd92c6fed10a78c21581ac114b27bd994fdc3fa7  tests/wake.test.js
 b086039c1b8f9f55450f1637a3f385d328cb655cc6c7121a809f0e83a3747a18  tests/water.test.js
@@ -163,7 +164,7 @@ e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-she
 # span < 0.75, idle drift < 0.5 units, walked > 0.8, foot swing > 0.15 rad,
 # foot at rest < 0.05). Loosening any of them to make a red run green is
 # exactly the move R5 exists to make loud.
-e6146e629a672f31ba65318fc32e240d238d07976ef37a2300d06daa7301834d  tools/birb-walk.mjs
+4741ed9951daa52ed902b7d0423100734e44fe284f3b59069861f78d0a11d979  tools/birb-walk.mjs
 # --- the contract ------------------------------------------------------------
 edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONTRACT.md
 # --- the coverage oracle (G0: R5 was not enforced on it) ---------------------

@@ -144,8 +144,24 @@ async function main() {
     console.log(`  walked forward ${walked.toFixed(2)} units; foot swing ${footSwing.toFixed(3)} rad`);
     check(walked > 0.8, `pushing the stick forward moved the bird only ${walked.toFixed(2)} units`);
     check(footSwing > 0.15, `the feet did not animate while walking: swing ${footSwing.toFixed(3)} rad`);
-    check(Math.abs(afterWalk.radius - beforeWalk.radius) < 2.5,
-        `the bird left the surface while walking: radius ${beforeWalk.radius} -> ${afterWalk.radius}`);
+    // CLEARANCE, not radius. The raw radius conflates "walked up a hill" with
+    // "took off": this world's terrain rolls, the landing spot is unseeded and
+    // so differs every run, and a run that landed at radius 105.86 (three
+    // consecutive runs either side of it landed at 104.96-105.01) walked 2.5
+    // units uphill for a 2.75 rise and failed a 2.5-unit radius tolerance
+    // while never leaving the ground. `aboveGround` is sampled from the same
+    // carved-terrain function the flight floor and the landing check use, so
+    // walking up any slope holds it constant and only actually leaving the
+    // surface moves it. See docs/perf/gates/G-WALK-SLOPE.md.
+    const clearanceRise = (Number.isFinite(afterWalk.aboveGround) && Number.isFinite(beforeWalk.aboveGround))
+        ? afterWalk.aboveGround - beforeWalk.aboveGround
+        : null;
+    console.log(`  clearance above ground ${beforeWalk.aboveGround} -> ${afterWalk.aboveGround}`
+        + ` (radius ${beforeWalk.radius} -> ${afterWalk.radius})`);
+    check(clearanceRise !== null,
+        'birdPose().aboveGround is missing — the check cannot tell a hill from a takeoff without it');
+    check(clearanceRise === null || Math.abs(clearanceRise) < 1.0,
+        `the bird left the surface while walking: clearance ${beforeWalk.aboveGround} -> ${afterWalk.aboveGround}`);
 
     // ── the feet must settle when it stops ──────────────────────────────
     await stick(page, null);

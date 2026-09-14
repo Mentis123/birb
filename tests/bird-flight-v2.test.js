@@ -130,10 +130,9 @@ for (const site of SITES) {
       const start = headingOf(bird).clone();
       const startRight = new THREE.Vector3().crossVectors(start, radialUp(bird)).normalize();
 
-      // 0.28 stick is inside the band where the dihedral still balances the
-      // roll (see FLIGHT_V2_DEFAULTS.rightingSoftBank), so this is a HELD
-      // bank and not a roll that happens to be passing through one.
-      fly(bird, { x: 0.28 * stick, y: 0, active: true }, 2);
+      // Half stick is a HELD bank (0.5 / edge * maxBank = 37 degrees), not a
+      // roll that happens to be passing through one — only the rail rolls.
+      fly(bird, { x: 0.5 * stick, y: 0, active: true }, 2);
 
       const bank = bankDeg(bird);
       // Right stick banks right wing DOWN, which is a negative bank — the same
@@ -253,13 +252,63 @@ test('a dive gains speed, a climb bleeds it, and neither leaves the bounds', () 
 test('a held dive gains and hands-off returns to cruise', () => {
   const bird = spawn(SITES[0], { position: new THREE.Vector3(0, SPHERE_RADIUS + 400, 0) });
   levelAt(bird, SITES[0].forward());
-  bird.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -45 / DEG));
-  fly(bird, { x: 0, y: 0, active: false }, 2);
-  assert.ok(bird.speed > 12.5, `a 45-degree dive should gain speed, got ${bird.speed.toFixed(2)}`);
+  // HELD: 0.7 stick commands a 52-degree dive and holds it there. A dive the
+  // stick is not holding is one the hands-off stability is already pulling
+  // out of, and the speed it gains says more about that than about energy.
+  fly(bird, { x: 0, y: -0.7, active: true }, 2);
+  assert.ok(pitchDeg(bird) < -40, `holds the commanded dive, pitch ${pitchDeg(bird).toFixed(1)}`);
+  assert.ok(bird.speed > 12.5, `a 52-degree dive should gain speed, got ${bird.speed.toFixed(2)}`);
   assert.ok(bird.energy() > 1.1, `energy ${bird.energy().toFixed(3)} should read above 1 in a dive`);
   fly(bird, { x: 0, y: 0, active: false }, 10);
+  assert.ok(Math.abs(pitchDeg(bird)) < 3, `hands-off levels, pitch ${pitchDeg(bird).toFixed(2)}`);
   assert.ok(Math.abs(bird.speed - 11) < 0.2, `should settle back to cruise, got ${bird.speed.toFixed(2)}`);
 });
+
+// ---------------------------------------------------------------------------
+// Attitude below the rail, rate at it (the adversarial review's F2/F3/F6)
+// ---------------------------------------------------------------------------
+
+for (const site of SITES) {
+  test(`[${site.name}] a half stick holds a steady bank and never rolls past it`, () => {
+    const bird = spawn(site);
+    const target = (0.5 / FLIGHT_V2_DEFAULTS.edge) * FLIGHT_V2_DEFAULTS.maxBank * DEG;
+    let peak = 0;
+    fly(bird, { x: 0.5, y: 0, active: true }, 6, (b) => { peak = Math.max(peak, Math.abs(bankDeg(b))); });
+    assert.ok(Math.abs(-bankDeg(bird) - target) < 3, `holds ${target.toFixed(1)}, got ${bankDeg(bird).toFixed(1)}`);
+    assert.ok(peak < target + 5, `never overshoots into a roll, peak ${peak.toFixed(1)}`);
+    // Just inside the rail is the steepest held bank; the rail itself rolls.
+    const edgeBird = spawn(site);
+    fly(edgeBird, { x: FLIGHT_V2_DEFAULTS.edge - 0.01, y: 0, active: true }, 6);
+    assert.ok(Math.abs(-bankDeg(edgeBird) - FLIGHT_V2_DEFAULTS.maxBank * DEG) < 4,
+      `just inside the rail holds maxBank, got ${bankDeg(edgeBird).toFixed(1)}`);
+    const railBird = spawn(site);
+    let crossed = false;
+    fly(railBird, { x: FLIGHT_V2_DEFAULTS.edge, y: 0, active: true }, 1.2, (b) => { if (Math.abs(bankDeg(b)) > 170) crossed = true; });
+    assert.ok(crossed, 'at the rail the bank keeps going and passes inverted');
+  });
+
+  test(`[${site.name}] a half pull holds a steady climb; hands-off from vertical levels`, () => {
+    const bird = spawn(site, { position: site.position().normalize().multiplyScalar(SPHERE_RADIUS + 400) });
+    levelAt(bird, site.forward());
+    const target = (0.5 / FLIGHT_V2_DEFAULTS.edge) * FLIGHT_V2_DEFAULTS.maxPitchHold * DEG;
+    fly(bird, { x: 0, y: 0.5, active: true }, 4);
+    assert.ok(Math.abs(pitchDeg(bird) - target) < 3, `holds a ${target.toFixed(1)}-degree climb, got ${pitchDeg(bird).toFixed(1)}`);
+    assert.ok(Math.abs(bankDeg(bird)) < 3, `wings stay level in a straight climb, bank ${bankDeg(bird).toFixed(2)}`);
+
+    // Straight up, hands off. A sin(2p) stability term is ZERO here and the
+    // bird hung there indefinitely (the review's F3); the attitude command has
+    // its full authority at the vertical.
+    const vertical = spawn(site, { position: site.position().normalize().multiplyScalar(SPHERE_RADIUS + 400) });
+    levelAt(vertical, site.forward());
+    vertical.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 90 / DEG));
+    assert.ok(pitchDeg(vertical) > 89, `starts vertical, pitch ${pitchDeg(vertical).toFixed(1)}`);
+    let levelledAt = -1;
+    fly(vertical, { x: 0, y: 0, active: false }, 4, (b, i) => {
+      if (levelledAt < 0 && Math.abs(pitchDeg(b)) < 10) levelledAt = (i + 1) * DT;
+    });
+    assert.ok(levelledAt > 0 && levelledAt < 3, `levels from vertical in under 3 s, took ${levelledAt.toFixed(2)}`);
+  });
+}
 
 test('a commanded speed is held, and writing cruise hands the energy model back', () => {
   // index.html writes `cruise` every frame the bird flies under its own
@@ -393,7 +442,12 @@ test('the drop-in surface index.html relies on is present', () => {
   assert.equal(bird.zenMode, true);
   assert.equal(typeof bird.bankAngle(), 'number');
   assert.equal(typeof bird.pitchAngle(), 'number');
-  assert.equal(bird.energy(), bird.speed / bird.cruise);
+  // Against a number, not against the getter's own formula.
+  bird.setSpeed(11);
+  bird.cruise = 11;
+  bird.speed = 16.5;
+  bird._lastTickSpeed = 16.5; // a read, not a command
+  assert.ok(Math.abs(bird.energy() - 1.5) < 1e-9, `energy ${bird.energy()}`);
 });
 
 test('a huge delta is clamped so a hitch cannot teleport the bird', () => {

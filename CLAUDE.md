@@ -956,6 +956,64 @@
 > Do not quote either. A real number needs the pose pinned the way the feather
 > A/B pins it (`restorePose` + `freeze` + `setSunTime` + `pinTier`).
 
+> **A level bird cannot land, and it is not v2's fault** (2026-09-14, in
+> [G-FLIGHT-V2](docs/perf/gates/G-FLIGHT-V2.md)). `_floorAt` and
+> `checkGroundCollision` sample the SAME terrain function and add the SAME
+> 0.6 bird radius, and `tick()` clamps to the floor before the landing check
+> reads the position — so a flying bird sits at exactly `aboveGround` 0.600
+> and the strict `<` is settled by float rounding. `setAltitude` below the
+> surface does not help; the clamp lifts it back in one frame. Measured: a
+> level bird grounded on about one run in three inside 60 frames, and
+> `tools/birb-walk.mjs` is reliable only because it polls 120. Landing today
+> is the knockdown or the nest; a glide onto flat ground meets an invisible
+> floor. Left alone deliberately — a landing band changes v1 for every mode
+> and has to respect the gravity-less-floor invariant — so the v2 tool
+> asserts what is reachable and its own business: upright, unhurried contact
+> must never read as a CRASH (which is exactly the boost bug the review
+> found). **When two systems share a boundary exactly, `<` is a coin toss.**
+
+> **The walk gate measured a hill and called it a takeoff** (2026-09-14):
+> [docs/perf/gates/G-WALK-SLOPE.md](docs/perf/gates/G-WALK-SLOPE.md).
+> Browser Health failed with "the bird left the surface while walking: radius
+> 105.857 -> 108.608" on a tree whose every change was v2-gated or inert
+> under v1 — and three re-runs on that same tree passed, landing at
+> 104.96-105.01. The failing run LANDED 0.85 higher and walked uphill: the
+> check compared RAW RADIUS, and on carved rolling terrain a 2.75-unit rise
+> over 2.45 units of travel is a 48-degree slope, not flight. `birdPose()`
+> reports `aboveGround` now, sampled through the same `sampleTerrainHeight`
+> the flight floor and the landing check use, and the harness compares
+> CLEARANCE (and fails loudly if the field is missing, rather than passing
+> vacuously). **The quantity a check's own failure message names is the one
+> it has to measure** — and the landing spot is still unseeded, which is the
+> variance this removes a verdict from rather than removes.
+
+> **The first load after every deploy was a broken one, and it looked like a
+> plumage bug** (2026-09-14). The owner's console at the title screen:
+> `Uncaught TypeError: pionusPlumageRequested is not a function` inside
+> `createProceduralBirbV3`, and the module script dead before Tap to Start.
+> Nothing about plumage: `sw.js` served the SHELL network-first (a navigation)
+> and the MODULES stale-while-revalidate, so a fresh `index.html` from the new
+> deploy drove the previous build's cached `visual-style.js`, which predated
+> the export. It healed only when the new worker finished installing and the
+> update banner reloaded the page seconds later — and the auto-reload lives in
+> a separate classic `<script>` precisely so a dead module script cannot
+> stop it, which is the only reason this was one broken load and not a
+> permanent one. Modules are network-first now (`networkFirstModule`, falling
+> back to the one core cache offline), so shell and modules come from the same
+> deploy by construction; Vercel serves them `must-revalidate`, so online it
+> is an If-None-Match round trip, not a re-download. `tests/sw-modules.test.js`
+> pins the strategy. **A cache strategy that is right for a file can be wrong
+> for a SET of files that must agree with each other.**
+>
+> **The aerobatics trigger was too eager, from the phone** ("the barrel rolls
+> and dives and stuff are too sensitive / trigger too soon"): `STICK_EDGE`
+> is 0.97 / 1.0 s / 1.4 s from 0.94 / 0.55 s. Half a second at the rail is
+> inside an ordinary committed turn, and a pinned dive is the most common
+> thing anyone does with altitude, so the loop UNDER — which fires from
+> exactly that — has its own longer dwell; `progress()` measures against
+> whichever applies, so the wind-up still reads as "asking". v2's rail moved
+> to 0.97 with it: it is the same stick.
+
 > **Flight v2 — proper flight, behind `?flight=v2`** (2026-09-13, night):
 > [docs/realism/FLIGHT_V2_PLAN.md](docs/realism/FLIGHT_V2_PLAN.md) is the
 > brief, [docs/perf/gates/G-FLIGHT-V2.md](docs/perf/gates/G-FLIGHT-V2.md)
@@ -968,29 +1026,39 @@
 > a roll or a loop could only ever be a canned move with a trigger, a dwell,
 > a wind-up and a camera hold. `src/flight/bird-flight-v2.js` (extends
 > BirdFlight, so the terrain floor and parallel transport have one
-> definition) replaces the mapping: stick x is a ROLL rate, turning comes
-> from the bank (`turnGain * sin(bank)` about the radial, plus a small direct
-> assist), pitch is unlimited, hands-off rights the bird and settles the
-> nose, and speed is ENERGY — a dive gains, a climb bleeds, drag returns it
-> to cruise. Everything scripted is off under v2. Measured on the sim clock
-> (`flightProbe().simTime` — a harness that counts frames × 0.05 was
-> guessing, and the first sheet read a 0.85 s roll that was 2.05): full roll
-> 2.05 s, righting from inverted 2.42 s, loops 3.7 s at a 12–13 unit altitude
-> span with speed 7.4–14.3 through them, inverted ground contact is a crash
-> (the existing knockdown) and an upright slow arrival still lands.
-> **Two things the phone must judge**: stick x is a RATE, so past a crossover
-> a held stick rolls forever — in-game (the input pipeline shapes the stick
-> first) raw 0.25 settles at 14° and 0.33 at 24°; `rightingRate` moves that
-> crossover, and `?v2tune=rightingRate:2,turnGain:1.8` overrides any of the
-> twelve `FLIGHT_V2_DEFAULTS` at boot without a deploy, reported back by
-> `flightProbe().tuning`. And a full-stick dive is a push-over (120° in a
-> second), not a dive: the evidence tool learned to dive at half stick.
-> `tools/birb-flight-v2.mjs` is in Browser Health; `?flight=v2` is one tap on
-> the panel's Flags tab. v1 stays the default until both have been flown.
-> The self-righting term is NOT `-sin(bank)`: that is zero at 180° and an
-> inverted bird would hang there — it is constant-rate outside
-> `rightingSoftBank` (0.7 rad) and proportional inside, scaled by
-> (1−|x|)(1−|y|) so a held loop is never rolled into an Immelmann at the top.
+> definition) replaces the mapping. **Attitude below the rail, rate at it**:
+> push the stick part way and the bird holds that bank (up to 70°) and turns
+> from it (`turnGain * sin(bank)` about the radial, 127°/s at the maximum
+> against v1's 135); centre it and the wings level; pin it to the rail
+> (0.94, the edge the old trigger measured) and it keeps rolling. Pull part
+> way and it holds that climb; pull to the rail and it goes over the top.
+> Speed is ENERGY — a dive gains, a climb bleeds, drag returns it to
+> cruise. Everything scripted is off under v2; the chase camera holds the
+> tangent velocity heading with radial up; inverted or fast-and-nose-down
+> ground contact is the existing knockdown, upright and slow still lands.
+>
+> **The first cut was a pure RATE on both axes and an adversarial review
+> refuted it with reproductions before the phone saw it.** The only
+> sustainable bank was below shaped stick 0.29 (raw 0.40), and an ordinary
+> hard turn on this stick is raw 0.6–0.8 — so the first hard turn asked for
+> would have rolled the bird onto its back; a held pitch had a trim band of
+> 12% of the stick; the `sin(2p)` stability was zero at the vertical and a
+> teleported nose-up bird hung there with the camera heading frozen; and the
+> crash rule fired on a level upright bird for 0.68 s after every boost
+> (target 26.4 → 11 in one frame, speed still 19). A green oracle is not a
+> good mapping; the review is what turned "rolls forever" from a feel note
+> into a number. Measured on the sim clock (`flightProbe().simTime` — a
+> harness that counted frames × 0.05 read a 0.85 s roll that was 2.05):
+> rail roll 2.35 s, righting from inverted 1.38 s, loops 3.3–3.7 s at a
+> 12–15 unit span with speed 7.4–14.4 through them, held bank at raw
+> 0.25 / 0.33 = 11° / 16.5° (the input pipeline's deadzone and expo shape
+> the stick before the controller sees it). `?v2tune=bankGain:3,turnGain:1.6`
+> overrides any of the fourteen `FLIGHT_V2_DEFAULTS` at boot without a
+> deploy, reported back by `flightProbe().tuning`; a full-stick dive is a
+> push-over (120° in a second), so the evidence tool dives at half stick.
+> `tools/birb-flight-v2.mjs` (21 checks) is in Browser Health; `?flight=v2`
+> is one tap on the panel's Flags tab. v1 stays the default until both have
+> been flown.
 
 > **ULTRA IS THE OLD MAX REALISM, the panel is a preset strip, and the
 > harnesses boot at the baseline** (2026-09-13, night):

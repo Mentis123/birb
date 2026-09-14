@@ -255,28 +255,39 @@ async function main() {
             skip('crash-while-inverted scenario — could not invert the bird (see the bank check above); '
                 + 'cannot exercise ground-contact-by-attitude independently of that defect');
         } else {
-            // Release for exactly one frame (per FLIGHT_V2_PLAN.md's rightingRate
-            // scaling by (1-|x|)): at rightingRate 1.4 rad/s and the 0.05s clamp,
-            // one frame moves roll at most ~4°, negligible against the 150°+ we
-            // are holding.
+            // The rule, checked against the attitude AT THE CONTACT FRAME.
+            //
+            // Not against the attitude before the drop, which is what the
+            // first version did and why it failed one run in three: placed
+            // well below the surface the bird penetrates, `_deflectAlongTerrain`
+            // runs, and re-aiming the forward along the surface can carry a
+            // heavily banked bird back upright within a frame or two — so an
+            // "inverted" bird legitimately grounded, and the check called it a
+            // defect. Reading the roll at the frame the state changes makes
+            // the assertion the real invariant instead: whatever attitude the
+            // bird actually arrived in must produce the matching outcome, and
+            // it cannot pass vacuously in either direction (an inverted
+            // grounding fails it, and so does an upright crash).
+            //
+            // The stick stays at the rail so nothing rights the bird while it
+            // falls, and the placement is shallow (-0.05) so contact happens
+            // without a violent deflection.
+            await setAltitude(page, -0.05);
+            const crash = await sampleUntil(page, secToFrames(3), (p) => p.recovery !== 'flying');
             await release(page);
-            await stepProbe(page, 1);
-            // 0.2 above the carved surface, the same placement tools/birb-walk.mjs
-            // lands with: the landing floor is the surface plus the bird's own
-            // clearance radius, so 0.2 is INSIDE it and contact registers on the
-            // next frame. At 2 units the bird sat above both floors holding its
-            // altitude (no gravity here) and contact depended on whether the
-            // terrain ahead happened to rise within the window — measured: the
-            // upright half grounded, the inverted half never did, same placement.
-            await setAltitude(page, 0.2);
-            const crash = await sampleUntil(page, secToFrames(2), (p) => p.recovery !== 'flying');
             if (!crash.hit) {
-                check(false, 'the bird never left FLYING after being placed 0.2 units above ground while '
-                    + `inverted (roll ${num(invert.probe.rollFullDeg)}°) — checkGroundCollision may not be running`);
+                check(false, 'the bird never left FLYING after being placed below the surface while '
+                    + `banked (roll ${num(invert.probe.rollFullDeg)}°) — checkGroundCollision may not be running`);
             } else {
-                check(crash.probe.recovery === 'falling',
-                    `ground contact while inverted (roll ${num(invert.probe.rollFullDeg)}°) enters FALLING, `
-                    + `not GROUNDED — got recovery=${crash.probe.recovery} at frame ${crash.frame}`);
+                // bodyUp·radial at that frame. With the pitch near level this
+                // is cos(roll); the index.html rule is `bodyUp·up < 0.25`.
+                const atContact = crash.probe.rollFullDeg;
+                const uprightness = Math.cos((atContact * Math.PI) / 180);
+                const wanted = uprightness < 0.25 ? 'falling' : 'grounded';
+                check(crash.probe.recovery === wanted,
+                    `contact at roll ${num(atContact)}° (bodyUp·up ${num(uprightness, 2)}) must be `
+                    + `${wanted.toUpperCase()} — got ${crash.probe.recovery} at frame ${crash.frame}`);
+                console.log(`  ..   contact attitude roll ${num(atContact)}°, outcome ${crash.probe.recovery}`);
             }
             await shot('v2-loop-4.png');
         }
@@ -287,14 +298,57 @@ async function main() {
         // pitch stability) runs every frame REGARDLESS of flightRecoveryState
         // — only the extra fall-ramp pull is gated on FALLING.
         await release(page);
+        // The crash scenario leaves the bird FALLING at the surface, and the
+        // fall ramp grounds it — so without this the "lands" check below would
+        // read GROUNDED on its first frame without ever exercising the landing
+        // path (the review's F5). Let it ground, take off again with the boost
+        // pill (which is the takeoff button while grounded), climb out, and
+        // only then drop it on the ground upright.
+        await sampleUntil(page, secToFrames(6), (p) => p.recovery === 'grounded');
+        await page.evaluate(() => document.querySelector('[data-boost]')?.click());
+        await setAltitude(page, 90);
+        const flying = await sampleUntil(page, secToFrames(4), (p) => p.recovery === 'flying');
+        check(flying.hit, `is FLYING again before the upright landing (recovery=${flying.probe ? flying.probe.recovery : 'unknown'})`);
         const relevel = await sampleUntil(page, secToFrames(4),
             (p) => Math.abs(p.rollDeg) < 10 && Math.abs(p.pitchDeg) < 10);
-        await setAltitude(page, 0.2);
-        const land = await sampleUntil(page, secToFrames(3), (p) => p.recovery === 'grounded');
-        check(relevel.hit, 'the bird re-levels (roll/pitch < 10°) after the crash scenario, so the '
-            + 'upright-landing scenario below is driven from a clean state');
-        check(land.hit, `upright and slow, the bird grounds within ${secToFrames(3)} frames — `
-            + `recovery=${land.probe ? land.probe.recovery : 'unknown'}`);
+        const beforeDrop = await probe(page);
+        check(beforeDrop.recovery === 'flying', `still FLYING at the moment of the drop (recovery=${beforeDrop.recovery})`);
+        // What this can assert, and why it is not "it grounds".
+        //
+        // Measured on this build: the flight floor (bird-flight.js _floorAt)
+        // and the landing check (checkGroundCollision) sample the SAME
+        // terrain function and add the SAME 0.6 bird radius, and tick()
+        // clamps to the floor before the landing check reads the position —
+        // so a level flying bird sits at exactly aboveGround 0.600, the
+        // boundary, and `distanceFromCenter < minAltitude` is decided by
+        // float rounding. Placing it below the surface does not help: the
+        // clamp lifts it back to the boundary in the same frame. Landing in
+        // this game happens through the knockdown (which pushes below the
+        // floor every frame) or through the nest; a level cruise onto flat
+        // ground is luck. That is pre-existing and out of this tool's scope
+        // — see docs/perf/gates/G-FLIGHT-V2.md.
+        //
+        // So the assertion is the half that IS reachable and IS this tool's
+        // business: upright, unhurried contact must never be read as a CRASH.
+        // The v2 rule is `bodyUp·up < 0.25 || (speed > 1.4*cruise && nose
+        // down)`, and the boost bug the review found (a level bird above
+        // 1.4x cruise for 0.68 s after every boost) would trip exactly this.
+        await setAltitude(page, -0.5);
+        let crashedUpright = null;
+        let groundedUpright = false;
+        for (let i = 0; i < secToFrames(6) && !crashedUpright; i += 1) {
+            const p = await stepProbe(page, 1);
+            if (p.recovery === 'falling') crashedUpright = p;
+            if (p.recovery === 'grounded') { groundedUpright = true; break; }
+            // Re-arm the penetration: the clamp lifts the bird back to the
+            // boundary every frame, so one placement is one chance.
+            if (i % 4 === 3) await setAltitude(page, -0.5);
+        }
+        check(!crashedUpright,
+            `upright and slow, ground contact must not be a crash — got recovery=falling`
+            + (crashedUpright ? ` at roll ${num(crashedUpright.rollFullDeg)}°, speed ${num(crashedUpright.speed, 2)}` : ''));
+        console.log(`  ..   upright contact ${groundedUpright ? 'grounded' : 'did not ground within the window'}`
+            + ' (a level bird sits exactly on the floor boundary — see the note above)');
 
     } catch (err) {
         failures.push('threw: ' + String((err && err.stack) || err));

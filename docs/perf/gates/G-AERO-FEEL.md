@@ -104,3 +104,29 @@ bounded by the sweep's), the numbers above are consistent with it, and the
 camera frames (`a6-loop-over-*.png`) show a level horizon with the bird
 inverted mid-frame. Whether 1.3 s reads as "a little slower" and 88
 degrees of wind-up reads as intent rather than twitch is the phone's call.
+
+## Follow-up: the trigger was still too eager (2026-09-14)
+
+From the phone, on the shipped build: *"the barrel rolls and dives and stuff
+are too sensitive / trigger too soon"*. `STICK_EDGE` was `edge 0.94`,
+`dwell 0.55 s`.
+
+Half a second at the rail is inside an ordinary committed turn, and a pinned
+DIVE is the most common thing anyone does with altitude — so the loop under,
+which fires from exactly that, now asks for the longest hold of the three:
+
+| | before | after |
+|---|---|---|
+| edge | 0.94 | 0.97 |
+| dwell (roll, loop over) | 0.55 s | 1.0 s |
+| dwell (loop under) | 0.55 s | 1.4 s |
+
+`progress()` measures against whichever dwell applies, so the wind-up
+(`AERO_WINDUP`) still deepens the bank or the climb across the whole hold and
+the gesture reads as asking rather than as nothing happening. Measured live
+after the change, sim time on the rail before the move fired: roll 1.1 s,
+loop over 1.2 s, loop under 1.4 s.
+
+Flight v2's rail moved to 0.97 in the same change. It is the same stick, and
+under v2 the rail is where a held bank becomes a roll — the report applies
+there just as much, even though v2 has no dwell at all.

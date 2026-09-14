@@ -32,8 +32,8 @@ and every aircraft:
 
 | input | v1 | v2 |
 |---|---|---|
-| stick x | yaw rate about radial up (+ cosmetic bank) | **roll rate** about the bird's forward axis |
-| stick y | pitch rate, clamped ±80° | **pitch rate, unlimited** |
+| stick x | yaw rate about radial up (+ cosmetic bank) | **a bank to hold** (up to 70°) reached at the roll rate; at the rail (0.94) a **roll rate** |
+| stick y | pitch rate, clamped ±80° | **an elevation to hold** (up to 70°); at the rail a **pitch rate, unlimited** — the loop |
 | turning | from yaw | **from the bank**: yaw rate about radial up = `turnGain * sin(bank)`, plus a small direct assist `yawAssist * x` so a thumbstick still feels responsive |
 | roll with no input | levelled at 2.2 rad/s always | **self-righting toward upright** at `rightingRate` (a bird's dihedral), scaled down while the stick holds a bank; never fights a held input |
 | pitch with no input | auto-level to horizon, clamp | **gentle pitch stability** toward the horizon by the shortest path, scaled down while the stick holds pitch; no clamp |
@@ -43,10 +43,15 @@ Angles are measured against the LOCAL radial (this is a sphere; up is
 radial, never world +Y — the rule every other system here follows):
 `bank = atan2(up·right, up·bodyUp)`, `pitch = asin(up·forward)`.
 
-Inverted flight, loops, rolls, split-S, Immelmann — all emergent. Hold the
-stick over and you keep rolling; centre it and you keep the bank; pull and
-hold and you go over the top; push and hold and you go under. The loop's
-radius is speed over pitch rate and nothing else.
+Inverted flight, loops, rolls, split-S, Immelmann — all emergent. The stick
+commands an ATTITUDE below the rail and a RATE at it (the adversarial review
+measured why: a pure rate on a thumbstick made the only sustainable bank one
+below shaped 0.29, so an ordinary hard turn at raw 0.6-0.8 rolled the bird onto
+its back). Push the stick part way and you hold that bank; centre it and the
+wings level; pin it to the rail (0.94, the same edge the old trigger measured)
+and you keep rolling. Pull part way and you hold that climb; pull to the rail
+and you go over the top. The loop's radius is speed over pitch rate and nothing
+else.
 
 ## Interface contract (what index.html needs from a controller)
 
@@ -109,6 +114,16 @@ Read `index.html` at the `new BirdFlight(` site (~9362) and every
    so the A/B is one tap on the phone.
 
 ## Tuning start points (all in one `FLIGHT_V2_DEFAULTS` table; the phone decides)
+
+> **Superseded on the same night.** The table below is the pure-rate first
+> cut that the adversarial review measured and rejected (G-FLIGHT-V2, "What
+> the review found"). The shipped table is `FLIGHT_V2_DEFAULTS` in
+> `src/flight/bird-flight-v2.js`: `edge 0.94`, `maxBank 1.22`,
+> `maxPitchHold 1.22`, `bankGain 2.0`, `pitchGain 2.0`, `turnGain 2.0`,
+> `rollRate 3.5`, `pitchRate 2.1`, `yawAssist 0.35`, energy unchanged.
+> `rightingRate`, `rightingSoftBank` and `pitchStability` no longer exist —
+> the bank and pitch commands ARE the stability. `?v2tune=key:value` overrides
+> any of them at boot.
 
 ```
 rollRate      3.5 rad/s   (200°/s — a full roll in 1.8 s at full stick)
