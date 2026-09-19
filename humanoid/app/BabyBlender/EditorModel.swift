@@ -204,17 +204,18 @@ final class EditorModel: ObservableObject {
         // Hovering counts as activity. Without it the view draws one frame per
         // hover event and pauses in between, so the cursor stutters across the
         // model instead of tracking it.
-        if !strokeOpen && length(spin) < 1e-4 && hoverPending == nil { onActivity?(false) }
+        let idle = !strokeOpen && HumanoidCore.length(spin) < 1e-4 && hoverPending == nil
+        if idle { onActivity?(false) }
     }
 
     /// Exponential decay, the same shape `UIScrollView` uses for a flick. A
     /// turntable that stops dead the instant the finger lifts is the single
     /// clearest tell that a 3D viewport was not finished.
     private func applyCoast(_ elapsed: Double) -> Bool {
-        guard length(spin) > 1e-4 else { return false }
+        guard HumanoidCore.length(spin) > 1e-4 else { return false }
         camera.orbit(dx: spin.x * elapsed, dy: spin.y * elapsed)
         spin *= pow(0.998, elapsed * 1000)
-        if length(spin) < 1e-4 { spin = .zero }
+        if HumanoidCore.length(spin) < 1e-4 { spin = .zero }
         return true
     }
 
@@ -279,7 +280,7 @@ final class EditorModel: ObservableObject {
                     let screenDelta = Vec2(point.x - last.x, point.y - last.y)
                     let world = camera.worldDelta(screenDelta: screenDelta,
                                                   viewport: viewport, depth: grabDepth)
-                    if length(world) > 0 { sculptCentres.append(hit.position) }
+                    if HumanoidCore.length(world) > 0 { sculptCentres.append(hit.position) }
                     grabDelta += world * sample.force
                 } else if tool.isPaint {
                     paintSteps.append((hit.position, hit.triangle))
@@ -288,9 +289,11 @@ final class EditorModel: ObservableObject {
                     // moved: Inflate pushes the surface out from under itself,
                     // and a stroke that measured that would partly be measuring
                     // its own output.
-                    let travelled = length(Vec2(point.x - (lastScreenPoint?.x ?? point.x),
-                                                point.y - (lastScreenPoint?.y ?? point.y)))
-                        * camera.metresPerPixel(depth: hit.distance, viewportHeight: viewport.y)
+                    let previous = lastScreenPoint ?? point
+                    let onScreen = Vec2(point.x - previous.x, point.y - previous.y)
+                    let travelled = HumanoidCore.length(onScreen)
+                        * camera.metresPerPixel(depth: hit.distance,
+                                                viewportHeight: viewport.y)
                     sculptStroke?.settings = settings()
                     sculptCentres.append(contentsOf:
                         sculptStroke?.advance(to: hit.position, by: travelled) ?? [])
@@ -376,7 +379,7 @@ final class EditorModel: ObservableObject {
         }
         let rope = radiusPoints * 0.6
         let delta = Vec2(point.x - anchor.x, point.y - anchor.y)
-        let distance = length(delta)
+        let distance = HumanoidCore.length(delta)
         guard distance > rope else { return anchor }
         let moved = anchor + delta * ((distance - rope) / distance)
         stabiliserAnchor = moved
@@ -425,7 +428,8 @@ final class EditorModel: ObservableObject {
         let a = mesh.normals[Int(mesh.indices[t])]
         let b = mesh.normals[Int(mesh.indices[t + 1])]
         let c = mesh.normals[Int(mesh.indices[t + 2])]
-        return normalize(a * hit.barycentric.x + b * hit.barycentric.y + c * hit.barycentric.z)
+        let blended = a * hit.barycentric.x + b * hit.barycentric.y + c * hit.barycentric.z
+        return HumanoidCore.normalize(blended)
     }
 
     // MARK: - Brush
