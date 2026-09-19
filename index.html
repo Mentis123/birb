@@ -749,6 +749,15 @@
       pointer-events: none;
       transition: opacity 200ms ease, transform 140ms ease, box-shadow 140ms ease;
       z-index: 12;
+      /* The pill is a PAD under the stunt flight model: tap to boost, drag for
+         rudder and throttle. A draggable control needs touch-action: none or
+         the browser claims the gesture as a pan/zoom before the page sees the
+         second pointermove. The thumbstick zone underneath already sets it for
+         exactly this reason. */
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
       box-shadow: 0 3px 16px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(190, 240, 255, 0.22);
       touch-action: none;
       -webkit-touch-callout: none;
@@ -762,7 +771,20 @@
 
     .boost-button.is-cooling {
       opacity: 0.38;
-      pointer-events: none;
+      /* NOT pointer-events: none. Cooling only means the BOOST is unavailable
+         (triggerBoost returns early on its own), and under the stunt model
+         this pill is also the rudder and the throttle — taking its pointer
+         events away would have dropped both for the 1.7 s after every boost,
+         which is exactly when a player is most likely to be steering. */
+      pointer-events: auto;
+    }
+
+    /* While a drag is live, say so: the pill is the only thing on screen that
+       can show a rudder or throttle input is being made. */
+    .boost-button.is-dragging {
+      opacity: 1;
+      border-color: rgba(190, 245, 255, 1);
+      box-shadow: 0 0 18px rgba(150, 230, 255, 0.55);
     }
 
     .boost-button:active {
@@ -2655,6 +2677,13 @@
               </svg>
               <span data-quality-label>Amazing</span>
             </button>
+            <!-- Flight model: Stunt (default) or Classic -->
+            <button type="button" class="settings-button" data-control="flight-model" aria-label="Switch flight model">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3c.7 0 1.2.6 1.2 1.3v4.2l7.3 4.1v1.9l-7.3-2.3v4.1l2.4 1.7v1.5L12 18.7l-3.6 1.1v-1.5l2.4-1.7v-4.1L3.5 14.7v-1.9l7.3-4.1V4.3C10.8 3.6 11.3 3 12 3Z" />
+              </svg>
+              <span data-flight-model-label>Stunt</span>
+            </button>
             <!-- Game Mode -->
             <button type="button" class="settings-button" data-control="game-mode" aria-label="Select game mode">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -3289,6 +3318,8 @@
     const settingsGameModeButton = document.querySelector('[data-control="game-mode"]');
     const settingsQualityButton = document.querySelector('[data-control="quality"]');
     const qualityLabelEl = document.querySelector('[data-quality-label]');
+    const settingsFlightModelButton = document.querySelector('[data-control="flight-model"]');
+    const flightModelLabelEl = document.querySelector('[data-flight-model-label]');
     const infoOverlay = document.querySelector('[data-info-overlay]');
     const infoCloseButton = document.querySelector('[data-control="info-close"]');
     const gameModeOverlay = document.querySelector('[data-game-mode-overlay]');
@@ -3407,11 +3438,32 @@
       });
     });
 
-    // Flight v2 — bank to turn, `?flight=v2` (docs/realism/FLIGHT_V2_PLAN.md).
-    // Declared up here because the import below is GATED on it: the module is
-    // in sw.js CORE_ASSETS so an offline v2 boot is safe either way, but a boot
-    // that is never going to fly v2 should not pay a fetch for it.
-    const flightV2 = /[?&]flight=v2(?:&|$)/.test(window.location?.search || '');
+    // Which flight model flies. THE DEFAULT IS STUNT
+    // (docs/realism/STUNT_FLIGHT_PLAN.md): the stick commands roll and pitch
+    // RATES, the rudder and throttle live on the BOOST pill, and rolls,
+    // loops, knife edges and hammerheads are things you fly rather than moves
+    // that play. `classic` is the old v1 mapping, one tap away in the gear
+    // menu and remembered; `v2` is the bank-to-turn experiment, reachable by
+    // URL only, kept because its gate record cites it.
+    //
+    // `?flight=` wins over the remembered preference and is NOT itself
+    // remembered — the same rule `?quality=` follows, so a link can send a
+    // phone to a specific model without changing what that phone boots into
+    // tomorrow.
+    const FLIGHT_MODEL_STORAGE_KEY = 'birbFlightModel';
+    const flightModelFromUrl = (/[?&]flight=(v1|classic|v2|stunt)(?:&|$)/
+      .exec(window.location?.search || '') || [])[1];
+    let flightModelSaved = null;
+    try { flightModelSaved = window.localStorage?.getItem(FLIGHT_MODEL_STORAGE_KEY); } catch (_) { flightModelSaved = null; }
+    // `v1` and `classic` are the same model; v1 is the older spelling and is
+    // what every existing link and gate record says.
+    const flightModelWanted = (flightModelFromUrl || flightModelSaved || 'stunt').replace(/^v1$/, 'classic');
+    const flightV2 = flightModelWanted === 'v2';
+    // The stunt CONTROLLER serves both 'stunt' and 'classic' — under classic
+    // every method delegates to BirdFlight's, which is what makes the gear
+    // toggle a live switch instead of a page reload. So it is loaded for both.
+    const flightStunt = !flightV2;
+    const flightModelInitial = flightV2 ? 'v2' : flightModelWanted;
 
     let THREE,
       GLTFLoader,
@@ -3425,7 +3477,9 @@
       getEnvironmentDefinition,
       DEFAULT_GRADE,
       nipplejs,
-      BirdFlight, BirdFlightV2, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
+      BirdFlight, BirdFlightV2, BirdFlightStunt, FLIGHT_MODELS, FLIGHT_STUNT_DEFAULTS,
+      attachStuntPad, createStuntDetector,
+      BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
 
     try {
       THREE = await import("https://esm.sh/three@0.183.2");
@@ -3435,6 +3489,14 @@
       BirdFlight = birdFlightMod.BirdFlight;
       if (flightV2) {
         BirdFlightV2 = (await import("./src/flight/bird-flight-v2.js")).BirdFlightV2;
+      }
+      if (flightStunt) {
+        const stuntMod = await import("./src/flight/bird-flight-stunt.js");
+        BirdFlightStunt = stuntMod.BirdFlightStunt;
+        FLIGHT_MODELS = stuntMod.FLIGHT_MODELS;
+        FLIGHT_STUNT_DEFAULTS = stuntMod.FLIGHT_STUNT_DEFAULTS;
+        attachStuntPad = (await import("./src/flight/stunt-pad.js")).attachStuntPad;
+        createStuntDetector = (await import("./src/flight/stunt-detector.js")).createStuntDetector;
       }
       const birdCameraMod = await import("./src/flight/bird-camera.js");
       BirdCamera = birdCameraMod.BirdCamera;
@@ -3545,7 +3607,6 @@
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
-      var { createAerobatics, createStickEdgeTrigger, AEROBATIC_MOVES } = await import("./src/flight/aerobatics.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -3704,7 +3765,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v73-2026-09-14-walk-slope';
+    const BIRB_BUILD = 'v74-2026-09-19-stunt-flight';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5021,38 +5082,16 @@
     const BOOST_CONFIG = { speedMult: 2.4, duration: 0.6, cooldown: 1.1 };
     let boostTimer = 0;
     let boostCooldown = 0;
-    // Committed aerobatics (src/flight/aerobatics.js). The trigger lives at
-    // the EDGES OF THE STICK: pin it hard over and hold and the bank becomes
-    // a roll, pin it hard up and the climb goes over the top. This replaced a
-    // double tap on the boost pill, which failed on the only test that
-    // matters — the owner could not tell whether it was working or not. A
-    // gesture that has to be explained, on a screen with nowhere to explain
-    // it, is a feature nobody finds.
-    let aerobatics = null;
-    let aeroTrigger = null;
-    // How hard the chase camera is HOLDING A STABLE FRAME for a live move,
-    // 0..1. The harness capture read well without this because it samples at
-    // two-frame intervals and the damped rig had not caught up; the phone,
-    // at 60 fps, showed the rig doing exactly what it is built to do — follow
-    // the bird's own up and forward — which during a roll means the camera
-    // rolls too and the bird never visibly inverts, and during a loop means
-    // the offset swings round behind the inverted bird and the world reads
-    // as going backwards. Radial up + the heading at move start, ramped.
-    let aerobaticStable = 0;
-    // The level heading the bird had when the move began, in world space,
-    // re-projected onto the current tangent plane each frame. Scratch;
-    // reused; never allocated in the loop.
-    const _aeroHeading = new THREE.Vector3(0, 0, -1);
-    const _aeroUp = new THREE.Vector3(0, 1, 0);
-    const _aeroScratch = new THREE.Vector3();
-    // Flight v2's camera hold and its attitude-at-contact test. Module scope,
-    // filled per frame, never allocated in the loop.
+    // Flight v2's camera hold and its attitude-at-contact test, now shared
+    // with the stunt model. Module scope, filled per frame, never allocated
+    // in the loop.
     const _v2Up = new THREE.Vector3();
     const _v2Fwd = new THREE.Vector3();
     const _v2Tan = new THREE.Vector3();
     const _v2BodyUp = new THREE.Vector3();
-    // The smoothed LEVEL heading the chase camera stands behind under v2.
-    // Persists across frames — that is the whole point of it.
+    const _v2Vel = new THREE.Vector3();
+    // The smoothed LEVEL heading the chase camera stands behind. Persists
+    // across frames — that is the whole point of it.
     const _v2Heading = new THREE.Vector3();
     const _v2Hold = { weight: 1, heading: _v2Heading, distanceMul: 1 };
     const _v2FollowHold = { weight: 1, heading: _v2Heading, up: _v2Up, distanceMul: 1 };
@@ -5062,24 +5101,32 @@
     // camera off along the OLD direction for the first frames (and, near the
     // vertical, indefinitely). Zeroed there; the next flying frame re-seeds it.
     const v2ForgetHeading = () => { _v2Heading.set(0, 0, 0); };
-    // The stick as the MODEL sees it around a move. bird-visual.js banks the
-    // model by input.x and tilts it by input.y; this is that input with the
-    // wind-up folded in (see AERO_WINDUP below). One object, filled per
-    // frame — zero-allocation loop.
-    const _aeroVisualInput = { x: 0, y: 0, active: false };
-    // How far past its ordinary ceiling the model banks (or tilts) while the
-    // stick is held on the rail EARNING a move, as a fraction of the ordinary
-    // amount: 0.4 takes the 63-degree bank to 88. The freeze the owner saw
-    // ("freezes position on the wing tilt before it rolls") was the dwell —
-    // 0.55 s at a bank that had already saturated — followed by the old code
-    // MUTING the visual bank the moment the move fired, so a 63-degree bank
-    // unwound while the sweep was still easing in from zero. Now the bank is
-    // kept for the whole move and the dwell is MOTION: the bank keeps
-    // deepening until the roll takes over from it, and the extra unwinds in
-    // step with the sweep — never faster than 0.4/PI of the roll rate, so
-    // the apparent rotation cannot reverse. Measured: see G-AERO-FEEL.
-    const AERO_WINDUP = 0.4;
-    let _aeroWindup = 0;
+
+    // A capture harness cannot hold a thumb on the BOOST pill, and every
+    // vertical figure needs the throttle — so `__BIRB.setPad()` writes here
+    // and the per-frame read prefers it. `?debug=1` only, same as setStick.
+    let __birbPadOverride = null;
+    // The last figure the detector named, for a harness to assert on.
+    let __birbLastFigure = null;
+    // How many of each figure this session. Shown on the results card.
+    const stuntTally = Object.create(null);
+
+    // The stunt model's right hand: the BOOST pill as a throttle/rudder pad
+    // (src/flight/stunt-pad.js). Null under classic and v2, where the pill is
+    // the plain button it has always been.
+    let stuntPad = null;
+    // Names the figure after the fact (src/flight/stunt-detector.js). Nothing
+    // decides in advance what the player is flying any more, so the toast has
+    // to be earned by recognising it.
+    let stuntDetector = null;
+    // One object, filled per frame: the stick plus the pad's two axes. The
+    // controller reads `rudder` and `throttle` off its input.
+    const _stuntInput = { x: 0, y: 0, active: false, rudder: 0, throttle: 1 };
+    // What the detector is fed. Same rule: one object, refilled.
+    const _stuntSample = {
+      rollDelta: 0, pitchDelta: 0, bank: 0, pitch: 0, heading: 0,
+      speed: 0, cruise: 1, aboveGround: Infinity, stalled: false,
+    };
 
     /**
      * The bird's clearance above the terrain it is over, or Infinity before
@@ -9427,19 +9474,55 @@
         }
       }
     }
+    // `?stunttune=rollMax:6,gSink:5` overrides any of FLIGHT_STUNT_DEFAULTS at
+    // boot, one number at a time, and flightProbe().tuning reports it back.
+    // The A/B is flown on a phone; without this every re-tune is a push and a
+    // deploy, and those numbers are start points chosen from what a Pitts
+    // does, not measurements from the device.
+    if (flightStunt) {
+      const tune = (/[?&]stunttune=([^&]+)/.exec(window.location?.search || '') || [])[1];
+      if (tune) {
+        for (const pair of decodeURIComponent(tune).split(',')) {
+          const [k, v] = pair.split(':');
+          const n = Number.parseFloat(v);
+          if (Object.prototype.hasOwnProperty.call(FLIGHT_STUNT_DEFAULTS, k) && Number.isFinite(n)) {
+            flightOptions[k] = n;
+          }
+        }
+      }
+      flightOptions.model = flightModelInitial === 'classic'
+        ? FLIGHT_MODELS.CLASSIC : FLIGHT_MODELS.STUNT;
+    }
+    // ONE controller serves stunt and classic; `model` decides which law runs
+    // and every classic path delegates to BirdFlight's own. That is what makes
+    // the gear-menu toggle a live switch rather than a page reload: swapping
+    // controller OBJECTS would mean re-pointing every closure that captured
+    // `flight` — the camera rig, the nesting system, the drone system, the
+    // debug hooks — and a field does not.
     const flight = flightV2
       ? new BirdFlightV2(THREE, flightOptions)
-      : new BirdFlight(THREE, flightOptions);
+      : new BirdFlightStunt(THREE, flightOptions);
+    /** The model actually flying, for the gear menu, the probe and the HUD. */
+    const currentFlightModel = () => (flightV2 ? 'v2' : flight.model);
 
     // 3. Visuals
     // Under v2 the FLIGHT FRAME rolls for real, so this layer is cut to a small
     // aileron/elevator lean (7 / 4.6 degrees). Left at v1's 63/36 the model
     // would carry a full cosmetic bank on top of a frame that is already
     // banked, and the bird would sit a bank's worth off its own turn.
-    const visual = new BirdVisual(THREE, {
-      maxBankAngle: flightV2 ? 0.12 : Math.PI * 0.35,
-      maxPitchTilt: flightV2 ? 0.08 : Math.PI * 0.2,
-    });
+    // Under v2 and stunt the FLIGHT FRAME rolls for real, so this layer is cut
+    // to a small aileron/elevator lean (7 / 4.6 degrees). Left at v1's 63/36
+    // the model would carry a full cosmetic bank on top of a frame that is
+    // already banked, and the bird would sit a bank's worth off its own turn.
+    // Under classic the flight frame does NOT roll and this layer is the only
+    // bank there is, so it keeps v1's numbers — which is why the amounts are
+    // re-applied by the live model toggle rather than fixed at boot.
+    const VISUAL_LEAN = {
+      rolling: { maxBankAngle: 0.12, maxPitchTilt: 0.08 },
+      painted: { maxBankAngle: Math.PI * 0.35, maxPitchTilt: Math.PI * 0.2 },
+    };
+    const visual = new BirdVisual(THREE,
+      flightModelInitial === 'classic' ? VISUAL_LEAN.painted : VISUAL_LEAN.rolling);
 
     const aimRig = new AimRig(THREE);
     const nestAimUp = new THREE.Vector3();
@@ -9447,13 +9530,11 @@
     // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
     flightController = flight;
     flightControllerInitialized = true;
-    // Committed aerobatics are exactly what v2 deletes: a roll is the stick
-    // held over and a loop is the stick held back. Both stay null under v2 —
-    // the per-frame block is already null-guarded, so `_aeroWindup` keeps its
-    // initial 0 and the visual layer sees the plain stick.
-    if (!flightV2) {
-      aerobatics = createAerobatics(AEROBATIC_MOVES);
-      aeroTrigger = createStickEdgeTrigger();
+    // The trick detector, and the pad on the BOOST pill. Both stunt-only; the
+    // pad is attached later, where the boost button is wired, because it has
+    // to REPLACE that button's click handler rather than sit beside it.
+    if (flightStunt) {
+      stuntDetector = createStuntDetector();
     }
 
     // Set sphere center on flight controller for spherical world support
@@ -9782,11 +9863,26 @@
           if (preloadedSounds?.speedBoost) playFromPool(preloadedSounds.speedBoost);
           if (statusMetric) statusMetric.textContent = 'Boost!';
         };
-        boostButton.addEventListener('click', triggerBoost);
-        boostButton.addEventListener('touchend', (e) => {
-          e.preventDefault();
-          triggerBoost();
-        }, { passive: false });
+        // Under the stunt model the pill is a PAD: tap is the boost exactly as
+        // before, and a drag from the pill is throttle (up/down) and rudder
+        // (left/right), both springing back on release. Nothing else on the
+        // screen changes, and a player who never drags has the game they had
+        // yesterday — which is the only reason it is safe to put two axes on
+        // the one control everybody already knows.
+        //
+        // The pad REPLACES the click/touchend handlers rather than sitting
+        // beside them: with both attached, a drag that happens to end over the
+        // pill fires a boost the player did not ask for, and every rudder
+        // input would end in a surge.
+        if (flightStunt && typeof attachStuntPad === 'function' && window.PointerEvent) {
+          stuntPad = attachStuntPad(boostButton, { onTap: triggerBoost });
+        } else {
+          boostButton.addEventListener('click', triggerBoost);
+          boostButton.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            triggerBoost();
+          }, { passive: false });
+        }
       }
     }
 
@@ -11043,7 +11139,14 @@
             // write `speed` directly — those are commanded speeds, and v2
             // honours a direct write as both the speed and the target.
             const target = boostTimer > 0 ? resumeSpeed * BOOST_CONFIG.speedMult : resumeSpeed;
-            if (flightV2) flight.cruise = target;
+            // v2 and stunt both run an ENERGY model: `cruise` is the target
+            // and the controller owns `speed` (a dive gains, a climb bleeds),
+            // so writing speed here every frame would flatten the whole model
+            // back to v1's constant. Classic has no energy model and takes
+            // the speed directly. The grounded and falling branches above
+            // still write `speed`; those are commanded speeds, and both
+            // controllers honour a direct write as speed AND target.
+            if (flightV2 || flight.isStunt) flight.cruise = target;
             else flight.speed = target;
           }
         }
@@ -11065,95 +11168,25 @@
           }
         }
 
-        // Aerobatics run BEFORE tick(), not after. tick() ends by re-deriving
-        // the pose and enforcing the pitch clamp against the orientation it
-        // finds, so a roll applied afterwards is a roll the controller has not
-        // seen and the clamp has not been told to stand down for. Anything
-        // that takes the bird out of the flight envelope has to be inside the
-        // frame the envelope is checked in.
-        if (aerobatics) {
-          // Earn a move from the stick before advancing one. Only while
-          // genuinely flying: a pinned stick during a landing approach or a
-          // knockdown is the player steering, not asking to roll.
-          if (aeroTrigger) {
-            const flying = !isNested
-              && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING
-              && !nestingControlsBird;
-            if (!flying) {
-              aeroTrigger.reset();
-            } else {
-              const ask = aeroTrigger.update(resolvedInput.x, resolvedInput.y, delta);
-              if (ask) {
-                const r = aerobatics.start(ask.move, {
-                  direction: ask.direction,
-                  altitude: __BIRB_ALTITUDE_ABOVE_GROUND(),
-                });
-                if (r.started) {
-                  // Capture the LEVEL heading now, before the move bends the
-                  // nose: forward with its radial component removed.
-                  _aeroUp.copy(flight.position).normalize();
-                  _aeroHeading.set(0, 0, -1).applyQuaternion(flight.quaternion);
-                  _aeroHeading.addScaledVector(_aeroUp, -_aeroHeading.dot(_aeroUp));
-                  if (_aeroHeading.lengthSq() < 1e-6) _aeroHeading.set(0, 0, -1);
-                  else _aeroHeading.normalize();
-                  if (statusMetric) statusMetric.textContent = r.label + '!';
-                  triggerHaptic(18);
-                } else if (r.reason === 'too-low' && statusMetric) {
-                  // Never swallow a deliberate hold. "Nothing happened" is
-                  // the worst feedback there is for one.
-                  statusMetric.textContent = 'Too low!';
-                }
-              }
-            }
-          }
-          const aero = aerobatics.update(delta);
-          // Wind-up: rises with the hold while a move is being earned, is
-          // handed over intact the frame the move starts, and unwinds with
-          // the sweep — gone by the half-way point, when the move is what
-          // the eye is following.
-          _aeroWindup = aero.active
-            ? AERO_WINDUP * Math.max(0, 1 - aero.swept / Math.PI)
-            : (aeroTrigger ? aeroTrigger.progress() * AERO_WINDUP : 0);
-          if (aero.active && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
-            flight.aerobatic(aero.rollDelta, aero.pitchDelta);
-            // A loop carries speed. `flight.speed` was assigned from cruise a
-            // few lines up and is again next frame, so this cannot compound.
-            if (aero.speedMul !== 1) flight.speed *= aero.speedMul;
-            aerobaticStable = aero.stableCamera;
-            // Re-project the held heading onto THIS frame's tangent plane —
-            // parallel transport has moved the radial since the move began.
-            _aeroUp.copy(flight.position).normalize();
-            _aeroScratch.copy(_aeroHeading).addScaledVector(_aeroUp, -_aeroHeading.dot(_aeroUp));
-            if (_aeroScratch.lengthSq() > 1e-6) _aeroHeading.copy(_aeroScratch).normalize();
-            // bCam (src/flight/bird-camera.js) is the LIVE chase rig — see
-            // "FLIGHT PORT" above. cameraState's follow rig is parked at
-            // spawn on this path (read back: its position never moved through
-            // a whole loop) and is held too only so the two cannot disagree
-            // if that rig is ever switched back in.
-            bCam.setHold({ weight: aerobaticStable, heading: _aeroHeading, distanceMul: aero.cameraDistance });
-            cameraState?.setFollowHold?.({
-              weight: aerobaticStable, heading: _aeroHeading, up: _aeroUp, distanceMul: aero.cameraDistance,
-            });
-          } else {
-            // Covers both "the move ended" and "the bird was knocked down or
-            // landed mid-move" — a manoeuvre must never outlive the state it
-            // was legal in, or the stabilisers stay suspended on a bird that
-            // is now falling.
-            if (aero.active) aerobatics.cancel();
-            flight.endAerobatic();
-            if (aerobaticStable !== 0) {
-              bCam.setHold({ weight: 0 });
-              cameraState?.setFollowHold?.({ weight: 0 });
-            }
-            aerobaticStable = 0;
-          }
+        // The stunt model's right hand. The pad springs to neutral, so an
+        // absent or idle pad is throttle 1 and no rudder — which is exactly
+        // what the classic model wants, and why this needs no branch.
+        _stuntInput.x = resolvedInput.x || 0;
+        _stuntInput.y = resolvedInput.y || 0;
+        _stuntInput.active = !!resolvedInput.active;
+        if (__birbPadOverride) {
+          _stuntInput.rudder = __birbPadOverride.rudder;
+          _stuntInput.throttle = __birbPadOverride.throttle;
+        } else {
+          _stuntInput.rudder = stuntPad ? stuntPad.rudder : 0;
+          _stuntInput.throttle = stuntPad ? stuntPad.throttle : 1;
         }
 
         // 2. Physics Update
         // IMPORTANT: We pass delta even when nested!
         // BirdFlight.speed will be 0 when nested, preventing position change,
         // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
-        pose = flight.tick(resolvedInput, delta);
+        pose = flight.tick(_stuntInput, delta);
 
         if (!nestingControlsBird && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
           // Linear ramp from 1× → 3× over FALL_RAMP_DURATION seconds, then hold.
@@ -11225,7 +11258,7 @@
             // degrees off upright; 1.4x cruise is more than level flight can
             // build, so only a dive (which tops out at maxMul 1.9) trips it.
             let v2Crash = false;
-            if (flightV2 && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+            if ((flightV2 || flight.isStunt) && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
               _v2Up.copy(pose.position).normalize();
               _v2BodyUp.set(0, 1, 0).applyQuaternion(pose.quaternion).normalize();
               _v2Fwd.set(0, 0, -1).applyQuaternion(pose.quaternion).normalize();
@@ -11273,13 +11306,23 @@
         // EVERY frame, along the level heading, with radial up. In ordinary
         // level flight the held heading IS the bird's forward, so this changes
         // nothing there — it only bites where the old rig was already wrong.
-        if (flightV2) {
+        if (flightV2 || flight.isStunt) {
           const v2Flying = !isNested && !nestingControlsBird
             && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
           if (v2Flying) {
             _v2Up.copy(pose.position).normalize();
             _v2Fwd.set(0, 0, -1).applyQuaternion(pose.quaternion).normalize();
-            _v2Tan.copy(_v2Fwd).addScaledVector(_v2Up, -_v2Fwd.dot(_v2Up));
+            // Under stunt the heading comes from the VELOCITY, not the nose.
+            // With sink and a stall the two differ, and through a hammerhead
+            // the velocity reverses smoothly while the nose snaps round — a
+            // camera on forward flips at the top of one. Falls back to the
+            // nose when the velocity is too short to have a direction.
+            if (flight.isStunt && pose.velocity && pose.velocity.lengthSq() > 1e-4) {
+              _v2Vel.copy(pose.velocity).normalize();
+            } else {
+              _v2Vel.copy(_v2Fwd);
+            }
+            _v2Tan.copy(_v2Vel).addScaledVector(_v2Up, -_v2Vel.dot(_v2Up));
             // FREEZE the heading while the nose is near vertical: the tangent
             // projection is short there and its direction is mostly noise, so a
             // rig that followed it would flip the frame at the top of a loop.
@@ -11312,6 +11355,40 @@
             // those paths behave exactly as they do under v1.
             bCam.setHold(_v2HoldOff);
             cameraState?.setFollowHold?.(_v2HoldOff);
+          }
+        }
+
+        // Name the figure. Nothing decides in advance what the player is
+        // flying any more, so the toast has to be earned by recognising it
+        // afterwards — and the detector reads the controller's own ROTATION
+        // DELTAS rather than bank and pitch angles, because both of those
+        // have singularities exactly where the interesting figures live.
+        if (stuntDetector && flight.isStunt) {
+          const stuntFlying = !isNested && !nestingControlsBird
+            && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
+          if (stuntFlying) {
+            const dl = flight.lastDeltas;
+            _stuntSample.rollDelta = dl.roll;
+            _stuntSample.pitchDelta = dl.pitch;
+            _stuntSample.bank = flight.bankAngle();
+            _stuntSample.pitch = flight.pitchAngle();
+            _stuntSample.heading = 0;
+            _stuntSample.speed = flight.speed;
+            _stuntSample.cruise = flight.cruise;
+            _stuntSample.aboveGround = __BIRB_ALTITUDE_ABOVE_GROUND();
+            _stuntSample.stalled = dl.stalled;
+            const figure = stuntDetector.update(_stuntSample, delta);
+            if (figure) {
+              __birbLastFigure = figure.id;
+              if (statusMetric) statusMetric.textContent = figure.label;
+              triggerHaptic(18);
+              stuntTally[figure.id] = (stuntTally[figure.id] || 0) + 1;
+            }
+          } else {
+            // A knockdown, a nest or a teleport is not the end of a figure;
+            // it is the end of the attempt. Half a loop left in an
+            // accumulator would otherwise link into the next thing flown.
+            stuntDetector.reset();
           }
         }
 
@@ -11369,10 +11446,7 @@
         // roll is a constant offset that starts and ends continuous, whereas
         // muting it unwound the bank against the sweep's ease-in and read as
         // the bird freezing before it rolled.
-        _aeroVisualInput.x = resolvedInput.x * (1 + _aeroWindup);
-        _aeroVisualInput.y = resolvedInput.y * (1 + _aeroWindup);
-        _aeroVisualInput.active = resolvedInput.active;
-        visualQuat = visual.update(pose.quaternion, _aeroVisualInput, delta);
+        visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
 
         // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
@@ -12413,6 +12487,81 @@
       applyQualityPreset(found >= 0 ? found : 0, { persist: false });
     }
 
+    // ---- Flight model toggle -------------------------------------------
+    // Stunt (the default) or Classic. This is a LIVE switch: the controller
+    // carries both laws and `setModel` picks which one `tick()` runs, so
+    // nothing is reconstructed and no closure has to be re-pointed. A player
+    // who does not get on with the stunt model is two taps from the game they
+    // had, mid-flight, without losing the run.
+    //
+    // Under `?flight=v2` this control is hidden rather than lying: v2 is a
+    // separate controller object and cannot be switched into or out of
+    // without a reload.
+    const FLIGHT_MODEL_LABELS = { stunt: 'Stunt', classic: 'Classic', v2: 'Bank-to-turn' };
+
+    function applyFlightModel(model, { persist = true } = {}) {
+      if (flightV2 || !flightController || typeof flightController.setModel !== 'function') {
+        return currentFlightModel();
+      }
+      const next = model === 'classic' || model === 'v1' ? 'classic' : 'stunt';
+      flightController.setModel(next);
+      // The cosmetic lean has to move with the law. Under stunt the flight
+      // frame rolls for real and the model needs only an aileron's worth of
+      // lean on top; under classic the flight frame never rolls and this
+      // layer IS the bank. Leave it at the stunt value and a classic turn has
+      // no visible bank at all.
+      const lean = next === 'classic' ? VISUAL_LEAN.painted : VISUAL_LEAN.rolling;
+      if (newFlightSystem?.visual) {
+        newFlightSystem.visual.maxBankAngle = lean.maxBankAngle;
+        newFlightSystem.visual.maxPitchTilt = lean.maxPitchTilt;
+      }
+      // Half a figure left in an accumulator belongs to a law that is no
+      // longer flying.
+      stuntDetector?.reset();
+      stuntPad?.cancel?.();
+      // Classic has no every-frame camera hold; hand the frame back so the
+      // rig behaves exactly as it always did there.
+      if (next === 'classic') {
+        newFlightSystem?.camera?.setHold?.(_v2HoldOff);
+        cameraState?.setFollowHold?.(_v2HoldOff);
+      }
+      v2ForgetHeading();
+      if (flightModelLabelEl) flightModelLabelEl.textContent = FLIGHT_MODEL_LABELS[next];
+      if (settingsFlightModelButton) {
+        settingsFlightModelButton.setAttribute('title', next === 'stunt'
+          ? 'Stunt: the stick rolls and pitches. Drag the Boost pill for rudder and throttle.'
+          : 'Classic: the stick steers and the bird stays upright.');
+      }
+      if (persist) {
+        // A private window or blocked site data throws here; a remembered
+        // preference is a convenience and must never break boot.
+        try { window.localStorage?.setItem(FLIGHT_MODEL_STORAGE_KEY, next); } catch (_) { /* ignore */ }
+      }
+      return next;
+    }
+
+    if (settingsFlightModelButton) {
+      if (flightV2) {
+        // Honest rather than broken: v2 is reachable by URL and cannot be
+        // toggled live.
+        if (flightModelLabelEl) flightModelLabelEl.textContent = FLIGHT_MODEL_LABELS.v2;
+        settingsFlightModelButton.disabled = true;
+        settingsFlightModelButton.classList.add('settings-button--disabled');
+      } else {
+        settingsFlightModelButton.addEventListener('click', () => {
+          const now = applyFlightModel(currentFlightModel() === 'stunt' ? 'classic' : 'stunt');
+          if (statusMetric) {
+            statusMetric.textContent = now === 'stunt'
+              ? 'Stunt flight: roll and pitch. Drag Boost for rudder and throttle.'
+              : 'Classic flight: steer and stay upright.';
+          }
+        });
+        // Label the button with whatever the boot actually chose, without
+        // persisting it — `?flight=` must not become sticky.
+        applyFlightModel(flightModelInitial, { persist: false });
+      }
+    }
+
     if (settingsQualityButton) {
       settingsQualityButton.addEventListener('click', () => {
         applyQualityPreset(qualityPresetIndex + 1);
@@ -13317,16 +13466,6 @@
         // describes where the bird is actually pointing and which way it is
         // actually going, which is what a question like "why does a dive turn
         // into a spiral" needs and what no screenshot can answer.
-        // Fire a committed manoeuvre from a harness. `force` skips the
-        // altitude gate, because a capture wants the move at whatever pose it
-        // has pinned, not wherever the terrain happens to allow one.
-        aero: (move = 'roll', direction = 1, force = true) => {
-          if (!aerobatics) return null;
-          return aerobatics.start(move, {
-            direction,
-            altitude: force ? Infinity : __BIRB_ALTITUDE_ABOVE_GROUND(),
-          });
-        },
         // What the follow rig ITSELF reports holding, read back from the
         // rig — so a hold the game believes it sent can be checked against
         // one the camera actually has.
@@ -13344,13 +13483,24 @@
             mode: cameraState?.getMode?.(),
           };
         },
-        aeroState: () => (aerobatics ? {
-          ...aerobatics.state(),
-          stableCamera: +aerobaticStable.toFixed(3),
-          heading: _aeroHeading.toArray().map((n) => +n.toFixed(4)),
-          up: _aeroUp.toArray().map((n) => +n.toFixed(4)),
-          suspended: !!flightController?.aerobaticActive,
+        // The stunt model's right hand, driven from a harness. A capture
+        // cannot hold a thumb on the BOOST pill, and every vertical figure
+        // needs the throttle; without this the hammerhead is unphotographable.
+        setPad: (rudder = 0, throttle = 1) => {
+          __birbPadOverride = (rudder === null) ? null : { rudder, throttle };
+          return __birbPadOverride;
+        },
+        // What the trick detector currently holds, and the last figure it
+        // named. A harness asserts "the detector saw a loop" rather than
+        // re-deriving one from angles it would have to unwrap itself.
+        stuntState: () => (stuntDetector ? {
+          ...stuntDetector.state(),
+          lastFigure: __birbLastFigure,
+          model: currentFlightModel(),
+          pad: { rudder: stuntPad ? stuntPad.rudder : 0, throttle: stuntPad ? stuntPad.throttle : 1 },
         } : null),
+        // Switch flight model live, the same call the gear menu makes.
+        setFlightModel: (model) => applyFlightModel(model),
         flightProbe: () => {
           const fc = flightController;
           if (!fc?.position || !fc?.quaternion) return null;
@@ -13383,7 +13533,7 @@
               ? sampleTerrainHeight(up.x, up.y, up.z) : 0)
             : 0;
           const d3 = (n) => +n.toFixed(3);
-          // Full-circle versions for the aerobatics: asin folds at 90, so a
+          // Full-circle versions: asin folds at 90, so a
           // roll through inverted reads as 90 -> 0 and a loop over the top as
           // 90 -> 0 too. Roll about forward is atan2(up.right, up.bodyUp)
           // (exact while the pitch is level); pitch is atan2(up.fwd, up.bodyUp)
@@ -13403,10 +13553,9 @@
             // rollFullDeg + visualBankDeg, pitchFullDeg + visualPitchDeg. The
             // signs agree by construction — a right stick banks the model
             // right wing down (negative about forward) and rolls the frame
-            // the same way (aerobatic() negates for exactly this reason).
+            // the same way (the controller negates for exactly this reason).
             visualBankDeg: vis ? d3(vis.bank * 180 / Math.PI) : null,
             visualPitchDeg: vis ? d3(vis.pitchTilt * 180 / Math.PI) : null,
-            windup: d3(typeof _aeroWindup === 'number' ? _aeroWindup : 0),
             headingDeg: heading === null ? null : d3(heading * 180 / Math.PI),
             radius: d3(fc.position.length()),
             aboveGround: d3(fc.position.length() - groundR),
@@ -13422,7 +13571,7 @@
             // three below are v2's and are NULL under v1 rather than 0, so a
             // harness can tell "this build has no energy model" from "the
             // energy model reads zero".
-            controller: flightV2 ? 'v2' : 'v1',
+            controller: currentFlightModel(),
             // The simulation clock (sum of the clamped per-frame deltas the
             // flight actually integrated). A harness that counts frames and
             // multiplies by 0.05 is guessing; this is the number.
@@ -13434,15 +13583,31 @@
               maxPitchHold: fc.maxPitchHold, bankGain: fc.bankGain, pitchGain: fc.pitchGain,
               turnGain: fc.turnGain, yawAssist: fc.yawAssist, gSpeed: fc.gSpeed, drag: fc.drag,
               minMul: fc.minMul, maxMul: fc.maxMul, deadzone: fc.deadzone,
-            } : null,
-            // The bank the FLIGHT FRAME is holding, full circle. Under v1 the
-            // only bank is the cosmetic one on the model (visualBankDeg above).
-            bankDeg: (flightV2 && typeof fc.bankAngle === 'function')
+            } : (fc.isStunt ? {
+              rollMax: fc.rollMax, rollExpo: fc.rollExpo, gRollDamp: fc.gRollDamp,
+              pitchMax: fc.pitchMax, yawMax: fc.yawMax, righting: fc.righting,
+              pitchTrim: fc.pitchTrim, rightingLimit: fc.rightingLimit, gSpeed: fc.gSpeed,
+              drag: fc.drag, gSink: fc.gSink, stallMul: fc.stallMul, stallRate: fc.stallRate,
+              throttleIdle: fc.throttleIdle, throttleFull: fc.throttleFull,
+              deadzone: fc.deadzone, assist: fc.assist,
+            } : null),
+            // The bank the FLIGHT FRAME is holding, full circle. Under classic
+            // the only bank is the cosmetic one on the model (visualBankDeg).
+            bankDeg: (typeof fc.bankAngle === 'function' && (flightV2 || fc.isStunt))
               ? d3(fc.bankAngle() * 180 / Math.PI) : null,
             // The target the energy model chases, and speed as a fraction of
             // it: > 1 means the bird has dived into the bank.
-            cruise: (flightV2 && Number.isFinite(fc.cruise)) ? d3(fc.cruise) : null,
-            energy: (flightV2 && typeof fc.energy === 'function') ? d3(fc.energy()) : null,
+            cruise: ((flightV2 || fc.isStunt) && Number.isFinite(fc.cruise)) ? d3(fc.cruise) : null,
+            energy: ((flightV2 || fc.isStunt) && typeof fc.energy === 'function') ? d3(fc.energy()) : null,
+            // The stunt model's aerodynamic state. Null under v1/v2 rather
+            // than 0, so a harness can tell "this build has no wing model"
+            // from "the wing is carrying nothing".
+            lift: (fc.isStunt && typeof fc.liftFactor === 'function') ? d3(fc.liftFactor()) : null,
+            sink: (fc.isStunt && typeof fc.sinkRate === 'function') ? d3(fc.sinkRate()) : null,
+            stalled: (fc.isStunt && typeof fc.isStalled === 'function') ? fc.isStalled() : null,
+            authority: (fc.isStunt && typeof fc.authority === 'function') ? d3(fc.authority()) : null,
+            throttle01: fc.isStunt ? d3(fc._throttle01 ?? 1) : null,
+            rudder: fc.isStunt ? d3(fc._rudder ?? 0) : null,
           };
         },
         flapPhase: (phase01 = null) => {

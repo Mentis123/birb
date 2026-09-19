@@ -11,7 +11,7 @@
  * here is not "does the bird bank" — it is "did the flag even reach a v2
  * controller", because a page that silently keeps running v1 under
  * `?flight=v2` would otherwise pass every check below for the wrong reason
- * (aerobatics.js already produces rolls and loops as scripted MOVES on v1).
+ * (the default stunt model produces rolls and loops from a pure-rate stick).
  *
  * FRAMES, never milliseconds. `renderFrame` in index.html clamps its own
  * delta to 0.05s (20fps floor — the same clamp `birb-walk.mjs` and
@@ -125,7 +125,7 @@ async function main() {
 
         // ── 1. is v2 even active? ────────────────────────────────────────
         // Everything below is worthless evidence if the flag did not reach a
-        // v2 controller — v1 + aerobatics.js already rolls and loops as
+        // v2 controller — the default stunt model already rolls and loops as
         // scripted MOVES, so a silently-ignored flag would still pass a bank
         // or loop check for the wrong reason. This must be the first thing
         // checked and, on a miss, the ONLY thing reported.

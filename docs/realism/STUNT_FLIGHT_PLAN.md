@@ -1,9 +1,35 @@
 # Stunt flight — fly the bird like a biplane, behind `?flight=stunt`
 
-**Status:** plan only (2026-09-19). Nothing in this document is built. The
-owner's brief: *"Plan new joystick control mechanics so the birb can be
+**Status: BUILT AND SHIPPED AS THE DEFAULT** (2026-09-19). What actually
+landed, with its measurements and its open questions, is
+[docs/perf/gates/G-STUNT-0.md](../perf/gates/G-STUNT-0.md) — read that first;
+this document is the design reasoning it was built from, kept because the
+*why* behind each term is not repeated there.
+
+The owner's brief: *"Plan new joystick control mechanics so the birb can be
 controlled like a bi-wing stunt plane, to do stunts and aerobatics. This will
 be a total rewrite of the current weird triggered animation rolls and stuff."*
+Then, on the plan: *"Make the stunt controller the default, and have a toggle
+in the settings to switch which controller. … Please implement full send
+live."*
+
+**What differs from the plan below, and why:**
+
+- **It is one class, not two.** `BirdFlightStunt` carries a `model` field and
+  delegates to `BirdFlight`'s methods under `classic`. Swapping controller
+  OBJECTS live would mean re-pointing every closure that captured `flight`;
+  a field does not, and that is what makes the gear toggle work mid-flight.
+- **v2 was NOT deleted.** `?flight=v2` still reaches it, because G-FLIGHT-V2
+  cites it and `tools/birb-flight-v2.mjs` is a Browser Health step.
+  `aerobatics.js` and its test WERE deleted, which is the part the brief asked
+  for.
+- **Both idle stabilisers are scaled by AUTHORITY**, which the plan did not
+  call for. Without it the hammerhead is unreachable — see the gate's table.
+- **The phases below were collapsed into one change** at the owner's
+  instruction ("full send live"). Phase 4's camera-roll-follow A/B and the
+  Stunt Show mode were NOT built.
+- **`assist` is wired and defaults to 0 everywhere.** The Zen default of 1
+  described in §2.6 is not implemented.
 
 Read [FLIGHT_V2_PLAN.md](FLIGHT_V2_PLAN.md) and
 [G-FLIGHT-V2](../perf/gates/G-FLIGHT-V2.md) first. v2 was the first attempt

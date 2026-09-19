@@ -52,7 +52,14 @@ async function main() {
     // `quality=amazing`: the baseline preset. Ultra (the production default) renders a
     // frame in 2.6 s under SwiftShader, which is not a mode test, it is a renderer
     // test; tools/birb-default.mjs proves the default. See docs/perf/gates/G-ULTRA-DEFAULT.md.
-    await page.goto(`http://127.0.0.1:${port}/index.html?debug=1&quality=amazing`, { waitUntil: 'domcontentloaded' });
+    // `flight=classic`: the v1 mapping. THE PRODUCTION DEFAULT IS NOW STUNT
+    // (docs/realism/STUNT_FLIGHT_PLAN.md, gate G-STUNT-0), and every assertion
+    // in this harness was written and frozen against v1's flight behaviour —
+    // a clamped pitch, no roll in the flight frame, no sink. Pinning it here
+    // RESTORES the state it was frozen against, exactly as `quality=amazing`
+    // does for the Ultra default. tools/birb-stunt.mjs is the harness that
+    // boots the real default and asserts the stunt law's own business.
+    await page.goto(`http://127.0.0.1:${port}/index.html?debug=1&quality=amazing&flight=classic`, { waitUntil: 'domcontentloaded' });
     await startGame(page, 45000);
     if (env !== 'forest') {
         await page.evaluate((id) => window.__BIRB.setEnvironment(id), env);
