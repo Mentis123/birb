@@ -733,7 +733,19 @@
     .boost-button {
       position: absolute;
       bottom: clamp(1rem, 4vw, 2rem);
-      left: clamp(1rem, 4vw, 2rem);
+      /* BOTTOM RIGHT, beside the gear rather than on the far left.
+         Under the stunt flight model this pill is a PAD — tap to boost, drag
+         for rudder and throttle — so it has to live under a DIFFERENT thumb
+         from the stick, or the two controls fight for one. The nipplejs zone
+         is `inset: 0` (the stick can be started anywhere), and a right-handed
+         player's stick thumb lands bottom-left, which is exactly where this
+         used to be.
+         `--space-2 * 2 + 3rem` clears the settings gear, which owns the
+         corner itself at `bottom/right: var(--space-2)` and is 3rem square.
+         No collision with the centred Fly button: that shows only while
+         GROUNDED or FALLING and this pill is `.is-visible` only while
+         FLYING. */
+      right: calc(var(--space-2) * 2 + 3rem);
       min-width: clamp(70px, 18vw, 96px);
       height: clamp(54px, 13vw, 66px);
       padding: 0 clamp(0.8rem, 2.6vw, 1.2rem);

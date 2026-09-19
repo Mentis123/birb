@@ -133,6 +133,30 @@ authority at the vertical — and has its own test at both sites.
   from one that does not work), toggles the model live, and treats console
   warnings as failures.
 
+## The pill moved to the bottom RIGHT
+
+Shipped at the same time and worth its own line, because the pad is worthless
+without it. The BOOST pill had always been bottom-LEFT, and as a BUTTON that
+was fine. As a PAD it has to live under a different thumb from the stick, and
+`.touch-controls__zone` is `inset: 0` — the nipplejs stick is dynamic over the
+whole screen, so a right-handed player's stick thumb lands bottom-left, which
+is exactly where the pill was. Two controls, one thumb, and the rudder would
+never have been usable while steering.
+
+It sits at `right: calc(var(--space-2) * 2 + 3rem)`, which clears the settings
+gear that owns the corner itself (3rem square at `var(--space-2)`). No
+collision with the centred Fly button: that shows only while GROUNDED or
+FALLING, and the pill is `.is-visible` only while FLYING.
+
+Two CSS changes came with making it draggable at all. It needs
+`touch-action: none`, or the browser claims the gesture as a pan before the
+page sees the second `pointermove`. And `.is-cooling` no longer sets
+`pointer-events: none`: cooling means the BOOST is unavailable (`triggerBoost`
+returns early on its own), but under the stunt model the pill is also the
+rudder and the throttle, and taking its pointer events away dropped both for
+the 1.7 s after every boost — exactly when a player is most likely to be
+steering.
+
 ## Gate decision: the frozen oracles this change touches
 
 Per the manifest's own rule, each of these is authorised here and the manifest
