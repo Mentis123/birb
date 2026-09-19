@@ -66,6 +66,18 @@ async function hold(page, { x = 0, y = 0, rudder = 0, throttle = 1 }, n, sampleE
 const release = (page) => page.evaluate(() => { window.__BIRB.setStick(0, 0); window.__BIRB.setPad(null); });
 
 /**
+ * The shipping pitch axis PULLS BACK for nose up (see `invertPitch`), so a
+ * climb command is a NEGATIVE stick y. Read from the live probe rather than
+ * assumed, so this harness follows the build instead of encoding one side of
+ * the preference — and so flipping the default cannot silently turn the loop
+ * check into a dive check that still passes.
+ */
+const pitchSign = (page) => page.evaluate(() => {
+  const t = window.__BIRB.flightProbe()?.tuning;
+  return t && t.invertPitch === false ? 1 : -1;
+});
+
+/**
  * Get well clear of the ground, level, at cruise.
  *
  * NOT optional, and the first run of this harness is why. The stunt model
@@ -78,8 +90,18 @@ const release = (page) => page.evaluate(() => { window.__BIRB.setStick(0, 0); wi
  * checks, and every one of them failed for a reason that had nothing to do
  * with what it was testing.
  */
+let levelPose = null;
 async function reset(page, altitude = 220) {
   await release(page);
+  // ATTITUDE, not just altitude. `setAltitude` moves the bird without
+  // touching its orientation, so a reset after the rail-roll test used to
+  // leave it wherever the roll stopped — and since an inverted bird STAYING
+  // inverted is the designed behaviour (`rightingLimit`), the next check
+  // inherited a coin toss on frame timing. One run started the levelling
+  // check at 166.8 degrees and it failed for doing the right thing.
+  // `restorePose` replays a pose captured while level, which is the one
+  // deterministic way back.
+  if (levelPose) await page.evaluate((p) => { window.__BIRB.restorePose(p); }, levelPose);
   await page.evaluate((alt) => { window.__BIRB.setAltitude(alt); }, altitude);
   await frames(page, 20);
 }
@@ -112,6 +134,9 @@ async function main() {
       { waitUntil: 'domcontentloaded' });
     await startGame(page, 60000);
     await frames(page, 20);
+    // Capture the spawn attitude while it is still level — every later reset
+    // replays it.
+    levelPose = await page.evaluate(() => window.__BIRB.capturePose());
     await reset(page);
 
     // ---- 1. the default --------------------------------------------------
@@ -165,6 +190,19 @@ async function main() {
     check(rightWingDown, 'and a right stick puts the right wing down');
 
     // ---- 4. hands off, the wings level -----------------------------------
+    // Establish a bank that is BOUNDED BY CONSTRUCTION first. Inheriting
+    // whatever attitude the rail-roll above happened to stop at makes this
+    // check a coin toss on frame timing: one run ended at 166.8 degrees, and
+    // an inverted bird STAYING inverted is the designed behaviour
+    // (`rightingLimit`), so the check failed for doing the right thing. A
+    // 0.45 stick saturates against the lateral stability around 38 degrees
+    // however long it is held, and `reset` now replays a LEVEL pose, so this
+    // can never start inverted no matter how many frames the harness gets.
+    await reset(page);
+    const entry = await hold(page, { x: 0.45 }, 40, 8);
+    const entryBank = Math.abs(entry[entry.length - 1].bankDeg);
+    check(entryBank > 10 && entryBank < 90,
+      `established a moderate bank to level out of (|bank| ${entryBank.toFixed(1)})`);
     await release(page);
     const levelled = await hold(page, {}, 150, 6);
     const endBank = Math.abs(levelled[levelled.length - 1].bankDeg);
@@ -184,7 +222,9 @@ async function main() {
       `idle throttle slows the bird below cruise (${slowest.toFixed(1)} vs ${cruiseNow.toFixed(1)})`);
     // ---- 7. a loop, and the detector names it ----------------------------
     await reset(page);
-    const loopSamples = await hold(page, { y: 1 }, 220, 4);
+    const up = await pitchSign(page);
+    check(up === -1, `the shipping pitch axis pulls back for nose up (sign ${up})`);
+    const loopSamples = await hold(page, { y: up }, 220, 4);
     const wentOver = loopSamples.some((s) => Math.abs(s.pitchFullDeg ?? s.pitchDeg) > 110)
       || loopSamples.some((s) => s.pitchDeg > 70);
     check(wentOver, 'a held pull takes the nose past the old 80-degree ceiling');
@@ -220,6 +260,69 @@ async function main() {
     });
     check(menu.present && !menu.disabled, 'the gear menu carries the flight-model toggle');
     check(menu.label === 'Stunt' || menu.label === 'Classic', `and it is labelled (${menu.label})`);
+
+    // ---- 9b. the camera view toggle is live ------------------------------
+    // FPV is NOT the legacy cameraState FPV rig: that rig levels its roll
+    // against world +Y, which is wrong everywhere on a sphere but the pole.
+    // This one wears the BIRD'S OWN quaternion, so the horizon rolls with the
+    // aircraft — which is the whole point of a cockpit view, and is the one
+    // property worth asserting from the live page rather than the source.
+    await reset(page);
+    const camProbe = () => page.evaluate(() => {
+      const p = window.__BIRB.cameraProbe();
+      const f = window.__BIRB.flightProbe();
+      const v = window.__BIRB.cameraView();
+      const [x, y, z, w] = p.quaternion;
+      // rotate local +Y (the camera's own up) into world
+      const ix = w * 0 + y * 0 - z * 1, iy = w * 1 + z * 0 - x * 0;
+      const iz = w * 0 + x * 1 - y * 0, iw = -x * 0 - y * 1 - z * 0;
+      const up = [
+        ix * w + iw * -x + iy * -z - iz * -y,
+        iy * w + iw * -y + iz * -x - ix * -z,
+        iz * w + iw * -z + ix * -y - iy * -x,
+      ];
+      const r = Math.hypot(...p.position);
+      const dot = (up[0] * p.position[0] + up[1] * p.position[1] + up[2] * p.position[2]) / r;
+      return {
+        view: v.view,
+        birdVisible: v.birdVisible,
+        camToBird: Math.abs(r - f.radius),
+        upOffRadialDeg: Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI,
+        bankDeg: f.bankDeg,
+      };
+    });
+
+    const chaseCam = await camProbe();
+    check(chaseCam.view === 'chase', `the shipping default is the chase camera (${chaseCam.view})`);
+    check(chaseCam.birdVisible === true, 'and the bird is visible in it');
+
+    await page.evaluate(() => window.__BIRB.setCameraView('fpv'));
+    await frames(page, 12);
+    const fpvCam = await camProbe();
+    check(fpvCam.view === 'fpv', `the view switches live (got ${fpvCam.view})`);
+    check(fpvCam.birdVisible === false, 'and the bird model is hidden in the cockpit');
+    check(fpvCam.camToBird < 1.5, `and the camera sits ON the bird (${fpvCam.camToBird.toFixed(2)} units)`);
+
+    // Bank hard: the horizon must roll with the aircraft, not stay level.
+    await hold(page, { x: 0.8 }, 45);
+    const banked = await camProbe();
+    await release(page);
+    await frames(page, 30);
+    check(Math.abs(banked.bankDeg) > 25, `a held stick banks the bird (${banked.bankDeg?.toFixed(1)} deg)`);
+    check(Math.abs(banked.upOffRadialDeg - Math.abs(banked.bankDeg)) < 8,
+      `and the cockpit horizon rolls WITH it (up is ${banked.upOffRadialDeg.toFixed(1)} off radial against ${Math.abs(banked.bankDeg ?? 0).toFixed(1)} of bank)`);
+
+    await page.evaluate(() => window.__BIRB.setCameraView('chase'));
+    await frames(page, 12);
+    const backCam = await camProbe();
+    check(backCam.view === 'chase' && backCam.birdVisible === true, 'and it switches back, with the bird restored');
+
+    const camMenu = await page.evaluate(() => {
+      const b = document.querySelector('[data-control="camera-view"]');
+      return b ? { present: true, disabled: b.disabled, label: b.querySelector('[data-camera-view-label]')?.textContent } : { present: false };
+    });
+    check(camMenu.present && !camMenu.disabled, 'the gear menu carries the camera-view toggle');
+    check(/cam$/i.test(camMenu.label || ''), `and it is labelled (${camMenu.label})`);
 
     // ---- 10. still flying, and quiet -------------------------------------
     await release(page);

@@ -102,6 +102,18 @@ const fly = (bird, input, seconds, onStep) => {
 
 const stick = (x = 0, y = 0, extra = {}) => ({ x, y, active: x !== 0 || y !== 0, ...extra });
 
+// Which way the pitch axis points. The shipping model PULLS BACK for nose up
+// (see `invertPitch`), so a "pull" is a NEGATIVE stick y. Every check below
+// asks for a pull or a push by intent rather than by sign, so flipping the
+// default does not silently invert what any of them is testing.
+const PITCH_SIGN = FLIGHT_STUNT_DEFAULTS.invertPitch ? -1 : 1;
+/** Stick position for a nose-UP command of `amount` (0..1). */
+const pull = (amount, extra = {}) => stick(0, PITCH_SIGN * amount, extra);
+/** Stick position for a nose-DOWN command of `amount` (0..1). */
+const push = (amount, extra = {}) => stick(0, -PITCH_SIGN * amount, extra);
+/** Roll `sx` while pulling `amount` — a banked, climbing turn. */
+const bankPull = (sx, amount, extra = {}) => stick(sx, PITCH_SIGN * amount, extra);
+
 // ---------------------------------------------------------------------------
 // The expo curve — the term that makes a pure-rate roll axis survive a thumb
 // ---------------------------------------------------------------------------
@@ -148,15 +160,24 @@ for (const site of SITES) {
   test(`[${site.name}] a held full stick rolls right through inverted and keeps going`, () => {
     const bird = spawn(site);
     let sawInverted = false;
-    // rollMax 5.2 rad/s: 360 degrees in about 1.2 s.
-    fly(bird, stick(1, 0), 1.3, (b) => {
+    let swept = 0;
+    // Measured on the SWEPT angle, not on the bank at a fixed moment. The
+    // lateral stability (see `bankComfort`) opposes the first 90 degrees, so
+    // the time a full turn takes depends on tuning — the property that must
+    // hold is that a pinned stick keeps going round, not that it lands
+    // level at any particular second.
+    fly(bird, stick(1, 0), 2.5, (b) => {
+      swept += b.lastDeltas.roll;
       if (Math.abs(bankDeg(b)) > 165) sawInverted = true;
     });
     assert.ok(sawInverted, 'passed through inverted');
-    // Back near level after a full turn — a roll that lands at 340 degrees
-    // leaves the bird permanently off level.
-    assert.ok(Math.abs(bankDeg(bird)) < 45,
-      `a full roll comes back near level, got ${bankDeg(bird).toFixed(1)}`);
+    assert.ok(Math.abs(swept) > 2 * Math.PI,
+      `a pinned stick keeps rolling past a full turn (swept ${(swept * DEG).toFixed(0)} deg)`);
+    // ...and does not stop there.
+    const before = swept;
+    fly(bird, stick(1, 0), 0.5, (b) => { swept += b.lastDeltas.roll; });
+    assert.ok(Math.abs(swept) > Math.abs(before) + 1,
+      'and it is still rolling after a full turn');
   });
 
   test(`[${site.name}] a bank put in with the stick SURVIVES a held turn`, () => {
@@ -169,7 +190,7 @@ for (const site of SITES) {
     assert.ok(entry < -12, `established a bank of ${entry.toFixed(1)} degrees`);
     // Now pull, with only a whisper of aileron — the ordinary way a turn is
     // flown. The bank must not wash out.
-    fly(bird, stick(0.12, 0.5), 1.2);
+    fly(bird, bankPull(0.12, 0.5), 1.2);
     const held = bankDeg(bird);
     assert.ok(held < entry * 0.6,
       `the bank held through the pull: entry ${entry.toFixed(1)}, now ${held.toFixed(1)}`);
@@ -179,7 +200,7 @@ for (const site of SITES) {
   test(`[${site.name}] an ordinary hard turn does not roll the bird over`, () => {
     // Raw 0.7 held for two seconds is what a player does in a hard turn.
     const bird = spawn(site);
-    fly(bird, stick(0.7, 0.7), 2.0);
+    fly(bird, bankPull(0.7, 0.7), 2.0);
     const bank = Math.abs(bankDeg(bird));
     assert.ok(bank > 25 && bank < 130,
       `a diagonal stick banks into a turn rather than corkscrewing, got ${bank.toFixed(1)}`);
@@ -197,7 +218,7 @@ for (const site of SITES) {
     let overTheTop = false;
     // pitchMax 2.6 rad/s: 360 degrees in about 2.4 s. Authority scales it, so
     // give it room.
-    fly(bird, stick(0, 1), 3.2, (b) => {
+    fly(bird, pull(1), 3.2, (b) => {
       if (Math.abs(pitchFullDeg(b)) > 120) overTheTop = true;
     });
     assert.ok(overTheTop, 'went past the vertical — there is no pitch clamp');
@@ -212,9 +233,43 @@ for (const site of SITES) {
   test(`[${site.name}] there is no pitch clamp at all`, () => {
     const bird = spawn(site);
     assert.ok(bird.maxPitch >= Math.PI - 1e-6, 'reports no ceiling');
-    let maxNose = 0;
-    fly(bird, stick(0, 1), 0.7, (b) => { maxNose = Math.max(maxNose, Math.abs(pitchDeg(b))); });
-    assert.ok(maxNose > 82, `passes v1's 80-degree ceiling, reached ${maxNose.toFixed(1)}`);
+    // Measured on the FULL-CIRCLE pitch: `pitchDeg` is an asin and folds back
+    // at 90, so a bird that has gone right over the top reads as a shallow
+    // climb again. Past 100 degrees is unambiguously past the vertical, which
+    // is what v1's 80-degree clamp made impossible.
+    let past = false;
+    fly(bird, pull(1), 2.0, (b) => {
+      if (Math.abs(pitchFullDeg(b)) > 100) past = true;
+    });
+    assert.ok(past, 'goes past the vertical — v1 clamped at 80 degrees');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The pitch axis points the way a control column does
+// ---------------------------------------------------------------------------
+
+for (const site of SITES) {
+  test(`[${site.name}] PULLING BACK raises the nose and pushing drops it`, () => {
+    // Measured on where the NOSE ends up, not on the sign of the input — the
+    // whole point of the check is that those two are now opposite.
+    const back = spawn(site);
+    fly(back, stick(0, -0.6), 0.8);
+    assert.ok(pitchDeg(back) > 15,
+      `stick back (y -0.6) is nose UP, got ${pitchDeg(back).toFixed(1)} deg`);
+
+    const fwd = spawn(site);
+    fly(fwd, stick(0, 0.6), 0.8);
+    assert.ok(pitchDeg(fwd) < -15,
+      `stick forward (y +0.6) is nose DOWN, got ${pitchDeg(fwd).toFixed(1)} deg`);
+  });
+
+  test(`[${site.name}] ?pitchinvert=0 restores the direct sense`, () => {
+    const bird = spawn(site, { invertPitch: false });
+    assert.equal(bird.pitchSign, 1);
+    fly(bird, stick(0, 0.6), 0.8);
+    assert.ok(pitchDeg(bird) > 15,
+      `uninverted, stick up is nose up, got ${pitchDeg(bird).toFixed(1)} deg`);
   });
 }
 
@@ -280,9 +335,60 @@ for (const site of SITES) {
       `stays inverted hands-off, got ${bankDeg(bird).toFixed(1)}`);
   });
 
+  // The owner's report, in three tests: "if I roll 90 degrees left then put
+  // the stick in neutral, I should stay pitched sideways, then pulling back
+  // on the stick should have me basically turning around to that side... or
+  // even roll over 180 then pull back to dive". Each of these failed on the
+  // first cut, because the idle righting levelled anything under 120 degrees.
+  const rollTo = (bird, targetDeg) => {
+    for (let i = 0; i < 600 && Math.abs(bankDeg(bird)) < targetDeg; i += 1) bird.tick(stick(1, 0), DT);
+    return bird;
+  };
+
+  test(`[${site.name}] hands off from a KNIFE EDGE, it stays on the wing`, () => {
+    const bird = spawn(site);
+    rollTo(bird, 88);
+    const before = Math.abs(bankDeg(bird));
+    assert.ok(before > 85 && before < 100, `reached a knife edge (${before.toFixed(1)})`);
+    fly(bird, stick(0, 0), 3.0);
+    assert.ok(Math.abs(Math.abs(bankDeg(bird)) - before) < 4,
+      `holds the bank hands-off: ${before.toFixed(1)} -> ${bankDeg(bird).toFixed(1)}`);
+  });
+
+  test(`[${site.name}] a pull at the knife edge TURNS the bird, it does not climb`, () => {
+    const bird = spawn(site);
+    rollTo(bird, 88);
+    fly(bird, stick(0, 0), 0.5);
+    const h0 = headingOf(bird);
+    const p0 = pitchDeg(bird);
+    // On the wing, the bird's own up points toward the LOW wing (drop the
+    // left wing and the fin tips left), and a pull moves the nose toward the
+    // bird's own up — so "to that side" is the side bodyUp leans to.
+    const toward = bodyUpOf(bird).clone();
+    toward.addScaledVector(radialUp(bird), -toward.dot(radialUp(bird))).normalize();
+    fly(bird, pull(0.5), 1.0);
+    const h1 = headingOf(bird);
+    const turned = Math.acos(Math.max(-1, Math.min(1, h0.dot(h1)))) * DEG;
+    assert.ok(turned > 30, `heading swung ${turned.toFixed(1)} degrees`);
+    assert.ok(Math.abs(pitchDeg(bird) - p0) < 20,
+      `the pitch stayed near where it was (${p0.toFixed(1)} -> ${pitchDeg(bird).toFixed(1)})`);
+    assert.ok(h1.clone().sub(h0).dot(toward) > 0, 'turned toward the side the bird is banked to');
+  });
+
+  test(`[${site.name}] roll over 180 then pull, and it DIVES`, () => {
+    const bird = spawn(site);
+    rollTo(bird, 176);
+    fly(bird, stick(0, 0), 0.5);
+    assert.ok(Math.abs(bankDeg(bird)) > 165, `still inverted after a pause (${bankDeg(bird).toFixed(1)})`);
+    const alt0 = altitudeOf(bird);
+    fly(bird, pull(0.6), 1.2);
+    assert.ok(pitchDeg(bird) < -25, `nose is DOWN: ${pitchDeg(bird).toFixed(1)}`);
+    assert.ok(altitudeOf(bird) < alt0 - 2, `and losing height: ${alt0.toFixed(1)} -> ${altitudeOf(bird).toFixed(1)}`);
+  });
+
   test(`[${site.name}] hands off from a dive, the nose comes back to the horizon`, () => {
     const bird = spawn(site);
-    fly(bird, stick(0, -0.8), 0.6);
+    fly(bird, push(0.8), 0.6);
     assert.ok(pitchDeg(bird) < -25, `established a dive (${pitchDeg(bird).toFixed(1)})`);
     fly(bird, stick(0, 0), 4.0);
     assert.ok(Math.abs(pitchDeg(bird)) < 15,
@@ -314,13 +420,13 @@ test('a dive gains speed and a climb bleeds it, both bounded', () => {
   const site = SITES[0];
   const dive = spawn(site);
   dive.cruise = 11;
-  fly(dive, stick(0, -0.6), 1.5);
+  fly(dive, push(0.6), 1.5);
   assert.ok(dive.speed > 11, `a dive gains speed (${dive.speed.toFixed(1)})`);
   assert.ok(dive.speed <= 11 * FLIGHT_STUNT_DEFAULTS.maxMul + 1e-6, 'bounded above');
 
   const climb = spawn(site);
   climb.cruise = 11;
-  fly(climb, stick(0, 0.6), 1.5);
+  fly(climb, pull(0.6), 1.5);
   assert.ok(climb.speed < 11, `a climb bleeds speed (${climb.speed.toFixed(1)})`);
   assert.ok(climb.speed >= 11 * FLIGHT_STUNT_DEFAULTS.minMul - 1e-6, 'bounded below');
 });
@@ -331,9 +437,12 @@ test('lift is 1 level at cruise, zero in a knife edge and negative inverted', ()
   assert.ok(Math.abs(bird.liftFactor() - 1) < 0.05, `level at cruise: ${bird.liftFactor().toFixed(2)}`);
   assert.ok(bird.sinkRate() < 0.2, 'and it does not sink');
 
-  // Knife edge.
-  for (let i = 0; i < 400 && Math.abs(Math.abs(bankDeg(bird)) - 90) > 2; i += 1) bird.tick(stick(0.45, 0), DT);
-  assert.ok(Math.abs(bird.liftFactor()) < 0.25, `knife edge carries no lift: ${bird.liftFactor().toFixed(2)}`);
+  // Knife edge. Stick 0.8 is the firm-but-held input that the lateral
+  // stability settles at about 83 degrees — see `bankComfort`. A gentler
+  // stick now holds a gentler bank instead of rolling on round to 90.
+  fly(bird, stick(0.8, 0), 5.0);
+  assert.ok(Math.abs(bankDeg(bird)) > 75, `reached a knife edge (${bankDeg(bird).toFixed(0)})`);
+  assert.ok(Math.abs(bird.liftFactor()) < 0.3, `knife edge carries almost no lift: ${bird.liftFactor().toFixed(2)}`);
   assert.ok(bird.sinkRate() > 2.5, `and it falls: ${bird.sinkRate().toFixed(1)} units/s`);
 });
 
@@ -347,10 +456,9 @@ test('a knife edge loses altitude and a level bird does not', () => {
 
   const knife = spawn(SITES[1]);
   knife.cruise = 11;
-  for (let i = 0; i < 400 && Math.abs(Math.abs(bankDeg(knife)) - 90) > 2; i += 1) knife.tick(stick(0.45, 0), DT);
+  fly(knife, stick(0.8, 0), 5.0);
   const knifeStart = altitudeOf(knife);
-  // Hold the edge with a touch of aileron so righting does not run.
-  fly(knife, stick(0.09, 0), 1.5);
+  fly(knife, stick(0.8, 0), 1.5);
   const dropped = knifeStart - altitudeOf(knife);
   assert.ok(dropped > 2.5, `a knife edge falls out of the sky (dropped ${dropped.toFixed(1)})`);
 });
@@ -362,21 +470,112 @@ test('sink is suspended while the speed is COMMANDED (walking, nesting, the free
 });
 
 // ---------------------------------------------------------------------------
+// RELAXED FLIGHT — the regression the owner found on the phone
+//
+// "It's like it stalls way too much when trying to fly up and it's no longer
+// a fun relaxing experience." Two causes, both fixed and both pinned here:
+// the climb bleed was linear in sin(pitch), so a 45-degree climb settled
+// below stall; and pitch was a pure rate with no resting point, so holding
+// ANY up-stick rotated the bird to vertical in about two seconds.
+//
+// These checks are the floor of the whole model. A future tuning pass that
+// makes some stunt reachable by raising the climb penalty again has to fail
+// here first.
+// ---------------------------------------------------------------------------
+
+for (const site of SITES) {
+  test(`[${site.name}] an ordinary climb NEVER stalls, at any gentle stick`, () => {
+    for (const sy of [0.2, 0.3, 0.4, 0.5, 0.6]) {
+      const bird = spawn(site);
+      bird.cruise = 11;
+      let stalled = false;
+      let minSpeed = Infinity;
+      // Ten seconds is far past any transient: if it settles below stall,
+      // this finds it.
+      fly(bird, pull(sy), 10, (b) => {
+        if (b.isStalled()) stalled = true;
+        minSpeed = Math.min(minSpeed, b.speed);
+      });
+      assert.ok(!stalled,
+        `stick ${sy} held for 10 s must keep flying (min speed ${minSpeed.toFixed(2)}, `
+        + `stall ${(FLIGHT_STUNT_DEFAULTS.stallMul * 11).toFixed(2)})`);
+    }
+  });
+
+  test(`[${site.name}] a held up-stick settles at a CLIMB, not at the vertical`, () => {
+    // The input needs a resting point. Without one a relaxed player who just
+    // wants height ends up pointing at the sky with no airspeed.
+    for (const [sy, maxPitch] of [[0.3, 45], [0.5, 55], [0.6, 62]]) {
+      const bird = spawn(site);
+      bird.cruise = 11;
+      let peak = 0;
+      fly(bird, pull(sy), 10, (b) => { peak = Math.max(peak, Math.abs(pitchFullDeg(b))); });
+      assert.ok(peak < maxPitch,
+        `stick ${sy} settles at a climb, peaked at ${peak.toFixed(0)} (limit ${maxPitch})`);
+      assert.ok(pitchDeg(bird) > 12, `and it IS climbing (${pitchDeg(bird).toFixed(0)} deg)`);
+    }
+  });
+
+  test(`[${site.name}] a gentle climb GAINS altitude instead of losing it`, () => {
+    const bird = spawn(site);
+    bird.cruise = 11;
+    const start = altitudeOf(bird);
+    fly(bird, pull(0.4), 10);
+    assert.ok(altitudeOf(bird) > start + 20,
+      `ten seconds of gentle climb gains height (${start.toFixed(0)} -> ${altitudeOf(bird).toFixed(0)})`);
+  });
+
+  test(`[${site.name}] a gentle turn holds a bank and does not roll or sink`, () => {
+    const bird = spawn(site);
+    bird.cruise = 11;
+    const start = altitudeOf(bird);
+    let peakBank = 0;
+    fly(bird, stick(0.3, 0), 10, (b) => { peakBank = Math.max(peakBank, Math.abs(bankDeg(b))); });
+    assert.ok(peakBank < 40,
+      `a gentle sideways stick is a BANK, not a barrel roll (peaked ${peakBank.toFixed(0)} deg)`);
+    assert.ok(Math.abs(bankDeg(bird)) > 12, `and it is a real bank (${bankDeg(bird).toFixed(0)} deg)`);
+    assert.ok(Math.abs(altitudeOf(bird) - start) < 8,
+      `and it costs almost no altitude (${(altitudeOf(bird) - start).toFixed(1)})`);
+  });
+
+  test(`[${site.name}] a held bank tracks the stick, gently to steeply`, () => {
+    // The ladder that makes the model legible: more stick is more bank, all
+    // the way to a knife edge, and only a pinned stick rolls.
+    const banks = [0.3, 0.5, 0.7, 0.8].map((sx) => {
+      const bird = spawn(site);
+      bird.cruise = 11;
+      fly(bird, stick(sx, 0), 6);
+      return Math.abs(bankDeg(bird));
+    });
+    for (let i = 1; i < banks.length; i += 1) {
+      assert.ok(banks[i] > banks[i - 1] + 5,
+        `more stick is more bank: ${banks.map((b) => b.toFixed(0)).join(' / ')}`);
+    }
+    assert.ok(banks[banks.length - 1] > 70, 'and a firm stick reaches a knife edge');
+  });
+}
+
+// ---------------------------------------------------------------------------
 // The stall — the hammerhead, with no move list
 // ---------------------------------------------------------------------------
 
 test('a vertical climb runs out of speed and the nose falls through — the hammerhead', () => {
   // This is the whole figure, with no move list, no trigger and no dwell:
-  // pull to the vertical, let go, and the terms do it. The pitch trim is
-  // scaled by authority precisely so this is reachable — unscaled it dragged
-  // the nose back to the horizon before the speed could fall below stall.
+  // pull to the vertical with the power back, let go, and the terms do it.
+  //
+  // THE THROTTLE IS PART OF THE INPUT, and that is not a weakening of the
+  // figure — it is how a hammerhead is actually flown. At full power the
+  // climb curve (see `climbExp`) deliberately keeps an ordinary climb flying,
+  // which is the whole fix for "it stalls way too much when trying to fly
+  // up"; cutting the power is the deliberate act that makes the wing stop.
   const bird = spawn(SITES[1]);
   bird.cruise = 11;
-  fly(bird, stick(0, 0.95), 0.67);
-  assert.ok(pitchDeg(bird) > 70, `pulled to near-vertical (${pitchDeg(bird).toFixed(1)})`);
+  const idle = { throttle: FLIGHT_STUNT_DEFAULTS.throttleIdle };
+  fly(bird, pull(1, idle), 1.0);
+  assert.ok(pitchDeg(bird) > 60, `pulled up steeply (${pitchDeg(bird).toFixed(1)})`);
   let stalled = false;
   let minSpeed = Infinity;
-  fly(bird, stick(0, 0), 7.0, (b) => {
+  fly(bird, stick(0, 0, idle), 8.0, (b) => {
     if (b.isStalled()) stalled = true;
     minSpeed = Math.min(minSpeed, b.speed);
   });
@@ -385,15 +584,15 @@ test('a vertical climb runs out of speed and the nose falls through — the hamm
     `and the nose came back down (${pitchDeg(bird).toFixed(1)})`);
 });
 
-test('cutting the throttle is how a hammerhead is flown, and it works', () => {
+test('at FULL power the same pull does not stall — that is the point', () => {
+  // The counterpart to the hammerhead above, and the regression guard for
+  // the whole of this fix: with the power on, pulling up hard is a CLIMB.
   const bird = spawn(SITES[1]);
   bird.cruise = 11;
-  const idle = { throttle: FLIGHT_STUNT_DEFAULTS.throttleIdle };
-  fly(bird, stick(0, 0.95, idle), 0.67);
-  let minSpeed = Infinity;
-  fly(bird, stick(0, 0, idle), 7.0, (b) => { minSpeed = Math.min(minSpeed, b.speed); });
-  assert.ok(minSpeed < FLIGHT_STUNT_DEFAULTS.stallMul * 11,
-    `idle power puts it well under stall (${minSpeed.toFixed(2)})`);
+  fly(bird, pull(1), 1.0);
+  let stalled = false;
+  fly(bird, pull(1), 1.0, (b) => { if (b.isStalled()) stalled = true; });
+  assert.ok(!stalled, 'a powered pull-up keeps flying');
 });
 
 test('authority falls with speed, so a stalled bird is not a bird with full elevator', () => {
@@ -418,7 +617,7 @@ test('classic delegates to v1: the pitch clamp is back and the stick yaws', () =
   const bird = spawn(SITES[0], { model: FLIGHT_MODELS.CLASSIC, maxPitch: Math.PI * (80 / 180) });
   assert.equal(bird.model, 'classic');
   // v1 clamps pitch at 80 degrees however long you pull.
-  fly(bird, stick(0, 1), 3.0);
+  fly(bird, pull(1), 3.0);
   assert.ok(Math.abs(pitchDeg(bird)) <= 81,
     `classic holds v1's clamp, got ${pitchDeg(bird).toFixed(1)}`);
 });
@@ -433,7 +632,7 @@ test('the model switch restores v1\'s pitch clamp, and takes it away again', () 
   bird.setModel(FLIGHT_MODELS.CLASSIC);
   assert.ok(Math.abs(bird.maxPitch - Math.PI * (80 / 180)) < 1e-9,
     `classic gets v1's ceiling back (got ${bird.maxPitch})`);
-  fly(bird, stick(0, 1), 3.0);
+  fly(bird, pull(1), 3.0);
   assert.ok(Math.abs(pitchDeg(bird)) <= 81, `and it is enforced (${pitchDeg(bird).toFixed(1)})`);
   bird.setModel(FLIGHT_MODELS.STUNT);
   assert.ok(bird.maxPitch >= Math.PI - 1e-6, 'and stunt takes it away again');
@@ -442,7 +641,7 @@ test('the model switch restores v1\'s pitch clamp, and takes it away again', () 
 test('the model switch is live, and hands speed ownership over cleanly', () => {
   const bird = spawn(SITES[0]);
   bird.cruise = 11;
-  fly(bird, stick(0, -0.5), 1.0);
+  fly(bird, push(0.5), 1.0);
   const divedTo = bird.speed;
   assert.ok(divedTo > 11, 'the energy model was running');
   bird.setModel(FLIGHT_MODELS.CLASSIC);
@@ -491,9 +690,9 @@ test('a gravity-less floor is never ratcheted upward by the sink term', () => {
 
 test('zero allocations in the hot loop: the pose object is the same object', () => {
   const bird = spawn(SITES[0]);
-  const first = bird.tick(stick(0.4, 0.4, { rudder: 0.3, throttle: 1.2 }), DT);
+  const first = bird.tick(bankPull(0.4, 0.4, { rudder: 0.3, throttle: 1.2 }), DT);
   for (let i = 0; i < 1000; i += 1) {
-    const pose = bird.tick(stick(0.4, 0.4, { rudder: 0.3, throttle: 1.2 }), DT);
+    const pose = bird.tick(bankPull(0.4, 0.4, { rudder: 0.3, throttle: 1.2 }), DT);
     assert.equal(pose, first, 'the same pre-allocated pose every frame');
   }
   assert.ok(Number.isFinite(bird.position.x), 'and 1000 ticks leaves it finite');
@@ -514,6 +713,6 @@ test('lastDeltas reports what the frame actually rotated, for the trick detector
   bird.tick(stick(1, 0), DT);
   assert.ok(Math.abs(bird.lastDeltas.roll) > 1e-4, 'a roll frame reports roll');
   assert.ok(Math.abs(bird.lastDeltas.pitch) < 1e-3, 'and not pitch');
-  bird.tick(stick(0, 1), DT);
+  bird.tick(pull(1), DT);
   assert.ok(Math.abs(bird.lastDeltas.pitch) > 1e-4, 'a pitch frame reports pitch');
 });

@@ -96,6 +96,144 @@
 > SwiftShader. Classic is two taps away in the gear menu, which is what makes
 > a default nobody has flown on glass an acceptable one.
 
+> **AND THEN IT STALLED TOO MUCH TO BE FUN — both causes were the tuning**
+> (2026-09-19, later): [docs/perf/gates/G-STUNT-1.md](docs/perf/gates/G-STUNT-1.md).
+> The owner, flying the shipped build: *"it stalls way too much when trying to
+> fly up and it's no longer a fun relaxing experience."*
+>
+> **`gSpeed` was raised to 7.5 to make ONE figure reachable and it broke
+> ordinary flight.** With a linear `sin(pitch)` bleed, a 45-degree climb
+> settles at **5.11 against a 5.5 stall** — so the wing stopped flying on a
+> climb anybody makes without thinking. The hammerhead needed a vertical to
+> fall below stall; the way to get one is SHAPE, not magnitude. The climb half
+> of the term is **cubed** now (`climbExp` 3.0, dives stay linear, `gSpeed`
+> 6.5): a 45-degree climb settles at 8.45 and only past about 70 degrees does
+> the wing stop. **A global parameter tuned against a stunt is a parameter
+> tuned against the wrong thing.**
+>
+> **The subtler half: a pure RATE has no resting point.** Held for ten
+> seconds, stick 0.3 up took the bird to 90 degrees and stalled it, and stick
+> 0.3 sideways rolled a full 365 degrees and shed 34 units of altitude — so a
+> lazy turn was a slow barrel roll. Both axes now carry a **saturating
+> stability term**: beyond a comfort angle the bird is pushed back toward it
+> at a rate CLAMPED so a firm input still wins. Held angles — 0.3 stick is 38
+> degrees of climb / 24 of bank, 0.7 is 59 / 66, 0.85+ loops or rolls. **This
+> is not v2's rail**: v2 switched mode at a hard 0.97 threshold, this is a
+> saturation that is continuous in the stick, and it is what an elevator
+> overpowering an aircraft's own stability actually does. Both terms switch
+> off once the bird is committed (past the vertical, past `rightingLimit`), so
+> a loop still closes and inverted flight is still holdable. **The bank
+> ceiling is 91 degrees deliberately — a knife edge has to be a bank you can
+> HOLD, or it is not a manoeuvre.** The first value capped it at 72 and the
+> knife edge silently became unreachable; a probe caught that, no test did.
+>
+> **Everything sank all the time**, too: with no deadband, a bird at 90% of
+> cruise sank 0.76 units/s and a 30-degree bank sank 0.54, so relaxed flight
+> nagged at the player's altitude for no manoeuvre they would call one.
+> `sinkSlack` 0.15 makes gentle attitudes free and leaves the knife edge at
+> 3.4 and inverted at 8.
+>
+> **The hammerhead is now flown with the THROTTLE BACK**, which is how one is
+> actually flown and is what the pad exists for: full power 5.67 (no stall),
+> idle 3.85 (stalls). A hard pull at full power is a CLIMB, and there is a
+> test that says so.
+>
+> Ten seconds of relaxed flight, measured: hands-off holds altitude exactly, a
+> gentle climb gains 46 units, a gentle turn holds 24 degrees of bank and
+> loses nothing. Before, the same turn lost 34 and the same climb stalled.
+> `tests/bird-flight-stunt.test.js` gained a **relaxed flight** section at
+> both sites that any future climb-penalty raise has to fail first; seven
+> older checks were rewritten because they encoded the old law's inputs, two
+> of them made tuning-independent on the way (the roll measures SWEPT angle
+> from the controller's own deltas, not the bank at a fixed second).
+
+> **A knife edge you let go of stays on the wing** (2026-09-19):
+> [docs/perf/gates/G-STUNT-2.md](docs/perf/gates/G-STUNT-2.md). *"If I roll
+> 90 degrees left then put the stick in neutral, I should stay pitched
+> sideways, then pulling back should have me basically turning around to
+> that side."* The idle righting ran for any bank under 120°, so a released
+> knife edge rolled itself level (measured **‑89.6° → ‑1.2° in 3 s**) and the
+> pull that should have been a flat turn went nose-up 14°. It **fades to zero
+> between 35° and 55°** now (`rightingBand` / `rightingFade`, continuous, not
+> a rail): a lazy tilt still tidies itself, and any bank past that is held
+> hands-off at any angle — the same knife edge reads **‑89.6° → ‑89.6°**, and
+> a half-stick pull on it swings the heading 44° with the pitch at 0.3°.
+> Inverted-then-pull-to-dive already worked (`rightingLimit`) and has a test
+> now. Three tests were ADDED to the frozen stunt suite under that gate,
+> none weakened.
+
+> **Cockpit view is a setting, and it deliberately does NOT use the FPV rig
+> that was already there** (2026-09-19). *"Add a setting for fpv v 3rd."*
+> Chase cam / Cockpit is a gear-menu toggle persisted to `birbCameraView`,
+> with `?camera=fpv|chase` for a one-off boot (not persisted) and
+> `__BIRB.setCameraView()` / `__BIRB.cameraView()` for harnesses.
+>
+> **`cameraState`'s FPV rig levels its roll against WORLD +Y**, which is
+> correct within sight of the north pole and progressively wrong everywhere
+> else on a planet — the same class of bug as the walk bob writing
+> `position.y`, and the turret branch's own comment already says so, which is
+> why the turret does not use it either. Flight FPV therefore places the
+> camera at the bird wearing the **bird's own quaternion**, so the horizon
+> rolls with the aircraft anywhere on the sphere. The decisive measurement is
+> in `tools/birb-stunt.mjs`: in a held bank the camera's up sits **58.7
+> degrees off the local radial against 58.7 degrees of bank** — equal to a
+> tenth of a degree. A rig that levelled itself would read near zero there and
+> would otherwise look completely plausible in a still.
+>
+> The bird model is hidden in cockpit view through the same
+> `syncAvatarVisibility` the perch uses (`birbAnchor.visible`), so the two
+> cannot disagree, and the toggle is blocked while nested — the nest already
+> owns the camera, and the turret is an FPV of its own.
+
+> **The pitch axis pulls back for nose up** (2026-09-19, later still): *"let's
+> have the up down on the stick be reversed so it's like an actual plane
+> stick."* A control column is not a direction pad — pulling it toward you
+> raises the nose, because it moves an elevator and not the horizon — and on a
+> thumbstick "toward you" is DOWN. `?pitchinvert=0` restores the direct sense
+> and it is a switch on the Flags tab. **Inverted INSIDE the controller, never
+> at the input pipeline**: `inputState.y` is also how the bird walks backwards
+> on the ground, how the turret aims while nested, and what the classic model
+> pitches with, so negating it upstream would have reversed all three. Two
+> follow-ons that would each have read as a bug: `bird-visual.js` tilts the
+> model by `input.y`, so it is handed `pitchSign` or a pull-up lifts the bird
+> while tipping its beak down; and the unit suite asks for a `pull` or a
+> `push` **by intent rather than by sign**, so flipping the default cannot
+> quietly turn the loop check into a dive check that still passes.
+> `tools/birb-stunt.mjs` READS the sign off the probe and asserts the shipping
+> value, rather than assuming either.
+
+> **"Hitting start doesn't start" — and the shape of the page makes that the
+> DEFAULT failure** (2026-09-19). Not reproduced in the build: production
+> served the right `BIRB_BUILD`, all three new modules returned 200, the
+> no-flag boot was clean with zero console errors, and `birb-default`,
+> `birb-stunt` and 924 unit tests were green. What the hunt DID find is
+> structural and worth more than the incident.
+>
+> **Tap-to-Start is wired at index.html:3222. `startGameLoop` is assigned at
+> 14069.** So the button goes live near the START of the module script and
+> the thing it calls only exists at the END of it — and `startGame()` already
+> has a "scene still loading" branch that disables the button and writes
+> **Loading…**. Put together: ANY throw in the eleven thousand lines between
+> those two points — most plausibly a dynamic `import()` a stale service
+> worker cannot serve — leaves a live button that says Loading… forever, with
+> nothing on screen to say why, and a reload lands on the same worker and
+> does it again. **A dead module script does not look like a crash here; it
+> looks like a game that is still loading.**
+>
+> Hence the **boot watchdog**, a CLASSIC script above the module one (same
+> reasoning as the service-worker auto-reload: a dead module must not be able
+> to stop it). The module calls `window.__birbBootOk()` on the line above the
+> `startGameLoop` assignment — the right anchor, because that assignment
+> existing IS what Tap-to-Start needs. If it never arrives, a banner offers
+> one tap that unregisters every worker, deletes every cache and reloads with
+> a cache-busting query. **Two timers, not one**: at 25 s it shows only if
+> something actually threw (a failed import sets `reason`), and a 60 s
+> backstop covers a silent hang — because showing "did not load" over a game
+> that is merely loading on a cold cache is its own bug. Verified by serving
+> a 404 for `bird-flight-stunt.js`, which is exactly what a stale worker with
+> no copy of a new module produces: banner appears unprompted, names the
+> failed import, and one tap comes back booted.
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.

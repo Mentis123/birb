@@ -85,30 +85,134 @@ export const FLIGHT_STUNT_DEFAULTS = {
     // 150 deg/s — a loop in 2.4 s. Radius is speed over rate, about 4.2 at
     // cruise, so roughly 11 units across once the energy dip is counted.
     pitchMax: 2.6,
+    // Expo on the pitch axis, same cubic as the roll's. Without it a 0.3
+    // stick is 0.78 rad/s and holding it points the bird VERTICAL in two
+    // seconds, which is how a relaxed climb turned into a stall.
+    pitchExpo: 0.45,
+    // LONGITUDINAL STABILITY: the term that makes a held stick a CLIMB
+    // rather than a slow loop.
+    //
+    // Pitch is a rate, so holding the stick up does not hold a climb angle —
+    // it keeps rotating, and a player who just wants to gain height ends up
+    // pointing at the sky. That is the other half of "it stalls way too much
+    // when trying to fly up": the energy curve was wrong AND the input had no
+    // resting point.
+    //
+    // Beyond `pitchComfort` an upright bird is pushed back toward it at
+    // `pitchSoft` per radian of excess, CLAMPED at `pitchSoftMax`. The clamp
+    // is what keeps this from being a pitch ceiling: below about 0.75 of
+    // stick the restoring term can still match the command, so the bird
+    // settles at an angle; above it the command wins outright and the bird
+    // goes over the top. There is no rail and no mode — it is a saturation,
+    // which is exactly what an elevator overpowering an aircraft's own
+    // stability actually is. Held angles, measured:
+    //
+    //     stick 0.3 -> 39 deg      stick 0.7 -> 59 deg
+    //     stick 0.5 -> 47 deg      stick 0.8+ -> over the top
+    //
+    // and the steepest holdable climb (63 deg) sits just under the angle
+    // where the energy model would stall it (66 deg), so every sustainable
+    // climb is a climb you can sustain.
+    //
+    // It switches OFF once the bird is past the vertical (`bodyUp . up <= 0`),
+    // so the back half of a loop is free and a loop still closes.
+    pitchComfort: 0.52,
+    pitchSoft: 2.6,
+    pitchSoftMax: 1.5,
     // 69 deg/s of rudder. Enough to hold a knife edge's heading and to pivot
     // a hammerhead; deliberately not enough to flat-turn the bird, which
     // would hand back the auto-turn this law exists to remove.
     yawMax: 1.2,
+    // LATERAL STABILITY, the roll's half of the same story as `pitchComfort`.
+    //
+    // Roll is a rate too, so holding a gentle sideways stick does not hold a
+    // bank — it keeps rolling. Measured on the first cut: stick 0.3 held for
+    // ten seconds rolled the bird a full 365 degrees, so what a player meant
+    // as a lazy turn was a slow barrel roll that shed 34 units of altitude
+    // through the inverted part of every revolution.
+    //
+    // Same shape as the pitch term: beyond `bankComfort` the bird rolls back
+    // toward it at `bankSoft` per radian, clamped at `bankSoftMax` so a firm
+    // input still overpowers it. Held banks, measured:
+    //
+    //     stick 0.3 -> 25 deg      stick 0.7 -> 69 deg
+    //     stick 0.5 -> 42 deg      stick 0.8 -> 86 deg
+    //                              stick 0.85+ -> keeps rolling
+    //
+    // The ceiling is set at 91 degrees DELIBERATELY: a knife edge has to be
+    // a bank you can hold, or it is not a manoeuvre, it is something that
+    // happens on the way past. The first value capped it at 72 and the knife
+    // edge became unreachable. Off past `rightingLimit`, so inverted flight
+    // is still something you can hold too.
+    //
+    // This is NOT v2's rail. v2 switched mode at a hard 0.97 threshold; this
+    // is a saturation, continuous in the stick, and it is what an aileron
+    // overpowering roll damping actually does.
+    bankComfort: 0.17,
+    bankSoft: 2.39,
+    bankSoftMax: 3.4,
     // Idle-only stability. Runs ONLY with the whole stick inside the
     // deadzone — see the class comment.
     righting: 0.7,
+    // ...and only for a SHALLOW bank. The owner, from the phone: "if I roll
+    // 90 degrees left then put the stick in neutral, I should stay pitched
+    // sideways, then pulling back should have me basically turning around
+    // to that side". The first cut righted anything under `rightingLimit`
+    // (120 degrees), so a knife edge you let go of rolled itself level at
+    // 0.7 rad/s and the pull that should have been a flat turn became a
+    // climb. Dihedral is a weak term that tidies a lazy tilt; it does not
+    // pick a committed bank up off the wing. So the righting fades to
+    // NOTHING between `rightingBand - rightingFade` and `rightingBand`
+    // (35 -> 55 degrees), continuous in the bank — not a rail — and past
+    // that a bank you put in is a bank you keep, hands off, at any angle:
+    // knife edge, inverted, anything between.
+    rightingBand: 0.96,
+    rightingFade: 0.35,
     // 0.4, not 0.5, and scaled by authority in `_pitchTrimStep`. Measured:
     // at 0.5 unscaled the nose is dragged back to the horizon from vertical
     // before the energy model can bleed the speed below stall (bottomed at
     // 6.3 against a 5.5 stall), so a hammerhead was unreachable at full
     // power. This is also the difference between a trim and an autopilot.
     pitchTrim: 0.4,
-    // Past 120 degrees of bank an idle bird is closer to inverted than to
-    // upright, and STAYS inverted. Inverted level flight is a stunt; a
-    // controller that rolls you out of it is v2.
+    // Past 120 degrees of bank the bird is closer to inverted than upright,
+    // and the lateral stability under a held stick stops pushing it back
+    // toward upright. (The idle righting has its own, tighter band above.)
     rightingLimit: 2.09,
     // Energy (v2's model, verbatim), with a lower floor so a stall exists at
     // all: 0.35 * cruise is below `stallMul`.
-    // 7.5, from v2's 6.0. A stunt plane pointing straight up loses its
-    // airspeed fast, and that deceleration is what every vertical figure is
-    // made of: at 7.5 a sustained vertical bleeds toward 11 - 7.5/0.9 = 2.7,
-    // which is under the 5.5 stall, so the wing actually stops flying.
-    gSpeed: 7.5,
+    // How hard gravity bites along the flight path. A stunt plane pointing
+    // straight up loses its airspeed fast, and that deceleration is what
+    // every vertical figure is made of.
+    gSpeed: 6.5,
+    // THE CLIMB TERM IS CUBED, AND THAT IS THE WHOLE OF "IT STALLS TOO MUCH".
+    //
+    // Shipped first as a plain `sin(pitch)`, tuned so that a sustained
+    // vertical would fall below stall — which it did, and so did a 45-degree
+    // climb, which is an ordinary thing to do. Measured on the linear law at
+    // gSpeed 7.5: a 40-degree climb settles at 5.64 against a 5.5 stall and a
+    // 45-degree climb settles at 5.11, i.e. the wing stops flying on a climb
+    // any player would make without thinking about it. The owner's words:
+    // "it stalls way too much when trying to fly up and it's no longer a fun
+    // relaxing experience".
+    //
+    // Cubing the climb term (dives stay LINEAR — a dive should feel like it
+    // is being pulled down) moves the whole penalty into the steep end where
+    // it belongs. Equilibrium speed against climb angle, gSpeed 6.5, drag
+    // 0.9, cruise 11, stall 5.5:
+    //
+    //     30 deg -> 10.10      60 deg -> 6.31
+    //     45 deg ->  8.45      70 deg -> 5.01  STALL
+    //     50 deg ->  7.75      90 deg -> 3.78  STALL
+    //
+    // So an ordinary climb costs almost nothing, a committed one costs real
+    // speed, and only pointing it genuinely near-vertical stops the wing —
+    // which is exactly the input a hammerhead is. Cut the throttle and it
+    // stalls at any real climb, because that is a deliberate act.
+    //
+    // THE LESSON: this number was raised to make ONE edge-case figure
+    // reachable and it broke the common case. A global parameter tuned
+    // against a stunt is a parameter tuned against the wrong thing.
+    climbExp: 3.0,
     drag: 0.9,
     minMul: 0.35,
     maxMul: 1.9,
@@ -116,10 +220,23 @@ export const FLIGHT_STUNT_DEFAULTS = {
     // sink in a knife edge against an 11-unit cruise: legible from the chase
     // camera, and recoverable.
     gSink: 4.0,
+    // Lift the wing is allowed to be short of before it sinks at all.
+    //
+    // Without it, ANY departure from level-at-cruise loses altitude: a bird
+    // at 90% of cruise carries 0.81 lift and sinks 0.76 units/s, and a gentle
+    // 30-degree bank sinks at 0.54 — so relaxed flight nags at the player's
+    // altitude the whole time for no manoeuvre they would call a manoeuvre.
+    // At 0.15 a 30-degree bank and a slightly-slow bird are both free, a
+    // 60-degree bank still costs 1.4, a knife edge still costs 3.4 and
+    // inverted still costs the full 8. The cost lands on the committed
+    // attitudes and nowhere else.
+    sinkSlack: 0.15,
     // Below half cruise the nose weathervanes toward the velocity at
-    // `stallRate`. This is the hammerhead and the tail slide.
+    // `stallRate`. This is the hammerhead and the tail slide. 1.4, not 2.0:
+    // a stall the player did not ask for should read as the nose going
+    // heavy, not as the bird being snatched out of their hands.
     stallMul: 0.5,
-    stallRate: 2.0,
+    stallRate: 1.4,
     // Throttle range, as a multiple of cruise. Springs back to 1.
     throttleIdle: 0.55,
     throttleFull: 1.35,
@@ -129,6 +246,23 @@ export const FLIGHT_STUNT_DEFAULTS = {
     // 0 = the biplane, 1 = v2's attitude-hold assistance. One scalar on one
     // code path, not a second controller and not a rail.
     assist: 0,
+    // PULL BACK FOR NOSE UP, like an actual stick. A real aircraft's control
+    // column is not a direction pad: pulling it toward you raises the nose
+    // and pushing it away drops it, because it moves the elevator, not the
+    // horizon. On a thumbstick "toward you" is DOWN, so the pitch axis is
+    // negated.
+    //
+    // Inverted INSIDE the controller, deliberately, rather than at the input
+    // pipeline: `inputState.y` is also how the bird walks backwards on the
+    // ground (`walkBackThreshold`), how the turret aims while nested, and
+    // what the classic model pitches with. Negating it upstream would have
+    // reversed all three. The only axis that should flip is the one holding
+    // an elevator.
+    //
+    // `?pitchinvert=0` restores the direct sense. It stays because which way
+    // a pitch axis should go is the most personal preference in the genre,
+    // and a comparison you cannot re-run is one nobody re-runs.
+    invertPitch: true,
 };
 
 /** Cubic expo, sign-preserving. `linear` is the share held at the centre. */
@@ -269,7 +403,7 @@ export class BirdFlightStunt extends BirdFlight {
     /** Units per second the bird is falling, radially. Never negative. */
     sinkRate() {
         if (this._commanded) return 0;
-        const s = Math.max(0, 1 - this.liftFactor());
+        const s = Math.max(0, 1 - this.liftFactor() - this.sinkSlack);
         return Math.min(s, 2) * this.gSink;
     }
 
@@ -301,6 +435,13 @@ export class BirdFlightStunt extends BirdFlight {
         const cruise = this._cruise > 0 ? this._cruise : 1;
         return Math.max(0.35, Math.min(1.2, Math.abs(this.speed) / cruise));
     }
+
+    /**
+     * +1 or -1: what the pitch axis is multiplied by before it becomes an
+     * elevator command. Read by the visual layer so the model's cosmetic
+     * nose tilt agrees with the nose the player is actually commanding.
+     */
+    get pitchSign() { return this.invertPitch ? -1 : 1; }
 
     /** True while the wing is below flying speed. */
     isStalled() {
@@ -357,20 +498,23 @@ export class BirdFlightStunt extends BirdFlight {
 
     /**
      * Idle roll righting. Toward wings-level by the short way round, and only
-     * while the bird is within `rightingLimit` of upright — past that it is
-     * closer to inverted, and an inverted bird that is left alone stays
-     * inverted (and sinks, which is the tell).
+     * for a SHALLOW bank: it fades to zero across `rightingFade` below
+     * `rightingBand`, so a knife edge or an inverted bird that is left alone
+     * stays exactly where it was put (and sinks, which is the tell). See
+     * `rightingBand` for the report that set it.
      */
     _rightingStep(dt, strength) {
         const bank = this.bankAngle();
-        if (Math.abs(bank) > this.rightingLimit) return 0;
+        const fade = Math.max(0, Math.min(1,
+            (this.rightingBand - Math.abs(bank)) / this.rightingFade));
+        if (fade <= 0) return 0;
         // `bank` is POSITIVE for a left bank and `_rollBy(+)` deepens a left
         // bank, so the correction is the negative of the error. The sign is
         // folded in once, here.
         // Scaled by AUTHORITY, because this is an aerodynamic term and not an
         // autopilot: a wing with no air over it does not right itself.
         const rate = Math.max(-this.righting, Math.min(this.righting, -bank * 2.2))
-            * strength * this.authority();
+            * strength * fade * this.authority();
         const step = rate * dt;
         this._rollBy(step);
         return step;
@@ -405,6 +549,50 @@ export class BirdFlightStunt extends BirdFlight {
             * strength * this.authority();
         const sign = s.up.dot(s.bodyUp) >= 0 ? 1 : -1;
         const step = rate * sign * dt;
+        this._pitchBy(step);
+        return step;
+    }
+
+    /**
+     * Lateral stability — see `bankComfort`. Mirrors `_pitchSoftStep`.
+     *
+     * Off past `rightingLimit`, for the same reason the idle righting is:
+     * past that the bird is closer to inverted than upright, and inverted
+     * flight is a thing you hold rather than a thing you are rolled out of.
+     */
+    _bankSoftStep(dt) {
+        const bank = this.bankAngle();
+        if (Math.abs(bank) > this.rightingLimit) return 0;
+        const over = Math.abs(bank) - this.bankComfort;
+        if (over <= 0) return 0;
+        const rate = Math.min(this.bankSoft * over, this.bankSoftMax) * this.authority();
+        // `bank` is POSITIVE for a left bank and `_rollBy(+)` deepens one, so
+        // the correction is the negative of the excess.
+        const step = -Math.sign(bank) * rate * dt;
+        this._rollBy(step);
+        return step;
+    }
+
+    /**
+     * Longitudinal stability — see `pitchComfort` for what it is for.
+     *
+     * Only while UPRIGHT: once the nose is past the vertical the bird is
+     * committed to a loop and this must not fight it, or the back half never
+     * closes. Scaled by authority, like every other aerodynamic term here.
+     */
+    _pitchSoftStep(dt) {
+        const s = this._scratch;
+        s.up.copy(this.position).sub(this.sphereCenter);
+        if (s.up.lengthSq() < 1e-12) return 0;
+        s.up.normalize();
+        s.bodyUp.set(0, 1, 0).applyQuaternion(this.quaternion).normalize();
+        if (s.up.dot(s.bodyUp) <= 0) return 0;
+        s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
+        const pitch = Math.asin(Math.max(-1, Math.min(1, s.forward.dot(s.up))));
+        const over = Math.abs(pitch) - this.pitchComfort;
+        if (over <= 0) return 0;
+        const rate = Math.min(this.pitchSoft * over, this.pitchSoftMax) * this.authority();
+        const step = -Math.sign(pitch) * rate * dt;
         this._pitchBy(step);
         return step;
     }
@@ -467,7 +655,10 @@ export class BirdFlightStunt extends BirdFlight {
         }
         const target = cruise * this._throttle01;
         const sinPitch = Math.sin(this.pitchAngle());
-        this.speed += (-this.gSpeed * sinPitch - this.drag * (this.speed - target)) * dt;
+        // Climbing is CUBED, diving is linear — see `climbExp` for the
+        // measurement that forced it. `sinPitch` is positive nose-up.
+        const along = sinPitch > 0 ? Math.pow(sinPitch, this.climbExp) : sinPitch;
+        this.speed += (-this.gSpeed * along - this.drag * (this.speed - target)) * dt;
         const lo = this.minMul * cruise;
         const hi = this.maxMul * cruise;
         if (this.speed < lo) this.speed = lo;
@@ -499,7 +690,8 @@ export class BirdFlightStunt extends BirdFlight {
         }
 
         const sx = this._stick(input?.x ?? 0);
-        const sy = this._stick(input?.y ?? 0);
+        // See `invertPitch`: pull back (stick DOWN) is nose UP.
+        const sy = this._stick(input?.y ?? 0) * this.pitchSign;
         const rud = this._stick(input?.rudder ?? 0);
         // The pad springs to 1; an absent field means "no pad on this build".
         const thr = Number.isFinite(input?.throttle) ? input.throttle : 1;
@@ -521,14 +713,21 @@ export class BirdFlightStunt extends BirdFlight {
             const step = -rate * dt;
             this._rollBy(step);
             d.roll = step;
+            // Added, never assigned: the detector reads the NET rotation.
+            d.roll += this._bankSoftStep(dt);
         }
 
         // 2. Pitch. Unlimited — a loop is a 360-degree pitch and any ceiling
-        //    makes one impossible.
+        //    makes one impossible — but a held stick settles at a climb
+        //    ANGLE rather than rotating forever, because the stability term
+        //    below can match it until the command saturates it.
         if (sy) {
-            const step = sy * this.pitchMax * auth * zenPitch * dt;
+            const step = stickExpo(sy, this.pitchExpo) * this.pitchMax * auth * zenPitch * dt;
             this._pitchBy(step);
             d.pitch = step;
+            // Added, never assigned: the detector reads the NET rotation this
+            // frame, and a loop is the net of the command and the stability.
+            d.pitch += this._pitchSoftStep(dt);
         }
 
         // 3. Rudder, about the bird's own up. Right rudder turns right, which
