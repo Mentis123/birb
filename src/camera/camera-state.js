@@ -639,6 +639,11 @@ export function createCameraState({ three, scene, flightController, sphereCenter
     },
     dispose,
     setSphereCenter,
+    // Committed-manoeuvre camera hold; see follow-camera.js setHold().
+    setFollowHold: (opts) => (followState.rig && typeof followState.rig.setHold === 'function'
+      ? followState.rig.setHold(opts) : 0),
+    getFollowDebug: () => (followState.rig && typeof followState.rig.getDebugState === 'function'
+      ? followState.rig.getDebugState() : null),
     getConfig(mode) {
       return modeConfigurations[mode];
     },

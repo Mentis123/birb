@@ -36,7 +36,15 @@
 // touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
-const CACHE_VERSION = 'v60-2026-09-13-solid-bird-slalom-removed';
+//
+// Bumped for flight v2 (`?flight=v2`, docs/realism/FLIGHT_V2_PLAN.md):
+// src/flight/bird-flight-v2.js joins CORE_ASSETS below. index.html imports it
+// only when the flag is set, but a flagged boot on a phone with no signal is
+// exactly the case CORE_ASSETS exists for, and SW-3 (build-identity.test.js)
+// requires every src/ module to be listed regardless. index.html's BIRB_BUILD
+// is bumped to the same literal in the same change, which closes the v57-vs-v54
+// divergence the note above records.
+const CACHE_VERSION = 'v73-2026-09-14-walk-slope';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -111,11 +119,16 @@ const CORE_ASSETS = [
   './sound/explosion.mp3',
   './sound/ring-collect.wav',
   './src/flight/bird-flight.js',
+  // The v2 controller (`?flight=v2`). Listed even though it is a FLAGGED,
+  // conditional import: a module reachable from any boot path and absent here
+  // dies on the first offline launch, and it is 11 KB.
+  './src/flight/bird-flight-v2.js',
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
+  './src/flight/aerobatics.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',
@@ -155,6 +168,9 @@ const CORE_ASSETS = [
   './src/ui/minimap.js',
   './src/ui/dev-quality-panel.js',
   './src/ui/dev-gesture.js',
+  // The panel's Flags tab table; imported by dev-quality-panel.js on the
+  // boot path, so an offline launch without it dies on a dynamic import.
+  './src/ui/boot-flags.js',
   './src/nesting/nest-points.js',
   './src/nesting/nesting-system.js',
   './src/nesting/aim-rig.js',
@@ -255,8 +271,22 @@ self.addEventListener('fetch', (event) => {
   // instantly (fast, offline-safe) but always re-fetch in the background so
   // the NEXT load runs the freshest code even without a version bump. This is
   // the self-healing layer that stops iOS pinning old module code.
+  // Modules go NETWORK FIRST, like the shell, and this is a correctness rule,
+  // not a speed preference. The shell (a navigation) is networkFirst; the
+  // modules were stale-while-revalidate, which serves whatever the PREVIOUS
+  // build's cache holds and refreshes it afterwards. So the first load after
+  // every deploy was a NEW index.html driving OLD modules: on 2026-09-14 the
+  // owner's console showed `pionusPlumageRequested is not a function` at the
+  // title screen — index.html asking visual-style.js for an export the cached
+  // copy predated — and the module script died at top level, before Tap to
+  // Start. The page only heals when the new worker finishes installing and
+  // the update banner reloads it, seconds later. Fetching modules from the
+  // network whenever the network answers makes shell and modules come from
+  // the SAME deploy by construction (Vercel serves them with must-revalidate,
+  // so this is an If-None-Match round trip, not a re-download), and offline
+  // both fall back to the one core cache, which is coherent with itself.
   if (sameOrigin && url.pathname.endsWith('.js')) {
-    event.respondWith(staleWhileRevalidate(event));
+    event.respondWith(networkFirstModule(request));
     return;
   }
 
@@ -266,26 +296,19 @@ self.addEventListener('fetch', (event) => {
 // Serve from cache immediately, refresh the cache in the background. Heavy
 // media stays on cacheFirst — only code goes through here, so the extra
 // background fetches are small.
-async function staleWhileRevalidate(event) {
-  const { request } = event;
-  const cache = await caches.open(CORE_CACHE);
-  const cached = await cache.match(request, { ignoreSearch: false });
-  const network = fetch(request)
-    .then((response) => {
-      if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => {});
-      }
-      return response;
-    })
-    .catch(() => null);
-
-  if (cached) {
-    // Keep the worker alive long enough to finish the background refresh.
-    event.waitUntil(network);
-    return cached;
+async function networkFirstModule(request) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      const cache = await caches.open(CORE_CACHE);
+      cache.put(request, response.clone()).catch(() => {});
+    }
+    return response;
+  } catch (err) {
+    const cached = await caches.match(request, { ignoreSearch: false });
+    if (cached) return cached;
+    return new Response('', { status: 504, statusText: 'Offline' });
   }
-  const fresh = await network;
-  return fresh || new Response('', { status: 504, statusText: 'Offline' });
 }
 
 async function networkFirst(request) {

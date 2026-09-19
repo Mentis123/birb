@@ -22,6 +22,21 @@ public typealias Vec2 = SIMD2<Double>
     let l = length(a)
     return l > 1e-12 ? a / l : Vec3(0, 0, 0)
 }
+
+// The same three for Vec2.
+//
+// Screen space needs them as much as world space does — a drag is a Vec2, a
+// camera's leftover spin is a Vec2, and a stabiliser's rope length is measured
+// in one. They were missing because nothing in the export path had ever needed
+// a 2D length, so `length(someVec2)` resolved to the Vec3 overload and failed
+// with "cannot convert Vec2 to Vec3", which reads like a mistake at the call
+// site rather than a gap in the library.
+@inlinable public func dot(_ a: Vec2, _ b: Vec2) -> Double { a.x * b.x + a.y * b.y }
+@inlinable public func length(_ a: Vec2) -> Double { dot(a, a).squareRoot() }
+@inlinable public func normalize(_ a: Vec2) -> Vec2 {
+    let l = length(a)
+    return l > 1e-12 ? a / l : Vec2(0, 0)
+}
 /// Angle between two vectors in degrees. Returns 180 for a zero-length input so
 /// that degenerate bones fail an angle gate rather than silently passing it.
 public func angleDegrees(_ a: Vec3, _ b: Vec3) -> Double {

@@ -55,3 +55,40 @@ final class MathTests: XCTestCase {
                        "a zero-length bone must fail an angle gate, not pass it")
     }
 }
+
+/// The 2D helpers.
+///
+/// Added because the editor needed them and they were not there: screen-space
+/// work (a drag, the camera's leftover spin, the stabiliser's rope) is all
+/// `Vec2`, and without these `length(aVec2)` picks the `Vec3` overload and
+/// fails at the call site.
+extension MathTests {
+    func testVec2LengthAndDot() {
+        XCTAssertEqual(length(Vec2(3, 4)), 5, accuracy: 1e-12)
+        XCTAssertEqual(length(Vec2(0, 0)), 0, accuracy: 1e-12)
+        XCTAssertEqual(dot(Vec2(2, 3), Vec2(4, 5)), 23, accuracy: 1e-12)
+        // Perpendicular vectors have no projection onto each other.
+        XCTAssertEqual(dot(Vec2(1, 0), Vec2(0, 1)), 0, accuracy: 1e-12)
+    }
+
+    func testVec2NormalizeIsUnitLength() {
+        for v in [Vec2(3, 4), Vec2(-7, 0.25), Vec2(0, -2)] {
+            XCTAssertEqual(length(normalize(v)), 1, accuracy: 1e-12)
+        }
+    }
+
+    func testVec2NormalizeOfZeroIsZeroRatherThanNaN() {
+        // Same contract as the Vec3 form. A camera whose spin has decayed to
+        // nothing must not normalise into NaN and take the view with it.
+        let n = normalize(Vec2(0, 0))
+        XCTAssertEqual(n.x, 0)
+        XCTAssertEqual(n.y, 0)
+    }
+
+    func testVec2AndVec3AgreeOnASharedPlane() {
+        // The 2D form is not a separate implementation with its own rounding.
+        for (x, y) in [(3.0, 4.0), (-1.5, 9.25), (0.001, -0.002)] {
+            XCTAssertEqual(length(Vec2(x, y)), length(Vec3(x, y, 0)), accuracy: 1e-15)
+        }
+    }
+}

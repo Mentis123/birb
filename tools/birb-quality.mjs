@@ -230,7 +230,10 @@ async function boot() {
     consoleErrors.push(`request failed: ${req.url()} (${req.failure()?.errorText})`);
   });
 
-  const url = `http://127.0.0.1:${port}/index.html?debug=1`;
+  // `quality=amazing`: the baseline preset, which is the state every assertion
+  // below was frozen against (shadows off, tier auto, no overrides) before Ultra
+  // became the production default. See docs/perf/gates/G-ULTRA-DEFAULT.md.
+  const url = `http://127.0.0.1:${port}/index.html?debug=1&quality=amazing`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await startGame(page, 30000);
 

@@ -49,6 +49,27 @@ export function createFollowCameraRig(three, options = {}) {
     _breathOffset: new Vector3(),
   };
 
+  // A committed aerobatic manoeuvre asks the rig to HOLD a frame: `up` is
+  // the planet's radial and `heading` is the level heading the bird had when
+  // the move began. Without it this rig, which derives both its up and its
+  // offset from the bird's own orientation, rolls with a barrel roll (so the
+  // bird never visibly inverts) and swings round to the far side of a loop
+  // as the nose comes over the top (so the world reads as going backwards).
+  // `weight` is 0..1 and is ramped by the caller; at 0 the hold is inert.
+  const hold = {
+    weight: 0,
+    heading: new Vector3(0, 0, -1),
+    up: new Vector3(0, 1, 0),
+    // How much further back to stand during the move, 1 = no change. A loop
+    // needs it: its radius (~3.5 units at cruise) is smaller than the
+    // ordinary 6-unit stand-off, so with the camera at its usual distance the
+    // bird goes over the top almost directly above the lens and the rig has
+    // to pitch to near-vertical to keep it in frame — which is the "goes
+    // wild" the phone reported. Twice the distance keeps the whole circle in
+    // front of and above the camera.
+    distanceMul: 1,
+  };
+
   // Accumulator for camera-breath sine wave (radians).
   // Advances each frame by (2*PI*HZ*delta). Pre-allocated primitive, no GC.
   let _breathTime = 0;
@@ -223,6 +244,10 @@ export function createFollowCameraRig(three, options = {}) {
     } else {
       state.up.set(0, 1, 0);
     }
+    if (hold.weight > 0) {
+      state.up.lerp(hold.up, hold.weight);
+      if (state.up.lengthSq() < 1e-6) state.up.copy(hold.up); else state.up.normalize();
+    }
 
     // Compute a smoothed travel direction. Prefer actual velocity to align the
     // camera with the bird's path, but fall back to facing when hovering. This
@@ -236,6 +261,14 @@ export function createFollowCameraRig(three, options = {}) {
       }
     }
 
+    // Under a hold the rig chases the HELD heading instead of the bird's
+    // live forward, which during a loop points up, then backwards, then
+    // down. Chasing that is what put the camera on the far side of the
+    // loop; and if the damped direction were merely frozen rather than
+    // steered, releasing the hold would leave it wherever the move ended.
+    if (hold.weight > 0) {
+      scratch.travelDirection.lerp(hold.heading, hold.weight).normalize();
+    }
     if (state.travelDirection.lengthSq() < 1e-6) {
       state.travelDirection.copy(scratch.travelDirection);
     } else {
@@ -250,8 +283,9 @@ export function createFollowCameraRig(three, options = {}) {
     // Camera positioning using the user's reference formula:
     // Camera.Position = Bird.Position - (Direction * Distance) + (Up * Height)
     // offset.z = distance behind, offset.y = height above
-    const distanceBehind = Math.abs(state.offset.z);
-    const heightAbove = state.offset.y;
+    const holdStretch = 1 + (hold.distanceMul - 1) * hold.weight;
+    const distanceBehind = Math.abs(state.offset.z) * holdStretch;
+    const heightAbove = state.offset.y * holdStretch;
 
     // Start with bird position (plus ambient bob if any)
     state.desiredPosition.copy(pose.position);
@@ -379,8 +413,16 @@ export function createFollowCameraRig(three, options = {}) {
       };
     }
 
-    const positionAlpha = resolveWeight(state.positionDamping, delta);
-    const lookAtAlpha = resolveWeight(state.lookAtDamping, delta);
+    // Under a hold the rig has to REACH its held station, not drift toward
+    // it: the ordinary damping closes 95% of the gap in about half a second,
+    // and a loop is two. Measured before this, the camera began a loop 1.5
+    // units BELOW the bird (the stick had been pinned up for the dwell, and
+    // the rig had followed the climbing bird's frame) and never got behind
+    // it before the move was over. The floor is a per-frame weight, so it
+    // is frame-rate independent enough for a 60/120 Hz phone.
+    const holdFloor = hold.weight * 0.35;
+    const positionAlpha = Math.max(resolveWeight(state.positionDamping, delta), holdFloor);
+    const lookAtAlpha = Math.max(resolveWeight(state.lookAtDamping, delta), holdFloor);
     const rotationAlpha = resolveWeight(state.rotationDamping, delta);
 
     state.position.lerp(state.desiredPosition, positionAlpha);
@@ -416,6 +458,19 @@ export function createFollowCameraRig(three, options = {}) {
     };
   }
 
+  /**
+   * Hold a stable frame for a committed manoeuvre. `heading` and `up` are
+   * copied (never retained), so the caller may pass scratch vectors.
+   * Passing weight 0 (or nothing) releases the hold.
+   */
+  function setHold({ weight = 0, heading = null, up = null, distanceMul = 1 } = {}) {
+    hold.weight = Math.max(0, Math.min(1, Number.isFinite(weight) ? weight : 0));
+    hold.distanceMul = Number.isFinite(distanceMul) && distanceMul > 0 ? distanceMul : 1;
+    if (heading && heading.lengthSq() > 1e-6) hold.heading.copy(heading).normalize();
+    if (up && up.lengthSq() > 1e-6) hold.up.copy(up).normalize();
+    return hold.weight;
+  }
+
   function getDebugState() {
     return {
       position: state.position.clone(),
@@ -428,6 +483,10 @@ export function createFollowCameraRig(three, options = {}) {
       velocityLookAhead: state.velocityLookAhead,
       steeringLookAhead: { ...state.steeringLookAhead },
       travelDirection: state.travelDirection.clone(),
+      // The hold as the rig actually has it — not as the caller believes it
+      // sent it. A hold that never arrives is indistinguishable from one
+      // that does not work, unless this is read back.
+      hold: { weight: hold.weight, distanceMul: hold.distanceMul, heading: hold.heading.clone(), up: hold.up.clone() },
     };
   }
 
@@ -474,5 +533,6 @@ export function createFollowCameraRig(three, options = {}) {
     updateFromPose,
     getDebugState,
     snap,
+    setHold,
   };
 }

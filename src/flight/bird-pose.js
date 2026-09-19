@@ -29,12 +29,33 @@ export function blendToward(current, target, delta, rate) {
  * Wings fold IN and shorten, and the fold has to be gradual: snapping the
  * wings closed on the frame the nesting state flips reads as a dropped frame
  * rather than as a bird settling.
+ *
+ * A tuck is TWO rotations, and only having one is why this pose read as a
+ * bird holding its wings out rather than a bird with its wings away. `fold`
+ * is dihedral — it drops the wing toward the flank — and on its own it just
+ * makes a wide V pointing at the ground, because the wing is still standing
+ * straight out sideways. `sweep` is what lays it back ALONG the body, so the
+ * folded wing finishes over the flank with its primaries trailing past the
+ * tail, which is the silhouette a perched bird actually has.
+ *
+ * The pair was solved by capture at fixed poses, not chosen: with sweep at
+ * zero, 0.95 rad of fold hangs the wing plate visibly below the belly line
+ * and the back view is two thin blades either side of the body. Trading some
+ * of it for sweep (0.70 / 0.65) absorbs the wing into the body silhouette
+ * from every angle the chase camera can reach. Less fold than that (0.50 /
+ * 0.80) and the wing swings back OUT — past about 0.7 rad of sweep the wing
+ * is pointing astern rather than lying on the bird, and it reads as wide
+ * again.
  */
 export function perchPose(blend) {
   const t = Math.max(0, Math.min(1, blend || 0));
   return {
     // Radians added to each wing's base rotation, mirror-signed by the caller.
-    fold: t * 0.95,
+    // Positive drops the wing toward the flank.
+    fold: t * 0.70,
+    // Radians of backward sweep about the wing's own vertical, mirror-signed
+    // by the caller. Lays the folded wing back along the body.
+    sweep: t * 0.65,
     // Wings pull in against the body rather than staying spread.
     span: 1 - t * 0.42,
     // The tail drops and narrows as the bird settles onto the nest.

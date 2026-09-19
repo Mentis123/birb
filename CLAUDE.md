@@ -530,13 +530,35 @@
 > four images, chained under the rim light's own onBeforeCompile, `?feathers=0`
 > and `?feathernormals=0` for the A/B, v3 only (its UVs tile in surface units;
 > the atlas v2 built assumed a bird-shaped image `asset-check` will never
-> accept). **Measured on the sheet it darkens the rendered bird 18-49%, far
-> more than the 7% the offline solve predicts, with or without normals** — the
-> reading is that the plain bird's belly and back were BLOWN OUT (rim + emissive
-> + key on a near-white vertex colour) and the multiply removes a clipped
-> highlight, which is nonlinear; that is inferred from the composite, not yet
-> measured, and the phone decides. First capture at 4 tiles/unit minified the
+> accept). First capture at 4 tiles/unit minified the
 > 512 sheet 8-20x into mush (detail x0.85-1.29); it is 1.8 now.
+>
+> **CORRECTED 2026-09-13 (evening): the "darkens the bird 18-49%" reading was
+> an artefact of comparing two separate browser boots.** Re-measured against
+> a CONTROL — two boots with the sheets ON in both — the control's own
+> luminance spread is 0.1-3.2% and its mean absolute pixel difference 1.2-3.4
+> of 255, which is the same size as everything that had been attributed to
+> the feathers. Boot-to-boot, the bird's world orientation at freeze differs,
+> so the key light lands at a different angle; `pinTier(0)`, `setSunEnabled
+> (false)`, `setSunTime`, `setBloom({enabled:false})`, `freeze(true)`,
+> `restorePose({position, quaternion})` and `flapPhase()` together pin most
+> of it and the residual (idle flutter, tail sway — both sub-degree, both
+> enough to shift a silhouette by a pixel) still floors the method at about
+> 2/255. **A difference you cannot separate from your own control is not a
+> measurement.**
+>
+> What the sheets actually do, measured with the same control: at a 1.05-unit
+> stand-off the body carries **+40.8% high-frequency detail** against
+> feathers=0 (control +4.2%) and the back +18.8% (control -9.4%) — visibly
+> scalloped contour feathers across the breast and flank. At the 4.2-unit
+> chase stand-off the game actually uses, the difference is -3.8% detail
+> against a -2.4% control: **indistinguishable from noise.** Luminance moves
+> under 3.4% at every distance, so they do not darken the bird meaningfully
+> either. The sheets are real, they are on, and at play distance you cannot
+> see them — the limit is the bird's ~140 px on screen against a 512 sheet at
+> 1.8 tiles/unit, which is a TILING RATE problem (fewer, larger feathers),
+> not a strength problem. Reproduce with the deterministic A/B described
+> above; `?feathers=0` is the off side.
 
 > **The bird was inside out, and the slalom was two yellow towers**
 > (2026-09-13, evening). Both found by the owner flying the shipped build on
@@ -584,8 +606,9 @@
 > A feature "added to every environment" is not paid for when it is used; it
 > is paid for always.
 
-> **The organic pass is planned, not built** (2026-09-13, late):
-> [docs/realism/ORGANIC_PASS_PLAN.md](docs/realism/ORGANIC_PASS_PLAN.md).
+> **The organic pass: Waves A and B shipped, C/D planned** (2026-09-13, late):
+> [docs/realism/ORGANIC_PASS_PLAN.md](docs/realism/ORGANIC_PASS_PLAN.md), §11
+> and §12 for what they actually did.
 > The owner asked for less blocky leaves and a smoother ground that keeps its
 > sharp rocks. Two measurements set the plan's shape. **The forest's 285
 > canopies are 24k of its 58k triangles**, so "more segments" is +24k and off
@@ -603,7 +626,512 @@
 > the plan costs zero triangles and zero draw calls; the mountain (35k tris,
 > six-sided cone pines) is where the cheap geometry goes; shadows are a
 > five-minute phone measurement, not a plan item, because the lever exists
-> and no device number does.
+> and no device number does — it is **"Real shadows (shadow map)"** on the
+> **Ultra** tab of the three-finger quality panel, which works on production
+> without `?debug=1` (that is what assertion A1 exists to prove). Do not reach
+> for MAX REALISM to test it: G-ASCEND found its partner BACK TO SHIPPING
+> DEFAULT is not reversible.
+>
+> **Wave A shipped and is the default**, behind `?smooth=0` / `__BIRB.smooth()`:
+> the ground and eight soft materials (canopies, shrubs, ferns, the gold crown,
+> pine crowns, snow caps, both clouds) shade smooth while every rock, boulder,
+> scree, spire, peak, cliff and building keeps its facets; trees lean 1-3° off
+> radial unless they host a nest; rocks got three independent axes and sit
+> into the ground. **The canyons are where the rule is visible**: the plateau
+> top rolls and the wall below the rim fractures, on one mesh and one draw
+> call. Two things it taught. **The escape hatch had to be engineered to be a
+> true before** — the first splice emitted a shader one blank line longer than
+> the one it claims to reproduce, which is cosmetic in GLSL and worthless as
+> evidence, so the flat path is now diffed against HEAD's own output. And a
+> **radial fan of spokes across the snowfield was in BOTH frames**: the
+> teleport target sat within 18 degrees of the sphere's +Y pole, where all 128
+> meridians converge. A capture near a UV pole says nothing about shading.
+> Trunks were deliberately left flat — bark is not crystalline, but the
+> authored bark tints were solved against the flat material's measured
+> luminance, so it is a re-measurement, not a flip.
+
+> **Wave B: the leaves, snow on what faces up, and soil you can see the grain
+> of** (2026-09-13). `?leaves=0`, `?snowline=0`, `?groundbump=0`.
+>
+> **A crown's outline is what makes it read as solid, and adding segments
+> cannot fix that at any price this frame can pay** — 285 canopies are already
+> 41% of the forest's triangles. So the ragged edge is CUT OUT of the existing
+> mesh: world-space noise thresholded near the silhouette, fed to three's own
+> alpha test. Two traps in one feature. **The obvious `normal.z` silhouette
+> term cannot compile there** — three's fragment order puts
+> `<alphatest_fragment>` BEFORE `<normal_fragment_begin>`, and `vNormal` is
+> compiled away entirely under FLAT_SHADED, so anything built on it dies under
+> `?smooth=0`, the one path the A/B needs. And **a FACET normal cannot cut a
+> silhouette on a low-poly mesh**: it is constant across a facet, a lathe
+> canopy has seven, and the capture showed one clean straight edge with the
+> opposite third of the crown dissolved. `ensureWorldNormalVarying` carries
+> the interpolated normal and is per-material correct for free — three's
+> polyhedra are non-indexed, so on a boulder `objectNormal` already IS the
+> facet normal while on a lathe it is smooth.
+>
+> **Two latent bugs came out; only one announced itself.** `addFoliageWind`
+> ASSIGNED `onBeforeCompile` and set a CONSTANT cache key, so any patch already
+> on a foliage material was erased silently — nothing had caught it because the
+> only other patch there chains and happened to run second. And
+> `addAtmosphere` guarded its `varying` DECLARATION while replacing
+> `<begin_vertex>` unconditionally, so a second patch wanting the same world
+> position declared `birbWorldPos` twice: **140 compile failures**, caught by
+> `tools/birb-shaders.mjs` and by nothing else, because three draws nothing for
+> a failed material and the page still paints. One guarded helper now.
+>
+> **Snow settles by `dot(N, normalize(worldPos))`** — radial up, never world
+> +Y — written at `<color_fragment>`, and a boulder goes from a uniform dark
+> polyhedron to snow on its up-facing planes with bare rock on the sides. A
+> conifer flank sits ~72 degrees off up, so the 0.45 floor the rock materials
+> use puts no snow on a pine at all; theirs opens to 0.10.
+>
+> **The ground bump's strength was ten times off because the units are not
+> three's.** `perturbNormalArb` expects a height map's gradient; here the
+> height is the albedo's LUMINANCE, which changes ~0.01 per pixel, so at the
+> 0.35 a bump map would want the frame is pixel-identical to no bump — which
+> looks exactly like the feature not being wired. One capture at 20x proved it
+> was (mean channel difference 25/255), then the sweep read 0.35 invisible, 5
+> right, 9 noisy, 20 static. Strength and fade are solved as a PAIR from "~5 at
+> a perch, ~1 by flight altitude": rate ln(5)/21, strength 5·e^(4·rate). The
+> triplanar sample is hoisted and shared, so it is still three `texture2D`
+> calls and a test counts them.
+>
+> **The cost this could not measure is B1's.** An alpha-tested material loses
+> early-Z and the canopies are the biggest instanced meshes in the frame; under
+> SwiftShader at 1 fps that number is meaningless. If the phone's adaptive tier
+> starts dropping where it did not, gate the erosion on `tier < 2` like the
+> ribbons. `?leaves=0` is the control.
+
+> **The bird on its feet: a pose nothing had ever driven** (2026-09-13,
+> late). The owner asked for wings tucked and a walk animation on the ground.
+> Both already existed in the source. Neither had ever run.
+>
+> **`perchBlend` targeted `isNested` alone**, so the fold, the pulled-in span
+> and the dropped tail could only happen in a nest — and **the bird is
+> INVISIBLE at the perch** (`birbAnchor.visible = mode !== FPV`). So the perch
+> pose had shipped for months, was unit-tested in `bird-pose.js`, and had
+> never been seen by anyone. A bird walking on the ground held the full
+> spread-wing glide. It now targets `isNested || isGroundedVisual`.
+>
+> **A tuck is TWO rotations and the pose only had one.** `fold` is dihedral —
+> it drops the wing toward the flank — and a wing that is still standing
+> straight out sideways just becomes a wide V pointing at the ground.
+> `perchPose` gained `sweep`, the ONLY term in the whole rig that writes
+> `rotation.y`, which lays the folded wing back ALONG the body so the
+> primaries trail past the tail. Solved by capture at four fixed poses, not
+> chosen: 0.95 fold / 0 sweep hangs the wing plate below the belly line and
+> the rear view is two thin blades either side of the body; 0.50 / 0.80 swings
+> it back out again, because past ~0.7 rad of sweep the wing points astern
+> rather than lying on the bird. 0.70 / 0.65 absorbs it into the silhouette
+> from every angle the chase camera can reach.
+>
+> **The walk bob moved along WORLD +Y** — `birbAnchor.position.y += sin(...)`
+> — on a planet where up is radial. Correct within sight of the north pole
+> and a progressively sideways shuffle everywhere else. Same rule the ground
+> shader, the flight floor and Wave B's snow term all already follow.
+>
+> **`tools/birb-walk.mjs` is the guard, and it is in CI.** It lands the bird
+> through a real ground collision and then asserts the pose and the controls:
+> wings fold and sweep (and mirror), span pulls in, a bird with no input does
+> not drift, forward moves it and swings the feet, the feet settle when the
+> stick is released, reverse comes back, steering moves it. Mutation-tested by
+> reverting the `perchBlend` fix — three failures, each naming the defect.
+> `__BIRB.birdPose()` is what made any of it checkable: without it, "the wings
+> tuck when grounded" is a claim about source rather than about the bird on
+> screen. **Frames, never milliseconds** — the walk advances per frame and
+> this harness runs at a few frames a second under SwiftShader.
+
+> **The bank had no bank in it, the dive had a spiral in it, and the bird is a
+> Bronze-winged Pionus now** (2026-09-13, night). All three reported from the
+> phone; all three measured before anything was changed.
+>
+> **"Banks left both wings go straight, banks right both wings go down."**
+> The bank dip was written with the two wings OPPOSITE-signed, which under the
+> right wing's `scale.z = -1` is a symmetric FLAP, not a roll. A bank is the
+> one motion in the whole rig that is not mirror-symmetric, so it is the one
+> term that must be SAME-signed. Measured with the new `birdPose().leftTip` /
+> `.rightTip` (each wingtip in the BIRD'S OWN frame, which is the only frame
+> where "that wing is high" means anything): at five stick positions the two
+> tips were equal **to four decimal places** — zero bank, all of the amplitude
+> going into a phantom flap that then stacked with the correctly-symmetric
+> `glideSweep`, adding one way and cancelling the other. That is the report,
+> exactly. Fixed, it measures antisymmetric: bank -1.31 / +1.31 at full stick
+> either way, collective dip the same -0.12 in both. **A rotation.x pair does
+> not tell you which wing is up; evaluating the tip position does.**
+>
+> **A held dive spiralled and looped out of itself because yaw turned about
+> the BIRD'S up.** Correct for an aircraft in open sky, wrong on a planet: at
+> 60-70 degrees nose-down the bird's own up points backward along the ground,
+> so a yaw input is a world-space ROLL — and roll was never corrected, because
+> `_applyZenAutoLevelRoll` ran only in Zen AND only on a near-centred stick,
+> which is exactly when roll does not accumulate. Measured holding (x 0.25,
+> y -1) from 200 units up: roll 0.5 -> **40 degrees**, heading through more
+> than a full turn, pitch carried from -70 round to **+55 — the bird pulled
+> out of its own dive and started climbing.** Yawing about the PLANET'S up
+> instead: roll **0.0 throughout**, the full -80 held for the whole run, a
+> smooth constant-rate descending turn. With no yaw input the two are
+> identical, which is the property that makes it safe. `?levelturn=0` is the
+> before; `docs/perf/gates/G-FLIGHT-LEVEL.md` has the table. `maxPitch` is 80
+> degrees now, not 72 — and deliberately not 90, where the tangent-plane
+> heading is undefined and auto-level has no sign to work with.
+> `__BIRB.flightProbe()` reports pitch, roll and heading against the local
+> radial, which is what made any of this arguable from numbers.
+>
+> **Aerobatics are still off the table and this is what it would take:** the
+> pitch clamp lifted entirely, an explicit roll input (roll is currently
+> cosmetic — `bird-visual.js` rolls the MODEL, not the flight frame), a chase
+> camera that survives inversion, and a ground floor that behaves when the
+> bird is upside down. The controller is quaternion-based 6DOF underneath, so
+> it is work, not a rewrite.
+>
+> **The bird is a Bronze-winged Pionus** (`?pionus=0` for the old blue).
+> Bronze mantle and coverts, dusky violet body, dark blue-green flight
+> feathers, a pink-white chin band, and the Pionus signature red. Two things
+> worth keeping. **The red went on the TAIL ROOT, not the undertail coverts
+> where the real bird carries it** — this bird is only ever seen from the
+> chase camera, behind and above, and a marking on the underside is a marking
+> nobody will ever see; banded along each tail feather's own length it flashes
+> from exactly the angle the player is watching from. And **the first
+> iridescence washed the whole wing to grey against a bright sky**: a fresnel
+> that grows monotonically to the silhouette stacks with `addRimLight`, which
+> already owns the silhouette, and a feather plate seen near edge-on is almost
+> ALL silhouette. `addFeatherSheen`'s band now PEAKS across the surface and
+> returns to zero at the edge, which is also what a structural colour actually
+> does. It multiplies the light rather than adding a flat term, and it extends
+> the program cache key — `addRimLight` returns a CONSTANT key, so a sheened
+> wing and a rim-only body would otherwise share one compiled program.
+>
+> Also: `node_modules/three/index.js`, the repo's tracked hand-written stub,
+> gained `Quaternion.conjugate`/`invert`. Bringing a world axis into the
+> bird's frame needs the inverse and the stub lacked a method three has always
+> had — two existing flight tests failed on it before it was added.
+
+> **"An airplane more than a bird" — and MEASURE THE RENDER, NOT THE
+> CONSTANTS** (2026-09-13, night). The wing planform is a table now
+> (`WING_PROFILES`, `?wing=v3|slim|parrot|stocky`), default `parrot`.
+>
+> The first diagnosis was wrong and worth recording. Computing aspect ratio
+> (span squared over area) from the feather plates' own width constants gives
+> **9.1** — glider territory, a tidy story, and false: the plates FAN and
+> OVERLAP, so the wing's real chord is far deeper than any single plate.
+> Measured off a top-down capture instead (span and chord in pixels, sampled
+> at three stations along each wing), the shipped wing is **AR 6.3** — already
+> inside the range a parrot occupies. A plan built on the 9.1 would have cut
+> the span about twice as hard as it needed cutting.
+>
+> **The pointed tip was most of the aircraft read, not the slenderness.**
+> Primary length rose monotonically outward (0.74 -> 1.00), so the OUTERMOST
+> feather was the longest and the wing swept to a dart. A round wing's longest
+> primary sits about a third of the way out and the tips curve back in from
+> there; `round` switches that length from a ramp to a hump, and in the
+> top-down tile it is the first thing you see change. Measured across the four
+> profiles: span 3.55/3.40/3.15/2.89, AR 6.3/5.7/5.1/4.6, and **1,518
+> triangles in every one of them** — planform is free. `stocky` (4.6) goes too
+> far: the wings start to read as too small for the body rather than as a
+> stocky parrot's. `parrot` (5.1) also hands the bronze coverts most of the
+> wing's area, which is the point of a bronze-WINGED bird.
+>
+> One trap the change introduced and closed: `tipFeather` (the ribbon trail's
+> anchor, and what `birdPose().leftTip` reports) was taken from the LAST
+> primary in the loop. With a rounded tip that is the SHORTEST one, so the
+> anchor would have jumped a third of the hand inboard. It tracks the
+> furthest-reaching primary now.
+
+> **Aerobatics shipped, ULTRA IS THE DEFAULT, and REAL SHADOWS ARE ON**
+> (2026-09-13, night). `src/flight/aerobatics.js` +
+> `tests/aerobatics.test.js`. `__BIRB.aero(move, dir)` and
+> `__BIRB.aeroState()` drive and report it.
+>
+> **THE TRIGGER LIVES AT THE EDGES OF THE STICK, and the first one did not.**
+> It shipped as a double tap on the BOOST pill and the owner's first words
+> back were "I'm not getting how this double-tap boost thing works — or
+> isn't". That is the only test a trigger has to pass. It is now: pin the
+> stick hard over and HOLD and the bank becomes a roll; pin it hard up and the
+> climb goes over the top. Both are the continuation of something the player
+> was already doing, so there is nothing to discover — the move is what
+> happens when you ask for more of what you have got. Two numbers make it
+> work. `edge` is **0.94**, because a virtual stick reads 0.6-0.8 through an
+> ordinary hard turn and a move that fires there reads as a bug, not a
+> feature — measured live, a 0.8 stick held for ten seconds never fires.
+> `dwell` is **0.55 s**, which is long enough that the climb has already hit
+> the 80-degree pitch ceiling and the bank has already reached full
+> deflection: in both cases the aircraft has visibly run out of the ordinary
+> control before the extraordinary one takes over. Holding the rail keeps
+> asking, so a sustained full bank rolls about every 1.7 s — the move's own
+> cooldown, not the trigger, is what paces that.
+>
+> **They are COMMITTED moves, not free 6DOF, and that is the design not a
+> shortcut.** Free inverted flight would have to answer for the nesting state
+> machine, the landing check, and a ground floor that is a MINIMUM RADIUS with
+> no opinion about which way up the bird is. A move that starts, runs on rails
+> for about a second and hands back a level bird never opens those questions.
+> There is also no spare input on this screen — one stick, one pill, both
+> already under a thumb.
+>
+> **The angle profile is an integrated raised cosine, and the reason is that a
+> move which does not CLOSE is invisible in every frame and permanent.** Rate
+> `turns * 2PI * (1 - cos(2PI t))` is zero at both ends and its integral is
+> exactly `turns * 2PI`. Deltas are DIFFERENCED from a swept total rather than
+> integrated from the rate, so frame rate cannot lose or gain angle — tested
+> at 120/60/30 fps and at a 5-second hitch, all closing to within 1e-6.
+> Measured on the real page: both moves return the bird to **-0.047 degrees of
+> roll**, and the loop's radius goes 206.2 -> 210.7 -> 206.2.
+>
+> **`aerobaticActive` suspending every stabiliser is the load-bearing half.**
+> A loop cannot exist while an 80-degree pitch ceiling is enforced — it is a
+> 360-degree pitch by definition — and the auto-level, the roll leveller and
+> the player's own stick would each undo the move as fast as it is made. The
+> move also runs BEFORE `tick()`, because `tick()` ends by enforcing that
+> clamp against the orientation it finds.
+>
+> **The roll direction was reversed, and the loop's camera went "wild,
+> maybe backwards" — three facts settled it** (2026-09-13, later still).
+> Forward is local -Z, so a POSITIVE rotation about +Z carries the right wing
+> (+X) UP: `aerobatic()` un-negated rolled a hard right bank to the LEFT,
+> straight against the visual bank the model was already holding the other
+> way. Negated now, with a test that checks which way the right wing tip
+> actually goes. **The visual bank is muted during a move** — the stick is
+> pinned (that is the trigger), so `bird-visual.js` would otherwise add a
+> full 63-degree bank on top of a frame that is already rolling.
+>
+> **`src/camera/follow-camera.js` IS NOT THE LIVE CHASE CAMERA.** The game
+> runs `BirdCamera` (`src/flight/bird-camera.js`, "FLIGHT PORT" in
+> index.html); cameraState's follow rig is parked at spawn on this path —
+> read back through a whole loop, its position never moved. The first camera
+> hold was wired into that parked rig, reached it (weight and distance read
+> back correctly), and changed nothing on screen. `__BIRB.cameraHold()` now
+> reports the LIVE rig's hold beside the parked one so this cannot be
+> mistaken twice. **A hold that arrives at the wrong rig is
+> indistinguishable from one that does not work, unless you read it back
+> from the rig that renders.**
+>
+> `BirdCamera` stands behind the bird along the bird's own FORWARD, and in a
+> loop that forward points up, then backwards, then down — so the camera
+> swung underneath the bird and out the far side. Under a hold it stands off
+> along the LEVEL heading the move began with (re-projected onto the tangent
+> plane each frame), 2x further back for a loop (radius ~3.5 at cruise is
+> smaller than the 5-unit stand-off, so at 1x the bird went over the top
+> almost directly above the lens), full weight for the whole move with 0.15 s
+> in / 0.25 s out ramps — a sin(PI t) ramp left the frame half-following the
+> tumble for most of the move. Measured on the live rig: **10.00 behind,
+> 4.00 up, 0.00 side, look angle -18.4 degrees, constant from t=0.09 to
+> 0.85** while the bird's pitch ran +48 -> +80 -> over the top -> back. Up
+> is already radial in that rig, which is why the barrel roll needed nothing
+> from it and always read against a level horizon.
+>
+> **Ultra is now the shipping default** (`QUALITY_PRESETS[0]`: tier PINNED at
+> 0, DPR ceiling 2.4), at the owner's explicit call. Know what the pin costs
+> before moving it back: `adaptiveTier.pin(0)` takes the tier away from the
+> controller that measures frame rate, so a device that cannot hold full
+> resolution no longer sheds it — it just runs slow. Two taps in the gear menu
+> undo it, which is what makes it an acceptable default and would not make it
+> an acceptable hard-coding. `QUALITY_STORAGE_KEY` moved to `birbQuality2` in
+> the same change: a preference stored under the old key would have silently
+> defeated the new default for every returning player.
+>
+> **Real shadow maps are ON at the Ultra preset** — `PCF at 2048`, 20 shadow
+> casters, verified at boot with `__BIRB.setShadows({})` reporting
+> `{enabled: true, type: 1, mapSize: 2048, casterCount: 20}` without anything
+> touching the panel. Captured at a champion tree with a low sun, the
+> difference is not subtle: the canopy and trunk get their shaded sides back
+> and the grove reads as having form instead of being flatly lit.
+>
+> Two things about how it is wired. It hangs off the PRESET rather than its
+> own hidden default, so one tap to Amazing drops the resolution pin AND the
+> shadows together — which is what someone whose phone is struggling actually
+> wants to do, and it means the escape hatch is the control they already know.
+> And it routes through `qualitySettings.request`, because CONTRACT §7.1 says
+> shadow state changes by that path and no other; a boot-time poke at
+> `shadowsSetEnabled` is the per-frame-writer failure A10 exists to catch.
+>
+> **PCF, not the workbench's VSM.** VSM is the softest of the four filters and
+> is what MAX REALISM reaches for, but it wants float targets and a blur pass
+> and has never been measured on a phone. PCF at the highest map size is a
+> real shadow that renders correctly everywhere. VSM is still one tap away on
+> the Ultra tab. Still not flipped: anisotropy and densities past 1.0.
+>
+> **The shadow cost was NOT cleanly measured** and the reason is worth
+> keeping: `--after` captures drift, so the frustum differs between the two
+> shots and the draw counts came back 25-vs-31 one way and 44-vs-30 the other.
+> Do not quote either. A real number needs the pose pinned the way the feather
+> A/B pins it (`restorePose` + `freeze` + `setSunTime` + `pinTier`).
+
+> **A level bird cannot land, and it is not v2's fault** (2026-09-14, in
+> [G-FLIGHT-V2](docs/perf/gates/G-FLIGHT-V2.md)). `_floorAt` and
+> `checkGroundCollision` sample the SAME terrain function and add the SAME
+> 0.6 bird radius, and `tick()` clamps to the floor before the landing check
+> reads the position — so a flying bird sits at exactly `aboveGround` 0.600
+> and the strict `<` is settled by float rounding. `setAltitude` below the
+> surface does not help; the clamp lifts it back in one frame. Measured: a
+> level bird grounded on about one run in three inside 60 frames, and
+> `tools/birb-walk.mjs` is reliable only because it polls 120. Landing today
+> is the knockdown or the nest; a glide onto flat ground meets an invisible
+> floor. Left alone deliberately — a landing band changes v1 for every mode
+> and has to respect the gravity-less-floor invariant — so the v2 tool
+> asserts what is reachable and its own business: upright, unhurried contact
+> must never read as a CRASH (which is exactly the boost bug the review
+> found). **When two systems share a boundary exactly, `<` is a coin toss.**
+
+> **The walk gate measured a hill and called it a takeoff** (2026-09-14):
+> [docs/perf/gates/G-WALK-SLOPE.md](docs/perf/gates/G-WALK-SLOPE.md).
+> Browser Health failed with "the bird left the surface while walking: radius
+> 105.857 -> 108.608" on a tree whose every change was v2-gated or inert
+> under v1 — and three re-runs on that same tree passed, landing at
+> 104.96-105.01. The failing run LANDED 0.85 higher and walked uphill: the
+> check compared RAW RADIUS, and on carved rolling terrain a 2.75-unit rise
+> over 2.45 units of travel is a 48-degree slope, not flight. `birdPose()`
+> reports `aboveGround` now, sampled through the same `sampleTerrainHeight`
+> the flight floor and the landing check use, and the harness compares
+> CLEARANCE (and fails loudly if the field is missing, rather than passing
+> vacuously). **The quantity a check's own failure message names is the one
+> it has to measure** — and the landing spot is still unseeded, which is the
+> variance this removes a verdict from rather than removes.
+
+> **The first load after every deploy was a broken one, and it looked like a
+> plumage bug** (2026-09-14). The owner's console at the title screen:
+> `Uncaught TypeError: pionusPlumageRequested is not a function` inside
+> `createProceduralBirbV3`, and the module script dead before Tap to Start.
+> Nothing about plumage: `sw.js` served the SHELL network-first (a navigation)
+> and the MODULES stale-while-revalidate, so a fresh `index.html` from the new
+> deploy drove the previous build's cached `visual-style.js`, which predated
+> the export. It healed only when the new worker finished installing and the
+> update banner reloaded the page seconds later — and the auto-reload lives in
+> a separate classic `<script>` precisely so a dead module script cannot
+> stop it, which is the only reason this was one broken load and not a
+> permanent one. Modules are network-first now (`networkFirstModule`, falling
+> back to the one core cache offline), so shell and modules come from the same
+> deploy by construction; Vercel serves them `must-revalidate`, so online it
+> is an If-None-Match round trip, not a re-download. `tests/sw-modules.test.js`
+> pins the strategy. **A cache strategy that is right for a file can be wrong
+> for a SET of files that must agree with each other.**
+>
+> **The aerobatics trigger was too eager, from the phone** ("the barrel rolls
+> and dives and stuff are too sensitive / trigger too soon"): `STICK_EDGE`
+> is 0.97 / 1.0 s / 1.4 s from 0.94 / 0.55 s. Half a second at the rail is
+> inside an ordinary committed turn, and a pinned dive is the most common
+> thing anyone does with altitude, so the loop UNDER — which fires from
+> exactly that — has its own longer dwell; `progress()` measures against
+> whichever applies, so the wind-up still reads as "asking". v2's rail moved
+> to 0.97 with it: it is the same stick.
+
+> **Flight v2 — proper flight, behind `?flight=v2`** (2026-09-13, night):
+> [docs/realism/FLIGHT_V2_PLAN.md](docs/realism/FLIGHT_V2_PLAN.md) is the
+> brief, [docs/perf/gates/G-FLIGHT-V2.md](docs/perf/gates/G-FLIGHT-V2.md)
+> the measurements. The owner's verdict on the committed aerobatics: "klugy
+> workarounds instead of proper flight like an airplane or bird. Why can't
+> we have proper flight?" We can; the reasons recorded against it were about
+> work, not physics. What made v1 feel scripted is the INPUT MAPPING on a
+> controller that is already quaternion 6DOF: stick x is yaw with a cosmetic
+> bank painted on the model, pitch is clamped at 80°, speed is constant, so
+> a roll or a loop could only ever be a canned move with a trigger, a dwell,
+> a wind-up and a camera hold. `src/flight/bird-flight-v2.js` (extends
+> BirdFlight, so the terrain floor and parallel transport have one
+> definition) replaces the mapping. **Attitude below the rail, rate at it**:
+> push the stick part way and the bird holds that bank (up to 70°) and turns
+> from it (`turnGain * sin(bank)` about the radial, 127°/s at the maximum
+> against v1's 135); centre it and the wings level; pin it to the rail
+> (0.94, the edge the old trigger measured) and it keeps rolling. Pull part
+> way and it holds that climb; pull to the rail and it goes over the top.
+> Speed is ENERGY — a dive gains, a climb bleeds, drag returns it to
+> cruise. Everything scripted is off under v2; the chase camera holds the
+> tangent velocity heading with radial up; inverted or fast-and-nose-down
+> ground contact is the existing knockdown, upright and slow still lands.
+>
+> **The first cut was a pure RATE on both axes and an adversarial review
+> refuted it with reproductions before the phone saw it.** The only
+> sustainable bank was below shaped stick 0.29 (raw 0.40), and an ordinary
+> hard turn on this stick is raw 0.6–0.8 — so the first hard turn asked for
+> would have rolled the bird onto its back; a held pitch had a trim band of
+> 12% of the stick; the `sin(2p)` stability was zero at the vertical and a
+> teleported nose-up bird hung there with the camera heading frozen; and the
+> crash rule fired on a level upright bird for 0.68 s after every boost
+> (target 26.4 → 11 in one frame, speed still 19). A green oracle is not a
+> good mapping; the review is what turned "rolls forever" from a feel note
+> into a number. Measured on the sim clock (`flightProbe().simTime` — a
+> harness that counted frames × 0.05 read a 0.85 s roll that was 2.05):
+> rail roll 2.35 s, righting from inverted 1.38 s, loops 3.3–3.7 s at a
+> 12–15 unit span with speed 7.4–14.4 through them, held bank at raw
+> 0.25 / 0.33 = 11° / 16.5° (the input pipeline's deadzone and expo shape
+> the stick before the controller sees it). `?v2tune=bankGain:3,turnGain:1.6`
+> overrides any of the fourteen `FLIGHT_V2_DEFAULTS` at boot without a
+> deploy, reported back by `flightProbe().tuning`; a full-stick dive is a
+> push-over (120° in a second), so the evidence tool dives at half stick.
+> `tools/birb-flight-v2.mjs` (21 checks) is in Browser Health; `?flight=v2`
+> is one tap on the panel's Flags tab. v1 stays the default until both have
+> been flown.
+
+> **ULTRA IS THE OLD MAX REALISM, the panel is a preset strip, and the
+> harnesses boot at the baseline** (2026-09-13, night):
+> [docs/perf/gates/G-ULTRA-DEFAULT.md](docs/perf/gates/G-ULTRA-DEFAULT.md).
+> The owner pressed MAX REALISM, said it looked better, and asked for the
+> best view on by default. The Ultra preset had been a SUBSET of that button
+> (tier 0, DPR ceiling 2.4, PCF 2048) and he could see the difference. A
+> preset is a complete visual state now: `applyQualityPreset` starts from
+> `resetVisualOverridesToShipping()` — the true before — and applies the
+> preset's own lever list through `qualitySettings.request`; Ultra's list
+> IS the MAX set (post Full, VSM 2048, 4x MSAA, anisotropy at the device
+> max, terrain High, decorative 1) and Amazing/Okay/Light are the baseline
+> plus a tier pin. **Native DPR is reached through the tier's CEILING
+> (`dprCap: Infinity`), never a `dpr` override**: an override takes the ratio
+> away from the tier, and the frozen A3 oracle's self-check (pin 0, pin 1,
+> expect the drawing buffer to move) would read false on every fresh boot.
+> `?quality=ultra|amazing|okay|light` boots a preset by URL, not remembered.
+>
+> **Under SwiftShader an Ultra frame is 2.6 s; Amazing is 0.13 s.** Measured
+> lever by lever and no single one owns it (DPR 3 -> 1.7 saves 1.1 s, then
+> shadows, post and MSAA about 0.4 s each), so the harnesses cannot run at
+> the default and the preset was not weakened to suit them. Three frozen
+> boot lines (`birb-modes`, `birb-walk`, `birb-quality`) gained
+> `&quality=amazing` under R5 — which RESTORES the state every quality
+> oracle was frozen against, since the old shipping default was exactly
+> Amazing — and `tools/birb-default.mjs` is the one Browser Health step that
+> boots with no flag and proves the production default is Ultra at its
+> ceiling, reversible, with the tier still owning the ratio.
+> `tools/birb-shaders.mjs` stays at Ultra on purpose (the VSM depth and
+> multisample programs exist only there) and waits for RENDERED frames per
+> biome now: its old 2200 ms wait was shorter than one Ultra frame, which
+> would have reported "ok" for materials never submitted. **The phone is
+> unmeasured**: the tier is pinned at Ultra, so nothing sheds if the iPhone
+> cannot hold it; Amazing is one tap away in the gear menu or the panel.
+>
+> **The three-finger panel was rebuilt for a thumb.** Every target is 44 px,
+> selects with four options or fewer are rows of buttons, toggles are
+> switches, the four presets sit in the header of every tab with the live
+> fps and draw-call line, and a **Flags** tab (`src/ui/boot-flags.js`, unit
+> tested) renders every boot-time A/B (`?smooth=0`, `?feathers=0`,
+> `?wing=`, `?bird=`, `?levelturn=0`, the authored-texture opt-outs...) as a
+> switch that RELOADS with the flag in the URL — `?goto`/`?env`/`?debug`
+> survive the reload. The oracle's selectors are untouched
+> (`#birb-dev-quality-panel`, `.bqp-tab` text, `.bqp-control` +
+> `.bqp-control-label` text, `input[type=range]`, `.bqp-stale-banner`) and
+> `decorativeDensity` is still on the Performance tab after "Weather
+> density". Also fixed on the way: the panel size never persisted, because
+> `win` was never declared and the ReferenceError was swallowed by its own
+> try/catch.
+
+> **The roll's freeze, the loop's radius and the loop under** (2026-09-13,
+> night): [docs/perf/gates/G-AERO-FEEL.md](docs/perf/gates/G-AERO-FEEL.md).
+> "Freezes position on the wing tilt before it rolls" was the 0.55 s dwell
+> at a bank that had already saturated, followed by the visual bank being
+> MUTED the frame the move fired — a 63-degree bank unwinding against a
+> sweep still easing in from zero. The bank is kept through the move now (a
+> constant offset, continuous at both ends), and the dwell is motion:
+> `AERO_WINDUP` deepens the bank past its ceiling (63 -> 88 degrees) in
+> proportion to the hold, hands it over intact, and unwinds it against the
+> angle SWEPT, so the apparent rotation is bounded never to reverse.
+> Measured with `flightProbe().rollFullDeg + visualBankDeg`: monotonic from
+> the first frame on the rail. Roll duration 0.95 -> 1.3 s.
+>
+> **"Almost pivoting on its own axis" was the raised cosine.** Radius is
+> speed over angular rate and the raised cosine's peak rate is twice its
+> average; at cruise that was a 1.75-unit circle. `sweptAngle` takes an
+> `ease` per move now — a trapezoid with raised-cosine ends whose integral
+> is still exactly `turns * 2PI`, and `ease 0.5` is the old profile to the
+> last bit (the roll keeps it). The loop is 2.6 s at `ease 0.22` and flies
+> at 1.5x cruise: measured diameter 11.7 against about 3.5. **Pin the stick
+> DOWN and the dive goes under** — `moveFromStick(0, -1)` is a loop with
+> direction -1, gated at `minAltitudeDown` 24 because it descends by the
+> whole diameter before it climbs (measured dip 13.5).
 
 > **The granite tint was solved, refuted and re-solved — by capture, not by
 > taste.** The first solve lifted the peaks to 1.73x their procedural

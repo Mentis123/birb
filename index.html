@@ -3407,6 +3407,12 @@
       });
     });
 
+    // Flight v2 — bank to turn, `?flight=v2` (docs/realism/FLIGHT_V2_PLAN.md).
+    // Declared up here because the import below is GATED on it: the module is
+    // in sw.js CORE_ASSETS so an offline v2 boot is safe either way, but a boot
+    // that is never going to fly v2 should not pay a fetch for it.
+    const flightV2 = /[?&]flight=v2(?:&|$)/.test(window.location?.search || '');
+
     let THREE,
       GLTFLoader,
       createCameraState,
@@ -3419,7 +3425,7 @@
       getEnvironmentDefinition,
       DEFAULT_GRADE,
       nipplejs,
-      BirdFlight, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
+      BirdFlight, BirdFlightV2, BirdCamera, BirdVisual, createTouchInput, createKeyboardInput, combineInputs, shapeAxis;
 
     try {
       THREE = await import("https://esm.sh/three@0.183.2");
@@ -3427,6 +3433,9 @@
       // New Flight System Imports
       const birdFlightMod = await import("./src/flight/bird-flight.js");
       BirdFlight = birdFlightMod.BirdFlight;
+      if (flightV2) {
+        BirdFlightV2 = (await import("./src/flight/bird-flight-v2.js")).BirdFlightV2;
+      }
       const birdCameraMod = await import("./src/flight/bird-camera.js");
       BirdCamera = birdCameraMod.BirdCamera;
       const birdVisualMod = await import("./src/flight/bird-visual.js");
@@ -3472,6 +3481,8 @@
       var sampleTerrainHeight = sphericalWorldModule.sampleTerrainHeight;
       var sampleTerrainMeshHeight = sphericalWorldModule.sampleTerrainMeshHeight;
       var sampleBasinHeight = sphericalWorldModule.sampleBasinHeight;
+      var setSmoothShading = sphericalWorldModule.setSmoothShading;
+      var smoothShadingActive = sphericalWorldModule.smoothShadingActive;
 
       // Nesting system imports
       const nestPointsModule = await import("./src/nesting/nest-points.js");
@@ -3492,7 +3503,7 @@
       var createCollectiblesSystem = collectiblesModule.createCollectiblesSystem;
 
       // ===== NEW MODULE IMPORTS (Improvements 1,5,6) =====
-      var { visualUniforms, getQualityPixelRatio, addRimLight } = await import('./src/environment/visual-style.js');
+      var { visualUniforms, getQualityPixelRatio, addRimLight, addFeatherSheen, pionusPlumageRequested } = await import('./src/environment/visual-style.js');
       var { createSkyDome } = await import("./src/environment/sky-dome.js");
       // Image-based lighting from the same gradient the dome paints, behind
       // ?ibl=1. scene.environment is null on the shipping path; see the module
@@ -3534,6 +3545,7 @@
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
+      var { createAerobatics, createStickEdgeTrigger, AEROBATIC_MOVES } = await import("./src/flight/aerobatics.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -3692,7 +3704,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v60-2026-09-13-solid-bird-slalom-removed';
+    const BIRB_BUILD = 'v73-2026-09-14-walk-slope';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5009,6 +5021,80 @@
     const BOOST_CONFIG = { speedMult: 2.4, duration: 0.6, cooldown: 1.1 };
     let boostTimer = 0;
     let boostCooldown = 0;
+    // Committed aerobatics (src/flight/aerobatics.js). The trigger lives at
+    // the EDGES OF THE STICK: pin it hard over and hold and the bank becomes
+    // a roll, pin it hard up and the climb goes over the top. This replaced a
+    // double tap on the boost pill, which failed on the only test that
+    // matters — the owner could not tell whether it was working or not. A
+    // gesture that has to be explained, on a screen with nowhere to explain
+    // it, is a feature nobody finds.
+    let aerobatics = null;
+    let aeroTrigger = null;
+    // How hard the chase camera is HOLDING A STABLE FRAME for a live move,
+    // 0..1. The harness capture read well without this because it samples at
+    // two-frame intervals and the damped rig had not caught up; the phone,
+    // at 60 fps, showed the rig doing exactly what it is built to do — follow
+    // the bird's own up and forward — which during a roll means the camera
+    // rolls too and the bird never visibly inverts, and during a loop means
+    // the offset swings round behind the inverted bird and the world reads
+    // as going backwards. Radial up + the heading at move start, ramped.
+    let aerobaticStable = 0;
+    // The level heading the bird had when the move began, in world space,
+    // re-projected onto the current tangent plane each frame. Scratch;
+    // reused; never allocated in the loop.
+    const _aeroHeading = new THREE.Vector3(0, 0, -1);
+    const _aeroUp = new THREE.Vector3(0, 1, 0);
+    const _aeroScratch = new THREE.Vector3();
+    // Flight v2's camera hold and its attitude-at-contact test. Module scope,
+    // filled per frame, never allocated in the loop.
+    const _v2Up = new THREE.Vector3();
+    const _v2Fwd = new THREE.Vector3();
+    const _v2Tan = new THREE.Vector3();
+    const _v2BodyUp = new THREE.Vector3();
+    // The smoothed LEVEL heading the chase camera stands behind under v2.
+    // Persists across frames — that is the whole point of it.
+    const _v2Heading = new THREE.Vector3();
+    const _v2Hold = { weight: 1, heading: _v2Heading, distanceMul: 1 };
+    const _v2FollowHold = { weight: 1, heading: _v2Heading, up: _v2Up, distanceMul: 1 };
+    const _v2HoldOff = { weight: 0 };
+    // A teleport, a landmark seek or an environment switch moves the bird
+    // without flying it there; the smoothed heading would otherwise stand the
+    // camera off along the OLD direction for the first frames (and, near the
+    // vertical, indefinitely). Zeroed there; the next flying frame re-seeds it.
+    const v2ForgetHeading = () => { _v2Heading.set(0, 0, 0); };
+    // The stick as the MODEL sees it around a move. bird-visual.js banks the
+    // model by input.x and tilts it by input.y; this is that input with the
+    // wind-up folded in (see AERO_WINDUP below). One object, filled per
+    // frame — zero-allocation loop.
+    const _aeroVisualInput = { x: 0, y: 0, active: false };
+    // How far past its ordinary ceiling the model banks (or tilts) while the
+    // stick is held on the rail EARNING a move, as a fraction of the ordinary
+    // amount: 0.4 takes the 63-degree bank to 88. The freeze the owner saw
+    // ("freezes position on the wing tilt before it rolls") was the dwell —
+    // 0.55 s at a bank that had already saturated — followed by the old code
+    // MUTING the visual bank the moment the move fired, so a 63-degree bank
+    // unwound while the sweep was still easing in from zero. Now the bank is
+    // kept for the whole move and the dwell is MOTION: the bank keeps
+    // deepening until the roll takes over from it, and the extra unwinds in
+    // step with the sweep — never faster than 0.4/PI of the roll rate, so
+    // the apparent rotation cannot reverse. Measured: see G-AERO-FEEL.
+    const AERO_WINDUP = 0.4;
+    let _aeroWindup = 0;
+
+    /**
+     * The bird's clearance above the terrain it is over, or Infinity before
+     * the world exists. Reads `sphericalWorld.sphereRadius` rather than the
+     * literal 120 the stats block carries: a manoeuvre refused for being too
+     * low has to be measuring the ground this world actually has.
+     */
+    const __BIRB_ALTITUDE_ABOVE_GROUND = () => {
+      const p = flightController?.position;
+      if (!p || !sphericalWorld) return Infinity;
+      const base = sphericalWorld.sphereRadius;
+      const terrain = (typeof sampleTerrainHeight === 'function')
+        ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
+      return p.length() - base - terrain;
+    };
     const flightRecoveryScratch = {
       radial: new THREE.Vector3(),
     };
@@ -5068,6 +5154,14 @@
     // rather than snapped: switching pose on the frame the nesting state flips
     // reads as a dropped frame, not as a bird settling onto a nest.
     let perchBlend = 0;
+    // The input the rig actually resolved this frame, so __BIRB.flightProbe()
+    // can report what drove the wings rather than what the stick was set to.
+    // Reused, never allocated in the loop.
+    const lastWingInput = { x: 0, y: 0, active: false };
+
+    // Scratch for the walk bob's radial up. Module scope, reused, never
+    // allocated in the loop.
+    const _walkUp = new THREE.Vector3();
 
     // Set once the nest launch handler is defined, so the ?debug=1 harness can
     // fire through the same path the on-screen button uses.
@@ -6173,6 +6267,7 @@
     }
 
     function setEnvironment(variantId) {
+      if (typeof v2ForgetHeading === 'function') v2ForgetHeading();
       const definition = getEnvironmentDefinition(variantId);
       if (!definition) return;
 
@@ -6760,14 +6855,51 @@
     // Paints every vertex of a geometry one flat colour so several
     // differently-coloured parts can share ONE vertexColors:true material
     // instead of one material (and one draw call) each.
-    const paintGeometryColor = (geometry, colorHex) => {
+    // Optional `band` paints a second colour across the ROOT end of the part,
+    // measured along its own bounding box rather than in any parent frame, so
+    // it works the same whether it is called before or after bakeGeometryTRS.
+    // `axis` names the direction the part EXTENDS in ('-x' means the tip is at
+    // minimum x, so the root is at maximum x); `until` is how far down the
+    // part the band reaches, 0..1; `softness` is the fade width in the same
+    // units. One extra pass over an attribute that is being written anyway —
+    // no extra geometry, no second material, no draw call.
+    const paintGeometryColor = (geometry, colorHex, band = null) => {
       const c = new THREE.Color(colorHex);
-      const count = geometry.attributes.position.count;
+      const position = geometry.attributes.position;
+      const count = position.count;
       const colors = new Float32Array(count * 3);
+      let bandColor = null; let comp = 0; let rootAt = 0; let span = 0;
+      if (band && band.color) {
+        bandColor = new THREE.Color(band.color);
+        const negative = String(band.axis || 'z').startsWith('-');
+        const letter = String(band.axis || 'z').replace('-', '');
+        comp = letter === 'x' ? 0 : letter === 'y' ? 1 : 2;
+        let lo = Infinity; let hi = -Infinity;
+        for (let i = 0; i < count; i++) {
+          const v = position.array[i * 3 + comp];
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        span = hi - lo;
+        rootAt = negative ? hi : lo;
+        // A part with no extent along its own axis cannot carry a band, and
+        // dividing by that span would write NaN into every vertex colour.
+        if (!(span > 1e-6)) bandColor = null;
+      }
       for (let i = 0; i < count; i++) {
-        colors[i * 3] = c.r;
-        colors[i * 3 + 1] = c.g;
-        colors[i * 3 + 2] = c.b;
+        let r = c.r; let g = c.g; let b = c.b;
+        if (bandColor) {
+          const t = Math.abs(position.array[i * 3 + comp] - rootAt) / span;
+          const until = band.until ?? 0.25;
+          const soft = Math.max(1e-4, band.softness ?? 0.1);
+          const w = Math.max(0, Math.min(1, (until - t) / soft + 1));
+          r += (bandColor.r - r) * w;
+          g += (bandColor.g - g) * w;
+          b += (bandColor.b - b) * w;
+        }
+        colors[i * 3] = r;
+        colors[i * 3 + 1] = g;
+        colors[i * 3 + 2] = b;
       }
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       return geometry;
@@ -7712,16 +7844,49 @@
     const createProceduralBirbV3 = () => {
       const birbModel = new THREE.Group();
 
-      // -- Palette ---------------------------------------------------------
-      // Unchanged from Phase 0 on purpose: the owner has signed these off, and
-      // changing the form and the colour in one step makes an A/B unreadable.
-      const backColor = new THREE.Color(0x2b5dcc);
-      const bodyColor = new THREE.Color(0x4a7cf0);
-      const bellyColor = new THREE.Color(0xe6efff);
-      const headTint = new THREE.Color(0x5a8cf5);
-      const beakColor = new THREE.Color(0xf5b942);
-      const beakDark = new THREE.Color(0xdb9a2e);
-      const featherEdge = new THREE.Color(0x4df0ff);
+      // -- Palette: Bronze-winged Pionus ------------------------------------
+      // `?pionus=0` restores the Phase 0 blue, because that is how this was
+      // judged and the old bird is the only honest before.
+      //
+      // The real bird, and which of it is worth spending pixels on at chase
+      // distance: dusky violet-blue body, a BRONZE mantle and wing coverts
+      // (the name, and the loudest thing about it), dark blue-green flight
+      // feathers, a pink-white band across the chin and forecrown, and the
+      // Pionus signature — bright RED undertail coverts. The red and the
+      // bronze are the two a viewer can name from behind and above, which is
+      // the only angle this bird is ever seen from, so those are the two that
+      // get pushed hardest.
+      const pionus = pionusPlumageRequested(window.location?.search || '');
+      // Mantle, scapulars and wing coverts. Warm copper rather than the true
+      // olive-bronze: the procedural material is lit by one key at emissive
+      // 0.34 and a literal transcription of the bird's own mantle lands as
+      // mud at this size.
+      const backColor = new THREE.Color(pionus ? 0x8a6c39 : 0x2b5dcc);
+      // Breast and flanks: dusky violet.
+      const bodyColor = new THREE.Color(pionus ? 0x6b6494 : 0x4a7cf0);
+      // Underside lift. NOT the near-white of the blue bird — a Pionus belly
+      // is violet-grey, and a white belly under a bronze wing reads as a
+      // different species from every angle.
+      const bellyColor = new THREE.Color(pionus ? 0xa89fc0 : 0xe6efff);
+      // Crown and nape: the darkest thing on the bird.
+      const headTint = new THREE.Color(pionus ? 0x3a3260 : 0x5a8cf5);
+      // The chin/forecrown band. Pink-white, and the one warm light note at
+      // the front of the bird.
+      const chinBand = new THREE.Color(0xf0c9d2);
+      // Undertail coverts. The Pionus signature, and the only saturated red
+      // on the model.
+      const ventRed = new THREE.Color(0xd4343c);
+      // Bill: pale horn with a darker base, not the blue bird's marigold.
+      const beakColor = new THREE.Color(pionus ? 0xe8dcb4 : 0xf5b942);
+      const beakDark = new THREE.Color(pionus ? 0xad9764 : 0xdb9a2e);
+      // Flight feathers: dark blue-green, with a teal edge at the tips.
+      const flightFeather = new THREE.Color(pionus ? 0x1e3f52 : 0x2b5dcc);
+      const featherEdge = new THREE.Color(pionus ? 0x2f8378 : 0x4df0ff);
+      // The lit edge of a bronze covert. Blending the coverts toward the
+      // flight feathers' teal instead is what made the first capture read as
+      // khaki: a bronze greyed toward green is not a duller bronze, it is a
+      // different colour.
+      const bronzeLit = new THREE.Color(0xc79a4e);
       const footColor = new THREE.Color(0x1a2438);
 
       // -- Materials: 4 --------------------------------------------------
@@ -7730,10 +7895,24 @@
       // because every part they cover is a separate mesh anyway — the wings and
       // tail have to be, since they rotate independently.
       const contourMat = new THREE.MeshStandardMaterial({
-        vertexColors: true, metalness: 0.12, roughness: 0.55, emissive: 0x0f1f45, emissiveIntensity: 0.34,
+        vertexColors: true, metalness: 0.12, roughness: 0.55,
+        // The ambient lift has to move with the palette. 0x0f1f45 is a blue,
+        // and a blue lift under a violet-and-bronze bird tints every shadow
+        // on it back toward the bird this one replaced.
+        emissive: pionus ? 0x1c1828 : 0x0f1f45,
+        emissiveIntensity: 0.34,
       });
+      // The wings carry the bronze, and bronze is a metal: it wants a tighter,
+      // brighter specular than a blue jay's flat vane did. Held at 0.34 rather
+      // than pushed further because there is no envMap on the shipping path —
+      // past about that, three's metal has nothing to reflect and the wing
+      // goes DARK between highlights, which is the opposite of the ask.
       const vaneMat = new THREE.MeshStandardMaterial({
-        vertexColors: true, metalness: 0.16, roughness: 0.48, emissive: 0x0f1f45, emissiveIntensity: 0.34,
+        vertexColors: true,
+        metalness: pionus ? 0.34 : 0.16,
+        roughness: pionus ? 0.36 : 0.48,
+        emissive: pionus ? 0x1c1828 : 0x0f1f45,
+        emissiveIntensity: 0.34,
         side: THREE.DoubleSide,
       });
       const footMat = new THREE.MeshStandardMaterial({
@@ -7826,11 +8005,32 @@
         ];
         const segs = 16;
         const positions = [], uvs = [], colors = [], indices = [];
+        // `topness` is where the vertex sits on its ring, +1 at the spine and
+        // -1 at the keel. `rowT` runs 0 at the tail to 1 at the brow. Between
+        // them they are enough to place every marking this bird needs without
+        // a texture, a second material or a single extra triangle.
         const ringColor = (topness, rowT) => {
           const c = bodyColor.clone();
           if (topness > 0.35) c.lerp(backColor, Math.min(1, (topness - 0.35) / 0.65));
           else if (topness < -0.30) c.lerp(bellyColor, Math.min(0.78, (-0.30 - topness) / 0.70));
           if (rowT > 0.70) c.lerp(headTint, Math.min(1, (rowT - 0.70) / 0.18) * 0.55);
+          if (!pionus) return c;
+          // UNDERTAIL COVERTS — the Pionus signature. Only on the underside
+          // (topness < 0) and only at the rump, which is exactly where the
+          // chase camera is looking from. Wrapping it round the whole rump
+          // would paint the bird's back red on the one view that matters.
+          if (rowT < 0.16 && topness < 0.10) {
+            const along = 1 - rowT / 0.16;
+            const under = Math.min(1, (0.10 - topness) / 0.55);
+            c.lerp(ventRed, Math.min(1, along * under) * 0.92);
+          }
+          // The pink-white chin and forecrown band, low and forward: it sits
+          // under the eye and round the base of the bill, not over the crown.
+          if (rowT > 0.74 && topness < 0.42) {
+            const along = Math.min(1, (rowT - 0.74) / 0.20);
+            const low = Math.min(1, (0.42 - topness) / 0.80);
+            c.lerp(chinBand, along * low * 0.80);
+          }
           return c;
         };
         // v tiles by accumulated arc length along the body, so the sheet does
@@ -7954,7 +8154,55 @@
       // The rig rotates the arm at the shoulder and the hand at the wrist, one
       // lagging the other, which is what makes a wing read as jointed instead
       // of as a board that happens to be feather-shaped.
-      const WRIST_Z = 0.86;   // along the wing's span axis, from the shoulder
+      // -- Wing planform ----------------------------------------------------
+      //
+      // Reported as "an airplane more than a bird". It measures, and the
+      // useful number is ASPECT RATIO — span squared over area — not span.
+      //
+      // MEASURE THE RENDER, NOT THE CONSTANTS. Computing AR from the feather
+      // plates' own widths gives 9.1 for the shipped wing, which is glider
+      // territory and is WRONG: the plates fan and overlap, so the wing's
+      // real chord is much deeper than any one plate. Measured off a
+      // top-down capture instead (span and chord in pixels, sampled at three
+      // stations along each wing), the shipped wing is **AR 6.3** — already
+      // inside the range a parrot occupies (~5-6). So raw slenderness was
+      // only part of it, and a plan built on the 9.1 would have cut the span
+      // roughly twice as hard as it needed to be cut.
+      //
+      // The rest of the aircraft read is SHAPE, and the pointed tip is most
+      // of it:
+      //
+      //  - **The tip came to a point.** Primary length rose monotonically
+      //    outward (0.74 -> 1.00), so the OUTERMOST feather was the longest
+      //    and the wing swept to a dart. A round wing's longest primary sits
+      //    about a third of the way out and the tips curve back in from
+      //    there. `round` switches that length from a ramp to a hump, and in
+      //    the top-down capture it is the single change you see first.
+      //  - **Constant chord.** A rectangle is a wing plan nothing alive has.
+      //    `chord` scales every plate's width, and the secondaries widen more
+      //    than the primaries do, which tapers the planform on its own.
+      //
+      // Span, chord and AR measured off the top-down tile of each profile;
+      // triangle count is IDENTICAL across all four (1,518), so this costs
+      // nothing. `?wing=<key>` selects one; `?wing=v3` is the shipped-before.
+      const WING_PROFILES = {
+        // span 3.55, AR 6.3 — what shipped. Long, thin, pointed.
+        v3:    { wrist: 0.86, chord: 1.00, prim: 1.00, round: 0 },
+        // span 3.40, AR 5.7 — rounded tip, barely shorter. Still a dart.
+        slim:  { wrist: 0.78, chord: 1.14, prim: 0.93, round: 1 },
+        // span 3.15, AR 5.1 — THE DEFAULT. Broad, round-tipped, and the
+        // bronze coverts now own most of the wing, which is the whole point
+        // of a bronze-WINGED bird.
+        parrot:{ wrist: 0.70, chord: 1.26, prim: 0.86, round: 1 },
+        // span 2.89, AR 4.6 — stubby; the wings start to read as too small
+        // for the body rather than as a stocky parrot's.
+        stocky:{ wrist: 0.62, chord: 1.38, prim: 0.78, round: 1 },
+      };
+      const wingProfile = WING_PROFILES[
+        (/[?&]wing=([a-z0-9]+)/i.exec(window.location?.search || '') || [])[1]
+      ] || WING_PROFILES.parrot;
+      const WRIST_Z = wingProfile.wrist;   // along the wing's span axis, from the shoulder
+      const WING_CHORD = wingProfile.chord;
       const buildWingV3 = (side) => {
         const arm = new THREE.Group();
 
@@ -7967,14 +8215,23 @@
           const t = i / (SEC - 1);
           const len = 0.54 + t * 0.22;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.165, backW: 0.250, tipTaper: 0.14, segments: 4,
+            // The secondaries widen MORE than the primaries do (the extra
+            // 0.10), because a wing that deepens uniformly is still a
+            // rectangle. This is what puts the taper in the planform.
+            length: len, frontW: 0.165 * (WING_CHORD + 0.10), backW: 0.250 * (WING_CHORD + 0.10),
+            tipTaper: 0.14, segments: 4,
             bow: 0.018, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.18, len);
           armParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
             position: [-0.03 - t * 0.10, 0.005, 0.08 + t * (WRIST_Z - 0.14)],
             rotation: [0, -0.16 - t * 0.10, -0.04],
-          }), bodyColor.clone().lerp(backColor, 0.25 + t * 0.3)));
+          }), pionus
+            // Secondaries run bronze at the root and darken into the flight
+            // feathers' blue-green toward the tip, which is where a real
+            // bronze wing's colour actually changes.
+            ? backColor.clone().lerp(flightFeather, 0.18 + t * 0.42)
+            : bodyColor.clone().lerp(backColor, 0.25 + t * 0.3)));
         }
         // Coverts: the short shingle feathers that lie OVER the secondaries'
         // bases. Without them the arm shows the secondaries' roots and reads
@@ -7984,14 +8241,21 @@
           const t = i / (COV - 1);
           const len = 0.30 + t * 0.10;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.115, backW: 0.150, tipTaper: 0.16, segments: 3,
+            length: len, frontW: 0.115 * (WING_CHORD + 0.10), backW: 0.150 * (WING_CHORD + 0.10),
+            tipTaper: 0.16, segments: 3,
             bow: 0.012, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.13, len);
           armParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
             position: [0.05, 0.06, 0.06 + t * (WRIST_Z - 0.16)],
             rotation: [0, -0.13 - t * 0.08, -0.10],
-          }), backColor.clone().lerp(bodyColor, 0.15 + t * 0.25)));
+          }), pionus
+            // THE bronze. These shingle over the secondaries' roots and are
+            // the largest unbroken patch of it on the bird, so they get the
+            // brightest copper and the sheen has the most surface to travel
+            // across.
+            ? backColor.clone().lerp(bronzeLit, 0.10 + t * 0.30)
+            : backColor.clone().lerp(bodyColor, 0.15 + t * 0.25)));
         }
         const armMesh = new THREE.Mesh(mergeAndDispose(armParts), vaneMat);
         armMesh.name = 'birbWingArm';
@@ -8009,13 +8273,21 @@
         let outermost = null;
         for (let i = 0; i < PRIM; i++) {
           const t = i / (PRIM - 1);
-          // Primaries lengthen outward and SPLAY: the gap between tips widens
-          // toward the outside, which is the finger separation a real wing
-          // shows against the sky and the single most recognisable thing about
-          // a bird's wing tip.
-          const len = 0.74 + t * 0.26;
+          // Primaries SPLAY: the gap between tips widens toward the outside,
+          // which is the finger separation a real wing shows against the sky
+          // and the single most recognisable thing about a bird's wing tip.
+          //
+          // Their LENGTH is either a ramp or a hump. The ramp (what shipped)
+          // makes the outermost feather the longest, which draws the wing to
+          // a swept point — an aircraft's planform. The hump peaks about a
+          // third of the way out and the tips curve back in from there, which
+          // is what makes a parrot's wing tip ROUND.
+          const ramp = 0.74 + t * 0.26;
+          const hump = 1.00 * (1 - 0.42 * Math.pow(Math.abs(t - 0.32) / 0.68, 1.6));
+          const len = (wingProfile.round ? hump : ramp) * wingProfile.prim;
           const plate = buildFeatherPlateGeometry({
-            length: len, frontW: 0.150, backW: 0.215, tipTaper: 0.16, segments: 4,
+            length: len, frontW: 0.150 * WING_CHORD, backW: 0.215 * WING_CHORD,
+            tipTaper: 0.16, segments: 4,
             bow: 0.022, axis: 'z', uvRect: FULL_UV,
           });
           tileUV(plate, 0.13, len);
@@ -8024,8 +8296,15 @@
             rotation: [0, -0.04 - t * 0.26, -0.02 - t * 0.05],
           };
           handParts.push(paintGeometryColor(bakeGeometryTRS(plate, trs),
-            backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
-          if (i === PRIM - 1) outermost = transformedLocalPoint(tipPointOfFeather({ length: len, axis: 'z' }), trs);
+            pionus
+              ? flightFeather.clone().lerp(featherEdge, 0.10 + t * 0.30)
+              : backColor.clone().lerp(featherEdge, 0.06 + t * 0.22)));
+          // Anchor on the primary that actually reaches furthest, not on the
+          // last one in the loop: with a rounded tip the outermost feather is
+          // the SHORTEST, and anchoring the ribbon trail there would move its
+          // origin inboard by a third of the hand.
+          const reach = transformedLocalPoint(tipPointOfFeather({ length: len, axis: 'z' }), trs);
+          if (!outermost || reach.z > outermost.z) outermost = reach;
         }
         const handMesh = new THREE.Mesh(mergeAndDispose(handParts), vaneMat);
         handMesh.name = 'birbWingHand';
@@ -8090,7 +8369,17 @@
         tailParts.push(paintGeometryColor(bakeGeometryTRS(plate, {
           position: [0, -Math.abs(spread) * 0.012, spread * 0.105],
           rotation: [spread * 0.40, 0, 0],
-        }), backColor.clone().lerp(featherEdge, 0.05 + Math.abs(spread) * 0.18)));
+        }), pionus
+          ? flightFeather.clone().lerp(featherEdge, 0.08 + Math.abs(spread) * 0.22)
+          : backColor.clone().lerp(featherEdge, 0.05 + Math.abs(spread) * 0.18),
+          // The red is banded along each tail feather's own LENGTH rather than
+          // painted on the undertail coverts where the real bird carries it.
+          // Anatomically that is a compromise and it is a deliberate one: this
+          // bird is only ever seen from the chase camera, behind and above,
+          // and a marking on the underside is a marking nobody will ever see.
+          // Banded at the root it flashes red at the base of the fanned tail
+          // from exactly the angle the player is watching from.
+          pionus ? { color: ventRed, until: 0.30, softness: 0.12, axis: '-x' } : null));
       }
       // Uppertail coverts: four short feathers lying OVER the tail's roots,
       // built into the tail mesh so they cost nothing and swing with it.
@@ -8105,7 +8394,11 @@
         tailParts.push(paintGeometryColor(bakeGeometryTRS(cov, {
           position: [0.06, 0.055 - t * 0.02, side * t * 0.075],
           rotation: [side * t * 0.30, 0, -0.16],
-        }), backColor.clone().lerp(bodyColor, 0.30 - t * 0.18)));
+        }), pionus
+          // Bronze over the tail's roots, so the red underneath reads as a
+          // separate marking rather than bleeding into the tail.
+          ? backColor.clone().lerp(bodyColor, 0.18 - t * 0.10)
+          : backColor.clone().lerp(bodyColor, 0.30 - t * 0.18)));
       }
       const tailMesh = new THREE.Mesh(mergeAndDispose(tailParts), vaneMat);
       tailMesh.name = 'birbTail';
@@ -8161,6 +8454,12 @@
           if (u) birbRimUniforms.push(u);
         }
       });
+
+      // Iridescence, on the WINGS only — it is a bronze-WINGED pionus, and a
+      // whole bird that shimmers reads as a bauble rather than a bird. Chained
+      // after the rim so both run; see addFeatherSheen for why it also has to
+      // extend the program cache key.
+      if (pionus) addFeatherSheen(vaneMat, THREE, { warm: 0xffc266, cool: 0x3f8f6e, power: 1.9, strength: 0.72 });
 
       // The two authored sheets, if this session wants them. Decode-gated and
       // reversible like every other authored surface in this repo.
@@ -9087,7 +9386,10 @@
 
     // 2. Flight Physics (BirdFlight)
     // Base speed bumped 4 -> 11 (~2.75×) so traversal feels right on the 4× world.
-    const flight = new BirdFlight(THREE, {
+    // One options object, either controller. BirdFlightV2 is a drop-in (same
+    // constructor options, same pose output) and ignores `levelTurns` — it has
+    // no other axis to turn about, since the turn comes out of the bank.
+    const flightOptions = {
       sphereCenter: new THREE.Vector3(0, 0, 0),
       sphereRadius: SPHERE_RADIUS,
       speed: 11,
@@ -9098,13 +9400,45 @@
       // Same clearance the ground-collision check uses, so the flight floor keeps
       // the bird's body ABOVE the carved mesh (no sinking-in then force-grounding
       // against rises) and the two stay one source of truth. See _floorAt().
-      birdRadius: FLIGHT_RECOVERY_CONFIG.birdRadius
-    });
+      birdRadius: FLIGHT_RECOVERY_CONFIG.birdRadius,
+      // Turn about the planet's up and roll back to level — the fix for a
+      // held dive spiralling and looping out of itself. `?levelturn=0`
+      // restores the old local-up yaw and leaves roll uncorrected, because
+      // the A/B is how this was judged and a comparison you cannot re-run is
+      // one nobody re-runs.
+      levelTurns: !/[?&]levelturn=0/.test(window.location?.search || ''),
+    };
+    // `?v2tune=rightingRate:2,turnGain:1.8` overrides FLIGHT_V2_DEFAULTS at
+    // boot, one number at a time. The A/B is flown on a phone at an airport;
+    // without this every re-tune is a push and a deploy, and the numbers in
+    // that table are starting points, not measurements — the crossover
+    // between "a held bank" and "a roll" (rightingRate) is the one the owner
+    // has to feel. Reported back by flightProbe().tuning so a capture says
+    // what it was flown with. Ignored under v1.
+    const V2_TUNE_KEYS = ['rollRate', 'pitchRate', 'edge', 'maxBank', 'maxPitchHold', 'bankGain',
+      'pitchGain', 'turnGain', 'yawAssist', 'gSpeed', 'drag', 'minMul', 'maxMul', 'deadzone'];
+    if (flightV2) {
+      const tune = (/[?&]v2tune=([^&]+)/.exec(window.location?.search || '') || [])[1];
+      if (tune) {
+        for (const pair of decodeURIComponent(tune).split(',')) {
+          const [k, v] = pair.split(':');
+          const n = Number.parseFloat(v);
+          if (V2_TUNE_KEYS.includes(k) && Number.isFinite(n)) flightOptions[k] = n;
+        }
+      }
+    }
+    const flight = flightV2
+      ? new BirdFlightV2(THREE, flightOptions)
+      : new BirdFlight(THREE, flightOptions);
 
     // 3. Visuals
+    // Under v2 the FLIGHT FRAME rolls for real, so this layer is cut to a small
+    // aileron/elevator lean (7 / 4.6 degrees). Left at v1's 63/36 the model
+    // would carry a full cosmetic bank on top of a frame that is already
+    // banked, and the bird would sit a bank's worth off its own turn.
     const visual = new BirdVisual(THREE, {
-      maxBankAngle: Math.PI * 0.35,
-      maxPitchTilt: Math.PI * 0.2,
+      maxBankAngle: flightV2 ? 0.12 : Math.PI * 0.35,
+      maxPitchTilt: flightV2 ? 0.08 : Math.PI * 0.2,
     });
 
     const aimRig = new AimRig(THREE);
@@ -9113,6 +9447,14 @@
     // LEGACY COMPATIBILITY: Map `flightController` to `flight` (BirdFlight)
     flightController = flight;
     flightControllerInitialized = true;
+    // Committed aerobatics are exactly what v2 deletes: a roll is the stick
+    // held over and a loop is the stick held back. Both stay null under v2 —
+    // the per-frame block is already null-guarded, so `_aeroWindup` keeps its
+    // initial 0 and the visual layer sees the plain stick.
+    if (!flightV2) {
+      aerobatics = createAerobatics(AEROBATIC_MOVES);
+      aeroTrigger = createStickEdgeTrigger();
+    }
 
     // Set sphere center on flight controller for spherical world support
     if (sphericalWorld && typeof flightController.setSphereCenter === 'function') {
@@ -9739,6 +10081,10 @@
       const bloomSizes = bloomPass ? bloomPass.getSizes() : null;
       return {
         mode: snap.mode,
+        // The active gear-menu preset, for the panel's strip. Guarded because
+        // QUALITY_PRESETS is declared further down this module: an evidence
+        // export taken before it exists reports null rather than throwing.
+        preset: (() => { try { return readQualityPresetState(); } catch (_) { return null; } })(),
         dpr: { requested: panelOverrides.dpr, effective: renderer.getPixelRatio() },
         postQuality: {
           requested: panelOverrides.postQuality,
@@ -10075,48 +10421,29 @@
         qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: request.key, value: request.value });
         return;
       }
+      if (request.kind === 'preset') {
+        // The strip at the top of every panel tab — the same four presets the
+        // gear menu cycles, addressed by id (or index) instead of by cycling.
+        const idx = typeof request.index === 'number'
+          ? request.index
+          : QUALITY_PRESETS.findIndex((p) => p.id === request.id);
+        if (idx >= 0) applyQualityPreset(idx);
+        return;
+      }
       if (request.kind === 'action') {
         if (request.action === 'resumeAuto') {
           qualitySettings.setMode(QUALITY_MODES.AUTO);
           adaptiveTier.unpin();
         } else if (request.action === 'reset' || request.action === 'backToShipping') {
-          resetVisualOverridesToShipping();
+          // The baseline preset, NOT persisted: this is a measurement step
+          // (the true before), not a preference. Routed through the preset so
+          // the gear menu's label, the panel's strip and the levers agree.
+          applyQualityPreset(QUALITY_PRESET_BASELINE, { persist: false });
         } else if (request.action === 'maxRealism') {
-          // One tap, every above-baseline lever to its ceiling. Each call is
-          // a REQUEST through the exact same qualitySettings.request() path
-          // a manual slider drag uses (CONTRACT §7.1) — this function has no
-          // rendering side effect that isn't also reachable by hand, one
-          // control at a time; it only saves fourteen taps on a phone in
-          // bright sunlight (the brief's own words).
-          const src = REQUEST_SOURCES.PANEL;
-          qualitySettings.request({ source: src, key: 'dpr', value: Math.max(1, window.devicePixelRatio || 1) });
-          qualitySettings.request({ source: src, key: 'postQuality', value: 'full' });
-          qualitySettings.request({ source: src, key: 'shadowsEnabled', value: true });
-          // VSM is the softest/highest-quality of the four filters this game
-          // exposes — the ceiling of shadowType's own enum, same reasoning
-          // as "highest map size" for shadowMapSize just below.
-          qualitySettings.request({ source: src, key: 'shadowType', value: 'vsm' });
-          qualitySettings.request({ source: src, key: 'shadowMapSize', value: 'high' });
-          qualitySettings.request({ source: src, key: 'antialiasing', value: '4x' });
-          qualitySettings.request({ source: src, key: 'anisotropy', value: renderer.capabilities.getMaxAnisotropy() });
-          // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
-          // 80k-triangle budget on desktop (85,504 tris — see spherical-
-          // world.js's own GROUND_RESOLUTION_PRESETS comment), which is a
-          // deliberate one-lever-at-a-time choice, not the one-tap "show me
-          // the envelope" preset's job. Ultra is still reachable by hand from
-          // the Terrain mesh resolution control right above this button.
-          qualitySettings.request({ source: src, key: 'terrainResolution', value: 'high' });
-          // decorativeDensity's new ceiling (this wave) is 2.0; weatherDensity/
-          // mistBudget were NOT extended (they'd need a bigger pre-allocated
-          // particle buffer this wave did not build), so they are left alone
-          // here rather than requesting a "new maximum" that is really just
-          // their unchanged shipping value.
-          // 1, not 2. The gate measured this above 1.0 and found a label: clamp()'s
-          // fallthrough capped it at 1 while the readout showed "2.00", and even
-          // unclamped the value only scales visualUniforms.wind — 14 mm more foliage
-          // sway, no particle, no draw call, no triangle. A ceiling the system cannot
-          // reach is a promise the panel cannot keep.
-          qualitySettings.request({ source: src, key: 'decorativeDensity', value: 1 });
+          // Alias for the Ultra preset — its lever list IS the old MAX
+          // REALISM set (see QUALITY_PRESETS). Kept so anything that still
+          // dispatches the old action lands on the same state as the strip.
+          applyQualityPreset(0);
         } else if (request.action === 'gradeNextCandidate') {
           // perf-grade PANEL wave: cycles gradeCandidatesFor(biome, baseline)
           // (src/environment/grade-candidates.js) — the SAME list
@@ -10156,6 +10483,9 @@
       closeEventName: DEV_PANEL_CLOSE_EVENT,
       getTelemetry: panelGetTelemetry,
       getControlState: panelGetControlState,
+      // Lazy: QUALITY_PRESETS is declared after this construction and the
+      // panel only reads the list when it renders (on open), long after boot.
+      getPresets: () => QUALITY_PRESETS.map((p, index) => ({ id: p.id, label: p.label, hint: p.hint, index })),
       getEvidence: panelGetEvidence,
       getBuildStale: () => buildIdentity().stale,
       onRequest: panelOnRequest,
@@ -10663,6 +10993,9 @@
               ? { x: 0, y: 0, active: false }
               : inputState;
         wingInputState = resolvedInput;
+        lastWingInput.x = resolvedInput.x || 0;
+        lastWingInput.y = resolvedInput.y || 0;
+        lastWingInput.active = !!resolvedInput.active;
 
         const sprintingNow = Boolean(sprintState?.active);
         const cruiseSpeed = sprintingNow
@@ -10703,7 +11036,15 @@
             flight.speed = FLIGHT_RECOVERY_CONFIG.minFlightResumeSpeed;
           } else {
             // Forward boost surges cruise speed; otherwise normal cruise.
-            flight.speed = boostTimer > 0 ? resumeSpeed * BOOST_CONFIG.speedMult : resumeSpeed;
+            // Under v2 this is the TARGET, not the speed: the energy model owns
+            // `speed` (a dive gains, a climb bleeds) and chases `cruise`, so
+            // writing speed here every frame would flatten the whole model back
+            // to v1's constant. The grounded and falling branches above still
+            // write `speed` directly — those are commanded speeds, and v2
+            // honours a direct write as both the speed and the target.
+            const target = boostTimer > 0 ? resumeSpeed * BOOST_CONFIG.speedMult : resumeSpeed;
+            if (flightV2) flight.cruise = target;
+            else flight.speed = target;
           }
         }
 
@@ -10721,6 +11062,90 @@
           if (cooling !== _boostBtnCooling) {
             boostButton.classList.toggle('is-cooling', cooling);
             _boostBtnCooling = cooling;
+          }
+        }
+
+        // Aerobatics run BEFORE tick(), not after. tick() ends by re-deriving
+        // the pose and enforcing the pitch clamp against the orientation it
+        // finds, so a roll applied afterwards is a roll the controller has not
+        // seen and the clamp has not been told to stand down for. Anything
+        // that takes the bird out of the flight envelope has to be inside the
+        // frame the envelope is checked in.
+        if (aerobatics) {
+          // Earn a move from the stick before advancing one. Only while
+          // genuinely flying: a pinned stick during a landing approach or a
+          // knockdown is the player steering, not asking to roll.
+          if (aeroTrigger) {
+            const flying = !isNested
+              && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING
+              && !nestingControlsBird;
+            if (!flying) {
+              aeroTrigger.reset();
+            } else {
+              const ask = aeroTrigger.update(resolvedInput.x, resolvedInput.y, delta);
+              if (ask) {
+                const r = aerobatics.start(ask.move, {
+                  direction: ask.direction,
+                  altitude: __BIRB_ALTITUDE_ABOVE_GROUND(),
+                });
+                if (r.started) {
+                  // Capture the LEVEL heading now, before the move bends the
+                  // nose: forward with its radial component removed.
+                  _aeroUp.copy(flight.position).normalize();
+                  _aeroHeading.set(0, 0, -1).applyQuaternion(flight.quaternion);
+                  _aeroHeading.addScaledVector(_aeroUp, -_aeroHeading.dot(_aeroUp));
+                  if (_aeroHeading.lengthSq() < 1e-6) _aeroHeading.set(0, 0, -1);
+                  else _aeroHeading.normalize();
+                  if (statusMetric) statusMetric.textContent = r.label + '!';
+                  triggerHaptic(18);
+                } else if (r.reason === 'too-low' && statusMetric) {
+                  // Never swallow a deliberate hold. "Nothing happened" is
+                  // the worst feedback there is for one.
+                  statusMetric.textContent = 'Too low!';
+                }
+              }
+            }
+          }
+          const aero = aerobatics.update(delta);
+          // Wind-up: rises with the hold while a move is being earned, is
+          // handed over intact the frame the move starts, and unwinds with
+          // the sweep — gone by the half-way point, when the move is what
+          // the eye is following.
+          _aeroWindup = aero.active
+            ? AERO_WINDUP * Math.max(0, 1 - aero.swept / Math.PI)
+            : (aeroTrigger ? aeroTrigger.progress() * AERO_WINDUP : 0);
+          if (aero.active && !isNested && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+            flight.aerobatic(aero.rollDelta, aero.pitchDelta);
+            // A loop carries speed. `flight.speed` was assigned from cruise a
+            // few lines up and is again next frame, so this cannot compound.
+            if (aero.speedMul !== 1) flight.speed *= aero.speedMul;
+            aerobaticStable = aero.stableCamera;
+            // Re-project the held heading onto THIS frame's tangent plane —
+            // parallel transport has moved the radial since the move began.
+            _aeroUp.copy(flight.position).normalize();
+            _aeroScratch.copy(_aeroHeading).addScaledVector(_aeroUp, -_aeroHeading.dot(_aeroUp));
+            if (_aeroScratch.lengthSq() > 1e-6) _aeroHeading.copy(_aeroScratch).normalize();
+            // bCam (src/flight/bird-camera.js) is the LIVE chase rig — see
+            // "FLIGHT PORT" above. cameraState's follow rig is parked at
+            // spawn on this path (read back: its position never moved through
+            // a whole loop) and is held too only so the two cannot disagree
+            // if that rig is ever switched back in.
+            bCam.setHold({ weight: aerobaticStable, heading: _aeroHeading, distanceMul: aero.cameraDistance });
+            cameraState?.setFollowHold?.({
+              weight: aerobaticStable, heading: _aeroHeading, up: _aeroUp, distanceMul: aero.cameraDistance,
+            });
+          } else {
+            // Covers both "the move ended" and "the bird was knocked down or
+            // landed mid-move" — a manoeuvre must never outlive the state it
+            // was legal in, or the stabilisers stay suspended on a bird that
+            // is now falling.
+            if (aero.active) aerobatics.cancel();
+            flight.endAerobatic();
+            if (aerobaticStable !== 0) {
+              bCam.setHold({ weight: 0 });
+              cameraState?.setFollowHold?.({ weight: 0 });
+            }
+            aerobaticStable = 0;
           }
         }
 
@@ -10792,9 +11217,40 @@
           if (groundResult.collided) {
             pose.position.copy(groundResult.correctedPosition);
             flight.position.copy(groundResult.correctedPosition);
-            applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
-            if (statusMetric) {
-              statusMetric.textContent = "Grounded. Push to walk, pull back to reverse — tap Fly to take off.";
+            // Under v2 the bird can reach the ground inverted or far too fast —
+            // there is no pitch clamp and no constant cruise any more — and a
+            // bird that lands on its back and starts WALKING reads as a bug.
+            // Anything but an upright, unhurried arrival routes into the same
+            // knockdown a tree impact and a drone strike already use. 0.5 is 60
+            // degrees off upright; 1.4x cruise is more than level flight can
+            // build, so only a dive (which tops out at maxMul 1.9) trips it.
+            let v2Crash = false;
+            if (flightV2 && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING) {
+              _v2Up.copy(pose.position).normalize();
+              _v2BodyUp.set(0, 1, 0).applyQuaternion(pose.quaternion).normalize();
+              _v2Fwd.set(0, 0, -1).applyQuaternion(pose.quaternion).normalize();
+              const cruise = Number.isFinite(flight.cruise) && flight.cruise > 0 ? flight.cruise : flight.speed;
+              // 0.25 is 75 degrees off upright: the 70-degree maximum HELD bank
+              // (bird-flight-v2.js maxBank) still lands, a rail roll does not.
+              // The speed half requires the nose to be DOWN (-0.2 is about 12
+              // degrees): the review measured a level, upright, hands-off bird
+              // above 1.4x cruise for 0.68 s after every boost ends (the
+              // target drops from 26.4 to 11 in one frame while the speed is
+              // still 19), so speed alone would have made a boosted skim a
+              // knockdown with the bird perfectly upright.
+              v2Crash = _v2BodyUp.dot(_v2Up) < 0.25
+                || (flight.speed > 1.4 * cruise && _v2Fwd.dot(_v2Up) < -0.2);
+            }
+            if (v2Crash) {
+              applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.FALLING);
+              if (statusMetric) {
+                statusMetric.textContent = "Crashed! You're going down.";
+              }
+            } else {
+              applyFlightRecoveryState(FLIGHT_RECOVERY_STATES.GROUNDED);
+              if (statusMetric) {
+                statusMetric.textContent = "Grounded. Push to walk, pull back to reverse — tap Fly to take off.";
+              }
             }
           } else if (flightRecoveryState === FLIGHT_RECOVERY_STATES.GROUNDED) {
             // Keep grounded movement hugging the surface while walking/sliding.
@@ -10806,6 +11262,57 @@
         if (nestedAimQuaternion) {
           pose.quaternion.copy(nestedAimQuaternion);
           flight.quaternion.copy(nestedAimQuaternion);
+        }
+
+        // Flight v2's chase frame. BirdCamera stands behind the bird along the
+        // bird's OWN forward, and in a loop that forward points up, then
+        // backwards, then down — so the rig swings under the bird and out the
+        // far side and the world reads as going backwards. Under v1 that was an
+        // event (a committed move asked for a hold); under v2 the bird can loop
+        // at any moment because there is no move to detect, so the hold is on
+        // EVERY frame, along the level heading, with radial up. In ordinary
+        // level flight the held heading IS the bird's forward, so this changes
+        // nothing there — it only bites where the old rig was already wrong.
+        if (flightV2) {
+          const v2Flying = !isNested && !nestingControlsBird
+            && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING;
+          if (v2Flying) {
+            _v2Up.copy(pose.position).normalize();
+            _v2Fwd.set(0, 0, -1).applyQuaternion(pose.quaternion).normalize();
+            _v2Tan.copy(_v2Fwd).addScaledVector(_v2Up, -_v2Fwd.dot(_v2Up));
+            // FREEZE the heading while the nose is near vertical: the tangent
+            // projection is short there and its direction is mostly noise, so a
+            // rig that followed it would flip the frame at the top of a loop.
+            // 0.25 of a unit forward is 75 degrees of pitch.
+            if (_v2Tan.length() >= 0.25) {
+              _v2Tan.normalize();
+              if (_v2Heading.lengthSq() < 1e-6) _v2Heading.copy(_v2Tan);
+              // ~0.08 s exponential, written against delta so it is the same
+              // smoothing at 60 fps and in a 3 fps capture harness. Not 0.25:
+              // the freeze above is what keeps the frame from flipping over
+              // the top, and at the 127 deg/s a maximum bank turns, a 0.25 s
+              // lag stood the camera 16 degrees outside every turn — 0.08 is
+              // 5, inside the rig's own damping.
+              else _v2Heading.lerp(_v2Tan, 1 - Math.exp(-delta / 0.08)).normalize();
+            }
+            if (_v2Heading.lengthSq() > 1e-6) {
+              // Stand further off the steeper the bird points, so a loop whose
+              // radius (speed / pitchRate ~ 5 units) is smaller than the 5-unit
+              // stand-off does not go over the top on top of the lens.
+              // Pre-allocated option objects (setHold copies what it needs):
+              // two literals a frame on the live path was the one allocation
+              // the review found in v2.
+              _v2Hold.distanceMul = 1 + 0.6 * Math.abs(_v2Fwd.dot(_v2Up));
+              _v2FollowHold.distanceMul = _v2Hold.distanceMul;
+              bCam.setHold(_v2Hold);
+              cameraState?.setFollowHold?.(_v2FollowHold);
+            }
+          } else {
+            // Landing, nested or knocked down: hand the frame straight back, so
+            // those paths behave exactly as they do under v1.
+            bCam.setHold(_v2HoldOff);
+            cameraState?.setFollowHold?.(_v2HoldOff);
+          }
         }
 
         // 3. Camera Update
@@ -10851,7 +11358,21 @@
         }
 
         // 4. Visual Update
-        visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
+        // During a committed move the stick is PINNED — that is the trigger —
+        // so the visual layer would add a full 63-degree bank and a pitch tilt
+        // on top of a flight frame that is already rolling or looping, and
+        // the model would sit a bank's worth off the manoeuvre at every point
+        // of it. The move owns the model's attitude; the visual bank resumes
+        // when it ends.
+        // The stick reaches the model through the wind-up, and it is NOT
+        // muted during a move: a bank of 63 degrees held through a 360-degree
+        // roll is a constant offset that starts and ends continuous, whereas
+        // muting it unwound the bank against the sweep's ease-in and read as
+        // the bird freezing before it rolled.
+        _aeroVisualInput.x = resolvedInput.x * (1 + _aeroWindup);
+        _aeroVisualInput.y = resolvedInput.y * (1 + _aeroWindup);
+        _aeroVisualInput.active = resolvedInput.active;
+        visualQuat = visual.update(pose.quaternion, _aeroVisualInput, delta);
 
         // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
@@ -10882,10 +11403,31 @@
         const pitchInput = wingInputState?.y ?? 0;
         const wingDipAmount = 0.4; // Max wing dip angle in radians
 
-        // Left turn (negative yaw): left wing dips down, right wing rises
-        // Right turn (positive yaw): right wing dips down, left wing rises
-        const leftDip = yawInput * wingDipAmount;  // Positive yaw = left rises
-        const rightDip = -yawInput * wingDipAmount; // Positive yaw = right dips
+        // Left turn (negative yaw): left wing dips down, right wing rises.
+        // Right turn (positive yaw): right wing dips down, left wing rises.
+        //
+        // BOTH TERMS CARRY THE SAME SIGN, and that is not a slip — it is the
+        // opposite of what the mirror rule does for every other term here, for
+        // the reason spelled out in the block below. A bank is the ONE motion
+        // that is not mirror-symmetric: one wing goes up while the other goes
+        // down. The right wing's `scale.z = -1` puts its tip at local -Z while
+        // the left's is at +Z (measured: leftTip.z +1.64, rightTip.z -1.64 in
+        // the bird's own frame), and a rotation about X sends +Z down while it
+        // sends -Z up. So the SAME rotation.x on both wings is a roll, and
+        // OPPOSITE rotations are a symmetric flap.
+        //
+        // This shipped with the two opposite, which meant the bank dip
+        // contributed EXACTLY ZERO bank and all of its amplitude to a
+        // collective flap — measured at five stick positions, leftTip.y and
+        // rightTip.y were equal to four decimal places at every one of them.
+        // Worse, that phantom flap then stacked with `glideSweep`, which is
+        // correctly symmetric: turning right the two added (both wings drove
+        // hard down), turning left they cancelled (both wings sat flat). That
+        // is exactly how it was reported from the phone — "banks left both
+        // wings go straight, banks right both wings go down".
+        const dip = -yawInput * wingDipAmount;
+        const leftDip = dip;   // Positive yaw (right turn): left wing rises
+        const rightDip = dip;  // Positive yaw (right turn): right wing drops
 
         // Flight-phase wing behavior:
         // - Grounded/falling/downward/banking: wings hold a steady glide posture.
@@ -10894,9 +11436,8 @@
         // of rotation.x — so any motion meant to look mirror-symmetric in world
         // space MUST be applied with opposite signs to the two rotation.x
         // values. That's why flap is +/- (both wings flap up together) AND
-        // glide-sweep is now +/- (both wings dip down together). Banking dip
-        // (leftDip / rightDip) is already opposite-sign so it preserves mirror
-        // too — wings stay glued in mirror-image at every frame.
+        // glide-sweep is +/- (both wings dip down together). The banking dip is
+        // the deliberate exception and is SAME-signed: see its own comment.
         const isFallingVisual = flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING;
         const isAirborneVisual = !isGroundedVisual && !isFallingVisual;
         const bankingHard = Math.abs(yawInput) > 0.25;
@@ -10940,7 +11481,11 @@
         // Perch fold and knockdown tumble. Both mix into the SAME formula
         // rather than running as a parallel animation path, so the mirror
         // rule above still holds for every term.
-        perchBlend = blendToward(perchBlend, isNested ? 1 : 0, delta, 5);
+        // A bird on its feet folds its wings. This targeted `isNested`
+        // alone, so a bird walking on the ground held the full spread-wing
+        // glide posture — the fold, the pulled-in span and the dropped tail
+        // all existed and none of them ever ran outside a nest.
+        perchBlend = blendToward(perchBlend, (isNested || isGroundedVisual) ? 1 : 0, delta, 5);
         const perch = perchPose(perchBlend);
         const tumble = isFallingVisual ? tumbleFlap(motionState.elapsed) : null;
 
@@ -10950,6 +11495,21 @@
         rightWing.rotation.x = rightWing.userData.baseRotation.x
           + rightDip - glideSweep - flapOffset - idleFlutter
           - perch.fold - (tumble ? tumble.right : 0);
+
+        // SWEEP, about the wing's own vertical (local Y). The ONLY term that
+        // writes rotation.y — every other pose term is dihedral or twist —
+        // and it exists because a fold alone cannot tuck a wing: dropping a
+        // wing that is still standing straight out sideways gives a wide V
+        // pointing at the ground, not a bird with its wings away. Laying it
+        // BACK is what puts the folded wing over the flank with its
+        // primaries trailing past the tail.
+        //
+        // Negative is aft for the left wing: the model faces local +X with
+        // the span along +Z, so a positive rotation about Y carries the
+        // wingtip toward the nose. The right wing takes the mirror sign for
+        // the same reason every other term here does.
+        leftWing.rotation.y = leftWing.userData.baseRotation.y - perch.sweep;
+        rightWing.rotation.y = rightWing.userData.baseRotation.y + perch.sweep;
 
         // TWIST, about the wing's own long axis (local Z, which is the span
         // axis — it is the one `scale.z` stretches and mirrors).
@@ -11056,8 +11616,17 @@
         // the right way. Same threshold as the grounded walk-speed logic.
         const walkDir = (inputState?.y ?? 0) < -FLIGHT_RECOVERY_CONFIG.walkBackThreshold ? -1 : 1;
         const walkPhase = motionState.elapsed * 9 * walkDir;
-        // Body bob at 2× step cadence so it bobs on each step.
-        birbAnchor.position.y += Math.sin(walkPhase * 2) * 0.04;
+        // Body bob at 2x step cadence so it bobs on each step — along the
+        // RADIAL up, not world +Y. This is a planet: `position.y` is only
+        // "up" within sight of the north pole, and everywhere else the bob
+        // was a sideways shuffle that got more sideways the further the bird
+        // walked from it. Same rule the ground shader, the flight floor and
+        // the snow term all already follow.
+        const bob = Math.sin(walkPhase * 2) * 0.04;
+        _walkUp.copy(birbAnchor.position);
+        if (_walkUp.lengthSq() > 1e-6) {
+          birbAnchor.position.addScaledVector(_walkUp.normalize(), bob);
+        }
         if (leftFoot) leftFoot.rotation.x = Math.sin(walkPhase) * 0.35;
         if (rightFoot) rightFoot.rotation.x = Math.sin(walkPhase + Math.PI) * 0.35;
       } else {
@@ -11706,42 +12275,98 @@
     // stuttering, were both stuck with whatever the controller decided.
     //
     // So a preset PINS the tier (or hands control back to the controller), and
-    // Ultra additionally raises the DPR CEILING. Note which way round that is:
-    // the ceiling is the most the renderer may ask for, and the adaptive tier
-    // still drops to 1.0 and 0.85 underneath it on measured FPS. So Ultra
-    // cannot pin a struggling phone at a resolution it cannot hold — it only
-    // stops a phone that is coasting from being held back by a cap chosen for
-    // the worst device.
+    // it is also a COMPLETE visual state: every lever the panel exposes, set
+    // in one go. It starts from resetVisualOverridesToShipping() — the
+    // baseline every lever is measured against (every override null, the
+    // tier unpinned, shadows off, bloom at 0.78, PCF, terrain standard) —
+    // and then applies its own lever list through qualitySettings.request,
+    // the same path a thumb on the panel takes (CONTRACT §7.1). That is what
+    // makes a preset REVERSIBLE: G-ASCEND measured the old BACK TO SHIPPING
+    // landing 0.07 above shipping bloom because it restored by intent rather
+    // than from a list; a preset switch always goes through the list.
+    //
+    // ULTRA IS THE OLD MAX REALISM, EXACTLY. The owner pressed that button,
+    // said it looked better, and asked for the best view on by default. So
+    // Ultra's lever list is the panel's MAX REALISM set, the MAX REALISM
+    // action is an alias for this preset, and Amazing is the baseline.
+    //
+    // One deliberate difference from the button's old body: Ultra reaches
+    // native DPR through the tier's CEILING (dprCap Infinity, tier pinned 0
+    // -> getQualityPixelRatio returns the device ratio), not through a
+    // `dpr` panel OVERRIDE. Same pixels on screen; different plumbing, and
+    // the plumbing matters: an override takes the ratio away from the tier
+    // entirely, so `__BIRB.pinTier(1)` would no longer move the drawing
+    // buffer and the frozen A3 oracle's own self-check (pin 0, pin 1, expect
+    // the ratio to differ) would read false on every fresh boot.
     const QUALITY_PRESETS = [
       {
-        id: 'ultra', label: 'Ultra', tier: 0, dprCap: 2.4,
-        hint: 'Everything on, full resolution. For a phone that is keeping up.',
+        id: 'ultra', label: 'Ultra', tier: 0, dprCap: Infinity,
+        hint: 'Max realism: native resolution, soft real shadows, 4x MSAA, dense terrain. For a phone that is keeping up.',
+        levers: () => [
+          ['postQuality', 'full'],
+          ['shadowsEnabled', true],
+          // VSM is the softest of the four filters this game exposes — the
+          // ceiling of shadowType's own enum, same reasoning as 'high' for
+          // the map size just below.
+          ['shadowType', 'vsm'],
+          ['shadowMapSize', 'high'],
+          ['antialiasing', '4x'],
+          ['anisotropy', renderer.capabilities.getMaxAnisotropy()],
+          // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
+          // 80k-triangle budget on desktop (85,504 tris — see spherical-
+          // world.js's GROUND_RESOLUTION_PRESETS). Ultra terrain is still
+          // one tap away on the panel's Ultra tab.
+          ['terrainResolution', 'high'],
+          ['decorativeDensity', 1],
+        ],
       },
       {
-        id: 'amazing', label: 'Amazing', tier: null, dprCap: null,
-        hint: 'Everything on, resolution managed automatically. The default.',
+        id: 'amazing', label: 'Amazing', tier: null, dprCap: null, levers: () => [],
+        hint: 'The baseline: everything on, resolution managed automatically, faked shadows.',
       },
-      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, hint: 'Lighter resolution, steadier frame rate.' },
-      { id: 'light', label: 'Light', tier: 2, dprCap: null, hint: 'Lowest cost. For an old or hot device.' },
+      { id: 'okay', label: 'Okay', tier: 1, dprCap: null, levers: () => [], hint: 'Lighter resolution, steadier frame rate.' },
+      { id: 'light', label: 'Light', tier: 2, dprCap: null, levers: () => [], hint: 'Lowest cost. For an old or hot device.' },
     ];
-    const QUALITY_STORAGE_KEY = 'birbQuality';
-    let qualityPresetIndex = 1; // Amazing
+    /** The preset every lever is measured against; the panel's reset lands here. */
+    const QUALITY_PRESET_BASELINE = 1;
+    // Bumped from `birbQuality` when the default moved to Ultra. A stored
+    // preference from before that change would otherwise silently defeat the
+    // new default for every returning player, including the one who asked for
+    // it — and "I set it to max and it did not change" is indistinguishable
+    // from the change not shipping.
+    const QUALITY_STORAGE_KEY = 'birbQuality2';
+    let qualityPresetIndex = 0; // Ultra — see restoreQualityPreset()
 
     function applyQualityPreset(index, { persist = true } = {}) {
       const i = ((index % QUALITY_PRESETS.length) + QUALITY_PRESETS.length) % QUALITY_PRESETS.length;
       const preset = QUALITY_PRESETS[i];
       qualityPresetIndex = i;
       qualityDprCap = preset.dprCap;
-      // `tier: null` means AUTO — hand the tier back to the controller that
-      // measures frame rate, rather than leaving it wherever it happened to be.
-      if (preset.tier === null) adaptiveTier.unpin();
-      else adaptiveTier.pin(preset.tier);
-      // The pin/unpin above may not have moved the tier at all (pinning 0 when
-      // already at 0), and the DPR ceiling is not a tier change, so force the
-      // one sizing function every quality change routes through. Without this,
-      // Ultra's raised ceiling would not reach the renderer until the next
-      // real resize — which on a phone is never.
+      // 1. The true before. Every override null, every lever at its shipping
+      //    value, the tier handed back to the controller, mode AUTO. Cheap
+      //    where nothing changed: setGroundResolution no-ops on an equal key,
+      //    and a material's needsUpdate before its first render is free.
+      resetVisualOverridesToShipping();
+      // 2. The tier. `tier: null` means AUTO, and the reset above already
+      //    unpinned it, so only a pin is a change here — and the pin may not
+      //    move the tier at all (pinning 0 when already at 0) while the DPR
+      //    ceiling is not a tier change, so force the one sizing function
+      //    every quality change routes through. Without this, Ultra's ceiling
+      //    would not reach the renderer until the next real resize — which on
+      //    a phone is never.
+      if (preset.tier !== null) adaptiveTier.pin(preset.tier);
       updateRendererSize(true);
+      // 3. The levers, through the panel's own request path — CONTRACT §7.1
+      //    says shadow state (and the rest) changes by that path and no other,
+      //    and a boot-time poke at shadowsSetEnabled would be the per-frame-
+      //    writer failure A10 exists to catch. Ordering note:
+      //    restoreQualityPreset() runs long after the world and the bird
+      //    exist, so shadowsSetEnabled's traversals have something to
+      //    traverse. Moving this call earlier would half-apply it.
+      const src = REQUEST_SOURCES.PANEL;
+      for (const [key, value] of preset.levers()) {
+        qualitySettings.request({ source: src, key, value });
+      }
       if (qualityLabelEl) qualityLabelEl.textContent = preset.label;
       if (settingsQualityButton) settingsQualityButton.setAttribute('title', preset.hint);
       if (persist) {
@@ -11752,11 +12377,40 @@
       return preset;
     }
 
+    /** What the gear menu, the panel strip and the debug hook all report. */
+    function readQualityPresetState() {
+      const p = QUALITY_PRESETS[qualityPresetIndex];
+      return { id: p.id, index: qualityPresetIndex, label: p.label };
+    }
+
     function restoreQualityPreset() {
+      // `?quality=ultra|amazing|okay|light` wins over the remembered
+      // preference and is NOT remembered itself. A production review URL,
+      // like `?env=` and `?goto=`: the owner can send a phone to a specific
+      // preset by link, and the harnesses use it to boot at the BASELINE.
+      // Why they must: under SwiftShader the Ultra default renders a frame
+      // in 2.6 s against Amazing's 0.13 s (measured, G-ULTRA-DEFAULT), and
+      // every frozen quality oracle was written against the Amazing state —
+      // shadows off, tier auto, no overrides — before Ultra became the
+      // default. Booting them there RESTORES their frozen conditions;
+      // tools/birb-default.mjs is the one check that boots with no flag and
+      // proves the production default is Ultra with every lever at its
+      // ceiling.
+      const fromUrl = (/[?&]quality=(ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
       let saved = null;
       try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
-      const found = QUALITY_PRESETS.findIndex((q) => q.id === saved);
-      applyQualityPreset(found >= 0 ? found : 1, { persist: false });
+      const found = QUALITY_PRESETS.findIndex((q) => q.id === (fromUrl || saved));
+      // Default ULTRA (index 0), by the owner's explicit call: the old MAX
+      // REALISM set, tier PINNED at 0, native resolution.
+      //
+      // Know what the pin costs before moving this back. `adaptiveTier.pin(0)`
+      // takes the tier away from the controller that measures frame rate, so a
+      // device that cannot hold full resolution no longer sheds it — it just
+      // runs slow. That is the deliberate trade of a preset called Ultra, and
+      // it is two taps to undo from the gear menu (or one on the panel's
+      // strip), which is why it is an acceptable default and would not be an
+      // acceptable hard-coding.
+      applyQualityPreset(found >= 0 ? found : 0, { persist: false });
     }
 
     if (settingsQualityButton) {
@@ -11832,6 +12486,7 @@
     // help the one person who has to sign the art off. He could not find the
     // stone arch; that is what this is for.
     function seekLandmark(id, back = null) {
+      v2ForgetHeading();
       const found = (sphericalWorld?.landmarks || []).find((l) => l.id === id);
       if (!found || !flightController?.position) return null;
       // Each landmark carries its own stand-off; 34 is only the fallback for
@@ -11949,6 +12604,22 @@
           return true;
         },
         environments: () => ENVIRONMENT_VARIANTS.map((v) => v.id),
+        // The organic pass, flipped at runtime for the A/B. This REBUILDS the
+        // world rather than just clearing `flatShading` on every material,
+        // and the rebuild is the point: the ground's slope source — which
+        // decides soil against rock, and with it every material boundary the
+        // terrain shader draws — is chosen when the shader compiles. Flip the
+        // material alone and you get per-fragment lighting under per-triangle
+        // material boundaries, which is neither the before nor the after.
+        //
+        // `?smooth=0` on a cold load is the same comparison without the
+        // rebuild, and is what the capture harness uses.
+        smooth: (on = true) => {
+          if (typeof setSmoothShading !== 'function') return null;
+          setSmoothShading(on);
+          setEnvironment(environmentState.id);
+          return smoothShadingActive();
+        },
         // Drop the bird to a given height above the real ground. Used by the
         // capture harness: the chase camera sits close behind the bird, so the
         // ground directly beneath it leaves the frame above roughly five
@@ -11956,6 +12627,7 @@
         setAltitude: (aboveGround) => {
           const p = flightController?.position;
           if (!p) return null;
+          v2ForgetHeading();
           const terrain = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
           p.normalize().multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
           return p.length();
@@ -11969,6 +12641,7 @@
         // The landmark valley is the only place the water shader is visible
         // and spawn is nowhere near it.
         teleport: (x, y, z, aboveGround = 6) => {
+          v2ForgetHeading();
           const p = flightController?.position;
           if (!p || !sphericalWorld) return null;
           const len = Math.hypot(x, y, z) || 1;
@@ -12577,6 +13250,201 @@
         // resumes. Exists so tools/birb-bird-sheet.mjs can capture three
         // deterministic flap poses instead of whatever phase the envelope
         // happens to be in at the moment of the shutter.
+        // What the rig is actually doing, read off the live model.
+        // Without this, "the wings tuck when grounded" and "the feet animate
+        // while walking" are claims about source rather than about the bird
+        // on screen — and this repo has shipped a rig term that never once
+        // executed (the perch fold, until 2026-09-13) precisely because
+        // nothing could see it.
+        birdPose: () => {
+          if (!birbAnchor) return null;
+          const g = (n) => birbAnchor.getObjectByName(n);
+          const rot = (o) => (o ? { x: +o.rotation.x.toFixed(4), y: +o.rotation.y.toFixed(4), z: +o.rotation.z.toFixed(4) } : null);
+          const lw = g('leftWing'); const rw = g('rightWing');
+          const tipLocal = (wing) => {
+            const tip = wing?.userData?.tipFeather;
+            if (!tip) return null;
+            birbAnchor.updateWorldMatrix(true, true);
+            const w = tip.getWorldPosition(new THREE.Vector3());
+            birbAnchor.worldToLocal(w);
+            return w.toArray().map((n) => +n.toFixed(4));
+          };
+          return {
+            recovery: flightRecoveryState,
+            nested: !!nestingSystem?.isNested?.(),
+            perchBlend: +perchBlend.toFixed(4),
+            leftWing: rot(lw),
+            rightWing: rot(rw),
+            // Span carries the perch pull-in; a tucked wing is shorter as
+            // well as folded, and only one of those is a rotation.
+            leftWingSpanZ: lw ? +lw.scale.z.toFixed(4) : null,
+            leftFoot: rot(g('leftFoot')),
+            rightFoot: rot(g('rightFoot')),
+            tail: rot(g('tail')),
+            // World position, so a caller can measure that walking moves it.
+            position: birbAnchor.position.toArray().map((n) => +n.toFixed(3)),
+            radius: +birbAnchor.position.length().toFixed(3),
+            // Clearance above the CARVED ground under the bird, not the raw
+            // radius. On rolling terrain those are different questions and
+            // only this one answers "is it still on the surface": a bird
+            // walking up a slope gains radius without leaving the ground, and
+            // tools/birb-walk.mjs failed once on exactly that (landed at
+            // 105.86 where a typical run lands at 104.97, then walked 2.5
+            // units uphill for a 2.75 rise against a 2.5 tolerance). Same
+            // sampler the flight floor and the landing check use, so all
+            // three agree about where the ground is.
+            aboveGround: (() => {
+              const p = birbAnchor.position;
+              const r = p.length();
+              if (!(r > 1e-3) || !sphericalWorld) return null;
+              const terrain = (typeof sampleTerrainHeight === 'function')
+                ? sampleTerrainHeight(p.x / r, p.y / r, p.z / r) : 0;
+              return +(r - (sphericalWorld.sphereRadius + terrain)).toFixed(3);
+            })(),
+            // Each wingtip in the BIRD'S OWN frame, which is the only frame in
+            // which "that wing is high" means anything. A rotation.x pair does
+            // NOT tell you this: the right wing carries scale.z = -1, so the
+            // same rotation on the two wings is a BANK and opposite rotations
+            // are a symmetric flap — the reverse of what reading the numbers
+            // suggests, and the reason the bank dip shipped with its signs
+            // swapped. `y` is the bird's own up.
+            leftTip: tipLocal(lw), rightTip: tipLocal(rw),
+          };
+        },
+        // The flight state in the only terms that mean anything on a sphere:
+        // pitch and roll against the LOCAL radial up, and a heading bearing in
+        // the local tangent plane. `birdPose()` describes the model; this
+        // describes where the bird is actually pointing and which way it is
+        // actually going, which is what a question like "why does a dive turn
+        // into a spiral" needs and what no screenshot can answer.
+        // Fire a committed manoeuvre from a harness. `force` skips the
+        // altitude gate, because a capture wants the move at whatever pose it
+        // has pinned, not wherever the terrain happens to allow one.
+        aero: (move = 'roll', direction = 1, force = true) => {
+          if (!aerobatics) return null;
+          return aerobatics.start(move, {
+            direction,
+            altitude: force ? Infinity : __BIRB_ALTITUDE_ABOVE_GROUND(),
+          });
+        },
+        // What the follow rig ITSELF reports holding, read back from the
+        // rig — so a hold the game believes it sent can be checked against
+        // one the camera actually has.
+        cameraHold: () => {
+          const live = newFlightSystem?.camera;
+          const d = cameraState?.getFollowDebug?.();
+          return {
+            // The rig that renders.
+            live: live && typeof live.getHold === 'function' ? {
+              weight: +live.getHold().weight.toFixed(3), distanceMul: live.getHold().distanceMul,
+              distance: live.distance, height: live.height,
+            } : null,
+            // The legacy follow rig, parked on this path.
+            follow: d ? { weight: d.hold?.weight, position: d.position?.toArray?.().map((n) => +n.toFixed(2)) } : null,
+            mode: cameraState?.getMode?.(),
+          };
+        },
+        aeroState: () => (aerobatics ? {
+          ...aerobatics.state(),
+          stableCamera: +aerobaticStable.toFixed(3),
+          heading: _aeroHeading.toArray().map((n) => +n.toFixed(4)),
+          up: _aeroUp.toArray().map((n) => +n.toFixed(4)),
+          suspended: !!flightController?.aerobaticActive,
+        } : null),
+        flightProbe: () => {
+          const fc = flightController;
+          if (!fc?.position || !fc?.quaternion) return null;
+          const up = fc.position.clone().normalize();
+          const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(fc.quaternion).normalize();
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(fc.quaternion).normalize();
+          const bodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(fc.quaternion).normalize();
+          // Pitch: positive is nose-up away from the planet. Same quantity the
+          // controller's own auto-level and maxPitch clamp are written against.
+          const pitch = Math.asin(Math.max(-1, Math.min(1, fwd.dot(up))));
+          // Roll: how far the bird's own up has tipped off radial, signed by
+          // which way. Nothing outside Zen mode ever corrects this.
+          const roll = Math.asin(Math.max(-1, Math.min(1, up.dot(right))));
+          // Heading, as a bearing in the tangent plane from a fixed reference
+          // (the world +Y pole projected down), so a run can see the track
+          // rotating even while pitch holds steady.
+          const poleRef = new THREE.Vector3(0, 1, 0).addScaledVector(up, -up.y);
+          let heading = null;
+          if (poleRef.lengthSq() > 1e-6) {
+            poleRef.normalize();
+            const tangentFwd = fwd.clone().addScaledVector(up, -fwd.dot(up));
+            if (tangentFwd.lengthSq() > 1e-6) {
+              tangentFwd.normalize();
+              const side = new THREE.Vector3().crossVectors(up, poleRef);
+              heading = Math.atan2(tangentFwd.dot(side), tangentFwd.dot(poleRef));
+            }
+          }
+          const groundR = sphericalWorld
+            ? sphericalWorld.sphereRadius + (typeof sampleTerrainHeight === 'function'
+              ? sampleTerrainHeight(up.x, up.y, up.z) : 0)
+            : 0;
+          const d3 = (n) => +n.toFixed(3);
+          // Full-circle versions for the aerobatics: asin folds at 90, so a
+          // roll through inverted reads as 90 -> 0 and a loop over the top as
+          // 90 -> 0 too. Roll about forward is atan2(up.right, up.bodyUp)
+          // (exact while the pitch is level); pitch is atan2(up.fwd, up.bodyUp)
+          // (exact while the roll is zero) — each valid for its own move.
+          const rollFull = Math.atan2(up.dot(right), up.dot(bodyUp));
+          const pitchFull = Math.atan2(up.dot(fwd), up.dot(bodyUp));
+          const vis = typeof visual !== 'undefined' && visual ? visual : null;
+          return {
+            pitchDeg: d3(pitch * 180 / Math.PI),
+            rollDeg: d3(roll * 180 / Math.PI),
+            rollFullDeg: d3(rollFull * 180 / Math.PI),
+            pitchFullDeg: d3(pitchFull * 180 / Math.PI),
+            // The MODEL's cosmetic bank/tilt (bird-visual.js), degrees. Both
+            // are rotations about the SAME body axis as the flight-frame
+            // angle above them (bank about forward, tilt about the wing
+            // axis), applied after it, so what the eye sees is the SUM:
+            // rollFullDeg + visualBankDeg, pitchFullDeg + visualPitchDeg. The
+            // signs agree by construction — a right stick banks the model
+            // right wing down (negative about forward) and rolls the frame
+            // the same way (aerobatic() negates for exactly this reason).
+            visualBankDeg: vis ? d3(vis.bank * 180 / Math.PI) : null,
+            visualPitchDeg: vis ? d3(vis.pitchTilt * 180 / Math.PI) : null,
+            windup: d3(typeof _aeroWindup === 'number' ? _aeroWindup : 0),
+            headingDeg: heading === null ? null : d3(heading * 180 / Math.PI),
+            radius: d3(fc.position.length()),
+            aboveGround: d3(fc.position.length() - groundR),
+            speed: d3(fc.speed ?? 0),
+            // The two things that bound a dive, reported beside it so a
+            // measured ceiling is never mistaken for a bug elsewhere.
+            maxPitchDeg: d3((fc.maxPitch ?? 0) * 180 / Math.PI),
+            recovery: flightRecoveryState,
+            // The input the RIG is seeing, which is not always the input the
+            // stick was set to: nesting, grounded and falling each rewrite it.
+            stick: { x: d3(lastWingInput.x), y: d3(lastWingInput.y), active: lastWingInput.active },
+            // Which mapping is flying (docs/realism/FLIGHT_V2_PLAN.md). The
+            // three below are v2's and are NULL under v1 rather than 0, so a
+            // harness can tell "this build has no energy model" from "the
+            // energy model reads zero".
+            controller: flightV2 ? 'v2' : 'v1',
+            // The simulation clock (sum of the clamped per-frame deltas the
+            // flight actually integrated). A harness that counts frames and
+            // multiplies by 0.05 is guessing; this is the number.
+            simTime: d3(motionState.elapsed),
+            // The numbers this bird is flying with (v2 only), so a capture or a
+            // phone report can name its tuning instead of assuming the table.
+            tuning: flightV2 ? {
+              rollRate: fc.rollRate, pitchRate: fc.pitchRate, edge: fc.edge, maxBank: fc.maxBank,
+              maxPitchHold: fc.maxPitchHold, bankGain: fc.bankGain, pitchGain: fc.pitchGain,
+              turnGain: fc.turnGain, yawAssist: fc.yawAssist, gSpeed: fc.gSpeed, drag: fc.drag,
+              minMul: fc.minMul, maxMul: fc.maxMul, deadzone: fc.deadzone,
+            } : null,
+            // The bank the FLIGHT FRAME is holding, full circle. Under v1 the
+            // only bank is the cosmetic one on the model (visualBankDeg above).
+            bankDeg: (flightV2 && typeof fc.bankAngle === 'function')
+              ? d3(fc.bankAngle() * 180 / Math.PI) : null,
+            // The target the energy model chases, and speed as a fraction of
+            // it: > 1 means the bird has dived into the bank.
+            cruise: (flightV2 && Number.isFinite(fc.cruise)) ? d3(fc.cruise) : null,
+            energy: (flightV2 && typeof fc.energy === 'function') ? d3(fc.energy()) : null,
+          };
+        },
         flapPhase: (phase01 = null) => {
           __birbFlapPhaseOverride = (phase01 === null || phase01 === undefined) ? null : Number(phase01);
           return __birbFlapPhaseOverride;
@@ -12742,6 +13610,40 @@
         // as A1/A2 before their capturers existed: unreachable from the harness means
         // ungraded.
         resetOverrides: () => { resetVisualOverridesToShipping(); return true; },
+        // The preset, scriptable: `qualityPreset()` reads, `qualityPreset('amazing')`
+        // applies (without persisting) and reads back. Reads EFFECTIVE values
+        // through panelGetControlState, never the preset table — a preset that
+        // did not reach the renderer must report as not having reached it.
+        qualityPreset: (id) => {
+          if (id !== undefined && id !== null) {
+            const idx = typeof id === 'number' ? id : QUALITY_PRESETS.findIndex((p) => p.id === id);
+            if (idx < 0) return { error: `unknown preset ${id}`, presets: QUALITY_PRESETS.map((p) => p.id) };
+            applyQualityPreset(idx, { persist: false });
+          }
+          const cs = panelGetControlState();
+          const effective = {};
+          const requested = {};
+          for (const [k, v] of Object.entries(cs)) {
+            if (v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, 'effective')) {
+              effective[k] = v.effective;
+              requested[k] = v.requested === undefined ? null : v.requested;
+            }
+          }
+          return {
+            ...readQualityPresetState(),
+            tier: adaptiveTier.getTier(),
+            pinned: adaptiveTier.isPinned(),
+            mode: qualitySettings.mode,
+            dprCap: qualityDprCap,
+            pixelRatio: renderer.getPixelRatio(),
+            shadowMapType: renderer.shadowMap.type,
+            shadowMapSize: shadowLight.shadow.mapSize.x,
+            bloomStrength: bloomPass ? bloomPass.getStrength() : null,
+            groundResolution: sphericalWorld ? sphericalWorld.groundResolution : null,
+            requested,
+            effective,
+          };
+        },
         setShadows: ({ enabled, type, mapSize } = {}) => {
           if (enabled !== undefined) {
             qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'shadowsEnabled', value: !!enabled });

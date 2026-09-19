@@ -334,7 +334,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
         encoder.setCullMode(.back)
-        encoder.setFrontFacingWinding(.counterClockwise)
+        // `setFrontFacingWinding` in Objective-C; Swift imports it under this
+        // name. The default is clockwise and the templates wind the other way,
+        // so leaving it out turns the model inside out.
+        encoder.setFrontFacing(.counterClockwise)
 
         let size = view.drawableSize
         let aspect = size.height > 0 ? Double(size.width / size.height) : 1
@@ -350,7 +353,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             // moves with the camera and the surface you are looking at is always
             // the lit one.
             lightDirection: {
-                let d = normalize(camera.forward - camera.up * 0.55 - camera.right * 0.35)
+                let over = camera.forward - camera.up * 0.55 - camera.right * 0.35
+                let d = HumanoidCore.normalize(over)
                 return SIMD3(Float(d.x), Float(d.y), Float(d.z))
             }())
 
@@ -400,12 +404,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// honest answer to "how big is my brush", and a flat disc on the model
     /// shows foreshortening on a slope where a screen circle would lie.
     private func writeCursorRing(_ cursor: Cursor, into buffer: MTLBuffer) -> Bool {
-        let normal = normalize(cursor.normal)
+        let normal = HumanoidCore.normalize(cursor.normal)
         guard normal.x.isFinite, cursor.radius > 0 else { return false }
         // Any vector not parallel to the normal will do for the first tangent.
         let seed = abs(normal.y) < 0.9 ? Vec3(0, 1, 0) : Vec3(1, 0, 0)
-        let tangent = normalize(cross(seed, normal))
-        let bitangent = cross(normal, tangent)
+        let tangent = HumanoidCore.normalize(HumanoidCore.cross(seed, normal))
+        let bitangent = HumanoidCore.cross(normal, tangent)
         // Lifted a fraction of the radius off the surface so the ring is not
         // z-fighting with the triangles it sits on.
         let centre = cursor.centre + normal * (cursor.radius * 0.03)

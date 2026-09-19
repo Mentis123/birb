@@ -77,20 +77,54 @@ jobs:
       # birb-quality steps with no guard, so the job died before reaching
       # any of the four below on every push touching index.html/src/**/sw.js.)
 
+      - name: The production default is Ultra, every lever at its ceiling, and a preset switch is reversible
+        # Boots with NO quality flag — the path a player takes — and reads the
+        # EFFECTIVE renderer state back: native DPR, VSM 2048, 4x MSAA, post
+        # Full, terrain High, anisotropy at the device max. Then Amazing must
+        # equal the baseline exactly and Ultra again must equal boot. Every
+        # other browser step below boots at `?quality=amazing`, because under
+        # SwiftShader an Ultra frame is 2.6 s (docs/perf/gates/G-ULTRA-DEFAULT.md).
+        run: node tools/birb-default.mjs
+
       - name: Game starts and is actually playable
         # Asserts a rendered frame AND that the nesting and collectibles
         # systems exist, on the plain-start path a player takes. Exits
         # non-zero on any page error or console error.
-        run: node tools/birb-shot.mjs --out /tmp/start.png --start
+        run: node tools/birb-shot.mjs --out /tmp/start.png --start --query quality=amazing
 
       - name: A nest can be landed on
-        run: node tools/birb-shot.mjs --out /tmp/nest.png --start --nest
+        run: node tools/birb-shot.mjs --out /tmp/nest.png --start --nest --query quality=amazing
 
       - name: Every game mode enters, reports sane state and exits
         # Ring Rush's win condition must equal the spawner's ring count, and
         # Turret Defense must put the player on the gun. Console warnings
         # count as failures: that is how the setup bug announced itself.
         run: node tools/birb-modes.mjs
+
+      - name: The bird can stand, walk, stop, reverse and steer
+        # The grounded state had a walk cycle and walk controls for months
+        # and nothing in the repo drove them, so two defects sat in the
+        # shipped build: the perch fold targeted `isNested` alone (a bird
+        # walking on the ground held the full spread-wing glide) and the
+        # walk bob moved along world +Y on a planet where up is radial.
+        # Neither is visible in a screenshot of a bird that happens to be
+        # flying, and neither is reachable from a unit test — the rig lives
+        # in index.html and the state only exists after a real ground
+        # collision.
+        run: node tools/birb-walk.mjs
+
+      - name: Flight v2 rolls, loops, turns from the bank, rights itself and crashes inverted
+        # docs/realism/FLIGHT_V2_PLAN.md's `?flight=v2`: bank-to-turn instead
+        # of yaw-with-cosmetic-bank, unlimited pitch instead of an 80° clamp,
+        # and an energy model instead of a constant cruise speed. The FIRST
+        # thing this checks is that the flag reached a v2 controller at
+        # all — v1 + aerobatics.js already rolls and loops as scripted
+        # moves, so a silently-ignored flag would pass a bank/loop check for
+        # the wrong reason. Everything after that drives `setStick`/
+        # `setAltitude` and reads `flightProbe()` on the live page, frame by
+        # frame (SwiftShader is too slow for this at the Ultra default, so
+        # this step — like birb-walk above — boots `?quality=amazing`).
+        run: node tools/birb-flight-v2.mjs
 
       - name: Every shader compiles, in every environment
         # Three logs a shader error and then quietly draws NOTHING for that

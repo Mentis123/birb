@@ -171,6 +171,35 @@ export const PINE_BARK_TINT = Object.freeze({ r: 1.222, g: 1.301, b: 1.128 });
  * reads as one coherent top-down projection rather than a visible three-way
  * blend seam near the rare steep facet.
  */
+/**
+ * How hard the forest ground's own albedo is read as a height field.
+ *
+ * The map is already being sampled for colour; the luminance of that sample
+ * is a height field and its screen-space gradient is the slope, so relief
+ * costs no normal map and no extra fetch.
+ *
+ * **The scale is NOT three's bumpScale, and assuming it was cost a round.**
+ * `perturbNormalArb` expects `dHdxy` from a height map, where a neighbouring
+ * texel differs by a large fraction of the full range. Here the height is the
+ * albedo's LUMINANCE, and a soil photo's luminance changes by roughly 0.01
+ * per pixel at a perch — an order of magnitude smaller. At the 0.35 a bump
+ * map would want, the measured normal tilt is about a degree and the frame is
+ * pixel-identical to no bump at all. Swept against captures at a fixed pose:
+ * 0.35 invisible, 5 reads as soil grain with relief, 9 is getting noisy, 20
+ * is static.
+ *
+ * The pair with the shader's distance fade is solved rather than picked. The
+ * bump is a PERCH effect — a grazing camera where the soil otherwise reads as
+ * a photograph laid flat — and at flight altitude it is just aliasing waiting
+ * to crawl. Wanting ~5 effective at 4 units and ~1 by 25 fixes the fade rate
+ * at ln(5)/21 = 0.077 and this strength at 5 * e^(4 * 0.077) = 6.8.
+ */
+export const GROUND_BUMP_STRENGTH = 7.0;
+
+export function authoredGroundBumpRequested(search) {
+  return !/[?&](groundbump|authored)=0/.test(search || '');
+}
+
 export const GROUND_TILE_UNITS = 18;
 export const GROUND_TRIPLANAR_SHARPNESS = 4;
 export const CANYON_TILE_METRES = 4.3;

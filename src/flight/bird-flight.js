@@ -12,7 +12,14 @@ export const FLIGHT_DEFAULTS = {
     speed: 11,                  // bumped 8 -> 11 (~37%) for traversable 4× world
     yawRate: Math.PI * 0.8,
     pitchRate: Math.PI * 0.6,
-    maxPitch: Math.PI * 0.4,
+    // 80 degrees. Was 72, which reads as a steep glide rather than a dive when
+    // you have altitude to spend on one. Deliberately short of 90: at exactly
+    // vertical the heading in the tangent plane is undefined and the auto-level
+    // term below has no sign to work with.
+    maxPitch: Math.PI * (80 / 180),
+    // How hard the bird rolls itself back level, per second, when the player is
+    // not holding a turn. See _levelRoll().
+    rollLevelRate: 2.2,
 };
 
 // Zen mode tuning — chill and floaty, NOT slow.
@@ -46,6 +53,15 @@ export class BirdFlight {
         this.yawRate = options.yawRate ?? FLIGHT_DEFAULTS.yawRate;
         this.pitchRate = options.pitchRate ?? FLIGHT_DEFAULTS.pitchRate;
         this.maxPitch = options.maxPitch ?? FLIGHT_DEFAULTS.maxPitch;
+        // Turn about the PLANET'S up rather than the bird's own, and roll back
+        // to level when nothing is holding a bank. Together these are what stop
+        // a held dive turning into a spiral; see yaw() for the measurement.
+        // Default ON; `?levelturn=0` restores the old model for the A/B.
+        this.levelTurns = options.levelTurns ?? true;
+        // True only while a committed manoeuvre is mid-flight. Suspends every
+        // stabiliser; see aerobatic().
+        this.aerobaticActive = false;
+        this.rollLevelRate = options.rollLevelRate ?? FLIGHT_DEFAULTS.rollLevelRate;
 
         // Cruise speed at full throttle. `throttle` (0..1) scales cruise so the
         // glide-speed slider has something to drive. Default 1.0 keeps the
@@ -77,6 +93,9 @@ export class BirdFlight {
             axis: new Vector3(),
             quat: new Quaternion(),
             transportQuat: new Quaternion(),
+            // Inverse of the bird's orientation, for bringing a world axis into
+            // the bird's own frame without allocating. See yaw().
+            quatInv: new Quaternion(),
             up: new Vector3(),
             forward: new Vector3(),
             oldPos: new Vector3(),
@@ -113,18 +132,120 @@ export class BirdFlight {
 
     /**
      * Yaw (Turn Left/Right)
-     * Rotates around the Bird's Local Up axis
+     *
+     * Rotates around the PLANET'S up (the outward radial at the bird's
+     * position), not the bird's own up — that is `levelTurns`, and it is the
+     * fix for the dive that turns into a spiral.
+     *
+     * Rotating about the bird's own up is correct for a plane in open sky and
+     * wrong for this game. Once the nose is 60-70 degrees down, the bird's own
+     * up points mostly BACKWARD along the ground, so a yaw input stops being a
+     * turn and becomes a world-space ROLL. Nothing outside Zen mode ever takes
+     * roll back out, so it accumulates: measured holding (x 0.25, y -1) from
+     * 200 units up, roll went 0.5 -> 40 degrees and stayed there, the heading
+     * swung through more than a full revolution, and the pitch was carried
+     * from -70 degrees round to +55 — the bird pulled out of its own dive and
+     * started climbing. That is the "twists, spirals and loops around instead
+     * of nosing down" report, and it is entirely this axis.
+     *
+     * About the radial instead, a turn is a turn at every pitch angle. In
+     * level flight the two axes coincide, so this is a no-op for ordinary
+     * cruising; it only bites where the old one was already wrong.
      */
     yaw(input, deltaTime) {
         if (!input) return;
         const yawMul = this.zenMode ? ZEN_TUNING.yawMul : 1;
         const angle = -input * this.yawRate * yawMul * deltaTime; // Input+ (Right) -> Neg Angle (Right Turn?)
-        // Standard: Rotate Around Y.
-        // If input +1 (Right), we want to turn Right.
-        // RotY(-ang) turns Right.
-        this._scratch.axis.set(0, 1, 0);
-        this._scratch.quat.setFromAxisAngle(this._scratch.axis, angle);
-        this.quaternion.multiply(this._scratch.quat);
+        const s = this._scratch;
+        if (this.levelTurns) {
+            // The planet's up, brought into the bird's own frame, because the
+            // rotation is applied on the right (local axis). Zero allocations.
+            s.axis.copy(this.position).sub(this.sphereCenter);
+            if (s.axis.lengthSq() < 1e-12) s.axis.set(0, 1, 0);
+            else {
+                s.axis.normalize();
+                s.quatInv.copy(this.quaternion).invert();
+                s.axis.applyQuaternion(s.quatInv);
+            }
+        } else {
+            // Legacy: rotate around local Y.
+            // If input +1 (Right), we want to turn Right. RotY(-ang) turns Right.
+            s.axis.set(0, 1, 0);
+        }
+        s.quat.setFromAxisAngle(s.axis, angle);
+        this.quaternion.multiply(s.quat);
+    }
+
+    /**
+     * Apply one frame of a committed aerobatic manoeuvre.
+     *
+     * `roll` is about the bird's own long axis (local Z — the same axis
+     * `_levelRoll` uses); positive rolls INTO a right bank. `pitch` is about
+     * its local right (local X, the same axis `pitch()` uses); positive is
+     * nose-up, so a positive full turn is a loop over the top. Setting `aerobaticActive` is the load-bearing
+     * half: without it the auto-level, the roll leveller and the maxPitch
+     * clamp all run in the same frame and undo the move as fast as it is
+     * made. A loop in particular cannot exist while an 80-degree pitch
+     * ceiling is being enforced — it is a 360-degree pitch by definition.
+     *
+     * The caller clears the flag when the move ends. Zero allocations.
+     */
+    aerobatic(roll = 0, pitch = 0) {
+        const s = this._scratch;
+        this.aerobaticActive = true;
+        if (roll) {
+            // NEGATED. Forward is local -Z, so a POSITIVE rotation about +Z
+            // carries the right wing (+X) UP — which is a roll to the LEFT.
+            // Shipped un-negated, a hard right bank rolled the bird left,
+            // straight against the visual bank the model was already holding
+            // the other way: reported from the phone as "hard bank left then
+            // does a right roll and the other way". Positive `roll` here is
+            // a roll INTO a right bank, right wing down, matching
+            // bird-visual.js's own convention (input +1 -> negative bank).
+            s.axis.set(0, 0, 1);
+            s.quat.setFromAxisAngle(s.axis, -roll);
+            this.quaternion.multiply(s.quat);
+        }
+        if (pitch) {
+            s.axis.set(1, 0, 0);
+            s.quat.setFromAxisAngle(s.axis, pitch);
+            this.quaternion.multiply(s.quat);
+        }
+    }
+
+    /** End the manoeuvre and hand the bird back to the stabilisers. */
+    endAerobatic() {
+        this.aerobaticActive = false;
+    }
+
+    /**
+     * Roll back toward level, about the bird's own long axis.
+     *
+     * A bird is not an aerobatic aircraft holding whatever attitude it is left
+     * in: with no roll input it rights itself. This existed only inside Zen
+     * mode, gated on a near-centred stick — which is precisely when roll does
+     * NOT accumulate, so it could never undo any of the roll a held turn built
+     * up. It runs in every mode now, every frame, and is deliberately gentle:
+     * the bank you SEE is `src/flight/bird-visual.js` rolling the model, a
+     * separate thing this cannot flatten.
+     *
+     * `sinRoll` is the planet's up projected onto the bird's own right, so it
+     * is zero when the bird's up and the planet's agree and signed by which
+     * way it has tipped.
+     */
+    _levelRoll(deltaTime, rate) {
+        const s = this._scratch;
+        s.sphereNormal.copy(this.position).sub(this.sphereCenter);
+        if (s.sphereNormal.lengthSq() < 1e-12) return;
+        s.sphereNormal.normalize();
+        const localRight = s.vec3_2.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
+        const sinRoll = s.sphereNormal.dot(localRight);
+        const correction = -sinRoll * rate * deltaTime;
+        if (Math.abs(correction) > 0.0001) {
+            s.axis.set(0, 0, 1); // Local Z (roll axis)
+            s.quat.setFromAxisAngle(s.axis, correction);
+            this.quaternion.multiply(s.quat);
+        }
     }
 
     /**
@@ -201,8 +322,10 @@ export class BirdFlight {
         this.quaternion.premultiply(s.transportQuat);
 
         // 4. Auto-Leveling (Pitch)
-        // Only auto-level if speed is sufficient (aerodynamic stability)
-        if (this.speed > 0.5) {
+        // Only auto-level if speed is sufficient (aerodynamic stability), and
+        // never during a manoeuvre — this term exists to return the nose to
+        // the horizon, which is precisely what a loop is not doing.
+        if (this.speed > 0.5 && !this.aerobaticActive) {
             s.forward.set(0, 0, -1).applyQuaternion(this.quaternion).normalize();
             s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
 
@@ -229,7 +352,7 @@ export class BirdFlight {
         s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
         const sinPitchNow = Math.max(-1, Math.min(1, s.forward.dot(s.sphereNormal)));
         const pitchNow = Math.asin(sinPitchNow);
-        if (Math.abs(pitchNow) > this.maxPitch) {
+        if (!this.aerobaticActive && Math.abs(pitchNow) > this.maxPitch) {
             const over = pitchNow - Math.sign(pitchNow) * this.maxPitch;
             s.axis.set(1, 0, 0);
             s.quat.setFromAxisAngle(s.axis, -over);
@@ -241,12 +364,26 @@ export class BirdFlight {
 
     tick(input, deltaTime) {
         const limitedDelta = Math.min(Math.max(deltaTime, 0), 0.05);
-        this.yaw(input.x, limitedDelta);
-        this.pitch(input.y, limitedDelta);
+        // A committed manoeuvre owns the orientation for its whole second.
+        // Leaving the stick live lets the player fight their own barrel roll,
+        // which does not produce a half-roll — it produces a manoeuvre that
+        // ends pointing somewhere nobody chose.
+        if (!this.aerobaticActive) {
+            this.yaw(input.x, limitedDelta);
+            this.pitch(input.y, limitedDelta);
+        }
 
-        // Zen mode: gentle auto-level-roll when stick is near-centered.
-        // Rotates around local Z to align the bird's local "up" with the sphere normal,
-        // preventing accidental disorientation. Small per-frame correction, not snappy.
+        // Roll back toward level, always. This runs in every mode and at every
+        // stick position: a held turn is exactly when roll accumulates under
+        // the legacy yaw axis, and exactly when the Zen-only version was gated
+        // off. Gentle enough that it never fights the player, because nothing
+        // in this game asks the player to hold a roll.
+        if (this.levelTurns && !this.aerobaticActive) {
+            this._levelRoll(limitedDelta, this.rollLevelRate);
+        }
+
+        // Zen mode: extra settling when the stick is near-centered, so a
+        // hands-off Zen bird sits flatter than a cruising one.
         if (this.zenMode) {
             const inputMag = Math.hypot(input.x || 0, input.y || 0);
             if (inputMag < 0.1) {
@@ -262,23 +399,10 @@ export class BirdFlight {
      * sphere normal by rotating around local Z. Zero allocations.
      */
     _applyZenAutoLevelRoll(deltaTime) {
-        const s = this._scratch;
-        // Local up of the bird in world space
-        s.up.set(0, 1, 0).applyQuaternion(this.quaternion).normalize();
-        // Sphere outward normal at bird position
-        s.sphereNormal.copy(this.position).sub(this.sphereCenter).normalize();
-        // Local right of the bird
-        const localRight = s.vec3_2.set(1, 0, 0).applyQuaternion(this.quaternion).normalize();
-        // Roll angle = angle between local-up and sphere-normal projected onto roll plane
-        // sin(roll) ≈ sphereNormal dot localRight (right component of normal)
-        const sinRoll = s.sphereNormal.dot(localRight);
-        // Gentle correction proportional to -sinRoll. Strength keeps it floaty.
-        const correction = -sinRoll * 1.2 * deltaTime;
-        if (Math.abs(correction) > 0.0001) {
-            s.axis.set(0, 0, 1); // Local Z (roll axis)
-            s.quat.setFromAxisAngle(s.axis, correction);
-            this.quaternion.multiply(s.quat);
-        }
+        // One implementation, two strengths: Zen's extra settling on a centred
+        // stick is the same correction the always-on leveller applies, just
+        // harder. Keeping two copies is how they drift apart.
+        this._levelRoll(deltaTime, 1.2);
     }
 
     // Minimum allowed radius along an outward unit direction. The shared terrain

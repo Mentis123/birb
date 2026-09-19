@@ -43,11 +43,29 @@ test('the perch pose folds the wings in and settles the tail', () => {
   assert.ok(perched.tailPitch > 0 && perched.tailSpread < 1);
 });
 
+test('the tuck is a fold AND a sweep, because one rotation cannot tuck a wing', () => {
+  // A fold alone drops a wing that is still standing straight out sideways,
+  // which is a wide V pointing at the ground rather than a wing put away.
+  // Captured at fixed poses: fold 0.95 with no sweep hangs the wing plate
+  // below the belly line and the rear view is two blades either side of the
+  // body; 0.70 of fold against 0.65 of sweep absorbs it into the silhouette.
+  assert.equal(perchPose(0).sweep, 0, 'a flying bird has no sweep');
+  const perched = perchPose(1);
+  assert.ok(perched.sweep > 0.4, `the wing must lay back, not just drop: ${perched.sweep}`);
+  // Past about 0.7 rad the wing points astern rather than along the body and
+  // the tuck reads WIDER again, which is the failure the capture found.
+  assert.ok(perched.sweep < 0.7, `swept so far back the wing leaves the body: ${perched.sweep}`);
+  // Both halves have to be real. A degenerate pair (all fold, or all sweep)
+  // is exactly what this test exists to stop a future tune from producing.
+  assert.ok(perched.fold > 0.4 && perched.fold < 0.9, `fold out of the solved band: ${perched.fold}`);
+});
+
 test('the perch pose is monotonic, so the fold never jitters mid-landing', () => {
   let previous = perchPose(0);
   for (let t = 0.1; t <= 1.0001; t += 0.1) {
     const current = perchPose(t);
     assert.ok(current.fold >= previous.fold);
+    assert.ok(current.sweep >= previous.sweep);
     assert.ok(current.span <= previous.span);
     previous = current;
   }

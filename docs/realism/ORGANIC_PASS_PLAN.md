@@ -1,7 +1,8 @@
 # The organic pass — smooth soil, pointy rocks, leafy crowns
 
-**Status: PLANNED, NOT BUILT.** Written 2026-09-13 after the inside-out-bird
-fix and the slalom removal shipped (`54332ef`, `db87a94`). The owner asked for
+**Status: WAVES A AND B SHIPPED 2026-09-13. C and D still planned.** Written after
+the inside-out-bird fix and the slalom removal shipped (`54332ef`, `db87a94`).
+What Wave A actually did, and the two things it taught, is §11 at the end. The owner asked for
 less blocky leaves, a smoother ground that still has sharp rocks, and whatever
 else is cheap and clever now that the frame has headroom. This is the plan for
 whichever session executes it. It assumes the reader has not seen the
@@ -557,3 +558,159 @@ node tools/birb-shot.mjs --start --env mountain --out pines.png --after "__BIRB.
 - **The slalom removal paid for this.** 5–7 draw calls and up to 6.8k
   triangles per biome came back on 2026-09-13. C1 and C3 spend about that.
   C4 spends more than that; hence "only if needed."
+
+
+---
+
+## 11. Wave A, as built (2026-09-13)
+
+All five items shipped, on by default, with `?smooth=0` and `__BIRB.smooth(on)`
+as the A/B. Zero new draw calls, zero new triangles, zero new assets.
+
+### What landed
+
+| # | Built as |
+|---|---|
+| A1 | `sphereMaterial.flatShading` now follows the flag, and `addGroundDetail({ smooth })` injects at `<normal_fragment_begin>`: slope from the smooth normal, lighting normal blended back toward the facet by `smoothstep(slopeStart, slopeEnd, slope)`. |
+| A2 | Eight soft materials follow the flag — three forest canopies, shrubs, ferns, the gold landmark crown, pine canopies, snow caps, both cloud puffs. Every rock/boulder/scree/spire/peak/cliff/building material passes `true` literally and is untouched. |
+| A3 | `treeLean()` in `visual-style.js`, 1–3° about a random bearing, `null` for a nest host. Composed `orientQ.multiply(leanQ)` — the same order the canyon spires have always used. Crowns ride the LEANED axis. |
+| A4 | `rockShape()`, three axes drawn separately plus a `0.30 × s` sink. Forest rocks' collider moved to `shape.max`; the boulders' `2.0 × s` bubble already covered the 1.30 long axis and was left alone. |
+| A5 | Vertex mottle `0.10 → 0.05` under smooth shading. |
+
+`treeLean` and `rockShape` live in `visual-style.js`, not in the builder —
+`spherical-world.js` cannot be imported in Node (its graph reaches a CDN URL),
+and `visual-style.js`'s own header says it exists so geometry stays testable
+there. Fifteen tests in `tests/organic-shading.test.js`.
+
+### Two things worth keeping
+
+**The flat path is byte-identical to what shipped, and that had to be
+engineered.** The first splice of the two shader branches left one stray blank
+line, so `?smooth=0` emitted a shader one line longer than the one it claims to
+reproduce. Cosmetic in GLSL and worthless as evidence: an escape hatch that
+emits *almost* the old shader is not a before. It is now verified by diffing
+the emitted fragment source against the module at `HEAD`, and the test suite
+pins the structural half of it.
+
+**The first mountain A/B was a false alarm, and the tell was that both frames
+had it.** A radial fan of ~20 spokes converged in the middle of the snowfield,
+which reads exactly like a smooth-shaded cone's pole. It was in the
+flat-shaded capture too: the teleport target was `(0.1, 0.95, 0.3)`, which is
+within 18° of the sphere's own +Y pole, where all 128 meridians of
+`SphereGeometry` converge. **A capture near a UV pole is not evidence about
+shading.** Re-shot at `(0.62, 0.38, 0.69)`.
+
+### Measured
+
+Smooth shading cannot add a draw call or a triangle — `flatShading` is a shader
+define on the same geometry, the same material and the same `InstancedMesh`.
+What *is* measurable is that the lean and the rock reshaping move instances, so
+frustum culling admits a slightly different set run to run:
+
+| pinned pose, tier 0, seed 16160 | smooth | flat | Δ tris |
+|---|---|---|---|
+| forest, valley pool | 105,368 | 106,160 | −0.7% |
+| mountain, ridge | 68,708 | 67,068 | +2.4% |
+
+Contact sheet, all four biomes: 13–45 calls, 35.1–58.1k triangles, every tile
+rendering, against budgets of 100 and 80k. Draw-call counts in the sheet swing
+±20 on framing alone (rings and drones moving through frame), which is the
+same drift `G-A5-DRIFT` documents; they are not a cost signal here.
+
+### What Wave A showed on screen
+
+- **The canyons are the proof of §2.** The plateau top rolls smoothly and the
+  wall below the rim keeps hard crystalline facets, with the transition landing
+  on the rim. One mesh, one draw call.
+- **The mountain gained the most.** It was a faceted golf ball; it is a
+  snow-covered ridge with form. Its `slopeStart 0.07 / slopeEnd 0.34` puts 92%
+  facet on a 45° face and 14% on a 30° one, so a rounded dome is *correctly*
+  smooth — that is the rule working, not the rule failing.
+- **Trunks were deliberately left flat** and are the obvious next candidate.
+  Bark is not crystalline and a six-sided cylinder shaded smooth is a rounder
+  tree — but the authored bark tints were solved against the flat-shaded
+  material's measured luminance (`PINE_BARK_TINT` targets the forest trunk's
+  VALUE, and `authored-tints.test.js` pins the separations), so it is a change
+  that has to be re-measured rather than flipped.
+
+
+---
+
+## 12. Wave B, as built (2026-09-13)
+
+All three items shipped, on by default, with `?leaves=0`, `?snowline=0` and
+`?groundbump=0`. Seventeen tests in `tests/organic-foliage.test.js`.
+
+### What landed
+
+| # | Built as |
+|---|---|
+| B1 | `addLeafEdge` in `visual-style.js`: world-space value noise thresholded near the silhouette, fed to three's own alpha test (`alphaTest = 0.5`, `alphaToCoverage = true`). On all three forest canopy buckets, the mountain pine crowns, and the opaque mobile cloud puffs. |
+| B2 | `addUpwardSnow`: one `smoothstep` on `dot(N, normalize(worldPos))`, written at `<color_fragment>`. On mountain boulders, cliff walls, scree and pine crowns, using `snowMat`'s own `0xe6f1ff`. |
+| B3 | The forest ground's authored albedo read as a height field. The triplanar sample is hoisted to `<normal_fragment_begin>` and shared, so it is still **three** `texture2D` calls, not six — pinned by a test that counts them. |
+
+### Four things worth keeping
+
+**The plan's own B1 snippet could not have compiled.** It used `normal.z` for
+the silhouette term at `<alphatest_fragment>` — but three's fragment order
+puts `<alphatest_fragment>` BEFORE `<normal_fragment_begin>`, so `normal` does
+not exist there. `vNormal` is no escape either: `FLAT_SHADED` compiles it away
+entirely, so anything built on it breaks under `?smooth=0`, which is the one
+path the A/B depends on. The rim comes from a carried world-normal varying and
+`cameraPosition` instead, which needs nothing three might have removed.
+
+**A facet normal cannot cut a silhouette on a low-poly mesh.** The first build
+derived the rim from `cross(dFdx(vBirbWorld), dFdy(vBirbWorld))` — constant
+across a facet, and a lathe canopy has seven of them. The capture is
+unmistakable: one clean straight edge on the left of the crown and the whole
+opposite third dissolved, because the threshold is a per-FACET decision.
+`ensureWorldNormalVarying` carries the interpolated vertex normal instead, and
+is per-material correct for free: three's polyhedra are non-indexed, so on a
+boulder `objectNormal` already IS the facet normal while on a lathe it is
+smooth. Neither call site has to choose.
+
+**Two latent bugs came out, and only one of them announced itself.**
+`addFoliageWind` ASSIGNED `onBeforeCompile` and set a CONSTANT
+`customProgramCacheKey`, so any patch already on a foliage material was erased
+without a word — nothing had caught it because the only other patch on those
+materials chains and happened to run afterwards. And `addAtmosphere` guarded
+its `varying` DECLARATION but replaced `<begin_vertex>` unconditionally, so a
+second patch wanting the same world position declared `birbWorldPos` twice:
+**140 shader compile failures**, caught by `tools/birb-shaders.mjs` and by
+nothing else, because three draws nothing for a material whose shader fails
+and the page still paints. Both patches now share one fully guarded helper.
+
+**The bump strength was ten times off, because the units are not three's.**
+`perturbNormalArb` expects `dHdxy` from a height map, where neighbouring
+texels differ by a large fraction of the range. Here the height is the
+albedo's LUMINANCE, which changes by roughly 0.01 per pixel — at the 0.35 a
+bump map would want, the frame is pixel-identical to no bump at all, which is
+indistinguishable from the feature not being wired. Proving it WAS wired took
+one capture at 20x (mean channel difference 25/255 against the off frame);
+the sweep then read 0.35 invisible, 5 correct, 9 noisy, 20 static. Strength
+and fade are solved as a pair from "~5 at a perch, ~1 by flight altitude":
+rate `ln(5)/21 = 0.077`, strength `5·e^(4·0.077) = 6.8`.
+
+### Measured
+
+| contact sheet, tier 0 pinned | Wave A | Wave B |
+|---|---|---|
+| forest flight | 26 calls / 58.1k | 26 / 58.6k |
+| canyons flight | 23 / 37.0k | 29 / 37.9k |
+| mountain flight | 45 / 38.0k | 28 / 37.0k |
+| city flight | 32 / 42.0k | 28 / 41.6k |
+
+No geometry changed, so the triangle movement is instance culling and the
+draw-call swing is rings and drones crossing the frustum, as in Wave A.
+
+**The one cost this cannot measure here is B1's.** An alpha-tested material
+loses early-Z, so canopy overdraw is paid in full, and the forest canopies are
+the largest instanced meshes in the frame. Under SwiftShader at one frame a
+second that number means nothing. It is a phone question: if the adaptive tier
+starts dropping where it did not before, gate the erosion on `tier < 2` the
+way the wingtip ribbons are. `?leaves=0` is the control.
+
+### Still open from Wave B
+
+The **blind paired A/B on the phone** for B1. A lacy crown is a taste call no
+contact sheet can make, and the sheet cannot see fill-rate cost either.

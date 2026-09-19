@@ -42,22 +42,27 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-13 at commit 54332ef by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-13 at commit 15472d9 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
 4deed1af6bb07606594214cb55313c159b7ce2abf8aae58aeb8ef99dceafded2  tests/adaptive-quality-traces.test.js
 0ac41b4d162af55f267b3cdfc207227ef9fbc89969be85ecea34154fee63acef  tests/adaptive-quality.test.js
+783657f4f721efc3681dc446daa73069cce8a8b869e9d2790ed6225528b7f53d  tests/aerobatics.test.js
 792aea6eb28c9974d79b64b84e27952517cedcfc31869e8194b9460e3b7914b8  tests/aim-rig.test.js
 f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-check.test.js
 3922615670f130b65326a1bc03d07f23cfae0a9fc552aa95ea980cb884ba3ea3  tests/asset-residency.test.js
 481310ecfcc59989fd52b27d397c0993b69ad1196afa8bce9ac8c30dcd1db275  tests/authored-feathers.test.js
 526bccb0e9f5bbc8cb65e8bcfe0bef58ff22c6b1604f41ad30814b01e7d2ade6  tests/authored-textures.test.js
 7fcdbfcda1406cb603f084ccf4e76a021fa54ff05166bdaf0e14da16e9414cdc  tests/authored-tints.test.js
+6f9c92d3b927330062190fff2cba727c271bf215da99fe594aa79f359609ce01  tests/bird-camera-hold.test.js
 b8096b78960e23a6ae729f5e2af859d6a823749975b2ae78f417e1aefec2411f  tests/bird-contract.test.js
-9cae8aea0b94686678097382c4ae991f967fe6cfe0f4c701b1ba6eb6139e511f  tests/bird-flight.test.js
-4f4f7249e48c116c6a16325664559fa3cc2a429316f0d3565905d8c1a01c7e3d  tests/bird-pose.test.js
+09f941af20c7c72049676cb387d70bd13a4bc593a87b9d0a6c62ccd47cf605dc  tests/bird-flight-v2.test.js
+be4fae20f590fc230dd2ee1968983087ab01c1d9a13fc86c5bbfc7b6fc613313  tests/bird-flight.test.js
+33af5b622a024647ac5ff84b5d7d6ad44e7f5992baa2c0a906117dd55f3111d0  tests/bird-plumage.test.js
+3a8ad03216c2600b6ad326c8c50583a471acab94365bb2234774b3583b625396  tests/bird-pose.test.js
 7ae9a937490a119b0d3f5771ed82a857eaaaac1020db9769b23929755888e039  tests/bloom-target-size.test.js
+1c1a5c0652cc5550c1e4cb16121a4307a991ee58ef962bc87d8abfac671b3806  tests/boot-flags.test.js
 4a0bd676e6294603c030d9f0643310a8dee8b12f8b0941a32f5213238f6b2555  tests/build-identity.test.js
 376a5c9c8234dccec3485fac62311cfd7457172f2cac4532269e4a858c3962a0  tests/city-windows.test.js
 1763c7b34412af9f769037fb1925b4b9ac1a8af9fb5ea819f592bf9ca6683cdd  tests/collider-grid.test.js
@@ -91,6 +96,7 @@ fc09ea0bb34ebf48e6c238c912194d5b5758baa8bb2d8b37b2592a3d74bc9810  tests/fixtures
 dde809691258654681f49c08bf7d9f83e62561957ca6efcbcc42441cfc885851  tests/fixtures/perf-traces/schema.js
 3e774634a06053250d406419f03a7130524c5df0de79b5af16f3afb73362ce28  tests/flight-controller.test.js
 92a319b600c83e33015bea300b415d32bfd2e586dbe9be25d961f9ab6ab73b8c  tests/flight-recovery.test.js
+bb5be71e87ea54ded333627ee4c4981651fa79337a725a71f2388fc9429e31d2  tests/follow-camera-hold.test.js
 6ac758f8cfbcae68718519bd6ed4e8074bf9db2055ff404655e98b92179c5f47  tests/frame-metrics.test.js
 b35dd0768aa24ced3ce109f8f47982e89d10a5ea6f274e28d1e60943fc5bfe83  tests/game-modes.test.js
 25a4e7365140ddfceaf1ff0c02ed662b29212480fb8763e9e70d23ad0cf01de3  tests/gauntlet-damage.test.js
@@ -100,7 +106,7 @@ f71e006ab5b11c70d955ac276e696149757e37d90f7870653116c9ff33ae63d4  tests/gauntlet
 7b53936a8ce0ad20ebcd15ebf26f91d451fb8ba15d81a19480fd2ef02afdb1dd  tests/gauntlet-qr.test.js
 e5b46a8520b5e7fafc5360eb6cc202e0ca905ce99e680386a0ef11cf99d55848  tests/gauntlet-race-logic.test.js
 14b4ffdb2a9569e76b06eecf8e2210436263987bca8687cc116656479df90579  tests/grade-candidates.test.js
-e3b92a6eb8d5f9a8c09ac610b5f75f454a5e7e8cb2fada6d2bf74b4f322ed791  tests/ground-triplanar.test.js
+6a19dc426dd3e7aae6c72ee05f88d833fb1dbd74b2d5d164ac0ac5d49f9505bc  tests/ground-triplanar.test.js
 aab1f981ae6e073443e3b433b56ad06b350d257deb924a96e50fbfd5f7009f2e  tests/helpers/flight-harness.js
 ff5d33d4d198922eba742b16faa85a98bcce6dfd48f094613695d7b81c8298d1  tests/helpers/sculpture-three.js
 074d4c9154550febacaef681825d56ee8c3fc06237022795a0189af3848d83f1  tests/icon3d-catalogue.test.js
@@ -115,6 +121,8 @@ a4d2a9302fbdea465e0ef4ddd1b8fbf3d176672b52941c8914667118ad5b3ea3  tests/instance
 4390c9394ede5917e7d9b8500f1d0806aabb2c9a42b47dddc298d768cd9c070c  tests/minimap.test.js
 48db762919e8391e9e2cdff060911fc2c6fabee6744a745760338fbcbfd69539  tests/nesting-system.test.js
 03b54a5cf05ce47b8b7de6cd3c537b22e6ceb37b50dcefe2624b3fdb6e9be886  tests/oracle-manifest.test.js
+746de3703c02df09396cdcb6c2701d3ffab3a69bd271c802f435644cb4e89c66  tests/organic-foliage.test.js
+b1de9a59adfd975527b3582be639c3a9732e2a655ef5c858809f956cd97eebeb  tests/organic-shading.test.js
 422ec28055458de741380a9deb1a1e1587c79fd60ce55329c50e3edf6a980955  tests/perch-horizon.test.js
 cdad347f4fd13d307927161f530cc6305b3df5161b17bbaf4eea76cd6a68ba40  tests/perf-learning.test.js
 a7b94cf4b0a5691c760a291acfe7997513caedd49270761aac74425373447e82  tests/perf-trace-corpus.test.js
@@ -126,6 +134,7 @@ a7b94cf4b0a5691c760a291acfe7997513caedd49270761aac74425373447e82  tests/perf-tra
 1775aefd8d9f9155863cc1592b1e81ab0c983773fd155e029410eb6526649e56  tests/sculpture-surface-nets.test.js
 98df1acaa8ff953e9ad688266b42cceaa8a8bbc8011982b7fcd44112073aaa4a  tests/seeded-random.test.js
 819e20ab9b1bd1a66549d76b29b4e97d1be47971fdd650e52b2c30a0b212b12b  tests/sky-environment.test.js
+002eaeb611404dfc37efca851839638d25564390dcab61df592c21934314885a  tests/sw-modules.test.js
 f9d96ad5dfb918df5985298b4e25c7daa639bb9c27e76785b0fc4c20c1fcbd07  tests/visual-upgrade.test.js
 7a62b70ff84fa8da8be84abefd92c6fed10a78c21581ac114b27bd994fdc3fa7  tests/wake.test.js
 b086039c1b8f9f55450f1637a3f385d328cb655cc6c7121a809f0e83a3747a18  tests/water.test.js
@@ -146,15 +155,23 @@ e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-she
 # label (the shipping default is Neutral 1.12, not ACES); the harness itself
 # is unchanged in the legacy --env/--out path.
 61a9d9a531d706cbd740ef062f0616e39acf29b1a1c28dc063f4a0e556238df9  tools/birb-lighting.mjs
-1e76f9c9bffdcbb14a8be5d5f16eebf32ffa9c1312feba3933894a2c4f97889f  tools/birb-modes.mjs
-708d15c40998957495c2548394cd806d602c4255ee7776ac509f64639ff9e76b  tools/birb-shaders.mjs
+39a312ad3959c931770de324454e9d6ec151aae25b0a0f128a151c6ccb47b802  tools/birb-modes.mjs
+67144c112b26647f1c989f1060d01c34d7162ea6164892e82220cc761cabd6b8  tools/birb-shaders.mjs
+# tools/birb-walk.mjs added 2026-09-13 (G-TUCK). It is a Browser Health gate
+# like the two above, and its thresholds are the whole oracle: it is the only
+# thing in the repo that drives the GROUNDED state, and every number in it was
+# set by a measurement (perchBlend > 0.8, wing fold and sweep deltas > 0.3,
+# span < 0.75, idle drift < 0.5 units, walked > 0.8, foot swing > 0.15 rad,
+# foot at rest < 0.05). Loosening any of them to make a red run green is
+# exactly the move R5 exists to make loud.
+4741ed9951daa52ed902b7d0423100734e44fe284f3b59069861f78d0a11d979  tools/birb-walk.mjs
 # --- the contract ------------------------------------------------------------
 edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONTRACT.md
 # --- the coverage oracle (G0: R5 was not enforced on it) ---------------------
 839a5bee550e812df229f09c21940bd40a20c55cf759d94b6d3b31527bc85e33  tools/req-verify.mjs
 # --- Wave 1: the oracles Wave 2 spends (R5: implementers must not edit these) ---
 3b5974b1d9797b903ebe8117413691a01244b3387cbc6bbfad77d8a2308a8db2  tools/lib/quality-assertions.mjs
-3b77ec06b4891d9f9196d27612ac75b365826deb7e85e6de8582ccf5f5a08791  tools/birb-quality.mjs
+802be73cd07a13861ce2309f1d6ce667ccff709a317222be6e6e8fe893ccfa1f  tools/birb-quality.mjs
 73a14e636dfbf1bcd7c6b0b16bb21b9b4c1af0edef233edaf7423938c94aa2ba  tests/frame-metrics-stats.test.js
 0f58a56fd72a386c17ea6bf514348dd71a06ce70ce079d87578a02985b87bae0  tests/quality-settings.test.js
 968016b32e29f80105a0a3ec43faa9ca28f4d67faf46cdde37fbac9ae3d52005  tests/frame-stats-totals.test.js

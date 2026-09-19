@@ -141,8 +141,28 @@ export const GROUND_PROFILES = {
  * an empty `image`" moment to protect against directly, but the same shape of
  * bug (switching a sampler on before its upload lands) is closed the same way.
  *
- * @param material   the terrain mesh's material (Lambert, flat-shaded)
+ * `smooth` is the 2026-09-13 organic pass and it changes TWO things, not one.
+ * The obvious half is that the material stops flat-shading. The half that is
+ * easy to miss: the slope term below — which decides soil against rock, and
+ * with it every material boundary this shader draws — was deliberately taken
+ * from the FACET normal, on the reasoning that it "agrees with the visible
+ * faceting". Once the visible surface is lit per fragment that reasoning
+ * inverts. A boundary that is constant per triangle, painted across a surface
+ * whose lighting is not, snaps at every triangle edge: hard-edged blotches on
+ * a soft hill. So the slope switches to the smooth normal with the shading.
+ *
+ * The facet normal does not go away — it becomes the thing the LIGHTING
+ * normal is blended back toward wherever that slope says rock. That is the
+ * whole of "smooth soil, pointy rocks": one mesh, one draw call, soil rolling
+ * and rock faces fracturing, with the transition following the material
+ * boundary the shader was already drawing.
+ *
+ * @param material   the terrain mesh's material (Lambert)
  * @param biome      key into GROUND_PROFILES; anything else is a no-op
+ * @param smooth     shade soil smoothly and keep facets on rock (see above).
+ *                    False emits EXACTLY the shader this module always has —
+ *                    same injections, same slope source, same cache key — so
+ *                    `?smooth=0` is a true before, not an approximation of it.
  * @param groundMap  optional { tile, sharpness, gain: {r,g,b} }. Omitted (the
  *                    default), this function emits exactly the shader it
  *                    always has — no sampler declared, no fetches, no dead
@@ -152,7 +172,7 @@ export const GROUND_PROFILES = {
  *                    defaults a missing one, the same contract
  *                    `addInstancedUvScale` uses for an unknown geometry shape.
  */
-export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null } = {}) {
+export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0 } = {}) {
   const profile = GROUND_PROFILES[biome];
   // The city's ground already carries a street grid and asphalt; mottling it
   // would fight the one thing that identifies it.
@@ -178,6 +198,9 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
     uGroundFacet: { value: 0.0 },
     uGroundGain: { value: new THREE.Vector3(groundMap.gain.r, groundMap.gain.g, groundMap.gain.b) },
     uGroundMix: { value: 0.0 },
+    // Bump strength. Live only on the smooth path: perturbing a normal that
+    // is about to be replaced by its own facet normal changes nothing.
+    uGroundBump: { value: smooth ? bump : 0.0 },
   } : null;
   if (texUniforms) material.userData.birbGroundTexUniforms = texUniforms;
 
@@ -213,6 +236,70 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       shader.fragmentShader = 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
     }
 
+    // Smooth path only: take the slope from the smooth normal and bend the
+    // LIGHTING normal back toward the facet on rock. This has to happen at
+    // <normal_fragment_begin> — `normal` is folded into the lighting long
+    // before <opaque_fragment>, so the tint block below cannot do it. The
+    // two values it computes are declared in main()'s scope, which is where
+    // <normal_fragment_begin> sits, so the tint block reads them for free.
+    //
+    // Derived in WORLD space off vBirbWorld rather than from vViewPosition:
+    // the varying is already here for the tint, and it costs this injection
+    // no assumption about which varyings the material happens to carry.
+    if (smooth) {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', `
+      #include <normal_fragment_begin>
+      vec3 gdUpW = normalize(vBirbWorld);
+      vec3 gdFacetW = normalize(cross(dFdx(vBirbWorld), dFdy(vBirbWorld)));
+      if (dot(gdFacetW, gdUpW) < 0.0) gdFacetW = -gdFacetW;
+      // Read BEFORE the blend below overwrites it, or the slope measures its
+      // own output and the rock term runs away with itself.
+      vec3 gdSmoothW = inverseTransformDirection(normal, viewMatrix);
+      float gdShadeSlope = 1.0 - clamp(dot(gdSmoothW, gdUpW), 0.0, 1.0);
+      vec3 gdShadeW = gdSmoothW;
+` + (texUniforms ? `
+      // The triplanar sample, HOISTED out of the tint block below so the
+      // bump and the colour share ONE set of fetches. Still three, exactly
+      // as before this existed.
+      vec3 gtN0 = normalize(mix(gdUpW, gdFacetW, uGroundFacet));
+      vec3 gtW0 = pow(abs(gtN0), vec3(uGroundSharp));
+      gtW0 /= max(gtW0.x + gtW0.y + gtW0.z, 1e-4);
+      vec3 gdTex = texture2D(uGroundMap, vBirbWorld.zy / uGroundTile).rgb * gtW0.x
+            + texture2D(uGroundMap, vBirbWorld.xz / uGroundTile).rgb * gtW0.y
+            + texture2D(uGroundMap, vBirbWorld.xy / uGroundTile).rgb * gtW0.z;
+
+      // The soil albedo's own luminance IS a height field, and its
+      // screen-space gradient is that field's slope — so relief costs no
+      // normal map and no extra fetch. Same construction as three's
+      // perturbNormalArb, done in world space because everything else here
+      // already is.
+      //
+      // Faded with view distance: at altitude one texel spans less than a
+      // pixel and an unfaded bump is just aliasing that crawls when the
+      // camera moves. It is a PERCH effect — a grazing camera three units
+      // off the ground, where the soil otherwise reads as a photograph laid
+      // flat — and it should be gone before it can shimmer.
+      if (uGroundBump > 0.0) {
+        float gdH = dot(gdTex, vec3(0.299, 0.587, 0.114));
+        vec3 gdSX = dFdx(vBirbWorld);
+        vec3 gdSY = dFdy(vBirbWorld);
+        vec3 gdR1 = cross(gdSY, gdShadeW);
+        vec3 gdR2 = cross(gdShadeW, gdSX);
+        float gdDet = dot(gdSX, gdR1);
+        // Solved, not picked. Wanted ~5 units of effective strength at a
+        // perch (4 units) and ~1 by ordinary flight altitude (25): the ratio
+        // fixes the rate at ln(5)/21 = 0.077, and the strength follows.
+        float gdFade = exp(-length(cameraPosition - vBirbWorld) * 0.08);
+        vec3 gdGrad = sign(gdDet) * (dFdx(gdH) * gdR1 + dFdy(gdH) * gdR2);
+        gdShadeW = normalize(abs(gdDet) * gdShadeW - gdGrad * uGroundBump * gdFade);
+      }
+` : ``) + `
+      gdShadeW = normalize(mix(gdShadeW, gdFacetW,
+        smoothstep(uGdSlopeRange.x, uGdSlopeRange.y, gdShadeSlope)));
+      normal = normalize((viewMatrix * vec4(gdShadeW, 0.0)).xyz);
+      `);
+    }
+
     shader.fragmentShader =
       'uniform float uGdBase; uniform float uGdScale;\n'
       + 'uniform vec3 uGdMoss; uniform vec3 uGdSoil; uniform vec3 uGdSlope;\n'
@@ -221,6 +308,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       + (texUniforms
         ? 'uniform sampler2D uGroundMap; uniform float uGroundTile; uniform float uGroundSharp;\n'
           + 'uniform float uGroundFacet; uniform vec3 uGroundGain; uniform float uGroundMix;\n'
+          + 'uniform float uGroundBump;\n'
         : '')
       + `
       float gdHash(vec3 p) {
@@ -253,7 +341,13 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       {
         vec3 gdP = vBirbWorld;
         vec3 gdUp = normalize(gdP);
-
+` + (smooth ? `
+        // Both already computed at <normal_fragment_begin>, from the SMOOTH
+        // normal — see the module doc for why the facet normal is the wrong
+        // slope source the moment the surface is lit per fragment.
+        vec3 gdN = gdFacetW;
+        float gdSlope = gdShadeSlope;
+` : `
         // The FACET normal, from the interpolated world position. Free, and
         // exactly right for flat-shaded low-poly ground: no attribute, no
         // tangent frame, and it agrees with the visible faceting rather than
@@ -261,7 +355,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
         vec3 gdN = normalize(cross(dFdx(gdP), dFdy(gdP)));
         if (dot(gdN, gdUp) < 0.0) gdN = -gdN;
         float gdSlope = 1.0 - clamp(dot(gdN, gdUp), 0.0, 1.0);
-
+`) + `
         // Macro patches, plus a finer cell mixed in. Two calls, not an octave
         // stack: the slope term below carries the structure and the noise only
         // has to break up the facets, so a third octave is fill rate spent on
@@ -290,7 +384,11 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
           float gdBand = sin(gdR * uGdBand.y) * 0.68 + sin(gdR * uGdBand.y * 2.37 + 1.7) * 0.32;
           gdTint *= 1.0 + gdBand * uGdBand.x;
         }
-` + (texUniforms ? `
+` + (texUniforms && smooth ? `
+        // Already fetched at <normal_fragment_begin>, where the bump needed
+        // it. Three fetches for the frame, not six.
+        gdTint *= mix(vec3(1.0), gdTex * uGroundGain, uGroundMix);
+` : texUniforms ? `
         // Authored ground overlay, triplanar off world position. See the
         // function doc comment above for why sphere-normal blending, why the
         // weights are renormalised, and why uGroundMix (not a clamp) is what
@@ -318,7 +416,8 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
   };
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
-  material.customProgramCacheKey = () => `${base}-ground-${biome}${texUniforms ? '-tex' : ''}`;
+  material.customProgramCacheKey = () =>
+    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}`;
   material.needsUpdate = true;
   return material;
 }

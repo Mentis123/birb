@@ -45,13 +45,28 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/index.html?debug=1`);
     await startGame(page);
 
+    // This boots at the PRODUCTION default (Ultra: VSM shadow maps, 4x MSAA
+    // on the scene target, full-resolution post, the high ground mesh) on
+    // purpose — the shadow-depth and multisample programs only exist on that
+    // path, and a shader gate that runs at a lighter preset never compiles
+    // them. It is the one harness that stays at Ultra; the others boot at
+    // `?quality=amazing` (see docs/perf/gates/G-ULTRA-DEFAULT.md).
     for (const env of ENVIRONMENTS) {
         const before = problems.length;
         await page.evaluate((id) => window.__BIRB.setEnvironment(id), env);
-        // Long enough for every material in the biome to be submitted at
-        // least once: a program is only compiled when something is drawn with
-        // it, so a short wait can miss the material that is broken.
-        await page.waitForTimeout(2200);
+        // FRAMES, never milliseconds. A program is only compiled when
+        // something is drawn with it, so the biome has to actually render
+        // before its errors can exist — and at the Ultra default a
+        // SwiftShader frame is about 2.6 s, so the old fixed 2200 ms wait
+        // could switch biomes before a single frame of the previous one had
+        // drawn, and report "ok" for materials that were never submitted.
+        // Three frames: the first is the switch, the next two are the
+        // biome's own materials (and the shadow pass) at least once each.
+        await page.evaluate(() => new Promise((resolve) => {
+            let n = 0;
+            const tick = () => { n += 1; if (n >= 3) resolve(); else requestAnimationFrame(tick); };
+            requestAnimationFrame(tick);
+        }));
         console.log(`  ${env}: ${problems.length === before ? 'ok' : `${problems.length - before} problem(s)`}`);
     }
 
