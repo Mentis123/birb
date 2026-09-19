@@ -2082,6 +2082,27 @@ gets called slow without a baseline). `BABY_BLENDER_BENCH=1 swift test -c releas
 --filter BenchmarkTests` still covers the sculpt path, where the difference does
 not signify. Three-finger tap in the app shows the on-device readout.
 
+**Second device run (2026-09-19): the cube renders and orbits; the Pencil
+does nothing, two fingers fight, and the run was a Debug build.** The
+evaluation is `humanoid/docs/Device_Pass_2.md` — read it before touching
+`SculptView`, `EditorModel` or `Camera`. The load-bearing finding: the
+viewport is in `MTKView` on-demand mode and tries to go continuous by
+setting `isPaused = false`, which Apple's own header says does nothing once
+`enableSetNeedsDisplay` is true — so Pencil samples queue and are only
+applied when a finger moves the camera, the hover ring never appears, the
+flick never coasts, and the multi-second "Hang detected" lines are most
+plausibly that queue dumped into one debug-build frame. Second: the
+one-finger orbit keeps running when the second finger lands and every
+recogniser is allowed to run simultaneously, so a two-finger drag is
+orbit + pan + pinch at once; pan is off by the aspect ratio, zoom is about
+the look-at point not the fingers, and the pivot never moves. The doc
+specifies the Nomad rule set (one finger on the model sculpts, on the
+background orbits; two fingers pan/zoom and re-centre the pivot under
+them), a pivot-plus-offset camera that can change pivot without the view
+jumping, the Release-scheme measurement discipline, and the order of work.
+**No number from a Debug run with the debugger attached is a number about
+the app.**
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror
