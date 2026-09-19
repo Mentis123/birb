@@ -42,13 +42,13 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-19 at commit 92b4588 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-19 at commit 03d3958 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
 4deed1af6bb07606594214cb55313c159b7ce2abf8aae58aeb8ef99dceafded2  tests/adaptive-quality-traces.test.js
 0ac41b4d162af55f267b3cdfc207227ef9fbc89969be85ecea34154fee63acef  tests/adaptive-quality.test.js
-129ee3cf3a78e703f40b2031669a4720a58e9f9e8072f6b63bca839ecf67728c  tests/bird-flight-stunt.test.js
+e08a8a88966d779502aa7c9475c625c8abb7e21dc7ba6b32055ce10ea360c348  tests/bird-flight-stunt.test.js
 164dad3c617966fe8370b410e5003d92f22b558afd1868c8229fa545d922afed  tests/stunt-detector.test.js
 24b61ddeb1aee31c8351a685c0f1d7f5c109cd2771f1902a6ee193fdaeb00fea  tests/stunt-pad.test.js
 # tests/aerobatics.test.js was REMOVED 2026-09-19 by gate decision

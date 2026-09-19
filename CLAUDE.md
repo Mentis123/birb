@@ -96,6 +96,57 @@
 > SwiftShader. Classic is two taps away in the gear menu, which is what makes
 > a default nobody has flown on glass an acceptable one.
 
+> **AND THEN IT STALLED TOO MUCH TO BE FUN — both causes were the tuning**
+> (2026-09-19, later): [docs/perf/gates/G-STUNT-1.md](docs/perf/gates/G-STUNT-1.md).
+> The owner, flying the shipped build: *"it stalls way too much when trying to
+> fly up and it's no longer a fun relaxing experience."*
+>
+> **`gSpeed` was raised to 7.5 to make ONE figure reachable and it broke
+> ordinary flight.** With a linear `sin(pitch)` bleed, a 45-degree climb
+> settles at **5.11 against a 5.5 stall** — so the wing stopped flying on a
+> climb anybody makes without thinking. The hammerhead needed a vertical to
+> fall below stall; the way to get one is SHAPE, not magnitude. The climb half
+> of the term is **cubed** now (`climbExp` 3.0, dives stay linear, `gSpeed`
+> 6.5): a 45-degree climb settles at 8.45 and only past about 70 degrees does
+> the wing stop. **A global parameter tuned against a stunt is a parameter
+> tuned against the wrong thing.**
+>
+> **The subtler half: a pure RATE has no resting point.** Held for ten
+> seconds, stick 0.3 up took the bird to 90 degrees and stalled it, and stick
+> 0.3 sideways rolled a full 365 degrees and shed 34 units of altitude — so a
+> lazy turn was a slow barrel roll. Both axes now carry a **saturating
+> stability term**: beyond a comfort angle the bird is pushed back toward it
+> at a rate CLAMPED so a firm input still wins. Held angles — 0.3 stick is 38
+> degrees of climb / 24 of bank, 0.7 is 59 / 66, 0.85+ loops or rolls. **This
+> is not v2's rail**: v2 switched mode at a hard 0.97 threshold, this is a
+> saturation that is continuous in the stick, and it is what an elevator
+> overpowering an aircraft's own stability actually does. Both terms switch
+> off once the bird is committed (past the vertical, past `rightingLimit`), so
+> a loop still closes and inverted flight is still holdable. **The bank
+> ceiling is 91 degrees deliberately — a knife edge has to be a bank you can
+> HOLD, or it is not a manoeuvre.** The first value capped it at 72 and the
+> knife edge silently became unreachable; a probe caught that, no test did.
+>
+> **Everything sank all the time**, too: with no deadband, a bird at 90% of
+> cruise sank 0.76 units/s and a 30-degree bank sank 0.54, so relaxed flight
+> nagged at the player's altitude for no manoeuvre they would call one.
+> `sinkSlack` 0.15 makes gentle attitudes free and leaves the knife edge at
+> 3.4 and inverted at 8.
+>
+> **The hammerhead is now flown with the THROTTLE BACK**, which is how one is
+> actually flown and is what the pad exists for: full power 5.67 (no stall),
+> idle 3.85 (stalls). A hard pull at full power is a CLIMB, and there is a
+> test that says so.
+>
+> Ten seconds of relaxed flight, measured: hands-off holds altitude exactly, a
+> gentle climb gains 46 units, a gentle turn holds 24 degrees of bank and
+> loses nothing. Before, the same turn lost 34 and the same climb stalled.
+> `tests/bird-flight-stunt.test.js` gained a **relaxed flight** section at
+> both sites that any future climb-penalty raise has to fail first; seven
+> older checks were rewritten because they encoded the old law's inputs, two
+> of them made tuning-independent on the way (the roll measures SWEPT angle
+> from the controller's own deltas, not the bank at a fixed second).
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.
