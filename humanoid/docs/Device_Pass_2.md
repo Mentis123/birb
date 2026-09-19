@@ -450,3 +450,132 @@ come first.
   current iPadOS, root cause 2 is only the simultaneity, and the unified
   recogniser is still the right fix.
   https://developer.apple.com/documentation/uikit/uipangesturerecognizer/maximumnumberoftouches
+
+---
+
+# 7. What shipped (2026-09-19, same day)
+
+Everything in §6 except the predicted-touch cursor, which is left open at the
+bottom. The core changes are covered by tests on Linux; the app changes are
+not compiled anywhere until the Mac builds them, which is the same split
+`Build_on_the_Mac.md` opens with. **224 core tests, 1 skipped, 0 failures;
+`tools/verify.sh` PASS.**
+
+## 7.1 The render loop (§1)
+
+`onActivity` now switches BOTH properties, which is what the MetalKit header
+requires and what the previous version missed:
+
+| | `isPaused` | `enableSetNeedsDisplay` |
+|---|---|---|
+| busy (stroke, hover, coast) | false | **false** |
+| idle | true | true, plus one `setNeedsDisplay()` |
+
+`EditorModel.requestDraw` is called from `enqueue`, `enqueueHover`,
+`clearHover` and `flick`, so anything that queues work asks for the frame that
+drains it instead of reasoning about whether one is already coming.
+`setNeedsDisplay` coalesces and is a no-op in continuous mode, so this is
+free.
+
+Two further things that made a stroke silently do nothing:
+
+- **A stroke that starts off the model now arms on the first sample that hits
+  it.** `strokeArmed` replaces the old "set everything up in `.began` or never".
+- **`SculptMTKView` decides once, per touch, who owns it** (`editingTouch`),
+  and a finger that lands ON the model sculpts while one that lands off it
+  orbits — until a Pencil has been seen, after which fingers navigate only.
+  That is Nomad's documented rule [S2][S3] and it needs no setting. The line
+  under the tool rail says which regime is in force, because "no pencil action
+  works" and "I was using a finger" look identical on the glass.
+
+## 7.2 Two-finger navigation (§2)
+
+**`Camera` is pivot plus a view-plane offset now.** `pivot` is what orbit turns
+around; `lookAt` is `pivot` slid by `offset` in the camera's own right/up
+plane. Splitting them is what lets all three gestures be independent, and what
+lets the pivot move without the view jumping.
+
+New, each with tests that fail on the old behaviour:
+
+- `pan(pixels:viewportHeight:)` — the aspect-ratio bug is gone. Mutation-tested:
+  restoring the old normalise-x-by-width form makes
+  `testPanMovesTheModelExactlyAsFarAsTheFingers` read **77.14 against 120**,
+  which is 120 divided by the 1400x900 aspect ratio, exactly the defect.
+- `zoom(by:about:viewport:)` — the world point under the fingers stays under
+  the fingers, and a pinch that runs into a limit stops rather than sliding the
+  view sideways.
+- `setPivot(to:)` — moves the orbit centre with the eye **bit-identical**, so
+  re-pivoting is invisible until the next orbit.
+- `minDistance` / `maxDistance` derived from the model's radius by `frame`,
+  rather than the fixed 0.05 / 5 metres.
+- `project(_:viewport:)` — the exact inverse of `ray`, which is what lets every
+  rule above be stated as a measurement rather than as an assertion about the
+  camera's internals.
+
+**One recogniser replaces three.** `NavigationGesture` counts its own touches:
+one orbits, two pan and pinch together and re-pivot under themselves on
+landing, three suspends navigation for the debug tap. The 1 -> 2 -> 1
+transitions re-read the reference centroid and spread, so adding or lifting a
+finger moves nothing. `delaysTouchesEnded` is off, which was holding the end of
+every stroke back by about 150 ms.
+
+## 7.3 Performance (§3)
+
+- **A Release scheme ships in `project.yml`** ("BabyBlender (Release)"), so the
+  measurement discipline is a dropdown rather than an instruction. Metal API
+  validation and GPU frame capture still have to be turned off by hand in the
+  scheme editor; a scheme spec cannot express them portably.
+- **`camera` and `document` are no longer `@Published`.** Between them they
+  were republishing the whole SwiftUI toolbar at up to 120 Hz. Nothing reads
+  them live: the mesh, texture, camera and cursor go straight to the renderer,
+  and the export sheet reads the document when it opens.
+- **`os_signpost` intervals**: `drain`, `samples`, `sculpt`, `grab`, `paint`,
+  `frame`. They land in Instruments' Points of Interest lane beside the Hang
+  instrument that produced the original report.
+- **The HUD gained the counter that proves the loop is alive**: queue depth at
+  drain (and its worst), picks per frame, and the frame count of the last
+  stroke. During a stroke the queue reads single digits. Hundreds is the bug
+  this pass fixed, and now it is visible on the device rather than inferred.
+- **`maximumDrawableCount = 2`** — one frame less presentation latency, as a
+  named constant with the trade written next to it. **Unmeasured on the
+  device**; the HUD's worst-frame figure is what decides whether it stays.
+- Per-frame allocations removed: the partial texture upload reuses a staging
+  buffer, and the sample/centre arrays are instance properties.
+
+## 7.4 Grab, captured (§4)
+
+`Sculpt.GrabSet` + `Document.beginGrab` / `grab(to:)`. The gesture decides what
+it holds ONCE, and every frame places that set at the **total** displacement
+rather than adding a delta to wherever the vertices had got to. Eleven tests,
+including: sixty frames of drag land where one call would, to 1e-12; returning
+to zero restores the surface exactly; one drag is one undo step that puts
+everything back; the captured set does not outlive its stroke. Grab is also
+handled before the pick now, so dragging the pointer off the silhouette keeps
+pulling instead of stalling.
+
+Pressure no longer multiplies the displacement: if the finger moved five
+millimetres the surface moves five millimetres. Pressure is in the weights the
+capture took at the start.
+
+## 7.5 Also
+
+- The brush ring stays visible while stroking, faded, and rides with the
+  surface a Grab is dragging. Apple's hover guidance says to hide a preview
+  once the pen is down, which is right for a drawing app where the mark is the
+  feedback; on a sculpting tool the ring is the only honest answer to "how big
+  is my brush", and ZBrush and Nomad both keep it up.
+- The `'weak' ownership of capture` warning is gone: the paint map build is a
+  `Task.detached` with one `MainActor.run` hop, which is also isolation-correct
+  rather than merely quiet.
+
+## 7.6 Still open
+
+- **Predicted touches** for the cursor ring (§3.4). Deliberately not done: it
+  must not feed the sculpt, and it is worth nothing until the loop above has
+  been confirmed on the device.
+- **Every number in §3 is still a build-box number.** Nothing here has been
+  run on the iPad. The acceptance checklist in §6 is what to run, in order,
+  and the HUD now carries every figure it asks for.
+- The A5-style question for this app: nothing yet proves the loop stays alive
+  under a long stroke. The queue-depth worst-case in the HUD is the closest
+  thing, and it is a reading rather than a check.

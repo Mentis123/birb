@@ -124,6 +124,60 @@ public struct Document {
         return touched.count
     }
 
+    // MARK: - Grab
+
+    private var grabSet: Sculpt.GrabSet?
+    /// The distinct vertices the open Grab owns, sorted, and their deltas when
+    /// it began. The undo record wants each vertex once; `GrabSet.vertices`
+    /// lists a vertex twice when it falls in both mirror halves.
+    private var grabRecordVertices: [Int] = []
+    private var grabBefore: [Vec3] = []
+
+    /// Whether a Grab gesture is open.
+    public var isGrabbing: Bool { grabSet != nil }
+
+    /// Opens a Grab: decides what it holds and remembers where that was.
+    ///
+    /// Returns false if the brush caught nothing, which the caller should treat
+    /// as "this gesture is not a grab" rather than retrying per frame.
+    @discardableResult
+    public mutating func beginGrab(at centre: Vec3, settings: Sculpt.Settings) -> Bool {
+        endGrab()
+        let set = Sculpt.captureGrab(at: centre, mesh: current, tables: tables,
+                                     settings: settings)
+        guard !set.isEmpty else { return false }
+        grabSet = set
+        grabRecordVertices = Array(Set(set.vertices)).sorted()
+        grabBefore = grabRecordVertices.map { sculptDelta[$0] }
+        return true
+    }
+
+    /// Places the open Grab at a TOTAL displacement from where it began.
+    ///
+    /// Total, not incremental: the caller hands over the whole travel of the
+    /// gesture so far, so a frame that drops samples or one that delivers six
+    /// land in the same place. Re-pushing the record each frame is what the
+    /// stroke merge is for — `before` keeps the value from the first push and
+    /// `after` takes the newest, so undo returns to before the drag began.
+    @discardableResult
+    public mutating func grab(to displacement: Vec3) -> Int {
+        guard let set = grabSet else { return 0 }
+        Sculpt.apply(set, displacement: displacement, to: &current, tables: tables)
+        for v in grabRecordVertices {
+            sculptDelta[v] = current.positions[v] - template.positions[v]
+        }
+        push(.sculpt(vertices: grabRecordVertices, before: grabBefore,
+                     after: grabRecordVertices.map { sculptDelta[$0] }))
+        return set.weldedCount
+    }
+
+    public mutating func endGrab() {
+        guard grabSet != nil else { return }
+        grabSet = nil
+        grabRecordVertices.removeAll(keepingCapacity: true)
+        grabBefore.removeAll(keepingCapacity: true)
+    }
+
     /// Every vertex a run of dabs can reach, so the undo record can snapshot
     /// their prior deltas before the brush overwrites them.
     ///
@@ -266,6 +320,10 @@ public struct Document {
         guard strokeDepth > 0 else { return }
         strokeDepth -= 1
         guard strokeDepth == 0 else { return }
+        // A captured Grab belongs to one gesture by construction; letting it
+        // outlive the group would apply the next drag's displacement to the
+        // previous drag's vertices.
+        endGrab()
         flushStroke()
     }
 

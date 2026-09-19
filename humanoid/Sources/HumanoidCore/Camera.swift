@@ -10,12 +10,34 @@ import Foundation
 ///
 /// What the app layer adds is a `MTKView`, a gesture recogniser and a draw
 /// call. Nothing there does arithmetic.
+///
+/// ## Pivot and offset, and why it is not one point
+///
+/// The camera orbits `pivot` and looks at `pivot` displaced by `offset` **in
+/// its own view plane**. One point cannot do both jobs: a pan that moved the
+/// orbit centre would swing the model out of frame on the next drag, and a
+/// pivot that could not move at all leaves every orbit after a pan rotating
+/// about somewhere off the model — which is exactly what "I want to look at it
+/// from a slightly different angle" ran into on the device.
+///
+/// Splitting them makes three gestures independent:
+///
+/// - `orbit` changes the angles; the offset rides along, so the framing
+///   rotates about the pivot rather than snapping back to it.
+/// - `pan(pixels:)` changes the offset only.
+/// - `setPivot(to:)` moves the orbit centre **without moving the eye at all**
+///   (see its note), so re-pivoting under two fingers is invisible until the
+///   next orbit.
 public struct Camera: Sendable {
-    /// What the camera looks at and rotates around.
-    public var target: Vec3
-    /// Distance from the target, in metres.
+    /// What the camera orbits around. Not necessarily what is in the middle of
+    /// the screen — see `lookAt`.
+    public var pivot: Vec3
+    /// Displacement of the view centre from the pivot, in metres, measured in
+    /// the camera's own right/up plane. This is what panning moves.
+    public var offset: Vec2
+    /// Distance from the view centre, in metres.
     public var distance: Double
-    /// Rotation about the world Y axis, radians. 0 looks along -Z at the target,
+    /// Rotation about the world Y axis, radians. 0 looks along -Z at the pivot,
     /// which puts the viewer on the model's +Z side — the side it faces.
     public var azimuth: Double
     /// Rotation above the horizon, radians. Clamped short of the poles.
@@ -24,35 +46,52 @@ public struct Camera: Sendable {
     public var fieldOfView: Double
     public var near: Double
     public var far: Double
+    /// How close and how far zoom may go, in metres. `frame` derives these from
+    /// the model's own radius, so a bigger template cannot be zoomed through
+    /// itself and a smaller one can still be inspected.
+    public var minDistance: Double
+    public var maxDistance: Double
 
     /// Just short of straight up or down. At exactly a pole the up vector and
     /// the view direction are parallel and the basis collapses, which shows as
     /// the model flipping over as you drag past vertical.
     public static let elevationLimit = Double.pi / 2 - 0.01
 
-    public init(target: Vec3 = .zero, distance: Double = 0.5,
+    public init(pivot: Vec3 = .zero, offset: Vec2 = .zero, distance: Double = 0.5,
                 azimuth: Double = 0, elevation: Double = 0.2,
                 fieldOfView: Double = 50 * .pi / 180,
-                near: Double = 0.01, far: Double = 100) {
-        self.target = target
+                near: Double = 0.01, far: Double = 100,
+                minDistance: Double = 0.05, maxDistance: Double = 5) {
+        self.pivot = pivot
+        self.offset = offset
         self.distance = distance
         self.azimuth = azimuth
         self.elevation = elevation
         self.fieldOfView = fieldOfView
         self.near = near
         self.far = far
+        self.minDistance = minDistance
+        self.maxDistance = maxDistance
     }
 
-    public var eye: Vec3 {
-        let horizontal = cos(elevation) * distance
-        return Vec3(target.x + sin(azimuth) * horizontal,
-                    target.y + sin(elevation) * distance,
-                    target.z + cos(azimuth) * horizontal)
-    }
+    // MARK: - Basis
 
-    public var forward: Vec3 { normalize(target - eye) }
+    /// The unit vector the camera looks along. A function of the two angles
+    /// alone, which is what keeps `eye` from depending on itself: the basis is
+    /// needed to place the view centre, and the view centre would otherwise be
+    /// needed to derive the basis.
+    public var forward: Vec3 {
+        let horizontal = cos(elevation)
+        return Vec3(-sin(azimuth) * horizontal, -sin(elevation), -cos(azimuth) * horizontal)
+    }
     public var right: Vec3 { normalize(cross(forward, Vec3(0, 1, 0))) }
     public var up: Vec3 { cross(right, forward) }
+
+    /// What sits in the middle of the screen: the pivot, slid across the view
+    /// plane by the pan offset.
+    public var lookAt: Vec3 { pivot + right * offset.x + up * offset.y }
+
+    public var eye: Vec3 { lookAt - forward * distance }
 
     // MARK: - Gestures
 
@@ -62,28 +101,90 @@ public struct Camera: Sendable {
         elevation = min(Camera.elevationLimit, max(-Camera.elevationLimit, elevation + dy * speed))
     }
 
-    /// Two-finger drag. Panning is scaled by distance so the model appears to
-    /// follow the finger at any zoom; a fixed rate feels glued when close and
-    /// sluggish when far.
-    public mutating func pan(dx: Double, dy: Double) {
-        let scale = distance * 2 * tan(fieldOfView / 2)
-        target -= right * (dx * scale)
-        target -= up * (dy * scale)
+    /// Two-finger drag, in **pixels**.
+    ///
+    /// Pixels rather than a normalised fraction, and it matters. The previous
+    /// version took dx normalised by the view's WIDTH and dy by its HEIGHT and
+    /// scaled both by the vertical extent, so on a landscape iPad the model
+    /// tracked the fingers vertically and lagged them horizontally by the aspect
+    /// ratio. There is one correct conversion and `metresPerPixel` already was
+    /// it; this is the same number Grab and the brush radius use.
+    public mutating func pan(pixels delta: Vec2, viewportHeight: Double) {
+        let perPixel = metresPerPixel(depth: distance, viewportHeight: viewportHeight)
+        guard perPixel > 0 else { return }
+        // Drag right and the model goes right, so the view centre goes left.
+        // Screen y points down and world up is +up, hence the opposite sign.
+        offset.x -= delta.x * perPixel
+        offset.y += delta.y * perPixel
     }
 
-    /// Pinch. Multiplicative, because a fixed step is imperceptible when far
-    /// away and slams into the near plane when close.
-    public mutating func zoom(by factor: Double, minimum: Double = 0.05, maximum: Double = 5) {
-        guard factor > 0 else { return }
-        distance = min(maximum, max(minimum, distance / factor))
+    /// Pinch, about the view centre. Multiplicative, because a fixed step is
+    /// imperceptible when far away and slams into the near plane when close.
+    public mutating func zoom(by factor: Double) {
+        guard factor > 0, factor.isFinite else { return }
+        distance = min(maxDistance, max(minDistance, distance / factor))
+    }
+
+    /// Pinch, about the point the fingers are on.
+    ///
+    /// The property this buys: the world point under `point` before the pinch
+    /// is under `point` after it. Scaling `distance` alone instead — which is
+    /// what the first version did — slides whatever you were pinching toward
+    /// the middle of the screen, and reads as the model drifting away from your
+    /// fingers.
+    ///
+    /// The shift is derived from the distance that was actually reached, not
+    /// from the requested factor, so a pinch that runs into `minDistance` or
+    /// `maxDistance` stops moving the view instead of sliding it sideways.
+    public mutating func zoom(by factor: Double, about point: Vec2, viewport: Vec2) {
+        guard factor > 0, factor.isFinite, viewport.y > 0 else { return }
+        let before = distance
+        let anchor = viewPlaneOffset(of: point, viewport: viewport)
+        zoom(by: factor)
+        guard before > 0 else { return }
+        offset += anchor * (1 - distance / before)
+    }
+
+    /// Moves the orbit centre to a world point **without moving the eye**.
+    ///
+    /// That is the whole trick, and it is why a pivot change can happen the
+    /// instant two fingers land rather than being a visible jump the user has
+    /// to understand. The new distance is the point's depth along the view
+    /// axis and the new offset is whatever puts the view centre back where it
+    /// already was, so `eye` and `forward` come out bit-identical; only the
+    /// centre of the NEXT orbit has changed.
+    ///
+    /// The one exception is a point outside the zoom range, where the clamp
+    /// wins and the eye does move. Deliberate: the alternative is letting a
+    /// double tap on a far corner escape the limits that stop you zooming
+    /// through the model.
+    @discardableResult
+    public mutating func setPivot(to point: Vec3) -> Bool {
+        let currentEye = eye
+        let f = forward
+        let depth = dot(point - currentEye, f)
+        guard depth.isFinite, depth > 1e-6 else { return false }
+        let clamped = min(maxDistance, max(minDistance, depth))
+        let centre = currentEye + f * clamped
+        let delta = centre - point
+        pivot = point
+        offset = Vec2(dot(delta, right), dot(delta, up))
+        distance = clamped
+        return true
     }
 
     /// Frames a bounding sphere, which is rotation-independent. Framing on an
     /// axis-aligned extent under-measures a cube seen corner-on and lets it
     /// overflow the view.
     public mutating func frame(centre: Vec3, radius: Double, margin: Double = 1.25) {
-        target = centre
-        distance = max(0.05, radius * margin / sin(fieldOfView / 2))
+        pivot = centre
+        offset = .zero
+        // Solved from the model rather than fixed in metres: the same numbers
+        // have to serve a 0.24 m clay cube and whatever a later template is.
+        minDistance = max(0.02, radius * 0.4)
+        maxDistance = max(minDistance * 4, radius * 30)
+        distance = min(maxDistance,
+                       max(minDistance, radius * margin / sin(fieldOfView / 2)))
     }
 
     public mutating func frame(_ mesh: MeshData, margin: Double = 1.25) {
@@ -146,6 +247,34 @@ public struct Camera: Sendable {
                                   + right * (ndcX * halfWidth)
                                   + up * (ndcY * halfHeight))
         return (eye, direction)
+    }
+
+    /// Where a world point lands on the screen, in the same pixel coordinates
+    /// `ray` takes. Nil behind the camera.
+    ///
+    /// The exact inverse of `ray`, and it exists so the camera's own rules can
+    /// be stated as measurements rather than as assertions about its internals:
+    /// "zooming about a point leaves that point where it was" is a sentence
+    /// about this function.
+    public func project(_ world: Vec3, viewport: Vec2) -> Vec2? {
+        guard viewport.x > 0, viewport.y > 0 else { return nil }
+        let toPoint = world - eye
+        let depth = dot(toPoint, forward)
+        guard depth > 1e-9 else { return nil }
+        let halfHeight = tan(fieldOfView / 2)
+        let halfWidth = halfHeight * (viewport.x / viewport.y)
+        let ndcX = (dot(toPoint, right) / depth) / halfWidth
+        let ndcY = (dot(toPoint, up) / depth) / halfHeight
+        return Vec2((ndcX + 1) * 0.5 * viewport.x, (1 - ndcY) * 0.5 * viewport.y)
+    }
+
+    /// Where a screen point sits in the view plane through the view centre, in
+    /// metres, relative to that centre. The quantity a zoom anchor is expressed
+    /// in.
+    public func viewPlaneOffset(of point: Vec2, viewport: Vec2) -> Vec2 {
+        let perPixel = metresPerPixel(depth: distance, viewportHeight: viewport.y)
+        return Vec2((point.x - viewport.x * 0.5) * perPixel,
+                    -(point.y - viewport.y * 0.5) * perPixel)
     }
 
     /// Convenience: the nearest front-facing hit under a screen point.

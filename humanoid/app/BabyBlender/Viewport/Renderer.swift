@@ -1,6 +1,7 @@
 import Foundation
 import Metal
 import MetalKit
+import QuartzCore
 import HumanoidCore
 
 /// Draws one `MeshData`, one albedo texture, and the brush cursor.
@@ -136,6 +137,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// sculpted edge — which on a modelling tool is most of the silhouette.
     static let sampleCount = 4
 
+    /// Drawables in flight. Two rather than the default three, which is one
+    /// whole frame less between the Pencil moving and the pixel changing — at
+    /// 120 Hz, 8 ms of the 25-33 ms budget.
+    ///
+    /// The trade is real and it is why this is a named constant rather than a
+    /// literal: with two, a frame that overruns stalls the next one instead of
+    /// being absorbed. The HUD's worst-frame figure is what says whether that
+    /// happens on this device, and changing this back is one character.
+    static let drawableCount = 2
+
+    /// Staging for a partial texture upload, reused. `replace(region:)` wants
+    /// tightly packed rows and the albedo is not, so the rectangle is gathered
+    /// first — allocating that per frame of a paint stroke is exactly the kind
+    /// of per-frame allocation the rest of this repo bans.
+    private var staging: [UInt8] = []
+
     init(view: MTKView) throws {
         guard let device = view.device ?? MTLCreateSystemDefaultDevice()
         else { throw SetupError.noDevice }
@@ -155,6 +172,9 @@ final class Renderer: NSObject, MTKViewDelegate {
         self.queue = queue
 
         view.device = device
+        if let layer = view.layer as? CAMetalLayer {
+            layer.maximumDrawableCount = Renderer.drawableCount
+        }
         view.colorPixelFormat = .bgra8Unorm_srgb
         view.depthStencilPixelFormat = .depth32Float
         view.sampleCount = Renderer.sampleCount
@@ -317,8 +337,9 @@ final class Renderer: NSObject, MTKViewDelegate {
               rect.minX >= 0, rect.minY >= 0,
               rect.maxX < albedo.width, rect.maxY < albedo.height else { return }
 
-        var rows = [UInt8](repeating: 0, count: width * height * 4)
-        rows.withUnsafeMutableBufferPointer { destination in
+        let needed = width * height * 4
+        if staging.count < needed { staging = [UInt8](repeating: 0, count: needed) }
+        staging.withUnsafeMutableBufferPointer { destination in
             albedo.rgba.withUnsafeBufferPointer { source in
                 for y in 0..<height {
                     let from = ((rect.minY + y) * albedo.width + rect.minX) * 4
@@ -328,7 +349,7 @@ final class Renderer: NSObject, MTKViewDelegate {
                 }
             }
         }
-        rows.withUnsafeBytes { bytes in
+        staging.withUnsafeBytes { bytes in
             texture.replace(region: MTLRegionMake2D(rect.minX, rect.minY, width, height),
                             mipmapLevel: 0,
                             withBytes: bytes.baseAddress!,
@@ -358,6 +379,9 @@ final class Renderer: NSObject, MTKViewDelegate {
             lastCommitted = nil
         }
         beforeDraw?()
+
+        birbSignpostBegin("frame")
+        defer { birbSignpostEnd("frame") }
 
         guard let descriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,

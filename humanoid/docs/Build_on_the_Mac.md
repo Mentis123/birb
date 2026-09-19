@@ -3,7 +3,7 @@
 **Time: about twenty minutes the first time, most of it Xcode indexing.**
 
 > **Read this first.** Everything in `Sources/` is tested on Linux and green —
-> 155 tests. Everything in `app/` is **not compiled anywhere yet**: there is no
+> 224 tests. Everything in `app/` is **not compiled anywhere yet**: there is no
 > Apple SDK on the build box, so the SwiftUI, UIKit and Metal layer was written
 > without a compiler. Expect to fix a handful of small things on the first
 > build. That is the expected outcome, not a failure, and the fixes belong in a
@@ -37,6 +37,31 @@ with something already on your account.
 
 A **Personal Team** (free Apple ID) signs for **seven days** and then the app
 refuses to launch until it is rebuilt. That is the schedule, not a fault.
+
+## 2b. Pick the right scheme — this is not optional for judging feel
+
+Two schemes are generated now:
+
+| Scheme | Run builds | Use it for |
+|---|---|---|
+| `BabyBlender` | Debug | ordinary development, breakpoints |
+| `BabyBlender (Release)` | **Release** | anything where you are judging speed |
+
+Xcode's Run button builds Debug, which is `-Onone`, and on this `Double`-heavy
+geometry code that is ten to forty times slower than release. The paint map
+measured 27 ms in release on the build box and **3,242 ms on the iPad in
+debug**. Every "Hang detected" line in the second device run was a debug
+number. **No measurement from a Debug build with the debugger attached is a
+measurement about this app.**
+
+Two more things a scheme cannot set for you, both in Edit Scheme -> Run ->
+Options, and both worth turning off before a feel test:
+
+- **Metal API Validation -> Disabled**
+- **GPU Frame Capture -> Disabled**
+
+Then stop Xcode and launch the app from the home screen. A debugger attached to
+a Metal app is not the app.
 
 ## 3. Build and run
 

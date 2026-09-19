@@ -2,11 +2,32 @@ import Foundation
 import SwiftUI
 import UIKit
 import QuartzCore
+import os.signpost
 import HumanoidCore
+
+/// Points-of-interest signposts, so Instruments can say where a frame went.
+///
+/// The Hang instrument is what reported "Hang detected: 4.46s" on the device
+/// and it cannot say what the main thread was doing. These intervals land in
+/// the same timeline beside it. Shared with the renderer.
+let birbSignpostLog = OSLog(subsystem: "com.mentis.birb.BabyBlender",
+                            category: .pointsOfInterest)
+
+@inline(__always)
+func birbSignpostBegin(_ name: StaticString) {
+    guard birbSignpostLog.signpostsEnabled else { return }
+    os_signpost(.begin, log: birbSignpostLog, name: name)
+}
+
+@inline(__always)
+func birbSignpostEnd(_ name: StaticString) {
+    guard birbSignpostLog.signpostsEnabled else { return }
+    os_signpost(.end, log: birbSignpostLog, name: name)
+}
 
 /// The editor's state: a document, a camera, a tool, and the stroke in progress.
 ///
-/// This is the only place in the app that decides anything. Two rules run
+/// This is the only place in the app that decides anything. Three rules run
 /// through all of it.
 ///
 /// **A stroke is one gesture.** Touch down to touch up is one undo step, because
@@ -15,11 +36,13 @@ import HumanoidCore
 /// **Input is paid for once a frame, not once an event.** A Pencil reports up to
 /// 240 times a second and the display refreshes 120 times; the samples are
 /// queued as they arrive and drained in `drainInput`, which the renderer calls
-/// at the top of each frame. The first version applied the whole chain per
-/// event — rebuilding the mesh, recomputing every normal, allocating a GPU
-/// buffer and asking for a redraw — which is where the lag came from. None of
-/// the arithmetic was slow; it simply ran four times more often than anything
-/// could be seen.
+/// at the top of each frame.
+///
+/// **Queuing a sample must ask for a frame.** Added after the second device
+/// run, where it was the whole bug: the queue was filled and nothing ever
+/// requested the draw that empties it, so a Pencil stroke sat in `pending`
+/// until an unrelated finger moved the camera. The queue is not the loop; it
+/// has to poke it.
 @MainActor
 final class EditorModel: ObservableObject {
     struct Change: OptionSet {
@@ -54,7 +77,7 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    /// One Pencil sample, as delivered. Queued rather than acted on.
+    /// One Pencil or finger sample, as delivered. Queued rather than acted on.
     struct Sample {
         enum Phase { case began, moved, ended, cancelled }
         var phase: Phase
@@ -62,16 +85,30 @@ final class EditorModel: ObservableObject {
         var location: Vec2
         /// 0...1, floored so a Pencil held upright still marks.
         var force: Double
+        /// True for a real Pencil. The editor uses it to stop offering finger
+        /// sculpting once a Pencil has been seen.
+        var isPencil: Bool
     }
 
-    /// Fully qualified, and it has to be.
+    /// Deliberately NOT `@Published`, either of them.
     ///
-    /// A bare `Document` is ambiguous once SwiftUI and UIKit are both imported —
-    /// the SDK has its own type of that name, and the compiler will not guess.
-    /// It builds fine headless, where neither framework exists, which is exactly
-    /// the class of error the Linux tests cannot reach.
-    @Published private(set) var document: HumanoidCore.Document
-    @Published var camera = Camera()
+    /// `@Published` republishes on every assignment whether or not anything
+    /// reads the value, and a struct property republishes when it is mutated.
+    /// `camera` is mutated on every frame of every orbit and `document` on
+    /// every frame of every stroke, so between them they rebuilt the whole
+    /// SwiftUI toolbar at up to 120 Hz to display two booleans. Neither is read
+    /// by anything that needs to track them live: the mesh, the texture, the
+    /// camera and the cursor go straight to the renderer through `onChange`,
+    /// and the export sheet reads the document once when it opens.
+    ///
+    /// Fully qualified, and it has to be. A bare `Document` is ambiguous once
+    /// SwiftUI and UIKit are both imported — the SDK has its own type of that
+    /// name, and the compiler will not guess. It builds fine headless, where
+    /// neither framework exists, which is exactly the class of error the Linux
+    /// tests cannot reach.
+    private(set) var document: HumanoidCore.Document
+    var camera = Camera()
+
     @Published var tool: Tool = .grab
     /// Brush radius in **screen points**, converted to metres at the hit depth.
     ///
@@ -85,6 +122,10 @@ final class EditorModel: ObservableObject {
     @Published var lockWorldSize = false
     @Published var strength: Double = 0.5
     @Published var symmetric = true
+    /// Forces finger sculpting on. Off by default because it is usually not
+    /// needed: until a Pencil has been seen, a finger that lands ON the model
+    /// sculpts and one that lands on the background orbits, which is Nomad's
+    /// rule and needs no setting at all.
     @Published var fingerEditing = false
     /// The rope stabiliser, off by default. Nomad ships its Lazy Rope on and
     /// has a standing request to turn it off, which is the tell: it changes the
@@ -97,20 +138,37 @@ final class EditorModel: ObservableObject {
     /// The debug readout, refreshed a few times a second while it is shown.
     @Published private(set) var hud = ""
     @Published var status: String?
+    /// One line under the tool rail saying who does what. It answers the
+    /// question the second device run raised — "none of the pencil actions
+    /// seems to work" is indistinguishable from "I was using a finger, and
+    /// fingers move the camera".
+    @Published private(set) var inputHint = "Pencil sculpts · one finger on the model sculpts, off it orbits"
 
-    /// What the frame cost, for the readout. Rebuilding this string every frame
-    /// would republish the whole view sixty to a hundred and twenty times a
-    /// second to display a number nobody can read that fast.
+    /// True once any Pencil touch or hover has arrived. From then on fingers
+    /// navigate only, because the alternative is that every orbit is also a
+    /// stroke.
+    private(set) var pencilSeen = false
+
+    /// What the frame cost, for the readout.
     private var hudClock: CFTimeInterval = 0
     private var frameSamples: [Double] = []
     private var lastDabs = 0
+    private var lastDrainDepth = 0
+    private var worstDrainDepth = 0
+    private var framesThisStroke = 0
+    private var picksThisFrame = 0
+    private var strokeSummary = "no stroke yet"
 
     /// Set by the viewport so a change can be pushed straight to the renderer
     /// without SwiftUI diffing a mesh.
     var onChange: ((Change) -> Void)?
-    /// Asks the viewport to keep drawing continuously — during a stroke and
-    /// while the camera coasts. Idle, the view draws only when asked.
+    /// Asks the viewport to run continuously — during a stroke, a hover and a
+    /// coast — or to go back to drawing on demand.
     var onActivity: ((Bool) -> Void)?
+    /// Asks the viewport for one frame. Cheap and coalesced, so anything that
+    /// queues work calls it rather than reasoning about whether a frame is
+    /// already coming.
+    var requestDraw: (() -> Void)?
 
     // MARK: - Input queue
 
@@ -119,35 +177,66 @@ final class EditorModel: ObservableObject {
     private var hoverCleared = false
 
     /// Queues a sample. Called from the touch handlers, possibly several times
-    /// per frame; does no work beyond appending.
+    /// per frame; does no work beyond appending and asking for a frame.
     func enqueue(_ sample: Sample) {
+        if sample.isPencil { notePencil() }
         pending.append(sample)
         if sample.phase == .began { onActivity?(true) }
+        requestDraw?()
     }
 
     /// Queues a hover position. The cursor is a preview and never touches the
     /// document, so it is kept apart from the stroke queue entirely.
     func enqueueHover(at location: Vec2, height: Double) {
+        notePencil()
         hoverPending = (location, height)
         hoverCleared = false
+        onActivity?(true)
+        requestDraw?()
     }
 
     func clearHover() {
         hoverPending = nil
         hoverCleared = true
+        requestDraw?()
+    }
+
+    /// Records that a Pencil exists on this device, which changes what a finger
+    /// means.
+    func notePencil() {
+        guard !pencilSeen else { return }
+        pencilSeen = true
+        inputHint = "Pencil sculpts · fingers move the camera"
     }
 
     // MARK: - Stroke state
 
     private var strokeOpen = false
+    /// Whether the stroke has found the surface. A stroke that starts a
+    /// millimetre off the model used to be dead for its whole length: the
+    /// `.began` sample missed, nothing was set up, and every later sample fell
+    /// through the same guard even once it crossed the model.
+    private var strokeArmed = false
     private var sculptStroke: Sculpt.Stroke?
     private var lastScreenPoint: Vec2?
     private var grabDepth: Double = 0
+    private var grabActive = false
+    /// The TOTAL displacement of the open Grab, not a per-frame delta. The
+    /// document holds the vertices it captured at the start and places them
+    /// absolutely, so this can be re-sent any number of times.
+    private var grabTotal: Vec3 = .zero
+    private var grabDirty = false
     private var strokeRadius: Double = 0.03
     private var strokeForce: Double = 1
     private var stabiliserAnchor: Vec2?
     private var paintDirty = Paint.Rect.empty
+    private var lastHit: (position: Vec3, normal: Vec3, distance: Double)?
     private(set) var cursor: Renderer.Cursor?
+
+    /// Reused across frames. Allocating these per frame is the one thing the
+    /// rest of this repo's house rules would not forgive.
+    private var sculptCentres: [Vec3] = []
+    private var paintSteps: [(point: Vec3, seed: Int)] = []
 
     /// Orbit velocity left over from a flick, in normalised screen units per
     /// second.
@@ -160,22 +249,29 @@ final class EditorModel: ObservableObject {
     init(document: HumanoidCore.Document) {
         self.document = document
         camera.frame(document.mesh)
+        sculptCentres.reserveCapacity(64)
+        paintSteps.reserveCapacity(64)
+        pending.reserveCapacity(64)
         NSLog("[BabyBlender] document ready: %d vertices", document.mesh.vertexCount)
     }
 
-    /// Builds the paint map on a background thread and hands it back.
+    convenience init() {
+        // A failure here means the app shipped without its template, which is a
+        // build mistake, not a runtime condition to recover from.
+        self.init(document: try! HumanoidCore.Document.clay())
+    }
+
+    /// Builds the paint map off the main thread and hands it back.
     ///
     /// Two versions of this were wrong before it. The first built the map in
     /// `init`, in front of the first frame. The second dispatched it to the
     /// MAIN queue "after the first frame" — which moved it later but not off
-    /// the thread that draws, so it still blocked the display for its whole
-    /// duration: 27 ms in release, **763 ms in debug**, and Xcode's Run button
-    /// builds debug. On the iPad that was a black screen with the console
-    /// stopped at "viewport ready".
+    /// the thread that draws: 27 ms in release, **763 ms in debug on the build
+    /// box and 3,242 ms on the iPad**, and Xcode's Run button builds debug.
     ///
     /// The map depends only on the template and the texture size, both
-    /// immutable, so it is built from a copy of the template on a utility
-    /// queue and installed on the main actor when done. `beginPaintStroke`
+    /// immutable, so it is built from a copy of the template on a background
+    /// task and installed on the main actor when done. `beginPaintStroke`
     /// still builds it on demand if a stroke arrives first; the cost of that
     /// race is a hitch on one stroke, never a bug.
     func prepareForPaintingSoon() {
@@ -183,11 +279,15 @@ final class EditorModel: ObservableObject {
         paintingPrepared = true
         let template = document.template
         let size = document.paintMapSize
-        DispatchQueue.global(qos: .utility).async {
+        // `Task.detached` rather than a nested `DispatchQueue` pair: the inner
+        // hop back used `[weak self]` while the outer closure had already
+        // captured self strongly, which is what the compiler was warning about.
+        // This shape has one capture, on the main actor, where it belongs.
+        Task.detached(priority: .utility) {
             let started = CACurrentMediaTime()
             let map = SurfacePaint.Map(template, width: size.width, height: size.height)
             let ms = (CACurrentMediaTime() - started) * 1000
-            DispatchQueue.main.async { [weak self] in
+            await MainActor.run { [weak self] in
                 self?.document.installPaintMap(map)
                 NSLog("[BabyBlender] paint map ready (%.0f ms, off the main thread)", ms)
             }
@@ -196,13 +296,46 @@ final class EditorModel: ObservableObject {
 
     private var paintingPrepared = false
 
-    convenience init() {
-        // A failure here means the app shipped without its template, which is a
-        // build mistake, not a runtime condition to recover from.
-        self.init(document: try! HumanoidCore.Document.clay())
+    // MARK: - Camera
+
+    /// One-finger drag, in normalised screen travel.
+    func orbit(by delta: Vec2) {
+        camera.orbit(dx: delta.x, dy: delta.y)
+        cameraMoved()
     }
 
-    // MARK: - Camera
+    /// Two-finger drag, in drawable pixels.
+    func pan(by delta: Vec2, viewport: Vec2) {
+        camera.pan(pixels: delta, viewportHeight: viewport.y)
+        cameraMoved()
+    }
+
+    /// Pinch, anchored at the point between the fingers.
+    func zoom(by factor: Double, about point: Vec2, viewport: Vec2) {
+        camera.zoom(by: factor, about: point, viewport: viewport)
+        cameraMoved()
+    }
+
+    /// Moves the orbit centre to whatever is under a screen point, without
+    /// moving the eye. Nothing happens on screen; the next orbit turns around
+    /// the new place instead of around wherever the model used to be.
+    func setPivot(at point: Vec2, viewport: Vec2) {
+        guard viewport.x > 0, viewport.y > 0 else { return }
+        guard let hit = camera.pick(document.mesh, at: point, viewport: viewport) else { return }
+        camera.setPivot(to: hit.position)
+        cameraMoved()
+    }
+
+    /// Double tap: on the model, re-pivot there; off it, frame the whole thing.
+    func doubleTap(at point: Vec2, viewport: Vec2) {
+        if viewport.x > 0, viewport.y > 0,
+           let hit = camera.pick(document.mesh, at: point, viewport: viewport) {
+            camera.setPivot(to: hit.position)
+            cameraMoved()
+        } else {
+            frameModel()
+        }
+    }
 
     func cameraMoved() {
         spin = .zero
@@ -212,6 +345,7 @@ final class EditorModel: ObservableObject {
     func flick(velocity: Vec2) {
         spin = velocity
         onActivity?(true)
+        requestDraw?()
     }
 
     func frameModel() {
@@ -220,14 +354,34 @@ final class EditorModel: ObservableObject {
         onChange?(.camera)
     }
 
+    /// Whether a finger landing here should sculpt rather than move the camera.
+    ///
+    /// Nomad's rule, and it needs no mode switch: before a Pencil has been
+    /// seen, a finger on the model works and a finger off it orbits. Once a
+    /// Pencil has been seen the Pencil owns editing and fingers navigate, which
+    /// is what stops every orbit also being a stroke.
+    func fingerShouldSculpt(at point: Vec2, viewport: Vec2) -> Bool {
+        if fingerEditing { return true }
+        guard !pencilSeen, viewport.x > 0, viewport.y > 0 else { return false }
+        return camera.pick(document.mesh, at: point, viewport: viewport) != nil
+    }
+
     // MARK: - The frame
 
     /// Drains a frame's worth of input, advances the camera's coast, and updates
     /// the cursor. Called by the renderer before it encodes anything.
     func drainInput(viewport: Vec2) {
+        birbSignpostBegin("drain")
+        defer { birbSignpostEnd("drain") }
+
         let now = CACurrentMediaTime()
         let elapsed = lastFrame > 0 ? min(0.1, now - lastFrame) : 1.0 / 120
         lastFrame = now
+
+        lastDrainDepth = pending.count
+        worstDrainDepth = max(worstDrainDepth, lastDrainDepth)
+        picksThisFrame = 0
+        if strokeOpen { framesThisStroke += 1 }
 
         var change = Change()
         if applyCoast(elapsed) { change.insert(.camera) }
@@ -239,7 +393,7 @@ final class EditorModel: ObservableObject {
         // hover event and pauses in between, so the cursor stutters across the
         // model instead of tracking it.
         //
-        // Reported only on the TRANSITION to idle. The first version called
+        // Reported only on the TRANSITION to idle. An earlier version called
         // `onActivity(false)` on every idle frame, and the viewport answers it
         // with `setNeedsDisplay()` — so each frame requested the next and the
         // "paused" view redrew continuously at the panel's full rate.
@@ -274,18 +428,24 @@ final class EditorModel: ObservableObject {
                      mean, worst)
             + String(format: "\ngpu %.2f ms  draws %d  tris %d",
                      stats.gpuMilliseconds, stats.drawCalls, stats.triangles)
-            + String(format: "\nbrush %.0f pt = %.1f mm  dabs/frame %d",
-                     radiusPoints, strokeRadius * 1000, lastDabs)
+            + String(format: "\nbrush %.0f pt = %.1f mm  dabs/frame %d  picks %d",
+                     radiusPoints, strokeRadius * 1000, lastDabs, picksThisFrame)
+            // The counter that proves the loop is alive. During a stroke this
+            // reads single digits — a Pencil at 240 Hz against 120 frames a
+            // second. Hundreds means samples are queuing with nothing draining
+            // them, which is what the second device run was.
+            + String(format: "\nqueue %d (worst %d)  %@", lastDrainDepth, worstDrainDepth,
+                     strokeSummary)
     }
 
     private func applySamples(viewport: Vec2) -> Change {
         guard !pending.isEmpty else { return [] }
+        birbSignpostBegin("samples")
+        defer { birbSignpostEnd("samples") }
+
         let samples = pending
         pending.removeAll(keepingCapacity: true)
-
         var change = Change()
-        var sculptCentres = [Vec3]()
-        var paintSteps = [(point: Vec3, seed: Int)]()
 
         for sample in samples {
             switch sample.phase {
@@ -294,37 +454,52 @@ final class EditorModel: ObservableObject {
                 strokeForce = sample.force
                 lastScreenPoint = sample.location
                 stabiliserAnchor = sample.location
-                guard let hit = pick(sample.location, viewport: viewport) else { continue }
-                grabDepth = hit.distance
-                strokeRadius = worldRadius(at: hit.distance, viewport: viewport)
-                sculptStroke = Sculpt.Stroke(settings: settings())
-                if tool.isPaint {
-                    document.beginPaintStroke(paintBrush())
-                    paintSteps.append((hit.position, hit.triangle))
-                } else if tool != .grab {
-                    sculptCentres.append(contentsOf: sculptStroke!.advance(to: hit.position))
-                }
+                arm(at: sample.location, viewport: viewport)
 
             case .moved:
                 strokeForce = sample.force
                 let point = stabilised(sample.location)
                 defer { lastScreenPoint = point }
-                guard let hit = pick(point, viewport: viewport) else { continue }
-                strokeRadius = worldRadius(at: hit.distance, viewport: viewport)
+                guard strokeArmed else {
+                    // Not on the model yet. Try again with this sample rather
+                    // than writing the whole gesture off.
+                    beginStroke()
+                    arm(at: point, viewport: viewport)
+                    continue
+                }
+                // Grab is handled BEFORE the pick, and deliberately. Once the
+                // set is captured the gesture owns it: the depth is fixed and
+                // nothing is re-picked, so dragging the pointer off the
+                // silhouette keeps pulling instead of stalling. Picking here
+                // would make a grab that leaves the model stop dead.
                 if tool == .grab {
-                    // Grab tracks the Pencil, so its delta is screen travel
-                    // converted at the depth the stroke started on. Converting
-                    // at the current depth instead makes the model slide out
-                    // from under the tip as the surface moves.
+                    // No pressure term: if the finger moved five millimetres
+                    // the surface moves five millimetres. Pressure is already
+                    // in the weights the capture took at the start.
                     guard let last = lastScreenPoint else { continue }
                     let screenDelta = Vec2(point.x - last.x, point.y - last.y)
                     let world = camera.worldDelta(screenDelta: screenDelta,
                                                   viewport: viewport, depth: grabDepth)
-                    if HumanoidCore.length(world) > 0 { sculptCentres.append(hit.position) }
-                    grabDelta += world * sample.force
-                } else if tool.isPaint {
+                    guard HumanoidCore.length(world) > 0 else { continue }
+                    grabTotal += world
+                    grabDirty = true
+                    // The ring rides with the surface it is dragging.
+                    if let previousHit = lastHit {
+                        lastHit = (previousHit.position + world, previousHit.normal,
+                                   previousHit.distance)
+                    }
+                    continue
+                }
+
+                guard let hit = pick(point, viewport: viewport) else { continue }
+                strokeRadius = worldRadius(at: hit.distance, viewport: viewport)
+                noteHit(hit)
+
+                switch tool {
+                case .paint, .erase:
                     paintSteps.append((hit.position, hit.triangle))
-                } else {
+
+                default:
                     // Advanced by POINTER travel, not by how far the surface
                     // moved: Inflate pushes the surface out from under itself,
                     // and a stroke that measured that would partly be measuring
@@ -335,77 +510,126 @@ final class EditorModel: ObservableObject {
                         * camera.metresPerPixel(depth: hit.distance,
                                                 viewportHeight: viewport.y)
                     sculptStroke?.settings = settings()
-                    sculptCentres.append(contentsOf:
-                        sculptStroke?.advance(to: hit.position, by: travelled) ?? [])
+                    if let more = sculptStroke?.advance(to: hit.position, by: travelled) {
+                        sculptCentres.append(contentsOf: more)
+                    }
                 }
 
             case .ended, .cancelled:
                 // Flush whatever this frame collected before closing, or the
                 // last few millimetres of every stroke are dropped.
-                change.formUnion(commit(sculpt: &sculptCentres, paint: &paintSteps))
+                change.formUnion(commit())
                 endStroke()
             }
         }
 
-        change.formUnion(commit(sculpt: &sculptCentres, paint: &paintSteps))
+        change.formUnion(commit())
         return change
     }
 
-    private var grabDelta: Vec3 = .zero
+    /// Finds the surface and sets the stroke up on it. Safe to call again on a
+    /// later sample: a stroke that began off the model arms on the first sample
+    /// that lands on it.
+    private func arm(at point: Vec2, viewport: Vec2) {
+        guard !strokeArmed, let hit = pick(point, viewport: viewport) else { return }
+        grabDepth = hit.distance
+        strokeRadius = worldRadius(at: hit.distance, viewport: viewport)
+        noteHit(hit)
 
-    private func commit(sculpt centres: inout [Vec3],
-                        paint steps: inout [(point: Vec3, seed: Int)]) -> Change {
-        var change = Change()
-        lastDabs = centres.count + steps.count
-        if !centres.isEmpty {
-            let brush: Sculpt.Brush
-            switch tool {
-            case .grab: brush = .grab(grabDelta)
-            case .inflate: brush = .inflate(Sculpt.inflatePerDab * strokeRadius)
-            case .deflate: brush = .inflate(-Sculpt.inflatePerDab * strokeRadius)
-            case .smooth: brush = .smooth
-            // Paint never queues sculpt centres; this keeps the switch total.
-            case .paint, .erase: brush = .smooth
-            }
-            if tool == .grab {
-                // Grab's whole frame is one displacement applied at the last
-                // place the tip was, rather than one dab per sample: the deltas
-                // sum to the same travel and the mesh is touched once.
-                document.sculpt(brush, at: [centres[centres.count - 1]], settings: settings())
-            } else {
-                document.sculpt(brush, at: centres, settings: settings())
-            }
-            change.insert(.mesh)
-            centres.removeAll(keepingCapacity: true)
-            grabDelta = .zero
+        switch tool {
+        case .paint, .erase:
+            document.beginPaintStroke(paintBrush())
+            paintSteps.append((hit.position, hit.triangle))
+        case .grab:
+            grabTotal = .zero
+            grabDirty = false
+            grabActive = document.beginGrab(at: hit.position, settings: settings())
+            guard grabActive else { return }
+        default:
+            sculptStroke = Sculpt.Stroke(settings: settings())
+            sculptCentres.append(contentsOf: sculptStroke!.advance(to: hit.position))
         }
-        if !steps.isEmpty {
-            for step in steps {
+        strokeArmed = true
+    }
+
+    private func commit() -> Change {
+        var change = Change()
+        lastDabs = sculptCentres.count + paintSteps.count + (grabDirty ? 1 : 0)
+
+        if grabActive, grabDirty {
+            birbSignpostBegin("grab")
+            document.grab(to: grabTotal)
+            birbSignpostEnd("grab")
+            grabDirty = false
+            change.insert(.mesh)
+        }
+
+        if !sculptCentres.isEmpty {
+            // Only the three dab brushes ever queue centres. Grab has its own
+            // captured path above and paint queues texels, so mapping them here
+            // would be inventing behaviour rather than keeping a switch total.
+            switch tool {
+            case .inflate, .deflate, .smooth:
+                let brush: Sculpt.Brush = tool == .smooth
+                    ? .smooth
+                    : .inflate(Sculpt.inflatePerDab * strokeRadius
+                               * (tool == .deflate ? -1 : 1))
+                birbSignpostBegin("sculpt")
+                document.sculpt(brush, at: sculptCentres, settings: settings())
+                birbSignpostEnd("sculpt")
+                change.insert(.mesh)
+            case .grab, .paint, .erase:
+                break
+            }
+            sculptCentres.removeAll(keepingCapacity: true)
+        }
+
+        if !paintSteps.isEmpty {
+            birbSignpostBegin("paint")
+            for step in paintSteps {
                 paintDirty = paintDirty.union(document.paint(to: step.point, seed: step.seed))
             }
+            birbSignpostEnd("paint")
             change.insert(.texture)
-            steps.removeAll(keepingCapacity: true)
+            paintSteps.removeAll(keepingCapacity: true)
         }
         return change
+    }
+
+    private func noteHit(_ hit: Picking.Hit) {
+        lastHit = (hit.position, normalAt(hit), hit.distance)
     }
 
     private func beginStroke() {
         guard !strokeOpen else { return }
         strokeOpen = true
+        strokeArmed = false
+        framesThisStroke = 0
         paintDirty = .empty
-        grabDelta = .zero
+        grabTotal = .zero
+        grabDirty = false
+        grabActive = false
         document.beginStroke()
     }
 
     private func endStroke() {
         guard strokeOpen else { return }
         strokeOpen = false
+        strokeArmed = false
+        grabActive = false
+        grabDirty = false
+        grabTotal = .zero
         document.endPaintStroke()
+        // Also closes any captured Grab: a gesture's vertex set must not
+        // outlive the gesture.
         document.endStroke()
         sculptStroke = nil
         lastScreenPoint = nil
         stabiliserAnchor = nil
-        onActivity?(false)
+        lastHit = nil
+        strokeSummary = "last stroke: \(framesThisStroke) frames"
+        // Idle is decided at the end of `drainInput`, not here: this runs
+        // mid-frame and the frame still has to be drawn.
     }
 
     /// The rope: the brush is dragged behind the tip and only moves when the
@@ -429,11 +653,21 @@ final class EditorModel: ObservableObject {
     // MARK: - Cursor
 
     private func updateCursor(viewport: Vec2) -> Change {
-        // Apple's guidance, and it is right: no hover preview while a stroke is
-        // running, or the cursor and the mark fight each other.
+        // Kept visible DURING the stroke, faded.
+        //
+        // Apple's hover guidance says to hide a preview once the pen is down,
+        // which is right for a drawing app where the mark is the feedback. On a
+        // sculpting tool the ring is the only honest answer to "how big is my
+        // brush", and ZBrush and Nomad both keep it up while you work.
         if strokeOpen {
-            guard cursor != nil else { return [] }
-            cursor = nil
+            guard let hit = lastHit else {
+                guard cursor != nil else { return [] }
+                cursor = nil
+                return .cursor
+            }
+            cursor = Renderer.Cursor(centre: hit.position, normal: hit.normal,
+                                     radius: strokeRadius, strength: 0.4,
+                                     painting: tool.isPaint)
             return .cursor
         }
         if hoverCleared {
@@ -475,7 +709,9 @@ final class EditorModel: ObservableObject {
     // MARK: - Brush
 
     private func pick(_ point: Vec2, viewport: Vec2) -> Picking.Hit? {
-        camera.pick(document.mesh, at: point, viewport: viewport)
+        guard viewport.x > 0, viewport.y > 0 else { return nil }
+        picksThisFrame += 1
+        return camera.pick(document.mesh, at: point, viewport: viewport)
     }
 
     private func worldRadius(at depth: Double, viewport: Vec2) -> Double {
@@ -531,11 +767,9 @@ final class EditorModel: ObservableObject {
     /// something SwiftUI actually shows has changed.
     ///
     /// This runs every frame of every stroke. `@Published` republishes on each
-    /// assignment whether or not the value differs, and an unconditional
-    /// `objectWillChange` rebuilt the entire toolbar at up to 120 Hz to display
-    /// two booleans that change twice per gesture. The mesh, the camera and the
-    /// cursor never go through SwiftUI at all — they are handed straight to the
-    /// renderer through `onChange`.
+    /// assignment whether or not the value differs, so an unconditional write
+    /// would rebuild the entire toolbar at up to 120 Hz to display two
+    /// booleans that change twice per gesture.
     private func refresh(_ change: Change) {
         let undoable = document.canUndo, redoable = document.canRedo
         if undoable != canUndo { canUndo = undoable }

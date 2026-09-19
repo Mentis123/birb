@@ -271,4 +271,105 @@ public enum Sculpt {
         }
         return touched
     }
+
+    // MARK: - Grab, captured
+
+    /// The vertices one Grab gesture owns, fixed at the moment it begins.
+    ///
+    /// Grab is the one brush that must not re-decide what it is holding. The
+    /// per-dab form re-picks the surface under the tip every frame, so as the
+    /// pulled surface moves — or as the tip runs off the bump it just made — a
+    /// different set of vertices is grabbed part way through one drag, and the
+    /// displacement accumulates from wherever they happened to be. Capturing
+    /// the set and its positions once makes the whole gesture a function of the
+    /// TOTAL displacement: idempotent, drift-free, and exactly the set undo
+    /// needs to record.
+    ///
+    /// A vertex near x = 0 can fall inside both the primary and the mirrored
+    /// half. It is stored once per half, which is what the per-dab form did by
+    /// running twice, and `apply` accumulates.
+    public struct GrabSet: Sendable {
+        /// Raw vertex indices — every weld member, so a seam moves as one point.
+        public let vertices: [Int]
+        /// Falloff x strength, per entry.
+        public let weights: [Double]
+        /// Whether this entry belongs to the mirrored half, whose displacement
+        /// has its x negated.
+        public let mirrored: [Bool]
+        /// Where each entry was when the gesture began.
+        public let origins: [Vec3]
+        /// Welded positions touched, for the incremental normal pass.
+        public let welded: Set<Int>
+
+        public var isEmpty: Bool { vertices.isEmpty }
+        public var weldedCount: Int { welded.count }
+
+        public init(vertices: [Int], weights: [Double], mirrored: [Bool],
+                    origins: [Vec3], welded: Set<Int>) {
+            self.vertices = vertices
+            self.weights = weights
+            self.mirrored = mirrored
+            self.origins = origins
+            self.welded = welded
+        }
+    }
+
+    /// Decides what a Grab gesture will hold, once, at the point it starts.
+    public static func captureGrab(at centre: Vec3, mesh: MeshData, tables: MeshTables,
+                                   settings: Settings) -> GrabSet {
+        var vertices = [Int]()
+        var weights = [Double]()
+        var mirrored = [Bool]()
+        var origins = [Vec3]()
+        var welded = Set<Int>()
+        guard settings.radius > 0, settings.strength != 0 else {
+            return GrabSet(vertices: vertices, weights: weights, mirrored: mirrored,
+                           origins: origins, welded: welded)
+        }
+
+        let radiusSquared = settings.radius * settings.radius
+        var halves: [(centre: Vec3, mirrored: Bool)] = [(centre, false)]
+        if settings.symmetric {
+            halves.append((Vec3(-centre.x, centre.y, centre.z), true))
+        }
+
+        for half in halves {
+            for w in 0..<tables.weldedCount {
+                let representative = tables.weldMembers[w][0]
+                let offset = mesh.positions[representative] - half.centre
+                let distanceSquared = dot(offset, offset)
+                guard distanceSquared <= radiusSquared else { continue }
+                let weight = falloff(distance: distanceSquared.squareRoot(),
+                                     radius: settings.radius) * settings.strength
+                guard weight > 0 else { continue }
+                welded.insert(w)
+                for member in tables.weldMembers[w] {
+                    vertices.append(member)
+                    weights.append(weight)
+                    mirrored.append(half.mirrored)
+                    origins.append(mesh.positions[member])
+                }
+            }
+        }
+        return GrabSet(vertices: vertices, weights: weights, mirrored: mirrored,
+                       origins: origins, welded: welded)
+    }
+
+    /// Places a captured Grab at a TOTAL displacement from where it began.
+    ///
+    /// Absolute rather than incremental, so calling it sixty times a frame apart
+    /// with a growing displacement lands in exactly the same place as calling it
+    /// once with the final one. The reset pass runs first and separately: a
+    /// vertex that belongs to both halves must not have its mirror contribution
+    /// wiped by its own reset.
+    public static func apply(_ set: GrabSet, displacement: Vec3,
+                             to mesh: inout MeshData, tables: MeshTables) {
+        guard !set.vertices.isEmpty else { return }
+        for (i, v) in set.vertices.enumerated() { mesh.positions[v] = set.origins[i] }
+        let flipped = Vec3(-displacement.x, displacement.y, displacement.z)
+        for (i, v) in set.vertices.enumerated() {
+            mesh.positions[v] += (set.mirrored[i] ? flipped : displacement) * set.weights[i]
+        }
+        mesh.recomputeNormals(tables, touching: set.welded)
+    }
 }

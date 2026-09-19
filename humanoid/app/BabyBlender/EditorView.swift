@@ -55,6 +55,17 @@ struct EditorView: View {
             .toggleStyle(.button)
             .help("Steady the stroke")
 
+            // Forces finger sculpting on. Usually unnecessary — until a Pencil
+            // has been seen, a finger on the model already sculpts — but it is
+            // the escape hatch for anyone who wants a finger to work while a
+            // Pencil is paired, and it is visible rather than buried so nobody
+            // has to guess why their finger only orbits.
+            Toggle(isOn: $editor.fingerEditing) {
+                Image(systemName: "hand.point.up.left")
+            }
+            .toggleStyle(.button)
+            .help("Let a finger sculpt")
+
             Button { editor.frameModel() } label: { Image(systemName: "viewfinder") }
 
             Button { showingExport = true } label: {
@@ -128,6 +139,16 @@ struct EditorView: View {
                 }
             }
             .frame(maxWidth: 560)
+
+            // Who does what, in one line.
+            //
+            // It exists because of the second device run: "none of the pencil
+            // actions seems to work" and "I was using a finger, and fingers
+            // move the camera" produce exactly the same experience, and there
+            // was nothing on screen to tell them apart.
+            Text(editor.inputHint)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.45))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)

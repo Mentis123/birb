@@ -64,3 +64,43 @@ targets:
         # Needed once the Metal viewport and the C++ geometry bridge land.
         SWIFT_OBJC_INTEROP_MODE: objcxx
         GENERATE_INFOPLIST_FILE: NO
+
+# Two schemes, and the second one is the point.
+#
+# Xcode's Run button builds DEBUG, which is `-Onone`. On this Double-heavy,
+# SIMD-free geometry code that is ten to forty times slower than release: the
+# paint map measured 27 ms in release on the build box and **3,242 ms on the
+# iPad in debug**, and the second device run's "Hang detected" lines were all
+# taken that way. No number from a debug run with the debugger attached is a
+# number about this app, so the release scheme is shipped rather than left as
+# an instruction nobody follows.
+#
+# Still worth doing by hand for a feel test, because a scheme cannot express
+# them: Edit Scheme -> Run -> Options -> Metal API Validation = Disabled and
+# GPU Frame Capture = Disabled, then stop Xcode and launch from the home
+# screen. A debugger attached to a Metal app is not the app.
+schemes:
+  BabyBlender:
+    build:
+      targets:
+        BabyBlender: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+  BabyBlender (Release):
+    build:
+      targets:
+        BabyBlender: all
+    run:
+      config: Release
+    profile:
+      config: Release
+    analyze:
+      config: Release
+    archive:
+      config: Release

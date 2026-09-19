@@ -50,10 +50,10 @@ final class CameraTests: XCTestCase {
     }
 
     func testOrbitingKeepsTheTargetAndDistanceFixed() {
-        var camera = Camera(target: Vec3(0.1, 0.2, 0.3), distance: 0.7)
+        var camera = Camera(pivot: Vec3(0.1, 0.2, 0.3), distance: 0.7)
         camera.orbit(dx: 0.3, dy: -0.2)
-        XCTAssertEqual(length(camera.eye - camera.target), 0.7, accuracy: 1e-9)
-        XCTAssertEqual(length(camera.target - Vec3(0.1, 0.2, 0.3)), 0, accuracy: 1e-12)
+        XCTAssertEqual(length(camera.eye - camera.pivot), 0.7, accuracy: 1e-9)
+        XCTAssertEqual(length(camera.pivot - Vec3(0.1, 0.2, 0.3)), 0, accuracy: 1e-12)
     }
 
     func testZoomIsMultiplicativeAndClamped() {
@@ -73,7 +73,7 @@ final class CameraTests: XCTestCase {
         camera.frame(mesh)
         // The cube's corners are the test: framing on the axis-aligned extent
         // instead of the bounding radius lets a corner-on view overflow.
-        let radius = mesh.positions.map { length($0 - camera.target) }.max()!
+        let radius = mesh.positions.map { length($0 - camera.pivot) }.max()!
         for azimuth in stride(from: 0.0, through: 6.0, by: 0.4) {
             camera.azimuth = azimuth
             let halfAngle = camera.fieldOfView / 2
@@ -109,8 +109,8 @@ final class CameraTests: XCTestCase {
     }
 
     func testTheViewMatrixPutsTheTargetOnTheNegativeZAxis() {
-        let camera = Camera(target: Vec3(0.1, 0, 0), distance: 0.8, azimuth: 0.7, elevation: 0.3)
-        let inView = camera.viewMatrix.transform(point: camera.target)
+        let camera = Camera(pivot: Vec3(0.1, 0, 0), distance: 0.8, azimuth: 0.7, elevation: 0.3)
+        let inView = camera.viewMatrix.transform(point: camera.lookAt)
         XCTAssertEqual(inView.x, 0, accuracy: 1e-9)
         XCTAssertEqual(inView.y, 0, accuracy: 1e-9)
         XCTAssertEqual(inView.z, -0.8, accuracy: 1e-9)
@@ -201,10 +201,13 @@ final class CameraTests: XCTestCase {
 
     func testPanningTracksTheFinger() {
         var camera = Camera(distance: 1, azimuth: 0, elevation: 0)
-        let before = camera.target
-        camera.pan(dx: 0.1, dy: 0)
-        // Dragging right moves the target left, so the model appears to follow.
-        XCTAssertLessThan(dot(camera.target - before, camera.right), 0)
+        let before = camera.lookAt
+        camera.pan(pixels: Vec2(100, 0), viewportHeight: 1000)
+        // Dragging right moves the view centre left, so the model follows.
+        XCTAssertLessThan(dot(camera.lookAt - before, camera.right), 0)
+        // And the pivot is untouched: panning must not move what orbit turns
+        // around, or every orbit after a pan swings the model out of frame.
+        XCTAssertEqual(length(camera.pivot), 0, accuracy: 1e-12)
     }
 }
 

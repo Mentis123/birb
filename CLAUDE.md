@@ -2082,26 +2082,56 @@ gets called slow without a baseline). `BABY_BLENDER_BENCH=1 swift test -c releas
 --filter BenchmarkTests` still covers the sculpt path, where the difference does
 not signify. Three-finger tap in the app shows the on-device readout.
 
-**Second device run (2026-09-19): the cube renders and orbits; the Pencil
-does nothing, two fingers fight, and the run was a Debug build.** The
-evaluation is `humanoid/docs/Device_Pass_2.md` — read it before touching
-`SculptView`, `EditorModel` or `Camera`. The load-bearing finding: the
-viewport is in `MTKView` on-demand mode and tries to go continuous by
-setting `isPaused = false`, which Apple's own header says does nothing once
-`enableSetNeedsDisplay` is true — so Pencil samples queue and are only
-applied when a finger moves the camera, the hover ring never appears, the
-flick never coasts, and the multi-second "Hang detected" lines are most
-plausibly that queue dumped into one debug-build frame. Second: the
-one-finger orbit keeps running when the second finger lands and every
-recogniser is allowed to run simultaneously, so a two-finger drag is
-orbit + pan + pinch at once; pan is off by the aspect ratio, zoom is about
-the look-at point not the fingers, and the pivot never moves. The doc
-specifies the Nomad rule set (one finger on the model sculpts, on the
-background orbits; two fingers pan/zoom and re-centre the pivot under
-them), a pivot-plus-offset camera that can change pivot without the view
-jumping, the Release-scheme measurement discipline, and the order of work.
-**No number from a Debug run with the debugger attached is a number about
-the app.**
+**Second device run (2026-09-19): the cube rendered and orbited; the Pencil
+did nothing, two fingers fought, and the whole run was a Debug build.**
+Diagnosis and the fixes are in `humanoid/docs/Device_Pass_2.md` (§7 is what
+shipped) — read it before touching `SculptView`, `EditorModel` or `Camera`.
+
+**`isPaused = false` does nothing once `enableSetNeedsDisplay` is true.**
+Apple's MetalKit header says enabling it "will also pause the MTKView's
+internal render loop and updates will instead be event driven", so the
+viewport's "go continuous during a stroke" switch was dead. Pencil samples
+queued and were only applied when an unrelated finger moved the camera; the
+hover ring never appeared and the flick never coasted, all from the same line.
+The multi-second "Hang detected" reports are most plausibly that queue dumped
+into one debug-build frame. `onActivity` flips BOTH properties now, and
+anything that queues a sample also calls `requestDraw`. **A queue is not a
+loop; it has to poke one.** Two more silent no-ops went with it: a stroke that
+started a millimetre off the model was dead for its whole length, and nothing
+on screen said that fingers move the camera.
+
+**One recogniser, not three.** A `UIPanGestureRecognizer` capped at one touch
+does NOT fail when a second finger lands — it keeps tracking the first — so
+with simultaneous recognition on, a two-finger drag was an orbit AND a pan AND
+a pinch at once. `NavigationGesture` counts its own touches and re-reads its
+reference centroid on every 1↔2 transition.
+
+**The camera is pivot plus a view-plane offset now**, and the split is what
+makes the three gestures independent: orbit turns around `pivot`, pan moves
+`offset`, and `setPivot` moves the orbit centre with the eye **bit-identical**,
+so two fingers landing can re-centre the orbit invisibly (Nomad's rule).
+`pan` takes PIXELS — the old form normalised x by the width and y by the
+height while scaling both by the vertical extent, so on a landscape iPad the
+model tracked the fingers vertically and lagged them horizontally. Mutation-
+tested: restoring it reads **77.14 against 120**, which is 120 over the
+1400x900 aspect ratio. Pinch is anchored between the fingers. Every rule is
+stated through the new `project()`, the exact inverse of the picking ray —
+**a camera rule you cannot phrase as "this point lands here" is not tested.**
+
+**Grab is captured at the start of the gesture** (`Sculpt.GrabSet`): it re-
+picked the surface every frame, so a drag that pulls the surface out from
+under itself ended up holding a different set than it started with. Every
+frame now places the captured set at the TOTAL displacement, so sixty frames
+land where one call would to 1e-12 and undo returns exactly.
+
+**Also:** `camera` and `document` are no longer `@Published` (between them they
+rebuilt the SwiftUI toolbar at up to 120 Hz); a **Release scheme ships in
+`project.yml`**, because Xcode's Run button builds Debug and no number from a
+Debug run with the debugger attached is a number about the app; `os_signpost`
+intervals and a HUD queue-depth counter make the next report arrive with
+numbers. **Unmeasured on the iPad: all of it** — 224 core tests and
+`verify.sh` PASS is what exists, and the acceptance checklist is
+Device_Pass_2 §6.
 
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
