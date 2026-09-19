@@ -11,6 +11,21 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **Stunt flight is planned, not built** (2026-09-19):
+> [docs/realism/STUNT_FLIGHT_PLAN.md](docs/realism/STUNT_FLIGHT_PLAN.md).
+> The owner asked for the bird to fly like a biplane and called the
+> triggered rolls a total rewrite. The plan: one pure-RATE controller
+> (`?flight=stunt`) — stick x is roll rate with cubic expo, stick y is pitch
+> rate, no auto-yaw from bank, righting only with the whole stick idle and
+> only inside 120° of upright, so a knife-edge holds heading and inverted
+> flight is a thing you do rather than fight. Lift and sink give a knife-edge
+> and an inverted bird somewhere to go; a stall term gives the hammerhead for
+> free. The BOOST pill becomes a pad: tap boosts, drag is throttle and
+> rudder. v2's energy model, chase-camera hold and crash-by-attitude rule
+> survive verbatim; v2's rail, its auto-turn and all of `aerobatics.js` are
+> deleted in the final phase. Five phases, each with a measured gate on the
+> sim clock; phase 0 (the mapping alone) is the one that decides it.
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.
