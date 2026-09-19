@@ -89,7 +89,11 @@ vertex CursorOut cursor_vertex(CursorIn in [[stage_in]],
     return out;
 }
 
-fragment float4 cursor_fragment(CursorOut in [[stage_in]],
-                                constant CursorUniforms &uniforms [[buffer(1)]]) {
+// No `stage_in`. The vertex stage outputs nothing but `[[position]]`, and a
+// fragment stage_in struct whose only member is the position is a shape some
+// Metal compilers reject — which would take the WHOLE default library down
+// with it, not just this function, and leave the renderer unable to find even
+// `model_vertex`. The cursor's colour comes from the uniform buffer anyway.
+fragment float4 cursor_fragment(constant CursorUniforms &uniforms [[buffer(1)]]) {
     return uniforms.colour;
 }

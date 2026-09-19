@@ -157,10 +157,27 @@ final class EditorModel: ObservableObject {
     init(document: HumanoidCore.Document) {
         self.document = document
         camera.frame(document.mesh)
-        // Painting needs a texel map. Building it costs about 30 ms at 1024, so
-        // it is paid here rather than inside the user's first paint stroke.
-        self.document.prepareForPainting()
+        NSLog("[BabyBlender] document ready: %d vertices", document.mesh.vertexCount)
     }
+
+    /// Builds the paint map, off the launch path.
+    ///
+    /// It used to be built in `init`, which put it in front of the first frame.
+    /// That is 27 ms in a release build and **763 ms in a debug one** — and
+    /// Xcode's Run button builds debug — so on an iPad core it is seconds of
+    /// black screen before anything is drawn. Called after the first frame
+    /// instead; `beginPaintStroke` still builds it on demand if a stroke somehow
+    /// beats this, so the only cost of being wrong here is a hitch, not a bug.
+    func prepareForPaintingSoon() {
+        guard !paintingPrepared else { return }
+        paintingPrepared = true
+        DispatchQueue.main.async { [weak self] in
+            self?.document.prepareForPainting()
+            NSLog("[BabyBlender] paint map ready")
+        }
+    }
+
+    private var paintingPrepared = false
 
     convenience init() {
         // A failure here means the app shipped without its template, which is a

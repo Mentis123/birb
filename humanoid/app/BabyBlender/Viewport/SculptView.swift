@@ -59,6 +59,22 @@ final class SculptMTKView: MTKView {
         }
     }
 
+    /// Replaces the black screen with the reason for it.
+    func showFailure(_ message: String) {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.textColor = .white
+        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        label.text = "Baby Blender could not start its viewport.\n\n\(message)"
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+        ])
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         report(touches, event, .began)
     }
@@ -99,7 +115,19 @@ struct SculptView: UIViewRepresentable {
         view.enableSetNeedsDisplay = true
         view.isPaused = true
 
-        guard let renderer = Renderer(view: view) else { return view }
+        let renderer: Renderer
+        do {
+            renderer = try Renderer(view: view)
+        } catch {
+            // Say so, on the screen and in the console.
+            //
+            // The previous version returned a view with no delegate here, which
+            // renders as black forever and reads as a hang. A viewport that
+            // cannot start is a bug worth naming, not worth hiding.
+            NSLog("[BabyBlender] renderer setup failed: \(error.localizedDescription)")
+            view.showFailure(error.localizedDescription)
+            return view
+        }
         context.coordinator.renderer = renderer
         context.coordinator.view = view
         view.delegate = renderer
@@ -147,6 +175,11 @@ struct SculptView: UIViewRepresentable {
         renderer.upload(albedo: editor.document.albedo)
         renderer.camera = editor.camera
         view.setNeedsDisplay()
+        // The paint map is built after the first frame rather than before it.
+        // In a debug build it costs the better part of a second, and Xcode's
+        // Run button builds debug.
+        editor.prepareForPaintingSoon()
+        NSLog("[BabyBlender] viewport ready")
         return view
     }
 
