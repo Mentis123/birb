@@ -147,6 +147,29 @@
 > of them made tuning-independent on the way (the roll measures SWEPT angle
 > from the controller's own deltas, not the bank at a fixed second).
 
+> **Cockpit view is a setting, and it deliberately does NOT use the FPV rig
+> that was already there** (2026-09-19). *"Add a setting for fpv v 3rd."*
+> Chase cam / Cockpit is a gear-menu toggle persisted to `birbCameraView`,
+> with `?camera=fpv|chase` for a one-off boot (not persisted) and
+> `__BIRB.setCameraView()` / `__BIRB.cameraView()` for harnesses.
+>
+> **`cameraState`'s FPV rig levels its roll against WORLD +Y**, which is
+> correct within sight of the north pole and progressively wrong everywhere
+> else on a planet — the same class of bug as the walk bob writing
+> `position.y`, and the turret branch's own comment already says so, which is
+> why the turret does not use it either. Flight FPV therefore places the
+> camera at the bird wearing the **bird's own quaternion**, so the horizon
+> rolls with the aircraft anywhere on the sphere. The decisive measurement is
+> in `tools/birb-stunt.mjs`: in a held bank the camera's up sits **58.7
+> degrees off the local radial against 58.7 degrees of bank** — equal to a
+> tenth of a degree. A rig that levelled itself would read near zero there and
+> would otherwise look completely plausible in a still.
+>
+> The bird model is hidden in cockpit view through the same
+> `syncAvatarVisibility` the perch uses (`birbAnchor.visible`), so the two
+> cannot disagree, and the toggle is blocked while nested — the nest already
+> owns the camera, and the turret is an FPV of its own.
+
 > **The pitch axis pulls back for nose up** (2026-09-19, later still): *"let's
 > have the up down on the stick be reversed so it's like an actual plane
 > stick."* A control column is not a direction pad — pulling it toward you

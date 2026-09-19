@@ -261,6 +261,69 @@ async function main() {
     check(menu.present && !menu.disabled, 'the gear menu carries the flight-model toggle');
     check(menu.label === 'Stunt' || menu.label === 'Classic', `and it is labelled (${menu.label})`);
 
+    // ---- 9b. the camera view toggle is live ------------------------------
+    // FPV is NOT the legacy cameraState FPV rig: that rig levels its roll
+    // against world +Y, which is wrong everywhere on a sphere but the pole.
+    // This one wears the BIRD'S OWN quaternion, so the horizon rolls with the
+    // aircraft — which is the whole point of a cockpit view, and is the one
+    // property worth asserting from the live page rather than the source.
+    await reset(page);
+    const camProbe = () => page.evaluate(() => {
+      const p = window.__BIRB.cameraProbe();
+      const f = window.__BIRB.flightProbe();
+      const v = window.__BIRB.cameraView();
+      const [x, y, z, w] = p.quaternion;
+      // rotate local +Y (the camera's own up) into world
+      const ix = w * 0 + y * 0 - z * 1, iy = w * 1 + z * 0 - x * 0;
+      const iz = w * 0 + x * 1 - y * 0, iw = -x * 0 - y * 1 - z * 0;
+      const up = [
+        ix * w + iw * -x + iy * -z - iz * -y,
+        iy * w + iw * -y + iz * -x - ix * -z,
+        iz * w + iw * -z + ix * -y - iy * -x,
+      ];
+      const r = Math.hypot(...p.position);
+      const dot = (up[0] * p.position[0] + up[1] * p.position[1] + up[2] * p.position[2]) / r;
+      return {
+        view: v.view,
+        birdVisible: v.birdVisible,
+        camToBird: Math.abs(r - f.radius),
+        upOffRadialDeg: Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI,
+        bankDeg: f.bankDeg,
+      };
+    });
+
+    const chaseCam = await camProbe();
+    check(chaseCam.view === 'chase', `the shipping default is the chase camera (${chaseCam.view})`);
+    check(chaseCam.birdVisible === true, 'and the bird is visible in it');
+
+    await page.evaluate(() => window.__BIRB.setCameraView('fpv'));
+    await frames(page, 12);
+    const fpvCam = await camProbe();
+    check(fpvCam.view === 'fpv', `the view switches live (got ${fpvCam.view})`);
+    check(fpvCam.birdVisible === false, 'and the bird model is hidden in the cockpit');
+    check(fpvCam.camToBird < 1.5, `and the camera sits ON the bird (${fpvCam.camToBird.toFixed(2)} units)`);
+
+    // Bank hard: the horizon must roll with the aircraft, not stay level.
+    await hold(page, { x: 0.8 }, 45);
+    const banked = await camProbe();
+    await release(page);
+    await frames(page, 30);
+    check(Math.abs(banked.bankDeg) > 25, `a held stick banks the bird (${banked.bankDeg?.toFixed(1)} deg)`);
+    check(Math.abs(banked.upOffRadialDeg - Math.abs(banked.bankDeg)) < 8,
+      `and the cockpit horizon rolls WITH it (up is ${banked.upOffRadialDeg.toFixed(1)} off radial against ${Math.abs(banked.bankDeg ?? 0).toFixed(1)} of bank)`);
+
+    await page.evaluate(() => window.__BIRB.setCameraView('chase'));
+    await frames(page, 12);
+    const backCam = await camProbe();
+    check(backCam.view === 'chase' && backCam.birdVisible === true, 'and it switches back, with the bird restored');
+
+    const camMenu = await page.evaluate(() => {
+      const b = document.querySelector('[data-control="camera-view"]');
+      return b ? { present: true, disabled: b.disabled, label: b.querySelector('[data-camera-view-label]')?.textContent } : { present: false };
+    });
+    check(camMenu.present && !camMenu.disabled, 'the gear menu carries the camera-view toggle');
+    check(/cam$/i.test(camMenu.label || ''), `and it is labelled (${camMenu.label})`);
+
     // ---- 10. still flying, and quiet -------------------------------------
     await release(page);
     await frames(page, 20);

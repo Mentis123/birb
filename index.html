@@ -2689,6 +2689,14 @@
               </svg>
               <span data-quality-label>Amazing</span>
             </button>
+            <!-- Camera: chase or first person -->
+            <button type="button" class="settings-button" data-control="camera-view" aria-label="Switch camera view">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 7.5h3.2l1.6-2.2h8.4l1.6 2.2H21v11H3z" />
+                <circle cx="12" cy="13" r="3.6" />
+              </svg>
+              <span data-camera-view-label>Chase cam</span>
+            </button>
             <!-- Flight model: Stunt (default) or Classic -->
             <button type="button" class="settings-button" data-control="flight-model" aria-label="Switch flight model">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -3440,6 +3448,8 @@
     const qualityLabelEl = document.querySelector('[data-quality-label]');
     const settingsFlightModelButton = document.querySelector('[data-control="flight-model"]');
     const flightModelLabelEl = document.querySelector('[data-flight-model-label]');
+    const settingsCameraViewButton = document.querySelector('[data-control="camera-view"]');
+    const cameraViewLabelEl = document.querySelector('[data-camera-view-label]');
     const infoOverlay = document.querySelector('[data-info-overlay]');
     const infoCloseButton = document.querySelector('[data-control="info-close"]');
     const gameModeOverlay = document.querySelector('[data-game-mode-overlay]');
@@ -3885,7 +3895,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v76-2026-09-19-boot-watchdog';
+    const BIRB_BUILD = 'v77-2026-09-19-fpv-view';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5165,6 +5175,14 @@
     // Hoisted variables to prevent ReferenceErrors
     let flightController = null;
     let flightControls = null;
+    // CHASE or FIRST PERSON, while flying. Independent of `cameraState`'s own
+    // mode, which nesting drives to FPV for the turret and must keep owning —
+    // two systems writing one enum is how the turret camera gets stolen by a
+    // menu. This is the player's preference for free flight; nesting still
+    // overrides it for as long as they are on the gun.
+    const CAMERA_VIEW_STORAGE_KEY = 'birbCameraView';
+    let flightCameraView = 'chase';           // 'chase' | 'fpv'
+
     const CAMERA_MODE_SEQUENCE = ['follow', 'fpv'];
     let cameraModeIndex = 0;
     let preferredCameraMode = 'follow';
@@ -5205,6 +5223,11 @@
     // Flight v2's camera hold and its attitude-at-contact test, now shared
     // with the stunt model. Module scope, filled per frame, never allocated
     // in the loop.
+    // The eye, in the BIRD'S own frame: a little forward of centre and a
+    // little above it, so the view leaves the body rather than starting
+    // inside it. Forward is local -Z.
+    const FPV_EYE_OFFSET = new THREE.Vector3(0, 0.26, -0.42);
+    const _fpvEye = new THREE.Vector3();
     const _v2Up = new THREE.Vector3();
     const _v2Fwd = new THREE.Vector3();
     const _v2Tan = new THREE.Vector3();
@@ -9704,7 +9727,40 @@
 
     const syncAvatarVisibility = (mode) => {
       if (!birbAnchor) return;
-      birbAnchor.visible = mode !== CAMERA_MODES.FPV;
+      // Hidden from the inside, whichever route put us there: the nest's
+      // turret FPV, or the player's own first-person preference in flight.
+      // Seeing the interior of your own bird is the failure this prevents,
+      // and it has two independent causes now.
+      birbAnchor.visible = mode !== CAMERA_MODES.FPV && flightCameraView !== 'fpv';
+    };
+
+    /**
+     * Chase or first person, for free flight.
+     *
+     * FIRST PERSON IS NOT THE LEGACY `cameraState` FPV RIG, deliberately.
+     * That rig's roll correction assumes world +Y is up — the comment on the
+     * turret branch in the camera block says so, and this is a sphere, so it
+     * misreads local-up rotation as roll by tens of degrees. The turret path
+     * already sidesteps it by writing the camera directly from a quaternion,
+     * and flight FPV does exactly the same thing: sit at the bird, wear the
+     * bird's own orientation. That is correct at any point on the planet by
+     * construction, and it ROLLS WITH THE AIRCRAFT, which is the entire
+     * appeal of a cockpit view on a stunt plane.
+     */
+    const applyCameraView = (view, { persist = true } = {}) => {
+      const next = view === 'fpv' ? 'fpv' : 'chase';
+      flightCameraView = next;
+      syncAvatarVisibility(cameraState?.getMode?.() ?? CAMERA_MODES.FOLLOW);
+      if (cameraViewLabelEl) cameraViewLabelEl.textContent = next === 'fpv' ? 'First person' : 'Chase cam';
+      if (settingsCameraViewButton) {
+        settingsCameraViewButton.setAttribute('title', next === 'fpv'
+          ? 'First person: the view sits on the bird and rolls with it.'
+          : 'Chase cam: the view follows from behind and above.');
+      }
+      if (persist) {
+        try { window.localStorage?.setItem(CAMERA_VIEW_STORAGE_KEY, next); } catch (_) { /* ignore */ }
+      }
+      return next;
     };
 
     const setCameraMode = (mode, { forced = false } = {}) => {
@@ -11548,6 +11604,20 @@
             cam.position.copy(pose.position);
             cam.quaternion.copy(nestedAimQuaternion);
           }
+        } else if (flightCameraView === 'fpv' && !isNested && !nestingControlsBird) {
+          // FIRST PERSON. Same shape as the turret branch above and for the
+          // same reason: the camera is placed from a quaternion rather than
+          // handed to a rig that has an opinion about which way is up.
+          const cam = cameraState?.camera;
+          if (cam) {
+            _fpvEye.copy(FPV_EYE_OFFSET).applyQuaternion(pose.quaternion);
+            cam.position.copy(pose.position).add(_fpvEye);
+            cam.quaternion.copy(pose.quaternion);
+            // `up` is read by anything that later calls lookAt on this camera;
+            // leave it agreeing with the view rather than stale from the
+            // chase rig, which sets it to the radial every frame it runs.
+            cam.up.set(0, 1, 0).applyQuaternion(pose.quaternion);
+          }
         } else if (currentMode === CAMERA_MODES.FOLLOW) {
           // Use New Flight Camera
           bCam.update(pose.position, pose.quaternion, delta);
@@ -12696,6 +12766,31 @@
       }
     }
 
+    // ---- Camera view toggle ---------------------------------------------
+    if (settingsCameraViewButton) {
+      settingsCameraViewButton.addEventListener('click', () => {
+        // Not while nested: the turret OWNS the camera there, and a toggle
+        // that silently does nothing is worse than one that says why.
+        if (nestingSystem?.isNested?.()) {
+          if (statusMetric) statusMetric.textContent = 'Take off first to change the camera.';
+          return;
+        }
+        const now = applyCameraView(flightCameraView === 'fpv' ? 'chase' : 'fpv');
+        if (statusMetric) {
+          statusMetric.textContent = now === 'fpv'
+            ? 'First person. The horizon rolls with you.'
+            : 'Chase cam.';
+        }
+        renderFrame(performance.now());
+      });
+      // `?camera=fpv|chase` wins over the remembered preference and is NOT
+      // itself remembered — the same rule `?quality=` and `?flight=` follow.
+      const fromUrl = (/[?&]camera=(fpv|chase)(?:&|$)/.exec(window.location?.search || '') || [])[1];
+      let savedView = null;
+      try { savedView = window.localStorage?.getItem(CAMERA_VIEW_STORAGE_KEY); } catch (_) { savedView = null; }
+      applyCameraView(fromUrl || savedView || 'chase', { persist: false });
+    }
+
     if (settingsQualityButton) {
       settingsQualityButton.addEventListener('click', () => {
         applyQualityPreset(qualityPresetIndex + 1);
@@ -13635,6 +13730,13 @@
         } : null),
         // Switch flight model live, the same call the gear menu makes.
         setFlightModel: (model) => applyFlightModel(model),
+        // Chase or first person, the same call the gear menu makes.
+        setCameraView: (view) => applyCameraView(view),
+        cameraView: () => ({
+          view: flightCameraView,
+          birdVisible: !!birbAnchor?.visible,
+          stateMode: cameraState?.getMode?.() ?? null,
+        }),
         flightProbe: () => {
           const fc = flightController;
           if (!fc?.position || !fc?.quaternion) return null;
