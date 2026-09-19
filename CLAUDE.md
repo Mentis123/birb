@@ -147,6 +147,23 @@
 > of them made tuning-independent on the way (the roll measures SWEPT angle
 > from the controller's own deltas, not the bank at a fixed second).
 
+> **The pitch axis pulls back for nose up** (2026-09-19, later still): *"let's
+> have the up down on the stick be reversed so it's like an actual plane
+> stick."* A control column is not a direction pad — pulling it toward you
+> raises the nose, because it moves an elevator and not the horizon — and on a
+> thumbstick "toward you" is DOWN. `?pitchinvert=0` restores the direct sense
+> and it is a switch on the Flags tab. **Inverted INSIDE the controller, never
+> at the input pipeline**: `inputState.y` is also how the bird walks backwards
+> on the ground, how the turret aims while nested, and what the classic model
+> pitches with, so negating it upstream would have reversed all three. Two
+> follow-ons that would each have read as a bug: `bird-visual.js` tilts the
+> model by `input.y`, so it is handed `pitchSign` or a pull-up lifts the bird
+> while tipping its beak down; and the unit suite asks for a `pull` or a
+> `push` **by intent rather than by sign**, so flipping the default cannot
+> quietly turn the loop check into a dive check that still passes.
+> `tools/birb-stunt.mjs` READS the sign off the probe and asserts the shipping
+> value, rather than assuming either.
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.

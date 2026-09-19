@@ -66,6 +66,18 @@ async function hold(page, { x = 0, y = 0, rudder = 0, throttle = 1 }, n, sampleE
 const release = (page) => page.evaluate(() => { window.__BIRB.setStick(0, 0); window.__BIRB.setPad(null); });
 
 /**
+ * The shipping pitch axis PULLS BACK for nose up (see `invertPitch`), so a
+ * climb command is a NEGATIVE stick y. Read from the live probe rather than
+ * assumed, so this harness follows the build instead of encoding one side of
+ * the preference — and so flipping the default cannot silently turn the loop
+ * check into a dive check that still passes.
+ */
+const pitchSign = (page) => page.evaluate(() => {
+  const t = window.__BIRB.flightProbe()?.tuning;
+  return t && t.invertPitch === false ? 1 : -1;
+});
+
+/**
  * Get well clear of the ground, level, at cruise.
  *
  * NOT optional, and the first run of this harness is why. The stunt model
@@ -184,7 +196,9 @@ async function main() {
       `idle throttle slows the bird below cruise (${slowest.toFixed(1)} vs ${cruiseNow.toFixed(1)})`);
     // ---- 7. a loop, and the detector names it ----------------------------
     await reset(page);
-    const loopSamples = await hold(page, { y: 1 }, 220, 4);
+    const up = await pitchSign(page);
+    check(up === -1, `the shipping pitch axis pulls back for nose up (sign ${up})`);
+    const loopSamples = await hold(page, { y: up }, 220, 4);
     const wentOver = loopSamples.some((s) => Math.abs(s.pitchFullDeg ?? s.pitchDeg) > 110)
       || loopSamples.some((s) => s.pitchDeg > 70);
     check(wentOver, 'a held pull takes the nose past the old 80-degree ceiling');

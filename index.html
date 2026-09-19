@@ -5134,6 +5134,12 @@
     // One object, filled per frame: the stick plus the pad's two axes. The
     // controller reads `rudder` and `throttle` off its input.
     const _stuntInput = { x: 0, y: 0, active: false, rudder: 0, throttle: 1 };
+    // What bird-visual.js is handed. Identical to the stick EXCEPT on the
+    // pitch axis under the stunt model, which pulls back for nose up: the
+    // model's cosmetic nose tilt has to agree with the nose the player is
+    // actually commanding, or a pull-up lifts the bird while tipping the
+    // model's beak down. One object, refilled — zero-allocation loop.
+    const _visualInput = { x: 0, y: 0, active: false };
     // What the detector is fed. Same rule: one object, refilled.
     const _stuntSample = {
       rollDelta: 0, pitchDelta: 0, bank: 0, pitch: 0, heading: 0,
@@ -9502,6 +9508,11 @@
           }
         }
       }
+      // `?pitchinvert=0` flies the pitch axis the direct way (stick up = nose
+      // up). The default PULLS BACK for nose up, like a control column.
+      if (/[?&]pitchinvert=0(?:&|$)/.test(window.location?.search || '')) {
+        flightOptions.invertPitch = false;
+      }
       flightOptions.model = flightModelInitial === 'classic'
         ? FLIGHT_MODELS.CLASSIC : FLIGHT_MODELS.STUNT;
     }
@@ -11458,7 +11469,10 @@
         // roll is a constant offset that starts and ends continuous, whereas
         // muting it unwound the bank against the sweep's ease-in and read as
         // the bird freezing before it rolled.
-        visualQuat = visual.update(pose.quaternion, resolvedInput, delta);
+        _visualInput.x = resolvedInput.x || 0;
+        _visualInput.y = (resolvedInput.y || 0) * (flight.isStunt ? flight.pitchSign : 1);
+        _visualInput.active = !!resolvedInput.active;
+        visualQuat = visual.update(pose.quaternion, _visualInput, delta);
 
         // Disable legacy world rotation
         sphericalWorld.root.quaternion.identity();
@@ -13602,6 +13616,14 @@
               drag: fc.drag, gSink: fc.gSink, stallMul: fc.stallMul, stallRate: fc.stallRate,
               throttleIdle: fc.throttleIdle, throttleFull: fc.throttleFull,
               deadzone: fc.deadzone, assist: fc.assist,
+              // Reported so a harness can follow the build rather than
+              // assuming which way the pitch axis points.
+              invertPitch: fc.invertPitch,
+              pitchExpo: fc.pitchExpo, pitchComfort: fc.pitchComfort,
+              pitchSoft: fc.pitchSoft, pitchSoftMax: fc.pitchSoftMax,
+              bankComfort: fc.bankComfort, bankSoft: fc.bankSoft,
+              bankSoftMax: fc.bankSoftMax, climbExp: fc.climbExp,
+              sinkSlack: fc.sinkSlack,
             } : null),
             // The bank the FLIGHT FRAME is holding, full circle. Under classic
             // the only bank is the cosmetic one on the model (visualBankDeg).

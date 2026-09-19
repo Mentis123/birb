@@ -232,6 +232,23 @@ export const FLIGHT_STUNT_DEFAULTS = {
     // 0 = the biplane, 1 = v2's attitude-hold assistance. One scalar on one
     // code path, not a second controller and not a rail.
     assist: 0,
+    // PULL BACK FOR NOSE UP, like an actual stick. A real aircraft's control
+    // column is not a direction pad: pulling it toward you raises the nose
+    // and pushing it away drops it, because it moves the elevator, not the
+    // horizon. On a thumbstick "toward you" is DOWN, so the pitch axis is
+    // negated.
+    //
+    // Inverted INSIDE the controller, deliberately, rather than at the input
+    // pipeline: `inputState.y` is also how the bird walks backwards on the
+    // ground (`walkBackThreshold`), how the turret aims while nested, and
+    // what the classic model pitches with. Negating it upstream would have
+    // reversed all three. The only axis that should flip is the one holding
+    // an elevator.
+    //
+    // `?pitchinvert=0` restores the direct sense. It stays because which way
+    // a pitch axis should go is the most personal preference in the genre,
+    // and a comparison you cannot re-run is one nobody re-runs.
+    invertPitch: true,
 };
 
 /** Cubic expo, sign-preserving. `linear` is the share held at the centre. */
@@ -404,6 +421,13 @@ export class BirdFlightStunt extends BirdFlight {
         const cruise = this._cruise > 0 ? this._cruise : 1;
         return Math.max(0.35, Math.min(1.2, Math.abs(this.speed) / cruise));
     }
+
+    /**
+     * +1 or -1: what the pitch axis is multiplied by before it becomes an
+     * elevator command. Read by the visual layer so the model's cosmetic
+     * nose tilt agrees with the nose the player is actually commanding.
+     */
+    get pitchSign() { return this.invertPitch ? -1 : 1; }
 
     /** True while the wing is below flying speed. */
     isStalled() {
@@ -649,7 +673,8 @@ export class BirdFlightStunt extends BirdFlight {
         }
 
         const sx = this._stick(input?.x ?? 0);
-        const sy = this._stick(input?.y ?? 0);
+        // See `invertPitch`: pull back (stick DOWN) is nose UP.
+        const sy = this._stick(input?.y ?? 0) * this.pitchSign;
         const rud = this._stick(input?.rudder ?? 0);
         // The pad springs to 1; an absent field means "no pad on this build".
         const thr = Number.isFinite(input?.throttle) ? input.throttle : 1;

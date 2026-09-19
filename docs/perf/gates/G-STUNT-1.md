@@ -132,6 +132,33 @@ measures full-circle pitch instead of an `asin` that folds at 90.
 
 `tools/birb-stunt.mjs` is 23/23 on the live page, unchanged.
 
+## The pitch axis pulls back for nose up
+
+> "Let's have the up down on the stick be reversed so it's like an actual
+> plane stick."
+
+A control column is not a direction pad: pulling it toward you raises the
+nose, because it moves an elevator rather than the horizon. On a thumbstick
+"toward you" is DOWN, so the pitch axis is negated. `?pitchinvert=0` restores
+the direct sense, and it is a switch on the panel's Flags tab.
+
+**Inverted inside the controller, deliberately, and not at the input
+pipeline.** `inputState.y` is also how the bird walks backwards on the ground
+(`walkBackThreshold`), how the turret aims while nested, and what the classic
+model pitches with. Negating it upstream would have reversed all three; the
+only axis that should flip is the one holding an elevator.
+
+Two follow-ons that would each have read as a bug:
+
+- **The model's cosmetic nose tilt had to flip with it.** `bird-visual.js`
+  tilts the model by `input.y`, so left alone a pull-up would have lifted the
+  bird while tipping its beak down. It is handed `pitchSign` now.
+- **The tests and the live harness encoded the old sense.** The unit suite
+  asks for a `pull` or a `push` by intent rather than by sign, so flipping the
+  default cannot silently turn a loop check into a dive check that still
+  passes; `tools/birb-stunt.mjs` READS the sign off the probe rather than
+  assuming it, and asserts the shipping value is the inverted one.
+
 ## What is NOT known
 
 The phone, again. Every number here is the unit suite. The shape of the fix
