@@ -22,7 +22,7 @@
 brew install xcodegen        # once
 cd humanoid/app
 xcodegen generate
-open Humanoid.xcodeproj
+open BabyBlender.xcodeproj
 ```
 
 The `.xcodeproj` is generated and gitignored. Never edit it by hand — change
@@ -30,10 +30,13 @@ The `.xcodeproj` is generated and gitignored. Never edit it by hand — change
 
 ## 2. Set signing
 
-Xcode → target **HumanoidApp** → *Signing & Capabilities* → tick **Automatically
+Xcode → target **BabyBlender** → *Signing & Capabilities* → tick **Automatically
 manage signing** and pick your team. The bundle id is
-`com.mentis.birb.HumanoidApp`; change the prefix in `project.yml` if that clashes
+`com.mentis.birb.BabyBlender`; change the prefix in `project.yml` if that clashes
 with something already on your account.
+
+A **Personal Team** (free Apple ID) signs for **seven days** and then the app
+refuses to launch until it is rebuilt. That is the schedule, not a fault.
 
 ## 3. Build and run
 
