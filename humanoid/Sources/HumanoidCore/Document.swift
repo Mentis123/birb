@@ -167,6 +167,26 @@ public struct Document {
         surfaceMap = SurfacePaint.Map(template, width: albedo.width, height: albedo.height)
     }
 
+    /// Whether the paint map is built yet.
+    public var isPreparedForPainting: Bool { surfaceMap != nil }
+
+    /// The size the paint map has to be built at, for a caller building it
+    /// somewhere other than here.
+    public var paintMapSize: (width: Int, height: Int) { (albedo.width, albedo.height) }
+
+    /// Installs a map built elsewhere — on a background thread, in practice.
+    ///
+    /// The map depends only on the template and the texture size, both of
+    /// which are immutable, so it can be built from a copy of `template` off
+    /// the main thread and handed back. That is how the app keeps the 763 ms
+    /// debug-build cost of building it out of the way of the first frame.
+    /// Ignored if a map is already present or the size does not match.
+    public mutating func installPaintMap(_ map: SurfacePaint.Map) {
+        guard surfaceMap == nil,
+              map.width == albedo.width, map.height == albedo.height else { return }
+        surfaceMap = map
+    }
+
     /// Opens a paint stroke. Everything until `endPaintStroke` is one undo step
     /// and one idempotent pass over the texture.
     public mutating func beginPaintStroke(_ brush: SurfacePaint.Brush) {

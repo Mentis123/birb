@@ -338,7 +338,18 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - Drawing
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    /// Asks for a frame whenever the drawable changes size.
+    ///
+    /// This is the fix for the first frame never arriving. `SculptView` calls
+    /// `setNeedsDisplay()` when it builds the view, but SwiftUI has not laid
+    /// the view out yet, so the view is 0x0: that draw finds no drawable and
+    /// returns, and in on-demand mode (`isPaused` + `enableSetNeedsDisplay`)
+    /// nothing asks for another. The layout pass that gives the view its real
+    /// size arrives here, and the frame has to be requested from here.
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        view.setNeedsDisplay()
+    }
 
     func draw(in view: MTKView) {
         // Last frame's GPU time, now that it has certainly finished.
@@ -441,7 +452,15 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         stats.drawCalls = drawCalls
         stats.triangles = indexCount / 3
+
+        if !hasDrawnAFrame {
+            hasDrawnAFrame = true
+            NSLog("[BabyBlender] first frame drawn: %.0fx%.0f, %d triangles",
+                  size.width, size.height, indexCount / 3)
+        }
     }
+
+    private var hasDrawnAFrame = false
 
     /// Builds the ring in world space, lying on the tangent plane at the hit.
     ///

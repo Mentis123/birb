@@ -153,6 +153,9 @@ final class EditorModel: ObservableObject {
     /// second.
     private var spin: Vec2 = .zero
     private var lastFrame: CFTimeInterval = 0
+    /// Whether the last frame had a stroke, a coast or a hover in progress, so
+    /// the idle notification fires once at the edge rather than every frame.
+    private var wasActive = false
 
     init(document: HumanoidCore.Document) {
         self.document = document
@@ -160,20 +163,34 @@ final class EditorModel: ObservableObject {
         NSLog("[BabyBlender] document ready: %d vertices", document.mesh.vertexCount)
     }
 
-    /// Builds the paint map, off the launch path.
+    /// Builds the paint map on a background thread and hands it back.
     ///
-    /// It used to be built in `init`, which put it in front of the first frame.
-    /// That is 27 ms in a release build and **763 ms in a debug one** — and
-    /// Xcode's Run button builds debug — so on an iPad core it is seconds of
-    /// black screen before anything is drawn. Called after the first frame
-    /// instead; `beginPaintStroke` still builds it on demand if a stroke somehow
-    /// beats this, so the only cost of being wrong here is a hitch, not a bug.
+    /// Two versions of this were wrong before it. The first built the map in
+    /// `init`, in front of the first frame. The second dispatched it to the
+    /// MAIN queue "after the first frame" — which moved it later but not off
+    /// the thread that draws, so it still blocked the display for its whole
+    /// duration: 27 ms in release, **763 ms in debug**, and Xcode's Run button
+    /// builds debug. On the iPad that was a black screen with the console
+    /// stopped at "viewport ready".
+    ///
+    /// The map depends only on the template and the texture size, both
+    /// immutable, so it is built from a copy of the template on a utility
+    /// queue and installed on the main actor when done. `beginPaintStroke`
+    /// still builds it on demand if a stroke arrives first; the cost of that
+    /// race is a hitch on one stroke, never a bug.
     func prepareForPaintingSoon() {
-        guard !paintingPrepared else { return }
+        guard !paintingPrepared, !document.isPreparedForPainting else { return }
         paintingPrepared = true
-        DispatchQueue.main.async { [weak self] in
-            self?.document.prepareForPainting()
-            NSLog("[BabyBlender] paint map ready")
+        let template = document.template
+        let size = document.paintMapSize
+        DispatchQueue.global(qos: .utility).async {
+            let started = CACurrentMediaTime()
+            let map = SurfacePaint.Map(template, width: size.width, height: size.height)
+            let ms = (CACurrentMediaTime() - started) * 1000
+            DispatchQueue.main.async { [weak self] in
+                self?.document.installPaintMap(map)
+                NSLog("[BabyBlender] paint map ready (%.0f ms, off the main thread)", ms)
+            }
         }
     }
 
@@ -221,8 +238,14 @@ final class EditorModel: ObservableObject {
         // Hovering counts as activity. Without it the view draws one frame per
         // hover event and pauses in between, so the cursor stutters across the
         // model instead of tracking it.
+        //
+        // Reported only on the TRANSITION to idle. The first version called
+        // `onActivity(false)` on every idle frame, and the viewport answers it
+        // with `setNeedsDisplay()` — so each frame requested the next and the
+        // "paused" view redrew continuously at the panel's full rate.
         let idle = !strokeOpen && HumanoidCore.length(spin) < 1e-4 && hoverPending == nil
-        if idle { onActivity?(false) }
+        if idle && wasActive { onActivity?(false) }
+        wasActive = !idle
     }
 
     /// Exponential decay, the same shape `UIScrollView` uses for a flick. A
