@@ -11,6 +11,41 @@ import HumanoidCore
 /// here is buffer bookkeeping, and the way to keep it honest is to keep it
 /// boring.
 final class Renderer: NSObject, MTKViewDelegate {
+    /// Why the renderer could not be built.
+    ///
+    /// This exists because the failure it replaces was invisible. `init?`
+    /// returned nil on any of seven guards, `SculptView` then handed SwiftUI a
+    /// view with no delegate, and the result was a black screen that never
+    /// loaded and never crashed — indistinguishable from a hang. A Metal
+    /// pipeline can fail to build for reasons no unit test can reach, so the
+    /// least it can do is say which one.
+    enum SetupError: LocalizedError {
+        case noDevice
+        case noCommandQueue
+        case noShaderLibrary
+        /// A shader function the renderer needs is missing from the library —
+        /// usually because Shaders.metal failed to compile, which takes the
+        /// whole library down rather than the one function.
+        case missingFunction(String)
+        case pipeline(String, Error?)
+        case depthState
+        case sampler
+
+        var errorDescription: String? {
+            switch self {
+            case .noDevice: return "This device has no Metal GPU."
+            case .noCommandQueue: return "Metal would not create a command queue."
+            case .noShaderLibrary:
+                return "No default Metal library. Shaders.metal is probably not in the target."
+            case .missingFunction(let name):
+                return "Shader function '\(name)' is missing. Shaders.metal did not compile."
+            case .pipeline(let which, let error):
+                return "The \(which) pipeline failed: \(error?.localizedDescription ?? "unknown")"
+            case .depthState: return "Metal would not create a depth-stencil state."
+            case .sampler: return "Metal would not create a texture sampler."
+            }
+        }
+    }
     /// Must match `Uniforms` in Shaders.metal exactly, in order and in padding.
     /// Metal will not complain about a mismatch; it will just read the wrong
     /// bytes and draw something wrong.
@@ -101,10 +136,21 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// sculpted edge — which on a modelling tool is most of the silhouette.
     static let sampleCount = 4
 
-    init?(view: MTKView) {
-        guard let device = view.device ?? MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue(),
-              let library = device.makeDefaultLibrary() else { return nil }
+    init(view: MTKView) throws {
+        guard let device = view.device ?? MTLCreateSystemDefaultDevice()
+        else { throw SetupError.noDevice }
+        guard let queue = device.makeCommandQueue() else { throw SetupError.noCommandQueue }
+        guard let library = device.makeDefaultLibrary() else { throw SetupError.noShaderLibrary }
+
+        // Looked up by name and checked individually. `makeFunction` returning
+        // nil is the symptom of a library that did not compile, and finding
+        // that out here names the shader instead of failing four lines later
+        // with "the pipeline failed".
+        func function(_ name: String) throws -> MTLFunction {
+            guard let f = library.makeFunction(name: name)
+            else { throw SetupError.missingFunction(name) }
+            return f
+        }
         self.device = device
         self.queue = queue
 
@@ -114,8 +160,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         view.sampleCount = Renderer.sampleCount
 
         let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "model_vertex")
-        descriptor.fragmentFunction = library.makeFunction(name: "model_fragment")
+        descriptor.vertexFunction = try function("model_vertex")
+        descriptor.fragmentFunction = try function("model_fragment")
         descriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
         descriptor.depthAttachmentPixelFormat = view.depthStencilPixelFormat
         descriptor.rasterSampleCount = Renderer.sampleCount
@@ -133,16 +179,15 @@ final class Renderer: NSObject, MTKViewDelegate {
         layout.layouts[0].stride = MemoryLayout<Vertex>.stride
         descriptor.vertexDescriptor = layout
 
-        guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor)
-        else { return nil }
-        self.pipeline = pipeline
+        do { self.pipeline = try device.makeRenderPipelineState(descriptor: descriptor) }
+        catch { throw SetupError.pipeline("model", error) }
 
         // The cursor ring: a line strip of bare positions, blended over the
         // model. Its own pipeline because it shares no vertex layout with the
         // mesh and wants no lighting.
         let cursorDescriptor = MTLRenderPipelineDescriptor()
-        cursorDescriptor.vertexFunction = library.makeFunction(name: "cursor_vertex")
-        cursorDescriptor.fragmentFunction = library.makeFunction(name: "cursor_fragment")
+        cursorDescriptor.vertexFunction = try function("cursor_vertex")
+        cursorDescriptor.fragmentFunction = try function("cursor_fragment")
         cursorDescriptor.colorAttachments[0].pixelFormat = view.colorPixelFormat
         cursorDescriptor.colorAttachments[0].isBlendingEnabled = true
         cursorDescriptor.colorAttachments[0].rgbBlendOperation = .add
@@ -161,14 +206,14 @@ final class Renderer: NSObject, MTKViewDelegate {
         cursorLayout.layouts[0].stride = MemoryLayout<SIMD3<Float>>.stride
         cursorDescriptor.vertexDescriptor = cursorLayout
 
-        guard let cursorPipeline = try? device.makeRenderPipelineState(descriptor: cursorDescriptor)
-        else { return nil }
-        self.cursorPipeline = cursorPipeline
+        do { self.cursorPipeline = try device.makeRenderPipelineState(descriptor: cursorDescriptor) }
+        catch { throw SetupError.pipeline("cursor", error) }
 
         let depth = MTLDepthStencilDescriptor()
         depth.depthCompareFunction = .less
         depth.isDepthWriteEnabled = true
-        guard let depthState = device.makeDepthStencilState(descriptor: depth) else { return nil }
+        guard let depthState = device.makeDepthStencilState(descriptor: depth)
+        else { throw SetupError.depthState }
         self.depthState = depthState
 
         // The ring is lifted off the surface by the geometry rather than by a
@@ -178,7 +223,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         cursorDepth.depthCompareFunction = .lessEqual
         cursorDepth.isDepthWriteEnabled = false
         guard let cursorDepthState = device.makeDepthStencilState(descriptor: cursorDepth)
-        else { return nil }
+        else { throw SetupError.depthState }
         self.cursorDepthState = cursorDepthState
 
         let samplerDescriptor = MTLSamplerDescriptor()
@@ -187,7 +232,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         samplerDescriptor.mipFilter = .notMipmapped
         samplerDescriptor.sAddressMode = .clampToEdge
         samplerDescriptor.tAddressMode = .clampToEdge
-        guard let sampler = device.makeSamplerState(descriptor: samplerDescriptor) else { return nil }
+        guard let sampler = device.makeSamplerState(descriptor: samplerDescriptor)
+        else { throw SetupError.sampler }
         self.sampler = sampler
 
         cursorBuffer = device.makeBuffer(
