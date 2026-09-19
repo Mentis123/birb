@@ -113,14 +113,26 @@ jobs:
         # collision.
         run: node tools/birb-walk.mjs
 
+      - name: The stunt flight model is the default, and the Boost pill is a pad
+        # docs/realism/STUNT_FLIGHT_PLAN.md, gate G-STUNT-0. This step boots
+        # with NO flight flag on purpose: its first assertion is that the
+        # PRODUCTION DEFAULT is the stunt model, which a run passing
+        # `?flight=stunt` could not tell you. It then proves the WIRING, which
+        # is where flight features in this repo actually break — the pad
+        # reaching the controller, the cruise handover going to the right
+        # property, the camera hold landing on the LIVE rig rather than the
+        # parked one, and a tap on the pill still boosting. Console warnings
+        # are failures.
+        run: node tools/birb-stunt.mjs
+
       - name: Flight v2 rolls, loops, turns from the bank, rights itself and crashes inverted
         # docs/realism/FLIGHT_V2_PLAN.md's `?flight=v2`: bank-to-turn instead
         # of yaw-with-cosmetic-bank, unlimited pitch instead of an 80° clamp,
         # and an energy model instead of a constant cruise speed. The FIRST
         # thing this checks is that the flag reached a v2 controller at
-        # all — v1 + aerobatics.js already rolls and loops as scripted
-        # moves, so a silently-ignored flag would pass a bank/loop check for
-        # the wrong reason. Everything after that drives `setStick`/
+        # all — the default stunt model already rolls and loops, so a
+        # silently-ignored flag would pass a bank/loop check for the wrong
+        # reason. Everything after that drives `setStick`/
         # `setAltitude` and reads `flightProbe()` on the live page, frame by
         # frame (SwiftShader is too slow for this at the Ultra default, so
         # this step — like birb-walk above — boots `?quality=amazing`).

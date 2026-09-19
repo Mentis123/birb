@@ -233,7 +233,14 @@ async function boot() {
   // `quality=amazing`: the baseline preset, which is the state every assertion
   // below was frozen against (shadows off, tier auto, no overrides) before Ultra
   // became the production default. See docs/perf/gates/G-ULTRA-DEFAULT.md.
-  const url = `http://127.0.0.1:${port}/index.html?debug=1&quality=amazing`;
+  // `flight=classic`: the v1 mapping. THE PRODUCTION DEFAULT IS NOW STUNT
+  // (docs/realism/STUNT_FLIGHT_PLAN.md, gate G-STUNT-0), and every assertion
+  // in this harness was written and frozen against v1's flight behaviour —
+  // a clamped pitch, no roll in the flight frame, no sink. Pinning it here
+  // RESTORES the state it was frozen against, exactly as `quality=amazing`
+  // does for the Ultra default. tools/birb-stunt.mjs is the harness that
+  // boots the real default and asserts the stunt law's own business.
+  const url = `http://127.0.0.1:${port}/index.html?debug=1&quality=amazing&flight=classic`;
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await startGame(page, 30000);
 
