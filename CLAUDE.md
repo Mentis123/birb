@@ -164,6 +164,38 @@
 > `tools/birb-stunt.mjs` READS the sign off the probe and asserts the shipping
 > value, rather than assuming either.
 
+> **"Hitting start doesn't start" — and the shape of the page makes that the
+> DEFAULT failure** (2026-09-19). Not reproduced in the build: production
+> served the right `BIRB_BUILD`, all three new modules returned 200, the
+> no-flag boot was clean with zero console errors, and `birb-default`,
+> `birb-stunt` and 924 unit tests were green. What the hunt DID find is
+> structural and worth more than the incident.
+>
+> **Tap-to-Start is wired at index.html:3222. `startGameLoop` is assigned at
+> 14069.** So the button goes live near the START of the module script and
+> the thing it calls only exists at the END of it — and `startGame()` already
+> has a "scene still loading" branch that disables the button and writes
+> **Loading…**. Put together: ANY throw in the eleven thousand lines between
+> those two points — most plausibly a dynamic `import()` a stale service
+> worker cannot serve — leaves a live button that says Loading… forever, with
+> nothing on screen to say why, and a reload lands on the same worker and
+> does it again. **A dead module script does not look like a crash here; it
+> looks like a game that is still loading.**
+>
+> Hence the **boot watchdog**, a CLASSIC script above the module one (same
+> reasoning as the service-worker auto-reload: a dead module must not be able
+> to stop it). The module calls `window.__birbBootOk()` on the line above the
+> `startGameLoop` assignment — the right anchor, because that assignment
+> existing IS what Tap-to-Start needs. If it never arrives, a banner offers
+> one tap that unregisters every worker, deletes every cache and reloads with
+> a cache-busting query. **Two timers, not one**: at 25 s it shows only if
+> something actually threw (a failed import sets `reason`), and a 60 s
+> backstop covers a silent hang — because showing "did not load" over a game
+> that is merely loading on a cold cache is its own bug. Verified by serving
+> a 404 for `bird-flight-stunt.js`, which is exactly what a stale worker with
+> no copy of a new module produces: banner appears unprompted, names the
+> failed import, and one tap comes back booted.
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.

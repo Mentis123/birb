@@ -90,8 +90,18 @@ const pitchSign = (page) => page.evaluate(() => {
  * checks, and every one of them failed for a reason that had nothing to do
  * with what it was testing.
  */
+let levelPose = null;
 async function reset(page, altitude = 220) {
   await release(page);
+  // ATTITUDE, not just altitude. `setAltitude` moves the bird without
+  // touching its orientation, so a reset after the rail-roll test used to
+  // leave it wherever the roll stopped — and since an inverted bird STAYING
+  // inverted is the designed behaviour (`rightingLimit`), the next check
+  // inherited a coin toss on frame timing. One run started the levelling
+  // check at 166.8 degrees and it failed for doing the right thing.
+  // `restorePose` replays a pose captured while level, which is the one
+  // deterministic way back.
+  if (levelPose) await page.evaluate((p) => { window.__BIRB.restorePose(p); }, levelPose);
   await page.evaluate((alt) => { window.__BIRB.setAltitude(alt); }, altitude);
   await frames(page, 20);
 }
@@ -124,6 +134,9 @@ async function main() {
       { waitUntil: 'domcontentloaded' });
     await startGame(page, 60000);
     await frames(page, 20);
+    // Capture the spawn attitude while it is still level — every later reset
+    // replays it.
+    levelPose = await page.evaluate(() => window.__BIRB.capturePose());
     await reset(page);
 
     // ---- 1. the default --------------------------------------------------
@@ -177,6 +190,19 @@ async function main() {
     check(rightWingDown, 'and a right stick puts the right wing down');
 
     // ---- 4. hands off, the wings level -----------------------------------
+    // Establish a bank that is BOUNDED BY CONSTRUCTION first. Inheriting
+    // whatever attitude the rail-roll above happened to stop at makes this
+    // check a coin toss on frame timing: one run ended at 166.8 degrees, and
+    // an inverted bird STAYING inverted is the designed behaviour
+    // (`rightingLimit`), so the check failed for doing the right thing. A
+    // 0.45 stick saturates against the lateral stability around 38 degrees
+    // however long it is held, and `reset` now replays a LEVEL pose, so this
+    // can never start inverted no matter how many frames the harness gets.
+    await reset(page);
+    const entry = await hold(page, { x: 0.45 }, 40, 8);
+    const entryBank = Math.abs(entry[entry.length - 1].bankDeg);
+    check(entryBank > 10 && entryBank < 90,
+      `established a moderate bank to level out of (|bank| ${entryBank.toFixed(1)})`);
     await release(page);
     const levelled = await hold(page, {}, 150, 6);
     const endBank = Math.abs(levelled[levelled.length - 1].bankDeg);

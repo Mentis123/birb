@@ -2968,6 +2968,114 @@
   </main>
   <noscript>Enable JavaScript to view the Birb Flight Lab experience.</noscript>
 
+  <!--
+    BOOT WATCHDOG — a CLASSIC script, deliberately, so a dead module script
+    cannot stop it. Same reasoning as the service-worker auto-reload.
+
+    The failure this exists for: `startGameLoop` is assigned at the very END
+    of the module script, and Tap-to-Start is wired near the START of it. So
+    if ANY of the eleven thousand lines between them throws — most plausibly a
+    dynamic `import()` that a stale service worker could not serve — the
+    button is live, the player taps it, and `startGame()` takes its
+    "scene still loading" branch and shows **Loading… forever**. The game is
+    bricked, there is nothing on screen to say why, and a reload lands on the
+    same cached worker and does it again.
+
+    This turns that into one tap. It does not paper over a bug: it only ever
+    fires when the boot genuinely never completed, it says so, and it clears
+    the two things that can cause it (the worker and its caches) before
+    reloading.
+  -->
+  <script>
+    (function () {
+      var booted = false;         // set true by the module script at the end
+      var reason = '';
+      var shown = false;
+      window.__birbBootOk = function () { booted = true; };
+      window.__birbBootState = function () { return { booted: booted, reason: reason }; };
+
+      function note(e) {
+        if (booted || reason) return;
+        var m = (e && (e.reason && (e.reason.message || e.reason) || e.message)) || '';
+        reason = String(m).slice(0, 140);
+      }
+      window.addEventListener('error', note, true);
+      window.addEventListener('unhandledrejection', note);
+
+      function recover() {
+        var done = function () {
+          // `reload(true)` is long dead; a cache-busting query is what forces
+          // the shell to come from the network on every browser that matters.
+          location.replace(location.pathname + '?fresh=' + Date.now());
+        };
+        var jobs = [];
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+              return Promise.all(rs.map(function (r) { return r.unregister(); }));
+            }));
+          }
+        } catch (_) { /* ignore */ }
+        try {
+          if (window.caches && caches.keys) {
+            jobs.push(caches.keys().then(function (ks) {
+              return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+            }));
+          }
+        } catch (_) { /* ignore */ }
+        // Never hang on a promise that does not settle.
+        var fallback = new Promise(function (r) { setTimeout(r, 2500); });
+        Promise.race([Promise.all(jobs).catch(function () {}), fallback]).then(done, done);
+      }
+
+      function show() {
+        if (shown || booted) return;
+        shown = true;
+        var d = document.createElement('div');
+        d.setAttribute('data-boot-recovery', '');
+        d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;'
+          + 'padding:1rem 1.1rem calc(1rem + env(safe-area-inset-bottom));'
+          + 'background:rgba(12,20,38,0.96);color:#eaf4ff;font:600 15px/1.45 system-ui,sans-serif;'
+          + 'box-shadow:0 -8px 28px rgba(0,0,0,0.5);text-align:center';
+        var p = document.createElement('div');
+        p.textContent = 'The game did not finish loading.';
+        p.style.cssText = 'margin-bottom:0.7rem;font-weight:700';
+        var sub = document.createElement('div');
+        sub.textContent = reason ? ('(' + reason + ')') : '(a cached file is probably out of date)';
+        sub.style.cssText = 'margin-bottom:0.85rem;font-weight:400;opacity:0.72;font-size:13px;'
+          + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = 'Clear cache and reload';
+        b.style.cssText = 'appearance:none;border:2px solid rgba(150,230,255,0.85);border-radius:999px;'
+          + 'background:linear-gradient(145deg,rgba(20,90,120,0.95),rgba(12,52,78,0.98));color:#eaf9ff;'
+          + 'font:700 15px/1 system-ui,sans-serif;padding:0.85rem 1.4rem;min-height:44px;cursor:pointer';
+        b.addEventListener('click', function () { b.textContent = 'Clearing…'; b.disabled = true; recover(); });
+        d.appendChild(p); d.appendChild(sub); d.appendChild(b);
+        (document.body || document.documentElement).appendChild(d);
+      }
+
+      // TWO timers, because a slow boot and a dead boot must not be treated
+      // alike. At 25 s the banner appears only if something actually THREW —
+      // a failed import sets `reason`, which is the case this exists for. A
+      // cold cache on a bad connection throws nothing and is simply slow, so
+      // it waits for the 60 s backstop, by which point it is not slow.
+      // Showing a "did not load" banner over a game that is still loading
+      // would be its own bug.
+      window.addEventListener('load', function () {
+        setTimeout(function () { if (reason) show(); }, 25000);
+        setTimeout(show, 60000);
+      });
+      // And immediately if a tap finds nothing to start — no reason to make
+      // somebody who already pressed the button wait out the timer.
+      document.addEventListener('click', function (e) {
+        if (booted) return;
+        var t = e.target && e.target.closest && e.target.closest('.title-btn-primary');
+        if (t && reason) setTimeout(show, 400);
+      }, true);
+    }());
+  </script>
+
   <script type="module">
     // Global error handler for mobile debugging
     window.addEventListener("error", (event) => {
@@ -3777,7 +3885,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v75-2026-09-19-stunt-feel';
+    const BIRB_BUILD = 'v76-2026-09-19-boot-watchdog';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -14065,6 +14173,12 @@
       };
       window.__BIRB_READY = true;
     }
+
+    // The boot watchdog's success signal (see the classic script above the
+    // module). This is the RIGHT line for it: `startGameLoop` existing is
+    // exactly what Tap-to-Start needs, so anything that prevents this
+    // assignment is what the watchdog is there to catch.
+    if (typeof window.__birbBootOk === 'function') window.__birbBootOk();
 
     startGameLoop = () => {
       if (gameLoopStarted) return;
