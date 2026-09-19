@@ -11,6 +11,91 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **THE BIRD FLIES LIKE A STUNT PLANE NOW, AND IT IS THE DEFAULT**
+> (2026-09-19): [docs/realism/STUNT_FLIGHT_PLAN.md](docs/realism/STUNT_FLIGHT_PLAN.md)
+> is the design, [docs/perf/gates/G-STUNT-0.md](docs/perf/gates/G-STUNT-0.md)
+> is what shipped and what was measured. The owner called the triggered rolls
+> "weird triggered animation" and asked for a total rewrite.
+> `src/flight/bird-flight-stunt.js` extends `BirdFlight` (so parallel
+> transport and the carve-down floor keep ONE definition): stick x is a **roll
+> rate** with cubic expo, stick y is an **unlimited pitch rate**, and the
+> BOOST pill is a **pad** — tap to boost exactly as before, drag for rudder
+> (about the BIRD'S OWN up, which is what a rudder is) and throttle.
+> **Nothing turns the bird except the lift vector**; there is no auto-yaw from
+> bank, which is the one omission that separates this from v2 and the reason a
+> knife edge can hold a heading at all. `src/flight/aerobatics.js` and its
+> test are DELETED; `?flight=v2` still reaches the bank-to-turn experiment.
+>
+> **`assist` aside, the whole feel comes from four terms, and three of them
+> exist because the first version measured wrong.**
+>
+> **The hammerhead was unreachable until the trim became aerodynamic.**
+> Hands-off, the pitch trim dragged the nose back to the horizon at a flat
+> 0.5 rad/s whatever the airspeed, so the bird was always level again before
+> the energy model could bleed it below stall: measured, the speed bottomed at
+> **6.30 against a 5.5 stall** and the wing never stopped flying. Scaling both
+> idle stabilisers by AUTHORITY (`clamp(speed/cruise, 0.35, 1.2)`) and lifting
+> `gSpeed` to 7.5 takes it to **4.45 at full power and 3.85 at idle throttle**.
+> That one change IS the hammerhead — pull to the vertical, let go, and the
+> terms do it, with no move list, no trigger and no dwell. **A stabiliser that
+> works at any airspeed is an autopilot, not a wing.**
+>
+> **The v70 pure-rate refutation is answered without a rail.** G-FLIGHT-V2
+> measured that a LINEAR roll rate rolls the bird onto its back at the raw
+> 0.6-0.8 an ordinary hard turn reads on this stick. Three terms answer it and
+> none is a mode boundary: cubic expo (half stick is 34% of the rate);
+> righting that runs **only with the whole stick idle**, so a bank you put in
+> stays in (v70 scaled it by `1 - |x|`, so every intermediate bank decayed
+> under the thumb and the only cure was more stick); and a roll rate that
+> eases under pull, which turns a diagonal stick from a corkscrew into a
+> banked turn. v2's 0.97 rail is gone — it was a hidden mode boundary only a
+> thumb pressed to the plastic ever reached.
+>
+> **A half-loop check that CONSUMED the accumulator made a full loop
+> undetectable forever.** The trick detector (`src/flight/stunt-detector.js`,
+> which names the figure after the fact because nothing decides in advance any
+> more) tested for a half turn before a full one and zeroed at PI — and a loop
+> necessarily passes through PI on its way to 2PI. Full turns fire on
+> completion and reset while the axis keeps running; half turns are classified
+> only once the axis has been quiet, which is what the end of a figure
+> actually looks like. It reads the controller's own **rotation deltas**, never
+> bank and pitch angles: both of those have singularities exactly where the
+> interesting figures live.
+>
+> **`classic` had no pitch clamp, and only the live page could see it.** The
+> constructor set `maxPitch = PI` unconditionally, so the Classic toggle ran
+> v1's `update()` against a ceiling that was not there — a bird that CAN loop
+> under classic looks like a bird flying normally until somebody loops it. The
+> unit suite and the eye both missed it; `tools/birb-stunt.mjs` caught it by
+> reading the probe after a live switch. **The ceiling belongs to the law, not
+> to the object.**
+>
+> **Lift and sink are what make a knife edge a manoeuvre rather than a pose.**
+> `lift = (speed/cruise)^2 * (bodyUp . up)` — 1 level at cruise, zero in a
+> knife edge, NEGATIVE inverted — and `sink = gSink * (1 - lift)` applied to
+> POSITION along the negative radial, never to the orientation. That gap
+> between where the bird looks and where it goes is the whole thing. It cannot
+> break the gravity-less-floor invariant because it only ever pushes DOWN, and
+> there is a test that proves it rather than asserting it. Note the knock-on:
+> the stunt bird SINKS, so a harness that flies it near the ground lands it —
+> the first run of `tools/birb-stunt.mjs` had six checks fail for reasons that
+> had nothing to do with what they tested, because one silent landing zeroed
+> the stick and released the camera hold.
+>
+> **The frozen harnesses are pinned to `&flight=classic`** (gate decision in
+> G-STUNT-0, the same precedent as `&quality=amazing` under R5): `birb-walk`,
+> `birb-modes` and `birb-quality` were all written against v1's flight
+> behaviour. `tools/birb-stunt.mjs` is the one that boots with **no flight
+> flag**, because its first assertion is that the PRODUCTION DEFAULT is the
+> stunt model — a harness passing `?flight=stunt` would still pass on a build
+> whose default had silently reverted. Also: the tracked `node_modules/three/index.js`
+> stub gained `Vector3.add`, `cross` and `distanceTo`, which real three has
+> always had.
+>
+> **Still unmeasured: the phone.** Every number above is the unit suite or
+> SwiftShader. Classic is two taps away in the gear menu, which is what makes
+> a default nobody has flown on glass an acceptable one.
+
 > **2026-09-06 visual/nesting update:** Read
 > [docs/VISUAL_UPGRADE_BRIEF.md](docs/VISUAL_UPGRADE_BRIEF.md) for the standalone
 > direction, implementation map, mobile constraints and unfinished roadmap.

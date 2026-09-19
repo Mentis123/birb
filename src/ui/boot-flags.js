@@ -90,10 +90,11 @@ export const BOOT_FLAGS = Object.freeze([
     hint: 'Off yaws about the bird’s own up — the before, where a held dive spiralled and looped out of itself.' },
   { key: 'flight', group: 'Flight', kind: 'select', label: 'Flight model',
     options: [
-      { value: null, label: 'v1 (yaw + cosmetic bank)' },
-      { value: 'v2', label: 'v2 (bank to turn)' },
+      { value: null, label: 'Stunt (default)' },
+      { value: 'classic', label: 'Classic (v1)' },
+      { value: 'v2', label: 'Bank to turn (v2)' },
     ],
-    hint: 'v2 replaces the yaw+clamp mapping with bank-to-turn, unlimited pitch and an energy model — see docs/realism/FLIGHT_V2_PLAN.md.' },
+    hint: 'Stunt is the shipping default: the stick is roll and pitch RATE, the Boost pill is rudder and throttle, and rolls, loops and hammerheads are flown rather than triggered. Stunt and Classic also toggle live in the gear menu; v2 is URL-only. See docs/realism/STUNT_FLIGHT_PLAN.md.' },
 ]);
 
 export function bootFlagByKey(key) {

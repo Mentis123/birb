@@ -65,18 +65,25 @@ test('a select reads its value, and an unknown value reads as the default', () =
   assert.deepEqual(readBootFlag('?bird=v2', 'bird'), { value: 'v2' });
 });
 
-test('the flight flag defaults to v1 (null) and offers v2', () => {
+test('the flight flag defaults to STUNT (null) and offers classic and v2', () => {
+  // The default moved from v1 to the stunt model on 2026-09-19
+  // (docs/realism/STUNT_FLIGHT_PLAN.md, gate G-STUNT-0), so `null` — the
+  // absent flag — is now stunt, and the old default is reachable as
+  // `classic`. The panel's convention is unchanged: null is whatever the
+  // game boots with no flag at all.
   const flag = bootFlagByKey('flight');
   assert.ok(flag, 'no flag for ?flight');
   assert.equal(flag.kind, 'select');
-  assert.deepEqual(flag.options.map((o) => o.value), [null, 'v2']);
+  assert.deepEqual(flag.options.map((o) => o.value), [null, 'classic', 'v2']);
   assert.deepEqual(readBootFlag('', 'flight'), { value: null });
+  assert.deepEqual(readBootFlag('?flight=classic', 'flight'), { value: 'classic' });
   assert.deepEqual(readBootFlag('?flight=v2', 'flight'), { value: 'v2' });
   // Same convention as every other select: an unknown value is the default,
   // not an error — the reload is what the panel navigates to, and the game's
-  // own `/[?&]flight=v2(?:&|$)/` regex treats anything else as v1 too.
-  assert.deepEqual(readBootFlag('?flight=v3', 'flight'), { value: null });
-  assert.equal(withBootFlag('', 'flight', 'v2'), 'flight=v2');
+  // own `/[?&]flight=(v1|classic|v2|stunt)(?:&|$)/` regex falls back to the
+  // stunt default for anything it does not recognise.
+  assert.deepEqual(readBootFlag('?flight=v9', 'flight'), { value: null });
+  assert.equal(withBootFlag('', 'flight', 'classic'), 'flight=classic');
   assert.equal(withBootFlag('?flight=v2', 'flight', null), '');
 });
 

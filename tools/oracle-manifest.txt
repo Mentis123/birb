@@ -42,13 +42,22 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-13 at commit 15472d9 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-19 at commit 92b4588 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
 4deed1af6bb07606594214cb55313c159b7ce2abf8aae58aeb8ef99dceafded2  tests/adaptive-quality-traces.test.js
 0ac41b4d162af55f267b3cdfc207227ef9fbc89969be85ecea34154fee63acef  tests/adaptive-quality.test.js
-783657f4f721efc3681dc446daa73069cce8a8b869e9d2790ed6225528b7f53d  tests/aerobatics.test.js
+129ee3cf3a78e703f40b2031669a4720a58e9f9e8072f6b63bca839ecf67728c  tests/bird-flight-stunt.test.js
+164dad3c617966fe8370b410e5003d92f22b558afd1868c8229fa545d922afed  tests/stunt-detector.test.js
+24b61ddeb1aee31c8351a685c0f1d7f5c109cd2771f1902a6ee193fdaeb00fea  tests/stunt-pad.test.js
+# tests/aerobatics.test.js was REMOVED 2026-09-19 by gate decision
+# docs/perf/gates/G-STUNT-0.md: src/flight/aerobatics.js is deleted — the
+# triggered barrel roll and loop are replaced by a pure-rate stunt flight
+# model where a roll is the stick held over and a loop is the stick held
+# back. A test for a module that no longer exists cannot be an oracle for
+# anything; the replacement oracles are tests/bird-flight-stunt.test.js,
+# tests/stunt-pad.test.js and tests/stunt-detector.test.js, listed below.
 792aea6eb28c9974d79b64b84e27952517cedcfc31869e8194b9460e3b7914b8  tests/aim-rig.test.js
 f039eed6242434995baa30c163ba6335316978c2294f5f992633051fc86bd7ca  tests/asset-check.test.js
 3922615670f130b65326a1bc03d07f23cfae0a9fc552aa95ea980cb884ba3ea3  tests/asset-residency.test.js
@@ -62,7 +71,7 @@ be4fae20f590fc230dd2ee1968983087ab01c1d9a13fc86c5bbfc7b6fc613313  tests/bird-fli
 33af5b622a024647ac5ff84b5d7d6ad44e7f5992baa2c0a906117dd55f3111d0  tests/bird-plumage.test.js
 3a8ad03216c2600b6ad326c8c50583a471acab94365bb2234774b3583b625396  tests/bird-pose.test.js
 7ae9a937490a119b0d3f5771ed82a857eaaaac1020db9769b23929755888e039  tests/bloom-target-size.test.js
-1c1a5c0652cc5550c1e4cb16121a4307a991ee58ef962bc87d8abfac671b3806  tests/boot-flags.test.js
+2384f7e011826b89cf4d6d082a66553a409ed98026321b626f3f6bba5c337942  tests/boot-flags.test.js
 4a0bd676e6294603c030d9f0643310a8dee8b12f8b0941a32f5213238f6b2555  tests/build-identity.test.js
 376a5c9c8234dccec3485fac62311cfd7457172f2cac4532269e4a858c3962a0  tests/city-windows.test.js
 1763c7b34412af9f769037fb1925b4b9ac1a8af9fb5ea819f592bf9ca6683cdd  tests/collider-grid.test.js
@@ -155,7 +164,7 @@ e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-she
 # label (the shipping default is Neutral 1.12, not ACES); the harness itself
 # is unchanged in the legacy --env/--out path.
 61a9d9a531d706cbd740ef062f0616e39acf29b1a1c28dc063f4a0e556238df9  tools/birb-lighting.mjs
-39a312ad3959c931770de324454e9d6ec151aae25b0a0f128a151c6ccb47b802  tools/birb-modes.mjs
+bbbe561b3ec3c5c702d993d7247c30838affb5586afd5a019a3d4ce7f8e1ffbc  tools/birb-modes.mjs
 67144c112b26647f1c989f1060d01c34d7162ea6164892e82220cc761cabd6b8  tools/birb-shaders.mjs
 # tools/birb-walk.mjs added 2026-09-13 (G-TUCK). It is a Browser Health gate
 # like the two above, and its thresholds are the whole oracle: it is the only
@@ -164,14 +173,14 @@ e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-she
 # span < 0.75, idle drift < 0.5 units, walked > 0.8, foot swing > 0.15 rad,
 # foot at rest < 0.05). Loosening any of them to make a red run green is
 # exactly the move R5 exists to make loud.
-4741ed9951daa52ed902b7d0423100734e44fe284f3b59069861f78d0a11d979  tools/birb-walk.mjs
+cda5da4893eb5fb4d711805f443aca482b6b6c688d69b2f50a7c2dfb144993f5  tools/birb-walk.mjs
 # --- the contract ------------------------------------------------------------
 edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONTRACT.md
 # --- the coverage oracle (G0: R5 was not enforced on it) ---------------------
 839a5bee550e812df229f09c21940bd40a20c55cf759d94b6d3b31527bc85e33  tools/req-verify.mjs
 # --- Wave 1: the oracles Wave 2 spends (R5: implementers must not edit these) ---
 3b5974b1d9797b903ebe8117413691a01244b3387cbc6bbfad77d8a2308a8db2  tools/lib/quality-assertions.mjs
-802be73cd07a13861ce2309f1d6ce667ccff709a317222be6e6e8fe893ccfa1f  tools/birb-quality.mjs
+15492b3f84e6249e63c5333b46e2d3a1c7c03678923d789ddf84232bc979af52  tools/birb-quality.mjs
 73a14e636dfbf1bcd7c6b0b16bb21b9b4c1af0edef233edaf7423938c94aa2ba  tests/frame-metrics-stats.test.js
 0f58a56fd72a386c17ea6bf514348dd71a06ce70ce079d87578a02985b87bae0  tests/quality-settings.test.js
 968016b32e29f80105a0a3ec43faa9ca28f4d67faf46cdde37fbac9ae3d52005  tests/frame-stats-totals.test.js

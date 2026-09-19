@@ -37,14 +37,14 @@
 // is skipped rather than failing either way -- but it is a real, visible
 // divergence for whoever next edits index.html to reconcile.
 //
-// Bumped for flight v2 (`?flight=v2`, docs/realism/FLIGHT_V2_PLAN.md):
-// src/flight/bird-flight-v2.js joins CORE_ASSETS below. index.html imports it
-// only when the flag is set, but a flagged boot on a phone with no signal is
-// exactly the case CORE_ASSETS exists for, and SW-3 (build-identity.test.js)
-// requires every src/ module to be listed regardless. index.html's BIRB_BUILD
-// is bumped to the same literal in the same change, which closes the v57-vs-v54
-// divergence the note above records.
-const CACHE_VERSION = 'v73-2026-09-14-walk-slope';
+// Bumped for the stunt flight model, which is now the DEFAULT
+// (docs/realism/STUNT_FLIGHT_PLAN.md): bird-flight-stunt.js, stunt-pad.js and
+// stunt-detector.js join CORE_ASSETS below and aerobatics.js leaves it, having
+// been deleted. Two of the three are on the DEFAULT boot path, so a stale core
+// cache would leave a phone with no flight controller at all — and SW-3
+// (build-identity.test.js) requires every src/ module to be listed regardless.
+// index.html's BIRB_BUILD is bumped to the same literal in the same change.
+const CACHE_VERSION = 'v74-2026-09-19-stunt-flight';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -123,12 +123,14 @@ const CORE_ASSETS = [
   // conditional import: a module reachable from any boot path and absent here
   // dies on the first offline launch, and it is 11 KB.
   './src/flight/bird-flight-v2.js',
+  './src/flight/bird-flight-stunt.js',
+  './src/flight/stunt-pad.js',
+  './src/flight/stunt-detector.js',
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
-  './src/flight/aerobatics.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',
