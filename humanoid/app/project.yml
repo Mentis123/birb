@@ -34,8 +34,13 @@ targets:
       properties:
         CFBundleDisplayName: Baby Blender
         UILaunchScreen: {}
+        # All four, deliberately. An iPad app that does not set
+        # UIRequiresFullScreen has to support every orientation or Xcode warns
+        # and the system refuses it multitasking — and a sculpting tool that
+        # cannot sit beside a reference image is the wrong tool.
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         UIFileSharingEnabled: true

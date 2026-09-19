@@ -64,7 +64,13 @@ final class EditorModel: ObservableObject {
         var force: Double
     }
 
-    @Published private(set) var document: Document
+    /// Fully qualified, and it has to be.
+    ///
+    /// A bare `Document` is ambiguous once SwiftUI and UIKit are both imported —
+    /// the SDK has its own type of that name, and the compiler will not guess.
+    /// It builds fine headless, where neither framework exists, which is exactly
+    /// the class of error the Linux tests cannot reach.
+    @Published private(set) var document: HumanoidCore.Document
     @Published var camera = Camera()
     @Published var tool: Tool = .grab
     /// Brush radius in **screen points**, converted to metres at the hit depth.
@@ -148,7 +154,7 @@ final class EditorModel: ObservableObject {
     private var spin: Vec2 = .zero
     private var lastFrame: CFTimeInterval = 0
 
-    init(document: Document) {
+    init(document: HumanoidCore.Document) {
         self.document = document
         camera.frame(document.mesh)
         // Painting needs a texel map. Building it costs about 30 ms at 1024, so
@@ -159,7 +165,7 @@ final class EditorModel: ObservableObject {
     convenience init() {
         // A failure here means the app shipped without its template, which is a
         // build mistake, not a runtime condition to recover from.
-        self.init(document: try! Document.clay())
+        self.init(document: try! HumanoidCore.Document.clay())
     }
 
     // MARK: - Camera
