@@ -335,6 +335,57 @@ for (const site of SITES) {
       `stays inverted hands-off, got ${bankDeg(bird).toFixed(1)}`);
   });
 
+  // The owner's report, in three tests: "if I roll 90 degrees left then put
+  // the stick in neutral, I should stay pitched sideways, then pulling back
+  // on the stick should have me basically turning around to that side... or
+  // even roll over 180 then pull back to dive". Each of these failed on the
+  // first cut, because the idle righting levelled anything under 120 degrees.
+  const rollTo = (bird, targetDeg) => {
+    for (let i = 0; i < 600 && Math.abs(bankDeg(bird)) < targetDeg; i += 1) bird.tick(stick(1, 0), DT);
+    return bird;
+  };
+
+  test(`[${site.name}] hands off from a KNIFE EDGE, it stays on the wing`, () => {
+    const bird = spawn(site);
+    rollTo(bird, 88);
+    const before = Math.abs(bankDeg(bird));
+    assert.ok(before > 85 && before < 100, `reached a knife edge (${before.toFixed(1)})`);
+    fly(bird, stick(0, 0), 3.0);
+    assert.ok(Math.abs(Math.abs(bankDeg(bird)) - before) < 4,
+      `holds the bank hands-off: ${before.toFixed(1)} -> ${bankDeg(bird).toFixed(1)}`);
+  });
+
+  test(`[${site.name}] a pull at the knife edge TURNS the bird, it does not climb`, () => {
+    const bird = spawn(site);
+    rollTo(bird, 88);
+    fly(bird, stick(0, 0), 0.5);
+    const h0 = headingOf(bird);
+    const p0 = pitchDeg(bird);
+    // On the wing, the bird's own up points toward the LOW wing (drop the
+    // left wing and the fin tips left), and a pull moves the nose toward the
+    // bird's own up — so "to that side" is the side bodyUp leans to.
+    const toward = bodyUpOf(bird).clone();
+    toward.addScaledVector(radialUp(bird), -toward.dot(radialUp(bird))).normalize();
+    fly(bird, pull(0.5), 1.0);
+    const h1 = headingOf(bird);
+    const turned = Math.acos(Math.max(-1, Math.min(1, h0.dot(h1)))) * DEG;
+    assert.ok(turned > 30, `heading swung ${turned.toFixed(1)} degrees`);
+    assert.ok(Math.abs(pitchDeg(bird) - p0) < 20,
+      `the pitch stayed near where it was (${p0.toFixed(1)} -> ${pitchDeg(bird).toFixed(1)})`);
+    assert.ok(h1.clone().sub(h0).dot(toward) > 0, 'turned toward the side the bird is banked to');
+  });
+
+  test(`[${site.name}] roll over 180 then pull, and it DIVES`, () => {
+    const bird = spawn(site);
+    rollTo(bird, 176);
+    fly(bird, stick(0, 0), 0.5);
+    assert.ok(Math.abs(bankDeg(bird)) > 165, `still inverted after a pause (${bankDeg(bird).toFixed(1)})`);
+    const alt0 = altitudeOf(bird);
+    fly(bird, pull(0.6), 1.2);
+    assert.ok(pitchDeg(bird) < -25, `nose is DOWN: ${pitchDeg(bird).toFixed(1)}`);
+    assert.ok(altitudeOf(bird) < alt0 - 2, `and losing height: ${alt0.toFixed(1)} -> ${altitudeOf(bird).toFixed(1)}`);
+  });
+
   test(`[${site.name}] hands off from a dive, the nose comes back to the horizon`, () => {
     const bird = spawn(site);
     fly(bird, push(0.8), 0.6);

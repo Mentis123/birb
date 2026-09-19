@@ -147,6 +147,21 @@
 > of them made tuning-independent on the way (the roll measures SWEPT angle
 > from the controller's own deltas, not the bank at a fixed second).
 
+> **A knife edge you let go of stays on the wing** (2026-09-19):
+> [docs/perf/gates/G-STUNT-2.md](docs/perf/gates/G-STUNT-2.md). *"If I roll
+> 90 degrees left then put the stick in neutral, I should stay pitched
+> sideways, then pulling back should have me basically turning around to
+> that side."* The idle righting ran for any bank under 120°, so a released
+> knife edge rolled itself level (measured **‑89.6° → ‑1.2° in 3 s**) and the
+> pull that should have been a flat turn went nose-up 14°. It **fades to zero
+> between 35° and 55°** now (`rightingBand` / `rightingFade`, continuous, not
+> a rail): a lazy tilt still tidies itself, and any bank past that is held
+> hands-off at any angle — the same knife edge reads **‑89.6° → ‑89.6°**, and
+> a half-stick pull on it swings the heading 44° with the pitch at 0.3°.
+> Inverted-then-pull-to-dive already worked (`rightingLimit`) and has a test
+> now. Three tests were ADDED to the frozen stunt suite under that gate,
+> none weakened.
+
 > **Cockpit view is a setting, and it deliberately does NOT use the FPV rig
 > that was already there** (2026-09-19). *"Add a setting for fpv v 3rd."*
 > Chase cam / Cockpit is a gear-menu toggle persisted to `birbCameraView`,

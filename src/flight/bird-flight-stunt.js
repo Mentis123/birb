@@ -154,15 +154,29 @@ export const FLIGHT_STUNT_DEFAULTS = {
     // Idle-only stability. Runs ONLY with the whole stick inside the
     // deadzone — see the class comment.
     righting: 0.7,
+    // ...and only for a SHALLOW bank. The owner, from the phone: "if I roll
+    // 90 degrees left then put the stick in neutral, I should stay pitched
+    // sideways, then pulling back should have me basically turning around
+    // to that side". The first cut righted anything under `rightingLimit`
+    // (120 degrees), so a knife edge you let go of rolled itself level at
+    // 0.7 rad/s and the pull that should have been a flat turn became a
+    // climb. Dihedral is a weak term that tidies a lazy tilt; it does not
+    // pick a committed bank up off the wing. So the righting fades to
+    // NOTHING between `rightingBand - rightingFade` and `rightingBand`
+    // (35 -> 55 degrees), continuous in the bank — not a rail — and past
+    // that a bank you put in is a bank you keep, hands off, at any angle:
+    // knife edge, inverted, anything between.
+    rightingBand: 0.96,
+    rightingFade: 0.35,
     // 0.4, not 0.5, and scaled by authority in `_pitchTrimStep`. Measured:
     // at 0.5 unscaled the nose is dragged back to the horizon from vertical
     // before the energy model can bleed the speed below stall (bottomed at
     // 6.3 against a 5.5 stall), so a hammerhead was unreachable at full
     // power. This is also the difference between a trim and an autopilot.
     pitchTrim: 0.4,
-    // Past 120 degrees of bank an idle bird is closer to inverted than to
-    // upright, and STAYS inverted. Inverted level flight is a stunt; a
-    // controller that rolls you out of it is v2.
+    // Past 120 degrees of bank the bird is closer to inverted than upright,
+    // and the lateral stability under a held stick stops pushing it back
+    // toward upright. (The idle righting has its own, tighter band above.)
     rightingLimit: 2.09,
     // Energy (v2's model, verbatim), with a lower floor so a stall exists at
     // all: 0.35 * cruise is below `stallMul`.
@@ -484,20 +498,23 @@ export class BirdFlightStunt extends BirdFlight {
 
     /**
      * Idle roll righting. Toward wings-level by the short way round, and only
-     * while the bird is within `rightingLimit` of upright — past that it is
-     * closer to inverted, and an inverted bird that is left alone stays
-     * inverted (and sinks, which is the tell).
+     * for a SHALLOW bank: it fades to zero across `rightingFade` below
+     * `rightingBand`, so a knife edge or an inverted bird that is left alone
+     * stays exactly where it was put (and sinks, which is the tell). See
+     * `rightingBand` for the report that set it.
      */
     _rightingStep(dt, strength) {
         const bank = this.bankAngle();
-        if (Math.abs(bank) > this.rightingLimit) return 0;
+        const fade = Math.max(0, Math.min(1,
+            (this.rightingBand - Math.abs(bank)) / this.rightingFade));
+        if (fade <= 0) return 0;
         // `bank` is POSITIVE for a left bank and `_rollBy(+)` deepens a left
         // bank, so the correction is the negative of the error. The sign is
         // folded in once, here.
         // Scaled by AUTHORITY, because this is an aerodynamic term and not an
         // autopilot: a wing with no air over it does not right itself.
         const rate = Math.max(-this.righting, Math.min(this.righting, -bank * 2.2))
-            * strength * this.authority();
+            * strength * fade * this.authority();
         const step = rate * dt;
         this._rollBy(step);
         return step;
