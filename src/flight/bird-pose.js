@@ -29,12 +29,33 @@ export function blendToward(current, target, delta, rate) {
  * Wings fold IN and shorten, and the fold has to be gradual: snapping the
  * wings closed on the frame the nesting state flips reads as a dropped frame
  * rather than as a bird settling.
+ *
+ * A tuck is TWO rotations, and only having one is why this pose read as a
+ * bird holding its wings out rather than a bird with its wings away. `fold`
+ * is dihedral — it drops the wing toward the flank — and on its own it just
+ * makes a wide V pointing at the ground, because the wing is still standing
+ * straight out sideways. `sweep` is what lays it back ALONG the body, so the
+ * folded wing finishes over the flank with its primaries trailing past the
+ * tail, which is the silhouette a perched bird actually has.
+ *
+ * The pair was solved by capture at fixed poses, not chosen: with sweep at
+ * zero, 0.95 rad of fold hangs the wing plate visibly below the belly line
+ * and the back view is two thin blades either side of the body. Trading some
+ * of it for sweep (0.70 / 0.65) absorbs the wing into the body silhouette
+ * from every angle the chase camera can reach. Less fold than that (0.50 /
+ * 0.80) and the wing swings back OUT — past about 0.7 rad of sweep the wing
+ * is pointing astern rather than lying on the bird, and it reads as wide
+ * again.
  */
 export function perchPose(blend) {
   const t = Math.max(0, Math.min(1, blend || 0));
   return {
     // Radians added to each wing's base rotation, mirror-signed by the caller.
-    fold: t * 0.95,
+    // Positive drops the wing toward the flank.
+    fold: t * 0.70,
+    // Radians of backward sweep about the wing's own vertical, mirror-signed
+    // by the caller. Lays the folded wing back along the body.
+    sweep: t * 0.65,
     // Wings pull in against the body rather than staying spread.
     span: 1 - t * 0.42,
     // The tail drops and narrows as the bird settles onto the nest.
@@ -114,11 +135,56 @@ export function wingBeat(phase01) {
     sweep = Math.sin(t * Math.PI) * 0.55;
     folding = Math.sin(t * Math.PI);
   }
+  // TWIST — pronation through the downstroke, supination through the recovery.
+  //
+  // This is the term that separates a wing from a board, and it is the one a
+  // single shoulder rotation cannot express. A real wing rotates about its own
+  // long axis: leading edge DOWN on the power stroke so the surface bites, and
+  // UP on the recovery so the primaries part and spill air instead of pushing
+  // the bird back down.
+  //
+  // It deliberately does NOT track `sweep`. Twist LEADS the stroke — the wing
+  // is already pronating as it starts down and is back to neutral before the
+  // bottom — so the two are a quarter-beat out of phase with each other. A
+  // twist proportional to sweep is the same animation under a second name and
+  // could be folded into the shoulder angle; the ratio test in
+  // tests/bird-pose.test.js is what holds that line.
+  //
+  // Peak 0.30 rad (17 degrees). Bounded well inside a right angle, because a
+  // wing that rotates further than that is a propeller.
+  const twist = p < DOWN
+    ? Math.sin((p / DOWN) * Math.PI + Math.PI * 0.35) * 0.30
+    : -Math.sin(((p - DOWN) / (1 - DOWN)) * Math.PI) * 0.22;
+
+  // THE HAND — the outer wing, from the wrist out through the primaries.
+  //
+  // It trails the shoulder. A bird's wing does not swing as one piece: the
+  // shoulder drives, the hand follows a fraction of a beat later, and that lag
+  // is most of what the eye reads as "jointed". Modelled as the same stroke
+  // shape evaluated at a retarded phase, so it cannot drift out of step with
+  // the shoulder however the beat is retimed.
+  //
+  // 0.08 of a beat, which at the climbing rate of 4.4 beats/sec is about 18 ms
+  // — small in time, clearly visible in silhouette. The lag test asserts the
+  // hand's extremum lands after the shoulder's and by less than a third of a
+  // beat, because a lag that large is a broken wing rather than a trailing one.
+  const HAND_LAG = 0.08;
+  const lagged = p - HAND_LAG - Math.floor(p - HAND_LAG);
+  const handSweep = lagged < DOWN
+    ? -Math.sin((lagged / DOWN) * Math.PI) * 1.0
+    : Math.sin(((lagged - DOWN) / (1 - DOWN)) * Math.PI) * 0.55;
+
   return {
     // Radians, added to the wing's base rotation with the mirror sign rule.
     angle: sweep * 0.52,
     // Multiplier on wing span: pulled in during recovery.
     span: 1 - folding * 0.22,
+    // Radians about the wing's own long axis. Positive is leading-edge-down.
+    twist,
+    // Radians for the outer wing group, if the model has one. A model without
+    // a `hand` group ignores this and loses the articulation, not the beat —
+    // which is why bird-contract.js treats `hand` as optional.
+    handAngle: handSweep * 0.34,
   };
 }
 

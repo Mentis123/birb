@@ -43,11 +43,29 @@ test('the perch pose folds the wings in and settles the tail', () => {
   assert.ok(perched.tailPitch > 0 && perched.tailSpread < 1);
 });
 
+test('the tuck is a fold AND a sweep, because one rotation cannot tuck a wing', () => {
+  // A fold alone drops a wing that is still standing straight out sideways,
+  // which is a wide V pointing at the ground rather than a wing put away.
+  // Captured at fixed poses: fold 0.95 with no sweep hangs the wing plate
+  // below the belly line and the rear view is two blades either side of the
+  // body; 0.70 of fold against 0.65 of sweep absorbs it into the silhouette.
+  assert.equal(perchPose(0).sweep, 0, 'a flying bird has no sweep');
+  const perched = perchPose(1);
+  assert.ok(perched.sweep > 0.4, `the wing must lay back, not just drop: ${perched.sweep}`);
+  // Past about 0.7 rad the wing points astern rather than along the body and
+  // the tuck reads WIDER again, which is the failure the capture found.
+  assert.ok(perched.sweep < 0.7, `swept so far back the wing leaves the body: ${perched.sweep}`);
+  // Both halves have to be real. A degenerate pair (all fold, or all sweep)
+  // is exactly what this test exists to stop a future tune from producing.
+  assert.ok(perched.fold > 0.4 && perched.fold < 0.9, `fold out of the solved band: ${perched.fold}`);
+});
+
 test('the perch pose is monotonic, so the fold never jitters mid-landing', () => {
   let previous = perchPose(0);
   for (let t = 0.1; t <= 1.0001; t += 0.1) {
     const current = perchPose(t);
     assert.ok(current.fold >= previous.fold);
+    assert.ok(current.sweep >= previous.sweep);
     assert.ok(current.span <= previous.span);
     previous = current;
   }
@@ -144,4 +162,86 @@ test('the bird flaps in bursts and then glides', () => {
 test('bursts ramp rather than switching on for a single frame', () => {
   const envelope = beatEnvelope(0.02);
   assert.ok(envelope > 0 && envelope < 1, `expected a ramp, got ${envelope}`);
+});
+
+// ---------------------------------------------------------------------------
+// Wing twist and the hand segment (docs/realism/BIRD_PLAN.md Phase 1).
+//
+// The measurement that motivates these: the bird is ~115-158 CSS px wide at
+// the chase camera on a 390x844 phone, so a feather is a few pixels and a barb
+// is sub-pixel. What reads as a real bird at that size is surface, silhouette
+// and MOTION — and the motion this rig had was one rigid plate rotating about
+// the shoulder, which is the one thing a real wing never does.
+// ---------------------------------------------------------------------------
+
+test('the wing twists, and the twist leads the sweep rather than tracking it', () => {
+  // A real wing pronates (leading edge down) through the downstroke to make
+  // thrust, and supinates on the recovery so the primaries can part and spill
+  // air. The tell that this is modelled rather than decorated is that twist is
+  // NOT proportional to sweep: if it were, it would be the same animation with
+  // a different name and could be folded into the shoulder angle.
+  let maxAbsRatioSpread = 0;
+  const ratios = [];
+  for (let i = 1; i < 20; i += 1) {
+    const p = i / 20;
+    const b = wingBeat(p);
+    assert.ok(Number.isFinite(b.twist), `twist must be finite at ${p}`);
+    if (Math.abs(b.angle) > 0.02) ratios.push(b.twist / b.angle);
+  }
+  const lo = Math.min(...ratios);
+  const hi = Math.max(...ratios);
+  maxAbsRatioSpread = hi - lo;
+  assert.ok(maxAbsRatioSpread > 0.5,
+    `twist/sweep ratio spans only ${maxAbsRatioSpread.toFixed(3)} — the twist is tracking the sweep, which makes it decoration`);
+});
+
+test('pronation on the downstroke, supination on the recovery', () => {
+  // Sign convention: positive twist is leading-edge-down (pronation).
+  // Downstroke is the first 38% of the beat; recovery is the rest.
+  const down = wingBeat(0.19).twist;
+  const up = wingBeat(0.69).twist;
+  assert.ok(down > 0, `mid-downstroke twist ${down.toFixed(3)} should pronate (positive)`);
+  assert.ok(up < 0, `mid-recovery twist ${up.toFixed(3)} should supinate (negative)`);
+});
+
+test('twist is bounded — a wing that rotates past a right angle is a propeller', () => {
+  for (let i = 0; i <= 40; i += 1) {
+    const t = wingBeat(i / 40).twist;
+    assert.ok(Math.abs(t) < Math.PI / 4,
+      `twist ${t.toFixed(3)} at phase ${(i / 40).toFixed(2)} exceeds 45 degrees`);
+  }
+});
+
+test('the hand LAGS the shoulder, which is the whole point of having one', () => {
+  // The wrist trails the shoulder through the stroke — that lag is what makes
+  // a wing read as jointed rather than as a board. Measured as a phase offset:
+  // the hand's extremum must arrive LATER in the beat than the shoulder's.
+  const samples = [];
+  for (let i = 0; i < 200; i += 1) {
+    const p = i / 200;
+    const b = wingBeat(p);
+    assert.ok(Number.isFinite(b.handAngle), `handAngle must be finite at ${p}`);
+    samples.push({ p, angle: b.angle, hand: b.handAngle });
+  }
+  const argMin = (key) => samples.reduce((a, b) => (b[key] < a[key] ? b : a)).p;
+  const shoulderLow = argMin('angle');
+  const handLow = argMin('hand');
+  assert.ok(handLow > shoulderLow,
+    `the hand bottoms out at ${handLow.toFixed(3)} and the shoulder at ${shoulderLow.toFixed(3)} — the hand must trail`);
+  assert.ok(handLow - shoulderLow < 0.3,
+    `lag of ${(handLow - shoulderLow).toFixed(3)} of a beat is a broken wing, not a trailing one`);
+});
+
+test('every beat field stays finite and periodic, including the new ones', () => {
+  const before = wingBeat(0.999);
+  const after = wingBeat(1.999);
+  for (const k of ['angle', 'span', 'twist', 'handAngle']) {
+    assert.ok(Math.abs(before[k] - after[k]) < 1e-9, `${k} is not periodic across the wrap`);
+  }
+  for (const bad of [NaN, Infinity, -Infinity, undefined, null, 'x']) {
+    const b = wingBeat(bad);
+    for (const k of ['angle', 'span', 'twist', 'handAngle']) {
+      assert.ok(Number.isFinite(b[k]), `${k} is not finite for input ${String(bad)}`);
+    }
+  }
 });

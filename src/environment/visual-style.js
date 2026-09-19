@@ -67,28 +67,8 @@ export function addAtmosphere(material, THREE, {
     shader.uniforms.uBirbSunRim = { value: sunRim };
     shader.uniforms.uBirbStrata = { value: strata };
 
-    // The world-position varying is SHARED with the other injections that need
-    // it (the city street grid, for one) and either can run first, so both
-    // sides have to declare it conditionally. Declared twice, the shader does
-    // not compile at all — "vBirbWorld : redefinition" — and Three then draws
-    // nothing for the material, which in this case was the entire ground.
-    if (!shader.vertexShader.includes('varying vec3 vBirbWorld;')) {
-      shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
-    }
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-       // The instance transform is applied in <project_vertex>, AFTER this
-       // chunk, so modelMatrix alone gives every instance the position of the
-       // unit geometry at the world origin. That made length(worldPos) ~0 for
-       // every tree in the world, so the mist term saw them all as 120 units
-       // below the base radius and painted the entire forest flat grey.
-       vec4 birbWorldPos = vec4(transformed, 1.0);
-       #ifdef USE_INSTANCING
-         birbWorldPos = instanceMatrix * birbWorldPos;
-       #endif
-       vBirbWorld = (modelMatrix * birbWorldPos).xyz;`,
-    );
+    // One shared, fully guarded injection — see ensureWorldVarying.
+    ensureWorldVarying(shader);
 
     shader.fragmentShader =
       'uniform float uBirbTime; uniform vec3 uBirbMist; uniform float uBirbAtmos;\n'
@@ -193,6 +173,68 @@ export function addAtmosphere(material, THREE, {
   return material;
 }
 
+/**
+ * Smooth shading, the shipping default since 2026-09-13. `?smooth=0` restores
+ * the flat-shaded world for the A/B.
+ *
+ * `flatShading` is a MATERIAL property and this world had it on thirty-four
+ * materials, as if it were a rendering mode rather than a per-surface choice.
+ * The ground mesh has carried correct smooth normals the whole time —
+ * `displaceSphereGeometry` calls `computeVertexNormals()` and the material
+ * threw the result away every frame. Soft materials (soil, foliage, snow,
+ * cloud) shade smooth now; crystalline ones (rock, boulder, scree, spire,
+ * peak, cliff, building) keep their facets, which is the one place low-poly
+ * reads as a material rather than as a budget.
+ *
+ * The escape hatch stays for the same reason `?bark=0` and `?skytex=0` do: a
+ * comparison you cannot re-run is one nobody re-runs.
+ */
+export function smoothShadingRequested(search) {
+  return !/[?&]smooth=0/.test(search || '');
+}
+
+/**
+ * A small random lean for a decorative tree, as radians about its OWN local X
+ * and Z (local +Y is the trunk axis, before it is stood up on the sphere).
+ *
+ * Every tree in this world was oriented `setFromUnitVectors(defaultUp, up)` —
+ * exactly radial, plumb to the planet, all 294 of them. That is what makes a
+ * forest read as planted rather than grown.
+ *
+ * NULL for a nest host, and that is load-bearing: a nest is placed radially
+ * above the trunk base at `(trunkHeight + canopyHeight * 0.9) * scale`, so
+ * tilting a champion walks its own perch out of its crown. Three degrees on a
+ * 40-unit tree is ~2 units of lateral drift — well inside an 8-16 unit canopy
+ * collider, so the colliders do not move, but the perch would.
+ *
+ * Two draws from `rng`, always the same two, so a caller's seeded stream
+ * advances identically whether or not the tree ends up leaning.
+ */
+export function treeLean(rng, isNestHost) {
+  if (isNestHost) return null;
+  const angle = 0.017 + rng() * 0.035;    // 1-3 degrees
+  const bearing = rng() * Math.PI * 2;
+  return { x: Math.cos(bearing) * angle, z: Math.sin(bearing) * angle };
+}
+
+/**
+ * Independent per-axis proportions for a scattered rock, and how far to sink
+ * it. Every rock, boulder and scree chip in this world was a REGULAR solid at
+ * a uniform scale under a random rotation — which is a die, and a die at any
+ * orientation is still a die. Three axes drawn separately give each one its
+ * own shape; burying the base makes it something the ground has grown around
+ * rather than something resting on a tablecloth.
+ *
+ * `max` is the longest half-axis. A caller whose collider radius was the exact
+ * uniform extent must use it, or the long axis now escapes its own collider.
+ */
+export function rockShape(rng, s) {
+  const x = s * (0.72 + rng() * 0.58);
+  const y = s * (0.60 + rng() * 0.42);
+  const z = s * (0.72 + rng() * 0.58);
+  return { x, y, z, max: Math.max(x, y, z), sink: s * 0.30 };
+}
+
 export function createCanopyGeometry(THREE, kind = 0) {
   // All variants retain the old envelope: radius <= 1, base y=0, crown y=1.
   // This keeps placement, crown nests and collision proxies meaningful.
@@ -229,7 +271,16 @@ export function createCanopyGeometry(THREE, kind = 0) {
 }
 
 export function addFoliageWind(material) {
-  material.onBeforeCompile = (shader) => {
+  // Chained, not assigned. This used to overwrite `onBeforeCompile` and set a
+  // CONSTANT `customProgramCacheKey`, so any patch already on a foliage
+  // material was silently erased and any patch added later had to be applied
+  // in exactly the right order to survive. Nothing caught it because the only
+  // other patch on these materials (addAtmosphere) chains and runs afterwards.
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
     shader.uniforms.uBirbTime = visualUniforms.time;
     shader.uniforms.uBirbWind = visualUniforms.wind;
     shader.vertexShader = 'uniform float uBirbTime; uniform float uBirbWind;\n' + shader.vertexShader;
@@ -244,7 +295,230 @@ export function addFoliageWind(material) {
       transformed.z += sin(uBirbTime * 0.83 + phase + 1.7) * 0.015 * weight * weight * uBirbWind;
     `);
   };
-  material.customProgramCacheKey = () => 'birb-foliage-wind-v1';
+  const windBase = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => `${windBase}-foliage-wind-v2`;
+  return material;
+}
+
+// ── Shared GLSL ────────────────────────────────────────────────────────────
+// The world-position varying every prop patch below needs. Declared
+// CONDITIONALLY in both stages: addAtmosphere wants the same varying and
+// either can run first. Declared twice the shader does not compile at all
+// ("vBirbWorld : redefinition"), three logs it and draws NOTHING for that
+// material — which is how the city's entire ground once shipped invisible.
+//
+// The instance transform lands in <project_vertex>, AFTER <begin_vertex>, so
+// `modelMatrix * transformed` alone gives every instance the unit geometry at
+// the world origin. Every prop here is instanced, so that is not a detail.
+function ensureWorldVarying(shader) {
+  if (!shader.vertexShader.includes('varying vec3 vBirbWorld;')) {
+    shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
+  }
+  // Guarded on the WRITE, not only on the declaration. addAtmosphere used to
+  // guard the `varying` line and then replace <begin_vertex> unconditionally,
+  // so a second patch on the same material declared `birbWorldPos` twice and
+  // the shader did not compile — 140 of them, caught by birb-shaders.mjs
+  // rather than by anything on screen, because three then draws nothing.
+  if (!shader.vertexShader.includes('vBirbWorld =')) {
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      vec4 birbWorldPos = vec4(transformed, 1.0);
+      #ifdef USE_INSTANCING
+        birbWorldPos = instanceMatrix * birbWorldPos;
+      #endif
+      vBirbWorld = (modelMatrix * birbWorldPos).xyz;`);
+  }
+  if (!shader.fragmentShader.includes('varying vec3 vBirbWorld;')) {
+    shader.fragmentShader = 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
+  }
+}
+
+/**
+ * The world-space surface normal, as the GEOMETRY declares it.
+ *
+ * Not the facet normal from `dFdx(vBirbWorld)`, and the difference is the
+ * whole of whether the leaf edge reads. A lathe canopy has seven radial
+ * segments, so a facet normal is CONSTANT across a facet the size of a third
+ * of the crown: thresholding on it erodes whole faces at once, which measured
+ * as a crown with one clean straight edge and the opposite third dissolved.
+ * The interpolated vertex normal varies per fragment, so the same threshold
+ * cuts a thin band that follows the true silhouette.
+ *
+ * And it is per-MATERIAL correct for free: three's polyhedra are non-indexed
+ * with per-face vertices, so on a boulder `objectNormal` already IS the facet
+ * normal, while on a lathe it is smooth. Each surface gets what it wants
+ * without the caller choosing.
+ *
+ * Scaled by the instance matrix the way three's own <defaultnormal_vertex>
+ * does — dividing by each column's squared length — because canopy instances
+ * carry a non-uniform (radius, height, radius) scale and a plain rotate would
+ * skew every normal on a tall tree.
+ */
+function ensureWorldNormalVarying(shader) {
+  if (shader.vertexShader.includes('vBirbNormalW =')) return;
+  if (!shader.vertexShader.includes('varying vec3 vBirbNormalW;')) {
+    shader.vertexShader = 'varying vec3 vBirbNormalW;\n' + shader.vertexShader;
+  }
+  shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `
+    #include <beginnormal_vertex>
+    vec3 birbNrm = objectNormal;
+    #ifdef USE_INSTANCING
+      mat3 birbIM = mat3(instanceMatrix);
+      birbNrm /= vec3(dot(birbIM[0], birbIM[0]), dot(birbIM[1], birbIM[1]), dot(birbIM[2], birbIM[2]));
+      birbNrm = birbIM * birbNrm;
+    #endif
+    vBirbNormalW = mat3(modelMatrix) * birbNrm;`);
+  if (!shader.fragmentShader.includes('varying vec3 vBirbNormalW;')) {
+    shader.fragmentShader = 'varying vec3 vBirbNormalW;\n' + shader.fragmentShader;
+  }
+}
+
+// One octave of 3D value noise, named so it cannot collide with
+// ground-detail.js's copy if both ever land on one material.
+const LEAF_NOISE_GLSL = `
+  float birbLeafHash(vec3 p) {
+    return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
+  }
+  float birbLeafNoise(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(birbLeafHash(i + vec3(0.0, 0.0, 0.0)), birbLeafHash(i + vec3(1.0, 0.0, 0.0)), f.x),
+          mix(birbLeafHash(i + vec3(0.0, 1.0, 0.0)), birbLeafHash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+      mix(mix(birbLeafHash(i + vec3(0.0, 0.0, 1.0)), birbLeafHash(i + vec3(1.0, 0.0, 1.0)), f.x),
+          mix(birbLeafHash(i + vec3(0.0, 1.0, 1.0)), birbLeafHash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+      f.z);
+  }
+`;
+
+export function leafEdgeRequested(search) { return !/[?&]leaves=0/.test(search || ''); }
+export function upwardSnowRequested(search) { return !/[?&]snowline=0/.test(search || ''); }
+
+/**
+ * Silhouette erosion — the leaves.
+ *
+ * A solid crown reads as solid because its OUTLINE is solid. Adding segments
+ * cannot fix that at any price this frame can pay: the forest's 285 canopies
+ * are already 41% of its triangles, and doubling the lathe is +24k on a 58k
+ * frame. So the ragged edge is CUT OUT of the existing mesh in the fragment
+ * shader, at zero geometry cost — noise thresholded near the silhouette and
+ * fed to three's own alpha test.
+ *
+ * Three details are load-bearing:
+ *
+ *  - **The silhouette term uses NO three varying.** The obvious `normal.z`
+ *    is not available: three's fragment order puts <alphatest_fragment>
+ *    BEFORE <normal_fragment_begin>, so `normal` does not exist yet, and
+ *    `vNormal` is compiled away entirely under FLAT_SHADED (i.e. `?smooth=0`).
+ *    The world-space facet normal against the eye needs neither and is
+ *    identical in both paths.
+ *  - **The noise is in WORLD space.** Screen-space noise swims as the camera
+ *    moves; world-space is pinned to the crown and only stirs with the wind
+ *    displacement, which is what leaves do.
+ *  - **three's alpha test, not a hand-rolled `discard`.** It then also
+ *    applies in any depth-only pass, so a shadow map would see the same
+ *    lacy edge rather than a solid cone.
+ */
+export function addLeafEdge(material, THREE, {
+  rimStart = 0.74, rimEnd = 0.995, cut = 0.52, scale = 1.3, key = 'leaf',
+} = {}) {
+  if (!material || material.userData?.birbLeafEdge) return material;
+  material.userData = material.userData || {};
+  material.userData.birbLeafEdge = true;
+  // USE_ALPHATEST is defined off material.alphaTest, and <alphatest_fragment>
+  // is a no-op without it — the erosion would compute and then be discarded
+  // by nothing at all.
+  material.alphaTest = 0.5;
+  // Free where the scene target has MSAA (tier 0), ignored where it does not.
+  material.alphaToCoverage = true;
+
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    ensureWorldVarying(shader);
+    ensureWorldNormalVarying(shader);
+    shader.uniforms.uLeafRim = { value: new THREE.Vector2(rimStart, rimEnd) };
+    shader.uniforms.uLeafCut = { value: cut };
+    shader.uniforms.uLeafScale = { value: scale };
+    shader.fragmentShader =
+      'uniform vec2 uLeafRim; uniform float uLeafCut; uniform float uLeafScale;\n'
+      + LEAF_NOISE_GLSL + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `
+      {
+        vec3 leN = normalize(vBirbNormalW);
+        vec3 leV = normalize(cameraPosition - vBirbWorld);
+        float leRim = 1.0 - abs(dot(leN, leV));
+        float leMask = birbLeafNoise(vBirbWorld * uLeafScale) * 0.62
+                     + birbLeafNoise(vBirbWorld * uLeafScale * 3.1) * 0.38;
+        // Solid in the interior; the outer band of the silhouette keeps only
+        // the fragments the noise leaves above the cut.
+        float leEdge = smoothstep(uLeafRim.x, uLeafRim.y, leRim);
+        float leKeep = smoothstep(uLeafCut - 0.07, uLeafCut + 0.07, leMask);
+        diffuseColor.a *= 1.0 - leEdge * (1.0 - leKeep);
+      }
+      #include <alphatest_fragment>
+    `);
+  };
+
+  const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => `${base}-${key}-edge-v1`;
+  material.needsUpdate = true;
+  return material;
+}
+
+/**
+ * Snow settles on what faces up.
+ *
+ * One dot product against the local radial up — this is a sphere, so "up" is
+ * `normalize(worldPos)`, never world +Y. Written at <color_fragment>, after
+ * three has applied the vertex colour and BEFORE the lighting: Lambert has
+ * folded diffuseColor into the outgoing light by <opaque_fragment>, so a
+ * write there changes nothing at all, which this repo has paid for once.
+ *
+ * The normal comes from `ensureWorldNormalVarying`, which is per-material
+ * correct without the caller choosing: three's polyhedra are non-indexed, so
+ * on a boulder it is already the facet normal — snow on the up-facing planes,
+ * bare rock on the sides, which is what settled snow looks like — while on a
+ * lathe or a cone it is smooth. `vNormal` would not do: FLAT_SHADED compiles
+ * it away entirely, so the patch would fail to build under `?smooth=0`.
+ */
+export function addUpwardSnow(material, THREE, {
+  color = 0xe6f1ff, amount = 0.75, start = 0.45, end = 0.85, key = 'snow',
+} = {}) {
+  if (!material || material.userData?.birbUpwardSnow) return material;
+  material.userData = material.userData || {};
+  material.userData.birbUpwardSnow = true;
+
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    ensureWorldVarying(shader);
+    ensureWorldNormalVarying(shader);
+    shader.uniforms.uSnowColor = { value: new THREE.Color(color) };
+    shader.uniforms.uSnowAmount = { value: amount };
+    shader.uniforms.uSnowRange = { value: new THREE.Vector2(start, end) };
+    shader.fragmentShader =
+      'uniform vec3 uSnowColor; uniform float uSnowAmount; uniform vec2 uSnowRange;\n'
+      + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+      #include <color_fragment>
+      {
+        vec3 snUp = normalize(vBirbWorld);
+        vec3 snN = normalize(vBirbNormalW);
+        float snLie = smoothstep(uSnowRange.x, uSnowRange.y, dot(snN, snUp));
+        diffuseColor.rgb = mix(diffuseColor.rgb, uSnowColor, snLie * uSnowAmount);
+      }
+    `);
+  };
+
+  const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => `${base}-${key}-snow-v1`;
+  material.needsUpdate = true;
+  return material;
 }
 
 /** Bake root contact shading into existing ground vertex colours at build time.
@@ -430,6 +704,92 @@ export function addRimLight(material, THREE, { color = 0x9fe8ff, power = 3.0, st
   material.userData = material.userData || {};
   material.userData.birbRim = uniforms;
   return uniforms;
+}
+
+/**
+ * Iridescent sheen for the bird's wing surfaces.
+ *
+ * A Bronze-winged Pionus's coverts are STRUCTURALLY coloured: the bronze
+ * flashes gold when the light is behind you and goes green-black at a grazing
+ * angle. That is a view-dependent hue shift, which no vertex colour and no
+ * albedo texture can express — both are fixed the moment the geometry is
+ * built. It is one fresnel term and no extra draw calls.
+ *
+ * Two things about the form are deliberate:
+ *
+ *  - It MULTIPLIES the light already there rather than adding a flat term.
+ *    A flat additive lifts a dark material far more than a bright one — that
+ *    is how a sun rim once turned the city's 0.09-linear asphalt into pale
+ *    snow — and here it would wash the dark flight feathers to grey while
+ *    doing nothing visible on the bronze.
+ *  - It CHAINS, and it extends the program cache key. `addRimLight` sets a
+ *    CONSTANT key ('birb-rim-v1'), so a material carrying this patch and one
+ *    carrying only the rim would otherwise share a compiled program and one
+ *    of them would silently render the other's shader.
+ *
+ * @param warm   the face-on colour the sheen pushes toward (gold)
+ * @param cool   the grazing-angle colour (green, for a bronze wing)
+ * @param power  fresnel exponent; higher keeps the shift to the very edge
+ */
+export function addFeatherSheen(material, THREE, {
+  warm = 0xffd27a, cool = 0x4fb488, power = 2.2, strength = 0.55,
+} = {}) {
+  if (!material) return null;
+  if (material.userData?.birbSheen) return material.userData.birbSheen;
+  const lit = material.isMeshStandardMaterial || material.isMeshPhysicalMaterial
+    || material.isMeshPhongMaterial || material.isMeshLambertMaterial;
+  if (!lit) return null;
+  const uniforms = {
+    uSheenWarm: { value: new THREE.Color(warm) },
+    uSheenCool: { value: new THREE.Color(cool) },
+    uSheenPower: { value: power },
+    uSheenStrength: { value: strength },
+  };
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function (shader, renderer) {
+    if (typeof previous === 'function') previous.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader =
+      'uniform vec3 uSheenWarm; uniform vec3 uSheenCool; uniform float uSheenPower; uniform float uSheenStrength;\n'
+      + shader.fragmentShader;
+    const anchor = shader.fragmentShader.includes('#include <opaque_fragment>')
+      ? '#include <opaque_fragment>'
+      : '#include <output_fragment>';
+    shader.fragmentShader = shader.fragmentShader.replace(anchor, `
+      // vViewPosition runs from the fragment TO the camera, so this is N·V.
+      float sheenFacing = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+      // The band PEAKS across the surface and falls back to zero at the
+      // silhouette, instead of growing monotonically to the edge. Two reasons,
+      // and the second is the one that showed up in a capture: iridescence is
+      // a shift that travels across a covert, not a halo on its outline; and
+      // addRimLight already owns the silhouette, so a monotonic term stacks
+      // with it. A feather plate seen near edge-on is almost ALL silhouette —
+      // with the monotonic form the whole wing washed to grey against a bright
+      // sky, which is the opposite of what a sheen is for.
+      float sheenF = 1.0 - sheenFacing;
+      float sheenP = pow(sheenF, uSheenPower);
+      float sheenBand = sheenP * (1.0 - sheenP * sheenP * sheenP);
+      // Face-on is gold, grazing is green — the way a real structural colour
+      // travels across a curved covert as the bird banks.
+      vec3 sheenTint = mix(uSheenWarm, uSheenCool, sheenBand);
+      outgoingLight += outgoingLight * sheenTint * sheenBand * uSheenStrength;
+      ${anchor}
+    `);
+  };
+  material.customProgramCacheKey = function () {
+    const base = typeof previousKey === 'function' ? previousKey.call(this) : '';
+    return `${base}-sheen`;
+  };
+  material.needsUpdate = true;
+  material.userData = material.userData || {};
+  material.userData.birbSheen = uniforms;
+  return uniforms;
+}
+
+/** `?pionus=0` puts the old blue jay palette and the flat wings back. */
+export function pionusPlumageRequested(search) {
+  return !/[?&]pionus=0/.test(search || '');
 }
 
 /**

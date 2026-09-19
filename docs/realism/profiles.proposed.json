@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "kind": "birb-realism-profile-proposal",
+  "runnableInCurrentGame": false,
+  "status": "proposed-unmeasured",
+  "reviewedMain": "f3f7c171e1ade34057c89929f8193ca600431815",
+  "primaryDevice": {
+    "model": "iPhone 16 Pro",
+    "browser": "Chrome",
+    "browserVersion": "152.0.7977.64",
+    "iOSVersion": null,
+    "capabilitiesVerified": false
+  },
+  "provenance": "Executive experiment settings; no profile is phone-qualified. See PROFILES.md for acceptance and current implementation gaps.",
+  "invariants": [
+    "gameplay seed/layout/collision/scoring independent of resource profile",
+    "same authored grade/material boundaries/hero identity",
+    "comfort preferences independent of resource quality",
+    "requested/resolved/allocated/last-frame-used exported separately",
+    "unknown timing/temperature/memory capacity reported unavailable"
+  ],
+  "requiresNewImplementation": [
+    "30 FPS render pacing with unchanged simulation semantics",
+    "hero bird and scene content LOD",
+    "AA/output ownership independent of bloom",
+    "profile schema migration and transactional recovery",
+    "resource ledger including depth/MSAA/shadows",
+    "deterministic animated benchmark routes",
+    "replacement adaptive controller"
+  ],
+  "profiles": [
+    {
+      "id": "shipping-reference",
+      "status": "existing-runtime-snapshot-required",
+      "targetFPS": 60,
+      "settings": null,
+      "content": "existing procedural content",
+      "autoEligible": false
+    },
+    {
+      "id": "reference-lab",
+      "status": "proposed-unmeasured",
+      "targetFPS": 60,
+      "trialSeconds": 120,
+      "sessionOnly": true,
+      "autoEligible": false,
+      "settings": {
+        "dpr": 2.5,
+        "postQuality": "full",
+        "antialiasing": "4x",
+        "shadowsEnabled": true,
+        "shadowType": "pcf",
+        "shadowMapSize": "high",
+        "anisotropy": 8
+      },
+      "experiments": {
+        "dprCeiling": "native-and-measured-pixel-budget",
+        "bird": "LOD0 when visible",
+        "terrain": "high near-field patch",
+        "water": "bounded hero reflection",
+        "decorativeRange": "full authored near field"
+      }
+    },
+    {
+      "id": "cinematic-30",
+      "status": "proposed-unmeasured",
+      "targetFPS": 30,
+      "autoEligible": false,
+      "settings": {
+        "dpr": 2,
+        "postQuality": "half",
+        "antialiasing": "2x",
+        "shadowsEnabled": true,
+        "shadowType": "pcf",
+        "shadowMapSize": "high",
+        "anisotropy": 8
+      },
+      "experiments": {
+        "bird": "projected-size LOD; hero near",
+        "terrain": "high near-field patch",
+        "water": "bounded hero reflection if justified",
+        "decorativeRange": "full near field"
+      }
+    },
+    {
+      "id": "ultra-60",
+      "status": "proposed-unmeasured",
+      "targetFPS": 60,
+      "autoEligible": false,
+      "settings": {
+        "dpr": 1.7,
+        "postQuality": "half",
+        "antialiasing": "2x",
+        "shadowsEnabled": true,
+        "shadowType": "pcf",
+        "shadowMapSize": "medium",
+        "anisotropy": 8
+      },
+      "experiments": {
+        "bird": "projected-size LOD; hero protected",
+        "terrain": "medium/high near-field patch",
+        "water": "cached environment reflection",
+        "decorativeRange": "medium/full near field"
+      }
+    },
+    {
+      "id": "balanced-60",
+      "status": "proposed-unmeasured",
+      "targetFPS": 60,
+      "autoEligible": false,
+      "settings": {
+        "dpr": 1.4,
+        "postQuality": "quarter",
+        "antialiasing": "2x",
+        "shadowsEnabled": true,
+        "shadowType": "pcf",
+        "shadowMapSize": "medium",
+        "anisotropy": 4
+      },
+      "experiments": {
+        "antialiasing": "2x versus non-temporal fallback measured A/B",
+        "bird": "same silhouette and identity",
+        "terrain": "medium patch; fewer material samples",
+        "water": "simplified reflection",
+        "decorativeRange": "shorter near field",
+        "shadowCoverage": "smaller caster region"
+      }
+    },
+    {
+      "id": "cool-30",
+      "status": "proposed-unmeasured",
+      "targetFPS": 30,
+      "autoEligible": false,
+      "settings": {
+        "dpr": 1.2,
+        "postQuality": "quarter",
+        "antialiasing": "off",
+        "shadowsEnabled": false,
+        "shadowType": "pcf",
+        "shadowMapSize": "low",
+        "anisotropy": 2
+      },
+      "experiments": {
+        "antialiasing": "new non-temporal fallback, not implemented",
+        "postQuality": "quarter versus bloom off; keep final output transform",
+        "bird": "same identity and contact",
+        "terrain": "coarse patch with broad material masks",
+        "water": "analytic sky reflection",
+        "decorativeRange": "sparse near field",
+        "contact": "cheap persistent contact fallback"
+      }
+    },
+    {
+      "id": "recovery",
+      "status": "proposed-unmeasured",
+      "targetFPS": 30,
+      "autoEligible": false,
+      "settings": {
+        "dpr": 1,
+        "postQuality": "off",
+        "antialiasing": "off",
+        "shadowsEnabled": false,
+        "shadowType": "pcf",
+        "shadowMapSize": "low",
+        "anisotropy": 1
+      },
+      "experiments": {
+        "dprRange": [
+          0.85,
+          1
+        ],
+        "water": "no extra reflection pass",
+        "contact": "cheap fallback",
+        "content": "working gameplay and readable fallback hero"
+      }
+    }
+  ],
+  "qualification": {
+    "physicalDeviceRequired": true,
+    "sustainedMinutes": 20,
+    "finalDefaultMinutes": 30,
+    "repeats": 3,
+    "p95IntervalBudgetMultiplier": 1.15,
+    "p99IntervalBudgetMultiplier": 1.5,
+    "maxMissedTargetSlotFraction": 0.01,
+    "maxSteadyStateHitchMs": 100,
+    "maxFinalToInitialP95Ratio": 1.1,
+    "thresholdProvenance": "proposed acceptance criteria; amend explicitly after device evidence",
+    "thermalSensorAvailable": false
+  },
+  "currentDeviceResults": [],
+  "selectedDefault": null
+}

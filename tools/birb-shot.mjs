@@ -28,6 +28,8 @@
  *   --w --h --dpr    explicit viewport overrides
  *   --env      forest|canyon|mountain|city — switch after start
  *   --nest     land on nest N (default 0) — implies --start
+ *   --query    extra query string, e.g. "bark=1&goto=stone-arch" (?debug=1
+ *              is always appended, so a flagged path stays scriptable)
  *   --eval     JS evaluated in the page after start, BEFORE the settle wait
  *   --after    JS evaluated AFTER the settle, just before the shutter
  *   --afterSettle  ms to wait after --after (default 320)
@@ -233,7 +235,15 @@ export async function startGame(page, timeout = 30000) {
     // The button self-disables and reads "Loading…" if the scene module has
     // not finished importing. Waiting for __BIRB_READY avoids that race.
     await page.waitForFunction('window.__BIRB_READY === true', null, { timeout });
-    await page.click('[data-title-start]', { timeout: 5000 });
+    // NOT 5000. The click's own handler is fast — measured at 2.6 ms, so there
+    // is no hitch under the player's thumb — but the two frames after it cost
+    // 2.1 s compiling the world's shaders under SwiftShader, and Playwright's
+    // action budget covers the page settling around the click, not just the
+    // dispatch. Run several harnesses at once on a loaded box and 5 s is not
+    // enough: `birb-quality.mjs` failed this way roughly one run in three,
+    // reporting a TimeoutError with zero assertions run, which reads exactly
+    // like a product regression and is not one. Share the caller's timeout.
+    await page.click('[data-title-start]', { timeout });
     // A revealed <main> is not a rendered frame. The elapsed clock only
     // advances inside renderFrame, so this waits for real animation frames.
     await page.waitForFunction(
@@ -277,7 +287,13 @@ async function main() {
 
     const { server, port } = await startServer(REPO_ROOT);
     const pagePath = String(args.page || 'index.html').replace(/^\/+/, '');
-    const url = `http://127.0.0.1:${port}/${pagePath}?debug=1`;
+    // --query rather than baking flags into --page: that path gets `?debug=1`
+    // appended verbatim, so `--page index.html?bark=1` produces a SECOND `?`
+    // and `debug` parses as part of the previous value. The flag's own regex
+    // still matched, so the capture looked like it proved the flagged path
+    // while `__BIRB` was absent and every hook silently did nothing.
+    const extra = String(args.query === true ? '' : (args.query || '')).replace(/^[?&]+/, '');
+    const url = `http://127.0.0.1:${port}/${pagePath}?debug=1${extra ? '&' + extra : ''}`;
 
     const browser = await chromium.launch({ executablePath: findChromium(), args: CHROMIUM_ARGS });
     // The iPhone descriptor carries the UA and touch flags the game's own
@@ -363,7 +379,8 @@ async function main() {
     await browser.close();
     server.close();
 
-    console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x${desktop ? ' desktop' : ' mobile'})`);
+    const qualityLabel = stats ? (stats.pinned ? `tier ${stats.tier} (pinned)` : `tier ${stats.tier} (adaptive)`) : 'unknown';
+    console.log(`shot: ${outPath}  (${width}x${height} @${dpr}x${desktop ? ' desktop' : ' mobile'})  [quality: ${qualityLabel}]`);
     if (evalResult !== undefined) console.log(`eval: ${JSON.stringify(evalResult)}`);
     if (afterResult !== undefined) console.log(`after: ${JSON.stringify(afterResult)}`);
     if (stats) console.log('stats: ' + JSON.stringify(stats));

@@ -4,6 +4,7 @@
  * Rings are placed at good flying altitudes around the sphere.
  * Only visible during Ring Rush mode.
  */
+import { worldRng } from './seeded-random.js';
 
 const SPHERE_RADIUS = 120;
 const RING_ALTITUDE_MIN = 12;  // Above sphere surface (scaled for bigger world)
@@ -34,13 +35,21 @@ const RING_CONFIGS = {
  * small sine-wave sway along oscUp so the path weaves. Player sees the next
  * 3-4 rings ahead of them forming a readable course to fly.
  */
-function generateRingPositions(count = RING_COUNT) {
+function generateRingPositions(count = RING_COUNT, environmentId) {
   const positions = [];
+  // Its own named stream — independent of the ground/prop builders in
+  // spherical-world.js, world-shell.js and weather.js. Keyed by
+  // environmentId so a seeded world's forest ring course and canyon ring
+  // course don't share one sequence (this file is the only one of the four
+  // where two differently-named worlds can legitimately build at once —
+  // Ring Rush's rings are environment-specific, unlike the single active
+  // ground/shell/weather build).
+  const rng = worldRng(`collectibles:${environmentId ?? 'default'}`);
 
   // --- Build a random orthonormal basis using pure numbers ---
   // Random unit vector on the sphere (uniform via rejection-free method).
-  const u1 = Math.random();
-  const u2 = Math.random();
+  const u1 = rng();
+  const u2 = rng();
   const z0 = 1 - 2 * u1;
   const r0 = Math.sqrt(Math.max(0, 1 - z0 * z0));
   const phi0 = 2 * Math.PI * u2;
@@ -103,7 +112,7 @@ function generateRingPositions(count = RING_COUNT) {
     const nz = dz / dLen;
 
     const altitude = SPHERE_RADIUS + RING_ALTITUDE_MIN +
-                     Math.random() * (RING_ALTITUDE_MAX - RING_ALTITUDE_MIN);
+                     rng() * (RING_ALTITUDE_MAX - RING_ALTITUDE_MIN);
 
     positions.push({
       x: nx * altitude,
@@ -214,7 +223,7 @@ function createRing(THREE, config) {
  */
 export function createCollectiblesSystem(THREE, scene, environmentId) {
   const config = RING_CONFIGS[environmentId] || RING_CONFIGS.mountain;
-  const positions = generateRingPositions(RING_COUNT);
+  const positions = generateRingPositions(RING_COUNT, environmentId);
 
   const container = new THREE.Group();
   container.name = 'collectibles';

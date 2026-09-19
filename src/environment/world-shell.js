@@ -1,4 +1,5 @@
 import * as THREEImported from "https://esm.sh/three@0.183.2";
+import { worldRng } from "./seeded-random.js";
 
 const DEG2RAD = Math.PI / 180;
 const BASE_SPACE_SCALE = 3.2;
@@ -27,8 +28,15 @@ const DEFAULT_OPTIONS = {
   },
 };
 
+// RNG for the environment shell currently being built. Set once per
+// createWorldShell() call from worldRng('world-shell:<variant>') and reused
+// for every prop this file places — see seeded-random.js for why a single
+// generator per build, not a fresh one per call, is what makes it
+// reproducible. Unseeded (the default) it IS Math.random.
+let _activeRng = Math.random;
+
 function randomInRange(min, max) {
-  return min + Math.random() * (max - min);
+  return min + _activeRng() * (max - min);
 }
 
 function createScatterGroup(THREE, {
@@ -126,15 +134,15 @@ function buildForestEnvironment({ THREE, root, config, propOrigin, terrainScale,
   for (let i = 0; i < islandCount; i += 1) {
     const mesh = new THREE.Mesh(islandGeometry, islandMaterial);
     const angle = (i / islandCount) * Math.PI * 2 + randomInRange(-0.2, 0.2);
-    const radius = terrainScale * (0.85 + Math.random() * 0.2);
+    const radius = terrainScale * (0.85 + _activeRng() * 0.2);
     mesh.position.set(
       Math.cos(angle) * radius,
-      -6.5 * spaceScale - Math.random() * 2.5,
+      -6.5 * spaceScale - _activeRng() * 2.5,
       Math.sin(angle) * radius,
     );
-    const uniformScale = 5.5 + Math.random() * 3.5;
-    mesh.scale.set(uniformScale, 2.8 + Math.random() * 1.4, uniformScale);
-    mesh.rotation.set(-0.18 + Math.random() * 0.36, Math.random() * Math.PI * 2, -0.18 + Math.random() * 0.36);
+    const uniformScale = 5.5 + _activeRng() * 3.5;
+    mesh.scale.set(uniformScale, 2.8 + _activeRng() * 1.4, uniformScale);
+    mesh.rotation.set(-0.18 + _activeRng() * 0.36, _activeRng() * Math.PI * 2, -0.18 + _activeRng() * 0.36);
     islandsGroup.add(mesh);
   }
   islandsGroup.position.y = -10.5;
@@ -233,13 +241,13 @@ function buildForestEnvironment({ THREE, root, config, propOrigin, terrainScale,
   });
   for (let i = 0; i < 4; i += 1) {
     const puff = new THREE.Mesh(
-      new THREE.SphereGeometry(0.44 + Math.random() * 0.28, 14, 12),
+      new THREE.SphereGeometry(0.44 + _activeRng() * 0.28, 14, 12),
       cloudMaterial,
     );
     puff.position.set(
       randomInRange(-0.48, 0.48),
       randomInRange(-0.12, 0.24),
-      i * 0.48 * (Math.random() > 0.5 ? 1 : -1),
+      i * 0.48 * (_activeRng() > 0.5 ? 1 : -1),
     );
     cloudPrototype.add(puff);
   }
@@ -270,14 +278,14 @@ function buildCanyonEnvironment({ THREE, root, propOrigin, terrainScale, spaceSc
   for (let i = 0; i < mesaCount; i += 1) {
     const mesh = new THREE.Mesh(mesaGeometry, mesaMaterial);
     const angle = (i / mesaCount) * Math.PI * 2 + randomInRange(-0.25, 0.25);
-    const radius = terrainScale * (0.78 + Math.random() * 0.22);
+    const radius = terrainScale * (0.78 + _activeRng() * 0.22);
     mesh.position.set(
       Math.cos(angle) * radius,
-      -5.8 * spaceScale - Math.random() * 1.6,
+      -5.8 * spaceScale - _activeRng() * 1.6,
       Math.sin(angle) * radius,
     );
-    const scale = 4.8 + Math.random() * 2.6;
-    mesh.scale.set(scale, 2.1 + Math.random() * 1.1, scale * (0.8 + Math.random() * 0.4));
+    const scale = 4.8 + _activeRng() * 2.6;
+    mesh.scale.set(scale, 2.1 + _activeRng() * 1.1, scale * (0.8 + _activeRng() * 0.4));
     mesh.rotation.y = randomInRange(0, Math.PI * 2);
     mesaGroup.add(mesh);
   }
@@ -613,6 +621,26 @@ function buildMountainEnvironment({ THREE, root, propOrigin, terrainScale, space
   root.add(floatingIce);
 }
 
+// Per-biome colour grade (VISUAL_UPGRADE_BUILD_PLAN §16.10 / perf-grade wave).
+// Tone mapping + exposure sit ABOVE the per-biome light rig above (ambient/
+// key/rim/fill/glow) — the lights are graded per biome already, the curve
+// that rolls them off into the final pixel was not. `bloomThreshold` rides
+// along in the same block because changing the tone curve changes what
+// crosses the bloom knee (ACES pushes highlights toward white and crosses it
+// more readily than Neutral; AgX holds saturation and may cross it less —
+// see index.html's bloom-pass file header and CLAUDE.md's own recorded
+// "0.79 against a 0.78 knee" miss). If a biome's grade needs its own knee to
+// keep rings/gates readable under a different curve, it changes THIS number,
+// not the global default in index.html.
+//
+// INVARIANT: every biome's default below is EXACTLY today's shipping global
+// (renderer.toneMapping = NeutralToneMapping, toneMappingExposure = 1.12,
+// bloomPass threshold = 0.78 — index.html:4268-4269/4438). This block makes
+// the grade a per-biome AUTHORING SURFACE; it does not itself change what
+// ships. Picking real grades per biome is a human decision on a real phone,
+// not this wave's job — see docs/VISUAL_UPGRADE_BUILD_PLAN.md §16.10.
+export const DEFAULT_GRADE = Object.freeze({ tone: 'neutral', exposure: 1.12, bloomThreshold: 0.78 });
+
 const ENVIRONMENT_VARIANTS = [
   {
     id: "forest",
@@ -642,6 +670,11 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0x9fc8ff, intensity: 0.38, position: [1.2, 3.1, -6.2] },
       glow: { color: 0x63d0ff, intensity: 1.35, distance: 12, decay: 2.1, position: [0.3, 1.6, 0.8] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // brighter — lift the canopy out of its own shade.
+    grade: { tone: 'neutral', exposure: 1.2096, bloomThreshold: 0.78 },
     builder: buildForestEnvironment,
   },
   {
@@ -672,6 +705,11 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0xffc9a4, intensity: 0.34, position: [2.2, 3, -7.1] },
       glow: { color: 0xffa05e, intensity: 1.5, distance: 14, decay: 2.6, position: [1, 2.1, 0.4] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // darker — hold the red rock instead of blowing it out.
+    grade: { tone: 'neutral', exposure: 1.008, bloomThreshold: 0.78 },
     builder: buildCanyonEnvironment,
   },
   {
@@ -714,6 +752,11 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0x99c9ff, intensity: 0.4, position: [1.6, 3.4, -6.6] },
       glow: { color: 0x88d1ff, intensity: 1.55, distance: 13, decay: 2.2, position: [0.4, 2, 0.6] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // brightest — snow wants the headroom.
+    grade: { tone: 'neutral', exposure: 1.2544, bloomThreshold: 0.78 },
     builder: buildMountainEnvironment,
   },
   {
@@ -748,6 +791,11 @@ const ENVIRONMENT_VARIANTS = [
       fill: { color: 0x9bd5ff, intensity: 0.45, position: [1.4, 3.8, -7.6] },
       glow: { color: 0x7fd8ff, intensity: 1.7, distance: 15, decay: 2.2, position: [0.2, 2.4, 1.1] },
     },
+    // Default = today's global (see DEFAULT_GRADE above). Untouched until an
+    // owner picks a grade on a real phone.
+    // Chosen by Mentis on a real iPhone, cycling the candidates live in motion —
+    // slightly down — protect the lit windows at dusk.
+    grade: { tone: 'neutral', exposure: 1.0528, bloomThreshold: 0.78 },
     builder: buildCityEnvironment,
   },
 ];
@@ -764,6 +812,8 @@ export function createWorldShell(
 ) {
   const THREE = three ?? THREEImported;
   const definition = getEnvironmentDefinition(variant);
+  // One RNG for this build, drawn once and reused for every prop below.
+  _activeRng = worldRng(`world-shell:${definition.id}`);
   const spaceScale = definition.spaceScale ?? BASE_SPACE_SCALE;
   const propSpread = definition.propSpread ?? 6.2;
   const terrainScale = definition.terrainScale ?? 110;
@@ -921,12 +971,12 @@ export function createWorldShell(
   const anchors = new THREE.InstancedMesh(anchorGeometry, anchorMaterial, anchorCount);
   const dummy = new THREE.Object3D();
   for (let i = 0; i < anchorCount; i += 1) {
-    const radius = (5 + Math.random() * 12) * spaceScale;
-    const angle = Math.random() * Math.PI * 2;
-    const height = -0.2 + Math.random() * 3.8;
+    const radius = (5 + _activeRng() * 12) * spaceScale;
+    const angle = _activeRng() * Math.PI * 2;
+    const height = -0.2 + _activeRng() * 3.8;
     dummy.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
-    dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    const scale = 0.6 + Math.random() * 0.9;
+    dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
+    const scale = 0.6 + _activeRng() * 0.9;
     dummy.scale.set(scale, scale, scale);
     dummy.updateMatrix();
     anchors.setMatrixAt(i, dummy.matrix);

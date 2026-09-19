@@ -108,6 +108,12 @@ export class BirdVisual {
         this.modelOffset.setFromUnitVectors(modelForward, targetForward);
     }
 
+    /** The cosmetic bank currently applied to the MODEL, radians. Read by probes. */
+    get bank() { return this._bank; }
+
+    /** The cosmetic pitch tilt currently applied to the MODEL, radians. */
+    get pitchTilt() { return this._pitchTilt; }
+
     /**
      * Reset visual state
      */

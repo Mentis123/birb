@@ -42,6 +42,8 @@
  *  - box: how large a volume is kept populated around the camera. Bigger
  *    boxes need more particles for the same density.
  */
+import { worldRng } from './seeded-random.js';
+
 export const WEATHER_PROFILES = {
   forest: {
     // Pollen and midges in warm air: barely falls, wanders, catches the light.
@@ -159,11 +161,19 @@ const FRAG = `
 
 /**
  * @param profile one of WEATHER_PROFILES
- * @returns { points, update(seconds, cameraPos, localUp), setDensity(0..1), dispose() }
+ * @returns { points, update(seconds, cameraPos, localUp), setDensity(0..2), dispose() }
  */
-export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
+export function createWeather(THREE, { profile, count, pixelRatio = 1, id } = {}) {
   const p = profile || WEATHER_PROFILES.forest;
   const total = Math.max(1, Math.floor(count ?? p.count));
+  // Its own named stream (see seeded-random.js) — independent of the ground
+  // builders in spherical-world.js / world-shell.js and of collectibles.js,
+  // so a seeded world's weather is reproducible without being coupled to
+  // how many props any other subsystem happened to place. `id` lets a
+  // future caller distinguish per-biome weather instances; unset callers
+  // (the only ones today) all share one 'weather' stream, which is still a
+  // fully independent subsystem stream on its own.
+  const rng = worldRng(`weather:${id ?? 'default'}`);
 
   const geometry = new THREE.BufferGeometry();
   // position is required by Three's Points, but every coordinate this shader
@@ -173,10 +183,10 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(total * 3), 3));
   const seeds = new Float32Array(total * 4);
   for (let i = 0; i < total; i++) {
-    seeds[i * 4] = Math.random();
-    seeds[i * 4 + 1] = Math.random();
-    seeds[i * 4 + 2] = Math.random();
-    seeds[i * 4 + 3] = Math.random();
+    seeds[i * 4] = rng();
+    seeds[i * 4 + 1] = rng();
+    seeds[i * 4 + 2] = rng();
+    seeds[i * 4 + 3] = rng();
   }
   geometry.setAttribute('aSeed', new THREE.Float32BufferAttribute(seeds, 4));
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
@@ -220,6 +230,8 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
   const _fwd = new THREE.Vector3();
   const _ref = new THREE.Vector3();
 
+  let _currentDensity = 1;
+
   return {
     points,
     profile: p,
@@ -245,14 +257,28 @@ export function createWeather(THREE, { profile, count, pixelRatio = 1 } = {}) {
       u.uFwd.value.copy(_fwd);
     },
 
-    /** 0 hides the weather entirely; 1 is the profile's own opacity. */
+    /**
+     * 0 hides the weather entirely; 1 is the profile's own opacity.
+     * (Wave 4 expansion to 0..2 deferred pending measured need for more particles.
+     * Currently weather/mist cannot exceed 1.0 without pre-allocating more geometry;
+     * decorativeDensity/wind is the available 0..2 scalar instead.)
+     */
     setDensity(amount) {
       const a = Math.max(0, Math.min(1, amount));
+      _currentDensity = a;
       material.uniforms.uOpacity.value = p.opacity * a;
       points.visible = a > 0.01;
     },
+    /**
+     * Live read of the effective density applied by setDensity().
+     * The dev panel's weather-density slider needs this to show
+     * "requested 0.4" even when a visibility floor might hide it.
+     */
+    getDensity() { return _currentDensity; },
 
     setPixelRatio(ratio) { material.uniforms.uPixelRatio.value = ratio; },
+    /** Live read of the uniform actually bound to the shader right now. */
+    getPixelRatio() { return material.uniforms.uPixelRatio.value; },
 
     dispose() { geometry.dispose(); material.dispose(); },
   };

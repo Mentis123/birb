@@ -3,9 +3,48 @@
 // release; the new SW will precache fresh shell assets and evict the old
 // caches on activate.
 
-// Bumped for the /grokrogue bypass below: the version change evicts CORE_CACHE
-// on activate so the new sibling route cannot inherit stale shell handling.
-const CACHE_VERSION = 'v42-2026-09-08-ground-and-ribbons';
+// Bumped for the Wave 2 perf-workbench modules added to CORE_ASSETS below
+// (frame-stats.js, gpu-timer.js, quality-settings.js, dev-quality-panel.js,
+// dev-gesture.js). CONTRACT §8.3/8.4: a new src/ module absent from
+// CORE_ASSETS is a blank page offline, and this MUST equal index.html's
+// BIRB_BUILD literal in the same commit — tests/build-identity.test.js
+// (P2.1f) enforces both halves.
+//
+// src/environment/seeded-random.js (P2R.5, the seeded world RNG) was added
+// to CORE_ASSETS below without a version bump here: this task's brief is
+// explicit that index.html is not to be touched, and SW-2 requires this
+// literal to equal index.html's BIRB_BUILD exactly, so bumping one without
+// the other would fail that check rather than pass it. Whoever next edits
+// index.html should bump CACHE_VERSION then, picking up this file too.
+// Bumped for the four new authored surfaces wired this session (canyon
+// sandstone spires, mountain granite peaks, mountain snow caps, city
+// concrete facades). None of them join CORE_ASSETS below -- see the note
+// beside stone_rock's own entry for why the same reasoning applies to all
+// four, restated per-file there.
+//
+// Bumped again: forest_ground_albedo.png joins CORE_ASSETS below, the same
+// day the triplanar ground overlay that consumes it actually got wired (it
+// shipped once already with nothing calling it -- `?ground=1` was a verified
+// no-op, pixel-identical to `?ground=0`). It is the forest's DEFAULT ground
+// texture now, same promotion bark got when it became the shipping default.
+//
+// NOTE this widens a PRE-EXISTING mismatch, not a new one: this literal is
+// supposed to equal index.html's BIRB_BUILD (tests/build-identity.test.js
+// SW-2 enforces both halves), and the two were already out of sync (v57 vs
+// index.html's 'v54-2026-09-11-instanced-bark') before this edit, because a
+// concurrent workflow owns index.html and this one is forbidden from
+// touching it. SW-2 is gated behind BIRB_PERF_IMPL, unset by default, so it
+// is skipped rather than failing either way -- but it is a real, visible
+// divergence for whoever next edits index.html to reconcile.
+//
+// Bumped for flight v2 (`?flight=v2`, docs/realism/FLIGHT_V2_PLAN.md):
+// src/flight/bird-flight-v2.js joins CORE_ASSETS below. index.html imports it
+// only when the flag is set, but a flagged boot on a phone with no signal is
+// exactly the case CORE_ASSETS exists for, and SW-3 (build-identity.test.js)
+// requires every src/ module to be listed regardless. index.html's BIRB_BUILD
+// is bumped to the same literal in the same change, which closes the v57-vs-v54
+// divergence the note above records.
+const CACHE_VERSION = 'v73-2026-09-14-walk-slope';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -29,9 +68,48 @@ const CORE_ASSETS = [
   './icons/apple-touch-icon.png',
   './splash.jpg',
   './info.jpg',
-  // NOT precached (install-weight diet, ~7.3 MB saved):
+  // The FOREST sky only. The authored panorama is the shipping default now,
+  // and forest is the biome a cold start always builds, so without this the
+  // first offline load shows the flat gradient with no warning -- the same
+  // trap this list's own note below describes for bark. The other three are
+  // 1.4 MB of install weight for biomes most sessions never visit, and
+  // cacheFirst picks each up the first time its biome is opened online.
+  './assets/env/forest_sky.png',
+  // Authored bark, promoted the day it became the shipping default — which is
+  // what the note that used to sit here said to do. 1.0 MB, and it buys the
+  // most-looked-at surface in the game: every trunk in the default biome.
+  './assets/textures/bark_pine_albedo.png',
+  './assets/textures/feather_contour_albedo.png',
+  './assets/textures/feather_contour_normal.png',
+  './assets/textures/feather_vane_albedo.png',
+  './assets/textures/feather_vane_normal.png',
+  './assets/textures/bark_pine_normal.png',
+  // The forest ground's triplanar overlay, same promotion. It is now wired
+  // (?ground=0 opts out) and forest is the biome a cold start always builds.
+  // The NORMAL is deliberately absent: ground-detail.js's overlay declares
+  // one uGroundMap sampler and no normal slot, so forest_ground_normal.png is
+  // never fetched by anything and would just be 1.33 MB of dead weight here.
+  './assets/textures/forest_ground_albedo.png',
+  // NOT precached (install-weight diet):
+  // - ./assets/env/{canyons,mountain,city}_sky.png (1.4 MB) — see above.
   // - ./birb.glb (1.7 MB) — only loads behind the ?glb=1 A/B flag; the
   //   runtime cache picks it up on demand for whoever uses that flag.
+  // - ./assets/textures/stone_rock_*.png (1.0 MB) — the arch is ONE object on
+  //   a 754-unit planet, so a megabyte of install weight for it is the wrong
+  //   trade where bark's was the right one. Offline it falls back to the
+  //   procedural pale limestone, which is a degradation and not a defect:
+  //   every applier now leaves the procedural material standing until its
+  //   images decode, so "no texture" renders the old material rather than a
+  //   black slab.
+  // - ./assets/textures/{canyon_sandstone,mountain_granite,mountain_snow,
+  //   city_concrete}_{albedo,normal}.png (1.0 MB each, 4.0 MB together) —
+  //   same reasoning as stone_rock above, generalised: none of these four are
+  //   props in the FOREST biome (the one a cold start always builds), so
+  //   none of them belong in the install-weight budget the way bark does.
+  //   `cacheFirst` (see the fetch handler below) picks each one up the first
+  //   time a player actually opens that biome online, and every applier
+  //   leaves its procedural material standing until the images decode --
+  //   the same degrade-not-fail path stone_rock already proved.
   // - ./sound/ambient-mountain.mp3 (5.6 MB) — setAmbientMusic deliberately
   //   pins the forest track (users asked for the original back), so the
   //   mountain track is currently unplayed. Re-add here if track switching
@@ -41,13 +119,22 @@ const CORE_ASSETS = [
   './sound/explosion.mp3',
   './sound/ring-collect.wav',
   './src/flight/bird-flight.js',
+  // The v2 controller (`?flight=v2`). Listed even though it is a FLAGGED,
+  // conditional import: a module reachable from any boot path and absent here
+  // dies on the first offline launch, and it is 11 KB.
+  './src/flight/bird-flight-v2.js',
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
+  './src/flight/aerobatics.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
+  './src/game/frame-stats.js',
+  './src/game/gpu-timer.js',
+  './src/game/quality-settings.js',
+  './src/game/perf-constants.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
   './src/camera/fpv-camera.js',
@@ -56,9 +143,15 @@ const CORE_ASSETS = [
   './src/controls/thumbstick.js',
   './src/controls/virtual-thumbstick.js',
   './src/environment/world-shell.js',
+  './src/environment/authored-textures.js',
+  './src/environment/sky-environment.js',
+  // Pre-existing gap, caught by SW-3 when authored-textures.js was added: this
+  // is dynamically imported by the dev panel's grade cycler (index.html:3451),
+  // so offline it would have thrown a failed import rather than a blank page —
+  // quieter than the /AR failure, same class.
+  './src/environment/grade-candidates.js',
   './src/environment/spherical-world.js',
   './src/environment/landmark-valley.js',
-  './src/environment/slalom-run.js',
   './src/environment/sky-dome.js',
   './src/environment/sun-cycle.js',
   './src/environment/water.js',
@@ -71,7 +164,13 @@ const CORE_ASSETS = [
   './src/nesting/nest-occlusion.js',
   './src/environment/collectibles.js',
   './src/environment/collider-grid.js',
+  './src/environment/seeded-random.js',
   './src/ui/minimap.js',
+  './src/ui/dev-quality-panel.js',
+  './src/ui/dev-gesture.js',
+  // The panel's Flags tab table; imported by dev-quality-panel.js on the
+  // boot path, so an offline launch without it dies on a dynamic import.
+  './src/ui/boot-flags.js',
   './src/nesting/nest-points.js',
   './src/nesting/nesting-system.js',
   './src/nesting/aim-rig.js',
@@ -172,8 +271,22 @@ self.addEventListener('fetch', (event) => {
   // instantly (fast, offline-safe) but always re-fetch in the background so
   // the NEXT load runs the freshest code even without a version bump. This is
   // the self-healing layer that stops iOS pinning old module code.
+  // Modules go NETWORK FIRST, like the shell, and this is a correctness rule,
+  // not a speed preference. The shell (a navigation) is networkFirst; the
+  // modules were stale-while-revalidate, which serves whatever the PREVIOUS
+  // build's cache holds and refreshes it afterwards. So the first load after
+  // every deploy was a NEW index.html driving OLD modules: on 2026-09-14 the
+  // owner's console showed `pionusPlumageRequested is not a function` at the
+  // title screen — index.html asking visual-style.js for an export the cached
+  // copy predated — and the module script died at top level, before Tap to
+  // Start. The page only heals when the new worker finishes installing and
+  // the update banner reloads it, seconds later. Fetching modules from the
+  // network whenever the network answers makes shell and modules come from
+  // the SAME deploy by construction (Vercel serves them with must-revalidate,
+  // so this is an If-None-Match round trip, not a re-download), and offline
+  // both fall back to the one core cache, which is coherent with itself.
   if (sameOrigin && url.pathname.endsWith('.js')) {
-    event.respondWith(staleWhileRevalidate(event));
+    event.respondWith(networkFirstModule(request));
     return;
   }
 
@@ -183,26 +296,19 @@ self.addEventListener('fetch', (event) => {
 // Serve from cache immediately, refresh the cache in the background. Heavy
 // media stays on cacheFirst — only code goes through here, so the extra
 // background fetches are small.
-async function staleWhileRevalidate(event) {
-  const { request } = event;
-  const cache = await caches.open(CORE_CACHE);
-  const cached = await cache.match(request, { ignoreSearch: false });
-  const network = fetch(request)
-    .then((response) => {
-      if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => {});
-      }
-      return response;
-    })
-    .catch(() => null);
-
-  if (cached) {
-    // Keep the worker alive long enough to finish the background refresh.
-    event.waitUntil(network);
-    return cached;
+async function networkFirstModule(request) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      const cache = await caches.open(CORE_CACHE);
+      cache.put(request, response.clone()).catch(() => {});
+    }
+    return response;
+  } catch (err) {
+    const cached = await caches.match(request, { ignoreSearch: false });
+    if (cached) return cached;
+    return new Response('', { status: 504, statusText: 'Offline' });
   }
-  const fresh = await network;
-  return fresh || new Response('', { status: 504, statusText: 'Offline' });
 }
 
 async function networkFirst(request) {

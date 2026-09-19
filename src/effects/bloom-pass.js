@@ -20,6 +20,41 @@
  *
  * Zero dependencies, in keeping with the rest of the repo. Everything is
  * pre-allocated in the constructor; `render()` allocates nothing.
+ *
+ * ---------------------------------------------------------------------------
+ * SCENE-TARGET MSAA (perf-wave-3b, "antialiasing on mobile")
+ * ---------------------------------------------------------------------------
+ * `index.html`'s WebGL context is created `antialias: !isMobile` — a
+ * context-creation flag that cannot be toggled after the fact, so it cannot
+ * be a live panel lever. But this pass never draws the scene straight to
+ * that context: it draws to `sceneTarget`, an offscreen `WebGLRenderTarget`,
+ * first. `WebGLRenderTarget` accepts a `samples` option, and — verified
+ * against the exact pinned CDN build (three@0.183.2) with the exact target
+ * options used below (RGBA HalfFloatType, depthBuffer, no stencil) under a
+ * real (SwiftShader/ANGLE) WebGL2 context — sampling that target's texture
+ * from a later full-screen pass (exactly what `brightMaterial`/
+ * `compositeMaterial` do) triggers an automatic multisample resolve with NO
+ * extra draw call and NO extra pass: a probe scanline across a rasterised
+ * diagonal edge went from 0 blended pixels at `samples: 0` to 2 blended
+ * pixels at `samples: 2` and `samples: 4`, with zero console warnings.
+ * That is real hardware MSAA on the one pass that matters (the scene pass,
+ * where every world edge is drawn) without recreating the WebGL context —
+ * the third route the task brief asked to weigh, and it beats both an
+ * FXAA-style resolve (which blurs; PERFORMANCE_REALISM_PLAN Experiment 2's
+ * own caveat) and a full context rebuild (which tears down every material,
+ * texture and render target mid-session).
+ *
+ * `samples` defaults to 0 — identical to today's plain `WebGLRenderTarget`,
+ * so a page that never calls `setSamples` is byte-for-byte unchanged.
+ * `setSamples(n)` clamps to `renderer.capabilities.maxSamples` AND requires
+ * `EXT_color_buffer_float` to be present (probed once, here, not assumed —
+ * `RGBA16F` multisample renderbuffers need it even under WebGL2, and this
+ * repo has shipped a capability probe nobody checked the return value of
+ * before). A device lacking either reports `samples` back as 0 for any
+ * request — an honest requested-vs-effective desync per CONTRACT §0, never
+ * a console warning and never a broken frame. Only `sceneTarget` gets
+ * `samples`; `blurA`/`blurB`/`rayTarget` stay single-sample — they are
+ * half-res full-screen quads with no geometric edges to smooth.
  */
 
 const FULLSCREEN_VERT = `
@@ -192,16 +227,52 @@ const COMPOSITE_FRAG = `
     float v = 1.0 - dot(d, d) * (uVignette + uSpeed * 0.85);
     gl_FragColor = vec4(c * v, 1.0);
     // ── The output transform, and it is not optional ─────────────────────
-    // The scene target holds LINEAR values: rendering into a render target
-    // forces linearToOutputTexel to identity, so every material writes
-    // tone-mapped linear and no material encodes. Writing that straight to an
-    // sRGB canvas is a gamma the display then applies twice — measured on the
-    // shipped build at mean 90 against 146 for the same frame with the pass
-    // switched off. The whole game was rendering dark whenever bloom ran, and
-    // it read as a moody grade rather than as a bug.
+    // The scene target holds RAW LINEAR values, and BOTH halves of the output
+    // transform have to happen here.
+    //
+    // The comment that used to sit here said "every material writes tone-mapped
+    // linear". That was false, and it hid the second half of this bug for as
+    // long as the pass has run. Three forces toneMapping = NoToneMapping
+    // whenever the render target is non-null and not XR, so the scene materials
+    // are compiled WITHOUT the tone-mapping chunk: renderer.toneMapping and
+    // toneMappingExposure never reach a single program that draws the world.
+    // The colourspace half was found and fixed; the tone half was asserted to be
+    // handled and was not.
+    //
+    // Measured on the shipped build, mean frame pixel over a 4.4x exposure sweep
+    // (0.5 -> 2.2): tier 0, where this pass runs, moved 1.89/255 — noise. Tier 1,
+    // where the game renders straight to the canvas and Three applies the curve
+    // normally, moved 72.03/255. So the tone curve was inert on the shipping path
+    // and live the moment the adaptive tier shed bloom, which also means the
+    // frame visibly changed character at the tier boundary.
+    //
+    // <tonemapping_fragment> is injected by Three for a material drawn to the
+    // CANVAS (null target), which is exactly what this composite is — so the
+    // curve the renderer is set to is the curve applied, and it recompiles when
+    // that enum changes because toneMapping is part of the program cache key.
+    #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `;
+
+/**
+ * Floor a render-target dimension into [1, limit], rejecting non-finite input.
+ *
+ * Pure and exported because it is the whole of the guard and the only part
+ * worth a test: building a fake THREE complete enough to construct the pass
+ * would test the fake.
+ *
+ * `Math.max(1, NaN)` is NaN, not 1 -- which is why the obvious clamp is not
+ * one. A non-finite size reaches GL unchanged, and a momentarily undefined
+ * `devicePixelRatio` (a device-toolbar toggle will do it) is enough to
+ * produce one from ordinary-looking inputs.
+ */
+export function clampTargetSize(value, limit) {
+  const cap = Number.isFinite(limit) && limit >= 1 ? Math.floor(limit) : 4096;
+  const n = Math.floor(value);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return n > cap ? cap : n;
+}
 
 export function createBloomPass(THREE, renderer, {
   threshold = 0.72,
@@ -217,6 +288,11 @@ export function createBloomPass(THREE, renderer, {
   rayKnee = 0.42,
   // Half the canvas in each axis, so a quarter of the pixels per blur tap.
   downscale = 2,
+  // Scene-target MSAA. 0 is today's plain single-sample target — the
+  // shipping default on every platform. Never pass non-zero here from a
+  // constructor call; raise it live via setSamples() from a panel request
+  // only (see the file-header note above).
+  samples = 0,
 } = {}) {
   const size = renderer.getSize(new THREE.Vector2());
   const pixelRatio = renderer.getPixelRatio();
@@ -229,7 +305,36 @@ export function createBloomPass(THREE, renderer, {
     stencilBuffer: false,
   };
 
-  const sceneTarget = new THREE.WebGLRenderTarget(1, 1, targetOptions);
+  // Cached inputs of the last setSize() call, so a live setDownscale(n) can
+  // re-derive the blur/ray target dimensions without the caller re-supplying
+  // width/height/ratio. `downscale` itself becomes mutable state here (it was
+  // constructor-only before): the closed-over `downscale` param is shadowed
+  // by this cache's own field the moment setSize/setDownscale run.
+  let lastWidth = 1;
+  let lastHeight = 1;
+  let lastRatio = 1;
+  let hasSizeBeenSet = false;
+  let currentDownscale = downscale;
+
+  // Probed ONCE, not assumed: RGBA16F multisample renderbuffers need
+  // EXT_color_buffer_float even on a WebGL2 context, and this repo has
+  // shipped a capability probe nobody checked before (the
+  // hardwareConcurrency/bloom trap CLAUDE.md records). A device missing
+  // either half of this reports every setSamples() request back as 0.
+  const gl = renderer.getContext();
+  const msaaSupported = !!(
+    renderer.capabilities.isWebGL2 &&
+    renderer.capabilities.maxSamples > 0 &&
+    gl.getExtension('EXT_color_buffer_float')
+  );
+
+  // `sceneTarget` is `let`, not `const`: raising samples recreates it
+  // (WebGLRenderTarget's multisample renderbuffer is allocated at
+  // construction, not re-derivable by mutating `.samples` after the fact),
+  // so every closure below that needs the CURRENT target reads this binding
+  // rather than capturing the original object.
+  let currentSamples = msaaSupported ? Math.max(0, Math.min(Math.floor(samples) || 0, renderer.capabilities.maxSamples)) : 0;
+  let sceneTarget = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, samples: currentSamples });
   // The blur targets need no depth buffer at all; they are full-screen
   // triangle passes over a texture.
   const blurA = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, depthBuffer: false });
@@ -313,17 +418,77 @@ export function createBloomPass(THREE, renderer, {
   quadMesh.frustumCulled = false;
   quadScene.add(quadMesh);
 
+  // The GL limit these targets must respect, read once. `sceneTarget` carries
+  // a depth RENDERBUFFER, and a renderbuffer over MAX_RENDERBUFFER_SIZE fails
+  // allocation outright -- leaving the attachment at its previous 0x0 size, so
+  // every draw into that framebuffer then fails too. That is the exact pair
+  // seen in the wild:
+  //   GL_INVALID_VALUE: glRenderbufferStorage: Desired resource size is
+  //     greater than max renderbuffer size
+  //   GL_INVALID_FRAMEBUFFER_OPERATION: glClear/glDrawElements: Framebuffer is
+  //     incomplete: Attachment has zero size
+  // reported on a real browser and NOT reproducible in this repo's harness
+  // (SwiftShader, MAX_RENDERBUFFER_SIZE 8192, largest request ever measured
+  // 612x1258, zero GL errors). So this is a guard, not a diagnosis: it makes
+  // the failure impossible and, when it fires, prints the numbers that say
+  // which input was wrong.
+  const glLimit = (() => {
+    try {
+      const ctx = renderer.getContext();
+      return Math.max(1, Math.min(
+        ctx.getParameter(ctx.MAX_RENDERBUFFER_SIZE) || 4096,
+        ctx.getParameter(ctx.MAX_TEXTURE_SIZE) || 4096,
+      ));
+    } catch { return 4096; }
+  })();
+  let limitWarned = false;
+
+  function safeSize(value, label) {
+    const n = clampTargetSize(value, glLimit);
+    if (n !== Math.floor(value) && !limitWarned) {
+      limitWarned = true;
+      console.warn(`[bloom] ${label} came out ${value}; clamped to ${n}. `
+        + `size=${lastWidth}x${lastHeight} ratio=${lastRatio} limit=${glLimit}`);
+    }
+    return n;
+  }
+
   function setSize(width, height, ratio) {
-    const w = Math.max(1, Math.floor(width * ratio));
-    const h = Math.max(1, Math.floor(height * ratio));
+    lastWidth = width;
+    lastHeight = height;
+    lastRatio = ratio;
+    hasSizeBeenSet = true;
+    const w = safeSize(width * ratio, 'scene width');
+    const h = safeSize(height * ratio, 'scene height');
     sceneTarget.setSize(w, h);
-    const bw = Math.max(1, Math.floor(w / downscale));
-    const bh = Math.max(1, Math.floor(h / downscale));
+    const bw = safeSize(w / currentDownscale, 'blur width');
+    const bh = safeSize(h / currentDownscale, 'blur height');
     blurA.setSize(bw, bh);
     blurB.setSize(bw, bh);
     rayTarget.setSize(bw, bh);
   }
   setSize(size.x, size.y, pixelRatio);
+
+  /**
+   * Recreate `sceneTarget` at a new sample count. A `WebGLRenderTarget`'s
+   * multisample renderbuffer is allocated once, at construction, from its
+   * `samples` option — there is no live setter that re-derives it, unlike
+   * `downscale` above — so a sample-count change disposes the old target
+   * and builds a new one, then re-runs `setSize` against the cached last
+   * width/height/ratio so the new target lands at the SAME dimensions the
+   * old one had, not 1x1. Every closure that reads `tScene` off the old
+   * target's texture (brightMaterial, compositeMaterial) is repointed here;
+   * `render()` and `getSizes()` close over the `sceneTarget` BINDING, not a
+   * snapshot, so they pick the new object up with no further change.
+   */
+  function recreateSceneTarget(nextSamples) {
+    sceneTarget.dispose();
+    sceneTarget = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, samples: nextSamples });
+    sceneTarget.texture.colorSpace = THREE.NoColorSpace;
+    brightMaterial.uniforms.tScene.value = sceneTarget.texture;
+    compositeMaterial.uniforms.tScene.value = sceneTarget.texture;
+    if (hasSizeBeenSet) setSize(lastWidth, lastHeight, lastRatio);
+  }
 
   // True while the ray buffer holds shafts that must be cleared once the sun
   // leaves the frame.
@@ -340,15 +505,87 @@ export function createBloomPass(THREE, renderer, {
 
   return {
     get enabled() { return true; },
-    sceneTarget,
+    // Getter, not a plain data property: `sceneTarget` (the closure
+    // variable) is reassigned by recreateSceneTarget() whenever setSamples
+    // changes the sample count, and a snapshot taken here at construction
+    // time would go stale the moment that happens.
+    get sceneTarget() { return sceneTarget; },
     frameStats,
 
     setSize,
 
+    /**
+     * Live sizes of every offscreen target, read from the targets
+     * themselves — never recomputed from `downscale` and the canvas size.
+     * `downscale` is reported alongside as the divisor actually applied by
+     * the last `setSize()` call, not the constructor option in isolation.
+     * `sceneSamples` is `sceneTarget.samples` itself — the EFFECTIVE sample
+     * count the live render target actually holds, already clamped against
+     * `renderer.capabilities.maxSamples` and gated on `msaaSupported` by
+     * `setSamples()` below, never recomputed from what was requested.
+     */
+    getSizes() {
+      return {
+        sceneTarget: { width: sceneTarget.width, height: sceneTarget.height },
+        blurA: { width: blurA.width, height: blurA.height },
+        blurB: { width: blurB.width, height: blurB.height },
+        rayTarget: { width: rayTarget.width, height: rayTarget.height },
+        downscale: currentDownscale,
+        sceneSamples: sceneTarget.samples,
+      };
+    },
+
+    /**
+     * Raise or lower the scene pass's hardware MSAA sample count live (see
+     * the file-header note). 0 disables it — the shipping default, and
+     * always the effective result on a device that lacks `EXT_color_buffer_
+     * float` or WebGL2, no matter what is requested; `getSizes().
+     * sceneSamples` / `getSamples()` report the true effective value so a
+     * caller can see that clamp happen rather than assume the request took.
+     */
+    setSamples(n) {
+      const requested = Math.max(0, Math.floor(n) || 0);
+      const next = msaaSupported ? Math.min(requested, renderer.capabilities.maxSamples) : 0;
+      if (next === currentSamples) return;
+      currentSamples = next;
+      recreateSceneTarget(next);
+    },
+    getSamples() { return sceneTarget.samples; },
+
+    /**
+     * Change the post-resolution divisor live. `downscale` used to be
+     * constructor-only because `setSize(w,h,ratio)` stored nothing — there
+     * was no way to re-derive the half-res target dimensions from a new
+     * divisor alone. Now it re-runs `setSize` against the cached last
+     * width/height/ratio, exactly as if the caller had called `setSize`
+     * again with the new divisor already in effect.
+     *
+     * blurA, blurB and rayTarget keep sharing one divisor here (unchanged
+     * from before): CONTRACT does not ask for them to diverge, and they are
+     * numerically identical today only as a consequence of that shared
+     * derivation, not because the shader maths requires it.
+     */
+    setDownscale(n) {
+      // Guard against setDownscale being called before the first setSize
+      if (!hasSizeBeenSet) return;
+
+      const next = Math.max(1, Math.floor(n) || 1);
+      if (next === currentDownscale) return;
+      currentDownscale = next;
+      setSize(lastWidth, lastHeight, lastRatio);
+    },
+
     setStrength(value) { compositeMaterial.uniforms.uStrength.value = value; },
+    getStrength() { return compositeMaterial.uniforms.uStrength.value; },
     setThreshold(value) { brightMaterial.uniforms.uThreshold.value = value; },
     setVignette(value) { compositeMaterial.uniforms.uVignette.value = value; },
     setRays(value) { compositeMaterial.uniforms.uRays.value = Math.max(0, value || 0); },
+    /**
+     * Live read of the composite's own shaft-strength uniform (P2.3b — the
+     * dev panel's shafts toggle needs an EFFECTIVE readback, never a mirror
+     * of what it last requested, per CONTRACT §0 "effective").
+     */
+    getRays() { return compositeMaterial.uniforms.uRays.value; },
     /**
      * Where the sun is on screen, in UV, and how much of the shaft effect to
      * apply. The caller owns this because only it knows where the sun is; the
@@ -370,8 +607,17 @@ export function createBloomPass(THREE, renderer, {
 
     /**
      * Render the scene through the pass. Replaces `renderer.render(scene, camera)`.
+     *
+     * `onRenderPass`, if given, is called with a boolean (true only for the
+     * scene pass) immediately after EVERY real renderer.render() call this
+     * method makes — while renderer.info.render still holds that call's own
+     * numbers, before the next render() resets them. It exists so a caller
+     * can own a whole-frame accumulator without this pass owning it: see
+     * index.html's `frameRenderTotals` / `tallyRenderPass`. Purely an
+     * observability hook — it never touches rendering state itself.
      */
-    render(scene, camera) {
+    render(scene, camera, onRenderPass) {
+      const tally = typeof onRenderPass === 'function' ? onRenderPass : null;
       // The world, into an offscreen buffer at full resolution.
       renderer.setRenderTarget(sceneTarget);
       renderer.clear();
@@ -384,10 +630,12 @@ export function createBloomPass(THREE, renderer, {
       // between the scene and the post passes, and that is the real number.
       frameStats.calls = renderer.info.render.calls;
       frameStats.triangles = renderer.info.render.triangles;
+      if (tally) tally(true);
 
       // Bright pass and downsample, half res. This buffer is the input to
       // BOTH the bloom blur and the light shafts.
       drawWith(brightMaterial, blurA);
+      if (tally) tally(false);
 
       // Light shafts, from the un-blurred bright buffer. Skipped outright
       // when the sun is off screen, which is most of the time — the cost is
@@ -403,6 +651,7 @@ export function createBloomPass(THREE, renderer, {
       if (raysOn || raysDirty) {
         raysMaterial.uniforms.tBright.value = blurA.texture;
         drawWith(raysMaterial, rayTarget);
+        if (tally) tally(false);
         if (raysOn) {
           // The dither that fixed the ghosting leaves its own signature: a
           // fine diagonal weave, chunky because the buffer is half resolution
@@ -413,9 +662,11 @@ export function createBloomPass(THREE, renderer, {
           blurMaterial.uniforms.tSource.value = rayTarget.texture;
           blurMaterial.uniforms.uDirection.value.set(1 / rayTarget.width, 0);
           drawWith(blurMaterial, blurB);
+          if (tally) tally(false);
           blurMaterial.uniforms.tSource.value = blurB.texture;
           blurMaterial.uniforms.uDirection.value.set(0, 1 / rayTarget.height);
           drawWith(blurMaterial, rayTarget);
+          if (tally) tally(false);
         }
         raysDirty = raysOn;
       }
@@ -424,13 +675,16 @@ export function createBloomPass(THREE, renderer, {
       blurMaterial.uniforms.tSource.value = blurA.texture;
       blurMaterial.uniforms.uDirection.value.set(1 / blurA.width, 0);
       drawWith(blurMaterial, blurB);
+      if (tally) tally(false);
       blurMaterial.uniforms.tSource.value = blurB.texture;
       blurMaterial.uniforms.uDirection.value.set(0, 1 / blurA.height);
       drawWith(blurMaterial, blurA);
+      if (tally) tally(false);
 
       // Composite plus vignette, the one full-resolution pass.
       compositeMaterial.uniforms.tBloom.value = blurA.texture;
       drawWith(compositeMaterial, null);
+      if (tally) tally(false);
     },
 
     dispose() {
