@@ -68,6 +68,17 @@ final class SculptMTKView: MTKView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Let go of a touch we are no longer following.
+        //
+        // `editingTouch` is weak, and a `UITouch` whose sequence has finished
+        // can be recycled or released; a touch cancelled while the main thread
+        // was blocked may never deliver its end here at all. Either way the
+        // stale value used to block every later stroke, because the guard
+        // below would return and nothing would ever clear it. The editor
+        // closes the stranded stroke when the next `.began` arrives.
+        if let current = editingTouch, current.phase == .ended || current.phase == .cancelled {
+            editingTouch = nil
+        }
         guard editingTouch == nil else { return }
         guard let touch = touches.first(where: { accepts($0) }) else { return }
         editingTouch = touch
@@ -231,6 +242,12 @@ final class NavigationGesture: UIGestureRecognizer {
         tracked.removeAll { touches.contains($0) }
         guard tracked.isEmpty else { return rebase(announcePivot: false) }
 
+        // A recogniser that has already failed, ended or been cancelled must
+        // not be written again — UIKit only allows a state change out of
+        // `.possible`, `.began` or `.changed`, and the yielded case reaches
+        // here already `.failed`.
+        guard state == .possible || state == .began || state == .changed else { return }
+
         if moved {
             // Hand the leftover velocity over, which the editor decays. A
             // turntable that stops dead on lift is the clearest sign a viewport
@@ -240,10 +257,8 @@ final class NavigationGesture: UIGestureRecognizer {
                               Double(velocity.y) / Double(max(1, view.bounds.height))))
             }
             state = cancelled ? .cancelled : .ended
-        } else if state == .possible {
-            state = .failed
         } else {
-            state = cancelled ? .cancelled : .ended
+            state = .failed
         }
     }
 
@@ -333,6 +348,10 @@ struct SculptView: UIViewRepresentable {
             let viewport = Vec2(Double(view.drawableSize.width),
                                 Double(view.drawableSize.height))
             guard viewport.x > 0, viewport.y > 0 else { return }
+            // Points to drawable pixels, read here rather than at setup: the
+            // view has no window when `makeUIView` runs, so its scale is 1 and
+            // the brush would be half size until the first resize.
+            editor.pointScale = Double(view.contentScaleFactor)
             editor.drainInput(viewport: viewport)
         }
 

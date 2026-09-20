@@ -22,6 +22,7 @@ struct EditorView: View {
                 topBar
                 if editor.showStats { statsOverlay }
                 Spacer()
+                if let status = editor.status { toast(status) }
                 bottomBar
             }
         }
@@ -95,6 +96,20 @@ struct EditorView: View {
             .padding(.top, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 18)
+    }
+
+    /// A line the editor can put on screen for a couple of seconds. Used for
+    /// the things that are otherwise indistinguishable from a broken tool —
+    /// "Paint is still warming up" being the one that prompted it.
+    private func toast(_ message: String) -> some View {
+        Text(message)
+            .font(.footnote)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.62), in: Capsule())
+            .padding(.bottom, 10)
+            .transition(.opacity)
     }
 
     private var bottomBar: some View {

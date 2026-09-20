@@ -166,14 +166,22 @@ public enum Sculpt {
     /// How far one dab of Inflate moves the surface, as a fraction of the brush
     /// radius, before falloff and strength.
     ///
-    /// This is small because a stroke is now resampled to a dab every quarter
-    /// radius, so a point on the path receives roughly eight overlapping dabs.
-    /// The first version of this shipped at 0.35 — a per-*gesture* amount — and
-    /// then applied one dab per Pencil event at pen-up, so a slow one-second
-    /// stroke stacked over a hundred of them in one place and extruded the
-    /// surface through itself. The folded triangles are back-face culled, which
-    /// is what "sometimes it goes inside out" was.
-    public static let inflatePerDab = 0.04
+    /// A stroke is resampled to a dab every quarter radius, so a point on the
+    /// path receives roughly eight overlapping dabs. The first version shipped
+    /// at 0.35 — a per-*gesture* amount — and then applied one dab per Pencil
+    /// event at pen-up, so a slow one-second stroke stacked over a hundred of
+    /// them in one place and extruded the surface through itself. The folded
+    /// triangles are back-face culled, which is what "sometimes it goes inside
+    /// out" was.
+    ///
+    /// Raised 0.04 -> 0.09 after the second device run: *"inflate at full
+    /// strength almost didn't"*. At 0.04, one dab at full strength moved the
+    /// surface 0.42 mm with a brush that was itself half the size the slider
+    /// claimed, so a whole pass across the model barely creased it. The ceiling
+    /// is the feedback gain `inflatePerDab / spacing`, which must stay well
+    /// under 1 or the stroke starts measuring its own output; 0.09 / 0.25 is
+    /// 0.36, and `testTheInflateFeedbackLoopConverges` fails above 0.125.
+    public static let inflatePerDab = 0.09
 
     /// Applies a whole run of dabs and rebuilds the normals once.
     ///
@@ -229,17 +237,27 @@ public enum Sculpt {
                             at centre: Vec3, settings: Settings) -> Set<Int> {
         guard settings.radius > 0, settings.strength != 0 else { return [] }
 
-        // Every brush reads the mesh as it was at the start of the dab. Smooth
-        // in particular must not see its own output: averaging against
-        // already-moved neighbours makes the result depend on vertex order, so
-        // the same stroke gives a different shape on a re-run.
-        let before = mesh.positions
+        // Smooth reads the mesh as it was at the start of the dab, and must:
+        // averaging against already-moved NEIGHBOURS makes the result depend on
+        // vertex order, so the same stroke gives a different shape on a re-run.
+        //
+        // Grab and Inflate do not need the snapshot and no longer take it.
+        // Weld groups are disjoint and each is written exactly once per dab, so
+        // neither brush can ever read a position its own dab has already
+        // moved — the copy was 90 KB per dab (3,750 positions, through
+        // copy-on-write) bought for nothing. Only Smooth crosses between
+        // groups, and only Smooth pays.
+        let snapshot: [Vec3]
+        switch brush {
+        case .smooth: snapshot = mesh.positions
+        case .grab, .inflate: snapshot = []
+        }
         let radiusSquared = settings.radius * settings.radius
         var touched = Set<Int>()
 
         for welded in 0..<tables.weldedCount {
             let representative = tables.weldMembers[welded][0]
-            let p = before[representative]
+            let p = mesh.positions[representative]
             let offset = p - centre
             let distanceSquared = dot(offset, offset)
             guard distanceSquared <= radiusSquared else { continue }
@@ -258,14 +276,14 @@ public enum Sculpt {
                 let ring = tables.neighbours[welded]
                 guard !ring.isEmpty else { continue }
                 var sum = Vec3.zero
-                for n in ring { sum += before[tables.weldMembers[n][0]] }
+                for n in ring { sum += snapshot[tables.weldMembers[n][0]] }
                 let average = sum * (1.0 / Double(ring.count))
-                shift = (average - p) * weight
+                shift = (average - snapshot[representative]) * weight
             }
 
             guard shift != .zero else { continue }
             for member in tables.weldMembers[welded] {
-                mesh.positions[member] = before[member] + shift
+                mesh.positions[member] += shift
             }
             touched.insert(welded)
         }

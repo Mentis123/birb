@@ -399,9 +399,16 @@ for Inflate/Smooth. Expose the floor; it is a feel number to tune on glass.
 ## 6. Order of work, and what "done" looks like on the device
 
 1. **Loop switch (§1A or §1B) + `setNeedsDisplay` on enqueue + HUD
-   counters.** Done when: Inflate held still raises the surface during the
-   press, the hover ring tracks (on a hover-capable iPad), a flick coasts,
-   and `pending` at drain never exceeds single digits.
+   counters.** Done when: Inflate **dragged slowly** across the model raises
+   it as you go, the hover ring tracks (on a hover-capable iPad), a flick
+   coasts, and `pending` at drain never exceeds single digits.
+
+   > **Corrected 2026-09-20.** This first read "Inflate held still raises the
+   > surface during the press", which contradicts the design it is checking:
+   > dabs are spaced along the PATH, so a stationary pointer emits none, and
+   > that is the half of the 2026-09-08 fix that stopped a held pen extruding
+   > a spike through the surface. ZBrush and Nomad both behave this way. An
+   > acceptance test that asks for the bug back is worse than no test.
 2. **Release scheme + signposts + boot log line.** Done when: a Release run
    detached from Xcode shows no `Hang detected` and the HUD reads ≥ 100 fps
    idle-to-stroke on a ProMotion iPad.
@@ -579,3 +586,123 @@ capture took at the start.
 - The A5-style question for this app: nothing yet proves the loop stays alive
   under a long stroke. The queue-depth worst-case in the HUD is the closest
   thing, and it is a reading rather than a check.
+
+
+---
+
+# 8. Third device run: the Pencil stopped and started (2026-09-20)
+
+The console settles the top-level question before any of the rest matters:
+
+```
+Found debug dylib relative path string `BabyBlender.debug.dylib`
+...
+App is being debugged, do not track this hang
+Hang detected: 0.92s (debugger attached, not reporting)
+[BabyBlender] paint map ready (2919 ms, off the main thread)
+```
+
+`BabyBlender.debug.dylib` and "App is being debugged" mean this was the
+**Debug** scheme again, so every latency number in the run is a debug number
+and the checklist's items 2 and 3 have still not been attempted. The
+"System gesture gate timed out" lines are a SYMPTOM of that, not a separate
+gesture bug: the system gesture gate waits on the main thread, and a main
+thread stopped for 0.9 s misses the window. Section 2b of
+`Build_on_the_Mac.md` now spells the scheme switch out step by step.
+
+Three real defects came out of the report anyway, and each is a fix rather
+than a measurement.
+
+## 8.1 "The pencil wasn't working, then did"
+
+`beginStroke()` opened with `guard !strokeOpen else { return }`. A stroke
+whose `.ended` never arrived therefore left `strokeOpen` true **forever**,
+and every later touch-down returned at that guard: no arm, no undo group, no
+paint stroke. The Pencil went on reporting and nothing happened, for the rest
+of the session.
+
+Ends do go missing. A touch cancelled while the main thread is blocked — a
+0.9 s hang, exactly what the console shows — may never deliver one, and
+`editingTouch` is a weak reference to a `UITouch` UIKit is free to recycle.
+
+Three changes, because one of them alone leaves a hole:
+
+- `beginStroke()` closes a stranded stroke instead of refusing to start. A
+  new touch-down means the previous gesture is over.
+- `SculptMTKView.touchesBegan` releases an `editingTouch` whose `phase` has
+  already ended or been cancelled, rather than letting it block the guard.
+- A five-second watchdog in `drainInput` closes a stroke that has heard
+  nothing, and logs it. Long on purpose: UIKit sends no `touchesMoved` for a
+  pointer that is not moving, so a short timeout would cut a stroke in half
+  whenever somebody paused to think.
+
+The readout now ends with `last: 14f dabs 9 texels 0 skipped 31 armed yes`,
+which distinguishes the three ways a stroke can look broken: it never found
+the model, it ran and moved nothing, or it painted nothing.
+
+## 8.2 "Inflate at full strength almost didn't"
+
+Two causes, multiplying.
+
+**The brush was half the size the slider claimed.** `radiusPoints` is in
+screen POINTS and `metresPerPixel` is per DRAWABLE pixel, and nothing
+converted between them. On a 2x iPad a "46 point" brush was 46 drawable
+pixels — 23 points. Inflate's displacement scales with the radius, so that
+halved the effect as well as the footprint. `pointScale` is read from the
+view each frame.
+
+**And the constant was too small.** `inflatePerDab` 0.04 moved the surface
+0.42 mm per dab at full strength. Measured in
+`testAFullStrengthPassVisiblyMovesTheSurface`: one 50 mm pass with a 21 mm
+brush at full strength moved the clay **3.28 mm** — and the test fails below
+3.6 mm, which is 1.5% of the model's width. At 0.09 it moves 7.5 mm. The
+ceiling is the feedback gain `inflatePerDab / spacing`, which the existing
+convergence test holds under 0.125; 0.09 / 0.25 is 0.36.
+
+Together that is about 4.5x. The gain test and the new floor test now pin it
+from both sides, which is what the first value was missing.
+
+## 8.3 "The paint didn't work"
+
+`Document.beginPaintStroke` builds the paint map on demand if it is missing,
+**on the main thread**, and that is the 2,919 ms the console reports. The
+background build starts when the viewport comes up, so the only way to reach
+the synchronous path is to paint in the first few seconds — and the result
+is a three-second freeze with the stroke lost, which is indistinguishable
+from a broken tool.
+
+Painting now refuses to build the map itself. It says "Paint is still warming
+up" and leaves the stroke unarmed, so it starts painting the moment the map
+lands, mid-gesture. `status` existed and nothing had ever displayed it; there
+is a toast now.
+
+## 8.4 Two costs removed while in there
+
+Both are pure waste and both hurt most in exactly the build the owner keeps
+running.
+
+- **`Document.sculpt` scanned every welded position per dab centre** to build
+  a deliberately generous superset of the vertices the brush was about to
+  report anyway — 3,458 x 4 x 2 set insertions for an ordinary frame.
+  `Sculpt.apply` already returns what it moved, and `sculptDelta` is
+  untouched by it, so reading `before` after the brush runs gives the same
+  answer. Exact instead of generous, and the scan is gone.
+- **`Sculpt.dab` snapshotted all 3,750 positions per dab.** Only Smooth needs
+  it: it averages across weld groups. Grab and Inflate write each disjoint
+  group exactly once and can never read a position their own dab has moved.
+  `testDroppingThePerDabSnapshotChangedNothing` pins all three brushes
+  against a reference that still snapshots.
+- **Redundant raycasts are skipped.** A Pencil reports at 240 Hz and dabs are
+  a quarter of the brush radius apart, so at any ordinary drawing speed most
+  coalesced samples move a pixel or two and emit nothing — while each costs a
+  linear pass over 6,912 triangles. A sample under two drawable pixels from
+  the last one is folded into the next **without advancing the travel**, so
+  the path is unchanged and only the waste goes. At a normal 5 cm/s the
+  Pencil covers about four drawable pixels per sample, so nothing is skipped
+  while the hand is moving. The readout counts the skips.
+
+## 8.5 What is still unmeasured
+
+Everything about speed. 226 core tests and `verify.sh` PASS is what exists.
+Until a **Release** run detached from Xcode reports its numbers, §3 of this
+document is a prediction.

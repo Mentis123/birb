@@ -2133,6 +2133,52 @@ numbers. **Unmeasured on the iPad: all of it** — 224 core tests and
 `verify.sh` PASS is what exists, and the acceptance checklist is
 Device_Pass_2 §6.
 
+**Third device run (2026-09-20): "the pencil wasn't working then did",
+Inflate barely moved the surface, paint did nothing — and the console still
+said `BabyBlender.debug.dylib`.** `docs/Device_Pass_2.md` §8. The Debug build
+explains the latency and the `Hang detected` lines, and **"System gesture gate
+timed out" is a symptom of a blocked main thread, not a gesture bug** — the
+gate waits on the main thread and a 0.9 s hang misses its window. Three real
+defects came out anyway.
+
+**`beginStroke()` opened with `guard !strokeOpen else { return }`, so ONE
+stroke whose `.ended` never arrived blocked every stroke for the rest of the
+session** — no arm, no undo group, no paint stroke, while the Pencil went on
+reporting. Ends do go missing: a touch cancelled during a hang may never
+deliver one, and `editingTouch` is a weak reference to a `UITouch` UIKit is
+free to recycle. A new touch-down force-closes the stranded stroke, the view
+releases a touch whose phase has already ended, and a five-second watchdog
+catches the rest. **A guard that protects a state machine from re-entry also
+traps it there.**
+
+**Inflate was weak twice over.** `radiusPoints` is in screen POINTS and
+`metresPerPixel` is per DRAWABLE pixel and nothing converted between them, so
+a "46 point" brush was 23 points on every 2x iPad — and Inflate's
+displacement scales with the radius, so that halved the effect too.
+`inflatePerDab` was then too small on its own: measured, one 50 mm pass at
+full strength moved the clay **3.28 mm**, under 1.5% of the model's width.
+0.04 -> 0.09 (gain 0.36, ceiling 0.125) takes it to 7.5 mm, and there is a
+FLOOR test now as well as the convergence ceiling — the old value fails it.
+**A gain ceiling alone is satisfied by a brush that does nothing.**
+
+**Paint froze instead of painting.** `beginPaintStroke` builds the paint map
+on demand on the MAIN THREAD, which is the 2,919 ms the console reports, so
+painting in the first few seconds was a three-second freeze with the stroke
+lost. It refuses to build it now, says so in a toast (`status` existed and
+nothing had ever displayed it) and arms the moment the background build
+lands, mid-gesture.
+
+**Two costs removed on the way, both pure waste:** `Document.sculpt` scanned
+every welded position per dab centre to compute a generous superset of what
+`Sculpt.apply` already returns, and `Sculpt.dab` snapshotted all 3,750
+positions per dab when only Smooth reads across weld groups. Redundant
+raycasts are skipped too — a sample under two drawable pixels from the last
+is folded into the next WITHOUT advancing the travel, so the path is
+unchanged. **Also corrected: this repo's own acceptance checklist said
+"Inflate held still raises the surface", which asks for the 2026-09-08 spike
+bug back.** Dabs are spaced along the PATH; a stationary pointer emits none,
+by design.
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror

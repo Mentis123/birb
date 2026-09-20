@@ -112,15 +112,25 @@ public struct Document {
     public mutating func sculpt(_ brush: Sculpt.Brush, at points: [Vec3],
                                 settings: Sculpt.Settings) -> Int {
         guard !points.isEmpty else { return 0 }
-        let vertices = pendingVertices(brush, at: points, settings: settings)
-        let before = vertices.map { sculptDelta[$0] }
+        // The brush reports exactly which welded positions it moved, so the
+        // undo record is built from that rather than from a separate scan.
+        //
+        // The scan this replaces (`pendingVertices`) walked every welded
+        // position once per dab centre and once more per mirror — 3,458 x 4 x 2
+        // set insertions for an ordinary frame of a stroke, to compute a
+        // deliberately generous superset of what `apply` was about to tell us
+        // anyway. `sculptDelta` is untouched by `apply`, which is what makes
+        // reading `before` AFTER the brush has run give the same answer as
+        // reading it before.
         let touched = Sculpt.apply(brush, to: &current, tables: tables,
                                    at: points, settings: settings)
         guard !touched.isEmpty else { return 0 }
+        let vertices = touched.flatMap { tables.weldMembers[$0] }.sorted()
+        let before = vertices.map { sculptDelta[$0] }
         for v in vertices { sculptDelta[v] = current.positions[v] - template.positions[v] }
-        let after = vertices.map { sculptDelta[$0] }
 
-        push(.sculpt(vertices: vertices, before: before, after: after))
+        push(.sculpt(vertices: vertices, before: before,
+                     after: vertices.map { sculptDelta[$0] }))
         return touched.count
     }
 
@@ -176,31 +186,6 @@ public struct Document {
         grabSet = nil
         grabRecordVertices.removeAll(keepingCapacity: true)
         grabBefore.removeAll(keepingCapacity: true)
-    }
-
-    /// Every vertex a run of dabs can reach, so the undo record can snapshot
-    /// their prior deltas before the brush overwrites them.
-    ///
-    /// Deliberately generous — a sphere test per dab centre, plus its mirror —
-    /// rather than exact. A vertex listed here but not actually moved records
-    /// `before == after`, which undo handles as a no-op; a vertex moved but not
-    /// listed would be unrecoverable.
-    private func pendingVertices(_ brush: Sculpt.Brush, at points: [Vec3],
-                                 settings: Sculpt.Settings) -> [Int] {
-        let r2 = settings.radius * settings.radius
-        var welded = Set<Int>()
-        for w in 0..<tables.weldedCount {
-            let p = current.positions[tables.weldMembers[w][0]]
-            for centre in points {
-                var d = p - centre
-                if dot(d, d) <= r2 { welded.insert(w); break }
-                if settings.symmetric {
-                    d = p - Vec3(-centre.x, centre.y, centre.z)
-                    if dot(d, d) <= r2 { welded.insert(w); break }
-                }
-            }
-        }
-        return welded.flatMap { tables.weldMembers[$0] }.sorted()
     }
 
     // MARK: - Painting

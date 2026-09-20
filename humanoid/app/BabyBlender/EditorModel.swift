@@ -117,6 +117,15 @@ final class EditorModel: ObservableObject {
     /// exactly one zoom, so zooming in to work on a detail makes the brush
     /// swallow it. Fixed on screen, zooming in buys finer detail for nothing.
     @Published var radiusPoints: Double = 46
+    /// Drawable pixels per screen point, read from the view each frame.
+    ///
+    /// Everything else in this file is in DRAWABLE PIXELS, because that is what
+    /// a touch location and the picking viewport are in. `radiusPoints` is the
+    /// one quantity in points, and without this conversion it was silently
+    /// delivering a brush half the size the slider claimed on every 2x iPad —
+    /// which is also half the Inflate displacement, since the amount scales
+    /// with the radius.
+    var pointScale: Double = 1
     /// Pins the brush to its current world size instead, for anyone who wants
     /// the other behaviour.
     @Published var lockWorldSize = false
@@ -157,6 +166,13 @@ final class EditorModel: ObservableObject {
     private var worstDrainDepth = 0
     private var framesThisStroke = 0
     private var picksThisFrame = 0
+    private var skippedPicks = 0
+    private var dabsThisStroke = 0
+    private var texelsThisStroke = 0
+    /// Below this much drawable-pixel travel a sample is folded into the next
+    /// one instead of earning its own raycast. Two pixels is one point on a 2x
+    /// panel: under the width of the line being drawn.
+    private static let pickSlopPixels: Double = 2
     private var strokeSummary = "no stroke yet"
 
     /// Set by the viewport so a change can be pushed straight to the renderer
@@ -180,6 +196,7 @@ final class EditorModel: ObservableObject {
     /// per frame; does no work beyond appending and asking for a frame.
     func enqueue(_ sample: Sample) {
         if sample.isPencil { notePencil() }
+        lastSampleTime = CACurrentMediaTime()
         pending.append(sample)
         if sample.phase == .began { onActivity?(true) }
         requestDraw?()
@@ -189,6 +206,7 @@ final class EditorModel: ObservableObject {
     /// document, so it is kept apart from the stroke queue entirely.
     func enqueueHover(at location: Vec2, height: Double) {
         notePencil()
+        lastHoverTime = CACurrentMediaTime()
         hoverPending = (location, height)
         hoverCleared = false
         onActivity?(true)
@@ -245,6 +263,27 @@ final class EditorModel: ObservableObject {
     /// Whether the last frame had a stroke, a coast or a hover in progress, so
     /// the idle notification fires once at the edge rather than every frame.
     private var wasActive = false
+    /// When the open stroke last heard from the pointer. The backstop for the
+    /// same wedge `beginStroke` closes: if the end never arrives AND no new
+    /// touch ever comes, nothing else would reopen the editor.
+    private var lastSampleTime: CFTimeInterval = 0
+    /// Deliberately long. UIKit sends no `touchesMoved` for a pointer that is
+    /// not moving, so a short timeout would cut a stroke in half every time
+    /// somebody paused to think. Five seconds is past any pause and well short
+    /// of a session.
+    private static let strokeTimeout: CFTimeInterval = 5
+    /// When the last hover event arrived. A hover whose end never comes would
+    /// otherwise hold the viewport in continuous mode for the session.
+    private var lastHoverTime: CFTimeInterval = 0
+    private static let hoverTimeout: CFTimeInterval = 0.6
+    private var statusUntil: CFTimeInterval = 0
+
+    /// Puts a line on screen for a couple of seconds. The editor had a
+    /// `status` property and nothing ever displayed it.
+    func say(_ message: String) {
+        status = message
+        statusUntil = CACurrentMediaTime() + 2.5
+    }
 
     init(document: HumanoidCore.Document) {
         self.document = document
@@ -386,6 +425,18 @@ final class EditorModel: ObservableObject {
         var change = Change()
         if applyCoast(elapsed) { change.insert(.camera) }
         change.formUnion(applySamples(viewport: viewport))
+        if hoverPending != nil, now - lastHoverTime > EditorModel.hoverTimeout {
+            clearHover()
+        }
+        if let current = status, !current.isEmpty, now > statusUntil {
+            status = nil
+        }
+        if strokeOpen, lastSampleTime > 0, now - lastSampleTime > EditorModel.strokeTimeout {
+            NSLog("[BabyBlender] stroke had no samples for %.1f s; closing it",
+                  now - lastSampleTime)
+            endStroke()
+            change.insert(.cursor)
+        }
         change.formUnion(updateCursor(viewport: viewport))
 
         if !change.isEmpty { refresh(change) }
@@ -434,8 +485,9 @@ final class EditorModel: ObservableObject {
             // reads single digits — a Pencil at 240 Hz against 120 frames a
             // second. Hundreds means samples are queuing with nothing draining
             // them, which is what the second device run was.
-            + String(format: "\nqueue %d (worst %d)  %@", lastDrainDepth, worstDrainDepth,
-                     strokeSummary)
+            + String(format: "\nqueue %d (worst %d)  scale %.0fx", lastDrainDepth,
+                     worstDrainDepth, pointScale)
+            + "\n" + strokeSummary
     }
 
     private func applySamples(viewport: Vec2) -> Change {
@@ -459,12 +511,12 @@ final class EditorModel: ObservableObject {
             case .moved:
                 strokeForce = sample.force
                 let point = stabilised(sample.location)
-                defer { lastScreenPoint = point }
                 guard strokeArmed else {
                     // Not on the model yet. Try again with this sample rather
                     // than writing the whole gesture off.
                     beginStroke()
                     arm(at: point, viewport: viewport)
+                    lastScreenPoint = point
                     continue
                 }
                 // Grab is handled BEFORE the pick, and deliberately. Once the
@@ -476,6 +528,7 @@ final class EditorModel: ObservableObject {
                     // No pressure term: if the finger moved five millimetres
                     // the surface moves five millimetres. Pressure is already
                     // in the weights the capture took at the start.
+                    defer { lastScreenPoint = point }
                     guard let last = lastScreenPoint else { continue }
                     let screenDelta = Vec2(point.x - last.x, point.y - last.y)
                     let world = camera.worldDelta(screenDelta: screenDelta,
@@ -491,6 +544,27 @@ final class EditorModel: ObservableObject {
                     continue
                 }
 
+                // A raycast the stroke cannot use is a raycast not worth
+                // taking.
+                //
+                // A Pencil reports up to 240 times a second and dabs are
+                // spaced a quarter of the brush radius apart, so at any
+                // ordinary drawing speed most coalesced samples move a pixel
+                // or two and emit nothing — while each one costs a linear
+                // pass over every triangle. Skipping them WITHOUT advancing
+                // `lastScreenPoint` keeps the travel: it accumulates to the
+                // next sample that is far enough to matter, so the path is
+                // unchanged and only the waste goes. At a normal 5 cm/s the
+                // Pencil covers about four drawable pixels per sample, so
+                // nothing is skipped while the hand is actually moving.
+                if let last = lastScreenPoint,
+                   HumanoidCore.length(Vec2(point.x - last.x, point.y - last.y))
+                       < EditorModel.pickSlopPixels {
+                    skippedPicks += 1
+                    continue
+                }
+
+                defer { lastScreenPoint = point }
                 guard let hit = pick(point, viewport: viewport) else { continue }
                 strokeRadius = worldRadius(at: hit.distance, viewport: viewport)
                 noteHit(hit)
@@ -538,6 +612,20 @@ final class EditorModel: ObservableObject {
 
         switch tool {
         case .paint, .erase:
+            // Never build the paint map from here.
+            //
+            // `beginPaintStroke` builds it on demand if it is missing, and on
+            // the device that measured **2,919 ms** — on the main thread, in
+            // the middle of a touch. The background build starts when the
+            // viewport comes up, so the only way to reach this is to paint in
+            // the first few seconds. Saying so and leaving the stroke unarmed
+            // means it starts painting the moment the map lands, mid-gesture,
+            // instead of freezing the app and losing the stroke.
+            guard document.isPreparedForPainting else {
+                prepareForPaintingSoon()
+                say("Paint is still warming up")
+                return
+            }
             document.beginPaintStroke(paintBrush())
             paintSteps.append((hit.position, hit.triangle))
         case .grab:
@@ -555,6 +643,7 @@ final class EditorModel: ObservableObject {
     private func commit() -> Change {
         var change = Change()
         lastDabs = sculptCentres.count + paintSteps.count + (grabDirty ? 1 : 0)
+        dabsThisStroke += lastDabs
 
         if grabActive, grabDirty {
             birbSignpostBegin("grab")
@@ -587,7 +676,12 @@ final class EditorModel: ObservableObject {
         if !paintSteps.isEmpty {
             birbSignpostBegin("paint")
             for step in paintSteps {
-                paintDirty = paintDirty.union(document.paint(to: step.point, seed: step.seed))
+                let touched = document.paint(to: step.point, seed: step.seed)
+                if !touched.isEmpty {
+                    texelsThisStroke += (touched.maxX - touched.minX + 1)
+                        * (touched.maxY - touched.minY + 1)
+                }
+                paintDirty = paintDirty.union(touched)
             }
             birbSignpostEnd("paint")
             change.insert(.texture)
@@ -601,10 +695,24 @@ final class EditorModel: ObservableObject {
     }
 
     private func beginStroke() {
-        guard !strokeOpen else { return }
+        // A new touch-down means the previous gesture is over, whatever became
+        // of its end.
+        //
+        // This used to `guard !strokeOpen else { return }`, and that one line
+        // is the best explanation for "the pencil wasn't working, then did".
+        // A stroke whose `.ended` never arrived — a touch cancelled while the
+        // main thread was blocked, a `UITouch` released out from under a weak
+        // reference — left `strokeOpen` true forever, and every later
+        // touch-down then returned here without arming, without opening an
+        // undo group and without beginning a paint stroke. The Pencil went on
+        // reporting and nothing happened, for the rest of the session.
+        if strokeOpen { endStroke() }
         strokeOpen = true
         strokeArmed = false
         framesThisStroke = 0
+        dabsThisStroke = 0
+        texelsThisStroke = 0
+        skippedPicks = 0
         paintDirty = .empty
         grabTotal = .zero
         grabDirty = false
@@ -614,6 +722,9 @@ final class EditorModel: ObservableObject {
 
     private func endStroke() {
         guard strokeOpen else { return }
+        // Read before it is cleared: whether the stroke ever found the model is
+        // the single most useful thing the readout can say about it.
+        let foundTheModel = strokeArmed
         strokeOpen = false
         strokeArmed = false
         grabActive = false
@@ -627,7 +738,13 @@ final class EditorModel: ObservableObject {
         lastScreenPoint = nil
         stabiliserAnchor = nil
         lastHit = nil
-        strokeSummary = "last stroke: \(framesThisStroke) frames"
+        // Everything the next device report needs about the stroke that just
+        // finished, on the glass rather than inferred. "armed no" is the
+        // stroke that never found the model; "dabs 0" is a brush that ran and
+        // did nothing; "texels 0" is paint that did not land.
+        strokeSummary = "last: \(framesThisStroke)f  dabs \(dabsThisStroke)"
+            + "  texels \(texelsThisStroke)  skipped \(skippedPicks)"
+            + "  armed \(foundTheModel ? "yes" : "no")"
         // Idle is decided at the end of `drainInput`, not here: this runs
         // mid-frame and the frame still has to be drawn.
     }
@@ -641,7 +758,7 @@ final class EditorModel: ObservableObject {
             stabiliserAnchor = point
             return point
         }
-        let rope = radiusPoints * 0.6
+        let rope = radiusPoints * pointScale * 0.6
         let delta = Vec2(point.x - anchor.x, point.y - anchor.y)
         let distance = HumanoidCore.length(delta)
         guard distance > rope else { return anchor }
@@ -716,8 +833,8 @@ final class EditorModel: ObservableObject {
 
     private func worldRadius(at depth: Double, viewport: Vec2) -> Double {
         guard !lockWorldSize else { return strokeRadius }
-        let metres = radiusPoints * camera.metresPerPixel(depth: depth,
-                                                          viewportHeight: viewport.y)
+        let metres = radiusPoints * pointScale
+            * camera.metresPerPixel(depth: depth, viewportHeight: viewport.y)
         return max(0.0005, metres)
     }
 
@@ -753,7 +870,7 @@ final class EditorModel: ObservableObject {
 
     func export(named name: String) -> Gate.Report {
         let report = document.validate()
-        status = report.passes ? "Pre-flight passed" : "Pre-flight found problems"
+        say(report.passes ? "Pre-flight passed" : "Pre-flight found problems")
         return report
     }
 

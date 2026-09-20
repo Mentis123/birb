@@ -267,4 +267,91 @@ final class SculptStrokeTests: XCTestCase {
             }
         }
     }
+
+    /// One ordinary pass of Inflate has to visibly move the surface.
+    ///
+    /// The other half of the feedback-gain guard, and it exists because the
+    /// shipped value failed it: *"inflate at full strength almost didn't"*.
+    /// A gain ceiling alone can be satisfied by a brush that does nothing, so
+    /// the floor is asserted against the model's own size rather than in
+    /// absolute millimetres.
+    func testAFullStrengthPassVisiblyMovesTheSurface() throws {
+        var mesh = try TemplateFile.Bundled.clay.load().mesh
+        let tables = MeshTables(mesh)
+        mesh.recomputeNormals(tables)
+        let start = mesh.positions
+
+        // A 21 mm brush on a 240 mm model — about what 46 screen points works
+        // out to at the default framing — dragged 50 mm across the front face.
+        let settings = Sculpt.Settings(radius: 0.021, strength: 1.0, symmetric: false)
+        var stroke = Sculpt.Stroke(settings: settings)
+        var centres = [Vec3]()
+        for i in 0...20 {
+            let x = -0.025 + 0.05 * Double(i) / 20
+            guard let hit = Picking.raycast(mesh, origin: Vec3(x, 0, 5),
+                                            direction: Vec3(0, 0, -1)) else { continue }
+            centres.append(contentsOf: stroke.advance(to: hit.position, by: 0.05 / 20))
+        }
+        XCTAssertGreaterThan(centres.count, 5, "the pass emitted almost no dabs")
+        Sculpt.apply(.inflate(Sculpt.inflatePerDab * settings.radius), to: &mesh,
+                     tables: tables, at: centres, settings: settings)
+
+        let peak = (0..<mesh.vertexCount)
+            .map { length(mesh.positions[$0] - start[$0]) }.max() ?? 0
+        // The clay cube is 0.24 m across. Under 1.5% of that is a stroke you
+        // cannot see on a model this size.
+        XCTAssertGreaterThan(peak, 0.24 * 0.015,
+                             "one pass of Inflate moved the surface only \(peak * 1000) mm")
+    }
+
+    /// Grab and Inflate stopped snapshotting the whole position array per dab.
+    /// That is only legal because weld groups are disjoint and each is written
+    /// once, so this pins the result against the brush that still snapshots.
+    func testDroppingThePerDabSnapshotChangedNothing() throws {
+        var mesh = try TemplateFile.Bundled.clay.load().mesh
+        let tables = MeshTables(mesh)
+        mesh.recomputeNormals(tables)
+        let settings = Sculpt.Settings(radius: 0.05, strength: 0.8, symmetric: true)
+        let centre = try XCTUnwrap(mesh.positions.first { $0.x > 0.08 && $0.z > 0.08 })
+
+        for brush in [Sculpt.Brush.inflate(0.004), .grab(Vec3(0.01, 0.005, 0)), .smooth] {
+            var live = mesh
+            Sculpt.apply(brush, to: &live, tables: tables, at: [centre], settings: settings)
+            // The reference: every welded group computed against a frozen copy,
+            // which is what the removed snapshot did.
+            var reference = mesh
+            let frozen = mesh.positions
+            for w in 0..<tables.weldedCount {
+                let representative = tables.weldMembers[w][0]
+                let p = frozen[representative]
+                for mirrored in settings.symmetric ? [false, true] : [false] {
+                    let c = mirrored ? Vec3(-centre.x, centre.y, centre.z) : centre
+                    let offset = p - c
+                    let d2 = dot(offset, offset)
+                    guard d2 <= settings.radius * settings.radius else { continue }
+                    let weight = Sculpt.falloff(distance: d2.squareRoot(),
+                                                radius: settings.radius) * settings.strength
+                    guard weight > 0 else { continue }
+                    let shift: Vec3
+                    switch brush {
+                    case .grab(let d):
+                        shift = (mirrored ? Vec3(-d.x, d.y, d.z) : d) * weight
+                    case .inflate(let amount):
+                        shift = mesh.normals[representative] * (amount * weight)
+                    case .smooth:
+                        let ring = tables.neighbours[w]
+                        guard !ring.isEmpty else { continue }
+                        var sum = Vec3.zero
+                        for n in ring { sum += frozen[tables.weldMembers[n][0]] }
+                        shift = (sum * (1.0 / Double(ring.count)) - p) * weight
+                    }
+                    for member in tables.weldMembers[w] { reference.positions[member] += shift }
+                }
+            }
+            for i in 0..<mesh.vertexCount {
+                XCTAssertEqual(length(live.positions[i] - reference.positions[i]), 0,
+                               accuracy: 1e-15, "vertex \(i) disagrees for \(brush)")
+            }
+        }
+    }
 }

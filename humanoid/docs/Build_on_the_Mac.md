@@ -38,30 +38,66 @@ with something already on your account.
 A **Personal Team** (free Apple ID) signs for **seven days** and then the app
 refuses to launch until it is rebuilt. That is the schedule, not a fault.
 
-## 2b. Pick the right scheme — this is not optional for judging feel
+## 2b. Pick the right scheme — step by step
 
-Two schemes are generated now:
+**You must run `xcodegen generate` again after pulling**, or the Release
+scheme will not exist. It is generated from `project.yml`, not stored in the
+project.
 
-| Scheme | Run builds | Use it for |
-|---|---|---|
-| `BabyBlender` | Debug | ordinary development, breakpoints |
-| `BabyBlender (Release)` | **Release** | anything where you are judging speed |
+### Where the scheme selector is
 
-Xcode's Run button builds Debug, which is `-Onone`, and on this `Double`-heavy
-geometry code that is ten to forty times slower than release. The paint map
-measured 27 ms in release on the build box and **3,242 ms on the iPad in
-debug**. Every "Hang detected" line in the second device run was a debug
-number. **No measurement from a Debug build with the debugger attached is a
+Top-left of the Xcode window, on the toolbar, immediately right of the ▶ and ■
+buttons. It reads **`BabyBlender > <your iPad name>`**. The **left half** of
+that control is the scheme; the **right half** is the destination.
+
+### Switch it
+
+1. Click the **left half** (the word `BabyBlender`).
+2. The menu lists both schemes. Choose **`BabyBlender (Release)`**.
+3. Click the **right half** and choose **your iPad by name**. Not
+   "My Mac (Designed for iPad)" — that runs it on the Mac.
+4. Press **⌘R**.
+
+That is the whole switch. You can tell it worked from the console: a Debug
+run prints `Found debug dylib relative path string BabyBlender.debug.dylib`
+in its first few lines, and a Release run does not.
+
+### If the Release scheme is not in the menu
+
+Either `xcodegen generate` did not re-run, or your XcodeGen is old. Do it by
+hand instead, which reaches the same place:
+
+1. **Product → Scheme → Edit Scheme…** (or ⌘<)
+2. Select **Run** in the left column.
+3. **Info** tab → **Build Configuration** → change `Debug` to **`Release`**.
+4. **Close**.
+
+Change it back the same way when you want breakpoints.
+
+### The two settings a scheme cannot carry
+
+Same dialog — **Product → Scheme → Edit Scheme… → Run → Options tab**:
+
+- **Metal API Validation** → **Disabled**
+- **GPU Frame Capture** → **Disabled**
+
+Both add CPU work to every Metal call while the debugger is attached. Leave
+them on while hunting a rendering bug; turn them off before judging speed.
+
+### Then take Xcode out of it
+
+Press **■** (stop) in Xcode, then tap the Baby Blender icon on the iPad's home
+screen. A debugger attached to a Metal app is not the app. This is the only
+run whose feel is worth reporting.
+
+### Why this matters so much here
+
+Debug is `-Onone`, and on this `Double`-heavy, SIMD-free geometry code that
+is ten to forty times slower than Release. The paint map measured 27 ms in
+Release on the build box and **2,919 ms on the iPad in Debug**. Every
+`Hang detected` line in the second and third device runs was a Debug number.
+**No measurement from a Debug build with the debugger attached is a
 measurement about this app.**
-
-Two more things a scheme cannot set for you, both in Edit Scheme -> Run ->
-Options, and both worth turning off before a feel test:
-
-- **Metal API Validation -> Disabled**
-- **GPU Frame Capture -> Disabled**
-
-Then stop Xcode and launch the app from the home screen. A debugger attached to
-a Metal app is not the app.
 
 ## 3. Build and run
 
