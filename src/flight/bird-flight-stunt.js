@@ -600,10 +600,23 @@ export class BirdFlightStunt extends BirdFlight {
      */
     _bankSoftStep(dt) {
         const bank = this.bankAngle();
-        if (Math.abs(bank) > this.rightingLimit) return 0;
+        // A DIHEDRAL, NOT A CEILING. The owner, from the phone: "when I bank
+        // to the left it locks up just before it goes into the vertical".
+        // This term used to run all the way to `rightingLimit`, clamped at
+        // `bankSoftMax` 3.4 rad/s — more than the roll command at any stick
+        // under 0.85 — so stick 0.8 pinned the bird at 86 degrees and only a
+        // thumb pressed to the plastic ever rolled through. Every real sim
+        // (DCS, X-Plane, IL-2, KSP) makes the stick a roll RATE with damping
+        // and NO attitude ceiling: you hold a bank by centring. So this fades
+        // out over the same band as the idle righting — full under 35, gone
+        // by 55 — and a gentle stick still settles at a relaxed bank while a
+        // firm one rolls straight through, past 90, past inverted, forever.
+        const fade = Math.max(0, Math.min(1,
+            (this.rightingBand - Math.abs(bank)) / this.rightingFade));
+        if (fade <= 0) return 0;
         const over = Math.abs(bank) - this.bankComfort;
         if (over <= 0) return 0;
-        const rate = Math.min(this.bankSoft * over, this.bankSoftMax) * this.authority();
+        const rate = Math.min(this.bankSoft * over, this.bankSoftMax) * fade * this.authority();
         // `bank` is POSITIVE for a left bank and `_rollBy(+)` deepens one, so
         // the correction is the negative of the excess.
         const step = -Math.sign(bank) * rate * dt;

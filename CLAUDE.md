@@ -147,6 +147,30 @@
 > of them made tuning-independent on the way (the roll measures SWEPT angle
 > from the controller's own deltas, not the bank at a fixed second).
 
+> **THE ROLL AXIS HAS NO CEILING** (2026-09-20):
+> [docs/perf/gates/G-STUNT-4.md](docs/perf/gates/G-STUNT-4.md). *"When I bank
+> to the left it locks up just before it goes into the vertical… push left,
+> roll past 90, push right and roll back, stay neutral there and fly
+> sideways."* Nothing scripted was left to remove — the aerobatics module is
+> gone, the camera hold is a continuous level heading, the stunt lean is
+> 0.12 rad. What remained was `_bankSoftStep`, G-STUNT-1's lateral stability,
+> clamped at **3.4 rad/s — more than the roll command at any stick under
+> 0.85** — so it was a CEILING: stick 0.8 pinned the bird at 86°, and an
+> ordinary hard push on this stick reads 0.6–0.8. The owner was sitting at
+> the ceiling. **Every real sim (DCS, X-Plane, IL-2, KSP) makes the stick a
+> roll RATE with damping and no attitude ceiling; you hold a bank by
+> centring.** So the term fades out over the dihedral band (full under 35°,
+> gone by 55° — the same `rightingBand`/`rightingFade`): 0.2/0.3/0.4 still
+> settle at a relaxed 19/24/31°, and 0.5+ rolls through, past 90, past
+> inverted, forever (0.7 sweeps 1355° in 10 s). The owner's sequence
+> measures roll to 112 → held → back to 88 → held → pull turns 116° at pitch
+> 3°. **The trade, stated**: "a turn" becomes "a roll" at about 0.45 of stick
+> now, not 0.85 — G-FLIGHT-V2's v70 refutation is still true of the numbers
+> and is no longer a defect, because it was asked for in those words. If a
+> 0.5 thumb rolls people who meant to turn, `rightingBand` is the one knob.
+> Three tests rewritten and three added in the frozen suite under that gate;
+> restoring the ceiling fails six.
+
 > **AN ELEVATOR DOES NOT ROLL YOU — and until 2026-09-20 it did**:
 > [docs/perf/gates/G-STUNT-3.md](docs/perf/gates/G-STUNT-3.md). *"I still
 > can't seem to even just fly direction on that knife edge — I want to roll 90

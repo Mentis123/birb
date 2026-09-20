@@ -199,7 +199,9 @@ async function main() {
     // however long it is held, and `reset` now replays a LEVEL pose, so this
     // can never start inverted no matter how many frames the harness gets.
     await reset(page);
-    const entry = await hold(page, { x: 0.45 }, 40, 8);
+    // 0.35, inside the dihedral band: 0.45 rolled through once G-STUNT-4
+    // removed the ceiling, and this check is about LEVELLING from a bank.
+    const entry = await hold(page, { x: 0.35 }, 40, 8);
     const entryBank = Math.abs(entry[entry.length - 1].bankDeg);
     check(entryBank > 10 && entryBank < 90,
       `established a moderate bank to level out of (|bank| ${entryBank.toFixed(1)})`);
@@ -207,6 +209,15 @@ async function main() {
     const levelled = await hold(page, {}, 150, 6);
     const endBank = Math.abs(levelled[levelled.length - 1].bankDeg);
     check(endBank < 30, `hands-off the wings come level (|bank| ${endBank.toFixed(1)})`);
+
+    // G-STUNT-4: a FIRM stick — the owner's 0.7, not a pinned 1.0 — rolls
+    // straight through the vertical. It used to pin at 86 degrees.
+    await reset(page);
+    const through = await hold(page, { x: -0.7 }, 70, 1);
+    const banks = through.map((s) => Math.abs(s.bankDeg));
+    check(banks.some((b) => b > 95), `a held 0.7 rolls PAST the vertical (peak |bank| ${Math.max(...banks).toFixed(1)})`);
+    check(banks.some((b) => b > 170), 'and past inverted — there is no ceiling');
+    await release(page);
 
     // The owner's manoeuvre, on the real page: roll hard over, then PULL,
     // and carve a flat turn instead of coning through the knife edge into

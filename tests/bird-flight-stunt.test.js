@@ -197,13 +197,49 @@ for (const site of SITES) {
     assert.ok(held > -170, 'and did not roll onto its back');
   });
 
-  test(`[${site.name}] an ordinary hard turn does not roll the bird over`, () => {
-    // Raw 0.7 held for two seconds is what a player does in a hard turn.
+  test(`[${site.name}] a gentle diagonal stick is a banked turn, not a corkscrew`, () => {
+    // G-STUNT-4: the roll axis has NO ceiling any more — a firm stick rolls
+    // through, by the owner's explicit call — so the boundary between "a
+    // turn" and "a roll" is the dihedral band (~0.45 stick). Under it a
+    // diagonal stick holds a bank and turns from it; the two-second corkscrew
+    // v70 was refuted for lives above it now, where it is asked for.
     const bird = spawn(site);
-    fly(bird, bankPull(0.7, 0.7), 2.0);
+    fly(bird, bankPull(0.4, 0.7), 2.0);
     const bank = Math.abs(bankDeg(bird));
-    assert.ok(bank > 25 && bank < 130,
-      `a diagonal stick banks into a turn rather than corkscrewing, got ${bank.toFixed(1)}`);
+    assert.ok(bank > 15 && bank < 60,
+      `a gentle diagonal stick banks into a turn rather than corkscrewing, got ${bank.toFixed(1)}`);
+  });
+
+  test(`[${site.name}] a firm stick rolls THROUGH the vertical and keeps going`, () => {
+    // "When I bank to the left it locks up just before it goes into the
+    // vertical." It used to: the lateral stability was clamped at 3.4 rad/s,
+    // more than the roll command at any stick under 0.85, so stick 0.8 pinned
+    // the bird at 86 degrees. There is no ceiling now — a held 0.7 must pass
+    // 90, pass inverted, and come round.
+    const bird = spawn(site);
+    let swept = 0; let past90 = false; let pastInverted = false;
+    fly(bird, stick(-0.7, 0), 4.0, (b) => {
+      swept += Math.abs(b.lastDeltas.roll);
+      if (Math.abs(bankDeg(b)) > 95) past90 = true;
+      if (Math.abs(bankDeg(b)) > 170) pastInverted = true;
+    });
+    assert.ok(past90, 'rolled past the vertical');
+    assert.ok(pastInverted, 'and past inverted');
+    assert.ok(swept > 2 * Math.PI, `and kept going: ${(swept * DEG).toFixed(0)} degrees swept`);
+  });
+
+  test(`[${site.name}] roll past 90, release, roll back, release: the bank is wherever you left it`, () => {
+    // The owner's sequence, verbatim.
+    const bird = spawn(site);
+    for (let i = 0; i < 600 && bankDeg(bird) < 110; i += 1) bird.tick(stick(-0.7, 0), DT);
+    const b1 = bankDeg(bird);
+    fly(bird, stick(0, 0), 2.0);
+    assert.ok(Math.abs(bankDeg(bird) - b1) < 3, `held past the vertical hands-off: ${b1.toFixed(0)} -> ${bankDeg(bird).toFixed(0)}`);
+    for (let i = 0; i < 600 && bankDeg(bird) > 90; i += 1) bird.tick(stick(0.7, 0), DT);
+    const b3 = bankDeg(bird);
+    fly(bird, stick(0, 0), 3.0);
+    assert.ok(Math.abs(bankDeg(bird) - b3) < 3, `rolled back and held: ${b3.toFixed(0)} -> ${bankDeg(bird).toFixed(0)}`);
+    assert.ok(Math.abs(bankDeg(bird)) > 75, `still on the wing (${bankDeg(bird).toFixed(0)})`);
   });
 }
 
@@ -506,10 +542,11 @@ test('lift is 1 level at cruise, zero in a knife edge and negative inverted', ()
   assert.ok(Math.abs(bird.liftFactor() - 1) < 0.05, `level at cruise: ${bird.liftFactor().toFixed(2)}`);
   assert.ok(bird.sinkRate() < 0.2, 'and it does not sink');
 
-  // Knife edge. Stick 0.8 is the firm-but-held input that the lateral
-  // stability settles at about 83 degrees — see `bankComfort`. A gentler
-  // stick now holds a gentler bank instead of rolling on round to 90.
-  fly(bird, stick(0.8, 0), 5.0);
+  // Knife edge: roll to it and centre the stick. There is no ceiling to
+  // lean on any more (G-STUNT-4), so the bank is wherever the stick was let
+  // go — which is the point.
+  for (let i = 0; i < 600 && Math.abs(bankDeg(bird)) < 88; i += 1) bird.tick(stick(0.8, 0), DT);
+  fly(bird, stick(0, 0), 0.5);
   assert.ok(Math.abs(bankDeg(bird)) > 75, `reached a knife edge (${bankDeg(bird).toFixed(0)})`);
   assert.ok(Math.abs(bird.liftFactor()) < 0.3, `knife edge carries almost no lift: ${bird.liftFactor().toFixed(2)}`);
   assert.ok(bird.sinkRate() > 2.5, `and it falls: ${bird.sinkRate().toFixed(1)} units/s`);
@@ -607,20 +644,25 @@ for (const site of SITES) {
       `and it costs almost no altitude (${(altitudeOf(bird) - start).toFixed(1)})`);
   });
 
-  test(`[${site.name}] a held bank tracks the stick, gently to steeply`, () => {
-    // The ladder that makes the model legible: more stick is more bank, all
-    // the way to a knife edge, and only a pinned stick rolls.
-    const banks = [0.3, 0.5, 0.7, 0.8].map((sx) => {
+  test(`[${site.name}] a gentle held stick tracks to a relaxed bank; a firm one is a roll`, () => {
+    // The ladder under the dihedral band: more stick is more bank, and it
+    // HOLDS. Above the band there is no ladder because there is no ceiling —
+    // the stick is a rate, as it is in every real sim.
+    const banks = [0.2, 0.3, 0.4].map((sx) => {
       const bird = spawn(site);
       bird.cruise = 11;
       fly(bird, stick(sx, 0), 6);
       return Math.abs(bankDeg(bird));
     });
     for (let i = 1; i < banks.length; i += 1) {
-      assert.ok(banks[i] > banks[i - 1] + 5,
+      assert.ok(banks[i] > banks[i - 1] + 3,
         `more stick is more bank: ${banks.map((b) => b.toFixed(0)).join(' / ')}`);
     }
-    assert.ok(banks[banks.length - 1] > 70, 'and a firm stick reaches a knife edge');
+    assert.ok(banks[banks.length - 1] < 55, `and none of them is a roll (${banks.map((b) => b.toFixed(0)).join(' / ')})`);
+    const roller = spawn(site);
+    let swept = 0;
+    fly(roller, stick(0.6, 0), 6, (b) => { swept += Math.abs(b.lastDeltas.roll); });
+    assert.ok(swept > 2 * Math.PI, `a firm stick rolls right round (${(swept * DEG).toFixed(0)} deg)`);
   });
 }
 

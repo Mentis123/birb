@@ -44,7 +44,7 @@
 // cache would leave a phone with no flight controller at all — and SW-3
 // (build-identity.test.js) requires every src/ module to be listed regardless.
 // index.html's BIRB_BUILD is bumped to the same literal in the same change.
-const CACHE_VERSION = 'v79-2026-09-20-flat-turn';
+const CACHE_VERSION = 'v80-2026-09-20-roll-through';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
