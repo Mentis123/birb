@@ -147,6 +147,46 @@
 > of them made tuning-independent on the way (the roll measures SWEPT angle
 > from the controller's own deltas, not the bank at a fixed second).
 
+> **AN ELEVATOR DOES NOT ROLL YOU — and until 2026-09-20 it did**:
+> [docs/perf/gates/G-STUNT-3.md](docs/perf/gates/G-STUNT-3.md). *"I still
+> can't seem to even just fly direction on that knife edge — I want to roll 90
+> degrees then pull back to hard bank along the horizon."* G-STUNT-2 made a
+> RELEASED knife edge hold, and it does; this is the half that breaks the
+> moment the player pulls.
+>
+> **`_pitchBy` rotates about the BIRD'S OWN X axis, which is the local radial
+> only when the nose is exactly on the horizon.** Off by a few degrees and the
+> bird rotates about a tilted axis — it CONES, and the bank sweeps by exactly
+> TWICE the offset: 2° off swings it 4.1°, 6° swings 12.0°, **11° swings 22.0°
+> — from −79 to −101, i.e. through the knife edge and out the far side into
+> inverted**, where lift goes negative and the sink jumps 3.4 → 4.8. On the
+> live page the bank and pitch traced a clean out-of-phase sinusoid pair,
+> which is the signature of a body coning about a fixed tilted axis. **And a
+> thumb cannot deliver 0°**, which is why this read as "I can't fly a
+> direction" rather than as a tuning note.
+>
+> **Nothing resisted it because every stabiliser is gated off exactly there**:
+> `_bankSoftStep` lives inside `if (sx)` (needs a roll input), `_rightingStep`
+> needs the whole stick idle, `_pitchSoftStep` needs an upright bird. Rolling
+> hard and then pulling satisfies none of the three.
+>
+> `_flatTurnStep` samples the bank before the pitch command and rolls back out
+> whatever the elevator moved — swing **0.0° at every offset from 0 to 20°**.
+> It cannot fight the player, because the roll command is applied earlier in
+> `tick` and is outside the measurement. **Faded to nothing between 55° and
+> 80° of pitch, and that is load-bearing**: bank is degenerate when the nose
+> points at the sky (it jumps by 180° as the pitch passes 90°), and a loop, a
+> hammerhead and the stall all pass through there.
+>
+> **A load factor was built, measured and REFUTED.** `lift × (1 + gLoad·|pull|)`
+> is real aerodynamics and looked like the other half of "along the horizon";
+> over a 6 s turn it moved altitude +19 → +26 at 60° of bank and **−19 → −19
+> at 88°** (zero by construction — the cosine is zero at any G), while the
+> speed the climb bleeds cancelled most of the rest. Removed. **The coning was
+> the whole bug, and a change whose effect is inside its own noise is not a
+> fix.** The turn already holds height where it should: 75° of bank at a
+> 0.3–0.5 pull sweeps 135–201° in six seconds for +2 to +11 units.
+
 > **A knife edge you let go of stays on the wing** (2026-09-19):
 > [docs/perf/gates/G-STUNT-2.md](docs/perf/gates/G-STUNT-2.md). *"If I roll
 > 90 degrees left then put the stick in neutral, I should stay pitched
