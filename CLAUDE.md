@@ -2179,6 +2179,49 @@ unchanged. **Also corrected: this repo's own acceptance checklist said
 bug back.** Dabs are spaced along the PATH; a stationary pointer emits none,
 by design.
 
+**Fourth device run (2026-09-20): Release at last — and Erase was wearing
+Paint's clothes.** `docs/Device_Pass_2.md` §9. The scheme switch landed: the
+paint map went **2,919 ms -> 185 ms**, and the repeated hangs are gone.
+
+**"Fill works but paint with a colour does not" was the tool, not the paint.**
+Both reach the GPU through the SAME upload with the whole image as its
+rectangle, so an upload bug cannot explain one working; and a probe of the
+editor's exact sequence measured **13,453 texels changed** in the core. What
+was left is that the tool was not Paint: `togglePaintErase()` read
+`tool == .erase ? .paint : .erase`, so from ANY sculpting tool the Pencil's
+double tap (a squeeze on a Pencil Pro — both easy to fire by accident picking
+the Pencil up) landed on **Erase**, which paints the base colour back and is
+therefore **completely invisible on a model nobody has painted yet**. It said
+nothing on screen. **A destination state that is invisible on a fresh
+document is not a state to arrive at silently.**
+
+**"Max strength for everything has to be turned way up" was four things
+multiplying, three of them DEFAULTS rather than limits**: brush 46 pt (16 mm
+on a 240 mm model) -> 80, strength 0.5 -> 1.0, Pencil pressure floor 0.15 ->
+0.35. Strength 0.5 is the worst, because for GRAB it means the surface moves
+half as far as the finger — the one thing Grab must not do. **A slider exists
+to go gentler; the middle of it is not where everyone should start.**
+
+**The per-dab constant needed a SECOND value, not a bigger one.**
+`inflatePerDab` (0.09) is bounded by a feedback gain — a stroke that measures
+the SURFACE counts its own output as travel. The editor passes POINTER travel
+and has since 2026-09-08, so that loop does not exist on its path, and the
+bound that does apply is the shape of one pass: dabs every 0.25 R with
+smoothstep weights summing to 4.0, so a pass displaces `4 x value x R`.
+`inflatePerDabDriven = 0.22` makes that just under one brush radius — a
+confident single stroke — where 0.09 was a third of it. Both are guarded and
+the guards say different things; the new one pins the pass from both sides
+(half a radius or it is invisible, one and a half or it is a spike) and then
+re-raycasts the stroke to prove a full-strength pass has not folded the
+surface through itself.
+
+**Smooth on a fresh cube is correctly nothing** — it moves points toward their
+neighbours' average, so it only shows once there is a lump to flatten.
+**Pencil hover is not universal**: M2-or-later iPad Pro/Air or the A17 Pro
+mini, with Pencil 2 or Pencil Pro. Elsewhere `UIHoverGestureRecognizer` never
+fires and there is nothing to draw. The readout now says `hover 412` or
+`hover never (iPad may not have it)` rather than leaving that a guess.
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror

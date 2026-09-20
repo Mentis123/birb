@@ -38,8 +38,11 @@ final class SculptMTKView: MTKView {
         // `force` is 0 for a finger and for a Pencil held perpendicular, so it
         // is floored rather than used raw: a stroke that does nothing because
         // the pressure read zero is indistinguishable from a broken brush.
+        // The floor is 0.35, not 0.15. A Pencil held at a natural writing
+        // angle reads well under half its maximum, and multiplying an already
+        // conservative brush by 0.15 is most of "max strength almost didn't".
         guard touch.type == .pencil, touch.maximumPossibleForce > 0 else { return 1 }
-        return max(0.15, Double(touch.force / touch.maximumPossibleForce))
+        return max(0.35, Double(touch.force / touch.maximumPossibleForce))
     }
 
     private func send(_ touch: UITouch, phase: EditorModel.Sample.Phase) {

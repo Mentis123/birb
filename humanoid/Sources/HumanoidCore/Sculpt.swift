@@ -177,11 +177,31 @@ public enum Sculpt {
     /// Raised 0.04 -> 0.09 after the second device run: *"inflate at full
     /// strength almost didn't"*. At 0.04, one dab at full strength moved the
     /// surface 0.42 mm with a brush that was itself half the size the slider
-    /// claimed, so a whole pass across the model barely creased it. The ceiling
-    /// is the feedback gain `inflatePerDab / spacing`, which must stay well
-    /// under 1 or the stroke starts measuring its own output; 0.09 / 0.25 is
-    /// 0.36, and `testTheInflateFeedbackLoopConverges` fails above 0.125.
+    /// claimed, so a whole pass across the model barely creased it.
+    ///
+    /// **This is the value for a stroke that measures the SURFACE**, where the
+    /// feedback gain `inflatePerDab / spacing` must stay under 1 or the stroke
+    /// never converges. 0.09 / 0.25 is 0.36, with the margin the gain test
+    /// keeps. A stroke advanced by POINTER travel has no such loop and wants
+    /// `inflatePerDabDriven` instead.
     public static let inflatePerDab = 0.09
+
+    /// How far one dab moves the surface when the stroke is advanced by
+    /// **pointer** travel, as a fraction of the brush radius.
+    ///
+    /// Two and a half times `inflatePerDab`, and legitimately so: the ceiling
+    /// on that constant is a feedback gain, and passing `by:` removes the
+    /// feedback. What bounds this one instead is the shape of a single pass.
+    /// Dabs land every 0.25 R, so a point on the path collects dabs at
+    /// 0, ±0.25, ±0.5, ±0.75 R whose smoothstep weights sum to 4.0 — one pass
+    /// therefore displaces the surface by `4 x value x R`, and 0.22 makes that
+    /// just under one brush radius. That is what a confident single stroke of a
+    /// sculpting brush should do, and at 0.09 it was a third of it.
+    ///
+    /// The editor always passes `by:`, so the editor always uses this. The two
+    /// constants exist separately because the coupling is not obvious from
+    /// either call site, and one number could not carry both meanings honestly.
+    public static let inflatePerDabDriven = 0.22
 
     /// Applies a whole run of dabs and rebuilds the normals once.
     ///

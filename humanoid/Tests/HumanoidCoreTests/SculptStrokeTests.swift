@@ -218,6 +218,13 @@ final class SculptStrokeTests: XCTestCase {
         let spacing = 0.25
         XCTAssertLessThan(Sculpt.inflatePerDab / spacing, 0.5,
                           "inflate per dab is closing on the dab spacing")
+        // The driven constant is deliberately past that margin and must NOT be
+        // used by a caller that lets the stroke measure the surface. Its own
+        // bound is the shape of a pass, asserted in
+        // `testAFullStrengthPassVisiblyMovesTheSurface`.
+        XCTAssertGreaterThan(Sculpt.inflatePerDabDriven, Sculpt.inflatePerDab)
+        XCTAssertLessThan(Sculpt.inflatePerDabDriven, 0.3,
+                          "one dab must stay well inside its own brush radius")
     }
 
     // MARK: - Batched application
@@ -283,7 +290,7 @@ final class SculptStrokeTests: XCTestCase {
 
         // A 21 mm brush on a 240 mm model — about what 46 screen points works
         // out to at the default framing — dragged 50 mm across the front face.
-        let settings = Sculpt.Settings(radius: 0.021, strength: 1.0, symmetric: false)
+        let settings = Sculpt.Settings(radius: 0.036, strength: 1.0, symmetric: false)
         var stroke = Sculpt.Stroke(settings: settings)
         var centres = [Vec3]()
         for i in 0...20 {
@@ -293,15 +300,28 @@ final class SculptStrokeTests: XCTestCase {
             centres.append(contentsOf: stroke.advance(to: hit.position, by: 0.05 / 20))
         }
         XCTAssertGreaterThan(centres.count, 5, "the pass emitted almost no dabs")
-        Sculpt.apply(.inflate(Sculpt.inflatePerDab * settings.radius), to: &mesh,
+        Sculpt.apply(.inflate(Sculpt.inflatePerDabDriven * settings.radius), to: &mesh,
                      tables: tables, at: centres, settings: settings)
 
         let peak = (0..<mesh.vertexCount)
             .map { length(mesh.positions[$0] - start[$0]) }.max() ?? 0
-        // The clay cube is 0.24 m across. Under 1.5% of that is a stroke you
-        // cannot see on a model this size.
-        XCTAssertGreaterThan(peak, 0.24 * 0.015,
+        // Half a brush radius is the floor for "I can see what I just did".
+        // The arithmetic predicts about one radius; anything under half means a
+        // constant moved without anyone re-deriving the pass.
+        XCTAssertGreaterThan(peak, settings.radius * 0.5,
                              "one pass of Inflate moved the surface only \(peak * 1000) mm")
+        XCTAssertLessThan(peak, settings.radius * 1.5,
+                          "one pass moved \(peak / settings.radius) radii — that is a spike")
+
+        // And the surface is still a surface: a pass at full strength must not
+        // fold through itself. This is the property the 2026-09-08 spike bug
+        // broke, and it is what actually bounds the constant now that the
+        // feedback loop is gone.
+        for x in stride(from: -0.02, through: 0.02, by: 0.005) {
+            XCTAssertNotNil(Picking.raycast(mesh, origin: Vec3(x, 0, 5),
+                                            direction: Vec3(0, 0, -1)),
+                            "the surface stopped being raycastable at x = \(x)")
+        }
     }
 
     /// Grab and Inflate stopped snapshotting the whole position array per dab.

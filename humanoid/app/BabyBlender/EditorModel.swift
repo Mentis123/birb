@@ -116,7 +116,13 @@ final class EditorModel: ObservableObject {
     /// the better default: a brush fixed in world units is the right size at
     /// exactly one zoom, so zooming in to work on a detail makes the brush
     /// swallow it. Fixed on screen, zooming in buys finer detail for nothing.
-    @Published var radiusPoints: Double = 46
+    ///
+    /// 80 rather than 46 after the third device run. At 46 on this iPad the
+    /// brush is about 16 mm across a 240 mm model — 7% — and a brush you have
+    /// to notice is a brush that reads as doing nothing. Inflate's push also
+    /// scales with the radius, so the default size and the default strength
+    /// were multiplying each other's weakness.
+    @Published var radiusPoints: Double = 80
     /// Drawable pixels per screen point, read from the view each frame.
     ///
     /// Everything else in this file is in DRAWABLE PIXELS, because that is what
@@ -129,7 +135,13 @@ final class EditorModel: ObservableObject {
     /// Pins the brush to its current world size instead, for anyone who wants
     /// the other behaviour.
     @Published var lockWorldSize = false
-    @Published var strength: Double = 0.5
+    /// Full by default.
+    ///
+    /// At 0.5 a Grab moves the surface half as far as the finger, which is the
+    /// one thing Grab must not do, and every other brush was halved on top of
+    /// constants that were already too small. The slider is there to go
+    /// GENTLER; there is no reason for the middle of it to be the default.
+    @Published var strength: Double = 1.0
     @Published var symmetric = true
     /// Forces finger sculpting on. Off by default because it is usually not
     /// needed: until a Pencil has been seen, a finger that lands ON the model
@@ -206,6 +218,11 @@ final class EditorModel: ObservableObject {
     /// document, so it is kept apart from the stroke queue entirely.
     func enqueueHover(at location: Vec2, height: Double) {
         notePencil()
+        if hoverEvents == 0 {
+            NSLog("[BabyBlender] Pencil hover works on this iPad (first event, height %.2f)",
+                  height)
+        }
+        hoverEvents += 1
         lastHoverTime = CACurrentMediaTime()
         hoverPending = (location, height)
         hoverCleared = false
@@ -275,6 +292,14 @@ final class EditorModel: ObservableObject {
     /// When the last hover event arrived. A hover whose end never comes would
     /// otherwise hold the viewport in continuous mode for the session.
     private var lastHoverTime: CFTimeInterval = 0
+    /// How many hover events have ever arrived.
+    ///
+    /// Pencil hover needs an M2-or-later iPad Pro or Air, or the A17 Pro mini,
+    /// with a Pencil 2 or Pencil Pro. On anything else
+    /// `UIHoverGestureRecognizer` simply never fires and the ring never
+    /// appears — which is a device fact and looks exactly like a bug. The
+    /// readout says which it is.
+    private(set) var hoverEvents = 0
     private static let hoverTimeout: CFTimeInterval = 0.6
     private var statusUntil: CFTimeInterval = 0
 
@@ -485,9 +510,11 @@ final class EditorModel: ObservableObject {
             // reads single digits — a Pencil at 240 Hz against 120 frames a
             // second. Hundreds means samples are queuing with nothing draining
             // them, which is what the second device run was.
-            + String(format: "\nqueue %d (worst %d)  scale %.0fx", lastDrainDepth,
-                     worstDrainDepth, pointScale)
+            + String(format: "\nqueue %d (worst %d)  scale %.0fx  hover %@",
+                     lastDrainDepth, worstDrainDepth, pointScale,
+                     hoverEvents > 0 ? "\(hoverEvents)" : "never (iPad may not have it)")
             + "\n" + strokeSummary
+            + "\ntool \(tool.rawValue)\(tool == .erase ? " (paints base colour)" : "")"
     }
 
     private func applySamples(viewport: Vec2) -> Change {
@@ -659,9 +686,12 @@ final class EditorModel: ObservableObject {
             // would be inventing behaviour rather than keeping a switch total.
             switch tool {
             case .inflate, .deflate, .smooth:
+                // `inflatePerDabDriven`, not `inflatePerDab`: every stroke
+                // here advances by POINTER travel, so the feedback loop the
+                // smaller constant guards against does not exist on this path.
                 let brush: Sculpt.Brush = tool == .smooth
                     ? .smooth
-                    : .inflate(Sculpt.inflatePerDab * strokeRadius
+                    : .inflate(Sculpt.inflatePerDabDriven * strokeRadius
                                * (tool == .deflate ? -1 : 1))
                 birbSignpostBegin("sculpt")
                 document.sculpt(brush, at: sculptCentres, settings: settings())
@@ -874,10 +904,25 @@ final class EditorModel: ObservableObject {
         return report
     }
 
-    /// Paint or Erase, whichever is not selected. What the Pencil's double tap
-    /// does, matching what the same gesture does in every drawing app.
+    /// What the Pencil's double tap (or a Pencil Pro squeeze) does.
+    ///
+    /// It used to be `tool = tool == .erase ? .paint : .erase`, which from ANY
+    /// sculpting tool jumped straight to Erase — and Erase paints the base
+    /// colour back, so on a model nobody has painted yet it is **completely
+    /// invisible**. One stray double tap while picking the Pencil up therefore
+    /// produced "paint with a colour does nothing" while Fill went on working,
+    /// with nothing on screen to say the tool had changed.
+    ///
+    /// From a sculpting tool it now selects Paint, from Paint it selects
+    /// Erase, and from Erase it goes back to Paint. Either way it says so.
     func togglePaintErase() {
-        tool = tool == .erase ? .paint : .erase
+        switch tool {
+        case .paint: tool = .erase
+        default: tool = .paint
+        }
+        say(tool == .erase
+            ? "Erase — paints the base colour back"
+            : "Paint")
     }
 
     /// Pushes a change to the viewport, and republishes to SwiftUI only when

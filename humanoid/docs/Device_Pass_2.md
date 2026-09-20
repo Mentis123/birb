@@ -706,3 +706,110 @@ running.
 Everything about speed. 226 core tests and `verify.sh` PASS is what exists.
 Until a **Release** run detached from Xcode reports its numbers, §3 of this
 document is a prediction.
+
+---
+
+# 9. Fourth device run: Release at last, and Erase was wearing Paint's clothes
+(2026-09-20)
+
+**The scheme switch worked.** `paint map ready (185 ms, off the main thread)`
+against 2,919 ms the run before — a 16x drop that is the Debug-to-Release
+difference and nothing else. One `Hang detected: 0.35s` at launch remains and
+is Metal pipeline compilation, which happens once. The repeated 0.26–0.92 s
+hangs are gone.
+
+(`fopen failed for data file` and `Errors found! Invalidating cache...` are
+the Metal shader cache warming on a first run. `RBSServiceErrorDomain Code=1
+"Client not entitled"` is the debugger asking FrontBoard for CPU time it is
+not entitled to. Neither is ours.)
+
+## 9.1 "Fill works but paint with a colour does not"
+
+Fill and a paint stroke reach the GPU through the **same** function
+(`Renderer.update(albedo:rect:)` with the whole image as its rectangle), so an
+upload bug cannot explain one working and the other not. And the core path is
+sound: a probe that replicates the editor's exact sequence — pick at screen
+centre, `beginPaintStroke`, twenty `paint(to:seed:)` steps across a 200-pixel
+drag — reports a dirty rectangle of 131 x 119 and **13,453 texels changed**.
+
+What was left is that the tool was not Paint.
+
+`togglePaintErase()` read `tool = tool == .erase ? .paint : .erase`. From ANY
+sculpting tool that lands on **Erase** — and Erase paints the base colour
+back, so on a model nobody has painted yet it changes nothing a person can
+see. It is driven by `UIPencilInteraction`, which is a double tap on a Pencil
+2 and a squeeze on a Pencil Pro: gestures that are easy to produce by accident
+while picking the Pencil up, and which said nothing on screen when they fired.
+Fill kept working throughout because Fill uses the colour directly.
+
+It now selects Paint from a sculpting tool, Erase from Paint, Paint from
+Erase, and says which in the toast. The readout carries the live tool too, and
+names Erase as "paints base colour".
+
+**A destination state that is invisible on a fresh document is not a state to
+arrive at silently.**
+
+## 9.2 "Max strength for everything has to be turned way up"
+
+Four things were multiplying, and three of them were defaults rather than
+limits.
+
+| | was | now |
+|---|---|---|
+| Brush size default | 46 pt (~16 mm on a 240 mm model) | 80 pt (~36 mm) |
+| Strength default | 0.5 | 1.0 |
+| Pencil pressure floor | 0.15 | 0.35 |
+| Inflate per dab | 0.09 R | **0.22 R** (driven strokes) |
+
+Strength at 0.5 is the worst of them, because for **Grab** it means the
+surface moves half as far as the finger — the one thing Grab must not do. The
+slider exists to go gentler; there is no reason for the middle of it to be
+where everyone starts.
+
+The per-dab constant needed a second value rather than a bigger one.
+`Sculpt.inflatePerDab` (0.09) is bounded by a FEEDBACK GAIN: a stroke that
+measures the surface counts its own output as travel, so a dab must move the
+surface less than the spacing that earns the next dab. **The editor does not
+measure the surface** — it passes pointer travel, and has since 2026-09-08 —
+so that loop does not exist on its path, and the bound that does apply is the
+shape of one pass. Dabs land every 0.25 R and the smoothstep weights at
+0, ±0.25, ±0.5, ±0.75 R sum to 4.0, so a pass displaces `4 x value x R`.
+`inflatePerDabDriven = 0.22` makes that just under one brush radius, which is
+what a confident single stroke should do. At 0.09 it was a third of it.
+
+Both constants are guarded and the guards say different things: the old gain
+test still pins `inflatePerDab`, and the new pass test pins the driven one
+from BOTH sides — at least half a radius (or it is invisible) and under one
+and a half (or it is a spike) — and then re-raycasts the surface across the
+stroke to prove a full-strength pass has not folded it through itself. That
+last assertion is the property the 2026-09-08 spike bug broke, and it is the
+real reason a number this size is safe now and was not then.
+
+## 9.3 "Is Smooth really different from Deflate, and Grab from Inflate?"
+
+They are, and two of them had a reason to look alike.
+
+- **Grab** moves the surface with the pointer. At strength 0.5 it moved half
+  as far, which reads as a weak Inflate rather than as dragging. At 1.0 the
+  surface follows the tip.
+- **Inflate** pushes along the surface normal, so it grows a dome wherever you
+  go instead of following you. With the default brush at 16 mm and 0.09 per
+  dab, both were small bumps.
+- **Deflate** is Inflate negated and always was.
+- **Smooth** moves each point toward the average of its neighbours. On a
+  surface that is already smooth — a fresh clay cube — that is **correctly
+  nothing**. It only shows once there is something to flatten. Sculpt a lump
+  with Inflate first, then run Smooth across it.
+
+## 9.4 "Can't see the Apple Pencil when near the screen floating"
+
+Pencil hover is not a universal feature. It needs an M2-or-later iPad Pro or
+Air, or the iPad mini (A17 Pro), with a Pencil 2 or Pencil Pro. On anything
+else `UIHoverGestureRecognizer` never fires and there is nothing to draw —
+which is a device fact that looks exactly like a bug.
+
+The readout now says `hover 412` or `hover never (iPad may not have it)`, and
+the first hover event that ever arrives logs itself. That distinguishes "this
+iPad cannot" from "this build will not" without another guess. The ring is
+already shown during a stroke, so the brush size is visible on contact either
+way.
