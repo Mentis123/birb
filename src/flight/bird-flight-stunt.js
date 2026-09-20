@@ -151,6 +151,44 @@ export const FLIGHT_STUNT_DEFAULTS = {
     bankComfort: 0.17,
     bankSoft: 2.39,
     bankSoftMax: 3.4,
+    // AN ELEVATOR DOES NOT ROLL YOU, and until this term existed it did.
+    //
+    // The owner, from the phone: "I still can't seem to even just fly
+    // direction on that knife edge — I want to roll 90 degrees then pull back
+    // to hard bank along the horizon." The cause is geometric and it is
+    // measured. `_pitchBy` rotates about the BIRD'S OWN X axis, and that axis
+    // is the local radial ONLY when the nose is exactly on the horizon. Tip
+    // the nose a few degrees off and the bird rotates about a tilted axis
+    // instead — it CONES, and the bank sweeps by exactly twice the offset:
+    //
+    //     nose off horizon | bank swings
+    //         0 deg        | 89.6 -> 90.4   (0.8)
+    //         2 deg        | 88.0 -> 92.0   (4.1)
+    //         6 deg        | 84.0 -> 96.0   (12.0)
+    //        11 deg        | 79.0 -> 101.0  (22.0)
+    //
+    // At 11 degrees — which is nothing on a thumbstick — the bank wanders
+    // past the knife edge into INVERTED, where lift goes negative and the
+    // sink jumps from 3.4 to 4.8. Every stabiliser is gated off exactly
+    // there: `_bankSoftStep` needs a roll input, `_rightingStep` needs the
+    // whole stick idle, `_pitchSoftStep` needs an upright bird. So nothing
+    // resists it and the turn falls out of the sky sideways.
+    //
+    // The fix is the one line of real aerodynamics that was missing: an
+    // ELEVATOR CHANGES PITCH, NOT BANK. The bank is measured across the
+    // pitch command and whatever it moved is rolled straight back out, so a
+    // pull holds whatever bank you set it at and the turn is flat by
+    // construction. It cannot fight the player's own roll, because the roll
+    // command is applied earlier in the tick and is outside the measurement.
+    //
+    // FADED OUT NEAR THE VERTICAL, and that is load-bearing: bank is
+    // undefined when the nose points at the sky, so past `flatTurnFull` the
+    // correction eases to nothing by `flatTurnNone` — a loop, a hammerhead
+    // and the stall all pass through there and must not meet a term that is
+    // reading a degenerate angle. Below 55 degrees of pitch it is at full
+    // strength, which covers every turn anybody flies.
+    flatTurnFull: 0.96,
+    flatTurnNone: 1.40,
     // Idle-only stability. Runs ONLY with the whole stick inside the
     // deadzone — see the class comment.
     righting: 0.7,
@@ -574,6 +612,33 @@ export class BirdFlightStunt extends BirdFlight {
     }
 
     /**
+     * An elevator changes pitch, not bank — see `flatTurnFull` for the
+     * measurement that made this necessary.
+     *
+     * Rolls back out whatever bank the pitch command just introduced, so a
+     * pull at any bank is a FLAT TURN at that bank instead of a cone. Takes
+     * the bank from before the pitch was applied; everything between the two
+     * readings is the elevator's doing and none of it belongs on the roll
+     * axis. Faded to nothing near the vertical, where bank is degenerate.
+     */
+    _flatTurnStep(bankBefore) {
+        const pitch = Math.abs(this.pitchAngle());
+        if (pitch >= this.flatTurnNone) return 0;
+        const span = this.flatTurnNone - this.flatTurnFull;
+        const fade = pitch <= this.flatTurnFull ? 1
+            : (span > 1e-6 ? (this.flatTurnNone - pitch) / span : 0);
+        let err = this.bankAngle() - bankBefore;
+        // Shortest way round: the bank wraps at PI and a roll through it must
+        // not read as a full turn of error.
+        while (err > Math.PI) err -= 2 * Math.PI;
+        while (err < -Math.PI) err += 2 * Math.PI;
+        const step = -err * fade;
+        if (!step) return 0;
+        this._rollBy(step);
+        return step;
+    }
+
+    /**
      * Longitudinal stability — see `pitchComfort` for what it is for.
      *
      * Only while UPRIGHT: once the nose is past the vertical the bird is
@@ -722,12 +787,15 @@ export class BirdFlightStunt extends BirdFlight {
         //    ANGLE rather than rotating forever, because the stability term
         //    below can match it until the command saturates it.
         if (sy) {
+            const bankBefore = this.bankAngle();
             const step = stickExpo(sy, this.pitchExpo) * this.pitchMax * auth * zenPitch * dt;
             this._pitchBy(step);
             d.pitch = step;
             // Added, never assigned: the detector reads the NET rotation this
             // frame, and a loop is the net of the command and the stability.
             d.pitch += this._pitchSoftStep(dt);
+            // The elevator's bank side-effect, rolled straight back out.
+            d.roll += this._flatTurnStep(bankBefore);
         }
 
         // 3. Rudder, about the bird's own up. Right rudder turns right, which

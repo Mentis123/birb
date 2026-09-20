@@ -386,6 +386,75 @@ for (const site of SITES) {
     assert.ok(altitudeOf(bird) < alt0 - 2, `and losing height: ${alt0.toFixed(1)} -> ${altitudeOf(bird).toFixed(1)}`);
   });
 
+  // "I still can't seem to even just fly direction on that knife edge — I
+  // want to roll 90 degrees then pull back to hard bank along the horizon."
+  // `_pitchBy` rotates about the bird's OWN X axis, which is the local radial
+  // only when the nose is exactly on the horizon. Off by a few degrees — all
+  // a thumb can ever deliver — and the bird CONES: the bank sweeps by twice
+  // the offset, through the knife edge and into inverted, where lift goes
+  // negative and it falls out of the sky sideways. Measured before the fix,
+  // an 11-degree offset swung the bank 79 -> 101.
+  const noseOff = (bird, deg) => {
+    const up = radialUp(bird);
+    const fwd = forwardOf(bird);
+    const axis = new THREE.Vector3().crossVectors(fwd, up).normalize();
+    // About the LOCAL horizontal, so this tips the nose without touching bank.
+    bird.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -deg / DEG));
+    return bird;
+  };
+
+  test(`[${site.name}] a pull at a knife edge does not roll the bird`, () => {
+    for (const off of [2, 6, 11, 20]) {
+      const bird = spawn(site);
+      for (let i = 0; i < 600 && Math.abs(bankDeg(bird)) < 88; i += 1) bird.tick(stick(1, 0), DT);
+      noseOff(bird, off);
+      const start = bankDeg(bird);
+      let lo = Infinity; let hi = -Infinity;
+      for (let i = 0; i < 360; i += 1) {
+        bird.tick(pull(0.7), DT);
+        lo = Math.min(lo, bankDeg(bird)); hi = Math.max(hi, bankDeg(bird));
+      }
+      assert.ok(hi - lo < 3,
+        `nose ${off} deg off the horizon: the bank must hold, swung ${(hi - lo).toFixed(1)} (${lo.toFixed(1)}..${hi.toFixed(1)}) from ${start.toFixed(1)}`);
+    }
+  });
+
+  test(`[${site.name}] a hard bank plus a pull carves a FLAT turn`, () => {
+    const bird = spawn(site);
+    for (let i = 0; i < 600 && Math.abs(bankDeg(bird)) < 75; i += 1) bird.tick(stick(1, 0), DT);
+    noseOff(bird, 6);
+    const bank0 = bankDeg(bird);
+    let swept = 0;
+    let prev = headingOf(bird);
+    for (let i = 0; i < 360; i += 1) {
+      bird.tick(pull(0.5), DT);
+      const h = headingOf(bird);
+      swept += Math.acos(Math.max(-1, Math.min(1, prev.dot(h)))) * DEG;
+      prev = h;
+    }
+    assert.ok(swept > 120, `swept a real turn: ${swept.toFixed(0)} degrees in 6 s`);
+    assert.ok(Math.abs(bankDeg(bird) - bank0) < 3,
+      `and held the bank through it: ${bank0.toFixed(1)} -> ${bankDeg(bird).toFixed(1)}`);
+    // Flat: the bird must not have rolled itself upright NOR onto its back.
+    assert.ok(Math.abs(bankDeg(bird)) > 60, `still hard banked (${bankDeg(bird).toFixed(1)})`);
+  });
+
+  test(`[${site.name}] the flat-turn term is OFF near the vertical, so a loop still closes`, () => {
+    // Bank is degenerate when the nose points at the sky — it jumps by 180
+    // as the pitch passes 90 — so the correction fades out before there. If
+    // it did not, a loop would meet a term reading a meaningless angle.
+    const bird = spawn(site);
+    let swept = 0;
+    let prev = bird.pitchAngle();
+    for (let i = 0; i < 400; i += 1) {
+      bird.tick(pull(1), DT);
+      swept += Math.abs(bird.lastDeltas.pitch);
+      prev = bird.pitchAngle();
+    }
+    assert.ok(swept > 2 * Math.PI, `went all the way round: ${(swept * DEG).toFixed(0)} degrees of pitch`);
+    assert.ok(Number.isFinite(prev), 'and the attitude stayed finite');
+  });
+
   test(`[${site.name}] hands off from a dive, the nose comes back to the horizon`, () => {
     const bird = spawn(site);
     fly(bird, push(0.8), 0.6);

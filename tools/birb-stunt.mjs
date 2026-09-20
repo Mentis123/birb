@@ -208,6 +208,43 @@ async function main() {
     const endBank = Math.abs(levelled[levelled.length - 1].bankDeg);
     check(endBank < 30, `hands-off the wings come level (|bank| ${endBank.toFixed(1)})`);
 
+    // The owner's manoeuvre, on the real page: roll hard over, then PULL,
+    // and carve a flat turn instead of coning through the knife edge into
+    // inverted. Measured here rather than in the unit sim because the live
+    // input pipeline shapes the stick and the page runs at a few frames a
+    // second, and the first report of this was from the phone.
+    await reset(page);
+    const sign = await pitchSign(page);
+    const knife = await page.evaluate(async ({ sign }) => {
+      const B = window.__BIRB;
+      B.setStick(1, 0);
+      for (let i = 0; i < 400; i += 1) {
+        await new Promise((r) => requestAnimationFrame(r));
+        if (Math.abs(B.flightProbe().bankDeg) >= 80) break;
+      }
+      const p0 = B.flightProbe();
+      const h0 = p0.headingDeg;
+      B.setStick(0, sign * 0.7);
+      let lo = Infinity; let hi = -Infinity; let swept = 0; let prev = h0;
+      for (let i = 0; i < 260; i += 1) {
+        await new Promise((r) => requestAnimationFrame(r));
+        const p = B.flightProbe();
+        if (p.recovery !== 'flying') break;
+        lo = Math.min(lo, p.bankDeg); hi = Math.max(hi, p.bankDeg);
+        let d = p.headingDeg - prev; while (d > 180) d -= 360; while (d < -180) d += 360;
+        swept += Math.abs(d); prev = p.headingDeg;
+        if (p.simTime - p0.simTime >= 4) break;
+      }
+      B.setStick(0, 0);
+      return { entry: p0.bankDeg, lo, hi, swept, end: B.flightProbe().bankDeg };
+    }, { sign });
+    check(Math.abs(knife.entry) >= 80, `rolled hard over first (|bank| ${Math.abs(knife.entry).toFixed(1)})`);
+    check(knife.hi - knife.lo < 12,
+      `a pull holds the bank instead of coning (swung ${(knife.hi - knife.lo).toFixed(1)} deg: ${knife.lo.toFixed(1)}..${knife.hi.toFixed(1)})`);
+    check(Math.abs(knife.end) > 60,
+      `and it is still hard banked at the end (${knife.end.toFixed(1)})`);
+    check(knife.swept > 90, `and it carved a real turn (${knife.swept.toFixed(0)} deg swept)`);
+
     // ---- 5. the rudder reaches the bird ----------------------------------
     const rudderSamples = await hold(page, { rudder: 1 }, 24);
     const rudderSeen = rudderSamples.some((s) => Math.abs(s.rudder) > 0.5);
