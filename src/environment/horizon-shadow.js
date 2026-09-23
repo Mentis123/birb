@@ -57,8 +57,10 @@ export function horizonShadowRequested(search) {
 export const HORIZON_SHADOW_DEFAULTS = Object.freeze({
   // Runtime A/B: 1 is the shipping look, 0 is pixel-for-pixel the old light.
   strength: 1,
-  // How much of the indirect light the sky visibility may take away.
-  sky: 0.8,
+  // How much of the indirect light the sky visibility may take away. Not 1:
+  // an occluding hill is itself lit and returns part of the sky it blocks,
+  // and a canopy splatted as a solid column blocks more than a crown does.
+  sky: 0.65,
   // Half-width of the sun's penumbra across the skyline, radians (~2.9 deg).
   penumbra: 0.05,
   // A directional light whose direction is within ~0.8 deg of the sun's is
