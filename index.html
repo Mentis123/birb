@@ -3712,6 +3712,11 @@
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       var { createFrameSampler, createIntervalRecorder } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
+      // One sun for a PLANET (?planetsun=0 is the before) and a physical sky
+      // that moves the authored palette with it (?atmos=0 is the before).
+      var { createSunFrame, sunCycleInto, sunWarmthInto } = await import("./src/environment/sun-frame.js");
+      var { createAtmosphereModel, createAtmosphereOutput, relativeInto: atmosRelativeInto } =
+        await import("./src/environment/atmosphere-model.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
@@ -4542,12 +4547,19 @@
     // Changing density does not change the number of shader operations.
     scene.fog = new THREE.FogExp2(0x9bbab5, 0.006);
 
+    // Boot flags (src/ui/boot-flags.js): the sun in the bird's own horizon
+    // frame, and the physical atmosphere that moves the palette with it.
+    // Read here because the dome compiles the atmosphere tint only when asked.
+    const planetSunRequested = !/[?&]planetsun=0(?:&|$)/.test(window.location?.search || '');
+    const atmosRequested = !/[?&]atmos=0(?:&|$)/.test(window.location?.search || '');
+
     // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
     const skyDome = createSkyDome({
       topColor: new THREE.Color(0x1b2a55),     // deep indigo zenith
       midColor: new THREE.Color(0x6d9ed0),     // soft painterly blue
       horizonColor: new THREE.Color(0xf5d8a6), // warm golden-hour cream
       bottomColor: new THREE.Color(0x2a1a28),  // muted plum below
+      atmosphere: atmosRequested,
     });
     scene.add(skyDome.mesh);
 
@@ -4979,7 +4991,183 @@
       distance: 12,
       _dir: new THREE.Vector3(),
       _color: new THREE.Color(),
+      // ?planetsun: the cycle is re-evaluated whenever `seconds` moves (the
+      // clock, or setSunTime while paused), and the authored fill direction
+      // is mapped through the bird's frame like the key and rim.
+      evaluatedSeconds: NaN,
+      baseFill: new THREE.Vector3(1.2, 3.1, -6.2),
     };
+
+    // ===== One sun for a planet (?planetsun, default on) =====
+    // sun-cycle.js describes the sun in a HORIZON frame and promises it never
+    // sets. Copied straight into world space, that promise held only near the
+    // +Y pole: measured on 54b1961, at the south pole the sun sat 19-58
+    // degrees BELOW the local horizon for the whole cycle, and on the equator
+    // for half of it. sunFrame is the bird's own East/Up/North, parallel-
+    // transported as it flies (src/environment/sun-frame.js); key, rim and
+    // fill are mapped through it EVERY frame, clock or no clock, because the
+    // direction depends on where the bird is. At the spawn pole the mapping is
+    // the identity, so the first frame is exactly the old one.
+    const sunFrame = createSunFrame();
+    const _sunLocal = { x: 0, y: 1, z: 0, height: 0, elevation: Math.PI / 2 };
+    const _sunWarmth = { r: 1, g: 1, b: 1, intensity: 1 };
+    // The core "glow" PointLight sits ~2.5 units from the planet's centre,
+    // ~118 under the ground, with a 12-15 unit range: it lights nothing and
+    // every lit fragment still evaluates it. Kept (applyLightingPreset writes
+    // it), hidden — which also drops NUM_POINT_LIGHTS from every program.
+    if (planetSunRequested) glowLight.visible = false;
+
+    // ===== Physical atmosphere (?atmos, default on) =====
+    // A compact Earth atmosphere (src/environment/atmosphere-model.js,
+    // Hillaire 2020 / Bruneton parameters) used ONLY as a ratio around each
+    // biome's authored palette: model(e_now) / model(e_ref), where e_ref is
+    // the elevation of that biome's authored key light (~42 degrees). At e_ref
+    // every colour below is exactly the authored one. Refreshed only when the
+    // local sun elevation has moved — the cycle moves it at most ~0.2 degrees
+    // a second — so it costs a fraction of a millisecond a few times a minute.
+    const atmosState = atmosRequested ? {
+      model: createAtmosphereModel(),
+      ref: createAtmosphereOutput(),
+      cur: createAtmosphereOutput(),
+      rel: createAtmosphereOutput(),
+      refElevation: NaN,
+      elevation: NaN,       // the local sun elevation this frame
+      lastElevation: NaN,   // ...at the last refresh
+      sinceRefresh: 0,
+      refreshes: 0,
+      dirty: true,
+      // Seeded from the rig, not white: if the initial environment setup ever
+      // throws before captureLightBases() runs, the modulation must still sit
+      // on a real colour.
+      baseHemiSky: ambient.color.clone(),
+      baseFog: new THREE.Color(),
+      baseMist: new THREE.Color(),
+      baseWaterSky: new THREE.Color(),
+      hasFog: false,
+      hasMist: false,
+      hasWater: false,
+      _up: new THREE.Vector3(),
+      _water: new THREE.Color(),
+    } : null;
+    const ATMOS_REFRESH_EPS = 0.004;    // rad (~0.23 deg) of elevation before a refresh is worth it
+    const ATMOS_REFRESH_MIN_S = 0.25;   // ...and no more often than this,
+    const ATMOS_REFRESH_JUMP = 0.035;   // ...unless the sun JUMPED (~2 deg: setSunTime, a teleport)
+
+    /** target = base * ratio, per channel. Zero allocation. */
+    function mulRatio(target, base, ratio) {
+      target.r = base.r * ratio[0];
+      target.g = base.g * ratio[1];
+      target.b = base.b * ratio[2];
+      return target;
+    }
+
+    // The biome's authored light, captured once per environment switch AFTER
+    // every colour that derives from its sky (fog, mist, water) has been set.
+    function captureLightBases() {
+      sunState.baseFill.copy(lightingRig.fillLight.position);
+      sunState.evaluatedSeconds = NaN;   // re-apply the cycle over the fresh preset
+      if (!atmosState) return;
+      const key = lightingRig.keyLight;
+      const len = key.position.length();
+      // applyLightingPreset has just written the AUTHORED key position, in the
+      // pole frame the palette was painted in.
+      atmosState.refElevation = len > 0 ? Math.asin(Math.max(-1, Math.min(1, key.position.y / len))) : 0.73;
+      atmosState.model.evaluate(atmosState.refElevation, atmosState.ref);
+      atmosState.baseHemiSky.copy(lightingRig.ambient.color);
+      atmosState.hasFog = !!scene.fog;
+      if (scene.fog) atmosState.baseFog.copy(scene.fog.color);
+      atmosState.hasMist = !!visualUniforms.mistColor.value;
+      if (atmosState.hasMist) atmosState.baseMist.copy(visualUniforms.mistColor.value);
+      atmosState.hasWater = !!(sphericalWorld?.water && skyDome?.getMidColor);
+      if (atmosState.hasWater) atmosState.baseWaterSky.copy(skyDome.getMidColor()).multiplyScalar(0.58);
+      atmosState.dirty = true;
+    }
+
+    // The ?planetsun sun, every frame. `clockDelta` is 0 while the clock is
+    // held (paused, reduced motion, a benchmark freeze): the sun then keeps its
+    // HOUR, not its world direction.
+    function updatePlanetSun(clockDelta, pos) {
+      const key = lightingRig.keyLight;
+      if (clockDelta > 0) sunState.seconds += clockDelta;
+      if (pos) sunFrame.update(pos.x, pos.y, pos.z);
+      if (sunState.seconds !== sunState.evaluatedSeconds) {
+        sunState.evaluatedSeconds = sunState.seconds;
+        sunCycleInto(sunState.seconds, _sunLocal);
+        if (atmosState) {
+          // The atmosphere owns the key's colour (updateAtmosphere); its
+          // intensity is the authored one, not the warmth heuristic's.
+          key.intensity = sunState.baseKeyIntensity;
+        } else {
+          sunWarmthInto(_sunLocal.height, _sunWarmth);
+          key.color.copy(sunState.baseKeyColor);
+          key.color.r *= _sunWarmth.r;
+          key.color.g *= _sunWarmth.g;
+          key.color.b *= _sunWarmth.b;
+          key.intensity = sunState.baseKeyIntensity * _sunWarmth.intensity;
+        }
+        lightingRig.rimLight.intensity = sunState.baseRimIntensity * (1.25 - _sunLocal.height * 0.4);
+      }
+      sunFrame.toWorld(_sunLocal.x, _sunLocal.y, _sunLocal.z, key.position).multiplyScalar(sunState.distance);
+      // The rim counter-rotates so a silhouette keeps an edge; the fill keeps
+      // its authored bearing — both in the bird's frame now, not the world's.
+      sunFrame.toWorld(-_sunLocal.x, Math.max(0.35, _sunLocal.y * 0.7), -_sunLocal.z, lightingRig.rimLight.position)
+        .multiplyScalar(sunState.distance * 0.85);
+      sunFrame.toWorld(sunState.baseFill.x, sunState.baseFill.y, sunState.baseFill.z, lightingRig.fillLight.position);
+      // The hemisphere's sky/ground axis is its position: radial up, not +Y.
+      lightingRig.ambient.position.set(sunFrame.up.x, sunFrame.up.y, sunFrame.up.z);
+      skyDome?.setSunDirection?.(key.position);
+      sphericalWorld?.features?.valley?.setSunDirection?.(key.position);
+      if (sphericalWorld?.water) {
+        sphericalWorld.water.setSunDirection(key.position);
+        sphericalWorld.water.setSunColor(key.color);
+      }
+    }
+
+    // The ?atmos palette. `keyTouched` is true on a frame the ?planetsun=0
+    // cycle rewrote the key with its warmth heuristic, which this replaces.
+    function updateAtmosphere(dt, pos, keyTouched) {
+      const a = atmosState;
+      const key = lightingRig.keyLight;
+      // The sun's elevation above the BIRD's horizon. Under ?planetsun that is
+      // the cycle's own; without it, wherever the world-fixed sun happens to
+      // sit over this spot (the model clamps a set sun to 0.02 rad).
+      let e;
+      if (planetSunRequested) {
+        e = _sunLocal.elevation;
+      } else {
+        const kl = key.position.length() || 1;
+        if (pos && pos.lengthSq() > 0) a._up.copy(pos).normalize();
+        else a._up.set(0, 1, 0);
+        e = Math.asin(Math.max(-1, Math.min(1, key.position.dot(a._up) / kl)));
+      }
+      a.elevation = e;
+      a.sinceRefresh += dt;
+      const moved = Math.abs(e - a.lastElevation);
+      let applyKey = keyTouched;
+      if (a.dirty || !(moved < ATMOS_REFRESH_JUMP)
+          || (moved > ATMOS_REFRESH_EPS && a.sinceRefresh >= ATMOS_REFRESH_MIN_S)) {
+        a.model.evaluate(e, a.cur);
+        atmosRelativeInto(a.cur, a.ref, a.rel);
+        a.lastElevation = e;
+        a.sinceRefresh = 0;
+        a.dirty = false;
+        a.refreshes += 1;
+        const rel = a.rel;
+        // Sky light on the hemisphere, air in the fog and the valley mist,
+        // the sky in the lakes, and the dome itself.
+        mulRatio(lightingRig.ambient.color, a.baseHemiSky, rel.irradiance);
+        if (a.hasFog && scene.fog) mulRatio(scene.fog.color, a.baseFog, rel.horizonMean);
+        if (a.hasMist && visualUniforms.mistColor.value) mulRatio(visualUniforms.mistColor.value, a.baseMist, rel.horizonMean);
+        if (a.hasWater && sphericalWorld?.water) sphericalWorld.water.setSky(mulRatio(a._water, a.baseWaterSky, rel.horizonMean));
+        skyDome?.setAtmosphere?.(rel);
+        applyKey = true;
+      }
+      if (applyKey) {
+        mulRatio(key.color, sunState.baseKeyColor, a.rel.sun);
+        if (sphericalWorld?.water) sphericalWorld.water.setSunColor(key.color);
+      }
+      if (keyTouched) key.intensity = sunState.baseKeyIntensity;
+    }
 
     const debugVectorState = (() => {
       const hasDebugVectors = new URLSearchParams(window.location.search).has("debugVectors");
@@ -6166,6 +6354,15 @@
       renderer.shadowMap.enabled = shadowsEnabled;
       shadowLight.visible = shadowsEnabled;
       shadowLight.castShadow = shadowsEnabled;
+      // ONE sun. The shadow light copies the key's direction, colour and full
+      // intensity every frame (the follow block below), so with the key still
+      // lit the sun counted twice: measured on 54b1961, turning shadows ON
+      // brightened the frame 5.9% (lower half +8.5%) and a shadow could remove
+      // at most half the sunlight. While shadows are on the shadow light IS
+      // the sun; the key keeps being computed (the sky disc, the water glint,
+      // the terrain rim and the shadow light itself all read it) but lights
+      // nothing.
+      lightingRig.keyLight.visible = !shadowsEnabled;
       if (shadowCasterProxy) {
         shadowCasterProxy.castShadow = shadowsEnabled;
         shadowCasterProxy.visible = shadowsEnabled;
@@ -6799,6 +6996,9 @@
           scene.fog.color.setHex(definition.fogColor);
         }
       }
+      // This biome's authored light is now complete: the bases the planet sun
+      // (?planetsun) and the atmosphere (?atmos) modulate around.
+      captureLightBases();
 
       // ===== IMPROVEMENT 5: Update ambient particles =====
       if (particleSystem) {
@@ -10653,6 +10853,9 @@
       if (Number.isFinite(atmos)) visualUniforms.atmosphere.value = atmos;
       if (hemiSky !== undefined && lightingRig.ambient?.color) {
         lightingRig.ambient.color.setHex(hemiSky);
+        // ?atmos modulates the hemisphere around its base: move the base too,
+        // or the next refresh quietly puts the old sky colour back.
+        if (atmosState) { atmosState.baseHemiSky.setHex(hemiSky); atmosState.dirty = true; }
       }
       if (Number.isFinite(exposure)) {
         qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'exposure', value: exposure });
@@ -12026,7 +12229,15 @@
       // `benchmarkFreezes.sun` (CONTRACT §2.1 'manual' Benchmark freeze) holds
       // it too — a 10-minute cycle confounds any A/B taken minutes apart, and
       // the sun is the one item this task was told twice not to get wrong.
-      if (sunState.enabled && !reducedMotionState.enabled && !benchmarkFreezes.sun && lightingRig.keyLight) {
+      //
+      // ?planetsun (default): the same components, mapped through the bird's
+      // own horizon frame EVERY frame — the clock holding still holds the
+      // hour, not the world direction. ?planetsun=0 is the block below as it
+      // was: world-fixed, written only while the clock runs.
+      const sunClockRuns = sunState.enabled && !reducedMotionState.enabled && !benchmarkFreezes.sun;
+      if (planetSunRequested) {
+        if (lightingRig.keyLight) updatePlanetSun(sunClockRuns ? delta : 0, birdPos);
+      } else if (sunClockRuns && lightingRig.keyLight) {
         sunState.seconds += delta;
         const sun = sunDirectionAt(sunState.seconds);
         sunState._dir.set(sun.x, sun.y, sun.z).multiplyScalar(sunState.distance);
@@ -12055,6 +12266,11 @@
           sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
           sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
         }
+      }
+      // ?atmos: the palette follows the LOCAL sun elevation (see
+      // updateAtmosphere). Before the shadow follow, which copies the key.
+      if (atmosState && lightingRig.keyLight) {
+        updateAtmosphere(delta, birdPos, !planetSunRequested && sunClockRuns);
       }
 
       // ===== Shadow-caster follow (Ascend wave, opt-in) =====
@@ -14074,6 +14290,73 @@
         // Jump the sun cycle to a point in its period, for captures.
         setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
         setSunEnabled: (on) => { sunState.enabled = !!on; return sunState.enabled; },
+        // Render ONLY the sky dome, through camera layer 31, so a check that
+        // measures the SKY cannot be confounded by whatever tree or cloud the
+        // unseeded world stood in front of the lens: planet-light-sky's
+        // ?atmos=0 control read -5.8% on a boot where one did, 0.0% on one
+        // where none did. skyOnly(false) puts the camera's own mask back.
+        skyOnly: (() => {
+          let savedMask = null;
+          return (on = true) => {
+            const cam = cameraState?.camera;
+            if (!cam || !skyDome?.mesh) return null;
+            if (on) {
+              if (savedMask === null) savedMask = cam.layers.mask;
+              skyDome.mesh.layers.enable(31);
+              cam.layers.set(31);
+            } else if (savedMask !== null) {
+              cam.layers.mask = savedMask;
+              savedMask = null;
+            }
+            return cam.layers.mask;
+          };
+        })(),
+        // The light rig as it stands, measured against the BIRD's own horizon:
+        // tools/realism-checks/planet-light-*.mjs read this rather than argue
+        // from source. Allocates; a debug readback, never called per frame.
+        lightRig: () => {
+          const key = lightingRig.keyLight;
+          const pos = flightController?.position;
+          const up = pos && pos.lengthSq() > 0 ? pos.clone().normalize() : new THREE.Vector3(0, 1, 0);
+          const sunDir = key.position.clone().normalize();
+          const hemiAxis = lightingRig.ambient.position.clone().normalize();
+          const deg = (r) => +(r * 180 / Math.PI).toFixed(3);
+          const rgb = (c) => [+c.r.toFixed(4), +c.g.toFixed(4), +c.b.toFixed(4)];
+          const ratio = (v) => (v ? [+v[0].toFixed(4), +v[1].toFixed(4), +v[2].toFixed(4)] : null);
+          return {
+            planetSun: planetSunRequested,
+            atmos: !!atmosState,
+            sunLocalElevationDeg: deg(Math.asin(Math.max(-1, Math.min(1, sunDir.dot(up))))),
+            sunDir: sunDir.toArray().map((n) => +n.toFixed(4)),
+            hemiUpDot: +hemiAxis.dot(up).toFixed(6),
+            keyVisible: key.visible,
+            glowVisible: lightingRig.glowLight.visible,
+            shadowsEnabled,
+            shadowLightVisible: shadowLight.visible,
+            keyColor: rgb(key.color),
+            keyIntensity: +key.intensity.toFixed(4),
+            hemiSky: rgb(lightingRig.ambient.color),
+            fogColor: scene.fog ? rgb(scene.fog.color) : null,
+            mistColor: visualUniforms.mistColor.value ? rgb(visualUniforms.mistColor.value) : null,
+            skyTint: skyDome?.atmosphereState ? skyDome.atmosphereState() : null,
+            frameResets: sunFrame.resets,
+            frame: {
+              east: [sunFrame.east.x, sunFrame.east.y, sunFrame.east.z],
+              up: [sunFrame.up.x, sunFrame.up.y, sunFrame.up.z],
+              north: [sunFrame.north.x, sunFrame.north.y, sunFrame.north.z],
+            },
+            sunSeconds: sunState.seconds,
+            atmosphere: atmosState ? {
+              refElevationDeg: deg(atmosState.refElevation),
+              elevationDeg: deg(atmosState.elevation),
+              refreshes: atmosState.refreshes,
+              sun: ratio(atmosState.rel.sun),
+              zenith: ratio(atmosState.rel.zenith),
+              horizonMean: ratio(atmosState.rel.horizonMean),
+              irradiance: ratio(atmosState.rel.irradiance),
+            } : null,
+          };
+        },
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {

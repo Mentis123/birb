@@ -156,6 +156,8 @@ const CORE_ASSETS = [
   './src/environment/landmark-valley.js',
   './src/environment/sky-dome.js',
   './src/environment/sun-cycle.js',
+  './src/environment/sun-frame.js',
+  './src/environment/atmosphere-model.js',
   './src/environment/water.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',

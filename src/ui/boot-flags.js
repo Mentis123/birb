@@ -65,6 +65,11 @@ export const BOOT_FLAGS = Object.freeze([
       { value: '1', label: 'On' },
     ],
     hint: 'Off is the shipping default. On prefilters the sky once at boot and lights the scene with it.' },
+  // ---- Light: one sun, one sky, for a planet ----
+  { key: 'planetsun', group: 'Light', kind: 'toggle', label: 'Sun in the bird’s own horizon (planet sun)',
+    hint: 'Off is the before: a world-fixed sun that sat below the local horizon over half the planet, a hemisphere light pointing at world +Y, and a point light buried in the planet’s core.' },
+  { key: 'atmos', group: 'Light', kind: 'toggle', label: 'Physical atmosphere moves the palette',
+    hint: 'A small Earth atmosphere (Hillaire 2020 / Bruneton) tints key, sky, fog, mist and lakes by how the sun’s height changes them. Exactly the authored look at the authored sun height; off is the warmth heuristic.' },
   // ---- The bird ----
   { key: 'bird', group: 'Bird', kind: 'select', label: 'Bird build',
     options: [
