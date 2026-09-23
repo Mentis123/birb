@@ -272,12 +272,31 @@ async function main() {
             // The stick stays at the rail so nothing rights the bird while it
             // falls, and the placement is shallow (-0.05) so contact happens
             // without a violent deflection.
-            await setAltitude(page, -0.05);
-            const crash = await sampleUntil(page, secToFrames(3), (p) => p.recovery !== 'flying');
+            //
+            // The contact is DELIVERED, not waited for (2026-09-23). BirdFlight
+            // clamps to the floor BEFORE checkGroundCollision reads the
+            // position, so a bird placed below the surface is back on the exact
+            // boundary by the time the check runs and the strict `<` is settled
+            // by float rounding — the same coin toss as "a level bird cannot
+            // land" in G-FLIGHT-V2. This used to wait 60 frames for the coin and
+            // sometimes it never landed: Browser Health on main at d47fc7e (run
+            // 159) failed here with the bird still FLYING at roll -153.1, on a
+            // commit whose branch run passed, and base main failed identically.
+            // probeGround makes the NEXT ground check see a real 0.05
+            // penetration, and the rule under test — the attitude at the
+            // contact frame decides FALLING or GROUNDED — runs exactly as it
+            // does in play. Placement and probe share one evaluate so no frame
+            // can fall between them.
+            await page.evaluate(() => {
+                window.__BIRB.setAltitude(-0.05);
+                return window.__BIRB.probeGround?.(0.05);
+            });
+            const crash = await sampleUntil(page, secToFrames(1), (p) => p.recovery !== 'flying');
             await release(page);
             if (!crash.hit) {
-                check(false, 'the bird never left FLYING after being placed below the surface while '
-                    + `banked (roll ${num(invert.probe.rollFullDeg)}°) — checkGroundCollision may not be running`);
+                check(false, 'a delivered ground contact left the bird FLYING while banked '
+                    + `(roll ${num(invert.probe.rollFullDeg)}°) — checkGroundCollision, or __BIRB.probeGround, `
+                    + 'is not running');
             } else {
                 // bodyUp·radial at that frame. With the pitch near level this
                 // is cos(roll); the index.html rule is `bodyUp·up < 0.25`.
@@ -311,9 +330,11 @@ async function main() {
         check(flying.hit, `is FLYING again before the upright landing (recovery=${flying.probe ? flying.probe.recovery : 'unknown'})`);
         const relevel = await sampleUntil(page, secToFrames(4),
             (p) => Math.abs(p.rollDeg) < 10 && Math.abs(p.pitchDeg) < 10);
+        check(relevel.hit, 'level again before the upright contact (roll/pitch < 10°) — '
+            + `roll ${num(relevel.probe ? relevel.probe.rollDeg : NaN)}°, pitch ${num(relevel.probe ? relevel.probe.pitchDeg : NaN)}°`);
         const beforeDrop = await probe(page);
         check(beforeDrop.recovery === 'flying', `still FLYING at the moment of the drop (recovery=${beforeDrop.recovery})`);
-        // What this can assert, and why it is not "it grounds".
+        // What this asserts, and why it used to be only "not a crash".
         //
         // Measured on this build: the flight floor (bird-flight.js _floorAt)
         // and the landing check (checkGroundCollision) sample the SAME
@@ -328,27 +349,23 @@ async function main() {
         // ground is luck. That is pre-existing and out of this tool's scope
         // — see docs/perf/gates/G-FLIGHT-V2.md.
         //
-        // So the assertion is the half that IS reachable and IS this tool's
-        // business: upright, unhurried contact must never be read as a CRASH.
-        // The v2 rule is `bodyUp·up < 0.25 || (speed > 1.4*cruise && nose
-        // down)`, and the boost bug the review found (a level bird above
+        // So this used to assert only the half that was reachable: upright,
+        // unhurried contact must never be read as a CRASH. With the contact
+        // DELIVERED by probeGround (see section 5) the whole rule is
+        // reachable, so it asserts the whole rule: that contact GROUNDS the
+        // bird. The v2 rule is `bodyUp·up < 0.25 || (speed > 1.4*cruise &&
+        // nose down)`, and the boost bug the review found (a level bird above
         // 1.4x cruise for 0.68 s after every boost) would trip exactly this.
-        await setAltitude(page, -0.5);
-        let crashedUpright = null;
-        let groundedUpright = false;
-        for (let i = 0; i < secToFrames(6) && !crashedUpright; i += 1) {
-            const p = await stepProbe(page, 1);
-            if (p.recovery === 'falling') crashedUpright = p;
-            if (p.recovery === 'grounded') { groundedUpright = true; break; }
-            // Re-arm the penetration: the clamp lifts the bird back to the
-            // boundary every frame, so one placement is one chance.
-            if (i % 4 === 3) await setAltitude(page, -0.5);
-        }
-        check(!crashedUpright,
-            `upright and slow, ground contact must not be a crash — got recovery=falling`
-            + (crashedUpright ? ` at roll ${num(crashedUpright.rollFullDeg)}°, speed ${num(crashedUpright.speed, 2)}` : ''));
-        console.log(`  ..   upright contact ${groundedUpright ? 'grounded' : 'did not ground within the window'}`
-            + ' (a level bird sits exactly on the floor boundary — see the note above)');
+        await page.evaluate(() => {
+            window.__BIRB.setAltitude(-0.5);
+            return window.__BIRB.probeGround?.(0.05);
+        });
+        const landing = await sampleUntil(page, secToFrames(1), (p) => p.recovery !== 'flying');
+        const landed = landing.hit ? landing.probe.recovery : 'flying';
+        check(landed === 'grounded',
+            `upright and slow, a ground contact GROUNDS the bird and is never a crash — got recovery=${landed}`
+            + (landing.hit ? ` at roll ${num(landing.probe.rollFullDeg)}°, pitch ${num(landing.probe.pitchDeg)}°, `
+                + `speed ${num(landing.probe.speed, 2)}` : ''));
 
     } catch (err) {
         failures.push('threw: ' + String((err && err.stack) || err));

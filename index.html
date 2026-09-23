@@ -5714,6 +5714,14 @@
     // Set only by the ?debug=1 capture harness; null in production.
     let __birbStickOverride = null;
 
+    // Set only by the ?debug=1 flight harness (__BIRB.probeGround); 0 in
+    // production. A one-shot depth the NEXT ground check sees the bird below
+    // its floor by. BirdFlight clamps to the floor before that check reads the
+    // position, so a flying bird sits exactly on the boundary and contact is
+    // settled by float rounding (G-FLIGHT-V2, "a level bird cannot land") — a
+    // harness asserting what CONTACT does has to be able to deliver one.
+    let __birbGroundProbe = 0;
+
     // Bird-studio state for tools/birb-bird-sheet.mjs — the bird alone against
     // a neutral background. Non-null while active; holds what was hidden/
     // changed so birdStudio(false) restores exactly that, not a guess.
@@ -11836,6 +11844,12 @@
             }
           }
 
+          if (__birbGroundProbe > 0) {
+            _v2Up.copy(pose.position).normalize();
+            pose.position.addScaledVector(_v2Up, -__birbGroundProbe);
+            flight.position.copy(pose.position);
+            __birbGroundProbe = 0;
+          }
           const groundResult = sphericalWorld.collisionSystem.checkGroundCollision(
             THREE,
             pose.position,
@@ -13586,6 +13600,13 @@
           const terrain = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(p.x, p.y, p.z) : 0;
           p.normalize().multiplyScalar(sphericalWorld.sphereRadius + terrain + aboveGround);
           return p.length();
+        },
+        // One real ground contact on the next frame: the ground check sees the
+        // bird `depth` below its floor, then applies its own rules to whatever
+        // attitude the bird has at that frame. See __birbGroundProbe.
+        probeGround: (depth = 0.05) => {
+          __birbGroundProbe = Math.max(0, Number(depth) || 0);
+          return __birbGroundProbe;
         },
         // Drives boost from a capture: a screenshot cannot hold a button.
         setStick: (x, y) => {
