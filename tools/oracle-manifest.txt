@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-23 at commit df21aa3 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-23 at commit a918487 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -173,7 +173,7 @@ e4b61079ee3feb11062eb889bcc8bbfae3fa23dc1ba456acb2c900c6fbd43887  tools/birb-she
 # label (the shipping default is Neutral 1.12, not ACES); the harness itself
 # is unchanged in the legacy --env/--out path.
 61a9d9a531d706cbd740ef062f0616e39acf29b1a1c28dc063f4a0e556238df9  tools/birb-lighting.mjs
-bbbe561b3ec3c5c702d993d7247c30838affb5586afd5a019a3d4ce7f8e1ffbc  tools/birb-modes.mjs
+90d8485e226d2205f5f47b3446e8274f75985d7ae2e9d7b46a431660289a5b4a  tools/birb-modes.mjs
 67144c112b26647f1c989f1060d01c34d7162ea6164892e82220cc761cabd6b8  tools/birb-shaders.mjs
 # tools/birb-walk.mjs added 2026-09-13 (G-TUCK). It is a Browser Health gate
 # like the two above, and its thresholds are the whole oracle: it is the only
