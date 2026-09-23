@@ -3309,6 +3309,9 @@
         const mainEl = document.querySelector('[data-game-main]');
         if (mainEl) mainEl.hidden = false;
         startGameLoop();
+        // Hear the air: build the flight audio inside this gesture (iOS will
+        // not start a context outside one). Null under ?airsound=0.
+        if (flightAudio) flightAudio.unlock();
         // Start background music only after the user has explicitly started.
         if (soundSettings.musicEnabled) {
           setAmbientMusic(true);
@@ -4114,6 +4117,9 @@
       if (continuousSounds.ambient) {
         continuousSounds.ambient.volume = getEffectiveVolume(BASE_VOLUMES.ambient, false);
       }
+      // The flight audio is an effect: master volume, silenced by the SFX
+      // toggle. Every slider move and toggle lands here.
+      if (flightAudio) flightAudio.setVolume(soundSettings.masterVolume, soundSettings.sfxEnabled);
     };
 
     // Play from preloaded pool (instant, no loading delay)
@@ -4175,6 +4181,104 @@
     const tickAmbientBirds = (_eligible) => { /* intentionally no-op */ };
     const updateWindSound = (_speed, _maxSpeed = 8) => { /* intentionally no-op */ };
 
+    // ============ HEAR THE AIR — procedural flight audio ============
+    // src/audio/flight-audio.js: wind, an aeolian whistle, the stall buffet,
+    // a whoosh on every real downstroke and a rush near the ground — all
+    // synthesised, no asset, no GPU. NOT the wind bed removed above: that was
+    // a constant loop on top of the music; this one measures 12-14 dB UNDER
+    // the music at cruise and speaks when the flight does something (speed, a
+    // stall, a beat, the ground) — docs/perf/gates/G-REALISM-FLIGHT-AUDIO.md.
+    // `?airsound=0` leaves `flightAudio` null, and every hook below is then a
+    // no-op — the silent game exactly as it was.
+    const airSoundWanted = !/[?&]airsound=0(?:&|$)/.test(window.location?.search || '');
+    let flightAudio = null;
+    if (airSoundWanted) {
+      try {
+        const { createFlightAudio } = await import('./src/audio/flight-audio.js');
+        flightAudio = createFlightAudio();
+        flightAudio.setVolume(soundSettings.masterVolume, soundSettings.sfxEnabled);
+      } catch (err) {
+        // The game flies on without it; the console still says so.
+        console.warn('[airsound] flight audio unavailable, flying silent:', err);
+        flightAudio = null;
+      }
+    }
+
+    // What the air is doing, measured, handed over in ONE object refilled
+    // every frame (zero allocation). Called where updateWindSound was.
+    const _faFrame = {
+      speed: NaN, paused: true, airborne: false, stalled: false, authority: NaN,
+      stallMul: 0.5, wingAngle: NaN, clearance: Infinity, overWater: false,
+    };
+    const _faPrevPos = new THREE.Vector3();
+    let _faHavePrev = false;
+    let _faPrevDelta = 0;
+    let _faWing = null;
+    let _faGroundIn = 0;
+    const updateFlightAudio = (delta, isNested) => {
+      const fc = flightController;
+      const f = _faFrame;
+      // This runs before the flight tick, so the pose it reads was produced
+      // by LAST frame's step: that is the time it advanced by.
+      const dt = _faPrevDelta;
+      _faPrevDelta = delta;
+      f.paused = !(delta > 0);
+      // Airspeed is what the bird actually moved — sink, falls, boosts and
+      // the nest auto-fly included, for every flight model alike. There is no
+      // wind in this world, so ground speed IS airspeed. A jump faster than
+      // any flight is a teleport or a restored pose, and reads as no sample.
+      f.speed = NaN;
+      if (fc && fc.position) {
+        if (_faHavePrev && dt > 0) {
+          const v = fc.position.distanceTo(_faPrevPos) / dt;
+          if (v <= 120) f.speed = v;
+        }
+        _faPrevPos.copy(fc.position);
+        _faHavePrev = true;
+      }
+      if (isNested) f.speed = 0;
+      f.airborne = !isNested && flightRecoveryState !== FLIGHT_RECOVERY_STATES.GROUNDED;
+      // The stall, from the stunt model's OWN flag and authority, and only
+      // while the bird flies itself. NOT while a boost is in the energy
+      // target: a boost moves it to 2.4x cruise and the controller's stall
+      // test is written against the target, so it reports a stall at 11 of
+      // a 26.4 target — a wing speeding up, not one stopping. The target is
+      // read, not boostTimer: it is still boosted on the frame after the
+      // timer runs out (written before the timer is decremented), and gating
+      // on the timer leaked exactly that frame as a 0.05 buffet.
+      const flying = f.airborne && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING
+        && !(nestingSystem && nestingSystem.getState() === NESTING_STATES.LANDING);
+      const unboosted = sprintState.active ? sprintState.sprintSpeed : sprintState.baseSpeed;
+      const boosted = boostTimer > 0 || (fc && fc.cruise > unboosted * 1.001);
+      if (flying && !boosted && fc && fc.isStunt && typeof fc.isStalled === 'function') {
+        f.stalled = fc.isStalled();
+        f.authority = fc.authority();
+        f.stallMul = fc.stallMul;
+      } else {
+        f.stalled = false;
+        f.authority = NaN;
+      }
+      // The wing, read where every pose path leaves it (this frame's is last
+      // frame's pose). Cached, re-resolved if the model was rebuilt.
+      let attached = false;
+      for (let p = _faWing ? _faWing.parent : null, i = 0; p && i < 8; p = p.parent, i += 1) {
+        if (p === birbAnchor) { attached = true; break; }
+      }
+      if (!attached) _faWing = (birbAnchor && birbAnchor.getObjectByName('leftWing')) || null;
+      f.wingAngle = _faWing ? _faWing.rotation.x : NaN;
+      // Clearance over the ground or the water: a terrain sample, so every
+      // fourth frame is plenty for a sound that eases over 60 ms.
+      if (--_faGroundIn <= 0) {
+        _faGroundIn = 4;
+        f.clearance = __BIRB_ALTITUDE_ABOVE_GROUND();
+        const level = sphericalWorld?.waterLevel ?? 0;
+        f.overWater = !!(fc && fc.position && level < 0 && f.clearance < 12
+          && typeof sampleTerrainMeshHeight === 'function'
+          && sampleTerrainMeshHeight(fc.position.x, fc.position.y, fc.position.z) < level);
+      }
+      flightAudio.update(f, dt);
+    };
+
     // Update drone hum based on nearest drone distance
     const updateDroneHumSound = (nearestDroneDistance, maxDistance = 40) => {
       if (!continuousSounds.droneHum || !soundSettings.sfxEnabled) {
@@ -4220,7 +4324,11 @@
     };
 
     // Unlock audio on first user interaction (required for iOS)
-    const unlockAudio = () => {
+    const unlockAudio = (evt) => {
+      // Once the game runs, every gesture re-arms the flight audio: built on
+      // the first, and iOS can interrupt a context at any time (a call, Siri)
+      // and will only let it resume inside a gesture.
+      if (flightAudio && gameLoopStarted) flightAudio.unlock(evt);
       if (audioUnlocked) return;
 
       // On mobile, audio APIs must be touched in a user gesture. We unlock here,
@@ -4302,7 +4410,8 @@
         if (!(vol > 0)) return; // sfx muted
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
-        if (!_ringAudioCtx) _ringAudioCtx = new AC();
+        // One context for the page: the flight audio's when it exists.
+        if (!_ringAudioCtx) _ringAudioCtx = (flightAudio && flightAudio.ensureContext()) || new AC();
         const ctx = _ringAudioCtx;
         if (ctx.state === 'suspended') ctx.resume();
         const now = ctx.currentTime;
@@ -11078,7 +11187,11 @@
       }
 
       // Update wind sound based on flight speed
-      if (flightController && !isNested) {
+      if (flightAudio) {
+        // Hear the air (the audio section's updateFlightAudio). The branches
+        // below are the ?airsound=0 path, untouched: a no-op.
+        updateFlightAudio(delta, isNested);
+      } else if (flightController && !isNested) {
         const currentSpeed = typeof flightController.getSpeed === 'function'
           ? flightController.getSpeed()
           : (flightController.speed || 0);
@@ -12361,6 +12474,7 @@
       previousTime = null;
       flightControls?.reset?.({ releasePointerLock: true });
       renderer.setAnimationLoop(null);
+      if (flightAudio) flightAudio.suspend('paused');
       gpuTimer.onContextLost();
       if (statusMetric) {
         statusMetric.textContent = "Graphics context lost — attempting to restore...";
@@ -12425,6 +12539,8 @@
         }
         if (continuousSounds.droneHum) continuousSounds.droneHum.pause();
         if (continuousSounds.wind) continuousSounds.wind.pause();
+        // The flight audio fades and suspends; the next frame wakes it.
+        if (flightAudio) flightAudio.suspend('hidden');
       } else {
         flightControls.reset();
         // Back in the foreground — resume the loops we paused, if appropriate.
@@ -12500,6 +12616,8 @@
 
       // Pause game
       renderer.setAnimationLoop(null);
+      // A paused bird is silent at once, not after the idle watchdog.
+      if (flightAudio) flightAudio.suspend('paused');
 
       // Show settings overlay
       if (settingsOverlay) {
@@ -14141,6 +14259,21 @@
             || nestingSystem.forceNestAt(nest);
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
+        // Hear the air: what the flight audio is driving, and with
+        // {measure: true} what actually comes OUT of it (an analyser on the
+        // master, created on first use). `toneHz` also reports how far a tone
+        // at that frequency stands above the noise around it.
+        flightAudio: (opts = {}) => {
+          if (!flightAudio) return { state: 'off' };
+          const out = flightAudio.probe();
+          // The controller's own, UNGATED stall flag and the boost, beside
+          // what the audio heard — so a check can show the boost trap.
+          out.modelStalled = typeof flightController?.isStalled === 'function'
+            ? !!flightController.isStalled() : null;
+          out.boosting = boostTimer > 0;
+          if (opts && opts.measure) out.measured = flightAudio.measure(opts);
+          return out;
+        },
         stats: () => ({
           // From the pass when it is running: renderer.info resets per
           // render() call and the composite is the last one, so reading the
