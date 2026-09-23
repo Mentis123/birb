@@ -8,6 +8,7 @@ import HumanoidCore
 struct EditorView: View {
     @StateObject private var editor = EditorModel()
     @State private var showingExport = false
+    @State private var showingBrush = false
 
     private static let ground = Color(red: 0.024, green: 0.035, blue: 0.094)
     private static let panel = Color(red: 0.039, green: 0.075, blue: 0.141)
@@ -68,6 +69,13 @@ struct EditorView: View {
             .help("Let a finger sculpt")
 
             Button { editor.frameModel() } label: { Image(systemName: "viewfinder") }
+
+            // Pressure, hardness and latency, one tap away. Tuning the Pencil
+            // is a feel decision that has to be made on the glass, so the
+            // controls for it are in the app rather than in a build.
+            Button { showingBrush = true } label: { Image(systemName: "pencil.tip.crop.circle") }
+                .help("Brush and Pencil settings")
+                .popover(isPresented: $showingBrush) { BrushSettingsView(editor: editor) }
 
             Button { showingExport = true } label: {
                 Text("Export").fontWeight(.semibold)
@@ -176,6 +184,95 @@ struct EditorView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption2).foregroundStyle(.white.opacity(0.55))
             content()
+        }
+    }
+}
+
+/// Everything about how the Pencil drives the brush.
+///
+/// Pressure is the one setting a person has to tune with their own hand, and
+/// before this it could not be tuned at all: it changed strength only, never
+/// size, from a floor fixed in the code.
+struct BrushSettingsView: View {
+    @ObservedObject var editor: EditorModel
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Pressure changes size", isOn: $editor.pressureSize)
+                    if editor.pressureSize {
+                        percentSlider("Lightest touch size", value: $editor.minimumSize, in: 0.05...1)
+                    }
+                    Toggle("Pressure changes strength", isOn: $editor.pressureStrength)
+                    if editor.pressureStrength {
+                        percentSlider("Lightest touch strength", value: $editor.minimumStrength,
+                                      in: 0.05...1)
+                    }
+                    Picker("Curve", selection: $editor.pressureCurve) {
+                        ForEach(PressureResponse.Curve.allCases) { curve in
+                            Text(curve.rawValue).tag(curve)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Apple Pencil pressure")
+                } footer: {
+                    Text("Soft makes a light touch count for more. The inner ring around the brush "
+                         + "shows the lightest-touch size. Grab always moves exactly with the "
+                         + "Pencil; pressure never changes it.")
+                }
+
+                Section {
+                    percentSlider("Edge hardness", value: $editor.hardness, in: 0...0.9)
+                } header: {
+                    Text("Paint")
+                } footer: {
+                    Text("How much of the brush paints solid colour before the soft edge.")
+                }
+
+                Section {
+                    Toggle("Mirror across the middle", isOn: $editor.symmetric)
+                    Toggle("Steady stroke (lazy rope)", isOn: $editor.stabilise)
+                    Toggle("Size fixed on the model", isOn: $editor.lockWorldSize)
+                } header: {
+                    Text("Brush")
+                } footer: {
+                    Text("Mirroring applies to painting as well as sculpting.")
+                }
+
+                Section {
+                    Toggle("Low-latency drawing", isOn: $editor.lowLatency)
+                    HStack {
+                        Text("Drawing through")
+                        Spacer()
+                        Text(editor.loopDescription).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Latency")
+                } footer: {
+                    Text("iPadOS 18 or later: the Pencil's samples arrive later in each frame and "
+                         + "the frame is shown as soon as it is ready. Tap with three fingers to "
+                         + "see the measured touch-to-glass time, and compare.")
+                }
+            }
+            .navigationTitle("Brush & Pencil")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .frame(minWidth: 380, minHeight: 560)
+    }
+
+    private func percentSlider(_ title: String, value: Binding<Double>,
+                               in range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: range)
         }
     }
 }

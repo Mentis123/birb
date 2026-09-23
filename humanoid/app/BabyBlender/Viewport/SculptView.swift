@@ -10,21 +10,31 @@ import HumanoidCore
 /// The rule this file follows is Nomad's, because it is the one that needs no
 /// mode switch and no setting: **the Pencil edits, and a finger edits only when
 /// it lands on the model and no Pencil has been seen.** A finger on the
-/// background always moves the camera, two fingers always pan and pinch. That
-/// removes the mode switch that otherwise sits between you and every stroke.
+/// background always moves the camera, two fingers always pan and pinch.
 final class SculptMTKView: MTKView {
-    var onSample: ((EditorModel.Sample) -> Void)?
+    var onSample: ((StrokeSample) -> Void)?
+    /// Where UIKit predicts the stroke will be a frame from now. For the ring
+    /// only; a predicted sample must never reach the document.
+    var onPredicted: ((Vec2) -> Void)?
+    /// A Pencil has just touched down. The navigation gesture uses it to let
+    /// go of a palm that got there first.
+    var onPencilDown: (() -> Void)?
     var onHover: ((Vec2, Double) -> Void)?
     var onHoverEnd: (() -> Void)?
     /// Asked when a finger lands: does the tool want it, or does the camera?
-    /// The navigation recogniser asks the same question of the same editor, so
-    /// the two cannot disagree and neither depends on which is told first.
     var fingerSculpts: ((CGPoint) -> Bool)?
 
     /// The one touch the tool is following. A second finger cannot start a
     /// second stroke, and a touch the tool declined at touch-down is never
     /// reconsidered mid-gesture.
     private weak var editingTouch: UITouch?
+
+    /// Whether the Pencil is on the glass right now. While it is, a finger that
+    /// lands is the hand holding it, not a camera gesture.
+    var pencilIsDown: Bool {
+        guard let touch = editingTouch, touch.type == .pencil else { return false }
+        return touch.phase != .ended && touch.phase != .cancelled
+    }
 
     private func accepts(_ touch: UITouch) -> Bool {
         switch touch.type {
@@ -34,24 +44,27 @@ final class SculptMTKView: MTKView {
         }
     }
 
-    private func force(_ touch: UITouch) -> Double {
-        // `force` is 0 for a finger and for a Pencil held perpendicular, so it
-        // is floored rather than used raw: a stroke that does nothing because
-        // the pressure read zero is indistinguishable from a broken brush.
-        // The floor is 0.35, not 0.15. A Pencil held at a natural writing
-        // angle reads well under half its maximum, and multiplying an already
-        // conservative brush by 0.15 is most of "max strength almost didn't".
-        guard touch.type == .pencil, touch.maximumPossibleForce > 0 else { return 1 }
-        return max(0.35, Double(touch.force / touch.maximumPossibleForce))
+    /// The Pencil's pressure, raw: `force / maximumPossibleForce`, 0...1.
+    ///
+    /// Raw on purpose. This used to floor it at 0.35 here, which flattened the
+    /// bottom third of the range — a light touch and a medium one did the same
+    /// thing. The curve, the floor and the ranges now live in
+    /// `PressureResponse`, where they are tested and where the person can set
+    /// them. A finger reports no pressure and is nil, which counts as a full
+    /// press.
+    private func force(_ touch: UITouch) -> Double? {
+        guard touch.type == .pencil, touch.maximumPossibleForce > 0 else { return nil }
+        return Double(touch.force / touch.maximumPossibleForce)
     }
 
-    private func send(_ touch: UITouch, phase: EditorModel.Sample.Phase) {
+    private func sample(_ touch: UITouch, phase: StrokeSample.Phase) -> StrokeSample {
         let scale = contentScaleFactor
         let point = touch.location(in: self)
-        onSample?(.init(phase: phase,
-                        location: Vec2(Double(point.x * scale), Double(point.y * scale)),
-                        force: force(touch),
-                        isPencil: touch.type == .pencil))
+        return StrokeSample(phase: phase,
+                            location: Vec2(Double(point.x * scale), Double(point.y * scale)),
+                            force: force(touch),
+                            isPencil: touch.type == .pencil,
+                            timestamp: touch.timestamp)
     }
 
     /// Replaces the black screen with the reason for it.
@@ -71,65 +84,65 @@ final class SculptMTKView: MTKView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // Let go of a touch we are no longer following.
-        //
-        // `editingTouch` is weak, and a `UITouch` whose sequence has finished
-        // can be recycled or released; a touch cancelled while the main thread
-        // was blocked may never deliver its end here at all. Either way the
-        // stale value used to block every later stroke, because the guard
-        // below would return and nothing would ever clear it. The editor
-        // closes the stranded stroke when the next `.began` arrives.
+        // Let go of a touch we are no longer following: a stale weak reference
+        // used to block every later stroke.
         if let current = editingTouch, current.phase == .ended || current.phase == .cancelled {
             editingTouch = nil
         }
+        if touches.contains(where: { $0.type == .pencil }) { onPencilDown?() }
         guard editingTouch == nil else { return }
         guard let touch = touches.first(where: { accepts($0) }) else { return }
         editingTouch = touch
-        send(touch, phase: .began)
+        onSample?(sample(touch, phase: .began))
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = editingTouch, touches.contains(touch) else { return }
-        // Every sample the Pencil took, not just the one UIKit chose to deliver.
-        //
-        // UIKit hands over one `touchesMoved` per display refresh and folds the
-        // rest into the event; a Pencil samples up to 240 times a second against
-        // a 120 Hz screen, so reading the delivered touch alone throws away half
-        // to three quarters of the stroke and fast curves come out polygonal.
-        // The coalesced array has to be read inside the event — it is not
-        // promised to outlive it.
+        // Every sample the Pencil took, not just the one UIKit chose to deliver:
+        // a Pencil samples up to 240 times a second against a 120 Hz screen,
+        // and the coalesced array has to be read inside the event.
         if let coalesced = event?.coalescedTouches(for: touch), !coalesced.isEmpty {
-            for sample in coalesced { send(sample, phase: .moved) }
+            for each in coalesced { onSample?(sample(each, phase: .moved)) }
         } else {
-            send(touch, phase: .moved)
+            onSample?(sample(touch, phase: .moved))
+        }
+        // Where the tip will be a frame from now. The ring is drawn there, which
+        // hides a frame of latency from the one thing that has to feel attached
+        // to the tip; the stroke itself only ever uses real samples.
+        if let ahead = event?.predictedTouches(for: touch)?.last {
+            let scale = contentScaleFactor
+            let point = ahead.location(in: self)
+            onPredicted?(Vec2(Double(point.x * scale), Double(point.y * scale)))
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = editingTouch, touches.contains(touch) else { return }
-        send(touch, phase: .ended)
+        onSample?(sample(touch, phase: .ended))
         editingTouch = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = editingTouch, touches.contains(touch) else { return }
-        send(touch, phase: .cancelled)
+        onSample?(sample(touch, phase: .cancelled))
         editingTouch = nil
     }
 }
 
 /// One recogniser for the whole camera: orbit, pan, pinch and re-pivot.
 ///
-/// It replaces three separate recognisers that all ran at once. A
-/// `UIPanGestureRecognizer` capped at one touch does not fail when a second
-/// finger lands — it keeps tracking the first — so with simultaneous
-/// recognition turned on, a two-finger drag was an orbit AND a pan AND a pinch
-/// in the same frame. That is what "the controls don't quite work right when I
-/// use two fingers" was.
+/// A `UIPanGestureRecognizer` capped at one touch does not fail when a second
+/// finger lands — it keeps tracking the first — so three recognisers running at
+/// once made a two-finger drag an orbit AND a pan AND a pinch. Counting touches
+/// in one place also makes the 1 -> 2 -> 1 transitions cheap to get right.
 ///
-/// Counting touches in one place also makes the 1 -> 2 -> 1 transitions
-/// cheap to get right: the reference centroid and spread are re-read whenever
-/// the set changes, so adding or lifting a finger moves nothing.
+/// **It stays out of the Pencil's way.** A hand drawing with a Pencil rests on
+/// the glass, and the palm usually lands a moment before the tip. Without
+/// this, that palm started an orbit and the model turned under the Pencil
+/// mid-stroke — which reads as "grabbing doesn't work". Now a finger that
+/// lands while the Pencil is down is ignored, a touch the size of a palm is
+/// ignored once a Pencil has been seen, and a one-finger orbit that began
+/// just before the Pencil landed is cancelled AND undone.
 final class NavigationGesture: UIGestureRecognizer {
     enum Move {
         /// Normalised screen travel.
@@ -139,8 +152,7 @@ final class NavigationGesture: UIGestureRecognizer {
         /// Drawable pixels for the anchor.
         case zoom(factor: Double, about: Vec2)
         /// Drawable pixels. Two fingers landing re-centre the orbit on what is
-        /// under them, which is Nomad's rule and the thing that stops every
-        /// orbit after a pan swinging the model out of frame.
+        /// under them.
         case pivot(Vec2)
     }
 
@@ -149,11 +161,29 @@ final class NavigationGesture: UIGestureRecognizer {
     /// Asked once, when the first finger lands. True means the tool is taking
     /// this gesture and the camera must keep out of it.
     var shouldYieldToTool: ((CGPoint) -> Bool)?
+    /// Whether a Pencil is on the glass right now.
+    var pencilIsDown: (() -> Bool)?
+    /// Whether a Pencil has ever been seen; only then is a large contact a palm.
+    var pencilSeen: (() -> Bool)?
+    /// The first finger of a gesture has landed: the camera as it is now is
+    /// what a palm's orbit is undone back to.
+    var onFirstTouch: (() -> Void)?
+    /// A palm's orbit was cancelled; put the camera back.
+    var onRevert: (() -> Void)?
+
+    /// A fingertip reads 7-20 points; a resting palm 30-60. Generous, because
+    /// a real two-finger pinch must never be mistaken for a hand.
+    private static let palmRadius: CGFloat = 40
+    /// How young a one-finger orbit can be and still be a palm that landed
+    /// before its Pencil.
+    private static let palmWindow: CFTimeInterval = 0.75
 
     private var tracked: [UITouch] = []
+    private var ignored: [UITouch] = []
     private var lastCentroid: CGPoint = .zero
     private var lastSpread: CGFloat = 0
     private var lastTime: CFTimeInterval = 0
+    private var firstTouchTime: CFTimeInterval = 0
     private var velocity: CGPoint = .zero
     private var moved = false
     private var yielded = false
@@ -165,6 +195,7 @@ final class NavigationGesture: UIGestureRecognizer {
     override func reset() {
         super.reset()
         tracked.removeAll(keepingCapacity: true)
+        ignored.removeAll(keepingCapacity: true)
         velocity = .zero
         moved = false
         yielded = false
@@ -175,8 +206,15 @@ final class NavigationGesture: UIGestureRecognizer {
         let direct = touches.filter { $0.type == .direct }
         guard !direct.isEmpty, !yielded else { return }
 
+        for touch in direct {
+            let palm = (pencilSeen?() ?? false) && touch.majorRadius > NavigationGesture.palmRadius
+            if pencilIsDown?() == true || palm { ignored.append(touch) }
+        }
+        let fingers = direct.filter { touch in !ignored.contains(where: { $0 === touch }) }
+        guard !fingers.isEmpty else { return }
+
         if tracked.isEmpty, state == .possible,
-           let first = direct.min(by: { $0.timestamp < $1.timestamp }),
+           let first = fingers.min(by: { $0.timestamp < $1.timestamp }),
            shouldYieldToTool?(first.location(in: view)) == true {
             // Failing rather than ignoring: the view's own touch handlers keep
             // the whole gesture, and the tap recognisers are unaffected.
@@ -185,15 +223,18 @@ final class NavigationGesture: UIGestureRecognizer {
             return
         }
 
+        if tracked.isEmpty {
+            firstTouchTime = CACurrentMediaTime()
+            onFirstTouch?()
+        }
         let hadTwo = tracked.count >= 2
-        for touch in direct where !tracked.contains(touch) { tracked.append(touch) }
+        for touch in fingers where !tracked.contains(where: { $0 === touch }) { tracked.append(touch) }
         rebase(announcePivot: !hadTwo && tracked.count >= 2)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard !yielded, let view, !tracked.isEmpty else { return }
-        // A third finger is the debug gesture, not a camera move. Hold still
-        // until it lifts rather than steering off two of the three.
+        // A third finger is the debug gesture, not a camera move.
         guard tracked.count <= 2 else { rebase(announcePivot: false); return }
 
         let active = Array(tracked.prefix(2))
@@ -240,21 +281,45 @@ final class NavigationGesture: UIGestureRecognizer {
         finish(touches, cancelled: true)
     }
 
+    /// The Pencil landed. Whatever the fingers were doing is over; a one-finger
+    /// orbit that began just before was almost certainly the heel of the hand,
+    /// so it is undone as well as stopped.
+    func yieldToPencil() {
+        guard !tracked.isEmpty else { return }
+        let palm = tracked.count == 1 && CACurrentMediaTime() - firstTouchTime < NavigationGesture.palmWindow
+        ignored.append(contentsOf: tracked)
+        tracked.removeAll(keepingCapacity: true)
+        velocity = .zero
+        switch state {
+        case .began, .changed:
+            if palm { onRevert?() }
+            state = .cancelled
+        case .possible:
+            state = .failed
+        default:
+            break
+        }
+    }
+
     private func finish(_ touches: Set<UITouch>, cancelled: Bool) {
+        ignored.removeAll { touch in touches.contains(touch) }
         let wasSingle = tracked.count == 1
+        let before = tracked.count
         tracked.removeAll { touches.contains($0) }
-        guard tracked.isEmpty else { return rebase(announcePivot: false) }
+        guard tracked.isEmpty else {
+            if tracked.count != before { rebase(announcePivot: false) }
+            return
+        }
+        // Only ignored touches are left — a palm still resting — and there was
+        // no gesture: nothing to finish until they lift too.
+        if before == 0, !ignored.isEmpty { return }
 
         // A recogniser that has already failed, ended or been cancelled must
-        // not be written again — UIKit only allows a state change out of
-        // `.possible`, `.began` or `.changed`, and the yielded case reaches
-        // here already `.failed`.
+        // not be written again.
         guard state == .possible || state == .began || state == .changed else { return }
 
         if moved {
-            // Hand the leftover velocity over, which the editor decays. A
-            // turntable that stops dead on lift is the clearest sign a viewport
-            // is unfinished.
+            // Hand the leftover velocity over, which the editor decays.
             if wasSingle, !cancelled, let view, abs(velocity.x) + abs(velocity.y) > 60 {
                 onFlick?(Vec2(Double(velocity.x) / Double(max(1, view.bounds.width)),
                               Double(velocity.y) / Double(max(1, view.bounds.height))))
@@ -301,93 +366,117 @@ final class NavigationGesture: UIGestureRecognizer {
     }
 }
 
-struct SculptView: UIViewRepresentable {
-    @ObservedObject var editor: EditorModel
+/// Who decides when the viewport draws.
+///
+/// **The display link** is MTKView's own timer: continuous while something is
+/// happening, on demand otherwise. It draws at the top of a display frame, with
+/// whatever Pencil samples UIKit had dispatched by then, and presents the frame
+/// a refresh later.
+///
+/// **The low-latency loop** (iPadOS 18) is a `UIUpdateLink` that asks for
+/// Apple's two drawing-app features together: Pencil events dispatched in the
+/// MIDDLE of the UI update, as late as they can be — `wantsLowLatencyEventDispatch`
+/// — and the frame presented immediately after the update's Core Animation
+/// commit rather than on the next refresh — `wantsImmediatePresentation`.
+/// Apple's documentation puts the second at one frame duration sooner. For a
+/// frame to ride that commit, the Metal layer presents inside it
+/// (`presentsWithTransaction`), which the renderer handles.
+///
+/// Neither has been measured on the iPad by this code's author, which is why
+/// the readout measures touch-to-glass on the device, the switch is in the
+/// brush settings, and the low-latency loop falls back to the display link by
+/// itself if it ever stops producing frames.
+@MainActor
+final class FrameLoop {
+    enum Mode { case displayLink, lowLatency }
 
-    func makeCoordinator() -> Coordinator { Coordinator(editor: editor) }
+    private(set) var mode: Mode = .displayLink
+    private weak var view: SculptMTKView?
+    /// Set when the low-latency loop fell back on its own. It stays down until
+    /// the person switches the setting off and on again: retrying on every
+    /// SwiftUI update would flap between the two loops.
+    private var gaveUp = false
+    private var busy = false
+    private var needsFrame = true
+    private var drewThisUpdate = false
+    private var pendingSince: CFTimeInterval = 0
+    private var lastFrameAt: CFTimeInterval = 0
+    /// The `UIUpdateLink`, kept untyped so the property needs no availability.
+    private var link: AnyObject?
 
-    func makeUIView(context: Context) -> SculptMTKView {
-        let view = SculptMTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
-        view.isMultipleTouchEnabled = true
-        // Ask for the highest rate any iPad offers and let MetalKit round.
-        //
-        // It rounds to the nearest FACTOR of the panel's own
-        // `maximumFramesPerSecond`, so 120 becomes 60 on a 60 Hz iPad by itself.
-        // Reading the screen here would not work anyway: the view has no window
-        // yet, and `UIScreen.main` is deprecated precisely because it is the
-        // wrong screen on a device with more than one.
-        view.preferredFramesPerSecond = 120
-        // Starts on demand; `onActivity` switches it to continuous. See the
-        // note there — the switch is BOTH properties, not one.
-        view.enableSetNeedsDisplay = true
-        view.isPaused = true
+    /// Whether a Pencil stroke or hover is live: only then is it worth waiting
+    /// for the low-latency dispatch before drawing.
+    var pencilActive: () -> Bool = { false }
+    /// The loop changed, for the readout and a toast.
+    var onModeChange: ((Mode, String?) -> Void)?
 
-        let renderer: Renderer
-        do {
-            renderer = try Renderer(view: view)
-        } catch {
-            // Say so, on the screen and in the console.
-            //
-            // The previous version returned a view with no delegate here, which
-            // renders as black forever and reads as a hang. A viewport that
-            // cannot start is a bug worth naming, not worth hiding.
-            NSLog("[BabyBlender] renderer setup failed: \(error.localizedDescription)")
-            view.showFailure(error.localizedDescription)
-            return view
-        }
-        context.coordinator.renderer = renderer
-        context.coordinator.view = view
-        view.delegate = renderer
-
-        renderer.beforeDraw = { [weak view, weak renderer] in
-            guard let view, let renderer else { return }
-            let now = CACurrentMediaTime()
-            let elapsed = context.coordinator.lastFrame > 0
-                ? now - context.coordinator.lastFrame : 0
-            context.coordinator.lastFrame = now
-            // Last frame's cost, since this one has not happened yet.
-            if elapsed > 0 { editor.report(frame: renderer.stats, elapsed: elapsed) }
-
-            let viewport = Vec2(Double(view.drawableSize.width),
-                                Double(view.drawableSize.height))
-            guard viewport.x > 0, viewport.y > 0 else { return }
-            // Points to drawable pixels, read here rather than at setup: the
-            // view has no window when `makeUIView` runs, so its scale is 1 and
-            // the brush would be half size until the first resize.
-            editor.pointScale = Double(view.contentScaleFactor)
-            editor.drainInput(viewport: viewport)
-        }
-
-        editor.onChange = { [weak view] change in
-            guard let renderer = context.coordinator.renderer else { return }
-            if change.contains(.mesh) { renderer.upload(editor.document.mesh) }
-            if change.contains(.texture) {
-                let rect = editor.takePaintDirtyRect()
-                if rect.isEmpty {
-                    renderer.upload(albedo: editor.document.albedo)
-                } else {
-                    renderer.update(albedo: editor.document.albedo, rect: rect)
-                }
+    init(view: SculptMTKView) {
+        self.view = view
+        useDisplayLink()
+        // Coming back from the background, or from Control Center, is not a
+        // loop that stopped drawing: forget whatever was pending while the app
+        // could not draw, or the watchdog reads the gap as a failure.
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.pendingSince = 0
+                self?.lastFrameAt = CACurrentMediaTime()
+                self?.request()
             }
-            renderer.camera = editor.camera
-            renderer.cursor = editor.cursor
-            view?.setNeedsDisplay()
         }
+    }
 
-        // The whole second device run, in one closure.
-        //
-        // `isPaused = false` on its own does NOTHING here. Apple's MetalKit
-        // header is explicit: setting `enableSetNeedsDisplay` to true "will
-        // also pause the MTKView's internal render loop and updates will
-        // instead be event driven". So the previous version queued Pencil
-        // samples, asked the view to run continuously, and the view kept
-        // drawing only on demand — with nothing on the Pencil path demanding
-        // anything. The stroke sat in the queue until an unrelated finger
-        // moved the camera, and then arrived all at once. Same dead switch for
-        // the hover ring and for the flick coast.
-        editor.onActivity = { [weak view] busy in
+    private var activeObserver: NSObjectProtocol?
+
+    /// Whether a missing frame can mean anything: the view is on screen and
+    /// the app is in front. Anything else is a pause, not a failure.
+    private var canJudge: Bool {
+        view?.window != nil && UIApplication.shared.applicationState == .active
+    }
+
+    var description: String {
+        switch mode {
+        case .displayLink: return "display link"
+        case .lowLatency: return "low-latency (UIUpdateLink)"
+        }
+    }
+
+    // MARK: Requests
+
+    /// Something wants the next frame drawn.
+    func request() {
+        let now = CACurrentMediaTime()
+        if !needsFrame { pendingSince = now }
+        needsFrame = true
+        switch mode {
+        case .displayLink:
+            // Coalesced, and a no-op in continuous mode.
+            view?.setNeedsDisplay()
+        case .lowLatency:
+            if #available(iOS 18.0, *), let link = link as? UIUpdateLink {
+                link.requiresContinuousUpdates = true
+            }
+            // The watchdog. A loop that is asked for frames and stops drawing
+            // them looks exactly like a frozen app, so it gives way to the
+            // display link rather than leaving anybody to find a switch.
+            if !canJudge {
+                pendingSince = now
+            } else if pendingSince > 0, now - pendingSince > 0.5, now - lastFrameAt > 0.5 {
+                fallBack(because: "no frame for \(Int((now - lastFrameAt) * 1000)) ms")
+            }
+        }
+    }
+
+    /// A stroke, hover or coast started or stopped.
+    func setBusy(_ busy: Bool) {
+        self.busy = busy
+        switch mode {
+        case .displayLink:
             guard let view else { return }
             if busy {
+                // BOTH properties, in this order: with `enableSetNeedsDisplay`
+                // true, MetalKit pauses its own loop whatever `isPaused` says.
                 if view.enableSetNeedsDisplay { view.enableSetNeedsDisplay = false }
                 if view.isPaused { view.isPaused = false }
             } else {
@@ -396,22 +485,211 @@ struct SculptView: UIViewRepresentable {
                 // One last frame, so the end of a stroke is drawn.
                 view.setNeedsDisplay()
             }
+        case .lowLatency:
+            request()
+        }
+    }
+
+    /// The renderer drew a frame.
+    func noteFrameDrawn() {
+        lastFrameAt = CACurrentMediaTime()
+        needsFrame = false
+        pendingSince = 0
+    }
+
+    // MARK: Modes
+
+    func setLowLatency(_ wanted: Bool) {
+        if !wanted { gaveUp = false }
+        if wanted, mode == .displayLink, !gaveUp {
+            if #available(iOS 18.0, *) { useLowLatency() }
+        } else if !wanted, mode == .lowLatency {
+            useDisplayLink()
+            onModeChange?(.displayLink, nil)
+        }
+    }
+
+    private func useDisplayLink() {
+        if #available(iOS 18.0, *), let link = link as? UIUpdateLink {
+            link.isEnabled = false
+        }
+        link = nil
+        mode = .displayLink
+        guard let view else { return }
+        (view.layer as? CAMetalLayer)?.presentsWithTransaction = false
+        view.isPaused = !busy
+        view.enableSetNeedsDisplay = !busy
+        view.setNeedsDisplay()
+    }
+
+    @available(iOS 18.0, *)
+    private func useLowLatency() {
+        guard let view else { return }
+        // Explicit drawing: MetalKit draws only when `draw()` is called, which
+        // the update link's actions do.
+        view.isPaused = true
+        view.enableSetNeedsDisplay = false
+        (view.layer as? CAMetalLayer)?.presentsWithTransaction = true
+
+        let link = UIUpdateLink(view: view)
+        link.wantsLowLatencyEventDispatch = true
+        link.wantsImmediatePresentation = true
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+        link.addAction(to: .beforeEventDispatch) { [weak self] _, _ in
+            self?.drewThisUpdate = false
+        }
+        // After the ordinary events: draw now, unless a Pencil is live and its
+        // samples are about to arrive in the low-latency dispatch — then wait
+        // for them, which is the entire point of asking for it.
+        link.addAction(to: .afterEventDispatch) { [weak self] _, info in
+            guard let self else { return }
+            if self.pencilActive(), info.isLowLatencyEventDispatchConfirmed { return }
+            self.drawIfNeeded()
+        }
+        link.addAction(to: .afterLowLatencyEventDispatch) { [weak self] _, _ in
+            self?.drawIfNeeded()
+        }
+        link.requiresContinuousUpdates = true
+        link.isEnabled = true
+        self.link = link
+        mode = .lowLatency
+        needsFrame = true
+        pendingSince = CACurrentMediaTime()
+        onModeChange?(.lowLatency, nil)
+
+        // If the link never draws at all — an OS that ignores it — give way
+        // rather than waiting to be asked. Judged only once the view is on
+        // screen: a cold launch can take longer than this to put it there.
+        checkFirstFrame(since: pendingSince, attempts: 0, seenOnScreen: false)
+    }
+
+    /// Falls back only after a full interval ON SCREEN with no frame: the first
+    /// check that finds the view in a window just starts the clock.
+    private func checkFirstFrame(since started: CFTimeInterval, attempts: Int, seenOnScreen: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.mode == .lowLatency, self.lastFrameAt < started,
+                  attempts < 20 else { return }
+            guard self.canJudge, seenOnScreen else {
+                self.checkFirstFrame(since: started, attempts: attempts + 1,
+                                     seenOnScreen: self.canJudge)
+                return
+            }
+            self.fallBack(because: "the update link drew nothing once it was on screen")
+        }
+    }
+
+    @available(iOS 18.0, *)
+    private func drawIfNeeded() {
+        guard !drewThisUpdate, needsFrame || busy, let view else { return }
+        drewThisUpdate = true
+        view.draw()
+        if !busy, let link = link as? UIUpdateLink {
+            // Nothing is animating: stop asking the system for updates until
+            // something requests a frame.
+            link.requiresContinuousUpdates = false
+        }
+    }
+
+    private func fallBack(because reason: String) {
+        guard mode == .lowLatency else { return }
+        NSLog("[BabyBlender] low-latency loop fell back to the display link: %@", reason)
+        gaveUp = true
+        useDisplayLink()
+        onModeChange?(.displayLink, reason)
+    }
+}
+
+struct SculptView: UIViewRepresentable {
+    @ObservedObject var editor: EditorModel
+
+    func makeCoordinator() -> Coordinator { Coordinator(editor: editor) }
+
+    func makeUIView(context: Context) -> SculptMTKView {
+        let view = SculptMTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+        view.isMultipleTouchEnabled = true
+        // Ask for the highest rate any iPad offers and let MetalKit round to a
+        // factor of the panel's own maximum.
+        view.preferredFramesPerSecond = 120
+        view.enableSetNeedsDisplay = true
+        view.isPaused = true
+
+        let renderer: Renderer
+        do {
+            renderer = try Renderer(view: view)
+        } catch {
+            // A viewport that cannot start is a bug worth naming, not hiding.
+            NSLog("[BabyBlender] renderer setup failed: \(error.localizedDescription)")
+            view.showFailure(error.localizedDescription)
+            return view
+        }
+        let coordinator = context.coordinator
+        coordinator.renderer = renderer
+        coordinator.view = view
+        view.delegate = renderer
+
+        let loop = FrameLoop(view: view)
+        coordinator.loop = loop
+        loop.pencilActive = { [weak editor] in editor?.pencilActive ?? false }
+        loop.onModeChange = { [weak editor, weak loop] mode, reason in
+            guard let editor, let loop else { return }
+            editor.loopDescription = loop.description
+            if let reason {
+                editor.say("Low-latency drawing is unavailable here; using the standard loop")
+                NSLog("[BabyBlender] %@", reason)
+            } else if mode == .lowLatency {
+                NSLog("[BabyBlender] drawing through the low-latency UIUpdateLink")
+            }
         }
 
-        // Belt and braces, and cheap: anything that queues work asks for a
-        // frame rather than reasoning about whether one is already coming.
-        // `setNeedsDisplay` coalesces, and in continuous mode it is a no-op.
-        editor.requestDraw = { [weak view] in view?.setNeedsDisplay() }
+        renderer.beforeDraw = { [weak view, weak renderer, weak loop, weak coordinator] in
+            guard let view, let renderer, let coordinator else { return }
+            loop?.noteFrameDrawn()
+            let now = CACurrentMediaTime()
+            let elapsed = coordinator.lastFrame > 0 ? now - coordinator.lastFrame : 0
+            coordinator.lastFrame = now
+            // Last frame's cost, since this one has not happened yet.
+            if elapsed > 0 { editor.report(frame: renderer.stats, elapsed: elapsed) }
 
-        context.coordinator.install(on: view)
+            let viewport = Vec2(Double(view.drawableSize.width), Double(view.drawableSize.height))
+            guard viewport.x > 0, viewport.y > 0 else { return }
+            // Points to drawable pixels, read here rather than at setup: the
+            // view has no window when `makeUIView` runs.
+            editor.pointScale = Double(view.contentScaleFactor)
+            editor.drainInput(viewport: viewport)
+            renderer.inputTimestamp = editor.measuresLatency ? editor.inputTimestampThisFrame : 0
+        }
+        renderer.requestFrame = { [weak loop] in loop?.request() }
+        renderer.onPresented = { [weak editor] input, shown in
+            // The presented handler runs on a Metal thread.
+            Task { @MainActor in editor?.noteLatency(shown - input) }
+        }
+
+        editor.onChange = { [weak coordinator] change in
+            guard let coordinator, let renderer = coordinator.renderer else { return }
+            if change.contains(.mesh) { renderer.upload(editor.document.mesh) }
+            if change.contains(.texture) {
+                switch editor.takeTextureUpload() {
+                case .nothing: break
+                case .whole: renderer.upload(albedo: editor.document.albedo)
+                case .region(let rect): renderer.update(albedo: editor.document.albedo, rect: rect)
+                }
+            }
+            renderer.camera = editor.camera
+            renderer.cursor = editor.cursor
+            coordinator.loop?.request()
+        }
+        editor.onActivity = { [weak loop] busy in loop?.setBusy(busy) }
+        editor.requestDraw = { [weak loop] in loop?.request() }
+
+        coordinator.install(on: view)
 
         renderer.upload(editor.document.mesh)
         renderer.upload(albedo: editor.document.albedo)
         renderer.camera = editor.camera
-        view.setNeedsDisplay()
+        loop.setLowLatency(editor.lowLatency)
+        editor.loopDescription = loop.description
+        loop.request()
         // The paint map is built after the first frame rather than before it.
-        // In a debug build it costs seconds, and Xcode's Run button builds
-        // debug.
         editor.prepareForPaintingSoon()
         NSLog("[BabyBlender] viewport ready")
         return view
@@ -419,14 +697,23 @@ struct SculptView: UIViewRepresentable {
 
     func updateUIView(_ view: SculptMTKView, context: Context) {
         context.coordinator.renderer?.camera = editor.camera
-        view.setNeedsDisplay()
+        if let loop = context.coordinator.loop {
+            loop.setLowLatency(editor.lowLatency)
+            loop.request()
+        }
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
         let editor: EditorModel
         var renderer: Renderer?
+        var loop: FrameLoop?
         weak var view: SculptMTKView?
         var lastFrame: CFTimeInterval = 0
+        private var navigation: NavigationGesture?
+        /// The camera when the current finger gesture began: what a palm's
+        /// orbit is undone back to.
+        private var cameraAtFirstTouch: Camera?
+        private var lastPencilTap: CFTimeInterval = 0
 
         init(editor: EditorModel) { self.editor = editor }
 
@@ -434,6 +721,7 @@ struct SculptView: UIViewRepresentable {
             self.view = view
 
             view.onSample = { [weak self] sample in self?.editor.enqueue(sample) }
+            view.onPredicted = { [weak self] point in self?.editor.predict(point) }
             // `view` weakly: these closures are stored ON the view, so a strong
             // capture is a cycle that keeps the whole viewport alive.
             view.onHover = { [weak self] point, height in
@@ -442,6 +730,10 @@ struct SculptView: UIViewRepresentable {
             view.onHoverEnd = { [weak self] in self?.editor.clearHover() }
             view.fingerSculpts = { [weak self] point in
                 self?.fingerSculpts(at: point) ?? false
+            }
+            view.onPencilDown = { [weak self] in
+                self?.editor.notePencil()
+                self?.navigation?.yieldToPencil()
             }
 
             let navigate = NavigationGesture(target: self,
@@ -452,8 +744,7 @@ struct SculptView: UIViewRepresentable {
             navigate.cancelsTouchesInView = false
             navigate.delaysTouchesBegan = false
             // Default is true, which holds `touchesEnded` back by about 150 ms
-            // while the recogniser is still undecided — long enough to be felt
-            // at the end of every stroke.
+            // while the recogniser is still undecided.
             navigate.delaysTouchesEnded = false
             navigate.delegate = self
             navigate.onMove = { [weak self] move in self?.apply(move) }
@@ -461,7 +752,18 @@ struct SculptView: UIViewRepresentable {
             navigate.shouldYieldToTool = { [weak self] point in
                 self?.fingerSculpts(at: point) ?? false
             }
+            navigate.pencilIsDown = { [weak view] in view?.pencilIsDown ?? false }
+            navigate.pencilSeen = { [weak self] in self?.editor.pencilSeen ?? false }
+            navigate.onFirstTouch = { [weak self] in
+                guard let self else { return }
+                self.cameraAtFirstTouch = self.editor.camera
+            }
+            navigate.onRevert = { [weak self] in
+                guard let self, let saved = self.cameraAtFirstTouch else { return }
+                self.editor.restoreCamera(saved)
+            }
             view.addGestureRecognizer(navigate)
+            navigation = navigate
 
             let doubleTap = UITapGestureRecognizer(target: self,
                                                    action: #selector(handleDoubleTap(_:)))
@@ -478,10 +780,9 @@ struct SculptView: UIViewRepresentable {
             tripleTap.delegate = self
             view.addGestureRecognizer(tripleTap)
 
-            // Hover: where the brush will land, before it lands. Pencil only —
-            // a trackpad pointer would otherwise drive it too. Only the newer
-            // iPads report it at all (M2 and later, plus the A17 Pro mini), so
-            // its absence is a device fact, not a bug.
+            // Hover: where the brush will land, before it lands. Pencil only.
+            // Only the newer iPads report it at all (M2 and later, plus the A17
+            // Pro mini), so its absence is a device fact, not a bug.
             let hover = UIHoverGestureRecognizer(target: self, action: #selector(handleHover(_:)))
             hover.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
             view.addGestureRecognizer(hover)
@@ -523,8 +824,7 @@ struct SculptView: UIViewRepresentable {
 
         // MARK: - Simultaneity
 
-        /// The taps run alongside navigation. Navigation itself no longer needs
-        /// this — it is one recogniser now — but a triple tap has to be able to
+        /// The taps run alongside navigation: a triple tap has to be able to
         /// happen while fingers are on the glass.
         func gestureRecognizer(_ gesture: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
@@ -548,11 +848,10 @@ struct SculptView: UIViewRepresentable {
         }
 
         /// Three fingers shows the debug readout. Three is the first touch count
-        /// the tool itself can never produce — one is a stroke or an orbit, two
-        /// is pan and pinch — which is the same reasoning behind the Birb Labs
-        /// three-finger QR.
+        /// the tool itself can never produce.
         @objc func handleTripleTap() {
             editor.showStats.toggle()
+            loop?.request()
         }
 
         // MARK: - Pencil
@@ -570,10 +869,43 @@ struct SculptView: UIViewRepresentable {
             }
         }
 
+        /// iPadOS 17.4 and earlier.
         func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
-            // The system-wide meaning of this gesture in a drawing app.
+            pencilTapped(UIPencilInteraction.preferredTapAction)
+        }
+
+        /// iPadOS 17.5 and later, where the older callback is no longer sent.
+        @available(iOS 17.5, *)
+        func pencilInteraction(_ interaction: UIPencilInteraction,
+                               didReceiveTap tap: UIPencilInteraction.Tap) {
+            pencilTapped(UIPencilInteraction.preferredTapAction)
+        }
+
+        /// A Pencil Pro squeeze, honouring its own setting.
+        @available(iOS 17.5, *)
+        func pencilInteraction(_ interaction: UIPencilInteraction,
+                               didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+            guard squeeze.phase == .ended else { return }
+            pencilTapped(UIPencilInteraction.preferredSqueezeAction)
+        }
+
+        /// What the person set in Settings → Apple Pencil, not what this app
+        /// assumes. "Ignore" is honoured: a double tap nobody asked for changed
+        /// the tool silently, which is how the fourth device run's "paint does
+        /// nothing" happened.
+        private func pencilTapped(_ action: UIPencilPreferredAction) {
+            let now = CACurrentMediaTime()
+            guard now - lastPencilTap > 0.05 else { return }
+            lastPencilTap = now
             editor.notePencil()
-            editor.togglePaintErase()
+            switch action {
+            case .ignore:
+                editor.pencilTapped(preference: .ignore)
+            case .switchPrevious:
+                editor.pencilTapped(preference: .previousTool)
+            default:
+                editor.pencilTapped(preference: .eraser)
+            }
         }
     }
 }

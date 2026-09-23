@@ -78,6 +78,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         /// World-space radius — the brush's real size, so the ring answers
         /// "how big is my brush" honestly at every zoom.
         var radius: Double
+        /// A second, fainter ring at the size a feather-light touch makes,
+        /// when pressure changes the size. The two together show the range
+        /// the Pencil can reach before it lands.
+        var innerRadius: Double?
         /// 0...1. Faint when the Pencil is far from the glass, solid as it
         /// approaches, which is the whole point of hover.
         var strength: Double
@@ -119,8 +123,13 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var indexBuffer: MTLBuffer?
     private var indexCount = 0
     private var texture: MTLTexture?
-    private var cursorBuffer: MTLBuffer?
+    /// One per vertex buffer, rotated with them. A single buffer rewritten
+    /// every frame is being read by the GPU for the frame before while the CPU
+    /// writes it, which tears the ring as it moves.
+    private var cursorBuffers: [MTLBuffer] = []
     private static let cursorSegments = 72
+    /// Two rings per buffer: the brush, and the lightest-touch size inside it.
+    private static let cursorVertices = (cursorSegments + 1) * 2
 
     /// Read every frame by the view; written by the editor when a gesture moves.
     var camera = Camera()
@@ -131,6 +140,18 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// drains a frame's worth of Pencil samples here, so input is paid for once
     /// per frame instead of once per event.
     var beforeDraw: (() -> Void)?
+    /// The newest input this frame consumed, on the host clock, or 0. Set by
+    /// `beforeDraw`; when it and `onPresented` are both set, the renderer asks
+    /// the drawable when it actually reached the display.
+    var inputTimestamp: CFTimeInterval = 0
+    /// Called with (input time, presented time) for frames that carried input,
+    /// on an arbitrary thread. The difference is touch-to-glass latency,
+    /// measured by the display rather than estimated.
+    var onPresented: (@Sendable (CFTimeInterval, CFTimeInterval) -> Void)?
+    /// Asks whoever owns the drawing loop for a frame. MetalKit's own
+    /// `setNeedsDisplay` does nothing in explicit-draw mode, which is the mode
+    /// the low-latency loop runs in.
+    var requestFrame: (() -> Void)?
 
     /// 4x multisampling. Apple GPUs resolve multisample colour in tile memory,
     /// so the cost is close to nothing and it removes the shimmer from every
@@ -256,9 +277,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         else { throw SetupError.sampler }
         self.sampler = sampler
 
-        cursorBuffer = device.makeBuffer(
-            length: MemoryLayout<SIMD3<Float>>.stride * (Renderer.cursorSegments + 1),
-            options: .storageModeShared)
+        for _ in 0..<Renderer.bufferCount {
+            guard let buffer = device.makeBuffer(
+                length: MemoryLayout<SIMD3<Float>>.stride * Renderer.cursorVertices,
+                options: .storageModeShared) else { continue }
+            cursorBuffers.append(buffer)
+        }
 
         super.init()
     }
@@ -286,7 +310,13 @@ final class Renderer: NSObject, MTKViewDelegate {
             }
         }
         for i in 0..<mesh.vertexCount {
-            let p = mesh.positions[i], n = mesh.normals[i], uv = mesh.uvs[i]
+            // `TextureSpace.metal`, never the raw UV. The document's v runs up
+            // and Metal's t runs down from the image's first row, so the raw
+            // value sampled every painted texel from the other end of the
+            // image — the other row of atlas tiles, another face of the cube.
+            // "Paint doesn't go on the right sides" was this line.
+            let p = mesh.positions[i], n = mesh.normals[i]
+            let uv = TextureSpace.metal(mesh.uvs[i])
             scratch[i] = Vertex(
                 position: SIMD3(Float(p.x), Float(p.y), Float(p.z)),
                 normal: SIMD3(Float(n.x), Float(n.y), Float(n.z)),
@@ -370,6 +400,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         view.setNeedsDisplay()
+        requestFrame?()
     }
 
     func draw(in view: MTKView) {
@@ -449,29 +480,74 @@ final class Renderer: NSObject, MTKViewDelegate {
                                       indexBufferOffset: 0)
         var drawCalls = 1
 
-        if let cursor, cursor.strength > 0.01, let cursorBuffer,
-           writeCursorRing(cursor, into: cursorBuffer) {
-            encoder.setRenderPipelineState(cursorPipeline)
-            encoder.setDepthStencilState(cursorDepthState)
-            encoder.setCullMode(.none)
-            let tint: SIMD4<Float> = cursor.painting
-                ? SIMD4(0.98, 0.86, 0.32, Float(cursor.strength))
-                : SIMD4(0.30, 0.94, 1.0, Float(cursor.strength))
-            var cursorUniforms = CursorUniforms(modelViewProjection: float4x4(viewProjection),
-                                                colour: tint)
-            encoder.setVertexBuffer(cursorBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&cursorUniforms,
-                                   length: MemoryLayout<CursorUniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&cursorUniforms,
-                                     length: MemoryLayout<CursorUniforms>.stride, index: 1)
-            encoder.drawPrimitives(type: .lineStrip, vertexStart: 0,
-                                   vertexCount: Renderer.cursorSegments + 1)
-            drawCalls += 1
+        if let cursor, cursor.strength > 0.01, vertexSlot < cursorBuffers.count {
+            let cursorBuffer = cursorBuffers[vertexSlot]
+            let rings = writeCursorRings(cursor, into: cursorBuffer)
+            if rings > 0 {
+                encoder.setRenderPipelineState(cursorPipeline)
+                encoder.setDepthStencilState(cursorDepthState)
+                encoder.setCullMode(.none)
+                let tint: SIMD4<Float> = cursor.painting
+                    ? SIMD4(0.98, 0.86, 0.32, Float(cursor.strength))
+                    : SIMD4(0.30, 0.94, 1.0, Float(cursor.strength))
+                var cursorUniforms = CursorUniforms(modelViewProjection: float4x4(viewProjection),
+                                                    colour: tint)
+                encoder.setVertexBuffer(cursorBuffer, offset: 0, index: 0)
+                encoder.setVertexBytes(&cursorUniforms,
+                                       length: MemoryLayout<CursorUniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&cursorUniforms,
+                                         length: MemoryLayout<CursorUniforms>.stride, index: 1)
+                encoder.drawPrimitives(type: .lineStrip, vertexStart: 0,
+                                       vertexCount: Renderer.cursorSegments + 1)
+                drawCalls += 1
+                if rings > 1 {
+                    // The lightest-touch ring, fainter than the brush itself.
+                    var inner = cursorUniforms
+                    inner.colour.w *= 0.45
+                    encoder.setVertexBytes(&inner, length: MemoryLayout<CursorUniforms>.stride,
+                                           index: 1)
+                    encoder.setFragmentBytes(&inner, length: MemoryLayout<CursorUniforms>.stride,
+                                             index: 1)
+                    encoder.drawPrimitives(type: .lineStrip,
+                                           vertexStart: Renderer.cursorSegments + 1,
+                                           vertexCount: Renderer.cursorSegments + 1)
+                    drawCalls += 1
+                }
+            }
         }
 
         encoder.endEncoding()
-        buffer.present(drawable)
-        buffer.commit()
+
+        // Touch-to-glass, measured by the display: the drawable reports when it
+        // was actually shown. Only for frames that consumed input, and only
+        // while something is listening.
+        let consumed = inputTimestamp
+        inputTimestamp = 0
+        if consumed > 0, let onPresented {
+            drawable.addPresentedHandler { shown in
+                let at = shown.presentedTime
+                guard at > 0 else { return }
+                onPresented(consumed, at)
+            }
+        }
+
+        // Read from the layer at the moment of presenting, so the renderer and
+        // the loop that set it cannot disagree about which way to present.
+        if (view.layer as? CAMetalLayer)?.presentsWithTransaction == true {
+            // The low-latency loop presents inside the UI update's own Core
+            // Animation transaction, which is what lets the system show the
+            // frame immediately after the update instead of a frame later.
+            // Apple's required order: commit, wait until SCHEDULED (not
+            // completed), then present the drawable itself — never through
+            // `present(_:)` on the command buffer, which does not wait for a
+            // transaction.
+            buffer.commit()
+            buffer.waitUntilScheduled()
+            drawable.present()
+        } else {
+            buffer.present(drawable)
+            buffer.commit()
+        }
         lastCommitted = buffer
 
         stats.drawCalls = drawCalls
@@ -486,15 +562,17 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private var hasDrawnAFrame = false
 
-    /// Builds the ring in world space, lying on the tangent plane at the hit.
+    /// Builds the rings in world space, lying on the tangent plane at the hit.
+    /// Returns how many it wrote: the brush, and the lightest-touch size if
+    /// there is one.
     ///
     /// Drawn in the plane of the surface rather than as a screen-space circle,
     /// because it has a second job besides marking the spot: it is the only
     /// honest answer to "how big is my brush", and a flat disc on the model
     /// shows foreshortening on a slope where a screen circle would lie.
-    private func writeCursorRing(_ cursor: Cursor, into buffer: MTLBuffer) -> Bool {
+    private func writeCursorRings(_ cursor: Cursor, into buffer: MTLBuffer) -> Int {
         let normal = HumanoidCore.normalize(cursor.normal)
-        guard normal.x.isFinite, cursor.radius > 0 else { return false }
+        guard normal.x.isFinite, cursor.radius > 0 else { return 0 }
         // Any vector not parallel to the normal will do for the first tangent.
         let seed = abs(normal.y) < 0.9 ? Vec3(0, 1, 0) : Vec3(1, 0, 0)
         let tangent = HumanoidCore.normalize(HumanoidCore.cross(seed, normal))
@@ -504,13 +582,22 @@ final class Renderer: NSObject, MTKViewDelegate {
         let centre = cursor.centre + normal * (cursor.radius * 0.03)
 
         let points = buffer.contents().bindMemory(to: SIMD3<Float>.self,
-                                                  capacity: Renderer.cursorSegments + 1)
-        for i in 0...Renderer.cursorSegments {
-            let angle = Double(i) / Double(Renderer.cursorSegments) * 2 * .pi
-            let p = centre + (tangent * cos(angle) + bitangent * sin(angle)) * cursor.radius
-            points[i] = SIMD3(Float(p.x), Float(p.y), Float(p.z))
+                                                  capacity: Renderer.cursorVertices)
+        var inner: Double = 0
+        if let requested = cursor.innerRadius, requested > 0, requested < cursor.radius {
+            inner = requested
         }
-        return true
+        let rings = inner > 0 ? 2 : 1
+        for ring in 0..<rings {
+            let radius = ring == 0 ? cursor.radius : inner
+            let base = ring * (Renderer.cursorSegments + 1)
+            for i in 0...Renderer.cursorSegments {
+                let angle = Double(i) / Double(Renderer.cursorSegments) * 2 * .pi
+                let p = centre + (tangent * cos(angle) + bitangent * sin(angle)) * radius
+                points[base + i] = SIMD3(Float(p.x), Float(p.y), Float(p.z))
+            }
+        }
+        return rings
     }
 }
 

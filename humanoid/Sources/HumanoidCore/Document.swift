@@ -47,7 +47,17 @@ public struct Document {
     /// Depth of the open stroke group. While this is non-zero every edit merges
     /// into one record instead of pushing its own.
     private var strokeDepth = 0
-    private var openStroke: Record?
+    /// The open sculpt group, kept as it grows rather than re-merged.
+    ///
+    /// Merging used to rebuild both dictionaries and re-sort every vertex the
+    /// stroke had ever touched on every push, and a stroke pushes once a
+    /// frame — so a long stroke paid for its whole length again each frame,
+    /// and the cost of the next frame grew with the last. Now a push costs
+    /// what it touched: a vertex's before-value is taken the first time it is
+    /// seen, and the after-values are read once, when the group closes.
+    private var openIndex: [Int: Int] = [:]
+    private var openVertices: [Int] = []
+    private var openBefore: [Vec3] = []
 
     /// How many strokes can be undone. The PRD's targets are 30 sculpt and 20
     /// paint; one bound covers both because a record is one stroke either way.
@@ -132,6 +142,33 @@ public struct Document {
         push(.sculpt(vertices: vertices, before: before,
                      after: vertices.map { sculptDelta[$0] }))
         return touched.count
+    }
+
+    /// Applies dabs that each carry their own brush and settings, and records
+    /// them. What the stroke engine hands over once per frame: pressure changes
+    /// the radius and strength of every dab, so one settings value per call
+    /// would stamp a whole frame with its last sample.
+    ///
+    /// `reference` is the shape the stroke started from; see
+    /// `Sculpt.apply(_:to:tables:reference:)` for why a stroke measures its
+    /// dabs against it.
+    @discardableResult
+    public mutating func sculpt(_ dabs: [Sculpt.Dab], reference: MeshData? = nil) -> Int {
+        guard !dabs.isEmpty else { return 0 }
+        let touched = Sculpt.apply(dabs, to: &current, tables: tables, reference: reference)
+        guard !touched.isEmpty else { return 0 }
+        let vertices = touched.flatMap { tables.weldMembers[$0] }.sorted()
+        let before = vertices.map { sculptDelta[$0] }
+        for v in vertices { sculptDelta[v] = current.positions[v] - template.positions[v] }
+        push(.sculpt(vertices: vertices, before: before,
+                     after: vertices.map { sculptDelta[$0] }))
+        return touched.count
+    }
+
+    /// The mirror image of a surface point and a triangle under it, for a
+    /// symmetric paint stroke. See `SurfacePaint.mirror`.
+    public func mirror(of point: Vec3, triangle: Int) -> (point: Vec3, seed: Int)? {
+        SurfacePaint.mirror(of: point, triangle: triangle, mesh: current, tables: tables)
     }
 
     // MARK: - Grab
@@ -245,6 +282,28 @@ public struct Document {
                                    tables: tables, into: &albedo)
     }
 
+    /// Extends the open paint stroke with the brush as it is NOW — radius and
+    /// opacity follow the Pencil's pressure sample by sample, and the segment
+    /// tapers from the previous brush to this one — and, when `mirror` is
+    /// given, paints its mirror image in the same pass.
+    @discardableResult
+    public mutating func paint(to point: Vec3, seed: Int, brush: SurfacePaint.Brush,
+                               mirror: (point: Vec3, seed: Int)?) -> Paint.Rect {
+        guard paintStroke != nil else { return .empty }
+        paintStroke!.brush = brush
+        return paintStroke!.extend(to: point, seed: seed, mirror: mirror, mesh: current,
+                                   tables: tables, into: &albedo)
+    }
+
+    /// The pointer left the model: the next point starts a new segment rather
+    /// than joining this one through the air.
+    public mutating func liftPaint() {
+        paintStroke?.lift()
+    }
+
+    /// Whether a paint stroke is open.
+    public var isPainting: Bool { paintStroke != nil }
+
     /// Closes the stroke and records it as one undoable step.
     public mutating func endPaintStroke() {
         guard let stroke = paintStroke, let origin = paintOrigin else { return }
@@ -314,7 +373,7 @@ public struct Document {
 
     private mutating func push(_ record: Record) {
         guard strokeDepth > 0 else { return commit(record) }
-        guard case .sculpt = record else {
+        guard case .sculpt(let vertices, let before, _) = record else {
             // Only sculpt merges. A paint record carries pixel payloads that do
             // not combine without stitching them, and paint is already one
             // record per gesture, so grouping it buys nothing. Flushing and
@@ -323,39 +382,27 @@ public struct Document {
             flushStroke()
             return commit(record)
         }
-        guard let existing = openStroke else { return openStroke = record }
-        guard case .sculpt = existing else {
-            flushStroke()
-            return openStroke = record
+        // `before` keeps the value from the FIRST time each vertex was touched
+        // and `after` is read when the group closes, so undoing the group
+        // returns to the state before the gesture began rather than to the
+        // middle of it.
+        for (i, v) in vertices.enumerated() where openIndex[v] == nil {
+            openIndex[v] = openVertices.count
+            openVertices.append(v)
+            openBefore.append(before[i])
         }
-        openStroke = merge(existing, record)
     }
 
     private mutating func flushStroke() {
-        guard let stroke = openStroke else { return }
-        openStroke = nil
-        commit(stroke)
-    }
-
-    /// Merges a later sculpt into an open one.
-    ///
-    /// `before` keeps the value from the FIRST time each vertex was touched and
-    /// `after` takes the most recent, so undoing the group returns to the state
-    /// before the gesture began rather than to the middle of it.
-    private func merge(_ existing: Record, _ next: Record) -> Record {
-        guard case .sculpt(let vA, let bA, let aA) = existing,
-              case .sculpt(let vB, let bB, let aB) = next else { return next }
-        var before = [Int: Vec3](minimumCapacity: vA.count + vB.count)
-        var after = [Int: Vec3](minimumCapacity: vA.count + vB.count)
-        for (i, v) in vA.enumerated() { before[v] = bA[i]; after[v] = aA[i] }
-        for (i, v) in vB.enumerated() {
-            if before[v] == nil { before[v] = bB[i] }
-            after[v] = aB[i]
-        }
-        let vertices = before.keys.sorted()
-        return .sculpt(vertices: vertices,
-                       before: vertices.map { before[$0]! },
-                       after: vertices.map { after[$0]! })
+        guard !openVertices.isEmpty else { return }
+        let order = openVertices.indices.sorted { openVertices[$0] < openVertices[$1] }
+        let vertices = order.map { openVertices[$0] }
+        let before = order.map { openBefore[$0] }
+        openIndex.removeAll(keepingCapacity: true)
+        openVertices.removeAll(keepingCapacity: true)
+        openBefore.removeAll(keepingCapacity: true)
+        commit(.sculpt(vertices: vertices, before: before,
+                       after: vertices.map { sculptDelta[$0] }))
     }
 
     private mutating func commit(_ record: Record) {
