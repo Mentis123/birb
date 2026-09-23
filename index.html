@@ -6867,6 +6867,9 @@
 
     birbAnchor = new THREE.Group();
     scene.add(birbAnchor);
+    // Clouds with volume: a puff the bird flies through never veils the bird
+    // (cloud-volume.js picks the puff's face by the camera AND the bird).
+    import('./src/environment/cloud-volume.js').then((m) => m.setCloudFocusObject(birbAnchor));
 
     // Keep the model aligned with the controller's forward vector (-Z) so the
     // beak points away from the camera. We detect the model's longest axis
@@ -13175,6 +13178,180 @@
             new THREE.Matrix4().makeBasis(right, eyeUp, fwd.clone().multiplyScalar(-1)),
           );
           return { name: mesh.name, count: mesh.count, index };
+        },
+        // Clouds with volume (src/environment/cloud-volume.js): live state,
+        // optional live tuning (`clouds({ opacity: 3 })`), null when the
+        // flag is off or the biome has no clouds.
+        clouds: (tune = null) => sphericalWorld?.clouds?.report(tune) ?? null,
+        // The Pause Flight button, for a capture: every clock stops (delta
+        // 0 — flight, wind, drones, weather) while frames keep rendering, so
+        // an A/B of two frames differs only by what the capture toggled.
+        // freeze() alone holds nothing: the main loop re-asserts cruise
+        // speed every frame, so a pose has to be re-set until this is on.
+        holdMotion: (on = true) => {
+          controlState.manuallyPaused = !!on;
+          refreshAnimationState();
+          return !motionState.animate;
+        },
+        // Look at cloud `index` from `back` units, with the sun beside the
+        // view ('side'), behind the cloud ('sun' - the silver lining) or
+        // behind the camera ('away'). `inside: rho` instead puts the bird
+        // (use setCameraView('fpv')) INSIDE a puff at normalised density rho,
+        // at a point no collider claims. Clouds are four per planet on a
+        // phone: a capture of one is otherwise luck.
+        goToCloud: (index = 0, {
+          back = 60, lift = 0, view = 'side', inside = null, look = 1, puff = null, dir = null, dryRun = false,
+        } = {}) => {
+          const c = sphericalWorld?.clouds;
+          const fc = flightController;
+          if (!c || !fc?.position || !c.clouds.length) return null;
+          // 'nearest': the cloud closest to the bird right now.
+          if (index === 'nearest') {
+            let best = Infinity;
+            c.clouds.forEach((q, i) => {
+              const d = fc.position.distanceToSquared(new THREE.Vector3(q.x, q.y, q.z));
+              if (d < best) { best = d; index = i; }
+            });
+          }
+          const s = c.clouds[Math.min(Math.max(0, index), c.clouds.length - 1)];
+          const centre = new THREE.Vector3(s.x, s.y, s.z);
+          const up = centre.clone().normalize();
+          const sun = (visualUniforms.sunDir.value || up).clone().normalize();
+          let fwd = sun.clone().addScaledVector(up, -sun.dot(up));
+          if (fwd.lengthSq() < 1e-6) fwd.set(1, 0, 0).addScaledVector(up, -up.x);
+          fwd.normalize();
+          if (view === 'side') fwd.crossVectors(up, fwd).normalize();
+          else if (view === 'away') fwd.negate();
+          let eye = centre.clone().addScaledVector(fwd, -back).addScaledVector(up, lift);
+          let at = centre;
+          let insideHit = null;
+          if (inside !== null) {
+            insideHit = c.insidePoint(inside, (p) => !sphericalWorld.collisionSystem
+              .checkObjectCollision(THREE, p, FLIGHT_RECOVERY_CONFIG.birdRadius).collided,
+            puff === null ? null : { puff, dir });
+            if (!insideHit) return null;
+            if (dryRun) return { puff: insideHit.puff, dir: insideHit.dir, radius: insideHit.radius };
+            eye = insideHit.point;
+            at = insideHit.centre;
+          }
+          fc.position.copy(eye);
+          // Straight at the target (the curvature puts a cloud 60 units off
+          // about 12 degrees below level), with the roll kept radial.
+          const eyeUp = eye.clone().normalize();
+          const lookDir = at.clone().sub(eye).multiplyScalar(look);
+          if (lookDir.lengthSq() < 1e-8) lookDir.copy(fwd);
+          lookDir.normalize();
+          const right = new THREE.Vector3().crossVectors(lookDir, eyeUp).normalize();
+          const camUp = new THREE.Vector3().crossVectors(right, lookDir).normalize();
+          fc.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, camUp, lookDir.clone().negate()));
+          return {
+            index, view, back, collider: +s.collider.toFixed(2), volumetric: c.volumetric,
+            // Degrees above the cloud's own horizon: what the lighting sees.
+            sunDir: sun.toArray().map((n) => +n.toFixed(4)),
+            sunElevation: +(Math.asin(Math.max(-1, Math.min(1, sun.dot(up)))) * 180 / Math.PI).toFixed(1),
+            centre: centre.toArray().map((n) => +n.toFixed(2)),
+            eye: eye.toArray().map((n) => +n.toFixed(2)),
+            distance: +eye.distanceTo(centre).toFixed(2),
+            inside: insideHit ? { puff: insideHit.puff, dir: insideHit.dir, radius: insideHit.radius } : null,
+          };
+        },
+        // Where cloud `index`'s shadow lands (the sun ray back from its
+        // centre to the rendered ground), and a view straight down at it
+        // from `above`: the frame the shadow check photographs.
+        goToCloudShadow: (index = 0, { above = 45, tilt = 0.12 } = {}) => {
+          const c = sphericalWorld?.clouds;
+          const fc = flightController;
+          const sunV = visualUniforms.sunDir.value;
+          if (!c || !fc?.position || !sunV || !c.clouds.length) return null;
+          // The shadow sphere (the puffs' centroid) where there is one, the
+          // collider centre on the solid path.
+          const list = c.spheres.length ? c.spheres : c.clouds;
+          const s = list[Math.min(Math.max(0, index), list.length - 1)];
+          const L = sunV.clone().normalize();
+          const p = new THREE.Vector3();
+          let ground = null;
+          for (let t = 0; t < 600; t += 0.25) {
+            p.set(s.x - L.x * t, s.y - L.y * t, s.z - L.z * t);
+            const r = p.length();
+            const g = SPHERE_RADIUS + sampleTerrainMeshHeight(p.x / r, p.y / r, p.z / r);
+            if (r <= g) { ground = p.clone().multiplyScalar(g / r); break; }
+          }
+          if (!ground) return null;
+          const up = ground.clone().normalize();
+          let tan = L.clone().addScaledVector(up, -L.dot(up));
+          if (tan.lengthSq() < 1e-6) tan.set(1, 0, 0).addScaledVector(up, -up.x);
+          tan.normalize();
+          // Stand off so the (tilted) view ray lands ON the spot.
+          fc.position.copy(ground).addScaledVector(up, above).addScaledVector(tan, -above * tilt);
+          const dir = up.clone().negate().addScaledVector(tan, tilt).normalize();
+          const right = new THREE.Vector3().crossVectors(dir, tan).normalize();
+          const camUp = new THREE.Vector3().crossVectors(right, dir).normalize();
+          fc.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, camUp, dir.clone().negate()));
+          return {
+            index,
+            ground: ground.toArray().map((n) => +n.toFixed(2)),
+            // Standing water is its own shader, not a shadow receiver.
+            water: sampleTerrainMeshHeight(up.x, up.y, up.z) < (sphericalWorld.waterLevel ?? 0),
+            visibility: +c.shadowAt(ground.x, ground.y, ground.z).toFixed(4),
+            sunElevation: +(Math.asin(Math.max(-1, Math.min(1, L.dot(up)))) * 180 / Math.PI).toFixed(1),
+          };
+        },
+        // The bird on screen (0-1, y down) through the camera that renders,
+        // with its projected half-extent: the cloud checks mask the bird's
+        // own pixels with it. `birdVisible(false)` hides it until the next
+        // camera-mode change, for the mask's other half.
+        birdScreen: () => {
+          const cam = cameraState?.camera;
+          if (!birbAnchor || !cam) return null;
+          cam.updateMatrixWorld();
+          const p = birbAnchor.getWorldPosition(new THREE.Vector3());
+          const size = new THREE.Box3().setFromObject(birbAnchor).getSize(new THREE.Vector3()).length() / 2;
+          const c = p.clone().project(cam);
+          const side = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+          const e = p.clone().addScaledVector(side, size).project(cam);
+          return {
+            x: (c.x + 1) / 2, y: (1 - c.y) / 2, r: Math.abs(e.x - c.x) / 2,
+            distance: +p.distanceTo(cam.getWorldPosition(new THREE.Vector3())).toFixed(3),
+            position: p.toArray(),
+            camera: cam.getWorldPosition(new THREE.Vector3()).toArray(),
+          };
+        },
+        birdVisible: (on = true) => {
+          if (!birbAnchor) return null;
+          birbAnchor.visible = !!on;
+          return birbAnchor.visible;
+        },
+        // How much of the sunlit ground is under a cloud shadow right now,
+        // over `n` evenly spread points: the real shadows (the JS mirror of
+        // the shader) against the crossed-sine field they replace
+        // (addAtmosphere's own formula and 0.42 strength, at the current
+        // time). A point counts when it loses more than 5% of its direct
+        // light (real) or of all its light (sine).
+        cloudShadowCoverage: (n = 4000) => {
+          const c = sphericalWorld?.clouds;
+          const L = visualUniforms.sunDir.value;
+          if (!L) return null;
+          const t = visualUniforms.time.value || 0;
+          const ga = Math.PI * (3 - Math.sqrt(5));
+          let lit = 0; let real = 0; let sine = 0; let realMean = 0; let sineMean = 0;
+          for (let i = 0; i < n; i += 1) {
+            const y = 1 - (2 * (i + 0.5)) / n; const rr = Math.sqrt(1 - y * y);
+            const x = Math.cos(ga * i) * rr; const z = Math.sin(ga * i) * rr;
+            if (x * L.x + y * L.y + z * L.z < 0.1) continue;
+            lit += 1;
+            const g = SPHERE_RADIUS + sampleTerrainMeshHeight(x, y, z);
+            const px = x * g; const py = y * g; const pz = z * g;
+            const occ = c && c.volumetric ? 1 - c.shadowAt(px, py, pz) : 0;
+            realMean += occ; if (occ > 0.05) real += 1;
+            const drift = t * 0.021;
+            const c1 = Math.sin(px * 0.0135 + drift) * Math.sin(pz * 0.0135 * 1.17 - drift * 0.8) * Math.sin(py * 0.0135 * 0.83);
+            const c2 = Math.sin(px * 0.0135 * 2.3 - drift * 1.4) * Math.sin(pz * 0.0135 * 1.9 + drift);
+            const s = Math.min(1, Math.max(0, (c1 * 0.65 + c2 * 0.35 + 0.15) / 0.7));
+            const dark = 0.42 * s * s * (3 - 2 * s);
+            sineMean += dark; if (dark > 0.05) sine += 1;
+          }
+          const f = (v) => +(v / Math.max(1, lit)).toFixed(4);
+          return { points: lit, real: f(real), realMean: f(realMean), sine: f(sine), sineMean: f(sineMean) };
         },
         // Fly to the nearest live drone and look at it. Drones orbit the whole
         // planet, so a capture of one is otherwise a matter of luck.

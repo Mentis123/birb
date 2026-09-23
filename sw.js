@@ -159,6 +159,7 @@ const CORE_ASSETS = [
   './src/environment/water.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
+  './src/environment/cloud-volume.js',
   './src/nesting/drone-look.js',
   './src/environment/weather.js',
   './src/environment/visual-style.js',

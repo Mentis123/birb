@@ -59,6 +59,8 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'smooth', group: 'Shading', kind: 'toggle', label: 'Smooth shading (soil rolls, rock fractures)' },
   { key: 'leaves', group: 'Shading', kind: 'toggle', label: 'Lacy canopy edges' },
   { key: 'snowline', group: 'Shading', kind: 'toggle', label: 'Snow on up-facing surfaces' },
+  { key: 'cloudvol', group: 'Shading', kind: 'toggle', label: 'Clouds with volume + real cloud shadows',
+    hint: 'Off is the solid puffs and the drifting sine-field shadows that had no relation to where any cloud was.' },
   { key: 'ibl', group: 'Shading', kind: 'select', label: 'Image-based lighting',
     options: [
       { value: null, label: 'Off' },
