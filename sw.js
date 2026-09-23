@@ -131,6 +131,7 @@ const CORE_ASSETS = [
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
+  './src/flight/aero-pose.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',
