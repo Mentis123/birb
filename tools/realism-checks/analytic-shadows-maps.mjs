@@ -11,7 +11,7 @@
  *    the ellipsoids stand down on any fragment with receiveShadow, so the
  *    bird's shadow on the ground is the map's and it is not darkened twice.
  */
-import { setSun, waitForBake, ridgeShadowView, birdOverLitSpot, abSeries, restore } from './analytic-shadows-lib.mjs';
+import { setSun, waitForBake, ridgeShadowView, birdOverLitSpot, abSeries, darkestWindow, restore } from './analytic-shadows-lib.mjs';
 
 export const name = 'analytic-shadows-maps';
 export const query = 'flight=classic';
@@ -41,10 +41,12 @@ export default async function run(ctx) {
   ctx.check(!!bird, 'placed the bird up the sun ray from a lit spot with maps on');
   if (bird) {
     await page.evaluate(() => window.__BIRB.horizon(0));
-    const [on1, off1, on2, off2] = await abSeries(ctx, 'birdShadow', [1, 0, 1, 0], bird.px, 6, 'maps-bird');
-    ctx.check(Math.abs(on1 - on2) + Math.abs(off1 - off2) <= 0.004 * off1, 'the control pairs agree');
-    ctx.check(Math.abs(on1 - off1) <= 0.005 * off1,
-      `the ellipsoids add nothing where the map already shades the ground (${off1.toFixed(4)} vs ${on1.toFixed(4)})`);
+    // The window the ellipsoids darken MOST, anywhere around where the bird's
+    // shadow lands: with maps on, that most is nothing.
+    const w = await darkestWindow(ctx, 'birdShadow', [1, 0, 1, 0], bird.px, { label: 'maps-bird' });
+    ctx.check(!!w && Math.abs(w.on1 - w.on2) + Math.abs(w.off1 - w.off2) <= 0.004 * w.off1, 'the control pairs agree');
+    ctx.check(!!w && w.darkening <= 0.005,
+      `the ellipsoids add nothing where the map already shades the ground (most darkened window ${w ? (w.darkening * 100).toFixed(2) : '?'}%)`);
   }
   await restore(ctx);
 }
