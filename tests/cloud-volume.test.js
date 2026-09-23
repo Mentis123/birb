@@ -18,13 +18,17 @@ import {
   setCloudShadowSpheres, cloudShadowUniforms, cloudVolumeUniforms, setCloudVolumeTuning,
   addCloudVolume, addCloudShadow, createCloudImmersion, createCloudsInfo, CLOUD_CHORD_GLSL,
   createCloudSorter, countSlotInversions, setCloudFocusObject, updateCloudFocus, CLOUD_OWN_ATTRIBUTE,
+  CLOUD_FOG, captureCloudFogBase, cloudFogColorInto,
 } from '../src/environment/cloud-volume.js';
 import { addAtmosphere, visualUniforms } from '../src/environment/visual-style.js';
+import { addHorizonShadow, horizonUniforms } from '../src/environment/horizon-shadow.js';
 
 const THREE = {
   DoubleSide: 2,
   FrontSide: 0,
+  Vector2: class { constructor(x = 0, y = 0) { this.x = x; this.y = y; } },
   Vector3: class { constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; } },
+  Vector4: class { constructor(x = 0, y = 0, z = 0, w = 0) { this.x = x; this.y = y; this.z = z; this.w = w; } },
   Color: class { constructor() { this.r = 1; this.g = 1; this.b = 1; } },
 };
 
@@ -512,6 +516,107 @@ test('behind a patch that already owns the sun visibility, the cloud JOINS it', 
   assert.ok(theirs > 0 && ours > theirs && ours < f.indexOf('#include <lights_fragment_begin>'),
     'the cloud scales the visibility after the other patch set it and before the light loop reads it');
   assert.ok(!f.includes('birbSunView = birbCloudUnit'), 'the other patch owns the sun direction');
+});
+
+// ── with the realism wave's horizon shadow (the merged world's order) ────
+test('horizon, then cloud, then atmosphere: ONE sun visibility, the product, read by the rim', () => {
+  for (const opts of [
+    { horizon: true, birdShadow: true }, { horizon: false, birdShadow: true }, { horizon: true, birdShadow: false },
+  ]) {
+    const label = JSON.stringify(opts);
+    const m = lambert();
+    addHorizonShadow(m, THREE, { receiver: 'ground', ...opts });
+    addCloudShadow(m, THREE);
+    addAtmosphere(m, THREE, { cloudStrength: 0 });
+    const s = compile(m);
+    const f = s.fragmentShader;
+    // One set of globals, one light-loop wrapper (the horizon's), one macro,
+    // one sky multiply: the cloud joined rather than stacked.
+    assert.equal(count(f, 'float birbSunVis'), 1, label);
+    assert.equal(count(f, 'float birbSkyVis'), 1, label);
+    assert.equal(count(f, 'void birbHorizonDirInfo('), 1, label);
+    assert.equal(count(f, 'void birbCloudDirInfo('), 0, label);
+    assert.equal(count(f, '#define getDirectionalLightInfo'), 1, label);
+    assert.equal(count(f, 'reflectedLight.indirectDiffuse *= birbSkyVis;'), 1, label);
+    assert.ok(!f.includes('reflectedLight.directDiffuse *='), label);
+    // The cloud scales what the horizon SET, before the light loop reads it.
+    const set = f.lastIndexOf('birbSunVis *= hzBird;') > 0 ? f.lastIndexOf('birbSunVis *= hzBird;')
+      : f.indexOf('birbSunVis = mix( 1.0, hzLit, hzStrength );');
+    const cloud = f.indexOf('birbSunVis *= 1.0 - csOcc;');
+    assert.ok(set > 0 && cloud > set && cloud < f.indexOf('#include <lights_fragment_begin>'), label);
+    assert.equal(count(f, 'birbSkyVis *= 1.0 - csOcc * uCloudShadowParams.z;'), 1, label);
+    // Both read ONE sun: the horizon's uniform and the cloud's are the same
+    // object here, and spherical-world binds the horizon's to sunDir.
+    assert.equal(s.uniforms.uCloudShadowSun, visualUniforms.sunDir, label);
+    assert.equal(s.uniforms.uHorizonSun, horizonUniforms.sun, label);
+    // The atmosphere's sun rim is in the same shade.
+    assert.ok(/uBirbSunRim \* uBirbAtmos \* birbSunVis\)/.test(f), `${label}: the rim reads birbSunVis`);
+    // One varying, as ever.
+    assert.equal(count(s.vertexShader, 'varying vec3 vBirbWorld;'), 1, label);
+    assert.equal(count(s.vertexShader, 'vBirbWorld ='), 1, label);
+    assert.equal(count(f, 'varying vec3 vBirbWorld;'), 1, label);
+    assert.match(m.customProgramCacheKey(), /horizon-.*cloudshadow-v2.*atmos-v6/);
+  }
+});
+
+test('with the horizon patch off (?horizon=0&birdshadow=0), the cloud brings the same contract', () => {
+  const m = lambert();
+  addHorizonShadow(m, THREE, { horizon: false, birdShadow: false });   // a no-op, as in the world
+  addCloudShadow(m, THREE);
+  addAtmosphere(m, THREE, { cloudStrength: 0 });
+  const f = compile(m).fragmentShader;
+  assert.equal(count(f, 'void birbHorizonDirInfo('), 0);
+  assert.equal(count(f, 'void birbCloudDirInfo('), 1);
+  assert.equal(count(f, 'float birbSunVis'), 1);
+  assert.equal(count(f, 'reflectedLight.indirectDiffuse *= birbSkyVis;'), 1);
+  assert.ok(/uBirbSunRim \* uBirbAtmos \* birbSunVis\)/.test(f), 'the rim is in the cloud shade too');
+});
+
+test('the bird variant takes the shadow and no in-cloud fog', () => {
+  const m = { isMeshStandardMaterial: true, userData: {}, transparent: false };
+  addCloudShadow(m, THREE, { fog: false });
+  const f = compile(m).fragmentShader;
+  assert.ok(f.includes('birbSunVis *= 1.0 - csOcc;'));
+  assert.ok(!f.includes('uCloudShadowFogParams.x > 0.0'), 'no fog');
+  assert.match(m.customProgramCacheKey(), /cloudshadow-nofog-v2$/);
+  const w = lambert();
+  addCloudShadow(w, THREE);
+  assert.notEqual(w.customProgramCacheKey(), m.customProgramCacheKey(), 'fog and no-fog never share a program');
+  assert.match(w.customProgramCacheKey(), /cloudshadow-v2$/);
+});
+
+test('the in-cloud fog rides the atmosphere: authored at capture, then scaled by the mist ratio', () => {
+  const saved = visualUniforms.mistColor.value;
+  try {
+    const mist = { r: 0.5, g: 0.6, b: 0.7 };
+    visualUniforms.mistColor.value = mist;
+    const authored = captureCloudFogBase();
+    const { tint, tintMix } = CLOUD_FOG;
+    const expect = [0.5, 0.6, 0.7].map((v, c) => v + (tint[c] - v) * tintMix);
+    authored.forEach((v, c) => assert.ok(Math.abs(v - expect[c]) < 1e-6));
+    const out = new Float32Array(3);
+    // At the reference sun the colour is exactly the authored one.
+    cloudFogColorInto(mist, out);
+    out.forEach((v, c) => assert.ok(Math.abs(v - expect[c]) < 1e-6));
+    // The atmosphere reddens and dims the mist by a per-channel ratio: the
+    // in-cloud fog moves by the SAME ratio.
+    const ratio = [0.9, 0.55, 0.3];
+    cloudFogColorInto({ r: 0.5 * ratio[0], g: 0.6 * ratio[1], b: 0.7 * ratio[2] }, out);
+    out.forEach((v, c) => assert.ok(Math.abs(v - expect[c] * ratio[c]) < 1e-6, `channel ${c}`));
+  } finally {
+    visualUniforms.mistColor.value = saved;
+  }
+});
+
+test('the JS mirror clamps like the shader: a raised atmosphere lever never makes the sun negative', () => {
+  const spheres = new Float32Array([0, 10, 0, 5]);
+  // Straight under a thick cloud, sun overhead: occlusion near strength.
+  const v1 = cloudShadowVisibility(0, 0, 0, [0, 1, 0], spheres, 1, 0.88, 3.2, 1);
+  assert.ok(v1 > 0 && v1 < 0.2);
+  // atmosphere 5: unclamped this was 1 - 0.88 * 5 * (1 - e^-...) < 0.
+  const v5 = cloudShadowVisibility(0, 0, 0, [0, 1, 0], spheres, 1, 0.88, 3.2, 5);
+  assert.equal(v5, 0);
+  assert.equal(cloudShadowVisibility(0, 0, 0, [0, 1, 0], spheres, 1, 0.88, 3.2, 0), 1, 'atmosphere 0 is no shadow');
 });
 
 test('switching the sine field off is a uniform, not a new program', () => {

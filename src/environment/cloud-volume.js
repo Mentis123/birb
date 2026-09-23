@@ -269,6 +269,15 @@ export function createCloudsInfo(THREE, {
       flatSaved = null;
     }
   };
+  // The JS mirror of the shadow shader at a world point: the fraction of the
+  // direct sun that reaches it now.
+  const shadowAt = (x, y, z) => {
+    const sun = visualUniforms.sunDir.value;
+    if (!sun || !volumetric) return 1;
+    const p = cloudShadowUniforms.params.value;
+    return Math.max(0, cloudShadowVisibility(x, y, z, [sun.x, sun.y, sun.z], cloudShadowUniforms.spheres.value,
+      cloudShadowUniforms.count.value, p[0], p[1], visualUniforms.atmosphere.value));
+  };
   return {
     volumetric,
     puffs,
@@ -316,8 +325,15 @@ export function createCloudsInfo(THREE, {
         shadowSpheres: volumetric ? cloudShadowUniforms.count.value : 0,
         immersion: +(immersion ? immersion.immersion : 0).toFixed(3),
         fog: volumetric ? +cloudShadowUniforms.fog.value[0].toFixed(3) : 0,
+        // The in-cloud fog's colour (linear), for the atmosphere A/B.
+        fogColor: volumetric ? Array.from(cloudShadowUniforms.fogColor.value, (v) => +v.toFixed(5)) : null,
         // Whether the bird counts as near a puff (see the module doc).
         focus: volumetric ? !!_focusObject && !_focusMuted : null,
+        // The sun's visibility through the clouds at the bird (the bird's
+        // lit materials take the same shadow the ground does).
+        birdSun: volumetric && _focusObject
+          ? +shadowAt(_focusObject.matrixWorld.elements[12], _focusObject.matrixWorld.elements[13],
+            _focusObject.matrixWorld.elements[14]).toFixed(4) : null,
         // Read back from the INSTANCE MATRICES, against the camera the sorter
         // last saw: how many neighbouring slots draw a nearer puff first.
         sort: sorter && mesh ? {
@@ -340,13 +356,7 @@ export function createCloudsInfo(THREE, {
     },
     // The JS mirror of the shadow shader at a world point: the fraction of
     // the direct sun that reaches it now.
-    shadowAt(x, y, z) {
-      const sun = visualUniforms.sunDir.value;
-      if (!sun || !volumetric) return 1;
-      const p = cloudShadowUniforms.params.value;
-      return cloudShadowVisibility(x, y, z, [sun.x, sun.y, sun.z], cloudShadowUniforms.spheres.value,
-        cloudShadowUniforms.count.value, p[0], p[1], visualUniforms.atmosphere.value);
-    },
+    shadowAt,
     // A point at normalised density `rho` (negative: outside the density,
     // d = sqrt(1 - rho) density radii from the centre) on one of seven rays
     // from a puff's centre — first AWAY from its cloud's collider (the only
@@ -440,7 +450,8 @@ export function cloudShadowVisibility(px, py, pz, sun, spheres, count,
       lx, ly, lz,
     );
   }
-  return 1 - strength * atmosphere * (1 - Math.exp(-opacity * tau));
+  // Clamped exactly as the shader clamps the occlusion.
+  return 1 - Math.min(1, Math.max(0, strength * atmosphere * (1 - Math.exp(-opacity * tau))));
 }
 
 /**
@@ -855,8 +866,12 @@ void birbCloudDirInfo( const in DirectionalLight dl, out IncidentLight light ) {
  * Order: chain this AFTER addHorizonShadow (so it can find and join that
  * patch's globals) and BEFORE addAtmosphere (so the atmosphere's sun rim
  * sees the shadowed `birbSunVis`, exactly as it does for the horizon).
+ *
+ * `fog: false` leaves out the in-cloud fog: the BIRD takes the cloud's shadow
+ * like the ground under it, but is the one thing the face choice keeps clear
+ * inside a cloud (see the module doc), so it is not fogged either.
  */
-export function addCloudShadow(material, THREE) {
+export function addCloudShadow(material, THREE, { fog = true } = {}) {
   if (!material || material.userData?.birbCloudShadow) return material;
   const lit = material.isMeshLambertMaterial || material.isMeshPhongMaterial
     || material.isMeshStandardMaterial || material.isMeshToonMaterial;
@@ -911,7 +926,7 @@ export function addCloudShadow(material, THREE) {
         .replace('#include <aomap_fragment>', `reflectedLight.indirectDiffuse *= birbSkyVis;
 #include <aomap_fragment>`);
     }
-    shader.fragmentShader = f.replace('#include <fog_fragment>', `#include <fog_fragment>
+    shader.fragmentShader = !fog ? f : f.replace('#include <fog_fragment>', `#include <fog_fragment>
       if ( uCloudShadowFogParams.x > 0.0 ) {
         float csFog = clamp( uCloudShadowFogParams.x
           * ( 1.0 - exp( -length( vBirbWorld - cameraPosition ) * uCloudShadowFogParams.y ) ), 0.0, 1.0 );
@@ -925,10 +940,62 @@ export function addCloudShadow(material, THREE) {
   };
   material.customProgramCacheKey = function birbCloudShadowKey() {
     const base = typeof previousKey === 'function' ? previousKey.call(this) : 'birb';
-    return `${base}-cloudshadow-v2`;
+    return `${base}-cloudshadow${fog ? '' : '-nofog'}-v2`;
   };
   material.needsUpdate = true;
   return material;
+}
+
+/**
+ * The in-cloud fog's colour: the valley mist (already the sky's mid tone)
+ * pulled toward a pale grey, because the inside of a cloud is the sky's own
+ * air, lit white.
+ */
+export const CLOUD_FOG = Object.freeze({ tint: Object.freeze([0.86, 0.88, 0.92]), tintMix: 0.6 });
+
+// The atmosphere (index.html's updateAtmosphere, src/environment/
+// atmosphere-model.js) recolours the fog and the valley mist by ONE per-
+// channel ratio, model(e_now) / model(e_ref), around each biome's authored
+// colour. The in-cloud fog is authored from that same mist, so it has to ride
+// the same ratio — otherwise at a low sun the inside of a cloud would stay
+// noon-white in a world gone orange. captureCloudFogBase() is called where the
+// atmosphere captures ITS bases (once per environment, after every sky-derived
+// colour is set); from then on the fog colour is
+//   authored * (mist_now / mist_at_capture), per channel,
+// which is exactly the authored colour at the reference sun and moves with the
+// atmosphere's ratio exactly. Never captured (a unit test, ?atmos=0 before the
+// first environment), it is the authored formula on the live mist.
+const _fogBase = { captured: false, mist: new Float32Array(3), fog: new Float32Array(3) };
+
+/** Capture the in-cloud fog's authored colour against the current mist. */
+export function captureCloudFogBase() {
+  const mist = visualUniforms.mistColor.value;
+  if (!mist) { _fogBase.captured = false; return null; }
+  const { tint, tintMix } = CLOUD_FOG;
+  const m = [mist.r, mist.g, mist.b];
+  for (let c = 0; c < 3; c++) {
+    _fogBase.mist[c] = m[c];
+    _fogBase.fog[c] = m[c] + (tint[c] - m[c]) * tintMix;
+  }
+  _fogBase.captured = true;
+  return Array.from(_fogBase.fog);
+}
+
+/** Write the in-cloud fog colour for the live mist into `out`. Zero alloc. */
+export function cloudFogColorInto(mist, out) {
+  if (!mist) return out;
+  const { tint, tintMix } = CLOUD_FOG;
+  if (_fogBase.captured) {
+    const b = _fogBase.mist; const f = _fogBase.fog;
+    out[0] = f[0] * (b[0] > 1e-4 ? mist.r / b[0] : 1);
+    out[1] = f[1] * (b[1] > 1e-4 ? mist.g / b[1] : 1);
+    out[2] = f[2] * (b[2] > 1e-4 ? mist.b / b[2] : 1);
+  } else {
+    out[0] = mist.r + (tint[0] - mist.r) * tintMix;
+    out[1] = mist.g + (tint[1] - mist.g) * tintMix;
+    out[2] = mist.b + (tint[2] - mist.b) * tintMix;
+  }
+  return out;
 }
 
 /**
@@ -940,7 +1007,6 @@ export function addCloudShadow(material, THREE) {
  */
 export function createCloudImmersion(puffs, count, {
   fogAmount = 0.85, fogLength = 9, densityRadius = CLOUD_VOLUME.densityRadius,
-  fogTint = [0.86, 0.88, 0.92], tintMix = 0.6,
 } = {}) {
   const state = { immersion: 0, puffs, count };
   const params = cloudShadowUniforms.fog.value;
@@ -953,14 +1019,7 @@ export function createCloudImmersion(puffs, count, {
     state.immersion = t * t * (3 - 2 * t);
     params[0] = state.immersion * fogAmount;
     params[1] = 1 / fogLength;
-    // The inside of a cloud is the sky's own air, lit white: the valley
-    // mist's colour (already the sky's mid tone) pulled toward a pale grey.
-    const mist = visualUniforms.mistColor.value;
-    if (mist) {
-      fog[0] = mist.r + (fogTint[0] - mist.r) * tintMix;
-      fog[1] = mist.g + (fogTint[1] - mist.g) * tintMix;
-      fog[2] = mist.b + (fogTint[2] - mist.b) * tintMix;
-    }
+    cloudFogColorInto(visualUniforms.mistColor.value, fog);
     return state.immersion;
   };
   state.reset = function reset() { state.immersion = 0; params[0] = 0; };

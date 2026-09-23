@@ -14,36 +14,12 @@
  * and at full again (the control). The ratio image must hold a shadow — a
  * dark core, soft edges, centred on the predicted spot — and nothing else.
  */
-import { setupForest, setSun, lumArray, shadowStats, holdPose } from './cloud-volume-lib.mjs';
+import {
+  setupForest, setSun, lumArray, shadowStats, holdPose, findShadowSpot as findSpot, convergeShadowPose, ensureFlying,
+} from './cloud-volume-lib.mjs';
 
 export const name = 'cloud-volume-shadow';
 export const query = 'flight=classic';
-
-// Pick a cloud and a time where the shadow lands on dry ground under a sun
-// well above the local horizon, so the frame is about the shadow and not
-// about a lake or a sunset.
-async function findSpot(ctx) {
-  let best = null;
-  for (const t of [0, 30, 60, 90, 120, 480, 510, 540, 570]) {
-    await setSun(ctx, t);
-    const found = await ctx.page.evaluate(() => {
-      const B = window.__BIRB;
-      const n = B.clouds()?.clouds || 0;
-      const out = [];
-      for (let i = 0; i < n; i += 1) {
-        const r = B.goToCloudShadow(i, { above: 40, tilt: 0.2 });
-        if (r) out.push({ i, ...r });
-      }
-      return out;
-    });
-    for (const f of found) {
-      if (f.water || f.visibility > 0.35) continue;
-      if (!best || f.sunElevation > best.sunElevation) best = { ...f, t };
-    }
-    if (best && best.sunElevation > 55) break;
-  }
-  return best;
-}
 
 export default async function run(ctx) {
   const { page } = ctx;
@@ -64,7 +40,16 @@ export default async function run(ctx) {
   });
   // Re-posed every frame, then every clock stopped: the three frames below
   // differ only by the shadow strength, and the view is centred on the spot.
-  pose.r = (await holdPose(ctx, 'return B.goToCloudShadow(arg, { above: 40, tilt: 0.2 });', spot.i, 6)).last;
+  // Under planet light the sun moves with the bird: fly there and let the
+  // placement converge before holding it (see convergeShadowPose).
+  await convergeShadowPose(ctx, spot.i);
+  await ensureFlying(ctx);
+  const held = await holdPose(ctx, 'return B.goToCloudShadow(arg, { above: 40, tilt: 0.2 });', spot.i, 6);
+  pose.r = held.last;
+  // A bird a collider knocked down is pinned to the ground, and every frame
+  // below would photograph the grass beside it rather than the spot.
+  ctx.check(held.recovery === 'flying' && !!pose.r?.clear,
+    `the camera holds a clear stand-off over the spot, flying (${held.recovery}; ${pose.r?.above} up, tilt ${pose.r?.tilt})`);
   const strength = pose.live.tuning.shadowStrength;
   let w = 0; let h = 0;
   const shoot = async (s, tag) => {

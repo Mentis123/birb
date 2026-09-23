@@ -3719,6 +3719,11 @@
       // bird-only sky env map). `?plumage=0` builds the Standard bird exactly.
       var { plumageRequested, plumageFor, plumageMaterialParams, installPlumageLighting, createBirdEnvironment } =
         await import("./src/flight/plumage.js");
+      // Clouds with volume (?cloudvol=0 is the before). Already loaded by
+      // spherical-world.js; imported here for the bird's share of it.
+      var { cloudVolumeRequested, addCloudShadow, setCloudFocusObject, captureCloudFogBase } =
+        await import("./src/environment/cloud-volume.js");
+      var cloudVolumeOn = cloudVolumeRequested(window.location.search);
       var { loadTexture: loadAuthoredTexture, applyAuthoredFeathers, authoredFeathersRequested, authoredFeatherNormalsRequested } =
         await import("./src/environment/authored-textures.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
@@ -5202,6 +5207,9 @@
     // The biome's authored light, captured once per environment switch AFTER
     // every colour that derives from its sky (fog, mist, water) has been set.
     function captureLightBases() {
+      // The in-cloud fog is authored from the mist, so it rides the same
+      // atmosphere ratio as the fog and the mist (cloud-volume.js).
+      if (cloudVolumeOn) captureCloudFogBase();
       sunState.baseFill.copy(lightingRig.fillLight.position);
       sunState.evaluatedSeconds = NaN;   // re-apply the cycle over the fresh preset
       if (!atmosState) return;
@@ -7232,7 +7240,7 @@
     scene.add(birbAnchor);
     // Clouds with volume: a puff the bird flies through never veils the bird
     // (cloud-volume.js picks the puff's face by the camera AND the bird).
-    import('./src/environment/cloud-volume.js').then((m) => m.setCloudFocusObject(birbAnchor));
+    setCloudFocusObject(birbAnchor);
 
     // Keep the model aligned with the controller's forward vector (-Z) so the
     // beak points away from the camera. We detect the model's longest axis
@@ -7386,6 +7394,20 @@
 
       birbAnchor.clear();
       birbAnchor.add(model);
+      // Clouds with volume: the bird takes a cloud's shadow on its SUN light
+      // (and the same share of sky light) like the ground under it, so a bird
+      // under or inside a cloud is not the one sunlit thing in its shade. No
+      // in-cloud fog: the bird is the one object the puffs' face choice keeps
+      // clear inside a cloud. Lit materials only, each once; ?cloudvol=0
+      // leaves the bird exactly as it was.
+      if (cloudVolumeOn) {
+        model.traverse((child) => {
+          if (!child.material) return;
+          for (const m of (Array.isArray(child.material) ? child.material : [child.material])) {
+            addCloudShadow(m, THREE, { fog: false });
+          }
+        });
+      }
       birbAnchor.scale.setScalar(0.52);
     };
 
@@ -13858,14 +13880,42 @@
           let tan = L.clone().addScaledVector(up, -L.dot(up));
           if (tan.lengthSq() < 1e-6) tan.set(1, 0, 0).addScaledVector(up, -up.x);
           tan.normalize();
-          // Stand off so the (tilted) view ray lands ON the spot.
-          fc.position.copy(ground).addScaledVector(up, above).addScaledVector(tan, -above * tilt);
-          const dir = up.clone().negate().addScaledVector(tan, tilt).normalize();
+          // A stand-off the bird can actually hold, tried nearest first: no
+          // collider may claim it (a canopy at 40 units knocks the bird down,
+          // and every later pose then photographs the grass) and no puff may
+          // contain it (inside a cloud the in-cloud fog washes the whole
+          // frame). The (tilted) view ray still lands ON the spot.
+          const eye = new THREE.Vector3();
+          const clearAt = (q) => {
+            const hit = sphericalWorld.collisionSystem?.checkObjectCollision?.(THREE, q, FLIGHT_RECOVERY_CONFIG.birdRadius * 2);
+            if (hit?.collided) return false;
+            const pf = c.puffs;
+            for (let i = 0; pf && i < pf.length; i += 4) {
+              const dx = q.x - pf[i]; const dy = q.y - pf[i + 1]; const dz = q.z - pf[i + 2];
+              if (dx * dx + dy * dy + dz * dz < (pf[i + 3] + 2) ** 2) return false;
+            }
+            return true;
+          };
+          let standOff = null;
+          for (const a of [above, above + 15, above - 15, above + 30]) {
+            for (const tl of [tilt, tilt + 0.25, tilt + 0.5]) {
+              if (a <= 4) continue;
+              eye.copy(ground).addScaledVector(up, a).addScaledVector(tan, -a * tl);
+              if (clearAt(eye)) { standOff = { a, tl }; break; }
+            }
+            if (standOff) break;
+          }
+          const { a: useAbove, tl: useTilt } = standOff || { a: above, tl: tilt };
+          fc.position.copy(ground).addScaledVector(up, useAbove).addScaledVector(tan, -useAbove * useTilt);
+          const dir = up.clone().negate().addScaledVector(tan, useTilt).normalize();
           const right = new THREE.Vector3().crossVectors(dir, tan).normalize();
           const camUp = new THREE.Vector3().crossVectors(right, dir).normalize();
           fc.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, camUp, dir.clone().negate()));
           return {
             index,
+            above: useAbove,
+            tilt: useTilt,
+            clear: !!standOff,
             ground: ground.toArray().map((n) => +n.toFixed(2)),
             // Standing water is its own shader, not a shadow receiver.
             water: sampleTerrainMeshHeight(up.x, up.y, up.z) < (sphericalWorld.waterLevel ?? 0),

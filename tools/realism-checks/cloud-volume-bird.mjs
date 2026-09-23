@@ -116,7 +116,13 @@ export default async function run(ctx) {
   const onBird = await shot({ bird: true, clouds: { visible: true, flat: true, nearMargin: 0.5, focus: true } }, 'flat-focus');
   const offBird = await shot({ clouds: { focus: false } }, 'flat-camera-only');
   const shipping = await shot({ clouds: { focus: true, reset: true } }, 'flat-shipping');
-  await shot({ clouds: { flat: false } }, 'shaded-shipping');
+  const shadedOn = await shot({ clouds: { flat: false } }, 'shaded-shipping');
+  // The bird takes the cloud's shadow on its sun light like the ground does
+  // (index.html patches its lit materials with addCloudShadow, fog off): the
+  // same frame with the shadow at 0 is the bird as the pre-merge build lit it.
+  const shadowStrength = await page.evaluate(() => window.__BIRB.clouds().tuning.shadowStrength);
+  const shadedOff = await shot({ clouds: { shadowStrength: 0 } }, 'shaded-no-cloud-shadow');
+  await page.evaluate((st) => window.__BIRB.clouds({ shadowStrength: st }), shadowStrength);
   const cam = await page.evaluate(() => window.__BIRB.clouds());
   await page.evaluate((b) => {
     const B = window.__BIRB;
@@ -139,6 +145,27 @@ export default async function run(ctx) {
   ctx.check(b.bird >= 0.3, `with the camera alone choosing, the front face veils the bird with the cloud BEHIND it (${(b.bird * 100).toFixed(1)}%)`);
   ctx.check(a.bird <= 0.05, `with the bird as focus, the puff it is in leaves it clear (${(a.bird * 100).toFixed(1)}%)`);
   ctx.check(s.bird <= 0.05, `and so does the shipping margin (${(s.bird * 100).toFixed(1)}%)`);
+  // Mean linear luminance of the bird's own pixels, shadow on vs off.
+  const toLin = (c) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const birdLum = (png) => {
+    let sum = 0; let n = 0;
+    for (let i = 0; i < w * h; i += 1) {
+      if (!mask[i]) continue;
+      const k = i * png.ch;
+      sum += 0.2126 * toLin(png.data[k]) + 0.7152 * toLin(png.data[k + 1]) + 0.0722 * toLin(png.data[k + 2]);
+      n += 1;
+    }
+    return n ? sum / n : 0;
+  };
+  const lOn = birdLum(shadedOn); const lOff = birdLum(shadedOff);
+  const birdSun = cam?.birdSun;
+  ctx.log(`the bird inside the puff: the sun's analytic visibility at the bird ${birdSun}; linear luminance `
+    + `${lOn.toFixed(4)} with the cloud shadow vs ${lOff.toFixed(4)} without it (${((1 - lOn / lOff) * 100).toFixed(1)}% darker)`);
+  if (birdSun !== null && birdSun < 0.8) {
+    ctx.check(lOn < lOff * 0.99, `the bird in a cloud's shade is shaded like the ground under it (${((1 - lOn / lOff) * 100).toFixed(1)}% darker at visibility ${birdSun})`);
+  } else {
+    ctx.check(Math.abs(lOn - lOff) <= 0.02 * lOff + 1e-4, `the bird out of the cloud's shade keeps its light (visibility ${birdSun}, ${((1 - lOn / lOff) * 100).toFixed(1)}%)`);
+  }
   ctx.check(cam?.focus === true && cam?.sort?.inversions === 0,
     `the bird is the live focus and the puffs draw back to front (${cam?.sort?.inversions} inversions, ${cam?.sort?.writes} re-sorts)`);
   await ctx.unfreeze();
