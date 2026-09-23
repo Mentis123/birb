@@ -126,6 +126,10 @@ const CORE_ASSETS = [
   './src/flight/bird-flight-stunt.js',
   './src/flight/stunt-pad.js',
   './src/flight/stunt-detector.js',
+  // The air (thermals, ridge lift, gusts). Imported on the boot path by
+  // index.html AND statically by spherical-world.js, so an offline launch
+  // without it dies before the first frame.
+  './src/flight/air-field.js',
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',

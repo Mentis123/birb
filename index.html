@@ -3594,6 +3594,26 @@
     // toggle a live switch instead of a page reload. So it is loaded for both.
     const flightStunt = !flightV2;
     const flightModelInitial = flightV2 ? 'v2' : flightModelWanted;
+    // Air with structure: thermals, ridge lift and gusts (src/flight/air-field.js,
+    // docs/perf/gates/G-REALISM-AIR-FIELD.md). `?air=0` is the true before —
+    // no field, no sampler on the flight, no wind in the pines, and the
+    // foliage uniform is the bare decorative density again.
+    const airRequested = !/[?&]air=0(?:&|$)/.test(window.location?.search || '');
+    // `?airtune=unitsPerMetre:0.5,wstar:2.6` overrides any number in
+    // AIR_FIELD_DEFAULTS at boot (createAirField ignores unknown keys), the
+    // same convention as ?stunttune= and for the same reason: the air is felt
+    // on the phone, and a re-tune should not need a deploy.
+    const airTune = {};
+    {
+      const raw = (/[?&]airtune=([^&]+)/.exec(window.location?.search || '') || [])[1];
+      if (raw) {
+        for (const pair of decodeURIComponent(raw).split(',')) {
+          const [k, v] = pair.split(':');
+          const n = Number.parseFloat(v);
+          if (k && Number.isFinite(n)) airTune[k] = n;
+        }
+      }
+    }
 
     let THREE,
       GLTFLoader,
@@ -3628,6 +3648,7 @@
         attachStuntPad = (await import("./src/flight/stunt-pad.js")).attachStuntPad;
         createStuntDetector = (await import("./src/flight/stunt-detector.js")).createStuntDetector;
       }
+      var { createAirField } = await import("./src/flight/air-field.js");
       const birdCameraMod = await import("./src/flight/bird-camera.js");
       BirdCamera = birdCameraMod.BirdCamera;
       const birdVisualMod = await import("./src/flight/bird-visual.js");
@@ -6462,6 +6483,38 @@
       if (bloomThresholdRequested == null) applyBloomThreshold(grade.bloomThreshold);
     }
 
+    // ===== Air: thermals, ridge lift, gusts =====
+    // One field per biome, rebuilt by setEnvironment (the thermals sit on
+    // THIS biome's terrain). Declared up here because the first
+    // setEnvironment() runs long before the flight controller exists.
+    // `airSampler` is created once and handed to the stunt flight; it reads
+    // whichever field is current, so an environment switch needs no rewiring.
+    // `airState` is the read-only summary the rest of the frame reads:
+    // `gust`/`gustSide`/`gustAlong` (vertical, cross- and along-wind) are
+    // -1..1 and visual only — they never move the bird; `updraft` is the
+    // air's vertical velocity at the bird in units/s. The pose layer reads
+    // `gust` to flick the wings; nothing here writes the bird.
+    let airField = null;
+    const airState = { enabled: airRequested, updraft: 0, thermal: 0, ridge: 0, gust: 0, gustSide: 0, gustAlong: 0, wind: 0 };
+    const airSampler = (x, y, z) => (airField ? airField.sample(x, y, z) : 0);
+    // The decorative density the tier or the panel asked for, BEFORE the gust
+    // multiplies it into the wind uniform. This is what the panel reports as
+    // `decorativeDensity` effective: a gust is weather, not a quality lever,
+    // and the frozen A10 oracle requires the lever to read back the same two
+    // frames later.
+    let windDensityEffective = 1;
+    function rebuildAirField(biomeId) {
+      airField = null;
+      if (!airRequested || typeof createAirField !== 'function' || !sphericalWorld) return;
+      airField = createAirField({
+        seed: biomeId,
+        sphereRadius: sphericalWorld.sphereRadius,
+        terrainHeight: (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight : null,
+        waterLevel: sphericalWorld.waterLevel ?? 0,
+        options: airTune,
+      });
+    }
+
     function setEnvironment(variantId) {
       if (typeof v2ForgetHeading === 'function') v2ForgetHeading();
       const definition = getEnvironmentDefinition(variantId);
@@ -6510,6 +6563,7 @@
       }
 
       sphericalWorld = nextWorld;
+      rebuildAirField(definition.id);
 
       // A standing anisotropy panel request survives the switch too: the new
       // biome's landmark-valley water textures were just created fresh (at
@@ -9127,7 +9181,9 @@
         if (key === 'antialiasing') return bloomPass ? aaLabelForSamples(bloomPass.getSamples()) : 'off';
         if (key === 'weatherDensity') return weather ? weather.getDensity() : null;
         if (key === 'mistBudget') return mistBudgetEffective;
-        if (key === 'decorativeDensity') return visualUniforms.wind.value;
+        // The lever's own per-frame output, before the gust (see
+        // windDensityEffective). With ?air=0 it IS visualUniforms.wind.value.
+        if (key === 'decorativeDensity') return windDensityEffective;
         if (key === 'shadowsEnabled') return renderer.shadowMap.enabled;
         if (key === 'shadowType') {
           const rev = {
@@ -9646,6 +9702,9 @@
       }
       flightOptions.model = flightModelInitial === 'classic'
         ? FLIGHT_MODELS.CLASSIC : FLIGHT_MODELS.STUNT;
+      // Rising air. Read by the stunt law only (classic's update() is v1's
+      // own and never sees it), and only while the bird flies itself.
+      if (airRequested) flightOptions.airSampler = airSampler;
     }
     // ONE controller serves stunt and classic; `model` decides which law runs
     // and every classic path delegates to BirdFlight's own. That is what makes
@@ -10386,7 +10445,7 @@
         bloomStrength: { requested: panelOverrides.bloomStrength, effective: bloomPass ? bloomPass.getStrength() : null },
         weatherDensity: { requested: panelOverrides.weatherDensity, effective: weather ? weather.getDensity() : null },
         mistBudget: { requested: panelOverrides.mistBudget, effective: mistBudgetEffective },
-        decorativeDensity: { requested: panelOverrides.decorativeDensity, effective: visualUniforms.wind.value },
+        decorativeDensity: { requested: panelOverrides.decorativeDensity, effective: windDensityEffective },
         antialiasing: {
           requested: panelOverrides.antialiasing,
           effective: bloomPass ? aaLabelForSamples(bloomPass.getSamples()) : 'off',
@@ -11369,6 +11428,15 @@
           _stuntInput.throttle = stuntPad ? stuntPad.throttle : 1;
         }
 
+        // The air moves on before the bird flies through it: the wind veers,
+        // the gust filters step, and every thermal re-reads its heat from the
+        // key light (the same "position IS the sun direction" convention
+        // visualUniforms.sunDir and the shadow follow use).
+        if (airField) {
+          const kl = lightingRig?.keyLight?.position;
+          airField.update(delta, kl ? kl.x : 0, kl ? kl.y : 1, kl ? kl.z : 0);
+        }
+
         // 2. Physics Update
         // IMPORTANT: We pass delta even when nested!
         // BirdFlight.speed will be 0 when nested, preventing position change,
@@ -11955,10 +12023,23 @@
       // tier 2. 0 == tier-2-equivalent (0.35), 1 == tier-0/1-equivalent (1.0),
       // 2.0 == maximum (1.65 = 1.0 + 0.65). Wind is a shader uniform; >1.0 is
       // real rendering work (more animated spray/bloom), not a label.
-      visualUniforms.wind.value = reducedMotionState.enabled ? 0
+      windDensityEffective = reducedMotionState.enabled ? 0
         : panelOverrides.decorativeDensity != null
           ? 0.35 + Math.min(2, panelOverrides.decorativeDensity) * 0.65
           : adaptiveTier.getTier() >= 2 ? 0.35 : 1;
+      // The air at the bird, sampled once for everyone downstream, and the
+      // gust multiplied into the foliage sway: 1.0 at the mean wind, more in
+      // a gust, less in a lull or in one of the wind's calm eyes. Reduced
+      // motion is still 0 — 0 times any gust.
+      if (airField && birdPos) {
+        airField.sample(birdPos.x, birdPos.y, birdPos.z);
+        const st = airField.state;
+        airState.updraft = st.updraft; airState.thermal = st.thermal; airState.ridge = st.ridge;
+        airState.gust = st.gust; airState.gustSide = st.gustSide; airState.gustAlong = st.gustAlong;
+        airState.wind = st.wind;
+      }
+      visualUniforms.wind.value = airField
+        ? windDensityEffective * airField.state.windVisual : windDensityEffective;
 
       // Boost drives the composite's radial smear, bloom lift and vignette.
       // Eased, so a tap on the pill does not snap the whole frame.
@@ -13719,6 +13800,107 @@
           __birbPadOverride = (rudder === null) ? null : { rudder, throttle };
           return __birbPadOverride;
         },
+        // The air (src/flight/air-field.js), read at the bird. `air(false)`
+        // detaches it from the FLIGHT only — gusts and foliage carry on — and
+        // `air(true)` puts it back: the in-page A/B a realism check flies the
+        // same pose through twice. Null fields mean `?air=0`.
+        air: (attach = null) => {
+          const fc = flightController;
+          if ((attach === true || attach === false) && fc) {
+            fc.airSampler = (attach && airRequested) ? airSampler : null;
+          }
+          // Whether the mountain's pine crowns carry the wind patch (null in
+          // any other biome): the one scenery change this field makes.
+          const pines = sphericalWorld?.root?.getObjectByName('mountain-pine-canopies-mesh')?.material;
+          const base = {
+            enabled: airRequested, built: !!airField, attached: !!fc && fc.airSampler === airSampler,
+            windUniform: +visualUniforms.wind.value.toFixed(4), density: windDensityEffective,
+            pineWind: pines ? /foliage-wind/.test(String(pines.customProgramCacheKey?.() ?? '')) : null,
+            // What ?airtune= overrode, and the numbers that set the feel.
+            tuning: airField ? {
+              overrides: { ...airTune }, zi: airField.config.zi, wstar: airField.config.wstar,
+              unitsPerMetre: airField.config.unitsPerMetre, thermalCount: airField.config.thermalCount,
+              windSpeed: airField.config.windSpeed,
+            } : null,
+          };
+          const p = fc?.position;
+          if (!airField || !p) return base;
+          airField.sample(p.x, p.y, p.z);
+          const st = airField.state;
+          const r = p.length() || 1;
+          const i = airField.nearest(p.x, p.y, p.z);
+          let nearestThermal = null;
+          if (i >= 0) {
+            const t = airField.thermals[i];
+            const at = airField.thermalAt(i, Math.max(1, Math.min(airField.config.zi - 1, st.agl)));
+            const dot = (t.dir[0] * p.x + t.dir[1] * p.y + t.dir[2] * p.z) / r;
+            nearestThermal = {
+              index: i, dir: t.dir.slice(), radius: +at.radius.toFixed(2), strength: +at.core.toFixed(3),
+              heat: +at.heat.toFixed(3), distance: +(r * Math.sqrt(Math.max(0, 2 - 2 * dot))).toFixed(2),
+            };
+          }
+          const d3 = (n) => +n.toFixed(3);
+          return {
+            ...base,
+            count: airField.count, time: d3(st.time), agl: d3(st.agl),
+            updraft: d3(st.updraft), thermal: d3(st.thermal), ridge: d3(st.ridge),
+            gust: d3(st.gust), gustSide: d3(st.gustSide), gustAlong: d3(st.gustAlong),
+            wind: d3(st.wind), windVisual: d3(st.windVisual),
+            applied: fc.lastAir != null ? d3(fc.lastAir) : null,
+            nearestThermal,
+            thermals: airField.thermals.map((t) => ({
+              index: t.index, dir: t.dir.slice(), heat: d3(airField.heat(t.index)),
+              core15: d3(airField.thermalAt(t.index, 15).core),
+            })),
+          };
+        },
+        // The air at any direction and height above ground, without moving
+        // the bird: a weather map can be measured without trees, landings or
+        // the bird's own sink confounding it. Does not advance the air.
+        airAt: (x, y, z, aboveGround = 10) => {
+          if (!airField || !sphericalWorld) return null;
+          const l = Math.hypot(x, y, z) || 1;
+          const nx = x / l; const ny = y / l; const nz = z / l;
+          const ground = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(nx, ny, nz) : 0;
+          const r = sphericalWorld.sphereRadius + ground + aboveGround;
+          const w = airField.sample(nx * r, ny * r, nz * r);
+          const st = airField.state;
+          return {
+            updraft: w, thermal: st.thermal, ridge: st.ridge, agl: st.agl, wind: st.wind,
+            nearest: st.nearest, distance: st.nearestDistance, ground,
+          };
+        },
+        // Put the bird in a thermal's core, level, `aboveGround` over its own
+        // ground. `index` null picks the strongest one under the current sun.
+        goToThermal: (index = null, aboveGround = 20) => {
+          const fc = flightController;
+          if (!airField || !fc?.position || !sphericalWorld || !airField.count) return null;
+          let i = index;
+          if (!Number.isInteger(i)) {
+            let bestCore = -Infinity;
+            for (let k = 0; k < airField.count; k += 1) {
+              const core = airField.thermalAt(k, 15).core;
+              if (core > bestCore) { bestCore = core; i = k; }
+            }
+          }
+          if (i < 0 || i >= airField.count) return null;
+          v2ForgetHeading();
+          const t = airField.thermals[i];
+          const up = new THREE.Vector3().fromArray(t.dir).normalize();
+          const ground = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(up.x, up.y, up.z) : 0;
+          fc.position.copy(up).multiplyScalar(sphericalWorld.sphereRadius + ground + aboveGround);
+          const ref = Math.abs(up.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+          const fwd = ref.addScaledVector(up, -ref.dot(up)).normalize();
+          const right = new THREE.Vector3().crossVectors(fwd, up).normalize();
+          fc.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd.clone().negate()));
+          const at = airField.thermalAt(i, aboveGround);
+          return {
+            index: i, dir: t.dir.slice(), aboveGround,
+            core: +at.core.toFixed(3), radius: +at.radius.toFixed(2), heat: +at.heat.toFixed(3),
+            position: fc.position.toArray().map((n) => +n.toFixed(3)),
+            quaternion: fc.quaternion.toArray(),
+          };
+        },
         // What the trick detector currently holds, and the last figure it
         // named. A harness asserts "the detector saw a loop" rather than
         // re-deriving one from angles it would have to unwrap itself.
@@ -13853,6 +14035,9 @@
             authority: (fc.isStunt && typeof fc.authority === 'function') ? d3(fc.authority()) : null,
             throttle01: fc.isStunt ? d3(fc._throttle01 ?? 1) : null,
             rudder: fc.isStunt ? d3(fc._rudder ?? 0) : null,
+            // The vertical AIR velocity the controller applied last frame
+            // (thermal + ridge + sink between them), units/s. See __BIRB.air().
+            air: fc.isStunt ? d3(fc.lastAir ?? 0) : null,
           };
         },
         flapPhase: (phase01 = null) => {

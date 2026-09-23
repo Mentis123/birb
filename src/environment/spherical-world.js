@@ -5,6 +5,7 @@ import {
 } from './visual-style.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
+import { airRequested } from '../flight/air-field.js';
 import {
   applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested,
   applyAuthoredBarkInstanced, applyAuthoredSurfaceInstanced, PINE_BARK_TINT,
@@ -475,6 +476,9 @@ function _softFlat() { return !_smoothShading; }
 // Wave B of the organic pass, resolved per world build like _smoothShading.
 let _leafEdge = true;
 let _upwardSnow = true;
+// The air (src/flight/air-field.js): the mountain pines sway in the same
+// gusting wind as the forest canopies. `?air=0` leaves them still, as before.
+let _pineWind = true;
 
 /**
  * Override the URL flag for the NEXT world build. `__BIRB.smooth()` sets this
@@ -2469,6 +2473,11 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   }
   // Pine canopy carries vertexColors for the baked base→tip gradient.
   const pineCanopyMat = new THREE.MeshLambertMaterial({ color: 0x32623e, flatShading: _softFlat(), vertexColors: true });
+  // The same wind the forest canopies sway in, gusts and all. FIRST in the
+  // chain, which is the order tests/organic-foliage.test.js pins for exactly
+  // this material (wind, then snow, then the leaf edge): the two patches
+  // below chain onto it and extend its program cache key.
+  if (_pineWind) addFoliageWind(pineCanopyMat);
   // A conifer's flanks sit ~72 degrees off the local up, so the 0.45 floor
   // the rock materials use would put no snow on a pine at all. Opened right
   // down and held to a light dusting: this is snow CAUGHT in needles, not a
@@ -3398,6 +3407,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   _smoothShading = typeof window !== 'undefined' ? smoothShadingRequested(_search) : true;
   _leafEdge = typeof window !== 'undefined' ? leafEdgeRequested(_search) : true;
   _upwardSnow = typeof window !== 'undefined' ? upwardSnowRequested(_search) : true;
+  _pineWind = typeof window !== 'undefined' ? airRequested(_search) : true;
   _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
   // One RNG for this build, drawn once and reused for every prop placed
