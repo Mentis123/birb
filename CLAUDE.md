@@ -2286,6 +2286,43 @@ mini, with Pencil 2 or Pencil Pro. Elsewhere `UIHoverGestureRecognizer` never
 fires and there is nothing to draw. The readout now says `hover 412` or
 `hover never (iPad may not have it)` rather than leaving that a guess.
 
+**Fifth pass (2026-09-23): paint was on the wrong FACE, Grab moved 2x, and CI
+had never compiled the app.** `humanoid/docs/Device_Pass_3.md` — read it
+before touching the stroke path. *"Painting doesn't even go on the right
+sides and grabbing and the functions just don't work well."*
+
+**The painter writes v-up UVs (row 0 at v = 1); Metal and glTF read from the
+top left; the renderer and the GLB exporter passed the UVs through raw.** So
+every stroke since the first painter was shown from the other end of the
+image — on the clay atlas, the other row of tiles: paint the front and it
+appeared on the left side. The painter's tests could not see it because the
+painter agrees with itself. `TextureSpace.metal`/`.gltf` own the conversion,
+tests sample paint back through them, and `tools/blender_check_paint.py`
+asks Blender's importer where the exported paint landed. **A convention two
+components must share needs a test that holds one against the other.**
+
+**The stroke logic moved into `HumanoidCore.StrokeEngine`**, out of
+`EditorModel` where nothing could test it — and every defect was there: Grab
+converted drags at the RAY length, not the view depth (+20-27% toward the
+screen edges), summed its symmetric halves (2x at x = 0, the middle of the
+front face), and scaled by the touch-down pressure; paint built its brush ONCE
+from the first, lightest sample (~30% opacity for the whole stroke); pressure
+never touched size. Symmetric halves now blend `(w1² + w2²)/(w1 + w2)`;
+`PressureResponse` gives a curve and size/strength ranges per sample; Grab
+ignores pressure. Driving the engine headless found one more: dabs re-picked
+on the surface they were raising made the same Inflate path differ by **8.3 mm
+with frame batching** — dabs are now placed and weighed against the stroke's
+starting shape, identical to 1e-9. Every fix is mutation-checked.
+
+**The macOS CI job passed in two seconds for months without compiling the
+app**: it named `Humanoid.xcodeproj` and piped into `xcpretty` with no
+`pipefail`. It now builds Release and Debug for a device. Also new: a
+`UIUpdateLink` low-latency loop (iPadOS 18, falls back by itself), predicted
+ring, palm rejection, two-finger-tap undo, touch-to-glass latency in the
+readout from `presentedTime`, and stroke ends 3.7 → 1.7 ms (16.9 → 4.9 at
+2048², which unblocks 2048). **Unmeasured on the iPad: all of it** — the
+checklist is Device_Pass_3 §8.
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror

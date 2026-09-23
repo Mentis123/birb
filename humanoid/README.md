@@ -13,7 +13,11 @@ and exports an avatar Unity accepts as a Humanoid for VRChat.
 > | `MeshTables` | welded positions, one-ring adjacency, mirror pairs, seam partners |
 > | `Sculpt` | Grab, Inflate/Deflate, Smooth, smoothstep falloff, X symmetry |
 > | `Picking` | ray to triangle to barycentric to UV, back-face culled |
-> | `Paint` | dabs, distance-resampled strokes, seam stamping, fill, eyedropper |
+> | `Paint` | dabs, fill, eyedropper, the dirty rectangle |
+> | `SurfacePaint` | painting on the surface (a world-space brush), taper, hardness, mirror track |
+> | `TextureSpace` | where a UV lands in the texture for the painter, Metal and glTF |
+> | `Pressure` | the Pencil's force to a curve, and to size and strength ranges |
+> | `StrokeEngine` | a whole stroke from Pencil samples: what every tool does, tested headless |
 > | `Document` | template + deltas, bounded undo/redo, export snapshot |
 > | `MeshGate` / `RigGate` | mesh checks always, rig checks only when rigged |
 >
@@ -21,12 +25,13 @@ and exports an avatar Unity accepts as a Humanoid for VRChat.
 > FBX and GLB, so the oracles check the path a user takes rather than the
 > template as authored.
 >
-> **The iPad app is written but has never been compiled** — there is no Apple
-> SDK on the build box. `app/` holds the Metal renderer, the Pencil/gesture
-> layer and the SwiftUI editor; expect to fix a few small things on the first
-> Xcode build. `Camera` deliberately lives in the tested core rather than in the
-> app, because screen-to-ray and framing are where a viewport's real bugs are.
-> See [`docs/Build_on_the_Mac.md`](docs/Build_on_the_Mac.md).
+> **The iPad app is compiled by CI on every push** (Release and Debug, for a
+> device) but can only be RUN on the iPad. `app/` holds the Metal renderer, the
+> Pencil/gesture layer and the SwiftUI editor — and as little decision-making as
+> possible: `Camera` and `StrokeEngine` live in the tested core because
+> screen-to-ray, framing and what a stroke does are where the real bugs have
+> been. See [`docs/Build_on_the_Mac.md`](docs/Build_on_the_Mac.md) and the
+> latest device checklist in [`docs/Device_Pass_3.md`](docs/Device_Pass_3.md).
 >
 > **Scope and build order (2026-09-05).** The product starts from one of two templates: **Clay** (unrigged) or **Humanoid** (rigged). Everything in this directory is the Humanoid path — the rig gate, the skeleton, the VRM humanBones map and the Unity/VRChat oracles all exist to serve it.
 >
@@ -43,10 +48,10 @@ The original product spec: [`../docs/PRD-humanoid-creator-v0.1.md`](../docs/PRD-
 ## What works today
 
 ```
-swift test                          # 53 tests, no Apple toolchain needed
+swift test                          # 265 tests, no Apple toolchain needed
 swift run humanoid-cli gate         # rig report for the frozen skeleton
 swift run humanoid-cli corpus out/  # write the golden corpus
-./tools/verify.sh                   # the whole chain, six stages
+./tools/verify.sh                   # the whole chain, eight stages
 ```
 
 `verify.sh` is the gate. It runs the unit tests, generates the corpus, then puts

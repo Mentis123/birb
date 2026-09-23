@@ -257,8 +257,13 @@ final class EditorModel: ObservableObject {
     private var statusUntil: CFTimeInterval = 0
 
     /// Puts a line on screen for a couple of seconds.
+    ///
+    /// Assigned only when it changes: `@Published` republishes on every
+    /// assignment, and a message repeated every frame — "Paint is still
+    /// warming up" while a stroke waits for the map — would rebuild the
+    /// SwiftUI chrome at the display's rate.
     func say(_ message: String) {
-        status = message
+        if status != message { status = message }
         statusUntil = CACurrentMediaTime() + 2.5
     }
 
@@ -440,7 +445,9 @@ final class EditorModel: ObservableObject {
         swap(&pending, &draining)
         defer { draining.removeAll(keepingCapacity: true) }
         if let newest = draining.last { inputTimestampThisFrame = newest.timestamp }
-        if let first = draining.first, first.phase == .began { pencilStroke = first.isPencil }
+        // A frame can hold the end of one stroke and the start of the next.
+        let ended = draining.contains { $0.phase == .ended || $0.phase == .cancelled }
+        let began = draining.last { $0.phase == .began }
 
         let wasOpen = engine.isOpen
         let effect = engine.apply(draining, to: &document, camera: camera, viewport: viewport,
@@ -449,9 +456,8 @@ final class EditorModel: ObservableObject {
             prepareForPaintingSoon()
             say("Paint is still warming up")
         }
-        if wasOpen || draining.contains(where: { $0.phase == .began }), !engine.isOpen {
-            strokeFinished()
-        }
+        if ended || (wasOpen && !engine.isOpen) { strokeFinished() }
+        if let began, engine.isOpen { pencilStroke = began.isPencil }
         return translate(effect)
     }
 

@@ -320,6 +320,23 @@ final class StrokeEngineTests: XCTestCase {
         XCTAssertEqual(length(rim - centre), 60, accuracy: 1e-6)
     }
 
+    func testTheHoverRingShowsThePressureRangeExceptForGrab() throws {
+        let engine = StrokeEngine()
+        let at = try pixel(try front(0, 0).position)
+        var brush = options(.paint)
+        let paint = try XCTUnwrap(engine.contact(at: at, document: document, camera: camera,
+                                                 viewport: viewport, options: brush))
+        XCTAssertEqual(paint.lightestRadius, paint.fullRadius * brush.pressure.minimumSize,
+                       accuracy: 1e-12)
+        brush.pressure.sizeFollowsPressure = false
+        let fixed = try XCTUnwrap(engine.contact(at: at, document: document, camera: camera,
+                                                 viewport: viewport, options: brush))
+        XCTAssertEqual(fixed.lightestRadius, fixed.fullRadius)
+        let grab = try XCTUnwrap(engine.contact(at: at, document: document, camera: camera,
+                                                viewport: viewport, options: options(.grab)))
+        XCTAssertEqual(grab.lightestRadius, grab.fullRadius, "Grab ignores pressure, ring included")
+    }
+
     func testHowTheSamplesAreBatchedIntoFramesDoesNotChangeTheShape() throws {
         // A 240 Hz Pencil against a 120 Hz display delivers two or three
         // samples a frame; a hitch delivers dozens. The same path has to make
