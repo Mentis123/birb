@@ -3809,7 +3809,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     groundMap: wantsGroundTexture
       ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT,
         // ?hextile=1: the map never repeats (ground-detail.js, hex note). Opt-in.
-        hexTile: hexTileRequested(_search) }
+        hexTile: hexTileRequested(window.location?.search) }
       : null,
   });
   if (wantsGroundTexture) {
