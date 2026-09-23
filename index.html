@@ -3710,6 +3710,10 @@
         await import("./src/ui/dev-quality-panel.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
+      // The bird's sun shadow as three analytic ellipsoids (?birdshadow=0),
+      // and the horizon-map readback for __BIRB.horizon (?horizon=0).
+      var { createBirdShadowDriver, birdShadowRequested } = await import("./src/effects/bird-shadow.js");
+      var { setHorizonStrength, horizonReadiness, horizonUniforms } = await import("./src/environment/horizon-shadow.js");
       var { createFrameSampler, createIntervalRecorder } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
@@ -4648,6 +4652,11 @@
     // rebuilt on every environment switch and the shadow belongs to the bird.
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
+    // The SUN shadow: body and wings as ellipsoids every world material reads
+    // (src/effects/bird-shadow.js). The contact disc above stays — it is the
+    // straight-down altitude cue, which a shadow 35 units off to the side at
+    // a 30-degree sun is not.
+    const birdShadowDriver = birdShadowRequested(window.location?.search || '') ? createBirdShadowDriver(THREE) : null;
 
     // Wingtip ribbons. Added to the SCENE, not the world root: the root is
     // rebuilt from scratch on every environment switch, and a trail parented
@@ -12154,6 +12163,12 @@
         }
         contactShadow.update(birdPos, floorRadius, shadowOn);
       }
+      // The bird's sun shadow (ellipsoids). Every preset: its cost is an
+      // early-out per fragment beyond 20 units of the bird. Hidden when the
+      // bird is (cockpit view, the perch) and while nested.
+      if (birdShadowDriver) {
+        birdShadowDriver.update(birbAnchor, !!birdPos && !isNested && birbAnchor?.visible !== false);
+      }
 
       // Wingtip ribbons — the mark the bird leaves when it is really working.
       //
@@ -14070,6 +14085,110 @@
             mapSize: shadowLight.shadow.mapSize.x,
             casterCount: shadowCasterProxy ? shadowCasterProxy.count : 0,
           };
+        },
+        // Horizon shadows (src/environment/horizon-map.js + horizon-shadow.js):
+        // `horizon(s)` sets the live strength (0 is the old light, pixel for
+        // pixel, without a recompile) and reports the bake. `sunLights` is
+        // the shader's own test run in JS: which visible directional lights
+        // shine from the sun's direction and so get the visibility. Three
+        // sorts shadow casters first, so `index0` is what directionalLights[0]
+        // is this frame — the key light with shadows off, the shadow light
+        // with them on. Allocates; a debug readback, never called per frame.
+        horizon: (strength) => {
+          if (strength !== undefined) setHorizonStrength(strength);
+          const w = sphericalWorld?.horizon || null;
+          const sun = visualUniforms.sunDir.value ? visualUniforms.sunDir.value.clone().normalize() : null;
+          const names = new Map([[lightingRig.keyLight, 'key'], [lightingRig.rimLight, 'rim'],
+            [lightingRig.fillLight, 'fill'], [shadowLight, 'shadow']]);
+          const lights = [];
+          scene.traverse((o) => {
+            if (!o.isDirectionalLight || !o.visible) return;
+            const d = o.getWorldPosition(new THREE.Vector3()).sub(o.target.getWorldPosition(new THREE.Vector3())).normalize();
+            const dot = sun ? d.dot(sun) : 0;
+            lights.push({ name: names.get(o) || o.name || 'directional', castShadow: !!o.castShadow,
+              dot: +dot.toFixed(6), sun: dot > (horizonUniforms.params.value?.w ?? 0.9999) });
+          });
+          const sorted = lights.slice().sort((a, b) => (b.castShadow ? 1 : 0) - (a.castShadow ? 1 : 0));
+          return {
+            enabled: !!w,
+            landed: !!w?.landed,
+            sun: sun ? sun.toArray().map((v) => +v.toFixed(6)) : null,
+            ready: +horizonReadiness().toFixed(3),
+            strength: horizonUniforms.params.value ? horizonUniforms.params.value.x : null,
+            stats: w ? w.stats : null,
+            result: w ? w.result : null,
+            size: w ? [w.width, w.height] : null,
+            sunLights: lights.filter((l) => l.sun).length,
+            index0: sorted[0] ? sorted[0].name : null,
+            index0IsSun: !!sorted[0]?.sun,
+            lights,
+          };
+        },
+        // Ground texels the BAKED map says are in a ridge's shadow for the
+        // current sun, confirmed by an independent march of the terrain
+        // alone — so a check can photograph a shadow it did not have to
+        // hope was there. `dir` defaults to under the bird.
+        horizonFind: (opts = {}) => {
+          const w = sphericalWorld?.horizon;
+          if (!w || !w.landed || !visualUniforms.sunDir.value) return [];
+          const p = flightController?.position;
+          const dir = opts.dir || (p ? p.toArray() : [0, 1, 0]);
+          return w.find({ ...opts, dir, sun: visualUniforms.sunDir.value.toArray() });
+        },
+        // Hold the simulation clock (frame delta 0) while rendering continues,
+        // so a pose photographs exactly as it was placed: freeze() zeroes the
+        // speed, but the controller keeps flying the bird on (~0.45 units a
+        // frame measured), which moves a cockpit camera off its target.
+        // Holding also SNAPS the chase camera onto the held pose: with delta 0
+        // BirdCamera's damping factor is 0, so it would otherwise stay
+        // wherever it was when the clock stopped.
+        hold: (on = true) => {
+          controlState.manuallyPaused = !!on;
+          refreshAnimationState();
+          if (on && flightController && newFlightSystem?.camera?.snap) {
+            const rig = newFlightSystem.camera;
+            // The stunt/v2 rig stands off along a HELD velocity heading, which
+            // is stale after a restorePose and cannot relax with delta 0: hand
+            // it the held pose's own level heading before snapping.
+            const h = rig.getHold?.();
+            if (h && h.weight > 0) {
+              const up = flightController.position.clone().normalize();
+              const f = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
+              f.addScaledVector(up, -f.dot(up));
+              if (f.lengthSq() > 1e-6) rig.setHold({ weight: h.weight, heading: f.normalize(), distanceMul: h.distanceMul });
+            }
+            rig.snap(flightController.position, flightController.quaternion);
+          }
+          return !motionState.animate;
+        },
+        // World point -> CSS pixel on the canvas (null behind the camera), so
+        // a check measures the patch it placed, wherever the framing put it.
+        project: (x, y, z) => {
+          const cam = cameraState?.camera;
+          if (!cam || !renderer?.domElement) return null;
+          cam.updateMatrixWorld();
+          const v = new THREE.Vector3(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+          if (v.z > -0.01) return null;
+          v.applyMatrix4(cam.projectionMatrix);
+          const r = renderer.domElement.getBoundingClientRect();
+          return [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height];
+        },
+        // How many world materials carry the shadow patch (0 is the true
+        // before, ?horizon=0&birdshadow=0).
+        horizonPatched: () => {
+          const seen = new Set();
+          sphericalWorld?.root?.traverse((o) => {
+            for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+              if (m?.userData?.birbHorizon) seen.add(m);
+            }
+          });
+          return seen.size;
+        },
+        // The bird's ellipsoid sun shadow (src/effects/bird-shadow.js).
+        birdShadow: (strength) => {
+          if (!birdShadowDriver) return null;
+          if (strength !== undefined) birdShadowDriver.setStrength(strength);
+          return birdShadowDriver.state();
         },
         // Jump the sun cycle to a point in its period, for captures.
         setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
