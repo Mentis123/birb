@@ -3606,12 +3606,15 @@
     const airTune = {};
     {
       const raw = (/[?&]airtune=([^&]+)/.exec(window.location?.search || '') || [])[1];
-      if (raw) {
-        for (const pair of decodeURIComponent(raw).split(',')) {
-          const [k, v] = pair.split(':');
-          const n = Number.parseFloat(v);
-          if (k && Number.isFinite(n)) airTune[k] = n;
-        }
+      // Guarded: this runs at the top of the module script, so a malformed
+      // escape (`%E0`) would throw a URIError that kills the whole boot and
+      // leaves Tap-to-Start saying Loading… forever. A bad tune is no tune.
+      let text = '';
+      try { text = raw ? decodeURIComponent(raw) : ''; } catch { text = ''; }
+      for (const pair of text.split(',')) {
+        const [k, v] = pair.split(':');
+        const n = Number.parseFloat(v);
+        if (k && Number.isFinite(n)) airTune[k] = n;
       }
     }
 

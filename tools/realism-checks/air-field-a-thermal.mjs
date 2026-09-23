@@ -55,9 +55,14 @@ export default async function run(ctx) {
       return ctx.hold({ x: 0, y: 0 }, N, PROBE);
     };
     const on = await flyFrom();
+    let off;
     await page.evaluate(() => window.__BIRB.air(false));
-    const off = await flyFrom();
-    await page.evaluate(() => window.__BIRB.air(true));
+    try {
+      off = await flyFrom();
+    } finally {
+      // Never leave the field detached for the checks after this one.
+      await page.evaluate(() => window.__BIRB.air(true));
+    }
     const flying = [...on, ...off].every((s) => s.rec === 'flying');
     if (!flying) { ctx.log(`thermal ${index}: the run met a tree, trying the next`); continue; }
     result = { index, go, on, off };
