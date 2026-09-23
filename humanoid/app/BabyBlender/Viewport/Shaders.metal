@@ -16,6 +16,9 @@ struct Uniforms {
 struct VertexIn {
     float3 position [[attribute(0)]];
     float3 normal   [[attribute(1)]];
+    // Already in Metal's texture space (origin top left). The renderer converts
+    // the document's v-up UV with TextureSpace.metal before upload; flipping
+    // here as well would put every painted texel on the wrong face again.
     float2 uv       [[attribute(2)]];
 };
 

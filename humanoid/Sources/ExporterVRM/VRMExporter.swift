@@ -110,10 +110,15 @@ public enum VRMExporter {
         let normalAccessor = addAccessor(view: addBufferView(normalBytes, target: arrayBuffer),
                                          componentType: float, count: mesh.vertexCount, type: "VEC3")
 
+        // glTF puts the texture origin at the TOP left; the document's UVs run
+        // up from the bottom (Blender's and FBX's convention, which the painter
+        // writes against). Written raw, every exported texture sat upside down
+        // on the model — on the clay atlas, on the wrong faces entirely.
         var uvBytes = Data()
         for uv in mesh.uvs {
-            uvBytes.appendLittleEndian(Float(uv.x))
-            uvBytes.appendLittleEndian(Float(uv.y))
+            let t = TextureSpace.gltf(uv)
+            uvBytes.appendLittleEndian(Float(t.x))
+            uvBytes.appendLittleEndian(Float(t.y))
         }
         let uvAccessor = addAccessor(view: addBufferView(uvBytes, target: arrayBuffer),
                                      componentType: float, count: mesh.vertexCount, type: "VEC2")

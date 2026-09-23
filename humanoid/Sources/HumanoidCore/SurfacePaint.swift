@@ -45,14 +45,24 @@ public enum SurfacePaint {
         /// Erasing paints the base colour back rather than making the texture
         /// transparent: the material is opaque, so a hole would export black.
         public var erasing: Bool
+        /// How much of the radius paints at full opacity, 0...1, before the
+        /// smooth falloff to the rim begins.
+        ///
+        /// 0 is the falloff across the whole radius, which is what every stroke
+        /// used to get: only the exact centre line reached the chosen colour,
+        /// so a blue stroke was a blue line with a wide wash either side — the
+        /// "paint is soft" of the first screenshot. The editor paints at about
+        /// half: a solid core with an edge that still has no ring.
+        public var hardness: Double
 
         public init(radius: Double = 0.02, opacity: Double = 1.0,
                     colour: (r: UInt8, g: UInt8, b: UInt8) = (40, 40, 48),
-                    erasing: Bool = false) {
+                    erasing: Bool = false, hardness: Double = 0) {
             self.radius = radius
             self.opacity = opacity
             self.colour = colour
             self.erasing = erasing
+            self.hardness = hardness
         }
     }
 
@@ -258,6 +268,17 @@ public enum SurfacePaint {
         private var origin: PNG.Image
         private var alpha: [UInt8]
         private var previous: Vec3?
+        /// The mirrored stroke's previous point, when symmetry is on. It shares
+        /// `alpha` and `origin` with the primary track, and that is the point:
+        /// where the two overlap — any stroke near the mirror plane — a texel
+        /// takes the greater of the two alphas instead of being painted twice,
+        /// or being painted once and then overwritten by the fainter one.
+        private var previousMirror: Vec3?
+        /// The brush as it was at the previous point. A segment tapers from
+        /// this to the current brush, so a pressure change along a stroke is a
+        /// smooth taper rather than a step at every sample.
+        private var previousRadius: Double?
+        private var previousOpacity: Double?
         private(set) public var dirty: Paint.Rect = .empty
 
         public init(map: Map, brush: Brush, origin: PNG.Image,
@@ -289,6 +310,24 @@ public enum SurfacePaint {
             self.origin = origin
             self.dirty = .empty
             self.previous = nil
+            self.previousMirror = nil
+            self.previousRadius = nil
+            self.previousOpacity = nil
+        }
+
+        /// Breaks the stroke: the next point starts a new segment instead of
+        /// joining the last one.
+        ///
+        /// For a pointer that left the model and came back. Joined, the
+        /// segment runs through space from where it left to where it
+        /// returned, and the capsule around that line paints a streak across
+        /// whatever surface it passes near — round the corner the Pencil went
+        /// over, onto a face it never touched.
+        public mutating func lift() {
+            previous = nil
+            previousMirror = nil
+            previousRadius = nil
+            previousOpacity = nil
         }
 
         /// Extends the stroke to a surface point and paints the swept capsule
@@ -301,26 +340,54 @@ public enum SurfacePaint {
         @discardableResult
         public mutating func extend(to point: Vec3, seed: Int, mesh: MeshData,
                                     tables: MeshTables, into image: inout PNG.Image) -> Paint.Rect {
-            defer { previous = point }
-            let from = previous ?? point
-            if let previous, previous == point, !dirty.isEmpty { return .empty }
-            let touched = paint(segment: from, to: point, seed: seed, mesh: mesh,
+            extend(to: point, seed: seed, mirror: nil, mesh: mesh, tables: tables, into: &image)
+        }
+
+        /// Extends the stroke, and its mirror image when `mirror` is given.
+        ///
+        /// `mirror` is the mirrored point and a triangle under it
+        /// (`SurfacePaint.mirror(of:triangle:mesh:tables:)`). Both tracks
+        /// paint into the same alpha buffer, so the stroke stays idempotent
+        /// where they meet on the plane.
+        @discardableResult
+        public mutating func extend(to point: Vec3, seed: Int, mirror: (point: Vec3, seed: Int)?,
+                                    mesh: MeshData, tables: MeshTables,
+                                    into image: inout PNG.Image) -> Paint.Rect {
+            let r1 = brush.radius, o1 = brush.opacity
+            let r0 = previousRadius ?? r1, o0 = previousOpacity ?? o1
+            defer {
+                previous = point
+                previousMirror = mirror?.point
+                previousRadius = r1
+                previousOpacity = o1
+            }
+            if let previous, previous == point, r0 == r1, o0 == o1, !dirty.isEmpty { return .empty }
+            var touched = paint(segment: previous ?? point, to: point, seed: seed,
+                                radii: (r0, r1), opacities: (o0, o1), mesh: mesh,
                                 tables: tables, into: &image)
+            if let mirror {
+                touched = touched.union(paint(segment: previousMirror ?? mirror.point, to: mirror.point,
+                                              seed: mirror.seed, radii: (r0, r1),
+                                              opacities: (o0, o1), mesh: mesh, tables: tables,
+                                              into: &image))
+            }
             dirty = dirty.union(touched)
             return touched
         }
 
-        private mutating func paint(segment from: Vec3, to: Vec3, seed: Int, mesh: MeshData,
-                                    tables: MeshTables,
+        private mutating func paint(segment from: Vec3, to: Vec3, seed: Int,
+                                    radii: (Double, Double), opacities: (Double, Double),
+                                    mesh: MeshData, tables: MeshTables,
                                     into image: inout PNG.Image) -> Paint.Rect {
-            guard brush.radius > 0, brush.opacity > 0 else { return .empty }
+            guard radii.0 > 0 || radii.1 > 0, opacities.0 > 0 || opacities.1 > 0 else { return .empty }
+            let reachRadius = max(radii.0, radii.1)
             let triangles = SurfacePaint.reach(from: from, to: to, seed: seed,
-                                               radius: brush.radius, mesh: mesh, tables: tables)
+                                               radius: reachRadius, mesh: mesh, tables: tables)
             guard !triangles.isEmpty else { return .empty }
 
             let colour = brush.erasing ? base : brush.colour
             let map = self.map
-            let brush = self.brush
+            let hardness = min(0.95, max(0, brush.hardness))
             var result = Paint.Rect.empty
 
             // The raster loop is lifted out into a free function taking raw
@@ -333,8 +400,8 @@ public enum SurfacePaint {
                     alpha.withUnsafeMutableBufferPointer { alphas in
                         result = Stroke.rasterise(
                             triangles: triangles, map: map, mesh: mesh,
-                            from: from, to: to, radius: brush.radius,
-                            opacity: brush.opacity, colour: colour, width: image.width,
+                            from: from, to: to, radii: radii, opacities: opacities,
+                            hardness: hardness, colour: colour, width: image.width,
                             pixels: pixels.baseAddress!, source: source.baseAddress!,
                             alphas: alphas.baseAddress!)
                     }
@@ -352,8 +419,8 @@ public enum SurfacePaint {
         /// this scale (a barycentric good to 1e-5 places a point on a 24 cm
         /// model to within microns) and costs twice the SIMD width.
         private static func rasterise(triangles: [Int], map: Map, mesh: MeshData,
-                                      from: Vec3, to: Vec3, radius: Double,
-                                      opacity: Double,
+                                      from: Vec3, to: Vec3, radii: (Double, Double),
+                                      opacities: (Double, Double), hardness: Double,
                                       colour: (r: UInt8, g: UInt8, b: UInt8),
                                       width: Int,
                                       pixels: UnsafeMutablePointer<UInt8>,
@@ -369,9 +436,20 @@ public enum SurfacePaint {
             let originX = Float(from.x), originY = Float(from.y), originZ = Float(from.z)
             let axisX = Float(axis.x), axisY = Float(axis.y), axisZ = Float(axis.z)
             let inverseAxis = sweeping ? Float(1 / axisLengthSquared) : 0
-            let radiusSquared = Float(radius * radius)
-            let inverseRadius = Float(1 / radius)
-            let opacity32 = Float(opacity)
+            // A segment tapers from the brush at its start to the brush at its
+            // end — pressure changes along a stroke — so radius and opacity are
+            // evaluated at each texel's place along the axis. The constant case
+            // keeps its precomputed reciprocal: it is most frames of most
+            // strokes, and the divide per painted texel is what it saves.
+            let startRadius = Float(radii.0), radiusChange = Float(radii.1 - radii.0)
+            let startOpacity = Float(opacities.0), opacityChange = Float(opacities.1 - opacities.0)
+            let tapering = radiusChange != 0
+            let largest = max(radii.0, radii.1)
+            let largestSquared = Float(largest * largest)
+            let constantInverse = Float(1 / max(1e-12, radii.1))
+            // Past `hardness` of the radius the smoothstep runs from full to
+            // nothing; inside it, the brush is solid.
+            let edge = Float(1 / max(0.05, 1 - hardness))
             let red = UInt32(colour.r), green = UInt32(colour.g), blue = UInt32(colour.b)
             var minX = Int.max, minY = Int.max, maxX = Int.min, maxY = Int.min
 
@@ -416,17 +494,24 @@ public enum SurfacePaint {
                         var dx = ax + e1x * v + e2x * w - originX
                         var dy = ay + e1y * v + e2y * w - originY
                         var dz = az + e1z * v + e2z * w - originZ
+                        var along: Float = 1
                         if sweeping {
-                            var along = (dx * axisX + dy * axisY + dz * axisZ) * inverseAxis
+                            along = (dx * axisX + dy * axisY + dz * axisZ) * inverseAxis
                             along = along < 0 ? 0 : (along > 1 ? 1 : along)
                             dx -= axisX * along; dy -= axisY * along; dz -= axisZ * along
                         }
                         let distanceSquared = dx * dx + dy * dy + dz * dz
-                        if distanceSquared > radiusSquared { continue }
+                        if distanceSquared > largestSquared { continue }
+                        let radius = startRadius + radiusChange * along
+                        if tapering, distanceSquared > radius * radius { continue }
+                        let inverseRadius = tapering ? 1 / radius : constantInverse
 
-                        // Smoothstep, inline: the brush edge must have no ring.
-                        let unit = 1 - distanceSquared.squareRoot() * inverseRadius
-                        let strength = unit * unit * (3 - 2 * unit) * opacity32
+                        // Solid inside the hardness, then smoothstep to the rim:
+                        // the brush edge must have no ring.
+                        var unit = (1 - distanceSquared.squareRoot() * inverseRadius) * edge
+                        unit = unit > 1 ? 1 : (unit < 0 ? 0 : unit)
+                        let opacity = startOpacity + opacityChange * along
+                        let strength = unit * unit * (3 - 2 * unit) * opacity
                         // Integer from here down. `Float.rounded()` and the
                         // trapping `UInt8(Float)` conversion do not inline, and
                         // there were four per texel.
@@ -465,6 +550,70 @@ public enum SurfacePaint {
             guard minX <= maxX else { return .empty }
             return Paint.Rect(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
         }
+    }
+
+    /// The mirror image of a point on the surface, across x = 0, and a triangle
+    /// under it — where a symmetric paint stroke puts its second track.
+    ///
+    /// Not simply "the mirrored triangle". The clay's POSITIONS are exactly
+    /// symmetric but its triangulation is not: every quad is split along the
+    /// same diagonal, so the mirror image of a triangle is usually not a
+    /// triangle of the mesh at all. The search is therefore by position, among
+    /// the faces around the mirrors of the hit triangle's corners — which
+    /// between them always cover the mirrored point on a symmetric shape — and
+    /// the answer is the nearest point ON the surface. That also keeps
+    /// symmetric painting sensible on a model sculpted without symmetry: the
+    /// mirror track follows the surface rather than painting air.
+    public static func mirror(of point: Vec3, triangle: Int, mesh: MeshData,
+                              tables: MeshTables) -> (point: Vec3, seed: Int)? {
+        guard triangle >= 0, triangle * 3 + 2 < mesh.indices.count else { return nil }
+        let target = Vec3(-point.x, point.y, point.z)
+        var candidates = [Int]()
+        for corner in 0..<3 {
+            let welded = tables.weldOf[Int(mesh.indices[triangle * 3 + corner])]
+            guard let partner = tables.mirror[welded] else { continue }
+            for face in tables.trianglesOfWelded[partner] where !candidates.contains(Int(face)) {
+                candidates.append(Int(face))
+            }
+        }
+        var best: (distance: Double, point: Vec3, face: Int)?
+        for face in candidates {
+            let a = mesh.positions[Int(mesh.indices[face * 3])]
+            let b = mesh.positions[Int(mesh.indices[face * 3 + 1])]
+            let c = mesh.positions[Int(mesh.indices[face * 3 + 2])]
+            let q = closestPoint(on: (a, b, c), to: target)
+            let offset = q - target
+            let distance = dot(offset, offset)
+            if best == nil || distance < best!.distance { best = (distance, q, face) }
+        }
+        guard let best else { return nil }
+        return (best.point, best.face)
+    }
+
+    /// The point of a triangle nearest `p` (Ericson, *Real-Time Collision
+    /// Detection* §5.1.5): the Voronoi region of each vertex and edge in turn,
+    /// then the face.
+    static func closestPoint(on triangle: (Vec3, Vec3, Vec3), to p: Vec3) -> Vec3 {
+        let (a, b, c) = triangle
+        let ab = b - a, ac = c - a, ap = p - a
+        let d1 = dot(ab, ap), d2 = dot(ac, ap)
+        if d1 <= 0 && d2 <= 0 { return a }
+        let bp = p - b
+        let d3 = dot(ab, bp), d4 = dot(ac, bp)
+        if d3 >= 0 && d4 <= d3 { return b }
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0 && d1 >= 0 && d3 <= 0 { return a + ab * (d1 / (d1 - d3)) }
+        let cp = p - c
+        let d5 = dot(ab, cp), d6 = dot(ac, cp)
+        if d6 >= 0 && d5 <= d6 { return c }
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0 && d2 >= 0 && d6 <= 0 { return a + ac * (d2 / (d2 - d6)) }
+        let va = d3 * d6 - d5 * d4
+        if va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0 {
+            return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)))
+        }
+        let denominator = 1 / (va + vb + vc)
+        return a + ab * (vb * denominator) + ac * (vc * denominator)
     }
 
     /// Triangles the brush can reach, by walking the surface outward from the
