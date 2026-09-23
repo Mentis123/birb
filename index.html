@@ -12321,10 +12321,18 @@
           const pb = 1 - perchBlend;
           const tl = tumble ? tumble.left : 0;
           const tr = tumble ? tumble.right : 0;
+          // THE BANK DIP, THE RIGHT WAY ROUND. The old rig above dips the
+          // group NAMED leftWing into a left turn — but that group is built at
+          // model +Z, and the model faces +X, so +Z is the bird's RIGHT
+          // (forward x up = X x Y = +Z). Its "inside wing dips" therefore
+          // raised the inside wing against every roll (found by the realism
+          // review, evaluating the tips rather than reading the names).
+          // Still same-signed on both groups — it is a roll — just negated.
+          // `?aeropose=0` keeps the old sign: that path is the true before.
           leftWing.rotation.x = leftWing.userData.baseRotation.x
-            + leftDip + a.wingX * pb + a.flutter + perch.fold + tl;
+            - leftDip + a.wingX * pb + a.flutter + perch.fold + tl;
           rightWing.rotation.x = rightWing.userData.baseRotation.x
-            + rightDip - a.wingX * pb - a.flutter - perch.fold - tr;
+            - rightDip - a.wingX * pb - a.flutter - perch.fold - tr;
           leftWing.rotation.y = leftWing.userData.baseRotation.y - perch.sweep - a.wingY * pb;
           rightWing.rotation.y = rightWing.userData.baseRotation.y + perch.sweep + a.wingY * pb;
           leftWing.rotation.z = leftWing.userData.baseRotation.z + a.wingZ * pb;
