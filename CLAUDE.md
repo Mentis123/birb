@@ -2336,14 +2336,29 @@ did-become-active observer stamping a frame that had never happened; the loop
 now judges on frames PRESENTED. **A watchdog that its own reset can satisfy
 is not watching anything.**
 
-**The live plan is `humanoid/docs/PLAN.md`** (2026-09-23): everything still
-open from the PRD's delivery plan, the three device passes and the Unity
-hand-off, consolidated into one backlog, plus ten new ideas (a stroke
-recorder with a Linux replay, sculpt layers, masking, four more brushes, a
-reset brush, matcap and cavity shading, clay shapes, Pencil Pro roll and
-haptics, AR Quick Look, a turntable capture). Add open items THERE; the pass
-documents are history. The two product-blocking facts it records: "Export
-Model" on the iPad writes no file, and documents do not persist.
+**The plan of record is `humanoid/docs/PLAN.md`** (2026-09-23, rewritten
+that evening). Six milestones, each ended by one device pass:
+- M0: close the loop — a recorder, a one-tap device report, and decisions
+  moved out of the untested `app/` into the core.
+- M1: keep and share the work — documents, an export zip, byte-bounded undo.
+- M2: finish Clay to the PRD's release definition.
+- M3: ship Clay 1.0.
+- M4: Clay 1.1, a sculpting tool.
+- M5: the Humanoid.
+
+It also sets budgets, lists seven owner decisions, and gives a section on
+where it departs from the PRD. Add open items THERE; the pass documents are
+history.
+
+Measured for it:
+- **Undo is bounded by count, not by bytes.** Thirty Fills hold 240 MB at
+  1024² and 960 MB at 2048², and a mirrored side-face stroke records 18% of
+  the texture. The morning's plan had retired tiled undo on its time cost
+  alone; **retire an item only when every cost it answered is measured.**
+- PNG-encoding a busy 2048² texture takes a second, so autosave writes raw
+  tiles and never encodes on the main thread.
+
+"Export Model" still writes no file, and documents still do not persist.
 
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity

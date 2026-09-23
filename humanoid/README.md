@@ -25,9 +25,10 @@ and exports an avatar Unity accepts as a Humanoid for VRChat.
 > FBX and GLB, so the oracles check the path a user takes rather than the
 > template as authored.
 >
-> **The live plan is [`docs/PLAN.md`](docs/PLAN.md)**: everything still open
-> from the PRD, the three device passes and the Unity hand-off in one backlog,
-> with ten new ideas. Add to it rather than starting another plan document.
+> **The build plan is [`docs/PLAN.md`](docs/PLAN.md)**: milestones to Clay
+> 1.0, Clay 1.1 and the Humanoid, each ended by one device pass, with budgets,
+> the owner's decisions and where it departs from the PRD. Add to it rather
+> than starting another plan document.
 >
 > **The iPad app is compiled by CI on every push** (Release and Debug, for a
 > device) but can only be RUN on the iPad. `app/` holds the Metal renderer, the
