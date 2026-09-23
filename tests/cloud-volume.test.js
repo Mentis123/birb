@@ -407,7 +407,14 @@ test('addCloudVolume: transparent, double-sided in ONE pass, no depth write, cha
   assert.ok(light > f.indexOf('vec3 outgoingLight =') && light < f.indexOf('#include <opaque_fragment>'));
   assert.equal(count(f, '#include <opaque_fragment>'), 1);
   // Radial up, never world +Y.
-  assert.ok(f.includes('vec3 cvUp = normalize( vCloudSphere.xyz )'));
+  assert.ok(f.includes('vec3 cvUp = birbCloudUnit( vCloudSphere.xyz )'));
+  // No bare normalize(): normalize(0) is NaN, and one NaN pixel is a black
+  // block after the half-res bloom blur. Every unit vector goes through
+  // birbCloudUnit, which returns zero for zero.
+  assert.equal(count(f, 'normalize('), 0, 'every normalize is guarded');
+  assert.ok(f.includes('float d = max( 1.0 + g * g - 2.0 * g * mu, 1e-4 );'), 'HG never divides by zero');
+  assert.ok(f.includes('float cvR = max( vCloudSphere.w * uCloudShape.x, 1e-4 );'));
+  assert.ok(f.includes('cvRe = max( cvRe, 0.05 );'));
   // Shared uniforms: one object, every puff material.
   assert.equal(shader.uniforms.uCloudShape, cloudVolumeUniforms.shape);
   assert.equal(shader.uniforms.uCloudShadowSpheres, undefined);
@@ -440,18 +447,71 @@ test('cloud shadows and the atmosphere share ONE world varying, in either order'
     assert.equal(count(s.fragmentShader, '#include <aomap_fragment>'), 1, order);
     assert.equal(count(s.fragmentShader, '#include <fog_fragment>'), 1, order);
     assert.equal(count(s.fragmentShader, 'float birbCloudChord'), 1, order);
-    // The shadow reaches the direct light before three's AO step, and a
-    // share of the sky light with it.
-    const occ = s.fragmentShader.indexOf('reflectedLight.directDiffuse *= 1.0 - csOcc');
-    assert.ok(occ > 0 && occ < s.fragmentShader.indexOf('#include <aomap_fragment>'), order);
-    assert.ok(s.fragmentShader.includes('reflectedLight.indirectDiffuse *= 1.0 - csOcc * uCloudShadowParams.z'));
+    // The shadow scales the SUN's light, inside three's light loop, and a
+    // share of the sky light ahead of three's AO step — never the summed
+    // direct light, which carries the rim and fill as well.
+    const f = s.fragmentShader;
+    assert.ok(!f.includes('reflectedLight.directDiffuse *='), order);
+    const occ = f.indexOf('birbSunVis *= 1.0 - csOcc;');
+    assert.ok(occ > 0 && occ < f.indexOf('#include <lights_fragment_begin>'), order);
+    assert.equal(count(f, 'birbSkyVis *= 1.0 - csOcc * uCloudShadowParams.z;'), 1, order);
+    assert.equal(count(f, 'reflectedLight.indirectDiffuse *= birbSkyVis;'), 1, order);
+    assert.ok(f.indexOf('reflectedLight.indirectDiffuse *= birbSkyVis;') < f.indexOf('#include <aomap_fragment>'), order);
     // The in-cloud fog lands after three's own fog, in the output colour
     // space the fragment is already in there.
-    const fog = s.fragmentShader.indexOf('linearToOutputTexel( vec4( uCloudShadowFog, 1.0 ) )');
+    const fog = s.fragmentShader.indexOf('linearToOutputTexel( vec4( max( uCloudShadowFog, vec3( 0.0 ) ), 1.0 ) )');
     assert.ok(fog > s.fragmentShader.indexOf('#include <fog_fragment>'), order);
-    assert.match(m.customProgramCacheKey(), /cloudshadow-v1/);
+    assert.match(m.customProgramCacheKey(), /cloudshadow-v2/);
     assert.match(m.customProgramCacheKey(), /atmos-v6/);
   }
+});
+
+test('a cloud shadow takes the SUN, once, by direction: not the rim, the fill or the sky', () => {
+  const m = lambert();
+  addCloudShadow(m, THREE);
+  const f = compile(m).fragmentShader;
+  // One set of globals, one wrapper, one macro span around the light loop.
+  assert.equal(count(f, 'float birbSunVis = 1.0;'), 1);
+  assert.equal(count(f, 'float birbSkyVis = 1.0;'), 1);
+  assert.equal(count(f, 'void birbCloudDirInfo('), 1);
+  assert.ok(f.indexOf('void birbCloudDirInfo(') > f.indexOf('#include <lights_pars_begin>'));
+  assert.ok(/dot\( light\.direction, birbSunView \) > 0\.9999 \) light\.color \*= birbSunVis;/.test(f),
+    'the light scaled is the one shining from the sun');
+  const def = f.indexOf('#define getDirectionalLightInfo( dl, l ) birbCloudDirInfo( dl, l )');
+  const inc = f.indexOf('#include <lights_fragment_begin>');
+  const undef = f.indexOf('#undef getDirectionalLightInfo');
+  assert.ok(def > 0 && def < inc && inc < undef, 'the macro covers exactly three\'s light loop');
+  // The sun's direction in VIEW space, the space light.direction is in.
+  assert.ok(f.includes('birbSunView = birbCloudUnit( ( viewMatrix * vec4( uCloudShadowSun, 0.0 ) ).xyz );'));
+  // Clamped, so a raised atmosphere lever cannot drive the sun negative.
+  assert.ok(f.includes('return clamp( uCloudShadowParams.x * uCloudShadowAtmos'));
+  assert.equal(count(f, 'normalize('), 0, 'every normalize is guarded');
+  assert.ok(f.includes('max( uCloudShadowFog, vec3( 0.0 ) )'), 'no negative into the sRGB pow()');
+});
+
+test('behind a patch that already owns the sun visibility, the cloud JOINS it', () => {
+  // A stand-in for horizon-shadow.js: its globals, wrapper and sky multiply,
+  // chained BEFORE the cloud. The cloud must multiply into them (one loss of
+  // the sun's Lambert term, by the product) and add no second wrapper, no
+  // second macro and no second sky multiply.
+  const m = lambert();
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = 'float birbSunVis = 1.0;\nfloat birbSkyVis = 1.0;\nvec3 birbSunView = vec3( 0.0, 0.0, 1.0 );\n'
+      + shader.fragmentShader
+        .replace('#include <lights_fragment_begin>', '{ birbSunVis = 0.5; }\n#define getDirectionalLightInfo( dl, l ) other( dl, l )\n#include <lights_fragment_begin>\n#undef getDirectionalLightInfo')
+        .replace('#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= birbSkyVis;\n#include <aomap_fragment>');
+  };
+  addCloudShadow(m, THREE);
+  const f = compile(m).fragmentShader;
+  assert.equal(count(f, 'float birbSunVis'), 1);
+  assert.equal(count(f, 'void birbCloudDirInfo('), 0);
+  assert.equal(count(f, '#define getDirectionalLightInfo'), 1);
+  assert.equal(count(f, 'reflectedLight.indirectDiffuse *= birbSkyVis;'), 1);
+  const theirs = f.indexOf('{ birbSunVis = 0.5; }');
+  const ours = f.indexOf('birbSunVis *= 1.0 - csOcc;');
+  assert.ok(theirs > 0 && ours > theirs && ours < f.indexOf('#include <lights_fragment_begin>'),
+    'the cloud scales the visibility after the other patch set it and before the light loop reads it');
+  assert.ok(!f.includes('birbSunView = birbCloudUnit'), 'the other patch owns the sun direction');
 });
 
 test('switching the sine field off is a uniform, not a new program', () => {

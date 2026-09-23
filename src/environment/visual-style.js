@@ -310,7 +310,7 @@ export function addFoliageWind(material) {
 // The instance transform lands in <project_vertex>, AFTER <begin_vertex>, so
 // `modelMatrix * transformed` alone gives every instance the unit geometry at
 // the world origin. Every prop here is instanced, so that is not a detail.
-function ensureWorldVarying(shader) {
+export function ensureWorldVarying(shader) {
   if (!shader.vertexShader.includes('varying vec3 vBirbWorld;')) {
     shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
   }

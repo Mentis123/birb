@@ -82,23 +82,28 @@
  * material as one shared uniform array, and each fragment integrates the SAME
  * density along the ray toward the sun: a soft-edged shadow exactly under
  * (and, with a low sun, exactly downwind of) the cloud that casts it, moving
- * when the sun moves. It takes the DIRECT light, and a share of the sky
+ * when the sun moves. It takes the SUN's light — the directional light
+ * shining from the sun, scaled inside three's light loop, never the rim or
+ * fill lights that come from elsewhere in the sky — and a share of the sky
  * light with it (CLOUD_SHADOW.sky — this world's sky light is strong enough
  * that a direct-only shadow measured 19% and nobody would see it), and
  * honours `visualUniforms.atmosphere` exactly as the sine field did. Worlds
  * without clouds (canyons, city) never receive the patch and keep the sine
- * field; `?cloudvol=0` restores both biomes exactly.
+ * field; `?cloudvol=0` restores both biomes exactly. Where the horizon
+ * shadow (horizon-shadow.js) is on the same material, the cloud multiplies
+ * into ITS sun visibility, so a fragment under a ridge and a cloud loses the
+ * sun once, by the product of the two.
  *
  * Everything per frame is uniform reads the GPU does; the only CPU work is
  * `cloudImmersion` and the sort, O(puffs), zero allocation, in the cloud
  * mesh's own onBeforeRender.
  */
-import { visualUniforms } from './visual-style.js';
+import { visualUniforms, ensureWorldVarying } from './visual-style.js';
 import { mulberry32 } from './seeded-random.js';
 
 /** `?cloudvol=0` restores the solid puffs and the sine-field shadows. */
 export function cloudVolumeRequested(search) {
-  return !/[?&]cloudvol=0/.test(search || '');
+  return !/[?&]cloudvol=0(?:&|$)/.test(search || '');
 }
 
 /**
@@ -535,32 +540,18 @@ export function extraCloudPuffs({ center, up, cloudScale, count, spread = 4, rMi
 }
 
 // ── GLSL ───────────────────────────────────────────────────────────────────
-
-// The world-position varying, byte-for-byte the declaration and write
-// visual-style.js's (private) ensureWorldVarying uses — so whichever patch
-// runs first declares it and the other sees it and skips. Declared twice,
-// the shader does not compile and three draws nothing. The guards here are
-// deliberately LOOSER than the exact strings: a declaration or write in any
-// spelling (a precision qualifier, other spacing) still counts as present.
-const WORLD_VARYING_DECL = /varying\s+(?:\w+\s+)?vec3\s+vBirbWorld\s*;/;
-const WORLD_VARYING_WRITE = /\bvBirbWorld\s*=/;
-function ensureWorldVarying(shader) {
-  if (!WORLD_VARYING_DECL.test(shader.vertexShader)) {
-    shader.vertexShader = 'varying vec3 vBirbWorld;\n' + shader.vertexShader;
-  }
-  if (!WORLD_VARYING_WRITE.test(shader.vertexShader)) {
-    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
-      #include <begin_vertex>
-      vec4 birbWorldPos = vec4(transformed, 1.0);
-      #ifdef USE_INSTANCING
-        birbWorldPos = instanceMatrix * birbWorldPos;
-      #endif
-      vBirbWorld = (modelMatrix * birbWorldPos).xyz;`);
-  }
-  if (!WORLD_VARYING_DECL.test(shader.fragmentShader)) {
-    shader.fragmentShader = 'varying vec3 vBirbWorld;\n' + shader.fragmentShader;
-  }
-}
+//
+// The world-position varying comes from visual-style.js's ensureWorldVarying
+// — ONE definition, the same exact-string guards every other patch uses, so
+// whichever patch runs first declares it and the rest see it and skip.
+// (This file used to carry a copy with looser regex guards; two guards that
+// can disagree about whether the varying exists are how a shader ends up
+// declaring it twice, which does not compile, and three then draws nothing.)
+//
+// NaN discipline: every GLSL normalize, divide, sqrt and pow below is fed a
+// value that is clamped or floored first. One NaN pixel in the scene target
+// is a black block after the half-res bloom blur, and SwiftShader and a
+// phone's GPU need not agree on which edge case produces one.
 
 /**
  * Per-instance attribute on a cloud mesh: the sphere [x, y, z, r] that
@@ -577,6 +568,12 @@ float birbCloudChord( float h, float u1 ) {
   float a = clamp( u1, -h, h );
   return 0.75 * ( h * h * ( h - a ) - ( h * h * h - a * a * a ) / 3.0 );
 }
+// A zero vector has no direction, and the built-in unit-vector function
+// returns NaN for one on every GPU; this returns the zero vector instead,
+// which every caller below reads as "no light, no chord".
+vec3 birbCloudUnit( vec3 v ) {
+  return v * inversesqrt( max( dot( v, v ), 1e-12 ) );
+}
 #endif
 `;
 
@@ -592,7 +589,9 @@ varying vec4 vCloudSphere;
 varying vec4 vCloudOwn;
 ${CLOUD_CHORD_GLSL}
 float birbCloudHG( float g, float mu ) {
-  float d = 1.0 + g * g - 2.0 * g * mu;
+  // Zero only at g = 1 looking into the sun (a live-tuning edge, not the
+  // shipped lobes), and 0/0 there is a NaN: floored.
+  float d = max( 1.0 + g * g - 2.0 * g * mu, 1e-4 );
   return ( 1.0 - g * g ) / ( d * sqrt( d ) );
 }
 // Optical depth from q (unit-sphere coordinates) along unit dir, forward
@@ -625,8 +624,8 @@ const VOLUME_EARLY_GLSL = `
   // either way, so the choice never changes the veil over the sky.
   float cvNear = min( length( cameraPosition - vCloudSphere.xyz ), length( uCloudFocus - vCloudSphere.xyz ) );
   if ( gl_FrontFacing == ( cvNear < vCloudSphere.w + uCloudShape.w ) ) discard;
-  vec3 cvDir = normalize( vBirbWorld - cameraPosition );
-  float cvR = vCloudSphere.w * uCloudShape.x;
+  vec3 cvDir = birbCloudUnit( vBirbWorld - cameraPosition );
+  float cvR = max( vCloudSphere.w * uCloudShape.x, 1e-4 );
   vec3 cvO = ( cameraPosition - vCloudSphere.xyz ) / cvR;
   float cvB = dot( cvDir, cvO );
   // The lumps: this ray sees a sphere of radius cvRe, chosen by the
@@ -639,6 +638,9 @@ const VOLUME_EARLY_GLSL = `
   vec3 cvSeed = fract( vCloudSphere.xyz * 0.1731 ) * 6.2832;
   float cvRe = 1.0 + uCloudCluster.z * birbCloudLump( cvM / max( cvP, 1e-4 ) * uCloudCluster.w + cvSeed )
     * smoothstep( 0.2, 0.7, cvP );
+  // Positive for any lump under 1 (shipped 0.18); floored so a live-tuned
+  // lump cannot divide by zero.
+  cvRe = max( cvRe, 0.05 );
   cvO /= cvRe;
   cvB /= cvRe;
   float cvH2 = 1.0 - cvP * cvP / ( cvRe * cvRe );
@@ -656,8 +658,8 @@ const VOLUME_EARLY_GLSL = `
 // At <opaque_fragment>: replace the hull's Lambert shading with the volume's.
 const VOLUME_LIGHT_GLSL = `
   {
-    vec3 cvL = normalize( uCloudSun );
-    vec3 cvUp = normalize( vCloudSphere.xyz );
+    vec3 cvL = birbCloudUnit( uCloudSun );
+    vec3 cvUp = birbCloudUnit( vCloudSphere.xyz );
     // Where along the chord the light we see was scattered: the middle of a
     // thin chord, pulled toward the entry as the chord thickens.
     float cvW = 0.5 / ( 1.0 + 0.35 * uCloudShape.y * cvTau );
@@ -781,31 +783,78 @@ uniform vec3 uCloudShadowFog;
 uniform vec3 uCloudShadowSun;
 uniform float uCloudShadowAtmos;
 ${CLOUD_CHORD_GLSL}
-// The occlusion, 0 (clear) to strength (under a thick cloud).
+// The occlusion, 0 (clear) to strength (under a thick cloud), clamped to
+// [0, 1]: the atmosphere uniform is a live lighting lever (applyLightingSettings takes
+// any finite number), and past 1/strength an unclamped term would drive the
+// sun NEGATIVE — which the sRGB output transform's pow() turns into NaN.
 float birbCloudShadow( vec3 p ) {
-  vec3 L = normalize( uCloudShadowSun );
+  vec3 L = birbCloudUnit( uCloudShadowSun );
   float tau = 0.0;
   for ( int i = 0; i < BIRB_CLOUD_SHADOW_MAX; i ++ ) {
     if ( i >= uCloudShadowCount ) break;
     vec4 s = uCloudShadowSpheres[ i ];
-    vec3 o = ( p - s.xyz ) / s.w;
+    vec3 o = ( p - s.xyz ) / max( s.w, 1e-3 );
     float b = dot( o, L );
     float h2 = b * b - dot( o, o ) + 1.0;
     // Missed, or the sphere is behind the fragment as seen from the sun.
-    if ( h2 <= 0.0 || b >= sqrt( h2 ) ) continue;
-    tau += birbCloudChord( sqrt( h2 ), b );
+    if ( h2 <= 0.0 ) continue;
+    float h = sqrt( h2 );
+    if ( b >= h ) continue;
+    tau += birbCloudChord( h, b );
   }
-  return uCloudShadowParams.x * uCloudShadowAtmos * ( 1.0 - exp( -uCloudShadowParams.y * tau ) );
+  return clamp( uCloudShadowParams.x * uCloudShadowAtmos * ( 1.0 - exp( -uCloudShadowParams.y * tau ) ), 0.0, 1.0 );
 }
 `;
 
+// The sun's visibility, applied to the SUN ALONE. A cloud between a fragment
+// and the sun does not take the rim or fill light (they come from elsewhere
+// in the sky), so it cannot be a multiply on reflectedLight.directDiffuse —
+// which is every directional, point and spot light summed. Instead the sun's
+// own IncidentLight colour is scaled inside three's light loop, before the
+// shadow-map factor, by wrapping getDirectionalLightInfo for the length of
+// <lights_fragment_begin>; the light matched is every directional light
+// shining FROM the sun's direction (the key, or at Ultra the shadow light
+// that stands in for it — three sorts shadow casters first, so the index
+// moves and the direction does not).
+//
+// The contract is src/environment/horizon-shadow.js's, by name: globals
+// birbSunVis / birbSkyVis / birbSunView, the sun's light scaled by
+// birbSunVis, the indirect light by birbSkyVis ahead of <aomap_fragment>.
+// When the horizon patch is already on the material (chained BEFORE this
+// one), the cloud only MULTIPLIES its visibility into those globals — one
+// wrapper, one sky multiply, so a fragment under a ridge AND a cloud loses
+// the sun's Lambert term once, by the product of the two visibilities.
+// Without it, this patch brings the same machinery itself.
+const SHADOW_GLOBALS_GLSL = `
+float birbSunVis = 1.0;
+float birbSkyVis = 1.0;
+vec3 birbSunView = vec3( 0.0, 0.0, 1.0 );
+`;
+
+// After <lights_pars_begin>, where DirectionalLight and IncidentLight exist.
+const SHADOW_LIGHT_WRAPPER_GLSL = `
+#if NUM_DIR_LIGHTS > 0
+void birbCloudDirInfo( const in DirectionalLight dl, out IncidentLight light ) {
+  getDirectionalLightInfo( dl, light );
+  // Within ~0.8 degrees of the sun (float32 round trips put the key and the
+  // shadow light at 1 - 1e-7 of each other).
+  if ( dot( light.direction, birbSunView ) > 0.9999 ) light.color *= birbSunVis;
+}
+#endif
+`;
+
 /**
- * Real cloud shadows on a lit world material: the direct light is multiplied
- * by the sun's visibility through the cloud-level spheres, just ahead of
- * <aomap_fragment> (three's own shadow maps act on the same term). While the
+ * Real cloud shadows on a lit world material: the SUN's light is scaled by
+ * its visibility through the cloud-level spheres (see the note above for how
+ * and why only the sun), and a share of the sky light with it, ahead of
+ * <aomap_fragment> where three applies its own ambient occlusion. While the
  * camera is inside a cloud the surface also fogs toward the cloud's colour,
  * because geometry INSIDE a puff sits in front of the puff's back faces and
  * the volume alone cannot veil it. Chains and extends the cache key.
+ *
+ * Order: chain this AFTER addHorizonShadow (so it can find and join that
+ * patch's globals) and BEFORE addAtmosphere (so the atmosphere's sun rim
+ * sees the shadowed `birbSunVis`, exactly as it does for the horizon).
  */
 export function addCloudShadow(material, THREE) {
   if (!material || material.userData?.birbCloudShadow) return material;
@@ -821,7 +870,10 @@ export function addCloudShadow(material, THREE) {
   material.onBeforeCompile = function birbCloudShadowPatch(shader, renderer) {
     if (typeof previous === 'function') previous.call(this, shader, renderer);
     const frag = shader.fragmentShader;
-    if (!frag.includes('#include <aomap_fragment>') || !frag.includes('#include <fog_fragment>')) return;
+    // Anchors this patch needs; a material without them is left alone rather
+    // than half-patched (three draws nothing for a shader that fails).
+    if (!frag.includes('#include <lights_pars_begin>') || !frag.includes('#include <lights_fragment_begin>')
+      || !frag.includes('#include <aomap_fragment>') || !frag.includes('#include <fog_fragment>')) return;
     ensureWorldVarying(shader);
     shader.uniforms.uCloudShadowSpheres = cloudShadowUniforms.spheres;
     shader.uniforms.uCloudShadowCount = cloudShadowUniforms.count;
@@ -830,27 +882,50 @@ export function addCloudShadow(material, THREE) {
     shader.uniforms.uCloudShadowFog = cloudShadowUniforms.fogColor;
     shader.uniforms.uCloudShadowSun = visualUniforms.sunDir;
     shader.uniforms.uCloudShadowAtmos = visualUniforms.atmosphere;
-    shader.fragmentShader = SHADOW_PARS_GLSL + shader.fragmentShader
-      .replace('#include <aomap_fragment>', `{
+    // The horizon patch's globals, if it ran first: join them.
+    const joined = shader.fragmentShader.includes('float birbSunVis');
+    const occlusion = `{
         // The sun goes behind the cloud; a share of the sky goes with it.
         float csOcc = birbCloudShadow( vBirbWorld );
-        reflectedLight.directDiffuse *= 1.0 - csOcc;
-        reflectedLight.directSpecular *= 1.0 - csOcc;
-        reflectedLight.indirectDiffuse *= 1.0 - csOcc * uCloudShadowParams.z;
-      }
-#include <aomap_fragment>`)
-      .replace('#include <fog_fragment>', `#include <fog_fragment>
+        birbSunVis *= 1.0 - csOcc;
+        birbSkyVis *= 1.0 - csOcc * uCloudShadowParams.z;${joined ? '' : `
+        birbSunView = birbCloudUnit( ( viewMatrix * vec4( uCloudShadowSun, 0.0 ) ).xyz );`}
+      }`;
+    let f = SHADOW_PARS_GLSL + (joined ? '' : SHADOW_GLOBALS_GLSL) + shader.fragmentShader;
+    if (joined) {
+      // After the horizon's own evaluation (it sets birbSunVis; this scales
+      // it), inside the span its getDirectionalLightInfo macro covers.
+      f = f.replace('#include <lights_fragment_begin>', `${occlusion}
+#include <lights_fragment_begin>`);
+    } else {
+      f = f
+        .replace('#include <lights_pars_begin>', `#include <lights_pars_begin>\n${SHADOW_LIGHT_WRAPPER_GLSL}`)
+        .replace('#include <lights_fragment_begin>', `${occlusion}
+#if NUM_DIR_LIGHTS > 0
+#define getDirectionalLightInfo( dl, l ) birbCloudDirInfo( dl, l )
+#endif
+#include <lights_fragment_begin>
+#if NUM_DIR_LIGHTS > 0
+#undef getDirectionalLightInfo
+#endif`)
+        .replace('#include <aomap_fragment>', `reflectedLight.indirectDiffuse *= birbSkyVis;
+#include <aomap_fragment>`);
+    }
+    shader.fragmentShader = f.replace('#include <fog_fragment>', `#include <fog_fragment>
       if ( uCloudShadowFogParams.x > 0.0 ) {
-        float csFog = uCloudShadowFogParams.x * ( 1.0 - exp( -length( vBirbWorld - cameraPosition ) * uCloudShadowFogParams.y ) );
+        float csFog = clamp( uCloudShadowFogParams.x
+          * ( 1.0 - exp( -length( vBirbWorld - cameraPosition ) * uCloudShadowFogParams.y ) ), 0.0, 1.0 );
         // gl_FragColor is already in the OUTPUT colour space here (sRGB on
         // screen, linear into the bloom target), exactly as three's own fog
-        // colour is; the uniform is linear.
-        gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( uCloudShadowFog, 1.0 ) ).rgb, csFog );
+        // colour is; the uniform is linear, and floored so the transform's
+        // pow() can never see a negative.
+        gl_FragColor.rgb = mix( gl_FragColor.rgb,
+          linearToOutputTexel( vec4( max( uCloudShadowFog, vec3( 0.0 ) ), 1.0 ) ).rgb, csFog );
       }`);
   };
   material.customProgramCacheKey = function birbCloudShadowKey() {
     const base = typeof previousKey === 'function' ? previousKey.call(this) : 'birb';
-    return `${base}-cloudshadow-v1`;
+    return `${base}-cloudshadow-v2`;
   };
   material.needsUpdate = true;
   return material;
