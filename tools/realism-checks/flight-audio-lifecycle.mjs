@@ -53,6 +53,15 @@ export default async function run(ctx) {
   await wait(400);
   const p4 = await probe(page);
   ctx.check(p4.state === 'suspended' && p4.suspendReason === 'paused', `settings open: ${p4.state} (${p4.suspendReason})`);
+  // The SFX switch lives IN this paused menu: off and on again there must
+  // not wake the wind over a paused game.
+  await page.evaluate(() => document.querySelector('[data-sound-toggle="sfx"]').click());
+  await wait(200);
+  await page.evaluate(() => document.querySelector('[data-sound-toggle="sfx"]').click());
+  await wait(400);
+  const p4b = await probe(page);
+  ctx.check(p4b.state === 'suspended' && p4b.suspendReason === 'paused',
+    `SFX off and on inside the paused menu: still ${p4b.state} (${p4b.suspendReason})`);
   await page.evaluate(() => document.querySelector('[data-control="settings-close"]').click());
   await ctx.frames(4);
   await wait(150);
