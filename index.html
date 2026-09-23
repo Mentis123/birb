@@ -3746,6 +3746,7 @@
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
+      var { createAeroPose, createAeroInput, aeroPoseRequested } = await import("./src/flight/aero-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -5551,6 +5552,24 @@
     // can report what drove the wings rather than what the stick was set to.
     // Reused, never allocated in the loop.
     const lastWingInput = { x: 0, y: 0, active: false };
+
+    // Let the air pose the bird (src/flight/aero-pose.js). `?aeropose=0` is
+    // the before — the raw-stick beat and the backwards elevator, exactly.
+    // Model, input record and flight-frame scratch are built ONCE here and
+    // refilled by the pose block every frame.
+    const aeroPoseEnabled = aeroPoseRequested(window.location?.search || '');
+    const aeroPose = aeroPoseEnabled ? createAeroPose() : null;
+    const aeroPoseInput = createAeroInput();
+    const _aeroForced = { wingX: 0, wingZ: 0, span: 1, handX: 0, handY: 0 };
+    const _aeroPrevPos = new THREE.Vector3();
+    const _aeroPrevQuat = new THREE.Quaternion();
+    const _aeroDq = new THREE.Quaternion();
+    let _aeroHasPrev = false;
+    let _aeroLive = false;
+    let _aeroPerchTailPitch = 0;
+    let _aeroPerchTailSpread = 1;
+    // Landing gear swings the legs this far FORWARD of straight down.
+    const AERO_GEAR_REACH = 0.15;
 
     // Scratch for the walk bob's radial up. Module scope, reused, never
     // allocated in the loop.
@@ -12042,6 +12061,102 @@
         const wingBlend = 1 - Math.exp(-delta * 8);
         leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
+
+        // LET THE AIR POSE THE BIRD (src/flight/aero-pose.js). Everything
+        // above is the old rig, kept verbatim as `?aeropose=0`'s before; with
+        // the aero pose on, this overwrites every term the stroke owns. The
+        // old rig read the RAW stick (`climbing = pitchInput > 0.2`) while the
+        // stunt model inverts pitch INSIDE the controller, so a dive flapped
+        // 2.4x harder than a climb. This reads the air: airspeed, the energy
+        // target, the throttle, the climb and the body rates, measured off
+        // the flight frame itself. The perch fold and the tumble still
+        // dominate — every aero term is scaled by (1 - perchBlend).
+        _aeroLive = false;
+        if (aeroPose) {
+          const fc = flightController;
+          const ai = aeroPoseInput;
+          const stunt = !!fc?.isStunt;
+          ai.airborne = isAirborneVisual && !isNested;
+          ai.landing = nestingSystem?.getState?.() === NESTING_STATES.LANDING;
+          ai.cruise = sprintState.baseSpeed;
+          ai.airspeed = Math.abs(fc?.speed ?? 0);
+          ai.throttle = stunt ? fc.throttle01 : 1;
+          ai.throttleIdle = stunt ? fc.throttleIdle : 0.55;
+          ai.target = ((flightV2 || stunt) && Number.isFinite(fc?.cruise)) ? fc.cruise * ai.throttle : ai.airspeed;
+          ai.stallMul = Number.isFinite(fc?.stallMul) ? fc.stallMul : 0.5;
+          // The controller's own flag reads speed against the TARGET, which a
+          // boost lifts to 2.4x cruise, so it says "stalled" for the first
+          // ~0.2 s of every boost. That is not a pose.
+          ai.stalled = stunt && boostTimer <= 0 && fc.isStalled();
+          ai.elevator = pitchInput * (stunt ? fc.pitchSign : 1);
+          ai.bank = Math.abs(yawInput);
+          ai.reducedMotion = reducedMotionState.enabled;
+          // An air field is being built in parallel; wired to 0 until it lands.
+          ai.gust = 0;
+          // Climb and body rates from the flight frame's own motion, frame to
+          // frame: the same for classic, v2 and stunt, and it sees what the
+          // nest auto-fly and the launch boost do to the position. A step no
+          // bird could fly (a teleport, a restorePose) is a discontinuity,
+          // not a rate.
+          ai.climbRate = 0; ai.pitchRate = 0; ai.rollRate = 0;
+          if (delta > 0 && pose?.position && pose?.quaternion) {
+            const r1 = pose.position.length();
+            if (_aeroHasPrev && pose.position.distanceTo(_aeroPrevPos) < 80 * delta + 0.5) {
+              ai.climbRate = (r1 - _aeroPrevPos.length()) / delta;
+              _aeroDq.copy(_aeroPrevQuat).invert().multiply(pose.quaternion);
+              const k = _aeroDq.w < 0 ? -2 / delta : 2 / delta;
+              // Body +X is the right wing: + is nose up. Body +Z is astern: +
+              // carries the LEFT wing down, so it is negated to "+ rolls right".
+              ai.pitchRate = _aeroDq.x * k;
+              ai.rollRate = -_aeroDq.z * k;
+            }
+            _aeroPrevPos.copy(pose.position);
+            _aeroPrevQuat.copy(pose.quaternion);
+            _aeroHasPrev = true;
+            const terrain = (typeof sampleTerrainHeight === 'function')
+              ? sampleTerrainHeight(pose.position.x, pose.position.y, pose.position.z) : 0;
+            ai.aboveGround = sphericalWorld ? r1 - (sphericalWorld.sphereRadius + terrain) : NaN;
+          }
+          const a = aeroPose.update(ai, delta);
+          const pb = 1 - perchBlend;
+          const tl = tumble ? tumble.left : 0;
+          const tr = tumble ? tumble.right : 0;
+          leftWing.rotation.x = leftWing.userData.baseRotation.x
+            + leftDip + a.wingX * pb + a.flutter + perch.fold + tl;
+          rightWing.rotation.x = rightWing.userData.baseRotation.x
+            + rightDip - a.wingX * pb - a.flutter - perch.fold - tr;
+          leftWing.rotation.y = leftWing.userData.baseRotation.y - perch.sweep - a.wingY * pb;
+          rightWing.rotation.y = rightWing.userData.baseRotation.y + perch.sweep + a.wingY * pb;
+          leftWing.rotation.z = leftWing.userData.baseRotation.z + a.wingZ * pb;
+          rightWing.rotation.z = rightWing.userData.baseRotation.z + a.wingZ * pb;
+          // THE HAND IS SAME-SIGNED. It is a child INSIDE the arm's
+          // scale.z = -1, so the mirror is already in its frame; the old rig
+          // negated the right hand and bent the two wrists opposite ways —
+          // measured under the forced stroke, left and right tips 0.269 vs
+          // 0.386 at the top and 1.249 vs 0.896 at mid-downstroke.
+          const lh = leftWing.userData.hand;
+          const rh = rightWing.userData.hand;
+          if (lh) {
+            lh.rotation.x = (lh.userData?.baseRotation?.x || 0) + a.handX * pb;
+            lh.rotation.y = (lh.userData?.baseRotation?.y || 0) + a.handY * pb;
+            lh.scale.x = 1 + (a.handSpread - 1) * pb;
+          }
+          if (rh) {
+            rh.rotation.x = (rh.userData?.baseRotation?.x || 0) + a.handX * pb;
+            rh.rotation.y = (rh.userData?.baseRotation?.y || 0) + a.handY * pb;
+            rh.scale.x = 1 + (a.handSpread - 1) * pb;
+          }
+          if (leftWing.userData.secondaryFeather) leftWing.userData.secondaryFeather.position.y = a.featherFlex;
+          if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = a.featherFlex;
+          if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = a.featherFlex * 1.5;
+          if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = a.featherFlex * 1.5;
+          const spanZ = perch.span * (1 + (a.span - 1) * pb);
+          leftWing.scale.z = spanZ;
+          rightWing.scale.z = -spanZ;
+          _aeroPerchTailPitch = perch.tailPitch;
+          _aeroPerchTailSpread = perch.tailSpread;
+          _aeroLive = true;
+        }
       }
 
       // Harness-only. Forces a specific point in the beat cycle so the bird
@@ -12073,6 +12188,25 @@
         if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = 0;
         if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = 0;
         if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = 0;
+        // Under the aero pose the sheet photographs the Pionus stroke at full
+        // depth — the beat the game actually flies — with the hands
+        // same-signed, as they are in flight.
+        if (aeroPose) {
+          const f = aeroPose.forcedStroke(__birbFlapPhaseOverride, _aeroForced);
+          leftWing.rotation.x = leftWing.userData.baseRotation.x + f.wingX;
+          rightWing.rotation.x = rightWing.userData.baseRotation.x - f.wingX;
+          leftWing.rotation.z = leftWing.userData.baseRotation.z + f.wingZ;
+          rightWing.rotation.z = rightWing.userData.baseRotation.z + f.wingZ;
+          for (let side = 0; side < 2; side += 1) {
+            const h = (side === 0 ? leftWing : rightWing).userData.hand;
+            if (!h) continue;
+            h.rotation.x = (h.userData?.baseRotation?.x || 0) + f.handX;
+            h.rotation.y = (h.userData?.baseRotation?.y || 0) + f.handY;
+            h.scale.x = 1;
+          }
+          leftWing.scale.z = f.span;
+          rightWing.scale.z = -f.span;
+        }
       }
 
       // Tail steering + idle sway — yaw input rotates the tail fan around Y
@@ -12095,6 +12229,17 @@
         tail.rotation.z = baseRot.z;
         const fanSpread = (1 + Math.abs(yawInputTail) * 0.20) * perchPose(perchBlend).tailSpread;
         tail.scale.z += (fanSpread - tail.scale.z) * (1 - Math.exp(-delta * 8));
+        // Aero pose: PITCH is rotation.z. The tail is built along -X, so the
+        // rotation.x the lines above write the elevator and the perch drop
+        // into is a TWIST about its own long axis, and the tip never moved.
+        // x carries the twist into a roll instead; the yaw sway stays as is.
+        if (aeroPose && _aeroLive) {
+          const a = aeroPose.out;
+          const pbT = 1 - perchBlend;
+          tail.rotation.x = baseRot.x + a.tailTwist * pbT;
+          tail.rotation.z = baseRot.z + a.tailPitch * pbT + _aeroPerchTailPitch;
+          tail.scale.z = _aeroPerchTailSpread * a.tailYawFan * (1 + (a.tailFan - 1) * pbT);
+        }
       }
 
       // Walk cycle — body bob + alternating foot tilt while grounded & moving.
@@ -12130,6 +12275,18 @@
       const footTuck = !isGroundedVisual && flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING ? footTuckRest : 0;
       if (leftFoot) leftFoot.rotation.z += (footTuck - leftFoot.rotation.z) * (1 - Math.exp(-delta * 7));
       if (rightFoot) rightFoot.rotation.z += (footTuck - rightFoot.rotation.z) * (1 - Math.exp(-delta * 7));
+      // Aero pose: down on the ground and falling (the pose the lines above
+      // ease to) and standing in the nest (where they tucked them, unseen in
+      // the cockpit view, so a take-off now starts gear-down); LANDING GEAR in
+      // the air — out a beat or three before contact on a slow descent,
+      // reaching a little forward, tucked again climbing away. Eased inside
+      // the model at the same 7/s.
+      if (aeroPose && _aeroLive) {
+        const a = aeroPose.out;
+        const footZ = footTuckRest * (1 - a.feet) + AERO_GEAR_REACH * a.gear;
+        if (leftFoot) leftFoot.rotation.z = footZ;
+        if (rightFoot) rightFoot.rotation.z = footZ;
+      }
 
       if (glideTrail && glideTrail.rotation) {
         glideTrail.rotation.z = motionState.elapsed * 0.32;
@@ -13918,7 +14075,60 @@
             // suggests, and the reason the bank dip shipped with its signs
             // swapped. `y` is the bird's own up.
             leftTip: tipLocal(lw), rightTip: tipLocal(rw),
+            // A point near the tail's trailing tip, same frame. The elevator
+            // is judged by where THIS goes, not by an Euler angle: the tail is
+            // built along -X, so the rotation.x the old rig wrote its
+            // elevator into is a twist about that axis and moves this by
+            // nothing (aero-pose moves it with rotation.z).
+            tailTip: (() => {
+              const tl = g('tail');
+              if (!tl) return null;
+              birbAnchor.updateWorldMatrix(true, true);
+              const w = tl.localToWorld(new THREE.Vector3(-0.8, 0, 0));
+              birbAnchor.worldToLocal(w);
+              return w.toArray().map((n) => +n.toFixed(4));
+            })(),
           };
+        },
+        // What the air is doing to the pose (src/flight/aero-pose.js): the
+        // beat's phase and depth, the burst envelope, the delivered power
+        // demand, the speed morph, the high-lift splay and tail fan, the
+        // landing gear, plus the inputs it was fed this frame. `enabled`
+        // is false under ?aeropose=0. The live object for game code (audio
+        // keyed off `downstroke`/`beats`) is `aeroPose.out` itself.
+        aeroPose: () => {
+          if (!aeroPose) return { enabled: false };
+          const a = aeroPose.out;
+          const ai = aeroPoseInput;
+          const r = (n) => (Number.isFinite(n) ? +n.toFixed(4) : null);
+          return {
+            enabled: true,
+            live: _aeroLive,
+            phase01: r(a.phase01), beats: a.beats, downstroke: a.downstroke,
+            depth: r(a.depth), envelope: r(a.envelope), demand: r(a.demand), duty: r(a.duty),
+            span: r(a.span), morphSpan: r(a.morphSpan), sweep: r(a.sweep), splay: r(a.splay),
+            tailFan: r(a.tailFan), tailPitch: r(a.tailPitch), tailTwist: r(a.tailTwist),
+            flex: r(a.flex), load: r(a.load), liftFraction: r(a.liftFraction),
+            feet: r(a.feet), gear: r(a.gear), air: r(a.air),
+            stalled: a.stalled, frozen: a.frozen,
+            input: {
+              airborne: ai.airborne, landing: ai.landing, airspeed: r(ai.airspeed), cruise: r(ai.cruise),
+              target: r(ai.target), throttle: r(ai.throttle), stalled: ai.stalled,
+              climbRate: r(ai.climbRate), pitchRate: r(ai.pitchRate), rollRate: r(ai.rollRate),
+              elevator: r(ai.elevator), bank: r(ai.bank), aboveGround: r(ai.aboveGround), gust: r(ai.gust),
+            },
+          };
+        },
+        // Put the bird back in the air (or on the ground). A harness knocked
+        // down by a drone or a canopy during its own setup stays FALLING
+        // through every later check — the stick is zeroed while falling — and
+        // every one of them then fails for a reason that has nothing to do
+        // with what it measures.
+        setRecovery: (state = 'flying') => {
+          const next = FLIGHT_RECOVERY_STATES[String(state).toUpperCase()];
+          if (!next) return null;
+          applyFlightRecoveryState(next);
+          return flightRecoveryState;
         },
         // The flight state in the only terms that mean anything on a sphere:
         // pitch and roll against the LOCAL radial up, and a heading bearing in
