@@ -132,6 +132,9 @@ const CORE_ASSETS = [
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
   './src/flight/aero-pose.js',
+  // Physical plumage: imported on every boot path (the v3 bird reads it at
+  // build time), so an offline launch without it dies on a dynamic import.
+  './src/flight/plumage.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',

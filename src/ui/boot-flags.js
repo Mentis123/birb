@@ -97,6 +97,8 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'feathernormals', group: 'Bird', kind: 'toggle', label: 'Feather normal maps' },
   { key: 'aeropose', group: 'Bird', kind: 'toggle', label: 'Air poses the bird (beat, span, tail, feet)',
     hint: 'Off is the old rig: the beat and the tail read the raw stick, so under pull-back-to-climb a dive flapped harder than a climb and the elevator moved the wrong way.' },
+  { key: 'plumage', group: 'Bird', kind: 'toggle', label: 'Physical plumage (iridescent wings, sheen, sky reflections)',
+    hint: 'Off is the Standard-material bird: metal-faked bronze, no environment to reflect. v3 only.' },
   // ---- Flight ----
   { key: 'levelturn', group: 'Flight', kind: 'toggle', label: 'Level turns (yaw about the planet)',
     hint: 'Off yaws about the bird’s own up — the before, where a held dive spiralled and looped out of itself.' },
