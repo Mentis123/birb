@@ -77,7 +77,15 @@ jobs:
       # birb-quality steps with no guard, so the job died before reaching
       # any of the four below on every push touching index.html/src/**/sw.js.)
 
+      # Every check below runs even when one above it failed
+      # (`if: ${{ !cancelled() }}`); the job still fails if any did. Under the
+      # default `success()` one red step skipped everything after it: on main
+      # at d47fc7e (run 159) the flight-v2 ground-contact coin toss failed and
+      # the shader and quality steps never ran, so that run could not say
+      # whether they were green. A failure should report what else broke,
+      # not hide it.
       - name: The production default is Ultra, every lever at its ceiling, and a preset switch is reversible
+        if: ${{ !cancelled() }}
         # Boots with NO quality flag — the path a player takes — and reads the
         # EFFECTIVE renderer state back: native DPR, VSM 2048, 4x MSAA, post
         # Full, terrain High, anisotropy at the device max. Then Amazing must
@@ -87,21 +95,25 @@ jobs:
         run: node tools/birb-default.mjs
 
       - name: Game starts and is actually playable
+        if: ${{ !cancelled() }}
         # Asserts a rendered frame AND that the nesting and collectibles
         # systems exist, on the plain-start path a player takes. Exits
         # non-zero on any page error or console error.
         run: node tools/birb-shot.mjs --out /tmp/start.png --start --query quality=amazing
 
       - name: A nest can be landed on
+        if: ${{ !cancelled() }}
         run: node tools/birb-shot.mjs --out /tmp/nest.png --start --nest --query quality=amazing
 
       - name: Every game mode enters, reports sane state and exits
+        if: ${{ !cancelled() }}
         # Ring Rush's win condition must equal the spawner's ring count, and
         # Turret Defense must put the player on the gun. Console warnings
         # count as failures: that is how the setup bug announced itself.
         run: node tools/birb-modes.mjs
 
       - name: The bird can stand, walk, stop, reverse and steer
+        if: ${{ !cancelled() }}
         # The grounded state had a walk cycle and walk controls for months
         # and nothing in the repo drove them, so two defects sat in the
         # shipped build: the perch fold targeted `isNested` alone (a bird
@@ -114,6 +126,7 @@ jobs:
         run: node tools/birb-walk.mjs
 
       - name: The stunt flight model is the default, and the Boost pill is a pad
+        if: ${{ !cancelled() }}
         # docs/realism/STUNT_FLIGHT_PLAN.md, gate G-STUNT-0. This step boots
         # with NO flight flag on purpose: its first assertion is that the
         # PRODUCTION DEFAULT is the stunt model, which a run passing
@@ -126,6 +139,7 @@ jobs:
         run: node tools/birb-stunt.mjs
 
       - name: Flight v2 rolls, loops, turns from the bank, rights itself and crashes inverted
+        if: ${{ !cancelled() }}
         # docs/realism/FLIGHT_V2_PLAN.md's `?flight=v2`: bank-to-turn instead
         # of yaw-with-cosmetic-bank, unlimited pitch instead of an 80° clamp,
         # and an energy model instead of a constant cruise speed. The FIRST
@@ -139,6 +153,7 @@ jobs:
         run: node tools/birb-flight-v2.mjs
 
       - name: Every shader compiles, in every environment
+        if: ${{ !cancelled() }}
         # Three logs a shader error and then quietly draws NOTHING for that
         # material, so the page still renders and a screenshot still exits
         # zero. Two systems shipped invisible this way in one session — the
@@ -152,6 +167,7 @@ jobs:
       # above on purpose (see the comment block at the top of this list).
 
       - name: Quality harness initializes; two capturers are still missing (Wave 2R)
+        if: ${{ !cancelled() }}
         # Boots a game, installs the 25 catalogued mutations and reads
         # telemetry from __BIRB.effective(). Measured on this tree: 23 of 25
         # mutations are detected; two (M-A1-gesture-behind-debug and
@@ -165,6 +181,7 @@ jobs:
         continue-on-error: true
 
       - name: Resize-restore bug is fixed and must stay fixed
+        if: ${{ !cancelled() }}
         # A6 asserts that tier restoration without a canvas resize leaves
         # bloom and weather targets desynchronized. That bug is what
         # docs/perf/EXPECTED-RED.md originally described as permanent.
@@ -178,6 +195,7 @@ jobs:
         run: node tools/birb-quality.mjs --check resize-restore
 
       - name: Every quality assertion passes
+        if: ${{ !cancelled() }}
         # Runs all twelve assertions. Measured on this tree: A4, A6, A7, A8,
         # A9 pass. A1, A2, A3, A5, A10, A11, A12 report their target file as
         # present on disk (src/ui/dev-quality-panel.js, src/ui/dev-gesture.js,
