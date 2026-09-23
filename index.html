@@ -3322,7 +3322,17 @@
       const startGame = () => {
         // Unlock audio in the same user gesture as Start. This avoids starting
         // ambient music from splash/tap interactions before gameplay begins.
-        unlockAudio();
+        //
+        // GUARDED, because `unlockAudio` is a const declared AFTER the
+        // module's import awaits: a tap that lands while three.js is still
+        // downloading hits its temporal dead zone and throws — measured, with
+        // the core module held in flight: "Cannot access 'unlockAudio' before
+        // initialization". That throw killed this handler before the pending
+        // path below could run, so the tap was simply lost (no "Loading…",
+        // nothing queued), and it also poisoned the boot watchdog's `reason`,
+        // which then offered to clear the cache of a game that was loading
+        // fine. The pending path takes the tap now; audio unlocks on the next.
+        try { unlockAudio(); } catch (_) { /* still loading */ }
         if (typeof startGameLoop !== 'function') {
           // Scene still loading (slow network / fast tap): show progress on
           // the button instead of revealing an empty canvas. The late-load
