@@ -113,6 +113,288 @@ export const GROUND_PROFILES = {
 };
 
 /**
+ * ── Ground that never repeats: hex tiling on two projections (?hextile=1) ──
+ *
+ * The authored ground map is one 512² photograph laid every 18 units. From
+ * the air that is a lattice: the same dark blotch, the same pale gravel
+ * patch, marching across the valley in rows. `groundMap.hexTile` replaces the
+ * triplanar sample with two ideas that compose:
+ *
+ *  - Mikkelsen 2022, "Practical Real-Time Hex-Tiling" (JCGT 11(3)). The plane
+ *    is cut into a triangle grid; each vertex owns a hexagonal tile that shows
+ *    the texture at a random OFFSET and ROTATION, and every point blends the
+ *    three tiles of its triangle. His blend is what makes it usable: the
+ *    barycentric weight is raised to the 7th power, so most of every tile is
+ *    one sample and only a thin seam blends, and it is tilted toward the
+ *    BRIGHTER sample (`mix(1, luminance, 0.6)`), so the seam follows the
+ *    texture's own features like a height blend instead of cross-fading two
+ *    photographs into mush. Each fetch is a `textureGrad` with the gradient
+ *    rotated with the tile, so the mip choice is continuous across the seams
+ *    that the random offsets would otherwise tear.
+ *  - Quilez's biplanar mapping. Of the three triplanar projections only the
+ *    two dominant ones are fetched, each with ITS OWN projected gradients,
+ *    and the weights get local support — a kept axis weighs nothing at
+ *    1/sqrt(3), which is exactly where the dropped axis can change, so the
+ *    swap is seamless. Three tiles x two projections is six fetches, not
+ *    nine; and over most of the planet the second axis sits below 1/sqrt(3)
+ *    and weighs exactly nothing, so it is skipped: three fetches there, the
+ *    same count the triplanar pays everywhere.
+ *
+ * The projections are chosen by the SMOOTH surface normal on the smooth path
+ * (the default), not by the sphere's radial as the triplanar does. Three
+ * projections averaged hide a projection that lies nearly along a valley
+ * wall — as blur; two cannot, and the map streaks. The triplanar avoided the
+ * facet normal because it snaps per triangle; the smooth normal is
+ * continuous, which is all the seamless swap needs. The flat path has no
+ * continuous surface normal and keeps the radial.
+ *
+ * Considered and rejected on the fetch budget: Wronski 2025 ("GPU-Friendly
+ * Laplacian Texture Blending", JCGT 14(1)) blends Laplacian levels with
+ * per-level mask sharpness and fixes the contrast loss properly — at n+1
+ * fetches per tile per projection, 30 for four levels against six here.
+ *
+ * Measured on the real forest albedo with the JS mirror below (200k samples):
+ * Mikkelsen's blend moves the mean +0.2% (inside the estimate's own noise,
+ * and the uGroundGain normalisation assumes the file's mean) and keeps 94% of
+ * the texture's standard deviation — the thin seams are all it loses.
+ *
+ * Everything here is OPT-IN. The frozen suites pin the default's fetch budget
+ * (three texture2D calls) and its bytes, so without `hexTile` this module
+ * emits exactly what it always has; with it and switched off at runtime
+ * (`setGroundHexTile(material, false)`), likewise — so the A/B's off side is
+ * the true before, not an approximation of it.
+ */
+export const HEX_TILE_DEFAULTS = Object.freeze({
+  // Fraction of a full turn a tile may be rotated by. Gravel and leaf litter
+  // seen from above have no grain direction, so all of it.
+  rotation: 1.0,
+  // Mikkelsen's g_fallOffContrast and g_exp, unchanged.
+  falloff: 0.6,
+  exponent: 7.0,
+  // Triangle-grid density in grid cells per texture repeat. 2*sqrt(3) is the
+  // paper's (and Heitz-Neyret 2018's): neighbouring tile centres 0.29 of a
+  // repeat apart, i.e. about 5.2 units on the 18-unit forest tile.
+  cells: 2 * Math.sqrt(3),
+});
+
+/** `?hextile=1`. Off is the shipping default (see the note above). */
+export function hexTileRequested(search) {
+  return /[?&]hextile=1(?:&|#|$)/.test(search || '');
+}
+
+/**
+ * Switch a hex-capable ground material between the hex path and the
+ * byte-identical triplanar at runtime (a recompile, not a uniform: the off
+ * program is literally the default's). Returns the new state, or null when
+ * the material was never given `groundMap.hexTile`. Debug/A-B only.
+ */
+export function setGroundHexTile(material, on) {
+  const state = material?.userData?.birbGroundHex;
+  if (!state) return null;
+  const next = !!on;
+  if (state.enabled !== next) {
+    state.enabled = next;
+    markHexProgram(material, next);
+    material.needsUpdate = true;
+  }
+  return state.enabled;
+}
+
+/**
+ * The flip has to reach three's PROGRAM cache, and the cache key alone cannot
+ * carry it: addAtmosphere (chained after this patch on every world material)
+ * evaluates the key chain ONCE, at patch time, and returns that string
+ * forever — so a key that changes afterwards changes nothing, three reuses
+ * the program it already has, and the A/B photographs one arm twice (it did,
+ * pixel for pixel). Three also keys programs on `material.defines`, so the
+ * hex program carries a define; an empty defines object adds nothing to the
+ * key or the source, which keeps the off program the default one exactly.
+ */
+function markHexProgram(material, on) {
+  if (on) material.defines = { ...(material.defines || {}), BIRB_GROUND_HEX: '' };
+  else if (material.defines) delete material.defines.BIRB_GROUND_HEX;
+}
+
+// ---- JS mirror of the GLSL below. Tests pin the properties the look depends
+// on (weights sum to 1, seams are continuous, the swap is seamless); nothing
+// here runs per frame. Plain float64, so it matches the shader's float32 in
+// behaviour, not to the last bit. ----
+const _fract = (x) => x - Math.floor(x);
+
+/** "Hash without Sine" (Dave Hoskins, MIT): three values in [0,1) per vertex. */
+export function hexTileHash(x, y) {
+  let a = _fract(x * 0.1031);
+  let b = _fract(y * 0.1030);
+  let c = _fract(x * 0.0973);
+  const d = a * (b + 33.33) + b * (a + 33.33) + c * (c + 33.33);
+  a += d; b += d; c += d;
+  return [_fract((a + b) * c), _fract((a + c) * b), _fract((b + c) * a)];
+}
+
+/**
+ * The triangle of the hex grid under `st` (texture units): its three vertex
+ * ids (integer lattice points in the skewed grid) and the barycentric weight
+ * each one gets, which is 1 at its own vertex and 0 on the far edge.
+ */
+export function hexTileCell(stx, sty, cells = HEX_TILE_DEFAULTS.cells) {
+  const gx = stx * cells;
+  const gy = sty * cells;
+  const kx = gx - 0.57735027 * gy;
+  const ky = 1.15470054 * gy;
+  const bx = Math.floor(kx);
+  const by = Math.floor(ky);
+  const fx = kx - bx;
+  const fy = ky - by;
+  const fz = 1 - fx - fy;
+  const s = fz <= 0 ? 1 : 0;
+  const s2 = 2 * s - 1;
+  return {
+    weights: [Math.max(0, -fz * s2), Math.max(0, s - fy * s2), Math.max(0, s - fx * s2)],
+    vertices: [[bx + s, by + s], [bx + s, by + 1 - s], [bx + 1 - s, by + s]],
+  };
+}
+
+/** Where vertex `v`'s tile samples the texture for the point `st`. */
+export function hexTileUv(stx, sty, v, { rotation = HEX_TILE_DEFAULTS.rotation, cells = HEX_TILE_DEFAULTS.cells } = {}) {
+  const h = hexTileHash(v[0], v[1]);
+  const angle = (h[2] * 2 - 1) * Math.PI * rotation;
+  const cs = Math.cos(angle);
+  const sn = Math.sin(angle);
+  const cx = (v[0] + 0.5 * v[1]) / cells;
+  const cy = 0.8660254 * v[1] / cells;
+  const dx = stx - cx;
+  const dy = sty - cy;
+  return [cs * dx - sn * dy + cx + h[0], sn * dx + cs * dy + cy + h[1]];
+}
+
+/** Mikkelsen's blend weights for barycentrics `w` and sample luminances `lum`, normalised. */
+export function hexTileWeights(w, lum, { falloff = HEX_TILE_DEFAULTS.falloff, exponent = HEX_TILE_DEFAULTS.exponent } = {}) {
+  const W = w.map((b, i) => (1 + (lum[i] - 1) * falloff) * Math.pow(Math.max(0, b), exponent));
+  const sum = W[0] + W[1] + W[2];
+  return W.map((x) => x / sum);
+}
+
+/**
+ * The two projections the biplanar path fetches for blend normal `n` (the
+ * smooth surface normal on the smooth path, the radial on the flat one),
+ * major first, with their normalised weights: `{ axes: ['x','z'], weights:
+ * [0.9, 0.1] }`. The minor axis is dropped (ties drop x, then y); a kept
+ * axis's raw weight is `clamp((|n| - 1/sqrt(3)) / (1 - 1/sqrt(3)))^sharpness`.
+ */
+export function biplanarProjections(nx, ny, nz, sharpness = 4) {
+  const an = [Math.abs(nx), Math.abs(ny), Math.abs(nz)];
+  const dropX = an[0] <= an[1] && an[0] <= an[2];
+  const dropY = !dropX && an[1] <= an[2];
+  const keepZ = dropX || dropY;
+  let axes = [dropX ? 1 : 0, keepZ ? 2 : 1];
+  if (an[axes[1]] > an[axes[0]]) axes = [axes[1], axes[0]];
+  const k = 0.57735027;
+  const raw = axes.map((a) => Math.pow(Math.min(1, Math.max(0, (an[a] - k) / (1 - k))), sharpness));
+  const names = ['x', 'y', 'z'];
+  // Mirrors the shader's early-out: no weight on the second axis, first only.
+  const weights = raw[1] <= 0 ? [1, 0] : [raw[0] / (raw[0] + raw[1]), raw[1] / (raw[0] + raw[1])];
+  return { axes: axes.map((a) => names[a]), weights };
+}
+
+// The GLSL. Declared after the ground-map uniforms (it reads uGroundMap,
+// uGroundTile and uGroundSharp) and emitted only on the hex path. GLSL ES
+// 3.00, which three compiles as: textureGrad is core, no extension needed.
+const HEX_TILE_GLSL = `
+      uniform vec4 uGroundHex; // x rotation (angle up to +/- x*PI), y luminance falloff, z exponent, w grid cells per repeat
+      // Hash without Sine (Dave Hoskins, MIT): offset and angle per vertex.
+      vec3 gtHexHash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+        p3 += dot(p3, p3.yxz + 33.33);
+        return fract((p3.xxy + p3.yzz) * p3.zyx);
+      }
+      // Mikkelsen 2022: three rotated, offset tiles of uGroundMap at st
+      // (texture units), dx/dy its screen derivatives.
+      vec3 gtHexTile(vec2 st, vec2 dx, vec2 dy) {
+        vec2 hxG = st * uGroundHex.w;
+        vec2 hxK = vec2(hxG.x - 0.57735027 * hxG.y, 1.15470054 * hxG.y);
+        vec2 hxB = floor(hxK);
+        vec3 hxF = vec3(hxK - hxB, 0.0);
+        hxF.z = 1.0 - hxF.x - hxF.y;
+        float hxS = step(0.0, -hxF.z);
+        float hxS2 = 2.0 * hxS - 1.0;
+        vec3 hxBary = max(vec3(-hxF.z * hxS2, hxS - hxF.y * hxS2, hxS - hxF.x * hxS2), 0.0);
+        vec2 hxV1 = hxB + vec2(hxS);
+        vec2 hxV2 = hxB + vec2(hxS, 1.0 - hxS);
+        vec2 hxV3 = hxB + vec2(1.0 - hxS, hxS);
+        vec3 hxH1 = gtHexHash(hxV1);
+        vec3 hxH2 = gtHexHash(hxV2);
+        vec3 hxH3 = gtHexHash(hxV3);
+        vec3 hxAng = (vec3(hxH1.z, hxH2.z, hxH3.z) * 2.0 - 1.0) * (3.14159265 * uGroundHex.x);
+        vec3 hxCs = cos(hxAng);
+        vec3 hxSn = sin(hxAng);
+        mat2 hxR1 = mat2(hxCs.x, hxSn.x, -hxSn.x, hxCs.x);
+        mat2 hxR2 = mat2(hxCs.y, hxSn.y, -hxSn.y, hxCs.y);
+        mat2 hxR3 = mat2(hxCs.z, hxSn.z, -hxSn.z, hxCs.z);
+        vec2 hxC1 = vec2(hxV1.x + 0.5 * hxV1.y, 0.8660254 * hxV1.y) / uGroundHex.w;
+        vec2 hxC2 = vec2(hxV2.x + 0.5 * hxV2.y, 0.8660254 * hxV2.y) / uGroundHex.w;
+        vec2 hxC3 = vec2(hxV3.x + 0.5 * hxV3.y, 0.8660254 * hxV3.y) / uGroundHex.w;
+        // Gradients rotate with the tile: the mip level stays continuous
+        // across the seams the random offsets tear in the coordinate.
+        vec3 hxT1 = textureGrad(uGroundMap, hxR1 * (st - hxC1) + hxC1 + hxH1.xy, hxR1 * dx, hxR1 * dy).rgb;
+        vec3 hxT2 = textureGrad(uGroundMap, hxR2 * (st - hxC2) + hxC2 + hxH2.xy, hxR2 * dx, hxR2 * dy).rgb;
+        vec3 hxT3 = textureGrad(uGroundMap, hxR3 * (st - hxC3) + hxC3 + hxH3.xy, hxR3 * dx, hxR3 * dy).rgb;
+        // Mikkelsen's contrast-preserving blend: a steep barycentric falloff
+        // tilted toward the brighter sample, renormalised to sum to 1.
+        vec3 hxLw = vec3(0.299, 0.587, 0.114);
+        vec3 hxW = mix(vec3(1.0), vec3(dot(hxT1, hxLw), dot(hxT2, hxLw), dot(hxT3, hxLw)), uGroundHex.y)
+                 * pow(hxBary, vec3(uGroundHex.z));
+        hxW /= hxW.x + hxW.y + hxW.z;
+        return hxW.x * hxT1 + hxW.y * hxT2 + hxW.z * hxT3;
+      }
+      // Quilez's biplanar: the two dominant projections of the triplanar
+      // (X reads zy, Y reads xz, Z reads xy), major first, each with its own
+      // projected world-space derivatives.
+      vec3 gtHexBiplanar(vec3 p, vec3 n, vec3 dpx, vec3 dpy) {
+        vec3 hxN = abs(n);
+        bool hxDropX = hxN.x <= hxN.y && hxN.x <= hxN.z;
+        bool hxKeepZ = hxDropX || hxN.y <= hxN.z;
+        vec2 hxW = vec2(hxDropX ? hxN.y : hxN.x, hxKeepZ ? hxN.z : hxN.y);
+        vec2 hxUvP = hxDropX ? p.xz : p.zy;
+        vec2 hxDxP = hxDropX ? dpx.xz : dpx.zy;
+        vec2 hxDyP = hxDropX ? dpy.xz : dpy.zy;
+        vec2 hxUvQ = hxKeepZ ? p.xy : p.xz;
+        vec2 hxDxQ = hxKeepZ ? dpx.xy : dpx.xz;
+        vec2 hxDyQ = hxKeepZ ? dpy.xy : dpy.xz;
+        bool hxSwap = hxW.y > hxW.x;
+        // Local support: a kept axis weighs nothing at 1/sqrt(3), which is
+        // where the dropped axis can change, so the swap is seamless.
+        hxW = pow(clamp(((hxSwap ? hxW.yx : hxW) - 0.57735027) / 0.42264973, 0.0, 1.0), vec2(uGroundSharp));
+        vec3 hxA = gtHexTile((hxSwap ? hxUvQ : hxUvP) / uGroundTile,
+          (hxSwap ? hxDxQ : hxDxP) / uGroundTile, (hxSwap ? hxDyQ : hxDyP) / uGroundTile);
+        // Most of the planet: the median axis weighs exactly nothing, so its
+        // three fetches are skipped. Explicit gradients make the branch legal.
+        if (hxW.y <= 0.0) return hxA;
+        vec3 hxQ = gtHexTile((hxSwap ? hxUvP : hxUvQ) / uGroundTile,
+          (hxSwap ? hxDxP : hxDxQ) / uGroundTile, (hxSwap ? hxDyP : hxDyQ) / uGroundTile);
+        return (hxA * hxW.x + hxQ * hxW.y) / (hxW.x + hxW.y);
+      }
+`;
+
+// The hex path's replacements for the two triplanar fetch blocks below.
+const HEX_SMOOTH_FETCH = `
+      // Hex-tiled biplanar (?hextile=1), HOISTED like the triplanar it
+      // replaces: the bump below reads the same six fetches, not more.
+      // Projections chosen by the SMOOTH surface normal, not the sphere's:
+      // with only two projections a valley wall can be left with one that
+      // lies almost along it, and the map streaks. The smooth normal is
+      // continuous across triangles, which is all the swap needs.
+      vec3 gtN0 = normalize(mix(gdSmoothW, gdFacetW, uGroundFacet));
+      vec3 gdTex = gtHexBiplanar(vBirbWorld, gtN0, dFdx(vBirbWorld), dFdy(vBirbWorld));
+`;
+const HEX_FLAT_OVERLAY = `
+        // Authored ground overlay, hex-tiled biplanar (?hextile=1): see the
+        // hex note at the top of this module.
+        vec3 gtN = normalize(mix(gdUp, gdN, uGroundFacet));
+        vec3 gtTex = gtHexBiplanar(gdP, gtN, dFdx(gdP), dFdy(gdP));
+        gdTint *= mix(vec3(1.0), gtTex * uGroundGain, uGroundMix);
+`;
+
+/**
  * Optional authored-texture overlay for the ground, projected TRIPLANAR off
  * the world position — the planet's own UVs run once around the sphere and
  * converge at the poles, so there is no seam-free UV to tile a texture on.
@@ -171,6 +453,9 @@ export const GROUND_PROFILES = {
  *                    call, every field is required: this throws rather than
  *                    defaults a missing one, the same contract
  *                    `addInstancedUvScale` uses for an unknown geometry shape.
+ *                    Optional `hexTile` (true, or a partial HEX_TILE_DEFAULTS)
+ *                    swaps the triplanar for hex-tiled biplanar — see the hex
+ *                    note above HEX_TILE_DEFAULTS. Absent, nothing changes.
  */
 export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0 } = {}) {
   const profile = GROUND_PROFILES[biome];
@@ -204,11 +489,26 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
   } : null;
   if (texUniforms) material.userData.birbGroundTexUniforms = texUniforms;
 
+  // Hex tiling rides the ground map (it re-samples it) and is only ever
+  // attached when asked for. `enabled` is read at every compile and by the
+  // cache key, so setGroundHexTile can flip it with one recompile.
+  let hexState = null;
+  if (texUniforms && groundMap.hexTile) {
+    const o = { ...HEX_TILE_DEFAULTS, ...(typeof groundMap.hexTile === 'object' ? groundMap.hexTile : {}) };
+    hexState = {
+      enabled: true,
+      uniform: { value: new THREE.Vector4(o.rotation, o.falloff, o.exponent, o.cells) },
+    };
+    material.userData.birbGroundHex = hexState;
+    markHexProgram(material, true);
+  }
+
   const previous = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
 
   material.onBeforeCompile = (shader, renderer) => {
     if (typeof previous === 'function') previous.call(material, shader, renderer);
+    const hex = !!(hexState && hexState.enabled);
 
     shader.uniforms.uGdBase = { value: baseRadius };
     shader.uniforms.uGdScale = { value: profile.noiseScale };
@@ -221,6 +521,15 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
     shader.uniforms.uGdDetail = { value: new THREE.Vector2(profile.detailScale, profile.detail) };
     shader.uniforms.uGdBand = { value: new THREE.Vector2(profile.band, profile.bandScale) };
     if (texUniforms) Object.assign(shader.uniforms, texUniforms);
+    // Bound whenever the material CAN go hex, not only when this compile is
+    // the hex one: three runs a program it reuses from its cache with the
+    // uniforms object of whichever program it compiled LAST, so after an
+    // off -> on flip a uniform bound only for the hex variant is never
+    // uploaded again — the program keeps its stale value and a retune
+    // silently does nothing (measured: five parameter sets, one frame).
+    // Unused by the off program, and a uniform not in the source is not in
+    // the program: the off shader's bytes do not change.
+    if (hexState) shader.uniforms.uGroundHex = hexState.uniform;
 
     // Shared with addAtmosphere and the city's street grid; whichever runs
     // first declares it. Declared twice the shader does not compile, Three
@@ -257,7 +566,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       vec3 gdSmoothW = inverseTransformDirection(normal, viewMatrix);
       float gdShadeSlope = 1.0 - clamp(dot(gdSmoothW, gdUpW), 0.0, 1.0);
       vec3 gdShadeW = gdSmoothW;
-` + (texUniforms ? `
+` + (texUniforms ? (hex ? HEX_SMOOTH_FETCH : `
       // The triplanar sample, HOISTED out of the tint block below so the
       // bump and the colour share ONE set of fetches. Still three, exactly
       // as before this existed.
@@ -267,7 +576,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       vec3 gdTex = texture2D(uGroundMap, vBirbWorld.zy / uGroundTile).rgb * gtW0.x
             + texture2D(uGroundMap, vBirbWorld.xz / uGroundTile).rgb * gtW0.y
             + texture2D(uGroundMap, vBirbWorld.xy / uGroundTile).rgb * gtW0.z;
-
+`) + `
       // The soil albedo's own luminance IS a height field, and its
       // screen-space gradient is that field's slope — so relief costs no
       // normal map and no extra fetch. Same construction as three's
@@ -310,6 +619,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
           + 'uniform float uGroundFacet; uniform vec3 uGroundGain; uniform float uGroundMix;\n'
           + 'uniform float uGroundBump;\n'
         : '')
+      + (hex ? HEX_TILE_GLSL : '')
       + `
       float gdHash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
@@ -388,7 +698,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
         // Already fetched at <normal_fragment_begin>, where the bump needed
         // it. Three fetches for the frame, not six.
         gdTint *= mix(vec3(1.0), gdTex * uGroundGain, uGroundMix);
-` : texUniforms ? `
+` : texUniforms ? (hex ? HEX_FLAT_OVERLAY : `
         // Authored ground overlay, triplanar off world position. See the
         // function doc comment above for why sphere-normal blending, why the
         // weights are renormalised, and why uGroundMix (not a clamp) is what
@@ -407,7 +717,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
                    + texture2D(uGroundMap, gtUvY).rgb * gtW.y
                    + texture2D(uGroundMap, gtUvZ).rgb * gtW.z;
         gdTint *= mix(vec3(1.0), gtTex * uGroundGain, uGroundMix);
-` : '') + `
+`) : '') + `
         outgoingLight *= gdTint;
       }
 
@@ -417,7 +727,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
   material.customProgramCacheKey = () =>
-    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}`;
+    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}${hexState && hexState.enabled ? '-hex' : ''}`;
   material.needsUpdate = true;
   return material;
 }
