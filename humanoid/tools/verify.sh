@@ -135,6 +135,19 @@ if command -v "$BLENDER_BIN" >/dev/null 2>&1; then
         fi
         rm -f "$import_log"
     done
+    # Paint has to come back out where it was painted, as a consumer reads the
+    # texture. Before 2026-09-23 every exported UV pointed at the other end of
+    # the image, and nothing here could see it: the render below replaces the
+    # material with plain clay.
+    if [ -e "$OUT/clay-sculpted.glb" ]; then
+        if "$BLENDER_BIN" --factory-startup --background \
+             --python "$ROOT/tools/blender_check_paint.py" -- "$OUT/clay-sculpted.glb" \
+             >/dev/null 2>&1; then
+            ok "clay-sculpted.glb paint lands where it was painted"
+        else
+            bad "clay-sculpted.glb paint is not where it was painted"
+        fi
+    fi
 else
     skip "Blender glTF import (set BLENDER_BIN)"
 fi

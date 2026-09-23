@@ -206,7 +206,11 @@ async function main() {
     for (const c of all) console.log(`${c.name}${c.query ? `  (?${c.query})` : ''}  — ${c.file}`);
     return;
   }
-  const selected = only.length ? all.filter((c) => only.includes(c.name)) : all;
+  // A trailing `*` selects by prefix (`--only aero-pose-*`). When names were
+  // exact-only, such a pattern matched nothing — and a run that silently
+  // selected half its list still ended "ok".
+  const wanted = (c) => only.some((o) => (o.endsWith('*') ? c.name.startsWith(o.slice(0, -1)) : o === c.name));
+  const selected = only.length ? all.filter(wanted) : all;
   if (!selected.length) {
     console.log(only.length ? `no check named ${only.join(', ')}` : 'no checks in tools/realism-checks/');
     process.exitCode = only.length ? 1 : 0;

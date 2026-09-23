@@ -59,12 +59,22 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'smooth', group: 'Shading', kind: 'toggle', label: 'Smooth shading (soil rolls, rock fractures)' },
   { key: 'leaves', group: 'Shading', kind: 'toggle', label: 'Lacy canopy edges' },
   { key: 'snowline', group: 'Shading', kind: 'toggle', label: 'Snow on up-facing surfaces' },
+  // ---- Shadows without shadow maps (every preset) ----
+  { key: 'horizon', group: 'Shading', kind: 'toggle', label: 'Terrain + canopy shadows (horizon map)',
+    hint: 'Ridges, canopies, peaks, spires and towers shade the ground and each other, and valleys see less sky. Baked once per world in a worker; off is the old unshadowed light.' },
+  { key: 'birdshadow', group: 'Shading', kind: 'toggle', label: 'Bird casts a sun shadow (ellipsoids)',
+    hint: 'Body and both wings as analytic ellipsoids along the real sun direction. The straight-down contact disc stays either way — it is the altitude cue.' },
   { key: 'ibl', group: 'Shading', kind: 'select', label: 'Image-based lighting',
     options: [
       { value: null, label: 'Off' },
       { value: '1', label: 'On' },
     ],
     hint: 'Off is the shipping default. On prefilters the sky once at boot and lights the scene with it.' },
+  // ---- Light: one sun, one sky, for a planet ----
+  { key: 'planetsun', group: 'Light', kind: 'toggle', label: 'Sun in the bird’s own horizon (planet sun)',
+    hint: 'Off is the before: a world-fixed sun that sat below the local horizon over half the planet, a hemisphere light pointing at world +Y, and a point light buried in the planet’s core.' },
+  { key: 'atmos', group: 'Light', kind: 'toggle', label: 'Physical atmosphere moves the palette',
+    hint: 'A small Earth atmosphere (Hillaire 2020 / Bruneton) tints key, sky, fog, mist and lakes by how the sun’s height changes them. Exactly the authored look at the authored sun height; off is the warmth heuristic.' },
   // ---- The bird ----
   { key: 'bird', group: 'Bird', kind: 'select', label: 'Bird build',
     options: [
@@ -85,6 +95,10 @@ export const BOOT_FLAGS = Object.freeze([
     hint: 'Off is the old blue jay palette and flat wings.' },
   { key: 'feathers', group: 'Bird', kind: 'toggle', label: 'Feather detail sheets', parent: 'authored' },
   { key: 'feathernormals', group: 'Bird', kind: 'toggle', label: 'Feather normal maps' },
+  { key: 'aeropose', group: 'Bird', kind: 'toggle', label: 'Air poses the bird (beat, span, tail, feet)',
+    hint: 'Off is the old rig: the beat and the tail read the raw stick, so under pull-back-to-climb a dive flapped harder than a climb and the elevator moved the wrong way.' },
+  { key: 'plumage', group: 'Bird', kind: 'toggle', label: 'Physical plumage (iridescent wings, sheen, sky reflections)',
+    hint: 'Off is the Standard-material bird: metal-faked bronze, no environment to reflect. v3 only.' },
   // ---- Flight ----
   { key: 'levelturn', group: 'Flight', kind: 'toggle', label: 'Level turns (yaw about the planet)',
     hint: 'Off yaws about the bird’s own up — the before, where a held dive spiralled and looped out of itself.' },
@@ -99,6 +113,9 @@ export const BOOT_FLAGS = Object.freeze([
       { value: 'v2', label: 'Bank to turn (v2)' },
     ],
     hint: 'Stunt is the shipping default: the stick is roll and pitch RATE, the Boost pill is rudder and throttle, and rolls, loops and hammerheads are flown rather than triggered. Stunt and Classic also toggle live in the gear menu; v2 is URL-only. See docs/realism/STUNT_FLIGHT_PLAN.md.' },
+  // ---- Audio ----
+  { key: 'airsound', group: 'Audio', kind: 'toggle', label: 'Hear the air (wind, whistle, stall buffet, wingbeats)',
+    hint: 'Procedural flight audio, no assets: the wind rises steeply with airspeed, a feather whistle at speed, a buffet near the stall, a whoosh on every downstroke. Off is the silent game. The SFX switch silences it too.' },
 ]);
 
 export function bootFlagByKey(key) {

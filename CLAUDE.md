@@ -11,6 +11,124 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **THE REALISM WAVE (2026-09-23): the light learned it is on a planet, the
+> bird learned it is in the air, and three defects were measured before
+> anything was built.** Ten researched upgrades
+> (the list is in this session's research turn; the gates are
+> `docs/perf/gates/G-REALISM-*.md`) were built as parallel branches off
+> `e252ca1`, each behind a Flags-tab switch whose off side is the true
+> before. `node tools/birb-realism.mjs` is the new live harness: one runner,
+> one module per check in `tools/realism-checks/`, one browser boot per flag
+> set, and ANY console warning fails the boot. Three of its checks were
+> written red-first against main and are green now.
+>
+> **The sun set over half the planet.** `sun-cycle.js` promised "never below
+> the horizon", then its horizon-frame numbers were copied into WORLD space —
+> a horizon frame only at the +Y pole. Measured: five of sixteen spot/time
+> pairs in the designed 19–58° band; the south pole sat 18–60° BELOW its
+> horizon all cycle, under a sky that rendered pixel-identical with the sun
+> up or down. `src/environment/sun-frame.js` PARALLEL-TRANSPORTS an
+> East/Up/North frame with the bird and maps key, rim and fill through it
+> every frame, clock or no clock (`?planetsun=0`); a jump over 10° rebuilds it
+> from the pole frame, and at the spawn pole the map is the identity bit for
+> bit. The price is holonomy — the sun's AZIMUTH depends on the route flown;
+> its elevation never does. The HemisphereLight's axis is its POSITION, which
+> sat at (0,1,0) forever, so at the south pole the "sky" colour lit
+> ground-facing sides (dot −0.999); it rides the local up now. A glow
+> PointLight 2.5 units from the planet's CENTRE (118 under the ground) was
+> evaluated by every lit fragment and lit nothing; hidden.
+>
+> **One atmosphere, as a RATIO** (`?atmos=0`). `atmosphere-model.js` is a
+> zero-alloc CPU Hillaire 2020 / Bruneton-Earth model evaluated at the LOCAL
+> sun elevation, applied only as model(e_now)/model(e_ref) around each
+> biome's authored palette — exactly 1 at the authored key elevation, so the
+> art direction is the centre of the range. It drives the key colour
+> (replacing the warmth heuristic), hemisphere sky, fog, valley mist, the
+> lakes' sky colour and a new sky-dome tint (compiled in only with the flag,
+> so `?atmos=0` keeps the dome shader byte-identical). Sky-only render, low →
+> high sun: +19% with it, −0.2% without.
+>
+> **Ultra counted the sun twice.** The shadow light copied the key's full
+> intensity every frame while the key stayed lit: turning shadows on
+> BRIGHTENED the frame 16.7%, and a shadow could remove at most half the sun.
+> `shadowsSetEnabled` hides the key while the shadow light is the sun (no
+> flag — a defect, not a look). Shadowed ground at the Ultra default is now
+> genuinely dark; nobody has seen that on the phone yet.
+>
+> **The wings flapped backwards to the physics** (`?aeropose=0` is the
+> before). The pose read the RAW stick while the shipping stunt model inverts
+> pitch INSIDE the controller, so a dive flapped 2.4x harder than a climb.
+> Measuring it properly found three more, each the lesson this repo keeps
+> relearning — **a rotation value does not say where a part went; evaluate a
+> point on it**: the tail is built along −X, so the "elevator" on
+> `rotation.x` was a TWIST that moved the tip by nothing; the two hands bent
+> opposite ways (the hand sits INSIDE the arm's `scale.z = −1`, so its terms
+> must be same-signed — tips differed by up to 0.54 units); and `wingBeat()`'s
+> "downstroke" raised the wing. `src/flight/aero-pose.js` drives the pose from
+> the air instead: near-constant beat frequency with amplitude from
+> Pennycuick's U-shaped power demand (cockatiels vary frequency only 1.2x,
+> Hedrick 2003), the Pionus stroke ("very deep wingbeats ... barely come above
+> horizontal on the upstroke" — eBird), span shrinking with speed (Rosén &
+> Hedenström 2001) with sweep, splayed hand and fanned tail at high lift,
+> the elevator on the right axis and sign, load flex, a gust flick (input
+> wired to the air field), and feet as landing gear. `wingBeat()` is frozen by
+> its test and left exactly as it was for the off path.
+>
+> **Shadows without shadow maps** (`?horizon=0`, `?birdshadow=0`). Below Ultra
+> nothing in this world cast anything. `horizon-map.js` bakes, once per world
+> (in a worker, main-thread fallback), the skyline elevation in 8 azimuths
+> over a 512x256 equirect of terrain PLUS canopies, peaks and spires splatted
+> as solids — curvature exact, out to 84 units — into two RGBA8 textures;
+> `horizon-shadow.js` subtracts the key's Lambert term where the sun is behind
+> the skyline and scales the sky light by what the skyline leaves visible, at
+> every preset. The bird is three ellipsoids casting a soft, contact-hardening
+> shadow ALONG THE SUN (the old disc still marks straight down). Known limits:
+> the bird does not RECEIVE terrain shadow, water is not shadowed, canopies
+> are solid columns.
+>
+> **Plumage is physical** (`?plumage=0`). Both feather materials are
+> dielectric `MeshPhysicalMaterial` — sheen on the contour, a 265 nm thin
+> film masked to the BRONZE feathers only (a film over the teal and the red
+> turned them olive and orange) — lit by a bird-only PMREM of the biome's sky,
+> aimed at the local up (three NEGATES `envMapRotation`; the un-negated angles
+> miss by 0.8 rad), with the hemisphere moved into the IBL irradiance slot so
+> the sky is counted once. Diffuse energy is preserved (`color = 1 −
+> old metalness`), emissive lift 0.34 → 0.14. Anisotropy was deliberately NOT
+> used: a feather's barbs make a chevron and every plate has one UV frame, so
+> any direction is mirrored-wrong on half of every feather.
+>
+> **The flight has a sound** (`?airsound=0`). `src/audio/flight-audio.js`:
+> five procedural layers, no asset, no node after the first gesture, no
+> allocation per frame — wind (RMS ∝ V^2.5, band ∝ V), an aeolian whistle
+> (f = 0.2·V/d, Selfridge 2018), a stall buffet from the model's OWN
+> `isStalled()`, a whoosh retriggered on every REAL downstroke (it samples
+> `leftWing.rotation.x`, so it hears whatever pose code runs), and a rush near
+> ground or water. Levels are OUTPUT RMS with filter-bandwidth makeup, not
+> gains. Nobody has listened to it on a phone; the silent switch mutes Web
+> Audio unless `navigator.audioSession` is 'playback' (unknown inside
+> Chrome-on-iOS). CLAUDE.md's "Web Audio doesn't work on iOS" is out of date.
+>
+> **Found and NOT fixed, for the flight owner:** the stunt model's
+> `liftFactor()`, `isStalled()` and `authority()` normalise by the BOOSTED
+> `_cruise`, so a boost reads as a stall and sinks the bird 1.4–1.55 units.
+> The audio and pose packages gate it out; the flight model still does it.
+>
+> **Still unmeasured: the phone.** Every number above is SwiftShader or the
+> unit suite. The costs added at the Ultra default — horizon reads on every
+> lit fragment at every preset, a 2.2 MB texture upload when the bake lands,
+> a heavier physical shader on the bird, a PMREM per biome switch — have no
+> device number. Each is one tap off on the Flags tab.
+>
+> **Also found by the reviews, NOT fixed, for the owner's eye:** the group
+> named `leftWing` is built at model +Z, which is the bird's RIGHT, so the
+> same-signed bank dip raises the INSIDE wing about 7 degrees against the
+> turn. And the frozen `tools/birb-modes.mjs` gives the turret's nest landing
+> 20 s of WALL CLOCK while the landing advances per FRAME (95-102 frames on
+> base and branch alike): under a load average of 8+ on a 4-core box it times
+> out on either tree. A red turret_defense on a busy machine is the clock, the
+> same trap as the old forest landing note — re-run it alone before believing
+> it.
+
 > **THE BIRD FLIES LIKE A STUNT PLANE NOW, AND IT IS THE DEFAULT**
 > (2026-09-19): [docs/realism/STUNT_FLIGHT_PLAN.md](docs/realism/STUNT_FLIGHT_PLAN.md)
 > is the design, [docs/perf/gates/G-STUNT-0.md](docs/perf/gates/G-STUNT-0.md)
@@ -2286,6 +2404,65 @@ mini, with Pencil 2 or Pencil Pro. Elsewhere `UIHoverGestureRecognizer` never
 fires and there is nothing to draw. The readout now says `hover 412` or
 `hover never (iPad may not have it)` rather than leaving that a guess.
 
+**Fifth pass (2026-09-23): paint was on the wrong FACE, Grab moved 2x, and CI
+had never compiled the app.** `humanoid/docs/Device_Pass_3.md` — read it
+before touching the stroke path. *"Painting doesn't even go on the right
+sides and grabbing and the functions just don't work well."*
+
+**The painter writes v-up UVs (row 0 at v = 1); Metal and glTF read from the
+top left; the renderer and the GLB exporter passed the UVs through raw.** So
+every stroke since the first painter was shown from the other end of the
+image — on the clay atlas, the other row of tiles: paint the front and it
+appeared on the left side. The painter's tests could not see it because the
+painter agrees with itself. `TextureSpace.metal`/`.gltf` own the conversion,
+tests sample paint back through them, and `tools/blender_check_paint.py`
+asks Blender's importer where the exported paint landed. **A convention two
+components must share needs a test that holds one against the other.**
+
+**The stroke logic moved into `HumanoidCore.StrokeEngine`**, out of
+`EditorModel` where nothing could test it — and every defect was there: Grab
+converted drags at the RAY length, not the view depth (+20-27% toward the
+screen edges), summed its symmetric halves (2x at x = 0, the middle of the
+front face), and scaled by the touch-down pressure; paint built its brush ONCE
+from the first, lightest sample (~30% opacity for the whole stroke); pressure
+never touched size. Symmetric halves now blend `(w1² + w2²)/(w1 + w2)`;
+`PressureResponse` gives a curve and size/strength ranges per sample; Grab
+ignores pressure. Driving the engine headless found one more: dabs re-picked
+on the surface they were raising made the same Inflate path differ by **8.3 mm
+with frame batching** — dabs are now placed and weighed against the stroke's
+starting shape, identical to 1e-9. Every fix is mutation-checked.
+
+**The macOS CI job passed in two seconds for months without compiling the
+app**: it named `Humanoid.xcodeproj` and piped into `xcpretty` with no
+`pipefail`. It now builds Release and Debug for a device. Also new: a
+`UIUpdateLink` low-latency loop (iPadOS 18, falls back by itself), predicted
+ring, palm rejection, two-finger-tap undo, touch-to-glass latency in the
+readout from `presentedTime`, and stroke ends 3.7 → 1.7 ms (16.9 → 4.9 at
+2048², which unblocks 2048). **Unmeasured on the iPad: all of it** — the
+checklist is Device_Pass_3 §8.
+
+**An adversarial review of the app layer then found ten more** (Device_Pass_3
+§10, all fixed). `pencilSeen` was never saved, so on every launch a palm on
+the model took the first stroke and the Pencil's touch-down was refused; a
+Pencil now takes over and the palm's stroke is DISCARDED
+(`StrokeEngine.discard` / `Document.discardStroke`: shape, normals and texels
+put back, history and redo untouched — closed-and-undone instead, it would sit
+on the redo stack, or undo the stroke before when it changed nothing). The
+two-finger tap discards its own first finger's stroke the same way before it
+undoes. And both low-latency watchdogs were switched off at launch by the
+did-become-active observer stamping a frame that had never happened; the loop
+now judges on frames PRESENTED. **A watchdog that its own reset can satisfy
+is not watching anything.**
+
+**The live plan is `humanoid/docs/PLAN.md`** (2026-09-23): everything still
+open from the PRD's delivery plan, the three device passes and the Unity
+hand-off, consolidated into one backlog, plus ten new ideas (a stroke
+recorder with a Linux replay, sculpt layers, masking, four more brushes, a
+reset brush, matcap and cavity shading, clay shapes, Pencil Pro roll and
+haptics, AR Quick Look, a turntable capture). Add open items THERE; the pass
+documents are history. The two product-blocking facts it records: "Export
+Model" on the iPad writes no file, and documents do not persist.
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror
@@ -2301,6 +2478,12 @@ A mobile-first 3D bird flight game built with Three.js. A bird flies on a spheri
 ## Who Made This
 
 **Mentis** (Adam Rappaport) — call him Mentis, not Adam.
+
+**When you give Mentis commands to run — on the Mac, the Windows box or a
+console — give the whole sequence as ONE copy-paste block, every time** (2026-09-23,
+in his words: "always want that for the console commands"). Prose that says
+"pull, generate, open" is not it; a fenced block that starts with `cd` and ends
+with the app open is.
 
 ## Default Interaction Mode
 

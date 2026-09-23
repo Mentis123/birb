@@ -246,6 +246,74 @@ final class DocumentExportTests: XCTestCase {
         XCTAssertFalse(json.contains("\"skins\""))
     }
 
+    /// The exported UVs must point at the paint in the exported texture, read
+    /// the way glTF reads it: origin at the TOP left.
+    ///
+    /// Written raw, the document's v-up UVs put every exported texture upside
+    /// down on the model — on the clay atlas, onto another face of the cube —
+    /// and nothing noticed, because the Blender render oracle replaces the
+    /// material with plain clay before it takes its picture.
+    func testExportedUVsFindThePaintInTheExportedTexture() throws {
+        var document = try Document.clay(textureSize: 256)
+        let hit = try XCTUnwrap(Picking.raycast(document.mesh, origin: Vec3(0.02, 0.03, 5),
+                                                direction: Vec3(0, 0, -1)))
+        document.paint(.init(radius: 0.05, opacity: 1, colour: (0, 0, 255)),
+                       along: [(point: hit.position, seed: hit.triangle)])
+        let snapshot = document.exportSnapshot(named: "Dot")
+        let glb = try VRMExporter.export(snapshot)
+
+        let uvs = try texcoords(in: glb)
+        XCTAssertEqual(uvs.count, snapshot.mesh.vertexCount)
+        // The triangle's corners sit a few millimetres from the brush centre,
+        // so the falloff has softened them; what matters is that they read as
+        // the paint and not as the clay underneath it.
+        let base = document.baseColour
+        func distance(_ a: (r: UInt8, g: UInt8, b: UInt8), _ b: (r: UInt8, g: UInt8, b: UInt8)) -> Int {
+            let dr = Int(a.r) - Int(b.r), dg = Int(a.g) - Int(b.g), db = Int(a.b) - Int(b.b)
+            return dr * dr + dg * dg + db * db
+        }
+        for corner in 0..<3 {
+            let vertex = Int(snapshot.mesh.indices[hit.triangle * 3 + corner])
+            let shown = TextureSpace.sampleTopLeft(snapshot.albedo, at: uvs[vertex])
+            XCTAssertLessThan(distance(shown, (0, 0, 255)), distance(shown, base) / 4,
+                              "vertex \(vertex) is under the paint and the exported UV reads \(shown)")
+        }
+        // And the far side of the cube, which the raw UVs used to land on,
+        // stays the base colour.
+        let back = try XCTUnwrap(Picking.raycast(document.mesh, origin: Vec3(0.02, 0.03, -5),
+                                                 direction: Vec3(0, 0, 1)))
+        let vertex = Int(snapshot.mesh.indices[back.triangle * 3])
+        let shown = TextureSpace.sampleTopLeft(snapshot.albedo, at: uvs[vertex])
+        XCTAssertEqual([shown.r, shown.g, shown.b],
+                       [document.baseColour.r, document.baseColour.g, document.baseColour.b])
+    }
+
+    /// TEXCOORD_0 of the first primitive, read back out of a GLB.
+    private func texcoords(in glb: Data) throws -> [Vec2] {
+        func u32(_ offset: Int) -> Int {
+            Int(UInt32(glb[offset]) | (UInt32(glb[offset + 1]) << 8)
+                | (UInt32(glb[offset + 2]) << 16) | (UInt32(glb[offset + 3]) << 24))
+        }
+        let jsonLength = u32(12)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: glb.subdata(in: 20..<(20 + jsonLength))) as? [String: Any])
+        let binStart = 20 + jsonLength + 8
+        let meshes = try XCTUnwrap(json["meshes"] as? [[String: Any]])
+        let primitive = try XCTUnwrap((meshes[0]["primitives"] as? [[String: Any]])?.first)
+        let attributes = try XCTUnwrap(primitive["attributes"] as? [String: Any])
+        let accessorIndex = try XCTUnwrap(attributes["TEXCOORD_0"] as? Int)
+        let accessor = try XCTUnwrap((json["accessors"] as? [[String: Any]])?[accessorIndex])
+        let view = try XCTUnwrap((json["bufferViews"] as? [[String: Any]])?[
+            try XCTUnwrap(accessor["bufferView"] as? Int)])
+        let count = try XCTUnwrap(accessor["count"] as? Int)
+        let start = binStart + (view["byteOffset"] as? Int ?? 0) + (accessor["byteOffset"] as? Int ?? 0)
+        return (0..<count).map { i in
+            let at = start + i * 8
+            return Vec2(Double(Float(bitPattern: UInt32(u32(at)))),
+                        Double(Float(bitPattern: UInt32(u32(at + 4)))))
+        }
+    }
+
     func testAnEditedHumanoidDocumentStillExportsAsAVRM() throws {
         var document = try Document.humanoid(textureSize: 64)
         document.sculpt(.inflate(0.005), at: [Vec3(0, 1.3, 0.1)],

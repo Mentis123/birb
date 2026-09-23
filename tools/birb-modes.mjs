@@ -91,8 +91,22 @@ async function main() {
         // assist, cooldown gate and all — and require a rocket to appear.
         let fired = '';
         if (mode === 'turret_defense') {
-            await page.waitForFunction('window.__BIRB.stats().nesting === "nested"', null, { timeout: 20000 })
-                .catch(() => failures.push('turret_defense: never reached the nest to fire from'));
+            // FRAMES, NEVER MILLISECONDS (gate G-MODES-CLOCK). The landing
+            // auto-fly advances per frame and needs ~95-102 of them on every
+            // tree measured; a 20 s wall-clock budget turned that into a
+            // frame-rate test, and a 4-5 fps CI runner failed it the moment
+            // the frame got heavier. 600 frames is ~6x the need at any rate.
+            const nestedAfter = await page.evaluate(() => new Promise((resolve) => {
+                let frames = 0;
+                const step = () => {
+                    frames += 1;
+                    if (window.__BIRB.stats().nesting === 'nested') resolve(frames);
+                    else if (frames >= 600) resolve(-frames);
+                    else requestAnimationFrame(step);
+                };
+                requestAnimationFrame(step);
+            }));
+            if (nestedAfter < 0) failures.push(`turret_defense: never reached the nest to fire from (${-nestedAfter} frames)`);
             let launches = 0;
             for (let shot = 0; shot < 3; shot++) {
                 const r = await page.evaluate(() => window.__BIRB.fire());

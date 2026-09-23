@@ -24,8 +24,14 @@ jobs:
       - name: System packages
         run: |
           apt-get update -qq
+          # The X and GL libraries are what Blender 4.5's binary links from the
+          # system (`ldd` on it; everything else it ships in its own lib/).
+          # libxkbcommon0 is the one the swift:noble image lacks: without it
+          # the Blender step died at load time on main on 2026-09-23, and that
+          # step runs only on main, so no branch run could have shown it.
           apt-get install -y -qq zlib1g-dev python3 curl xz-utils \
-            libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libsm6
+            libx11-6 libxext6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libice6 libsm6 \
+            libgl1 libegl1 libxkbcommon0
 
       - name: Unit tests
         working-directory: humanoid
@@ -40,9 +46,16 @@ jobs:
         run: |
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
           apt-get install -y -qq nodejs
-          mkdir -p .build/gltf && cd .build/gltf && npm install --silent gltf-validator
+          # `npm init` first, and it is not ceremony. With no package.json in
+          # this directory npm walks UP to the nearest one — the game's, at the
+          # repository root — and installs there, so the require() below found
+          # nothing and this step failed on every push from 2026-09-19 on,
+          # skipping every check after it.
+          mkdir -p .build/gltf && cd .build/gltf && npm init -y >/dev/null && npm install --silent gltf-validator
           cd "$GITHUB_WORKSPACE/humanoid"
-          for f in .build/corpus/*.vrm; do
+          # The clay exports are GLB, not VRM, and they are the files the app
+          # ships today; validating only *.vrm left them unchecked.
+          for f in .build/corpus/*.vrm .build/corpus/*.glb; do
             node -e "
               const v=require('$PWD/.build/gltf/node_modules/gltf-validator'), fs=require('fs');
               v.validateBytes(new Uint8Array(fs.readFileSync('$f'))).then(r=>{
@@ -97,6 +110,10 @@ jobs:
             /tmp/blender/blender --factory-startup --background \
               --python tools/blender_check_fbx.py -- "$f"
           done
+          # The exported texture read the way a consumer reads it: the paint
+          # has to be on the face it was painted on.
+          /tmp/blender/blender --factory-startup --background \
+            --python tools/blender_check_paint.py -- .build/corpus/clay-sculpted.glb
           # A picture of the exported file. Everything above proves the container
           # and the rig; none of it can tell a body from valid triangles.
           /tmp/blender/blender --factory-startup --background \
@@ -132,16 +149,35 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build for the iPad simulator
+      # This step used to pass in two seconds without compiling anything. It
+      # named `Humanoid.xcodeproj` and a `HumanoidApp` scheme, which stopped
+      # existing when the product became Baby Blender, and it piped xcodebuild
+      # into xcpretty under the default `bash -e` — no pipefail — so the step
+      # took xcpretty's exit status: "'Humanoid.xcodeproj' does not exist",
+      # then green. The iPad app had never once been compiled by CI.
+      #
+      # Built for a DEVICE, in Release, because that is what goes on the iPad:
+      # the optimiser is where a Release-only error lives, and a device build
+      # needs only the SDK that ships inside Xcode, not a simulator runtime.
+      - name: Build the iPad app
         working-directory: humanoid/app
+        shell: bash
         run: |
-          xcodebuild build \
-            -project Humanoid.xcodeproj \
-            -scheme HumanoidApp \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || xcodebuild build \
-              -project Humanoid.xcodeproj \
-              -scheme HumanoidApp \
-              -destination 'generic/platform=iOS Simulator' \
+          set -euo pipefail
+          # Xcode 26 ships the Metal compiler as a separate download. Without
+          # it Shaders.metal fails with "missing Metal Toolchain" and the whole
+          # default library goes with it.
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcodebuild -version
+          for configuration in Release Debug; do
+            echo "::group::$configuration"
+            xcodebuild build -quiet \
+              -project BabyBlender.xcodeproj \
+              -scheme BabyBlender \
+              -configuration "$configuration" \
+              -destination 'generic/platform=iOS' \
               CODE_SIGNING_ALLOWED=NO
+            echo "::endgroup::"
+          done

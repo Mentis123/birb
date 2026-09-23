@@ -490,6 +490,14 @@ export class BirdFlightStunt extends BirdFlight {
      */
     get pitchSign() { return this.invertPitch ? -1 : 1; }
 
+    /**
+     * Read-only: the live throttle multiple (0.55 idle .. 1.35 full, 1 at
+     * the neutral pad). The pose (src/flight/aero-pose.js) flaps by the power
+     * the air asks for, so it has to know what the pilot is giving it; at
+     * idle the bird glides. Changes nothing the law does.
+     */
+    get throttle01() { return this._throttle01; }
+
     /** True while the wing is below flying speed. */
     isStalled() {
         const cruise = this._cruise > 0 ? this._cruise : 1;
