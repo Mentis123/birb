@@ -19,7 +19,7 @@ left-wingtip height in the bird's own frame):
 
 | | climb | dive |
 |---|---|---|
-| tip travel SD (two runs) | **0.141 / 0.142** | **0.336 / 0.335** |
+| tip travel SD (three runs) | **0.141 / 0.142 / 0.143** | **0.336 / 0.335 / 0.352** |
 
 — a dive flapping 2.4x harder than a climb, as the check's header says.
 `node tools/birb-realism.mjs --only aero-pose-off` reproduces these; it boots
@@ -44,8 +44,8 @@ not say where a part went; evaluating a point on the part does.**
    height difference on a bird whose wing is 1.5 long. It is visible in the
    old bird sheet's `top` tile: two different-coloured wingtips.
 3. **The "downstroke" went UP.** `wingBeat()`'s fast 38% phase carries a
-   negative angle, and a negative `rotation.x` raises the left wing (measured:
-   phase 0.19 → left tip +1.25). So the power stroke lifted the wings, and the
+   negative angle, and a negative `rotation.x` raises `leftWing`'s tip
+   (measured: phase 0.19 → +1.25). So the power stroke lifted the wings, and the
    span folded on the stroke that came down. `wingBeat()` is frozen by
    `tests/bird-pose.test.js`, so it is left exactly as it was for
    `?aeropose=0`; the new stroke is a new function.
@@ -149,32 +149,35 @@ the same object every frame. `__BIRB.setRecovery(state)` and
 
 Method: `node tools/birb-realism.mjs --only 'flap-follows-climb,aero-pose-*'`
 (SwiftShader, `quality=amazing`, frames not milliseconds). **Control**: the
-same check on the same final build twice — climb SD 0.458 / 0.459, dive
-0.087 / 0.068 — so the method's own noise is ±0.001 on a climb and ±0.01 on
-a dive (the dive's residual depends on where the cruise burst was when the
-push began). The before is the same pair under `?aeropose=0`.
+same check on the same final build three times — climb SD 0.458 / 0.459 /
+0.455, dive 0.087 / 0.068 / 0.074 — so the method's own noise is ±0.002 on a
+climb and ±0.01 on a dive (the dive's residual depends on where the cruise
+burst was when the push began). The before is the same method under
+`?aeropose=0`, three times.
 
 | flap-follows-climb | before (`aeropose=0`) | after |
 |---|---|---|
-| tip travel SD, climb vs dive | 0.141 / 0.142 vs **0.336 / 0.335** | **0.458 / 0.459** vs 0.087 / 0.068 |
+| tip travel SD, climb vs dive | 0.141–0.143 vs **0.335–0.352** | **0.455–0.459** vs 0.068–0.087 |
 | tail TIP height, climb vs dive | −0.060 vs −0.059 (did not move) | **−0.153 vs +0.010** |
 | max left/right tip mismatch | **0.51 / 0.54** | **0.00000** |
 
 The rest, on the final tree (52/52 green across both boots): cruise demand
 1.00, depth 0.22, envelope mean 0.51–0.56; climb depth 0.99, envelope 1.00;
-the climbing stroke reaches 1.140 below the glide line and 0.416 above it
-(2.7:1; the first cut's 0.30 up read 1.088 / 0.525, which is where "barely
-above" was lost); beat frequency 4.04 → 4.49 Hz with effort (1.11x); dive and
+the climbing stroke reaches 1.140–1.145 below the glide line and
+0.416–0.481 above it (2.4–2.7:1; the first cut's 0.30 up read 1.088 /
+0.525, which is where "barely above" was lost); beat frequency 4.04 → 4.49
+Hz with effort (1.11x); dive and
 idle-throttle peak beat 0.000. Sprint (24 u/s): span 0.620, sweep 0.342 rad
 (the left wing's own rotation.y −0.542, scale.z 0.55), tail 0.740. Idle
 throttle (6.1 u/s): tail 1.549, splay 0.694, full span, held 0.10 forward. A
 0.75 pull at idle stalls it (min 4.17 u/s, 56 stalled frames): splay 1.0,
 tail 1.55. A firm roll (±3 rad/s measured off the frame) twists the tail
 ±0.20 into it. A hard pull: peak n 3.4, flex 0.158 rad; level flight 0.0000.
-Approach from 10 units at idle: the gear starts at 4.8 units and is 0.74 out
-at 3.4 units sinking 4.15 u/s — 0.67 s, about 2.7 beats, from contact (the
-first window, 1.8 → 0.9 s, had it out ~4 beats early); a go-around at full
-power climbs 9 u/s and the gear is fully up by 17 units.
+Approach from 10 units at idle: the gear starts at ~4.8 units and is 0.70–0.74
+out at 3.4–4.2 units sinking 4.15–4.46 u/s — 0.67–0.81 s, about 2.7–3.3
+beats, from contact (the first window, 1.8 → 0.9 s, had it out ~4 beats
+early); a go-around at full power climbs 9 u/s and the gear is fully up by
+17 units.
 
 On the ground the perch tail DROPS now: its tip reads −0.279 against the old
 −0.056, because the old rig wrote the perch's `tailPitch` into the twist axis
@@ -227,6 +230,21 @@ object every frame, the freeze rule, the ground fade-out).
 - **`--only aero-pose-*` selected nothing.** The runner matched exact names
   only, so the brief's own command silently ran half its list and still said
   "ok". A trailing `*` is a prefix now.
+
+## Found, not changed
+
+- **"leftWing" is the bird's RIGHT wing.** The model is built facing +X with
+  +Y up, so its +Z — where `buildWingV3(1)` puts `leftWing` — is `fwd × up`,
+  the bird's right; `orbitBird()` already computes it that way. So the bank
+  dip, which its own comment says drops the INSIDE wing, raises it: measured
+  at stick +0.5 (flight bank −11.5°, right wing down) the +Z tip sits at
+  +0.40 and the −Z tip at −0.05 in the bird's own frame — the wings tilt
+  AGAINST the turn by ~7°, which flattens a bank rather than exaggerating
+  it. The brief kept the dip same-signed (the antisymmetry fix of
+  2026-09-13 is right); which WAY it should lean is a call for the owner's
+  eye on the phone, and flipping its sign is one character.
+- **The boost sink** (the stall-flag trap above) belongs to the flight
+  model, not the pose.
 
 ## What is NOT verified
 
