@@ -385,6 +385,41 @@ public struct Document {
         flushStroke()
     }
 
+    /// Closes the open stroke WITHOUT recording it, and puts back everything
+    /// it changed: the shape, the texels and any captured Grab. The history
+    /// and the redo branch are left exactly as they were before it began.
+    ///
+    /// For a gesture that turned out not to be a stroke; see
+    /// `StrokeEngine.discard(_:)`. Closes the whole group however deeply it
+    /// is nested. Returns whether the shape moved back, and the texels that
+    /// did, for the caller's uploads.
+    @discardableResult
+    public mutating func discardStroke() -> (mesh: Bool, texture: Paint.Rect) {
+        var texture = Paint.Rect.empty
+        if let stroke = paintStroke, let origin = paintOrigin {
+            paintStroke = nil
+            paintOrigin = nil
+            spareStroke = stroke
+            texture = stroke.dirty
+            paste(copy(origin, texture), into: texture)
+        }
+        endGrab()
+        // The open group's before-values are each vertex's value the first
+        // time the stroke touched it, which is exactly what undo would restore.
+        var moved = Set<Int>()
+        for (i, v) in openVertices.enumerated() {
+            sculptDelta[v] = openBefore[i]
+            current.positions[v] = template.positions[v] + openBefore[i]
+            moved.insert(tables.weldOf[v])
+        }
+        if !moved.isEmpty { current.recomputeNormals(tables, touching: moved) }
+        openIndex.removeAll(keepingCapacity: true)
+        openVertices.removeAll(keepingCapacity: true)
+        openBefore.removeAll(keepingCapacity: true)
+        strokeDepth = 0
+        return (!moved.isEmpty, texture)
+    }
+
     private mutating func push(_ record: Record) {
         guard strokeDepth > 0 else { return commit(record) }
         guard case .sculpt(let vertices, let before, _) = record else {

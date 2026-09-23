@@ -8,7 +8,6 @@ import HumanoidCore
 struct EditorView: View {
     @StateObject private var editor = EditorModel()
     @State private var showingExport = false
-    @State private var showingBrush = false
 
     private static let ground = Color(red: 0.024, green: 0.035, blue: 0.094)
     private static let panel = Color(red: 0.039, green: 0.075, blue: 0.141)
@@ -72,10 +71,14 @@ struct EditorView: View {
 
             // Pressure, hardness and latency, one tap away. Tuning the Pencil
             // is a feel decision that has to be made on the glass, so the
-            // controls for it are in the app rather than in a build.
-            Button { showingBrush = true } label: { Image(systemName: "pencil.tip.crop.circle") }
-                .help("Brush and Pencil settings")
-                .popover(isPresented: $showingBrush) { BrushSettingsView(editor: editor) }
+            // controls for it are in the app rather than in a build. The
+            // Pencil's palette gestures open it too, which is why the flag
+            // lives on the editor.
+            Button { editor.showingBrushSettings = true } label: {
+                Image(systemName: "pencil.tip.crop.circle")
+            }
+            .help("Brush and Pencil settings")
+            .popover(isPresented: $editor.showingBrushSettings) { BrushSettingsView(editor: editor) }
 
             Button { showingExport = true } label: {
                 Text("Export").fontWeight(.semibold)

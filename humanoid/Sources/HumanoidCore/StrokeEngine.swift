@@ -145,6 +145,9 @@ public struct StrokeEngine {
         public var armed = false
         public var tool: EditTool = .grab
         public var peakPressure = 0.0
+        /// Taken back rather than kept: a palm, or a two-finger tap's first
+        /// finger. See `discard(_:)`.
+        public var discarded = false
     }
 
     public private(set) var isOpen = false
@@ -259,7 +262,7 @@ public struct StrokeEngine {
                 lastPointer = point
                 guard let hit = pick(point, on: reference ?? document.mesh, camera: camera,
                                      viewport: viewport) else {
-                    lift(document: &document)
+                    effect.formUnion(lift(document: &document))
                     continue
                 }
                 let depth = camera.viewDepth(of: hit.position)
@@ -321,6 +324,35 @@ public struct StrokeEngine {
         var effect = commit(document: &document)
         end(document: &document)
         effect.insert(.contact)
+        return effect
+    }
+
+    /// Ends the open stroke and takes back everything it did, without making
+    /// it an undo step: the gesture turned out not to be a stroke.
+    ///
+    /// Two gestures need this. The heel of a hand reaches the glass a moment
+    /// before the Pencil tip, and until a Pencil has been seen a finger on the
+    /// model sculpts, so the palm has already started a stroke when the
+    /// Pencil lands. And the first finger of a two-finger tap lands a moment
+    /// before the second: the tap means undo, not "inflate a bump here, then
+    /// undo". Closing such a stroke and undoing it is wrong twice over. It
+    /// would sit on the redo stack, and when it changed nothing at all,
+    /// `undo()` would take back the stroke before it instead.
+    @discardableResult
+    public mutating func discard(_ document: inout Document) -> Effect {
+        guard isOpen else { return [] }
+        pendingDabs.removeAll(keepingCapacity: true)
+        pendingPaint.removeAll(keepingCapacity: true)
+        grabDirty = false
+        let undone = document.discardStroke()
+        current.discarded = true
+        end(document: &document)
+        var effect: Effect = .contact
+        if undone.mesh { effect.insert(.mesh) }
+        if !undone.texture.isEmpty {
+            paintDirty = paintDirty.union(undone.texture)
+            effect.insert(.texture)
+        }
         return effect
     }
 
@@ -443,13 +475,20 @@ public struct StrokeEngine {
 
     /// The pointer left the model. The next sample that finds it again starts
     /// a new segment instead of joining this one through the air.
-    private mutating func lift(document: inout Document) {
+    ///
+    /// Returns what it painted, which has to reach the GPU like any other
+    /// paint. It used to be thrown away, so whenever the last sample on the
+    /// model and the first one off it fell into the same frame, the dab at
+    /// the model's edge stayed invisible until something else uploaded the
+    /// texture.
+    private mutating func lift(document: inout Document) -> Effect {
         current.lifted += 1
         sculptStroke = nil
         // Paint queued earlier this frame is applied before the lift, or it
         // would be painted as part of the new segment.
-        if !pendingPaint.isEmpty { _ = commitPaint(document: &document) }
+        let effect = commitPaint(document: &document)
         document.liftPaint()
+        return effect
     }
 
     // MARK: - Grab

@@ -2323,6 +2323,19 @@ readout from `presentedTime`, and stroke ends 3.7 → 1.7 ms (16.9 → 4.9 at
 2048², which unblocks 2048). **Unmeasured on the iPad: all of it** — the
 checklist is Device_Pass_3 §8.
 
+**An adversarial review of the app layer then found ten more** (Device_Pass_3
+§10, all fixed). `pencilSeen` was never saved, so on every launch a palm on
+the model took the first stroke and the Pencil's touch-down was refused; a
+Pencil now takes over and the palm's stroke is DISCARDED
+(`StrokeEngine.discard` / `Document.discardStroke`: shape, normals and texels
+put back, history and redo untouched — closed-and-undone instead, it would sit
+on the redo stack, or undo the stroke before when it changed nothing). The
+two-finger tap discards its own first finger's stroke the same way before it
+undoes. And both low-latency watchdogs were switched off at launch by the
+did-become-active observer stamping a frame that had never happened; the loop
+now judges on frames PRESENTED. **A watchdog that its own reset can satisfy
+is not watching anything.**
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror

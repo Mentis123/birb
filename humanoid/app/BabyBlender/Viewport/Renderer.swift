@@ -152,6 +152,12 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// `setNeedsDisplay` does nothing in explicit-draw mode, which is the mode
     /// the low-latency loop runs in.
     var requestFrame: (() -> Void)?
+    /// Called at the end of every frame `beforeDraw` began, with whether a
+    /// drawable was actually presented. A frame that found no drawable has
+    /// drained its input into the document and shown none of it, and the
+    /// loop has to know: it used to count as drawn, so updates could stop
+    /// with the end of a stroke never on the screen.
+    var afterDraw: ((Bool) -> Void)?
 
     /// 4x multisampling. Apple GPUs resolve multisample colour in tile memory,
     /// so the cost is close to nothing and it removes the shimmer from every
@@ -399,8 +405,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// size arrives here, and the frame has to be requested from here.
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        view.setNeedsDisplay()
-        requestFrame?()
+        // Through whoever owns the loop, which picks the right way to ask for
+        // the mode it is in. `setNeedsDisplay` is ignored in the low-latency
+        // loop's explicit mode, and a draw there outside the update link's own
+        // actions would be a second present in one transaction.
+        if let requestFrame { requestFrame() } else { view.setNeedsDisplay() }
     }
 
     func draw(in view: MTKView) {
@@ -410,6 +419,8 @@ final class Renderer: NSObject, MTKViewDelegate {
             lastCommitted = nil
         }
         beforeDraw?()
+        var presented = false
+        defer { afterDraw?(presented) }
 
         birbSignpostBegin("frame")
         defer { birbSignpostEnd("frame") }
@@ -548,6 +559,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             buffer.present(drawable)
             buffer.commit()
         }
+        presented = true
         lastCommitted = buffer
 
         stats.drawCalls = drawCalls

@@ -79,21 +79,36 @@ final class EditorModel: ObservableObject {
     /// Brush radius in **screen points** at full pressure, converted to metres
     /// at the depth the brush lands on. ZBrush's Draw Size and Nomad's
     /// "Screen" mode both work this way.
-    @Published var radiusPoints: Double = 80 { didSet { save(radiusPoints, "radiusPoints") } }
+    @Published var radiusPoints: Double = 80 {
+        didSet {
+            save(radiusPoints, "radiusPoints")
+            // With the size locked on the model the slider sets the locked
+            // size. It used to do nothing at all until the lock was switched
+            // off and on again.
+            if lockWorldSize { fixedWorldRadius = currentWorldRadius() }
+        }
+    }
     /// Drawable pixels per screen point, read from the view each frame.
     var pointScale: Double = 1
     /// Full by default: the slider exists to go GENTLER.
     @Published var strength: Double = 1.0 { didSet { save(strength, "strength") } }
     @Published var symmetric = true { didSet { save(symmetric, "symmetric") } }
-    /// Forces finger sculpting on. Until a Pencil has been seen, a finger that
-    /// lands ON the model sculpts and one that lands off it orbits — Nomad's
-    /// rule — so this is only needed to sculpt with a finger once a Pencil is
-    /// around.
-    @Published var fingerEditing = false
+    /// Lets a finger sculpt once a Pencil is around. Until a Pencil has been
+    /// seen, a finger that lands ON the model sculpts and one that lands off
+    /// it orbits (Nomad's rule), and this switch keeps that rule afterwards.
+    /// It used to make EVERY finger sculpt, which left no way to orbit, pan
+    /// or zoom with a finger at all while it was on.
+    @Published var fingerEditing = false { didSet { updateInputHint() } }
     /// The rope stabiliser, off by default: it changes the feel of every
     /// stroke, so it should be asked for.
     @Published var stabilise = false { didSet { save(stabilise, "stabilise") } }
-    @Published var colour = Color(red: 0.16, green: 0.35, blue: 0.63)
+    @Published var colour = Color(red: 0.16, green: 0.35, blue: 0.63) {
+        didSet { colourRGB = colour.rgb8 }
+    }
+    /// `colour` as the texture's bytes, converted when it changes. Converting
+    /// a SwiftUI colour builds a UIColor, a CGColor and an array, and the
+    /// brush is assembled every frame.
+    private var colourRGB: (r: UInt8, g: UInt8, b: UInt8) = (41, 89, 161)
     /// Paint only: how much of the brush paints solid before the soft edge.
     @Published var hardness: Double = 0.5 { didSet { save(hardness, "hardness") } }
 
@@ -126,6 +141,8 @@ final class EditorModel: ObservableObject {
     /// Which loop is actually drawing, for the readout: the low-latency one
     /// can fall back on its own if it ever stops producing frames.
     @Published var loopDescription = "MTKView display link"
+    /// Brush & Pencil, open. The Pencil's palette gestures open it too.
+    @Published var showingBrushSettings = false
 
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
@@ -138,9 +155,15 @@ final class EditorModel: ObservableObject {
     /// camera" look identical on the glass.
     @Published private(set) var inputHint = "Pencil sculpts · one finger on the model sculpts, off it orbits"
 
-    /// True once any Pencil touch or hover has arrived. From then on fingers
-    /// navigate only, because the alternative is that every orbit is also a
-    /// stroke.
+    /// True once any Pencil touch or hover has arrived on this iPad, and
+    /// remembered across launches. From then on fingers navigate, because the
+    /// alternative is that every orbit is also a stroke.
+    ///
+    /// It used to start false on every launch, so until the first Pencil
+    /// stroke of each session a finger on the model sculpted — and the heel
+    /// of the hand drawing reaches the glass before the tip. The palm took
+    /// the stroke, the Pencil was refused, and the first stroke of the day did
+    /// nothing until the Pencil was lifted and put down again.
     private(set) var pencilSeen = false
 
     /// Set by the viewport so a change can be pushed straight to the renderer
@@ -176,13 +199,36 @@ final class EditorModel: ObservableObject {
     /// Queues a sample. Called from the touch handlers, possibly several times
     /// per frame; does no work beyond appending and asking for a frame.
     func enqueue(_ sample: StrokeSample) {
+        if ignoringUntilNextStroke {
+            // The rest of a gesture whose stroke was already closed or thrown
+            // away — by an undo, a fill, or the Pencil taking over from a palm.
+            guard sample.phase == .began else {
+                if sample.phase == .ended || sample.phase == .cancelled {
+                    ignoringUntilNextStroke = false
+                }
+                return
+            }
+            ignoringUntilNextStroke = false
+        }
         if sample.isPencil { notePencil() }
         lastSampleTime = CACurrentMediaTime()
         pending.append(sample)
-        if sample.phase == .began { onActivity?(true) }
+        if sample.phase == .began {
+            // A stroke is made on a model that is holding still. A flick's
+            // coast runs on for a second or more, and a stroke started under it
+            // was applied through a camera that was still turning: a Pencil
+            // held still smeared, and a Grab's handle drifted off the tip.
+            spin = .zero
+            markActive()
+        }
         if sample.phase == .ended || sample.phase == .cancelled { predicted = nil }
         requestDraw?()
     }
+
+    /// Set when a command closed or discarded the open stroke while its
+    /// gesture was still on the glass: the rest of that gesture is dropped
+    /// rather than starting a stroke of its own.
+    private var ignoringUntilNextStroke = false
 
     /// Where the Pencil is predicted to be next frame. The cursor only.
     func predict(_ location: Vec2) {
@@ -201,7 +247,7 @@ final class EditorModel: ObservableObject {
         lastHoverTime = CACurrentMediaTime()
         hoverPending = (location, height)
         hoverCleared = false
-        onActivity?(true)
+        markActive()
         requestDraw?()
     }
 
@@ -216,7 +262,25 @@ final class EditorModel: ObservableObject {
     func notePencil() {
         guard !pencilSeen else { return }
         pencilSeen = true
-        inputHint = "Pencil sculpts · fingers move the camera"
+        save(true, "pencilSeen")
+        updateInputHint()
+    }
+
+    private func updateInputHint() {
+        let hint = pencilSeen && !fingerEditing
+            ? "Pencil sculpts · fingers move the camera"
+            : "Pencil sculpts · one finger on the model sculpts, off it orbits"
+        if inputHint != hint { inputHint = hint }
+    }
+
+    /// Tells the viewport to keep drawing, and remembers that it did, so the
+    /// edge back to idle is reported even when a whole gesture fits in one
+    /// frame. Without that, a stroke whose touch-down and lift were drained
+    /// together never reported idle, and the viewport went on drawing at the
+    /// display's full rate with nothing moving until the next stroke.
+    private func markActive() {
+        onActivity?(true)
+        wasActive = true
     }
 
     /// Whether a Pencil stroke or hover is in progress: what the low-latency
@@ -265,7 +329,28 @@ final class EditorModel: ObservableObject {
     func say(_ message: String) {
         if status != message { status = message }
         statusUntil = CACurrentMediaTime() + 2.5
+        scheduleStatusClear()
     }
+
+    /// The toast keeps its own clock. It used to be cleared from the frame
+    /// drain, and an idle viewport draws no frames, so "Undo" stayed on
+    /// screen until the next touch.
+    private func scheduleStatusClear() {
+        guard !statusClearScheduled else { return }
+        statusClearScheduled = true
+        let wait = max(0.05, statusUntil - CACurrentMediaTime())
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard let self else { return }
+            self.statusClearScheduled = false
+            if CACurrentMediaTime() + 0.01 >= self.statusUntil {
+                if self.status != nil { self.status = nil }
+            } else {
+                self.scheduleStatusClear()
+            }
+        }
+    }
+    private var statusClearScheduled = false
 
     init(document: HumanoidCore.Document) {
         self.document = document
@@ -275,6 +360,8 @@ final class EditorModel: ObservableObject {
         frameSamples.reserveCapacity(128)
         latencies.reserveCapacity(128)
         loadSettings()
+        colourRGB = colour.rgb8
+        updateInputHint()
         NSLog("[BabyBlender] document ready: %d vertices", document.mesh.vertexCount)
     }
 
@@ -362,8 +449,14 @@ final class EditorModel: ObservableObject {
 
     func flick(velocity: Vec2) {
         spin = velocity
-        onActivity?(true)
+        markActive()
         requestDraw?()
+    }
+
+    /// A finger landed: a coasting model stops under it, as a scrolling list
+    /// does.
+    func stopCoast() {
+        spin = .zero
     }
 
     func frameModel() {
@@ -375,12 +468,11 @@ final class EditorModel: ObservableObject {
 
     /// Whether a finger landing here should sculpt rather than move the camera.
     ///
-    /// Nomad's rule: before a Pencil has been seen, a finger on the model works
-    /// and a finger off it orbits. Once a Pencil has been seen the Pencil owns
-    /// editing and fingers navigate.
+    /// Nomad's rule: a finger on the model works and a finger off it orbits —
+    /// before a Pencil has been seen, or with "Let a finger sculpt" on. Once a
+    /// Pencil has been seen the Pencil owns editing and fingers navigate.
     func fingerShouldSculpt(at point: Vec2, viewport: Vec2) -> Bool {
-        if fingerEditing { return true }
-        guard !pencilSeen, viewport.x > 0, viewport.y > 0 else { return false }
+        guard fingerEditing || !pencilSeen, viewport.x > 0, viewport.y > 0 else { return false }
         return camera.pick(document.mesh, at: point, viewport: viewport) != nil
     }
 
@@ -395,6 +487,7 @@ final class EditorModel: ObservableObject {
         let now = CACurrentMediaTime()
         let elapsed = lastFrame > 0 ? min(0.1, now - lastFrame) : 1.0 / 120
         lastFrame = now
+        lastViewport = viewport
 
         lastDrainDepth = pending.count
         worstDrainDepth = max(worstDrainDepth, lastDrainDepth)
@@ -407,9 +500,6 @@ final class EditorModel: ObservableObject {
         change.formUnion(applySamples(viewport: viewport))
         if hoverPending != nil, now - lastHoverTime > EditorModel.hoverTimeout {
             clearHover()
-        }
-        if let current = status, !current.isEmpty, now > statusUntil {
-            status = nil
         }
         if engine.isOpen, lastSampleTime > 0, now - lastSampleTime > EditorModel.strokeTimeout {
             NSLog("[BabyBlender] stroke had no samples for %.1f s; closing it",
@@ -480,7 +570,7 @@ final class EditorModel: ObservableObject {
     private func brushOptions() -> BrushOptions {
         BrushOptions(tool: tool, radiusPoints: radiusPoints, pointScale: pointScale,
                      fixedWorldRadius: fixedWorldRadius, strength: strength,
-                     symmetric: symmetric, stabilise: stabilise, colour: colour.rgb8,
+                     symmetric: symmetric, stabilise: stabilise, colour: colourRGB,
                      hardness: hardness, pressure: pressureResponse)
     }
 
@@ -496,10 +586,10 @@ final class EditorModel: ObservableObject {
     private func currentWorldRadius() -> Double {
         let depth = camera.viewDepth(of: camera.lookAt)
         return max(0.0005, radiusPoints * pointScale
-                   * camera.metresPerPixel(depth: depth, viewportHeight: max(1, viewportHeight)))
+                   * camera.metresPerPixel(depth: depth, viewportHeight: max(1, lastViewport.y)))
     }
-    /// The drawable's height, remembered from the last frame.
-    private var viewportHeight: Double = 1
+    /// The drawable's size, remembered from the last frame.
+    private var lastViewport = Vec2(0, 0)
 
     // MARK: - Readout
 
@@ -540,6 +630,7 @@ final class EditorModel: ObservableObject {
             + "\nlast: \(last.tool.rawValue) \(framesLastStroke)f  samples \(last.samples)"
             + "  steps \(last.dabs)  texels \(last.texels)  skipped \(last.skipped)"
             + "  lifted \(last.lifted)  armed \(last.armed ? "yes" : "no")"
+            + (last.discarded ? "  discarded" : "")
             + String(format: "  peak %.2f", last.peakPressure)
             + "\ntool \(tool.rawValue)\(tool == .erase ? " (paints base colour)" : "")"
     }
@@ -561,7 +652,6 @@ final class EditorModel: ObservableObject {
     // MARK: - Cursor
 
     private func updateCursor(viewport: Vec2) -> Change {
-        viewportHeight = viewport.y
         let options = brushOptions()
         // Kept visible DURING the stroke. Apple's hover guidance says to hide a
         // preview once the pen is down, which is right for a drawing app where
@@ -633,14 +723,81 @@ final class EditorModel: ObservableObject {
 
     // MARK: - Commands
 
-    func undo() { document.undo(); pendingWholeTexture = true; refresh(.all); requestDraw?() }
-    func redo() { document.redo(); pendingWholeTexture = true; refresh(.all); requestDraw?() }
+    func undo() {
+        closeOpenStroke()
+        document.undo()
+        pendingWholeTexture = true
+        refresh(.all)
+        requestDraw?()
+    }
+
+    func redo() {
+        closeOpenStroke()
+        document.redo()
+        pendingWholeTexture = true
+        refresh(.all)
+        requestDraw?()
+    }
 
     func fill() {
-        document.fill(colour.rgb8)
+        closeOpenStroke()
+        document.fill(colourRGB)
         pendingWholeTexture = true
         refresh(.texture)
         requestDraw?()
+    }
+
+    /// Two fingers tapped together: undo.
+    ///
+    /// Until a Pencil has been seen, the tap's first finger can land on the
+    /// model and start a stroke before the second one makes it a tap —
+    /// Inflate dabs a bump at touch-down. That stroke is thrown away, not
+    /// undone, so the undo takes back the stroke that came before it.
+    func undoFromTap() {
+        discardOpenStroke()
+        guard document.canUndo else { return }
+        undo()
+        say("Undo")
+    }
+
+    /// Throws the open stroke away: its gesture turned out not to be a
+    /// stroke. A palm the Pencil has just taken over from, or a two-finger
+    /// tap's first finger. See `StrokeEngine.discard(_:)`.
+    func discardOpenStroke() {
+        settleInput()
+        guard engine.isOpen else { return }
+        refresh(translate(engine.discard(&document)))
+        strokeFinished()
+        ignoringUntilNextStroke = true
+    }
+
+    /// Finishes the open stroke where it is, so a command lands after it
+    /// rather than inside it.
+    ///
+    /// Undo, redo and fill all touch the history. One arriving mid-stroke —
+    /// the toolbar's Undo, tapped with the other hand — undid the stroke
+    /// before while this one was still recording, and this one's saved
+    /// before-values then put part of the undone edit back when it closed.
+    /// The rest of the gesture is dropped: it ended when the command arrived.
+    private func closeOpenStroke() {
+        settleInput()
+        guard engine.isOpen else { return }
+        refresh(translate(engine.close(&document)))
+        strokeFinished()
+        ignoringUntilNextStroke = true
+    }
+
+    /// Applies the queued input now, outside a frame, so a command sees the
+    /// stroke as far as the Pencil has actually taken it.
+    private func settleInput() {
+        guard !pending.isEmpty else { return }
+        guard lastViewport.x > 0, lastViewport.y > 0 else {
+            // No frame has been drawn yet, so nothing queued has reached the
+            // document; there is nothing to settle.
+            pending.removeAll(keepingCapacity: true)
+            return
+        }
+        refresh(applySamples(viewport: lastViewport))
     }
 
     func export(named name: String) -> Gate.Report {
@@ -667,10 +824,12 @@ final class EditorModel: ObservableObject {
             say(target.rawValue)
         case .eraser:
             togglePaintErase()
+        case .brushSettings:
+            showingBrushSettings = true
         }
     }
 
-    enum PencilTapPreference { case ignore, previousTool, eraser }
+    enum PencilTapPreference { case ignore, previousTool, eraser, brushSettings }
 
     /// From a sculpting tool, Paint; from Paint, Erase; from Erase, Paint.
     func togglePaintErase() {
@@ -720,6 +879,7 @@ final class EditorModel: ObservableObject {
         if let raw = d.string(forKey: EditorModel.defaultsPrefix + "pressureCurve"),
            let curve = PressureResponse.Curve(rawValue: raw) { pressureCurve = curve }
         if let v = bool("lowLatency") { lowLatency = v }
+        if let v = bool("pencilSeen") { pencilSeen = v }
     }
 }
 

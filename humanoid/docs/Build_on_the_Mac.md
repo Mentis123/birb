@@ -3,7 +3,7 @@
 **Time: about twenty minutes the first time, most of it Xcode indexing.**
 
 > **Read this first.** Everything in `Sources/` is tested on Linux and green —
-> 265 tests. Everything in `app/` is **compiled by CI** on every push (the
+> 270 tests. Everything in `app/` is **compiled by CI** on every push (the
 > `macos` job in `.github/workflows/humanoid.yml`, Release and Debug, for a
 > device) — which it was not before 2026-09-23: that job named a project that
 > no longer existed and still passed. Compiled is not run: the app layer's
@@ -120,12 +120,13 @@ A dark screen with a pale rounded cube in the middle.
 | **Two finger tap** | Undo |
 | Three finger tap | The readout: fps, frame time, **touch→glass latency**, pressure |
 | **Apple Pencil** | Sculpt or paint with the selected tool; pressure sets size and strength |
-| Pencil double tap / Pro squeeze | Whatever Settings → Apple Pencil says (eraser, previous tool, ignore) |
+| Pencil double tap / Pro squeeze | Whatever Settings → Apple Pencil says: eraser, previous tool, ignore; the palette settings (the squeeze's default) open Brush & Pencil |
 
-**Fingers navigate, the Pencil edits.** No mode switch. Until a Pencil has been
-seen, a finger that lands ON the model sculpts; the hand icon in the top bar
-forces finger sculpting on. A palm resting on the glass while you draw is
-ignored.
+**Fingers navigate, the Pencil edits.** No mode switch. Until a Pencil has ever
+been seen on this iPad (it is remembered), a finger that lands ON the model
+sculpts; the hand icon in the top bar keeps that rule on afterwards. A palm
+resting on the glass while you draw is ignored, and a Pencil that lands while
+a palm holds a stroke takes it over and throws the palm's stroke away.
 
 The pencil-tip button in the top bar opens **Brush & Pencil**: the pressure
 curve and the size and strength ranges, paint hardness, mirror, the rope

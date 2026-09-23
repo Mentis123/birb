@@ -236,8 +236,10 @@ old behaviour back fails at least one named test.
 | Symmetric halves summed | the three plane tests in `GrabTrackingTests` |
 | UV flip removed (renderer or exporter) | `TextureSpaceTests`, the export test, the Blender oracle |
 | Reused alpha buffer not cleared | `testASecondStrokeOverTheFirstBuildsUpAndUndoesSeparately` |
+| Lift drops the paint it applied (§10) | `testPaintJustBeforeTheStrokeRunsOffTheModelIsStillUploaded` |
+| Discard leaves texels, normals or the upload behind, or is close-and-undo (§10) | the four discard tests |
 
-226 → **265 core tests**, 1 skipped, 0 failures; `tools/verify.sh` all eight
+226 → **270 core tests**, 1 skipped, 0 failures; `tools/verify.sh` all eight
 stages PASS with Blender 4.5.13 and the Khronos validator; the app builds clean
 (Release and Debug, Xcode 26.6) in CI.
 
@@ -278,7 +280,8 @@ and launch from the home screen. Three-finger tap for the readout.
    back on: no streak where the Pencil was off the model.
 7. **Palm.** Rest the heel of your hand on the glass, then draw: the model does
    not turn.
-8. **Two-finger tap** undoes the last stroke.
+8. **Two-finger tap** undoes the last stroke, and the camera does not move.
+   A small two-finger pinch or pan moves the camera and does NOT undo.
 9. **Latency — the number to send back.** Draw small circles for five seconds
    and read `touch→glass` (median, p90) and the loop name after the dot. Then
    Brush & Pencil → turn **Low-latency drawing** off, and repeat. Both pairs of
@@ -288,6 +291,18 @@ and launch from the home screen. Three-finger tap for the readout.
 10. **Console lines worth pasting:** `drawing through the low-latency
     UIUpdateLink` (or the fall-back line), `paint map ready (… ms)`, and any
     `Hang detected`.
+11. **Palm first, on the first launch of this build.** Rest the heel of your
+    hand on the MODEL, then put the Pencil down and draw. The Pencil draws
+    from its first stroke, and whatever the palm did is taken back (the
+    readout's last line says `discarded`).
+12. **A coasting model stops.** Flick the model to spin it, then touch the
+    Pencil down while it is still turning: it stops at touch-down, and a
+    Pencil held still makes a dot, not a smear.
+13. **A flicked stroke keeps its tail.** Paint a quick stroke that flicks off
+    at the end: the paint reaches where the Pencil left the glass.
+14. **Pencil Pro squeeze** (left at the system default) opens Brush & Pencil
+    and does not change the tool. Double tap still switches Paint and Erase
+    unless Settings → Apple Pencil says otherwise.
 
 ## 9. What is still unmeasured
 
@@ -300,3 +315,29 @@ and launch from the home screen. Three-finger tap for the readout.
   point chosen from the Pencil's measured force range, and every one of them is
   a slider.
 - Whether 40 pt is the right palm size on this iPad; `NavigationGesture.palmRadius`.
+- Whether ten points of travel before a one-finger orbit starts
+  (`NavigationGesture.slop`, §10) feels late; it is UIKit's own pan
+  hysteresis, and it is what makes the two-finger tap reliable.
+
+## 10. A second look at the app layer
+
+The app is compiled by CI but runs nowhere except the iPad, so after the pass
+above an adversarial review read `EditorModel`, `SculptView`, `Renderer` and
+`EditorView` for behaviour, not syntax. Each finding below was checked against
+the code before anything changed; the one it rated minor and could only be
+settled on the device (a late low-latency confirmation delaying one frame's
+samples) was left as it is.
+
+| Finding | Fix |
+|---|---|
+| **A palm on the model before the first Pencil stroke of every session took the stroke, and the Pencil was refused** until it was lifted and put down again: `pencilSeen` was not saved, and the Pencil's touch-down was turned away because a touch was already being followed. The most likely cause of "the pencil wasn't working, then did". | `pencilSeen` persists. A Pencil landing while a finger holds the stroke takes it over, and the finger's stroke is **discarded**, not kept (`StrokeEngine.discard`). A Pencil nothing is following is taken up on its next move. |
+| **The low-latency watchdogs were both switched off at launch.** The did-become-active observer stamped a frame that had not happened; on a cold launch it fires after the view is built, so a `UIUpdateLink` that never drew would have left the viewport blank for the session. In the other direction, one draw that stalled half a second after its drain fell back for good, and a draw that found no drawable counted as drawn. | The loop judges on frames **presented** (stamped after `present`, counted for the first-frame check); a draw with no drawable asks again; activation only restarts a waiting request's clock. The frame-rate range comes from the panel, because the 80 Hz floor was asked of 60 Hz iPads too — including the M2/M3 iPad Air, which have hover and no ProMotion. |
+| **A stroke started during a flick's coast was applied through a turning camera**: a still Pencil smeared, a Grab's handle drifted. | A touch-down, or a finger landing, stops the coast. |
+| **Undo, redo and fill ran inside an open stroke.** The toolbar's Undo, tapped by the other hand mid-stroke, undid the previous stroke while this one was recording, and part of it came back when this one closed. The two-finger tap could do the same with its own first finger's stroke. | Commands close the open stroke first and drop the rest of its gesture. The two-finger tap **discards** its own finger's stroke and then undoes: undoing it instead would leave it on the redo stack, or, if it changed nothing, undo the stroke before. `Document.discardStroke` restores shape, normals and texels and leaves history and redo exactly as they were; four tests, each mutation-checked. |
+| **A two-finger tap undid and moved the camera**; the camera moved after one point of travel. | The tap waits for the camera gesture to fail, and the camera waits for UIKit's own ten points. |
+| **A Pencil Pro squeeze at its system default (Show contextual palette) switched a sculpt tool to Paint**, and "Run a shortcut" ran the Shortcut AND switched tool. | Only Switch to eraser switches; the palette actions open Brush & Pencil; the rest are ignored. |
+| **Paint just before a stroke ran off the model could stay invisible**: the lift applied it and threw its upload flag away. A core bug, found by reading the app's use of it. | `lift` returns its effect; `testPaintJustBeforeTheStrokeRunsOffTheModelIsStillUploaded`. |
+| Palm rejection read a touch's size only as it landed (palms land small and spread); a resting palm's own movement reset a finger's flick; the hand lifting after a stroke could orbit. | Size re-read while followed; only followed fingers move the camera; touches in the 0.3 s after the Pencil lifts are ignored. |
+| The last samples of every stroke — the ones between the last move and the lift — were never applied, clipping a flicked stroke's tail. | The lift's coalesced samples are applied before the end. |
+| A stroke whose touch-down and lift fell in one frame left the viewport drawing at full rate while idle; toasts stayed up until the next touch; the brush colour was converted through UIKit twice a frame; the Size slider did nothing with the size locked on the model; "Let a finger sculpt" took the camera away from fingers entirely; loop changes were published from inside SwiftUI view updates. | All fixed as described in the code comments at each site. |
+

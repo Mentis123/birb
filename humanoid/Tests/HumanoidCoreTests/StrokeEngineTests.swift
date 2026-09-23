@@ -288,6 +288,116 @@ final class StrokeEngineTests: XCTestCase {
         XCTAssertEqual(document.undoDepth, 2)
     }
 
+    func testPaintJustBeforeTheStrokeRunsOffTheModelIsStillUploaded() throws {
+        // The last sample on the model and the first one off it, in ONE frame.
+        // The lift applies the paint queued before it, and the upload for that
+        // paint used to be dropped with the lift's return value: the dab at the
+        // model's edge stayed invisible until something else re-uploaded.
+        var engine = StrokeEngine()
+        let start = try front(-0.02, 0.09), last = try front(0.02, 0.09)
+        let off = try pixel(Vec3(0.02, 0.3, 0.12))
+        XCTAssertNil(camera.pick(document.mesh, at: off, viewport: viewport))
+        let brush = options(.paint)
+        engine.apply([StrokeSample(phase: .began, location: try pixel(start.position))],
+                     to: &document, camera: camera, viewport: viewport, options: brush)
+        _ = engine.takePaintDirty()
+        let effect = engine.apply([StrokeSample(phase: .moved, location: try pixel(last.position)),
+                                   StrokeSample(phase: .moved, location: off)],
+                                  to: &document, camera: camera, viewport: viewport, options: brush)
+        XCTAssertTrue(effect.contains(.texture), "this frame's paint never reached the GPU")
+        let dirty = engine.takePaintDirty()
+        let texel = TextureSpace.texel(of: last.uv, width: document.albedo.width,
+                                       height: document.albedo.height)
+        XCTAssertTrue(texel.x >= dirty.minX && texel.x <= dirty.maxX
+                      && texel.y >= dirty.minY && texel.y <= dirty.maxY,
+                      "the dab at the edge is outside the rectangle uploaded")
+        XCTAssertTrue(isBlue(shown(at: last)))
+    }
+
+    // MARK: - Gestures that were not strokes
+
+    func testADiscardedStrokeLeavesTheShapeAndTheHistoryAsTheyWere() throws {
+        // A palm on the model before the Pencil landed: it has already run a
+        // stroke by the time anything can tell it was a palm.
+        var engine = StrokeEngine()
+        let a = try pixel(try front(-0.04, 0).position), b = try pixel(try front(0.04, 0).position)
+        stroke(&engine, line(from: a, to: b, steps: 10), options: options(.inflate))
+        let sculpted = document.mesh.positions
+        document.undo()
+        let original = document.mesh.positions
+        let originalNormals = document.mesh.normals
+        XCTAssertTrue(document.canRedo)
+
+        stroke(&engine, line(from: b, to: a, steps: 10), options: options(.inflate), end: false)
+        XCTAssertNotEqual(document.mesh.positions, original, "the palm's stroke moved nothing")
+        let effect = engine.discard(&document)
+        XCTAssertTrue(effect.contains(.mesh))
+        XCTAssertFalse(engine.isOpen)
+        XCTAssertTrue(engine.last.discarded)
+        XCTAssertEqual(document.mesh.positions, original)
+        let worstNormal = zip(document.mesh.normals, originalNormals).map { length($0 - $1) }.max() ?? 0
+        XCTAssertLessThan(worstNormal, 1e-9, "the normals still describe the palm's bump")
+        XCTAssertEqual(document.undoDepth, 0)
+        XCTAssertTrue(document.canRedo, "throwing a gesture away must not cost the redo branch")
+        document.redo()
+        let worst = zip(document.mesh.positions, sculpted).map { length($0 - $1) }.max() ?? 0
+        XCTAssertLessThan(worst, 1e-12)
+    }
+
+    func testATwoFingerTapsFirstFingerIsTakenBackBeforeTheUndo() throws {
+        // The first finger of the tap lands on the model and Inflate dabs a
+        // bump at touch-down; the second finger makes it a tap, which means
+        // undo. Closed and undone instead of discarded, the tap would take
+        // back its own bump and leave the stroke it was aimed at.
+        var engine = StrokeEngine()
+        let original = document.mesh.positions
+        let a = try pixel(try front(-0.04, 0).position), b = try pixel(try front(0.04, 0).position)
+        stroke(&engine, line(from: a, to: b, steps: 10), options: options(.inflate))
+        let tap = try pixel(try front(0.02, 0.05).position)
+        let sculpted = document.mesh.positions
+        engine.apply([StrokeSample(phase: .began, location: tap)], to: &document, camera: camera,
+                     viewport: viewport, options: options(.inflate))
+        XCTAssertNotEqual(document.mesh.positions, sculpted, "the tap's finger dabbed nothing")
+        engine.discard(&document)
+        document.undo()
+        XCTAssertEqual(document.mesh.positions, original)
+        XCTAssertFalse(document.canUndo)
+    }
+
+    func testADiscardedPaintStrokeLeavesNoPaintAndIsUploadedBack() throws {
+        var engine = StrokeEngine()
+        let before = document.albedo.rgba
+        let a = try pixel(try front(-0.05, 0).position), b = try pixel(try front(0.05, 0).position)
+        stroke(&engine, line(from: a, to: b, steps: 12), options: options(.paint, symmetric: true),
+               end: false)
+        XCTAssertNotEqual(document.albedo.rgba, before)
+        _ = engine.takePaintDirty()
+        let effect = engine.discard(&document)
+        XCTAssertEqual(document.albedo.rgba, before)
+        XCTAssertTrue(effect.contains(.texture))
+        XCTAssertFalse(engine.takePaintDirty().isEmpty, "the GPU would go on showing the paint")
+        XCTAssertEqual(document.undoDepth, 0)
+        // The next stroke paints normally over the reused buffer.
+        stroke(&engine, line(from: a, to: b, steps: 12), options: options(.paint))
+        XCTAssertTrue(isBlue(shown(at: try front(0, 0))))
+        XCTAssertEqual(document.undoDepth, 1)
+    }
+
+    func testADiscardedGrabPutsTheSurfaceBack() throws {
+        var engine = StrokeEngine()
+        let original = document.mesh.positions
+        let start = try pixel(try front(0, 0).position)
+        stroke(&engine, line(from: start, to: start + Vec2(0, -120), steps: 6),
+               options: options(.grab, symmetric: true), end: false)
+        XCTAssertNotEqual(document.mesh.positions, original)
+        engine.discard(&document)
+        XCTAssertEqual(document.mesh.positions, original)
+        XCTAssertNil(engine.grabHandle)
+        XCTAssertEqual(document.undoDepth, 0)
+        stroke(&engine, line(from: start, to: start + Vec2(0, -60), steps: 3), options: options(.grab))
+        XCTAssertEqual(document.undoDepth, 1, "the next Grab did not record")
+    }
+
     func testTheToolIsFixedAtTouchDown() throws {
         var engine = StrokeEngine()
         let a = try pixel(try front(-0.04, 0).position), b = try pixel(try front(0.04, 0).position)
