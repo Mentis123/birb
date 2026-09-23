@@ -70,6 +70,12 @@ export function addAtmosphere(material, THREE, {
     // One shared, fully guarded injection — see ensureWorldVarying.
     ensureWorldVarying(shader);
 
+    // The horizon patch (horizon-shadow.js, chained BEFORE this one) leaves a
+    // sun visibility in `birbSunVis`; a rim in a ridge's shadow is a rim the
+    // sun is not lighting. Emitted only when that global exists, so without
+    // the patch this function's output is byte-identical to what it was.
+    const rimSunVis = shader.fragmentShader.includes('float birbSunVis') ? ' * birbSunVis' : '';
+
     shader.fragmentShader =
       'uniform float uBirbTime; uniform vec3 uBirbMist; uniform float uBirbAtmos;\n'
       + 'uniform float uBirbBase; uniform float uBirbCloud;\n'
@@ -124,7 +130,7 @@ export function addAtmosphere(material, THREE, {
       // which is what it is meant to be: bright ground catches the low sun,
       // dark ground stays dark.
       outgoingLight += diffuseColor.rgb * uBirbSunColor
-        * (birbFacesSun * birbGrazing * uBirbSunRim * uBirbAtmos);
+        * (birbFacesSun * birbGrazing * uBirbSunRim * uBirbAtmos${rimSunVis});
 
       // ── Rock strata ──────────────────────────────────────────────────
       // Canyons only. A canyon is not a canyon because of its shape — plenty

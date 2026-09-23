@@ -1,5 +1,43 @@
 import * as THREE from "https://esm.sh/three@0.183.2";
 
+// The physical atmosphere's tint (src/environment/atmosphere-model.js), as a
+// RATIO around the authored sky: 1 everywhere when the sun sits where the
+// biome's palette was authored. The horizon carries the sun's azimuth
+// (a + b cos(phi) + c cos^2(phi) through the model's sunward, side and away
+// samples); the zenith blends in by elevation^2.5, which is how the model's
+// own sky ratio moves between 3 and 90 degrees (flat to about 30, then
+// falling to the zenith value) measured at the cycle's lowest and highest
+// sun. Written so that identity uniforms give exactly 1.0, not 0.99999994:
+// a + (b + c*cp)*cp with b = c = 0 is a + 0, and h + (z - h)*v with z = h is
+// h + 0. Only compiled when the dome is built with `atmosphere: true`.
+export const ATMOSPHERE_TINT_GLSL = `
+    uniform vec3 uAtmosA;
+    uniform vec3 uAtmosB;
+    uniform vec3 uAtmosC;
+    uniform vec3 uAtmosZenith;
+    uniform vec3 uAtmosDisc;
+
+    vec3 birbAtmosTint(vec3 dir) {
+      float up = dot(dir, uSkyUp);
+      vec3 sunFlat = uSunDirection - uSkyUp * dot(uSunDirection, uSkyUp);
+      vec3 dirFlat = dir - uSkyUp * up;
+      float denom = sqrt(dot(sunFlat, sunFlat) * dot(dirFlat, dirFlat));
+      float cp = denom > 1e-6 ? dot(sunFlat, dirFlat) / denom : 0.0;
+      vec3 horizon = uAtmosA + (uAtmosB + uAtmosC * cp) * cp;
+      float e = clamp(up, 0.0, 1.0);
+      float v = e * e * sqrt(e);
+      return horizon + (uAtmosZenith - horizon) * v;
+    }
+`;
+
+// Applied to the sky's base colour (gradient and panorama alike) BEFORE the
+// self-limiting glows read their headroom, so the band and halo still pay the
+// tax on the colour actually drawn.
+export const ATMOSPHERE_TINT_APPLY_GLSL = `
+      vec3 atmosTint = birbAtmosTint(dir);
+      color *= atmosTint;
+`;
+
 /**
  * Creates a sky dome with a painterly 3-stop vertical gradient shader.
  * Gradient: horizon (warm cream) -> mid (soft blue) -> zenith (deep indigo).
@@ -16,6 +54,10 @@ export function createSkyDome(options = {}) {
     bottomColor = new THREE.Color(0x2a1a28),  // muted plum below horizon
     offset = 0.0,    // shifts gradient up/down (-1 to 1)
     radius = 450,
+    // Compile in the physical-atmosphere tint (?atmos, index.html). OFF builds
+    // the shader string byte-for-byte as it was before the tint existed, so
+    // `?atmos=0` is the true before and not "the new shader at tint 1".
+    atmosphere = false,
   } = options;
 
   const vertexShader = `
@@ -53,7 +95,7 @@ export function createSkyDome(options = {}) {
     uniform float uTime;
     uniform float uRadius;
     varying vec3 vWorldPosition;
-
+${atmosphere ? ATMOSPHERE_TINT_GLSL : ''}
     void main() {
       vec3 dir = normalize(vWorldPosition - uCenter);
       float h = clamp(dot(dir, uSkyUp) + uOffset, -1.0, 1.0);
@@ -103,7 +145,7 @@ export function createSkyDome(options = {}) {
         vec3 texSky = texture2D(uSkyTexture, vec2(fract(su), clamp(sv, 0.0, 1.0))).rgb;
         color = mix(color, texSky, uSkyMix);
       }
-
+${atmosphere ? ATMOSPHERE_TINT_APPLY_GLSL : ''}
       // ── Self-limiting glows ──────────────────────────────────────────
       // How much room the sky still has before it clips. Both the horizon
       // band and the sun's broad halo are ADDITIVE, and additive light onto a
@@ -124,7 +166,7 @@ export function createSkyDome(options = {}) {
       // a placeholder generated from this very function. The stylised gradient
       // needs the band; a real sky brought its own.
       float horizonBand = exp(-pow((h - 0.02) * 8.0, 2.0)) * 0.22 * (1.0 - uSkyMix);
-      color += uHorizonColor * horizonBand * skyRoom;
+      color += uHorizonColor * horizonBand * skyRoom${atmosphere ? ' * atmosTint' : ''};
 
       // Sun: soft disc + two-lobe atmospheric halo. Pure shader math on the
       // existing dome — a golden-hour anchor with zero extra draw calls.
@@ -148,7 +190,7 @@ export function createSkyDome(options = {}) {
       // the knee. A disc at 1.15 was the brightest thing in the world and
       // still bloomed by nothing. It is also the only source the light
       // shafts have, so its brightness sets their whole strength.
-      color += uSunColor * (disc * 4.5 + halo);
+      color += uSunColor${atmosphere ? ' * uAtmosDisc' : ''} * (disc * 4.5 + halo);
 
       // Star-like noise for the top hemisphere, with a slow gentle twinkle.
       float starNoise = fract(sin(dot(vWorldPosition.xz * 0.1, vec2(12.9898, 78.233))) * 43758.5453);
@@ -183,6 +225,14 @@ export function createSkyDome(options = {}) {
       uSkyMix: { value: 0 },
       uSkyRotation: { value: 0 },
       uRadius: { value: radius },
+      ...(atmosphere ? {
+        // Identity: horizon a + b cos(phi) + c cos^2(phi) = 1, zenith 1, disc 1.
+        uAtmosA: { value: new THREE.Vector3(1, 1, 1) },
+        uAtmosB: { value: new THREE.Vector3(0, 0, 0) },
+        uAtmosC: { value: new THREE.Vector3(0, 0, 0) },
+        uAtmosZenith: { value: new THREE.Vector3(1, 1, 1) },
+        uAtmosDisc: { value: new THREE.Vector3(1, 1, 1) },
+      } : {}),
     },
     side: THREE.BackSide,
     depthWrite: false,
@@ -282,6 +332,41 @@ export function createSkyDome(options = {}) {
         present: !!material.uniforms.uSkyTexture.value,
         mix: material.uniforms.uSkyMix.value,
         rotation: material.uniforms.uSkyRotation.value,
+      };
+    },
+
+    /**
+     * The physical atmosphere's RATIOS (atmosphere-model.js relativeInto
+     * output: Float64Array(3) fields `horizonSun`, `horizonSide`,
+     * `horizonAway`, `zenith`, `sun`). The three horizon samples become
+     * a + b cos(phi) + c cos^2(phi) around the sun's azimuth, so the shader
+     * reproduces each exactly at 0, 90 and 180 degrees. A no-op on a dome
+     * built without `atmosphere`. Zero allocation.
+     */
+    setAtmosphere(rel) {
+      if (!atmosphere || !rel) return;
+      const u = material.uniforms;
+      const s = rel.horizonSun; const m = rel.horizonSide; const w = rel.horizonAway;
+      u.uAtmosA.value.set(m[0], m[1], m[2]);
+      u.uAtmosB.value.set((s[0] - w[0]) * 0.5, (s[1] - w[1]) * 0.5, (s[2] - w[2]) * 0.5);
+      u.uAtmosC.value.set(
+        (s[0] + w[0]) * 0.5 - m[0], (s[1] + w[1]) * 0.5 - m[1], (s[2] + w[2]) * 0.5 - m[2]);
+      u.uAtmosZenith.value.set(rel.zenith[0], rel.zenith[1], rel.zenith[2]);
+      u.uAtmosDisc.value.set(rel.sun[0], rel.sun[1], rel.sun[2]);
+    },
+
+    /** What the tint uniforms hold, for __BIRB.lightRig(). Null without it. */
+    atmosphereState() {
+      if (!atmosphere) return null;
+      const u = material.uniforms;
+      const arr = (v) => [+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)];
+      const a = u.uAtmosA.value; const b = u.uAtmosB.value; const c = u.uAtmosC.value;
+      return {
+        zenith: arr(u.uAtmosZenith.value),
+        horizonSun: [+(a.x + b.x + c.x).toFixed(4), +(a.y + b.y + c.y).toFixed(4), +(a.z + b.z + c.z).toFixed(4)],
+        horizonSide: arr(a),
+        horizonAway: [+(a.x - b.x + c.x).toFixed(4), +(a.y - b.y + c.y).toFixed(4), +(a.z - b.z + c.z).toFixed(4)],
+        disc: arr(u.uAtmosDisc.value),
       };
     },
 

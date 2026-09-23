@@ -3309,6 +3309,9 @@
         const mainEl = document.querySelector('[data-game-main]');
         if (mainEl) mainEl.hidden = false;
         startGameLoop();
+        // Hear the air: build the flight audio inside this gesture (iOS will
+        // not start a context outside one). Null under ?airsound=0.
+        if (flightAudio) flightAudio.unlock();
         // Start background music only after the user has explicitly started.
         if (soundSettings.musicEnabled) {
           setAmbientMusic(true);
@@ -3322,7 +3325,17 @@
       const startGame = () => {
         // Unlock audio in the same user gesture as Start. This avoids starting
         // ambient music from splash/tap interactions before gameplay begins.
-        unlockAudio();
+        //
+        // GUARDED, because `unlockAudio` is a const declared AFTER the
+        // module's import awaits: a tap that lands while three.js is still
+        // downloading hits its temporal dead zone and throws — measured, with
+        // the core module held in flight: "Cannot access 'unlockAudio' before
+        // initialization". That throw killed this handler before the pending
+        // path below could run, so the tap was simply lost (no "Loading…",
+        // nothing queued), and it also poisoned the boot watchdog's `reason`,
+        // which then offered to clear the cache of a game that was loading
+        // fine. The pending path takes the tap now; audio unlocks on the next.
+        try { unlockAudio(); } catch (_) { /* still loading */ }
         if (typeof startGameLoop !== 'function') {
           // Scene still loading (slow network / fast tap): show progress on
           // the button instead of revealing an empty canvas. The late-load
@@ -3702,6 +3715,10 @@
       // header for why this is being proved with a procedural map before the
       // authored biome skies (ASSET_JOBS.md job 02) are wired to it.
       var { installSkyEnvironment, iblRequested } = await import("./src/environment/sky-environment.js");
+      // Physical plumage for the v3 bird (thin-film wings, sheen body, a
+      // bird-only sky env map). `?plumage=0` builds the Standard bird exactly.
+      var { plumageRequested, plumageFor, plumageMaterialParams, installPlumageLighting, createBirdEnvironment } =
+        await import("./src/flight/plumage.js");
       var { loadTexture: loadAuthoredTexture, applyAuthoredFeathers, authoredFeathersRequested, authoredFeatherNormalsRequested } =
         await import("./src/environment/authored-textures.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
@@ -3710,8 +3727,17 @@
         await import("./src/ui/dev-quality-panel.js");
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
+      // The bird's sun shadow as three analytic ellipsoids (?birdshadow=0),
+      // and the horizon-map readback for __BIRB.horizon (?horizon=0).
+      var { createBirdShadowDriver, birdShadowRequested } = await import("./src/effects/bird-shadow.js");
+      var { setHorizonStrength, horizonReadiness, horizonUniforms } = await import("./src/environment/horizon-shadow.js");
       var { createFrameSampler, createIntervalRecorder } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
+      // One sun for a PLANET (?planetsun=0 is the before) and a physical sky
+      // that moves the authored palette with it (?atmos=0 is the before).
+      var { createSunFrame, sunCycleInto, sunWarmthInto } = await import("./src/environment/sun-frame.js");
+      var { createAtmosphereModel, createAtmosphereOutput, relativeInto: atmosRelativeInto } =
+        await import("./src/environment/atmosphere-model.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
@@ -3737,6 +3763,7 @@
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
+      var { createAeroPose, createAeroInput, aeroPoseRequested } = await import("./src/flight/aero-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
 
       // ===== SEAM EXTRACTIONS (CODEBASE_EVALUATION.md L1) =====
@@ -3895,7 +3922,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v80-2026-09-20-roll-through';
+    const BIRB_BUILD = 'v81-2026-09-23-realism';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -4104,6 +4131,9 @@
       if (continuousSounds.ambient) {
         continuousSounds.ambient.volume = getEffectiveVolume(BASE_VOLUMES.ambient, false);
       }
+      // The flight audio is an effect: master volume, silenced by the SFX
+      // toggle. Every slider move and toggle lands here.
+      if (flightAudio) flightAudio.setVolume(soundSettings.masterVolume, soundSettings.sfxEnabled);
     };
 
     // Play from preloaded pool (instant, no loading delay)
@@ -4165,6 +4195,104 @@
     const tickAmbientBirds = (_eligible) => { /* intentionally no-op */ };
     const updateWindSound = (_speed, _maxSpeed = 8) => { /* intentionally no-op */ };
 
+    // ============ HEAR THE AIR — procedural flight audio ============
+    // src/audio/flight-audio.js: wind, an aeolian whistle, the stall buffet,
+    // a whoosh on every real downstroke and a rush near the ground — all
+    // synthesised, no asset, no GPU. NOT the wind bed removed above: that was
+    // a constant loop on top of the music; this one measures 12-14 dB UNDER
+    // the music at cruise and speaks when the flight does something (speed, a
+    // stall, a beat, the ground) — docs/perf/gates/G-REALISM-FLIGHT-AUDIO.md.
+    // `?airsound=0` leaves `flightAudio` null, and every hook below is then a
+    // no-op — the silent game exactly as it was.
+    const airSoundWanted = !/[?&]airsound=0(?:&|$)/.test(window.location?.search || '');
+    let flightAudio = null;
+    if (airSoundWanted) {
+      try {
+        const { createFlightAudio } = await import('./src/audio/flight-audio.js');
+        flightAudio = createFlightAudio();
+        flightAudio.setVolume(soundSettings.masterVolume, soundSettings.sfxEnabled);
+      } catch (err) {
+        // The game flies on without it; the console still says so.
+        console.warn('[airsound] flight audio unavailable, flying silent:', err);
+        flightAudio = null;
+      }
+    }
+
+    // What the air is doing, measured, handed over in ONE object refilled
+    // every frame (zero allocation). Called where updateWindSound was.
+    const _faFrame = {
+      speed: NaN, paused: true, airborne: false, stalled: false, authority: NaN,
+      stallMul: 0.5, wingAngle: NaN, clearance: Infinity, overWater: false,
+    };
+    const _faPrevPos = new THREE.Vector3();
+    let _faHavePrev = false;
+    let _faPrevDelta = 0;
+    let _faWing = null;
+    let _faGroundIn = 0;
+    const updateFlightAudio = (delta, isNested) => {
+      const fc = flightController;
+      const f = _faFrame;
+      // This runs before the flight tick, so the pose it reads was produced
+      // by LAST frame's step: that is the time it advanced by.
+      const dt = _faPrevDelta;
+      _faPrevDelta = delta;
+      f.paused = !(delta > 0);
+      // Airspeed is what the bird actually moved — sink, falls, boosts and
+      // the nest auto-fly included, for every flight model alike. There is no
+      // wind in this world, so ground speed IS airspeed. A jump faster than
+      // any flight is a teleport or a restored pose, and reads as no sample.
+      f.speed = NaN;
+      if (fc && fc.position) {
+        if (_faHavePrev && dt > 0) {
+          const v = fc.position.distanceTo(_faPrevPos) / dt;
+          if (v <= 120) f.speed = v;
+        }
+        _faPrevPos.copy(fc.position);
+        _faHavePrev = true;
+      }
+      if (isNested) f.speed = 0;
+      f.airborne = !isNested && flightRecoveryState !== FLIGHT_RECOVERY_STATES.GROUNDED;
+      // The stall, from the stunt model's OWN flag and authority, and only
+      // while the bird flies itself. NOT while a boost is in the energy
+      // target: a boost moves it to 2.4x cruise and the controller's stall
+      // test is written against the target, so it reports a stall at 11 of
+      // a 26.4 target — a wing speeding up, not one stopping. The target is
+      // read, not boostTimer: it is still boosted on the frame after the
+      // timer runs out (written before the timer is decremented), and gating
+      // on the timer leaked exactly that frame as a 0.05 buffet.
+      const flying = f.airborne && flightRecoveryState === FLIGHT_RECOVERY_STATES.FLYING
+        && !(nestingSystem && nestingSystem.getState() === NESTING_STATES.LANDING);
+      const unboosted = sprintState.active ? sprintState.sprintSpeed : sprintState.baseSpeed;
+      const boosted = boostTimer > 0 || (fc && fc.cruise > unboosted * 1.001);
+      if (flying && !boosted && fc && fc.isStunt && typeof fc.isStalled === 'function') {
+        f.stalled = fc.isStalled();
+        f.authority = fc.authority();
+        f.stallMul = fc.stallMul;
+      } else {
+        f.stalled = false;
+        f.authority = NaN;
+      }
+      // The wing, read where every pose path leaves it (this frame's is last
+      // frame's pose). Cached, re-resolved if the model was rebuilt.
+      let attached = false;
+      for (let p = _faWing ? _faWing.parent : null, i = 0; p && i < 8; p = p.parent, i += 1) {
+        if (p === birbAnchor) { attached = true; break; }
+      }
+      if (!attached) _faWing = (birbAnchor && birbAnchor.getObjectByName('leftWing')) || null;
+      f.wingAngle = _faWing ? _faWing.rotation.x : NaN;
+      // Clearance over the ground or the water: a terrain sample, so every
+      // fourth frame is plenty for a sound that eases over 60 ms.
+      if (--_faGroundIn <= 0) {
+        _faGroundIn = 4;
+        f.clearance = __BIRB_ALTITUDE_ABOVE_GROUND();
+        const level = sphericalWorld?.waterLevel ?? 0;
+        f.overWater = !!(fc && fc.position && level < 0 && f.clearance < 12
+          && typeof sampleTerrainMeshHeight === 'function'
+          && sampleTerrainMeshHeight(fc.position.x, fc.position.y, fc.position.z) < level);
+      }
+      flightAudio.update(f, dt);
+    };
+
     // Update drone hum based on nearest drone distance
     const updateDroneHumSound = (nearestDroneDistance, maxDistance = 40) => {
       if (!continuousSounds.droneHum || !soundSettings.sfxEnabled) {
@@ -4210,7 +4338,11 @@
     };
 
     // Unlock audio on first user interaction (required for iOS)
-    const unlockAudio = () => {
+    const unlockAudio = (evt) => {
+      // Once the game runs, every gesture re-arms the flight audio: built on
+      // the first, and iOS can interrupt a context at any time (a call, Siri)
+      // and will only let it resume inside a gesture.
+      if (flightAudio && gameLoopStarted) flightAudio.unlock(evt);
       if (audioUnlocked) return;
 
       // On mobile, audio APIs must be touched in a user gesture. We unlock here,
@@ -4292,7 +4424,8 @@
         if (!(vol > 0)) return; // sfx muted
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
-        if (!_ringAudioCtx) _ringAudioCtx = new AC();
+        // One context for the page: the flight audio's when it exists.
+        if (!_ringAudioCtx) _ringAudioCtx = (flightAudio && flightAudio.ensureContext()) || new AC();
         const ctx = _ringAudioCtx;
         if (ctx.state === 'suspended') ctx.resume();
         const now = ctx.currentTime;
@@ -4542,12 +4675,19 @@
     // Changing density does not change the number of shader operations.
     scene.fog = new THREE.FogExp2(0x9bbab5, 0.006);
 
+    // Boot flags (src/ui/boot-flags.js): the sun in the bird's own horizon
+    // frame, and the physical atmosphere that moves the palette with it.
+    // Read here because the dome compiles the atmosphere tint only when asked.
+    const planetSunRequested = !/[?&]planetsun=0(?:&|$)/.test(window.location?.search || '');
+    const atmosRequested = !/[?&]atmos=0(?:&|$)/.test(window.location?.search || '');
+
     // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
     const skyDome = createSkyDome({
       topColor: new THREE.Color(0x1b2a55),     // deep indigo zenith
       midColor: new THREE.Color(0x6d9ed0),     // soft painterly blue
       horizonColor: new THREE.Color(0xf5d8a6), // warm golden-hour cream
       bottomColor: new THREE.Color(0x2a1a28),  // muted plum below
+      atmosphere: atmosRequested,
     });
     scene.add(skyDome.mesh);
 
@@ -4648,6 +4788,11 @@
     // rebuilt on every environment switch and the shadow belongs to the bird.
     const contactShadow = createContactShadow(THREE);
     scene.add(contactShadow.mesh);
+    // The SUN shadow: body and wings as ellipsoids every world material reads
+    // (src/effects/bird-shadow.js). The contact disc above stays — it is the
+    // straight-down altitude cue, which a shadow 35 units off to the side at
+    // a 30-degree sun is not.
+    const birdShadowDriver = birdShadowRequested(window.location?.search || '') ? createBirdShadowDriver(THREE) : null;
 
     // Wingtip ribbons. Added to the SCENE, not the world root: the root is
     // rebuilt from scratch on every environment switch, and a trail parented
@@ -4669,6 +4814,11 @@
     // can retint them all at once.
     const birbRimUniforms = [];
     const _rimWhite = new THREE.Color(0xffffff);
+    // The v3 bird's own sky (src/flight/plumage.js). Declared HERE, above the
+    // first setEnvironment() call, because that call reads it: a binding
+    // declared beside the bird would sit in its temporal dead zone and throw
+    // inside initial setup, which only warns and skips everything after.
+    let birbPlumageEnv = null;
     // Weather is per-biome and rebuilt on every environment switch, because
     // the profile IS the biome: snow in the mountains, pollen in the forest,
     // dust in the canyons, drizzle in the city.
@@ -4979,7 +5129,183 @@
       distance: 12,
       _dir: new THREE.Vector3(),
       _color: new THREE.Color(),
+      // ?planetsun: the cycle is re-evaluated whenever `seconds` moves (the
+      // clock, or setSunTime while paused), and the authored fill direction
+      // is mapped through the bird's frame like the key and rim.
+      evaluatedSeconds: NaN,
+      baseFill: new THREE.Vector3(1.2, 3.1, -6.2),
     };
+
+    // ===== One sun for a planet (?planetsun, default on) =====
+    // sun-cycle.js describes the sun in a HORIZON frame and promises it never
+    // sets. Copied straight into world space, that promise held only near the
+    // +Y pole: measured on 54b1961, at the south pole the sun sat 19-58
+    // degrees BELOW the local horizon for the whole cycle, and on the equator
+    // for half of it. sunFrame is the bird's own East/Up/North, parallel-
+    // transported as it flies (src/environment/sun-frame.js); key, rim and
+    // fill are mapped through it EVERY frame, clock or no clock, because the
+    // direction depends on where the bird is. At the spawn pole the mapping is
+    // the identity, so the first frame is exactly the old one.
+    const sunFrame = createSunFrame();
+    const _sunLocal = { x: 0, y: 1, z: 0, height: 0, elevation: Math.PI / 2 };
+    const _sunWarmth = { r: 1, g: 1, b: 1, intensity: 1 };
+    // The core "glow" PointLight sits ~2.5 units from the planet's centre,
+    // ~118 under the ground, with a 12-15 unit range: it lights nothing and
+    // every lit fragment still evaluates it. Kept (applyLightingPreset writes
+    // it), hidden — which also drops NUM_POINT_LIGHTS from every program.
+    if (planetSunRequested) glowLight.visible = false;
+
+    // ===== Physical atmosphere (?atmos, default on) =====
+    // A compact Earth atmosphere (src/environment/atmosphere-model.js,
+    // Hillaire 2020 / Bruneton parameters) used ONLY as a ratio around each
+    // biome's authored palette: model(e_now) / model(e_ref), where e_ref is
+    // the elevation of that biome's authored key light (~42 degrees). At e_ref
+    // every colour below is exactly the authored one. Refreshed only when the
+    // local sun elevation has moved — the cycle moves it at most ~0.2 degrees
+    // a second — so it costs a fraction of a millisecond a few times a minute.
+    const atmosState = atmosRequested ? {
+      model: createAtmosphereModel(),
+      ref: createAtmosphereOutput(),
+      cur: createAtmosphereOutput(),
+      rel: createAtmosphereOutput(),
+      refElevation: NaN,
+      elevation: NaN,       // the local sun elevation this frame
+      lastElevation: NaN,   // ...at the last refresh
+      sinceRefresh: 0,
+      refreshes: 0,
+      dirty: true,
+      // Seeded from the rig, not white: if the initial environment setup ever
+      // throws before captureLightBases() runs, the modulation must still sit
+      // on a real colour.
+      baseHemiSky: ambient.color.clone(),
+      baseFog: new THREE.Color(),
+      baseMist: new THREE.Color(),
+      baseWaterSky: new THREE.Color(),
+      hasFog: false,
+      hasMist: false,
+      hasWater: false,
+      _up: new THREE.Vector3(),
+      _water: new THREE.Color(),
+    } : null;
+    const ATMOS_REFRESH_EPS = 0.004;    // rad (~0.23 deg) of elevation before a refresh is worth it
+    const ATMOS_REFRESH_MIN_S = 0.25;   // ...and no more often than this,
+    const ATMOS_REFRESH_JUMP = 0.035;   // ...unless the sun JUMPED (~2 deg: setSunTime, a teleport)
+
+    /** target = base * ratio, per channel. Zero allocation. */
+    function mulRatio(target, base, ratio) {
+      target.r = base.r * ratio[0];
+      target.g = base.g * ratio[1];
+      target.b = base.b * ratio[2];
+      return target;
+    }
+
+    // The biome's authored light, captured once per environment switch AFTER
+    // every colour that derives from its sky (fog, mist, water) has been set.
+    function captureLightBases() {
+      sunState.baseFill.copy(lightingRig.fillLight.position);
+      sunState.evaluatedSeconds = NaN;   // re-apply the cycle over the fresh preset
+      if (!atmosState) return;
+      const key = lightingRig.keyLight;
+      const len = key.position.length();
+      // applyLightingPreset has just written the AUTHORED key position, in the
+      // pole frame the palette was painted in.
+      atmosState.refElevation = len > 0 ? Math.asin(Math.max(-1, Math.min(1, key.position.y / len))) : 0.73;
+      atmosState.model.evaluate(atmosState.refElevation, atmosState.ref);
+      atmosState.baseHemiSky.copy(lightingRig.ambient.color);
+      atmosState.hasFog = !!scene.fog;
+      if (scene.fog) atmosState.baseFog.copy(scene.fog.color);
+      atmosState.hasMist = !!visualUniforms.mistColor.value;
+      if (atmosState.hasMist) atmosState.baseMist.copy(visualUniforms.mistColor.value);
+      atmosState.hasWater = !!(sphericalWorld?.water && skyDome?.getMidColor);
+      if (atmosState.hasWater) atmosState.baseWaterSky.copy(skyDome.getMidColor()).multiplyScalar(0.58);
+      atmosState.dirty = true;
+    }
+
+    // The ?planetsun sun, every frame. `clockDelta` is 0 while the clock is
+    // held (paused, reduced motion, a benchmark freeze): the sun then keeps its
+    // HOUR, not its world direction.
+    function updatePlanetSun(clockDelta, pos) {
+      const key = lightingRig.keyLight;
+      if (clockDelta > 0) sunState.seconds += clockDelta;
+      if (pos) sunFrame.update(pos.x, pos.y, pos.z);
+      if (sunState.seconds !== sunState.evaluatedSeconds) {
+        sunState.evaluatedSeconds = sunState.seconds;
+        sunCycleInto(sunState.seconds, _sunLocal);
+        if (atmosState) {
+          // The atmosphere owns the key's colour (updateAtmosphere); its
+          // intensity is the authored one, not the warmth heuristic's.
+          key.intensity = sunState.baseKeyIntensity;
+        } else {
+          sunWarmthInto(_sunLocal.height, _sunWarmth);
+          key.color.copy(sunState.baseKeyColor);
+          key.color.r *= _sunWarmth.r;
+          key.color.g *= _sunWarmth.g;
+          key.color.b *= _sunWarmth.b;
+          key.intensity = sunState.baseKeyIntensity * _sunWarmth.intensity;
+        }
+        lightingRig.rimLight.intensity = sunState.baseRimIntensity * (1.25 - _sunLocal.height * 0.4);
+      }
+      sunFrame.toWorld(_sunLocal.x, _sunLocal.y, _sunLocal.z, key.position).multiplyScalar(sunState.distance);
+      // The rim counter-rotates so a silhouette keeps an edge; the fill keeps
+      // its authored bearing — both in the bird's frame now, not the world's.
+      sunFrame.toWorld(-_sunLocal.x, Math.max(0.35, _sunLocal.y * 0.7), -_sunLocal.z, lightingRig.rimLight.position)
+        .multiplyScalar(sunState.distance * 0.85);
+      sunFrame.toWorld(sunState.baseFill.x, sunState.baseFill.y, sunState.baseFill.z, lightingRig.fillLight.position);
+      // The hemisphere's sky/ground axis is its position: radial up, not +Y.
+      lightingRig.ambient.position.set(sunFrame.up.x, sunFrame.up.y, sunFrame.up.z);
+      skyDome?.setSunDirection?.(key.position);
+      sphericalWorld?.features?.valley?.setSunDirection?.(key.position);
+      if (sphericalWorld?.water) {
+        sphericalWorld.water.setSunDirection(key.position);
+        sphericalWorld.water.setSunColor(key.color);
+      }
+    }
+
+    // The ?atmos palette. `keyTouched` is true on a frame the ?planetsun=0
+    // cycle rewrote the key with its warmth heuristic, which this replaces.
+    function updateAtmosphere(dt, pos, keyTouched) {
+      const a = atmosState;
+      const key = lightingRig.keyLight;
+      // The sun's elevation above the BIRD's horizon. Under ?planetsun that is
+      // the cycle's own; without it, wherever the world-fixed sun happens to
+      // sit over this spot (the model clamps a set sun to 0.02 rad).
+      let e;
+      if (planetSunRequested) {
+        e = _sunLocal.elevation;
+      } else {
+        const kl = key.position.length() || 1;
+        if (pos && pos.lengthSq() > 0) a._up.copy(pos).normalize();
+        else a._up.set(0, 1, 0);
+        e = Math.asin(Math.max(-1, Math.min(1, key.position.dot(a._up) / kl)));
+      }
+      a.elevation = e;
+      a.sinceRefresh += dt;
+      const moved = Math.abs(e - a.lastElevation);
+      let applyKey = keyTouched;
+      if (a.dirty || !(moved < ATMOS_REFRESH_JUMP)
+          || (moved > ATMOS_REFRESH_EPS && a.sinceRefresh >= ATMOS_REFRESH_MIN_S)) {
+        a.model.evaluate(e, a.cur);
+        atmosRelativeInto(a.cur, a.ref, a.rel);
+        a.lastElevation = e;
+        a.sinceRefresh = 0;
+        a.dirty = false;
+        a.refreshes += 1;
+        const rel = a.rel;
+        // Sky light on the hemisphere, air in the fog and the valley mist,
+        // the sky in the lakes, and the dome itself.
+        mulRatio(lightingRig.ambient.color, a.baseHemiSky, rel.irradiance);
+        if (a.hasFog && scene.fog) mulRatio(scene.fog.color, a.baseFog, rel.horizonMean);
+        if (a.hasMist && visualUniforms.mistColor.value) mulRatio(visualUniforms.mistColor.value, a.baseMist, rel.horizonMean);
+        if (a.hasWater && sphericalWorld?.water) sphericalWorld.water.setSky(mulRatio(a._water, a.baseWaterSky, rel.horizonMean));
+        skyDome?.setAtmosphere?.(rel);
+        applyKey = true;
+      }
+      if (applyKey) {
+        mulRatio(key.color, sunState.baseKeyColor, a.rel.sun);
+        if (sphericalWorld?.water) sphericalWorld.water.setSunColor(key.color);
+      }
+      if (keyTouched) key.intensity = sunState.baseKeyIntensity;
+    }
 
     const debugVectorState = (() => {
       const hasDebugVectors = new URLSearchParams(window.location.search).has("debugVectors");
@@ -5354,6 +5680,24 @@
     // can report what drove the wings rather than what the stick was set to.
     // Reused, never allocated in the loop.
     const lastWingInput = { x: 0, y: 0, active: false };
+
+    // Let the air pose the bird (src/flight/aero-pose.js). `?aeropose=0` is
+    // the before — the raw-stick beat and the backwards elevator, exactly.
+    // Model, input record and flight-frame scratch are built ONCE here and
+    // refilled by the pose block every frame.
+    const aeroPoseEnabled = aeroPoseRequested(window.location?.search || '');
+    const aeroPose = aeroPoseEnabled ? createAeroPose() : null;
+    const aeroPoseInput = createAeroInput();
+    const _aeroForced = { wingX: 0, wingZ: 0, span: 1, handX: 0, handY: 0 };
+    const _aeroPrevPos = new THREE.Vector3();
+    const _aeroPrevQuat = new THREE.Quaternion();
+    const _aeroDq = new THREE.Quaternion();
+    let _aeroHasPrev = false;
+    let _aeroLive = false;
+    let _aeroPerchTailPitch = 0;
+    let _aeroPerchTailSpread = 1;
+    // Landing gear swings the legs this far FORWARD of straight down.
+    const AERO_GEAR_REACH = 0.15;
 
     // Scratch for the walk bob's radial up. Module scope, reused, never
     // allocated in the loop.
@@ -6166,6 +6510,15 @@
       renderer.shadowMap.enabled = shadowsEnabled;
       shadowLight.visible = shadowsEnabled;
       shadowLight.castShadow = shadowsEnabled;
+      // ONE sun. The shadow light copies the key's direction, colour and full
+      // intensity every frame (the follow block below), so with the key still
+      // lit the sun counted twice: measured on 54b1961, turning shadows ON
+      // brightened the frame 5.9% (lower half +8.5%) and a shadow could remove
+      // at most half the sunlight. While shadows are on the shadow light IS
+      // the sun; the key keeps being computed (the sky disc, the water glint,
+      // the terrain rim and the shadow light itself all read it) but lights
+      // nothing.
+      lightingRig.keyLight.visible = !shadowsEnabled;
       if (shadowCasterProxy) {
         shadowCasterProxy.castShadow = shadowsEnabled;
         shadowCasterProxy.visible = shadowsEnabled;
@@ -6747,6 +7100,13 @@
           console.warn('[ibl] sky environment failed; keeping direct lighting only', err);
         }
       }
+      // The bird reflects THIS biome's sky. Once per switch, never per frame;
+      // null until the v3 bird is built (the first call runs before it is).
+      if (birbPlumageEnv && definition.sky) {
+        try { birbPlumageEnv.setSky(definition.sky); } catch (err) {
+          console.warn('[plumage] bird sky bake failed; keeping the last one', err);
+        }
+      }
       // Aim the sky's sun at the env's key light so the visible sun disc and
       // the scene's directional lighting always agree.
       if (skyDome && typeof skyDome.setSunDirection === 'function' && lightingRig?.keyLight) {
@@ -6799,6 +7159,9 @@
           scene.fog.color.setHex(definition.fogColor);
         }
       }
+      // This biome's authored light is now complete: the bases the planet sun
+      // (?planetsun) and the atmosphere (?atmos) modulate around.
+      captureLightBases();
 
       // ===== IMPROVEMENT 5: Update ambient particles =====
       if (particleSystem) {
@@ -8093,7 +8456,13 @@
       // each can carry its own authored sheet; they cost no extra draw calls,
       // because every part they cover is a separate mesh anyway — the wings and
       // tail have to be, since they rotate independently.
-      const contourMat = new THREE.MeshStandardMaterial({
+      //
+      // Physical plumage (the default): both become MeshPhysicalMaterial from
+      // the table in src/flight/plumage.js — thin-film wings, a sheen body, a
+      // sky to reflect; its header has the why. `?plumage=0` builds the two
+      // Standard materials below exactly as they were.
+      const plumage = plumageRequested(window.location?.search || '');
+      const contourMat = plumage ? new THREE.MeshPhysicalMaterial(plumageMaterialParams(THREE, 'contour', { pionus })) : new THREE.MeshStandardMaterial({
         vertexColors: true, metalness: 0.12, roughness: 0.55,
         // The ambient lift has to move with the palette. 0x0f1f45 is a blue,
         // and a blue lift under a violet-and-bronze bird tints every shadow
@@ -8106,7 +8475,7 @@
       // than pushed further because there is no envMap on the shipping path —
       // past about that, three's metal has nothing to reflect and the wing
       // goes DARK between highlights, which is the opposite of the ask.
-      const vaneMat = new THREE.MeshStandardMaterial({
+      const vaneMat = plumage ? new THREE.MeshPhysicalMaterial(plumageMaterialParams(THREE, 'vane', { pionus })) : new THREE.MeshStandardMaterial({
         vertexColors: true,
         metalness: pionus ? 0.34 : 0.16,
         roughness: pionus ? 0.36 : 0.48,
@@ -8660,6 +9029,20 @@
       // extend the program cache key.
       if (pionus) addFeatherSheen(vaneMat, THREE, { warm: 0xffc266, cool: 0x3f8f6e, power: 1.9, strength: 0.72 });
 
+      // Physical plumage: the sky is counted once (the hemisphere moves into
+      // the IBL slot, the env map keeps only its reflection), and the two
+      // hand-made patches above are scaled back, because the physical model
+      // now makes a real rim and a real colour shift of its own.
+      if (plumage) {
+        const table = plumageFor(pionus);
+        for (const m of [contourMat, vaneMat]) {
+          installPlumageLighting(m, THREE);
+          if (m.userData?.birbRim) m.userData.birbRim.uBirbRimStrength.value *= table.rimScale;
+        }
+        if (vaneMat.userData?.birbSheen) vaneMat.userData.birbSheen.uSheenStrength.value *= table.featherSheenScale;
+        birbModel.userData.plumageMaterials = { contour: contourMat, vane: vaneMat };
+      }
+
       // The two authored sheets, if this session wants them. Decode-gated and
       // reversible like every other authored surface in this repo.
       birbModel.userData.featherMaterials = { contour: contourMat, vane: vaneMat };
@@ -8683,6 +9066,23 @@
         : birdVariant === 'v2' ? createProceduralBirbV2()
           : createProceduralBirbV3(),
     );
+
+    // The v3 bird's own sky (physical plumage), baked now for the biome that
+    // is already loaded — the first setEnvironment() ran before the bird
+    // existed — and again by every later switch. v1/v2 never set
+    // plumageMaterials: they are A/B builds, frozen at what they were judged as.
+    {
+      const plumageMaterials = birbAnchor.children[0]?.userData?.plumageMaterials;
+      if (plumageMaterials) {
+        try {
+          birbPlumageEnv = createBirdEnvironment(THREE, renderer, [plumageMaterials.contour, plumageMaterials.vane]);
+          birbPlumageEnv.setSky(getEnvironmentDefinition(environmentState.id)?.sky);
+          birbPlumageEnv.update(birbAnchor.position);
+        } catch (err) {
+          console.warn('[plumage] bird sky failed; the feathers keep their lights only', err);
+        }
+      }
+    }
 
     // The authored feather sheets, on the v3 bird only (its UVs tile in
     // surface units for exactly this; Phase 0's inherited generator UVs do
@@ -10656,6 +11056,9 @@
       if (Number.isFinite(atmos)) visualUniforms.atmosphere.value = atmos;
       if (hemiSky !== undefined && lightingRig.ambient?.color) {
         lightingRig.ambient.color.setHex(hemiSky);
+        // ?atmos modulates the hemisphere around its base: move the base too,
+        // or the next refresh quietly puts the old sky colour back.
+        if (atmosState) { atmosState.baseHemiSky.setHex(hemiSky); atmosState.dirty = true; }
       }
       if (Number.isFinite(exposure)) {
         qualitySettings.request({ source: REQUEST_SOURCES.PANEL, key: 'exposure', value: exposure });
@@ -11071,7 +11474,11 @@
       }
 
       // Update wind sound based on flight speed
-      if (flightController && !isNested) {
+      if (flightAudio) {
+        // Hear the air (the audio section's updateFlightAudio). The branches
+        // below are the ?airsound=0 path, untouched: a no-op.
+        updateFlightAudio(delta, isNested);
+      } else if (flightController && !isNested) {
         const currentSpeed = typeof flightController.getSpeed === 'function'
           ? flightController.getSpeed()
           : (flightController.speed || 0);
@@ -11833,6 +12240,108 @@
         const wingBlend = 1 - Math.exp(-delta * 8);
         leftWing.scale.z += (wingStretch - leftWing.scale.z) * wingBlend;
         rightWing.scale.z += (-wingStretch - rightWing.scale.z) * wingBlend;
+
+        // LET THE AIR POSE THE BIRD (src/flight/aero-pose.js). Everything
+        // above is the old rig, kept verbatim as `?aeropose=0`'s before; with
+        // the aero pose on, this overwrites every term the stroke owns. The
+        // old rig read the RAW stick (`climbing = pitchInput > 0.2`) while the
+        // stunt model inverts pitch INSIDE the controller, so a dive flapped
+        // 2.4x harder than a climb. This reads the air: airspeed, the energy
+        // target, the throttle, the climb and the body rates, measured off
+        // the flight frame itself. The perch fold and the tumble still
+        // dominate — every aero term is scaled by (1 - perchBlend).
+        _aeroLive = false;
+        if (aeroPose) {
+          const fc = flightController;
+          const ai = aeroPoseInput;
+          const stunt = !!fc?.isStunt;
+          ai.airborne = isAirborneVisual && !isNested;
+          ai.landing = nestingSystem?.getState?.() === NESTING_STATES.LANDING;
+          ai.cruise = sprintState.baseSpeed;
+          ai.airspeed = Math.abs(fc?.speed ?? 0);
+          ai.throttle = stunt ? fc.throttle01 : 1;
+          ai.throttleIdle = stunt ? fc.throttleIdle : 0.55;
+          ai.target = ((flightV2 || stunt) && Number.isFinite(fc?.cruise)) ? fc.cruise * ai.throttle : ai.airspeed;
+          ai.stallMul = Number.isFinite(fc?.stallMul) ? fc.stallMul : 0.5;
+          // The controller's own flag reads speed against the TARGET, which a
+          // boost lifts to 2.4x cruise, so it says "stalled" for the first
+          // ~0.2 s of every boost. That is not a pose.
+          ai.stalled = stunt && boostTimer <= 0 && fc.isStalled();
+          ai.elevator = pitchInput * (stunt ? fc.pitchSign : 1);
+          ai.bank = Math.abs(yawInput);
+          ai.reducedMotion = reducedMotionState.enabled;
+          // An air field is being built in parallel; wired to 0 until it lands.
+          ai.gust = 0;
+          // Climb and body rates from the flight frame's own motion, frame to
+          // frame: the same for classic, v2 and stunt, and it sees what the
+          // nest auto-fly and the launch boost do to the position. A step no
+          // bird could fly (a teleport, a restorePose) is a discontinuity,
+          // not a rate.
+          ai.climbRate = 0; ai.pitchRate = 0; ai.rollRate = 0;
+          if (delta > 0 && pose?.position && pose?.quaternion) {
+            const r1 = pose.position.length();
+            if (_aeroHasPrev && pose.position.distanceTo(_aeroPrevPos) < 80 * delta + 0.5) {
+              ai.climbRate = (r1 - _aeroPrevPos.length()) / delta;
+              _aeroDq.copy(_aeroPrevQuat).invert().multiply(pose.quaternion);
+              // Same rule for the attitude: a snap of more than ~0.6 rad in
+              // one frame (a restorePose, the launch realign after a tumble)
+              // is a discontinuity, and read as a rate it would spike the
+              // load flex for a frame's worth of easing.
+              if (Math.abs(_aeroDq.w) > 0.955) {
+                const k = _aeroDq.w < 0 ? -2 / delta : 2 / delta;
+                // Body +X is the right wing: + is nose up. Body +Z is astern: +
+                // carries the LEFT wing down, so it is negated to "+ rolls right".
+                ai.pitchRate = _aeroDq.x * k;
+                ai.rollRate = -_aeroDq.z * k;
+              }
+            }
+            _aeroPrevPos.copy(pose.position);
+            _aeroPrevQuat.copy(pose.quaternion);
+            _aeroHasPrev = true;
+            const terrain = (typeof sampleTerrainHeight === 'function')
+              ? sampleTerrainHeight(pose.position.x, pose.position.y, pose.position.z) : 0;
+            ai.aboveGround = sphericalWorld ? r1 - (sphericalWorld.sphereRadius + terrain) : NaN;
+          }
+          const a = aeroPose.update(ai, delta);
+          const pb = 1 - perchBlend;
+          const tl = tumble ? tumble.left : 0;
+          const tr = tumble ? tumble.right : 0;
+          leftWing.rotation.x = leftWing.userData.baseRotation.x
+            + leftDip + a.wingX * pb + a.flutter + perch.fold + tl;
+          rightWing.rotation.x = rightWing.userData.baseRotation.x
+            + rightDip - a.wingX * pb - a.flutter - perch.fold - tr;
+          leftWing.rotation.y = leftWing.userData.baseRotation.y - perch.sweep - a.wingY * pb;
+          rightWing.rotation.y = rightWing.userData.baseRotation.y + perch.sweep + a.wingY * pb;
+          leftWing.rotation.z = leftWing.userData.baseRotation.z + a.wingZ * pb;
+          rightWing.rotation.z = rightWing.userData.baseRotation.z + a.wingZ * pb;
+          // THE HAND IS SAME-SIGNED. It is a child INSIDE the arm's
+          // scale.z = -1, so the mirror is already in its frame; the old rig
+          // negated the right hand and bent the two wrists opposite ways —
+          // measured under the forced stroke, left and right tips 0.269 vs
+          // 0.386 at the top and 1.249 vs 0.896 at mid-downstroke.
+          const lh = leftWing.userData.hand;
+          const rh = rightWing.userData.hand;
+          if (lh) {
+            lh.rotation.x = (lh.userData?.baseRotation?.x || 0) + a.handX * pb;
+            lh.rotation.y = (lh.userData?.baseRotation?.y || 0) + a.handY * pb;
+            lh.scale.x = 1 + (a.handSpread - 1) * pb;
+          }
+          if (rh) {
+            rh.rotation.x = (rh.userData?.baseRotation?.x || 0) + a.handX * pb;
+            rh.rotation.y = (rh.userData?.baseRotation?.y || 0) + a.handY * pb;
+            rh.scale.x = 1 + (a.handSpread - 1) * pb;
+          }
+          if (leftWing.userData.secondaryFeather) leftWing.userData.secondaryFeather.position.y = a.featherFlex;
+          if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = a.featherFlex;
+          if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = a.featherFlex * 1.5;
+          if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = a.featherFlex * 1.5;
+          const spanZ = perch.span * (1 + (a.span - 1) * pb);
+          leftWing.scale.z = spanZ;
+          rightWing.scale.z = -spanZ;
+          _aeroPerchTailPitch = perch.tailPitch;
+          _aeroPerchTailSpread = perch.tailSpread;
+          _aeroLive = true;
+        }
       }
 
       // Harness-only. Forces a specific point in the beat cycle so the bird
@@ -11864,6 +12373,25 @@
         if (rightWing.userData.secondaryFeather) rightWing.userData.secondaryFeather.position.y = 0;
         if (leftWing.userData.tipFeather) leftWing.userData.tipFeather.position.y = 0;
         if (rightWing.userData.tipFeather) rightWing.userData.tipFeather.position.y = 0;
+        // Under the aero pose the sheet photographs the Pionus stroke at full
+        // depth — the beat the game actually flies — with the hands
+        // same-signed, as they are in flight.
+        if (aeroPose) {
+          const f = aeroPose.forcedStroke(__birbFlapPhaseOverride, _aeroForced);
+          leftWing.rotation.x = leftWing.userData.baseRotation.x + f.wingX;
+          rightWing.rotation.x = rightWing.userData.baseRotation.x - f.wingX;
+          leftWing.rotation.z = leftWing.userData.baseRotation.z + f.wingZ;
+          rightWing.rotation.z = rightWing.userData.baseRotation.z + f.wingZ;
+          for (let side = 0; side < 2; side += 1) {
+            const h = (side === 0 ? leftWing : rightWing).userData.hand;
+            if (!h) continue;
+            h.rotation.x = (h.userData?.baseRotation?.x || 0) + f.handX;
+            h.rotation.y = (h.userData?.baseRotation?.y || 0) + f.handY;
+            h.scale.x = 1;
+          }
+          leftWing.scale.z = f.span;
+          rightWing.scale.z = -f.span;
+        }
       }
 
       // Tail steering + idle sway — yaw input rotates the tail fan around Y
@@ -11886,6 +12414,17 @@
         tail.rotation.z = baseRot.z;
         const fanSpread = (1 + Math.abs(yawInputTail) * 0.20) * perchPose(perchBlend).tailSpread;
         tail.scale.z += (fanSpread - tail.scale.z) * (1 - Math.exp(-delta * 8));
+        // Aero pose: PITCH is rotation.z. The tail is built along -X, so the
+        // rotation.x the lines above write the elevator and the perch drop
+        // into is a TWIST about its own long axis, and the tip never moved.
+        // x carries the twist into a roll instead; the yaw sway stays as is.
+        if (aeroPose && _aeroLive) {
+          const a = aeroPose.out;
+          const pbT = 1 - perchBlend;
+          tail.rotation.x = baseRot.x + a.tailTwist * pbT;
+          tail.rotation.z = baseRot.z + a.tailPitch * pbT + _aeroPerchTailPitch;
+          tail.scale.z = _aeroPerchTailSpread * a.tailYawFan * (1 + (a.tailFan - 1) * pbT);
+        }
       }
 
       // Walk cycle — body bob + alternating foot tilt while grounded & moving.
@@ -11921,6 +12460,18 @@
       const footTuck = !isGroundedVisual && flightRecoveryState !== FLIGHT_RECOVERY_STATES.FALLING ? footTuckRest : 0;
       if (leftFoot) leftFoot.rotation.z += (footTuck - leftFoot.rotation.z) * (1 - Math.exp(-delta * 7));
       if (rightFoot) rightFoot.rotation.z += (footTuck - rightFoot.rotation.z) * (1 - Math.exp(-delta * 7));
+      // Aero pose: down on the ground and falling (the pose the lines above
+      // ease to) and standing in the nest (where they tucked them, unseen in
+      // the cockpit view, so a take-off now starts gear-down); LANDING GEAR in
+      // the air — out a beat or three before contact on a slow descent,
+      // reaching a little forward, tucked again climbing away. Eased inside
+      // the model at the same 7/s.
+      if (aeroPose && _aeroLive) {
+        const a = aeroPose.out;
+        const footZ = footTuckRest * (1 - a.feet) + AERO_GEAR_REACH * a.gear;
+        if (leftFoot) leftFoot.rotation.z = footZ;
+        if (rightFoot) rightFoot.rotation.z = footZ;
+      }
 
       if (glideTrail && glideTrail.rotation) {
         glideTrail.rotation.z = motionState.elapsed * 0.32;
@@ -12029,7 +12580,15 @@
       // `benchmarkFreezes.sun` (CONTRACT §2.1 'manual' Benchmark freeze) holds
       // it too — a 10-minute cycle confounds any A/B taken minutes apart, and
       // the sun is the one item this task was told twice not to get wrong.
-      if (sunState.enabled && !reducedMotionState.enabled && !benchmarkFreezes.sun && lightingRig.keyLight) {
+      //
+      // ?planetsun (default): the same components, mapped through the bird's
+      // own horizon frame EVERY frame — the clock holding still holds the
+      // hour, not the world direction. ?planetsun=0 is the block below as it
+      // was: world-fixed, written only while the clock runs.
+      const sunClockRuns = sunState.enabled && !reducedMotionState.enabled && !benchmarkFreezes.sun;
+      if (planetSunRequested) {
+        if (lightingRig.keyLight) updatePlanetSun(sunClockRuns ? delta : 0, birdPos);
+      } else if (sunClockRuns && lightingRig.keyLight) {
         sunState.seconds += delta;
         const sun = sunDirectionAt(sunState.seconds);
         sunState._dir.set(sun.x, sun.y, sun.z).multiplyScalar(sunState.distance);
@@ -12058,6 +12617,11 @@
           sphericalWorld.water.setSunDirection(lightingRig.keyLight.position);
           sphericalWorld.water.setSunColor(lightingRig.keyLight.color);
         }
+      }
+      // ?atmos: the palette follows the LOCAL sun elevation (see
+      // updateAtmosphere). Before the shadow follow, which copies the key.
+      if (atmosState && lightingRig.keyLight) {
+        updateAtmosphere(delta, birdPos, !planetSunRequested && sunClockRuns);
       }
 
       // ===== Shadow-caster follow (Ascend wave, opt-in) =====
@@ -12126,6 +12690,8 @@
         }
       }
       if (skyDome && cam) skyDome.followCamera(cam.position, motionState.elapsed);
+      // The bird's reflected sky keeps its zenith on the bird's radial up.
+      if (birbPlumageEnv && birbAnchor) birbPlumageEnv.update(birbAnchor.position);
 
       // IMPROVEMENT 1b: Cloud shell — slow drift + follow camera
       if (cloudShell && cam) {
@@ -12156,6 +12722,12 @@
           floorRadius = sphericalWorld.sphereRadius + terrain;
         }
         contactShadow.update(birdPos, floorRadius, shadowOn);
+      }
+      // The bird's sun shadow (ellipsoids). Every preset: its cost is an
+      // early-out per fragment beyond 20 units of the bird. Hidden when the
+      // bird is (cockpit view, the perch) and while nested.
+      if (birdShadowDriver) {
+        birdShadowDriver.update(birbAnchor, !!birdPos && !isNested && birbAnchor?.visible !== false);
       }
 
       // Wingtip ribbons — the mark the bird leaves when it is really working.
@@ -12354,6 +12926,7 @@
       previousTime = null;
       flightControls?.reset?.({ releasePointerLock: true });
       renderer.setAnimationLoop(null);
+      if (flightAudio) flightAudio.suspend('paused');
       gpuTimer.onContextLost();
       if (statusMetric) {
         statusMetric.textContent = "Graphics context lost — attempting to restore...";
@@ -12418,6 +12991,8 @@
         }
         if (continuousSounds.droneHum) continuousSounds.droneHum.pause();
         if (continuousSounds.wind) continuousSounds.wind.pause();
+        // The flight audio fades and suspends; the next frame wakes it.
+        if (flightAudio) flightAudio.suspend('hidden');
       } else {
         flightControls.reset();
         // Back in the foreground — resume the loops we paused, if appropriate.
@@ -12493,6 +13068,8 @@
 
       // Pause game
       renderer.setAnimationLoop(null);
+      // A paused bird is silent at once, not after the idle watchdog.
+      if (flightAudio) flightAudio.suspend('paused');
 
       // Show settings overlay
       if (settingsOverlay) {
@@ -13652,7 +14229,7 @@
         // restores exactly what this call actually changed (not a blanket
         // "turn everything back on"), so an environment switch mid-session can't
         // be clobbered by a restore that assumes what used to be there.
-        birdStudio: (on = true) => {
+        birdStudio: (on = true, { world = false } = {}) => {
           if (on) {
             // Returns what it actually found and hid, not just `true` — a
             // studio shot with an unexpected background artifact is a
@@ -13695,6 +14272,17 @@
             if (cloudShell?.mesh) cloudShell.mesh.visible = false;
             scene.background = new THREE.Color(0x808080);
             scene.fog = null;
+            // `{ world: true }`: the speed latch below without the grey box —
+            // the bird held still in front of the world it actually flies in
+            // (tools/birb-plumage-ab.mjs --world). What was just hidden is put
+            // back from the record, so birdStudio(false) stays exact.
+            if (world) {
+              if (sphericalWorld?.root && __birbStudioSaved.worldVisible !== null) sphericalWorld.root.visible = __birbStudioSaved.worldVisible;
+              if (skyDome?.mesh && __birbStudioSaved.skyVisible !== null) skyDome.mesh.visible = __birbStudioSaved.skyVisible;
+              if (cloudShell?.mesh && __birbStudioSaved.cloudShellVisible !== null) cloudShell.mesh.visible = __birbStudioSaved.cloudShellVisible;
+              scene.background = __birbStudioSaved.background;
+              scene.fog = __birbStudioSaved.fog;
+            }
             // Zero the speed the per-frame rewrite is being suppressed for
             // (the `!__birbStudioSaved` gate above), not just suppress the
             // rewrite: whatever `flight.speed`/`boostTimer` happened to be
@@ -13864,7 +14452,60 @@
             // suggests, and the reason the bank dip shipped with its signs
             // swapped. `y` is the bird's own up.
             leftTip: tipLocal(lw), rightTip: tipLocal(rw),
+            // A point near the tail's trailing tip, same frame. The elevator
+            // is judged by where THIS goes, not by an Euler angle: the tail is
+            // built along -X, so the rotation.x the old rig wrote its
+            // elevator into is a twist about that axis and moves this by
+            // nothing (aero-pose moves it with rotation.z).
+            tailTip: (() => {
+              const tl = g('tail');
+              if (!tl) return null;
+              birbAnchor.updateWorldMatrix(true, true);
+              const w = tl.localToWorld(new THREE.Vector3(-0.8, 0, 0));
+              birbAnchor.worldToLocal(w);
+              return w.toArray().map((n) => +n.toFixed(4));
+            })(),
           };
+        },
+        // What the air is doing to the pose (src/flight/aero-pose.js): the
+        // beat's phase and depth, the burst envelope, the delivered power
+        // demand, the speed morph, the high-lift splay and tail fan, the
+        // landing gear, plus the inputs it was fed this frame. `enabled`
+        // is false under ?aeropose=0. The live object for game code (audio
+        // keyed off `downstroke`/`beats`) is `aeroPose.out` itself.
+        aeroPose: () => {
+          if (!aeroPose) return { enabled: false };
+          const a = aeroPose.out;
+          const ai = aeroPoseInput;
+          const r = (n) => (Number.isFinite(n) ? +n.toFixed(4) : null);
+          return {
+            enabled: true,
+            live: _aeroLive,
+            phase01: r(a.phase01), beats: a.beats, downstroke: a.downstroke,
+            depth: r(a.depth), envelope: r(a.envelope), demand: r(a.demand), duty: r(a.duty),
+            span: r(a.span), morphSpan: r(a.morphSpan), sweep: r(a.sweep), splay: r(a.splay),
+            tailFan: r(a.tailFan), tailPitch: r(a.tailPitch), tailTwist: r(a.tailTwist),
+            flex: r(a.flex), load: r(a.load), liftFraction: r(a.liftFraction),
+            feet: r(a.feet), gear: r(a.gear), air: r(a.air),
+            stalled: a.stalled, frozen: a.frozen,
+            input: {
+              airborne: ai.airborne, landing: ai.landing, airspeed: r(ai.airspeed), cruise: r(ai.cruise),
+              target: r(ai.target), throttle: r(ai.throttle), stalled: ai.stalled,
+              climbRate: r(ai.climbRate), pitchRate: r(ai.pitchRate), rollRate: r(ai.rollRate),
+              elevator: r(ai.elevator), bank: r(ai.bank), aboveGround: r(ai.aboveGround), gust: r(ai.gust),
+            },
+          };
+        },
+        // Put the bird back in the air (or on the ground). A harness knocked
+        // down by a drone or a canopy during its own setup stays FALLING
+        // through every later check — the stick is zeroed while falling — and
+        // every one of them then fails for a reason that has nothing to do
+        // with what it measures.
+        setRecovery: (state = 'flying') => {
+          const next = FLIGHT_RECOVERY_STATES[String(state).toUpperCase()];
+          if (!next) return null;
+          applyFlightRecoveryState(next);
+          return flightRecoveryState;
         },
         // The flight state in the only terms that mean anything on a sphere:
         // pitch and roll against the LOCAL radial up, and a heading bearing in
@@ -14063,6 +14704,71 @@
             worldSize: size.toArray().map((v) => +v.toFixed(2)),
           };
         },
+        // Physical plumage (src/flight/plumage.js): what the two feather
+        // materials ARE on the live bird, and the bird's own sky. `set` tunes
+        // the live materials without a reboot — per part, any of color,
+        // metalness, roughness, ior, specularIntensity, iridescence,
+        // iridescenceIOR, iridescenceThicknessRange, sheen, sheenRoughness,
+        // sheenColor, envMapIntensity, emissiveIntensity, rim, featherSheen,
+        // hemi, envDiffuse, filmMask. `sky` bakes a caller's
+        // { top, mid, horizon, bottom } into the bird's env (null restores the
+        // biome's): a two-tone sky is how a check proves the reflection's
+        // zenith follows the radial up. `zenith` is the bird's radial up put
+        // through the matrix three builds from envMapRotation — (0, 1, 0) when
+        // the env is aimed right.
+        plumage: (opts = {}) => {
+          const built = birbAnchor?.children?.[0];
+          const fm = built?.userData?.featherMaterials || null;
+          const pm = built?.userData?.plumageMaterials || null;
+          if (pm && opts?.set) {
+            for (const part of ['contour', 'vane']) {
+              const s = opts.set[part]; const m = pm[part];
+              if (!s || !m) continue;
+              for (const k of ['metalness', 'roughness', 'ior', 'iridescence', 'iridescenceIOR', 'sheen', 'sheenRoughness', 'envMapIntensity', 'emissiveIntensity', 'specularIntensity']) {
+                if (Number.isFinite(s[k])) m[k] = s[k];
+              }
+              if (Array.isArray(s.iridescenceThicknessRange)) m.iridescenceThicknessRange = s.iridescenceThicknessRange.slice(0, 2);
+              if (s.sheenColor !== undefined) m.sheenColor.set(s.sheenColor);
+              if (s.color !== undefined) m.color.set(s.color);
+              if (Number.isFinite(s.rim) && m.userData.birbRim) m.userData.birbRim.uBirbRimStrength.value = s.rim;
+              if (Number.isFinite(s.featherSheen) && m.userData.birbSheen) m.userData.birbSheen.uSheenStrength.value = s.featherSheen;
+              if (Number.isFinite(s.hemi)) m.userData.birbPlumage.uPlumageHemi.value = s.hemi;
+              if (Number.isFinite(s.envDiffuse)) m.userData.birbPlumage.uPlumageEnvDiffuse.value = s.envDiffuse;
+              if (Number.isFinite(s.filmMask)) m.userData.birbPlumage.uPlumageFilmMask.value = s.filmMask;
+            }
+          }
+          if (pm && opts && opts.sky !== undefined && birbPlumageEnv) {
+            birbPlumageEnv.setSky(opts.sky === null ? getEnvironmentDefinition(environmentState.id)?.sky : opts.sky);
+          }
+          const r3 = (v) => (Number.isFinite(v) ? +v.toFixed(3) : v);
+          const describe = (m) => (m ? {
+            type: m.type, color: `#${m.color.getHexString()}`, metalness: r3(m.metalness), roughness: r3(m.roughness), ior: r3(m.ior),
+            specularIntensity: r3(m.specularIntensity ?? null),
+            iridescence: r3(m.iridescence), iridescenceIOR: r3(m.iridescenceIOR),
+            iridescenceThicknessRange: m.iridescenceThicknessRange ? m.iridescenceThicknessRange.slice() : null,
+            sheen: r3(m.sheen), sheenRoughness: r3(m.sheenRoughness),
+            sheenColor: m.sheenColor ? `#${m.sheenColor.getHexString()}` : null,
+            envMap: !!m.envMap, envMapIntensity: r3(m.envMapIntensity), emissiveIntensity: r3(m.emissiveIntensity),
+            rim: r3(m.userData?.birbRim?.uBirbRimStrength?.value),
+            featherSheen: r3(m.userData?.birbSheen?.uSheenStrength?.value),
+            hemi: r3(m.userData?.birbPlumage?.uPlumageHemi?.value ?? null),
+            envDiffuse: r3(m.userData?.birbPlumage?.uPlumageEnvDiffuse?.value ?? null),
+            filmMask: r3(m.userData?.birbPlumage?.uPlumageFilmMask?.value ?? null),
+          } : null);
+          let zenith = null;
+          if (pm?.vane?.envMap && birbAnchor) {
+            const e = pm.vane.envMapRotation;
+            const m4 = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(-e.x, -e.y, -e.z, e.order));
+            const z = birbAnchor.position.clone().normalize().applyMatrix4(m4);
+            zenith = [r3(z.x), r3(z.y), r3(z.z)];
+          }
+          return {
+            enabled: !!pm,
+            contour: describe(fm?.contour), vane: describe(fm?.vane),
+            env: birbPlumageEnv ? birbPlumageEnv.state() : null,
+            zenith,
+          };
+        },
         // Runs the rig contract oracle (src/flight/bird-contract.js)
         // against whatever is actually live in birbAnchor right now — the
         // procedural bird, or a GLB that made it past the ?glb=1 gate.
@@ -14248,9 +14954,180 @@
             casterCount: shadowCasterProxy ? shadowCasterProxy.count : 0,
           };
         },
+        // Horizon shadows (src/environment/horizon-map.js + horizon-shadow.js):
+        // `horizon(s)` sets the live strength (0 is the old light, pixel for
+        // pixel, without a recompile) and reports the bake. `sunLights` is
+        // the shader's own test run in JS: which visible directional lights
+        // shine from the sun's direction and so get the visibility. Three
+        // sorts shadow casters first, so `index0` is what directionalLights[0]
+        // is this frame — the key light with shadows off, the shadow light
+        // with them on. Allocates; a debug readback, never called per frame.
+        horizon: (strength) => {
+          if (strength !== undefined) setHorizonStrength(strength);
+          const w = sphericalWorld?.horizon || null;
+          const sun = visualUniforms.sunDir.value ? visualUniforms.sunDir.value.clone().normalize() : null;
+          const names = new Map([[lightingRig.keyLight, 'key'], [lightingRig.rimLight, 'rim'],
+            [lightingRig.fillLight, 'fill'], [shadowLight, 'shadow']]);
+          const lights = [];
+          scene.traverse((o) => {
+            if (!o.isDirectionalLight || !o.visible) return;
+            const d = o.getWorldPosition(new THREE.Vector3()).sub(o.target.getWorldPosition(new THREE.Vector3())).normalize();
+            const dot = sun ? d.dot(sun) : 0;
+            lights.push({ name: names.get(o) || o.name || 'directional', castShadow: !!o.castShadow,
+              dot: +dot.toFixed(6), sun: dot > (horizonUniforms.params.value?.w ?? 0.9999) });
+          });
+          const sorted = lights.slice().sort((a, b) => (b.castShadow ? 1 : 0) - (a.castShadow ? 1 : 0));
+          return {
+            enabled: !!w,
+            landed: !!w?.landed,
+            sun: sun ? sun.toArray().map((v) => +v.toFixed(6)) : null,
+            ready: +horizonReadiness().toFixed(3),
+            strength: horizonUniforms.params.value ? horizonUniforms.params.value.x : null,
+            stats: w ? w.stats : null,
+            result: w ? w.result : null,
+            size: w ? [w.width, w.height] : null,
+            sunLights: lights.filter((l) => l.sun).length,
+            index0: sorted[0] ? sorted[0].name : null,
+            index0IsSun: !!sorted[0]?.sun,
+            lights,
+          };
+        },
+        // Ground texels the BAKED map says are in a ridge's shadow for the
+        // current sun, confirmed by an independent march of the terrain
+        // alone — so a check can photograph a shadow it did not have to
+        // hope was there. `dir` defaults to under the bird.
+        horizonFind: (opts = {}) => {
+          const w = sphericalWorld?.horizon;
+          if (!w || !w.landed || !visualUniforms.sunDir.value) return [];
+          const p = flightController?.position;
+          const dir = opts.dir || (p ? p.toArray() : [0, 1, 0]);
+          return w.find({ ...opts, dir, sun: visualUniforms.sunDir.value.toArray() });
+        },
+        // Hold the simulation clock (frame delta 0) while rendering continues,
+        // so a pose photographs exactly as it was placed: freeze() zeroes the
+        // speed, but the controller keeps flying the bird on (~0.45 units a
+        // frame measured), which moves a cockpit camera off its target.
+        // Holding also SNAPS the chase camera onto the held pose: with delta 0
+        // BirdCamera's damping factor is 0, so it would otherwise stay
+        // wherever it was when the clock stopped.
+        hold: (on = true) => {
+          controlState.manuallyPaused = !!on;
+          refreshAnimationState();
+          if (on && flightController && newFlightSystem?.camera?.snap) {
+            const rig = newFlightSystem.camera;
+            // The stunt/v2 rig stands off along a HELD velocity heading, which
+            // is stale after a restorePose and cannot relax with delta 0: hand
+            // it the held pose's own level heading before snapping.
+            const h = rig.getHold?.();
+            if (h && h.weight > 0) {
+              const up = flightController.position.clone().normalize();
+              const f = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
+              f.addScaledVector(up, -f.dot(up));
+              if (f.lengthSq() > 1e-6) rig.setHold({ weight: h.weight, heading: f.normalize(), distanceMul: h.distanceMul });
+            }
+            rig.snap(flightController.position, flightController.quaternion);
+          }
+          return !motionState.animate;
+        },
+        // World point -> CSS pixel on the canvas (null behind the camera), so
+        // a check measures the patch it placed, wherever the framing put it.
+        project: (x, y, z) => {
+          const cam = cameraState?.camera;
+          if (!cam || !renderer?.domElement) return null;
+          cam.updateMatrixWorld();
+          const v = new THREE.Vector3(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+          if (v.z > -0.01) return null;
+          v.applyMatrix4(cam.projectionMatrix);
+          const r = renderer.domElement.getBoundingClientRect();
+          return [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height];
+        },
+        // How many world materials carry the shadow patch (0 is the true
+        // before, ?horizon=0&birdshadow=0).
+        horizonPatched: () => {
+          const seen = new Set();
+          sphericalWorld?.root?.traverse((o) => {
+            for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+              if (m?.userData?.birbHorizon) seen.add(m);
+            }
+          });
+          return seen.size;
+        },
+        // The bird's ellipsoid sun shadow (src/effects/bird-shadow.js).
+        birdShadow: (strength) => {
+          if (!birdShadowDriver) return null;
+          if (strength !== undefined) birdShadowDriver.setStrength(strength);
+          return birdShadowDriver.state();
+        },
         // Jump the sun cycle to a point in its period, for captures.
         setSunTime: (seconds) => { sunState.seconds = seconds; return sunState.seconds; },
         setSunEnabled: (on) => { sunState.enabled = !!on; return sunState.enabled; },
+        // Render ONLY the sky dome, through camera layer 31, so a check that
+        // measures the SKY cannot be confounded by whatever tree or cloud the
+        // unseeded world stood in front of the lens: planet-light-sky's
+        // ?atmos=0 control read -5.8% on a boot where one did, 0.0% on one
+        // where none did. skyOnly(false) puts the camera's own mask back.
+        skyOnly: (() => {
+          let savedMask = null;
+          return (on = true) => {
+            const cam = cameraState?.camera;
+            if (!cam || !skyDome?.mesh) return null;
+            if (on) {
+              if (savedMask === null) savedMask = cam.layers.mask;
+              skyDome.mesh.layers.enable(31);
+              cam.layers.set(31);
+            } else if (savedMask !== null) {
+              cam.layers.mask = savedMask;
+              savedMask = null;
+            }
+            return cam.layers.mask;
+          };
+        })(),
+        // The light rig as it stands, measured against the BIRD's own horizon:
+        // tools/realism-checks/planet-light-*.mjs read this rather than argue
+        // from source. Allocates; a debug readback, never called per frame.
+        lightRig: () => {
+          const key = lightingRig.keyLight;
+          const pos = flightController?.position;
+          const up = pos && pos.lengthSq() > 0 ? pos.clone().normalize() : new THREE.Vector3(0, 1, 0);
+          const sunDir = key.position.clone().normalize();
+          const hemiAxis = lightingRig.ambient.position.clone().normalize();
+          const deg = (r) => +(r * 180 / Math.PI).toFixed(3);
+          const rgb = (c) => [+c.r.toFixed(4), +c.g.toFixed(4), +c.b.toFixed(4)];
+          const ratio = (v) => (v ? [+v[0].toFixed(4), +v[1].toFixed(4), +v[2].toFixed(4)] : null);
+          return {
+            planetSun: planetSunRequested,
+            atmos: !!atmosState,
+            sunLocalElevationDeg: deg(Math.asin(Math.max(-1, Math.min(1, sunDir.dot(up))))),
+            sunDir: sunDir.toArray().map((n) => +n.toFixed(4)),
+            hemiUpDot: +hemiAxis.dot(up).toFixed(6),
+            keyVisible: key.visible,
+            glowVisible: lightingRig.glowLight.visible,
+            shadowsEnabled,
+            shadowLightVisible: shadowLight.visible,
+            keyColor: rgb(key.color),
+            keyIntensity: +key.intensity.toFixed(4),
+            hemiSky: rgb(lightingRig.ambient.color),
+            fogColor: scene.fog ? rgb(scene.fog.color) : null,
+            mistColor: visualUniforms.mistColor.value ? rgb(visualUniforms.mistColor.value) : null,
+            skyTint: skyDome?.atmosphereState ? skyDome.atmosphereState() : null,
+            frameResets: sunFrame.resets,
+            frame: {
+              east: [sunFrame.east.x, sunFrame.east.y, sunFrame.east.z],
+              up: [sunFrame.up.x, sunFrame.up.y, sunFrame.up.z],
+              north: [sunFrame.north.x, sunFrame.north.y, sunFrame.north.z],
+            },
+            sunSeconds: sunState.seconds,
+            atmosphere: atmosState ? {
+              refElevationDeg: deg(atmosState.refElevation),
+              elevationDeg: deg(atmosState.elevation),
+              refreshes: atmosState.refreshes,
+              sun: ratio(atmosState.rel.sun),
+              zenith: ratio(atmosState.rel.zenith),
+              horizonMean: ratio(atmosState.rel.horizonMean),
+              irradiance: ratio(atmosState.rel.irradiance),
+            } : null,
+          };
+        },
         setSprint: (on) => {
           sprintState.active = !!on;
           if (flightController && flightController.speed !== undefined) {
@@ -14308,6 +15185,21 @@
             || nestingSystem.forceNestAt(nest);
         },
         takeOff: () => (nestingSystem ? nestingSystem.takeOff() : false),
+        // Hear the air: what the flight audio is driving, and with
+        // {measure: true} what actually comes OUT of it (an analyser on the
+        // master, created on first use). `toneHz` also reports how far a tone
+        // at that frequency stands above the noise around it.
+        flightAudio: (opts = {}) => {
+          if (!flightAudio) return { state: 'off' };
+          const out = flightAudio.probe();
+          // The controller's own, UNGATED stall flag and the boost, beside
+          // what the audio heard — so a check can show the boost trap.
+          out.modelStalled = typeof flightController?.isStalled === 'function'
+            ? !!flightController.isStalled() : null;
+          out.boosting = boostTimer > 0;
+          if (opts && opts.measure) out.measured = flightAudio.measure(opts);
+          return out;
+        },
         stats: () => ({
           // From the pass when it is running: renderer.info resets per
           // render() call and the composite is the last one, so reading the

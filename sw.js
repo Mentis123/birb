@@ -44,7 +44,7 @@
 // cache would leave a phone with no flight controller at all — and SW-3
 // (build-identity.test.js) requires every src/ module to be listed regardless.
 // index.html's BIRB_BUILD is bumped to the same literal in the same change.
-const CACHE_VERSION = 'v80-2026-09-20-roll-through';
+const CACHE_VERSION = 'v81-2026-09-23-realism';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -131,6 +131,10 @@ const CORE_ASSETS = [
   './src/flight/touch-input.js',
   './src/flight/flight-recovery.js',
   './src/flight/bird-pose.js',
+  './src/flight/aero-pose.js',
+  // Physical plumage: imported on every boot path (the v3 bird reads it at
+  // build time), so an offline launch without it dies on a dynamic import.
+  './src/flight/plumage.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',
@@ -156,10 +160,17 @@ const CORE_ASSETS = [
   './src/environment/landmark-valley.js',
   './src/environment/sky-dome.js',
   './src/environment/sun-cycle.js',
+  './src/environment/sun-frame.js',
+  './src/environment/atmosphere-model.js',
   './src/environment/water.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
   './src/environment/cloud-volume.js',
+  // Horizon shadows: the bake (and the worker that runs it — a Worker script
+  // the page cannot start offline is a world with no shadows), the patch.
+  './src/environment/horizon-map.js',
+  './src/environment/horizon-worker.js',
+  './src/environment/horizon-shadow.js',
   './src/nesting/drone-look.js',
   './src/environment/weather.js',
   './src/environment/visual-style.js',
@@ -184,9 +195,12 @@ const CORE_ASSETS = [
   './src/effects/energy-ring.js',
   './src/effects/ribbon-trail.js',
   './src/effects/contact-shadow.js',
+  './src/effects/bird-shadow.js',
   './src/effects/burst-signatures.js',
   './src/effects/particles.js',
   './src/effects/screen-shake.js',
+  // Hear the air: imported on the default boot path (?airsound=0 skips it).
+  './src/audio/flight-audio.js',
 ];
 
 const RUNTIME_CACHEABLE_HOSTS = new Set([

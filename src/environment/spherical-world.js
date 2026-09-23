@@ -2,7 +2,15 @@ import {
   createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere,
   smoothShadingRequested, treeLean, rockShape,
   addLeafEdge, addUpwardSnow, leafEdgeRequested, upwardSnowRequested,
+  visualUniforms,
 } from './visual-style.js';
+import {
+  HORIZON_MAP_DEFAULTS, createHorizonBake, fillHeightGrid, splatProp, createGridTrig,
+  frustumProfile, latheProfile, domeProfile,
+  horizonTexelDirection, horizonFrame, decodeHorizonByte, sunVisibility, encodeEnvelopeHeight,
+} from './horizon-map.js';
+import { addHorizonShadow, horizonShadowRequested, ensureHorizonUniforms, horizonUniforms } from './horizon-shadow.js';
+import { birdShadowRequested } from '../effects/bird-shadow.js';
 import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import {
@@ -3464,6 +3472,324 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
 }
 
 // Environment builder mapping
+// ── Horizon shadows: the planet's own shadow, at every preset ──────────────
+// (src/environment/horizon-map.js bakes, horizon-shadow.js reads back.)
+//
+// The occluder field is the terrain MESH height plus the tall props splatted
+// as solids standing on their footprints. Only props that are opaque, tall
+// and stand on the ground are in it: canopies, pine crowns, peaks, spires,
+// cliff and corridor walls, city towers. Rocks, shrubs and ferns are under a
+// texel tall; clouds and arches float, and a heightfield can only say "solid
+// from the ground up", which would stand a cloud on a 60-unit pillar.
+const HORIZON_OCCLUDER_NAMES = /^(forest-canopies-\d+|mountain-pine-canopies-mesh|mountain-peaks-body|canyon-spires-\d+|canyon-needles|canyon-corridor-walls|mountain-cliff-walls|city-towers-\d+)$/;
+
+const _horizonNow = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+
+/** The solid's top-envelope profile from the unit geometry's own parameters. */
+function horizonProfileFor(geometry) {
+  const p = geometry.parameters || {};
+  switch (geometry.type) {
+    case 'LatheGeometry': return Array.isArray(p.points) ? latheProfile(p.points) : domeProfile();
+    case 'ConeGeometry': return frustumProfile(0, p.radius ?? 1);
+    case 'CylinderGeometry': return frustumProfile(p.radiusTop ?? 1, p.radiusBottom ?? 1);
+    case 'BoxGeometry': return null;   // a box: flat top over its own footprint
+    default: return domeProfile();
+  }
+}
+
+/** Splat every allow-listed instanced prop into `grid` (max). Build time only. */
+function splatHorizonOccluders(THREE, root, grid, width, height, radius) {
+  const trig = createGridTrig(width, height);
+  const m = new THREE.Matrix4(); const pos = new THREE.Vector3();
+  const q = new THREE.Quaternion(); const s = new THREE.Vector3();
+  const ax = new THREE.Vector3(); const ay = new THREE.Vector3(); const az = new THREE.Vector3();
+  const base = new THREE.Vector3(); const top = new THREE.Vector3(); const up = new THREE.Vector3();
+  const tx = new THREE.Vector3(); const tz = new THREE.Vector3();
+  const prop = { dir: [0, 0, 1], ex: [1, 0, 0], ez: [0, 1, 0], halfX: 0, halfZ: 0, base: 0, span: 0, profile: null };
+  let instances = 0; let texels = 0; const meshes = [];
+  root.updateMatrixWorld(true);
+  root.traverse((obj) => {
+    if (!obj.isInstancedMesh || !HORIZON_OCCLUDER_NAMES.test(obj.name || '')) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    if (mats.some((mt) => !mt || mt.transparent)) return;
+    const g = obj.geometry;
+    if (!g) return;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox;
+    const profile = horizonProfileFor(g);
+    // Footprint half-extents in the unit geometry: the axis radius for a
+    // solid of revolution, the half-width/depth for a box.
+    const rx = profile ? Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x)) : (bb.max.x - bb.min.x) / 2;
+    const rz = profile ? Math.max(Math.abs(bb.min.z), Math.abs(bb.max.z)) : (bb.max.z - bb.min.z) / 2;
+    prop.profile = profile;
+    let meshInstances = 0;
+    for (let i = 0; i < obj.count; i++) {
+      obj.getMatrixAt(i, m);
+      m.premultiply(obj.matrixWorld);
+      m.decompose(pos, q, s);
+      ax.set(1, 0, 0).applyQuaternion(q);
+      ay.set(0, 1, 0).applyQuaternion(q);
+      az.set(0, 0, 1).applyQuaternion(q);
+      base.copy(pos).addScaledVector(ay, s.y * bb.min.y);
+      top.copy(pos).addScaledVector(ay, s.y * bb.max.y);
+      up.addVectors(base, top);
+      const ul = up.length();
+      if (!(ul > 1e-6)) continue;
+      up.divideScalar(ul);
+      tx.copy(ax).addScaledVector(up, -ax.dot(up));
+      tz.copy(az).addScaledVector(up, -az.dot(up));
+      if (tx.lengthSq() < 1e-8 || tz.lengthSq() < 1e-8) continue;
+      tx.normalize(); tz.normalize();
+      prop.dir[0] = up.x; prop.dir[1] = up.y; prop.dir[2] = up.z;
+      prop.ex[0] = tx.x; prop.ex[1] = tx.y; prop.ex[2] = tx.z;
+      prop.ez[0] = tz.x; prop.ez[1] = tz.y; prop.ez[2] = tz.z;
+      prop.halfX = rx * Math.abs(s.x);
+      prop.halfZ = rz * Math.abs(s.z);
+      prop.base = base.dot(up) - radius;
+      prop.span = top.dot(up) - base.dot(up);
+      if (!(prop.span > 0.5) || !(prop.halfX > 0.2) || !(prop.halfZ > 0.2)) continue;
+      texels += splatProp(grid, width, height, radius, prop, trig);
+      instances++; meshInstances++;
+    }
+    meshes.push(`${obj.name}:${meshInstances}`);
+  });
+  return { instances, texels, meshes };
+}
+
+/**
+ * Debug readback (__BIRB.horizonFind): ground texels within an arc of `dir`
+ * that the BAKED ground set says are in shadow for `sun`, confirmed by an
+ * independent march of the analytic TERRAIN alone toward the sun — so a hit
+ * is a ridge shadow (want 'shadow') or, when the terrain alone would light
+ * it, a prop's (want 'canopy'); want 'lit' finds open sunlit ground.
+ * Allocates; never per frame.
+ */
+function findHorizonShadow(state, radius, {
+  dir, sun, minArc = 8, maxArc = 60, limit = 12, penumbra = 0.05, minElevationDeg = 0, clearTexels = 6,
+  want = 'shadow',
+} = {}) {
+  const lit = want === 'lit';
+  if (!state?.result || !dir || !sun) return [];
+  const W = state.width; const H = state.height;
+  const mask = state.propMask;
+  const ga = state.textures.groundA.image.data; const gb = state.textures.groundB.image.data;
+  const dl = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  const d = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
+  const sl = Math.hypot(sun[0], sun[1], sun[2]) || 1;
+  const s = [sun[0] / sl, sun[1] / sl, sun[2] / sl];
+  const angles = new Float64Array(8); const t = { x: 0, y: 0, z: 0 }; const f = {};
+  const vis = (j, i) => {
+    horizonTexelDirection(i, j, W, H, t);
+    const px = (j * W + i) * 4;
+    for (let a = 0; a < 4; a++) { angles[a] = decodeHorizonByte(ga[px + a]); angles[a + 4] = decodeHorizonByte(gb[px + a]); }
+    horizonFrame(t.x, t.y, t.z, f);
+    const su = s[0] * t.x + s[1] * t.y + s[2] * t.z;
+    const elev = Math.asin(Math.max(-1, Math.min(1, su)));
+    const az = Math.atan2(s[0] * f.nx + s[1] * f.ny + s[2] * f.nz, s[0] * f.ex + s[2] * f.ez);
+    return { v: sunVisibility(angles, az, elev, penumbra), elev, az, dir: [t.x, t.y, t.z], frame: { ...f } };
+  };
+  const out = [];
+  for (let j = 1; j < H - 1; j++) {
+    for (let i = 0; i < W; i++) {
+      horizonTexelDirection(i, j, W, H, t);
+      const cosA = t.x * d[0] + t.y * d[1] + t.z * d[2];
+      const arc = Math.acos(Math.max(-1, Math.min(1, cosA))) * radius;
+      if (arc < minArc || arc > maxArc) continue;
+      const c = vis(j, i);
+      if ((lit ? c.v < 0.98 : c.v > 0.02) || c.elev < Math.max(0.12, minElevationDeg * Math.PI / 180)) continue;
+      // Deep in it: every neighbour the same too, so a few texels of framing
+      // error still land on shadow (or on light).
+      let deep = true;
+      for (let dj = -2; dj <= 2 && deep; dj++) {
+        for (let di = -2; di <= 2 && deep; di++) {
+          if (!dj && !di) continue;
+          const v = vis(j + dj, (i + di + W) % W).v;
+          if (lit ? v < 0.95 : v > 0.05) deep = false;
+        }
+      }
+      if (!deep) continue;
+      // Dry ground only (the water surface is its own shader and is not
+      // shadowed), and open ground: no prop within `clearTexels`, so what the
+      // camera sees there is terrain and the shadow is the ridge's.
+      if (floodDepthDir(c.dir[0], c.dir[1], c.dir[2]) > 0) continue;
+      let open = true;
+      for (let dj = -clearTexels; dj <= clearTexels && open; dj++) {
+        const jj = j + dj; if (jj < 0 || jj >= H) continue;
+        for (let di = -clearTexels; di <= clearTexels; di++) {
+          const ii = (i + di + W) % W;
+          if (mask && mask[jj * W + ii]) { open = false; break; }
+          if ((dj & 1) === 0 && (di & 1) === 0) {
+            const q = horizonTexelDirection(ii, jj, W, H, { x: 0, y: 0, z: 0 });
+            if (floodDepthDir(q.x, q.y, q.z) > 0) { open = false; break; }
+          }
+        }
+      }
+      if (!open) continue;
+      if (lit) {
+        out.push({
+          dir: c.dir, arc: +arc.toFixed(2), ground: +terrainHeightDir(c.dir[0], c.dir[1], c.dir[2]).toFixed(3),
+          position: c.dir.map((v) => +(v * (radius + terrainHeightDir(c.dir[0], c.dir[1], c.dir[2]))).toFixed(3)),
+          sunElevationDeg: +(c.elev * 180 / Math.PI).toFixed(2), visibility: +c.v.toFixed(4),
+        });
+        continue;
+      }
+      // Independent confirmation from the analytic terrain alone.
+      const cx = c.frame.ex; const cz = c.frame.ez;
+      const dxw = Math.cos(c.az) * cx + Math.sin(c.az) * c.frame.nx;
+      const dyw = Math.sin(c.az) * c.frame.ny;
+      const dzw = Math.cos(c.az) * cz + Math.sin(c.az) * c.frame.nz;
+      const hEye = terrainHeightDir(c.dir[0], c.dir[1], c.dir[2]);
+      const re = radius + hEye + HORIZON_MAP_DEFAULTS.eyeBias;
+      let best = -Infinity;
+      for (let dist = 1.3; dist <= 84; dist *= 1.12) {
+        const b = dist / radius; const cb = Math.cos(b); const sb = Math.sin(b);
+        const qx = cb * c.dir[0] + sb * dxw; const qy = cb * c.dir[1] + sb * dyw; const qz = cb * c.dir[2] + sb * dzw;
+        const ql = Math.hypot(qx, qy, qz);
+        const rs = radius + terrainHeightDir(qx / ql, qy / ql, qz / ql);
+        const tanE = (rs * cb - re) / (rs * sb);
+        if (tanE > best) best = tanE;
+      }
+      const terrainHorizon = Math.atan(best);
+      // 'shadow': the terrain alone casts it (a ridge). 'canopy': the terrain
+      // alone would LIGHT it, so what the baked map shades it with is a prop.
+      if (want === 'canopy' ? terrainHorizon > c.elev - penumbra : terrainHorizon < c.elev + penumbra) continue;
+      out.push({
+        dir: c.dir, arc: +arc.toFixed(2), ground: +hEye.toFixed(3),
+        position: c.dir.map((v) => +(v * (radius + hEye)).toFixed(3)),
+        sunElevationDeg: +(c.elev * 180 / Math.PI).toFixed(2),
+        terrainHorizonDeg: +(terrainHorizon * 180 / Math.PI).toFixed(2),
+        visibility: +c.v.toFixed(4),
+      });
+    }
+  }
+  out.sort((a, b) => a.arc - b.arc);
+  return out.slice(0, limit);
+}
+
+/** Terrain + occluder grids for this world. Main thread, build time. */
+function buildHorizonJob(THREE, root, radius) {
+  const W = HORIZON_MAP_DEFAULTS.width; const H = HORIZON_MAP_DEFAULTS.height;
+  const t0 = _horizonNow();
+  const terrain = new Float32Array(W * H);
+  fillHeightGrid(terrain, W, H, terrainHeightDir, HORIZON_MAP_DEFAULTS.terrainStride);
+  const t1 = _horizonNow();
+  const occluder = Float32Array.from(terrain);
+  const splat = splatHorizonOccluders(THREE, root, occluder, W, H, radius);
+  const t2 = _horizonNow();
+  // Where something stands on the ground (debug finder only; 128 KB), and
+  // the envelope height itself, one byte a texel, for the prop receivers.
+  const propMask = new Uint8Array(W * H);
+  const envelope = new Uint8Array(W * H);
+  for (let n = 0; n < W * H; n++) {
+    propMask[n] = occluder[n] - terrain[n] > 0.25 ? 1 : 0;
+    envelope[n] = encodeEnvelopeHeight(occluder[n]);
+  }
+  return {
+    width: W, height: H, terrain, occluder, propMask, envelope,
+    stats: { fillMs: +(t1 - t0).toFixed(2), splatMs: +(t2 - t1).toFixed(2), ...splat },
+  };
+}
+
+function createHorizonTextures(THREE, W, H) {
+  const make = (name) => {
+    // Zero bytes decode to a skyline 90 degrees BELOW the horizon: fully lit,
+    // full sky. So the placeholder a material compiles against is inert.
+    const t = new THREE.DataTexture(new Uint8Array(W * H * 4), W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+    t.name = name;
+    t.wrapS = THREE.RepeatWrapping;         // longitude wraps
+    t.wrapT = THREE.ClampToEdgeWrapping;    // colatitude stops at the poles
+    t.magFilter = THREE.LinearFilter;
+    // No mipmaps: u jumps from 1 to 0 at the seam, and a mip chosen from
+    // that derivative would draw a seam line down the planet.
+    t.minFilter = THREE.LinearFilter;
+    t.generateMipmaps = false;
+    t.needsUpdate = true;
+    return t;
+  };
+  return {
+    groundA: make('horizon-ground-a'), groundB: make('horizon-ground-b'),
+    propA: make('horizon-prop-a'), propB: make('horizon-prop-b'),
+  };
+}
+
+/** The envelope heights as an R8 map (uploaded at once; no bake needed). */
+function createEnvelopeTexture(THREE, W, H, bytes) {
+  const t = new THREE.DataTexture(bytes, W, H, THREE.RedFormat, THREE.UnsignedByteType);
+  t.name = 'horizon-envelope';
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearFilter;
+  t.generateMipmaps = false;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  return t;
+}
+
+/**
+ * Run the bake in a module worker; fall back to 6 ms slices on the main
+ * thread if the worker cannot start or fails. `onDone(result)` is called at
+ * most once, never after cancel().
+ */
+function startHorizonBake(job, radius, onDone) {
+  let cancelled = false; let worker = null; let timer = null;
+  const tPost = _horizonNow();
+  const finish = (result) => { if (!cancelled) onDone(result); };
+  const sliced = (reason) => {
+    const bake = createHorizonBake({
+      radius, width: job.width, height: job.height, terrain: job.terrain, occluder: job.occluder,
+    });
+    let spent = 0;
+    const slice = () => {
+      timer = null;
+      if (cancelled) return;
+      const s0 = _horizonNow();
+      while (!bake.done && _horizonNow() - s0 < 6) bake.step(2);
+      spent += _horizonNow() - s0;
+      if (!bake.done) { timer = setTimeout(slice, 0); return; }
+      finish({
+        mode: 'sliced', reason, ms: spent, wallMs: _horizonNow() - tPost,
+        marched: bake.marched, propTexels: bake.propTexels,
+        groundA: bake.ground[0], groundB: bake.ground[1], propA: bake.prop[0], propB: bake.prop[1],
+      });
+    };
+    slice();
+  };
+  let started = false;
+  if (typeof Worker === 'function' && typeof URL === 'function') {
+    try {
+      worker = new Worker(new URL('./horizon-worker.js', import.meta.url), { type: 'module' });
+      worker.onmessage = (event) => {
+        const d = event.data || {};
+        if (worker) { worker.terminate(); worker = null; }
+        if (cancelled) return;
+        if (d.ok) finish({ mode: 'worker', wallMs: _horizonNow() - tPost, ...d });
+        else sliced(`worker: ${d.error}`);
+      };
+      worker.onerror = (event) => {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (worker) { worker.terminate(); worker = null; }
+        if (!cancelled) sliced('worker failed to start');
+      };
+      // Structured clone, not transfer: the fallback needs the originals.
+      worker.postMessage({
+        id: 1, radius, width: job.width, height: job.height, terrain: job.terrain, occluder: job.occluder,
+      });
+      started = true;
+    } catch (err) {
+      worker = null;
+    }
+  }
+  if (!started) sliced('no module worker');
+  return {
+    cancel() {
+      cancelled = true;
+      if (worker) { worker.terminate(); worker = null; }
+      if (timer) { clearTimeout(timer); timer = null; }
+    },
+  };
+}
+
 const SPHERE_BUILDERS = {
   forest: buildForestOnSphere,
   canyons: buildCanyonOnSphere,
@@ -3492,6 +3818,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   _cloudBuild = {
     volumetric: _cloudVolume, clouds: [], spheres: [], owner: [], puffs: null, immersion: null, sorter: null, mesh: null,
   };
+  // Horizon shadows and the bird's ellipsoid shadow (?horizon=0, ?birdshadow=0).
+  const _horizonOn = typeof window !== 'undefined' ? horizonShadowRequested(_search) : false;
+  const _birdShadowOn = typeof window !== 'undefined' ? birdShadowRequested(_search) : false;
   _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
   _landmarks = [];
   // One RNG for this build, drawn once and reused for every prop placed
@@ -3702,6 +4031,56 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
 
   bakeGroundContacts(THREE, sphereGeometry, root);
 
+  // ── Horizon shadows ─────────────────────────────────────────────────────
+  // The grids are built here, on the main thread, because the terrain field
+  // and the prop placements live here; the march (the expensive part) goes to
+  // a worker and the shadows fade in when it lands. Until then the
+  // placeholder textures read as "fully lit" and the patch's strength is 0.
+  let horizonState = null;
+  if (_horizonOn || _birdShadowOn) {
+    ensureHorizonUniforms(THREE, { sunDir: visualUniforms.sunDir, time: visualUniforms.time });
+  }
+  if (_horizonOn) {
+    try {
+      const job = buildHorizonJob(THREE, root, sphereRadius);
+      const textures = createHorizonTextures(THREE, job.width, job.height);
+      textures.envelope = createEnvelopeTexture(THREE, job.width, job.height, job.envelope);
+      horizonUniforms.groundA.value = textures.groundA;
+      horizonUniforms.groundB.value = textures.groundB;
+      horizonUniforms.propA.value = textures.propA;
+      horizonUniforms.propB.value = textures.propB;
+      horizonUniforms.envelope.value = textures.envelope;
+      horizonUniforms.lift.value.z = sphereRadius;
+      horizonUniforms.ready.value.x = 1e9;   // not landed: strength 0
+      horizonState = {
+        width: job.width, height: job.height, textures, propMask: job.propMask,
+        stats: { ...job.stats, bytes: job.width * job.height * (4 * 4 + 1) },
+        result: null,
+        handle: null,
+      };
+      horizonState.handle = startHorizonBake(job, sphereRadius, (result) => {
+        if (!horizonState) return;
+        textures.groundA.image.data = result.groundA;
+        textures.groundB.image.data = result.groundB;
+        textures.propA.image.data = result.propA;
+        textures.propB.image.data = result.propB;
+        for (const key of ['groundA', 'groundB', 'propA', 'propB']) textures[key].needsUpdate = true;
+        horizonUniforms.ready.value.x = Number.isFinite(visualUniforms.time.value) ? visualUniforms.time.value : 0;
+        horizonState.result = {
+          mode: result.mode, reason: result.reason || null,
+          bakeMs: +(+result.ms).toFixed(1), wallMs: +(+result.wallMs).toFixed(1),
+          marched: result.marched, propTexels: result.propTexels,
+        };
+        // The job's input grids (1 MB) live on in the bake's closure until
+        // the handle goes; nothing is left to cancel.
+        horizonState.handle = null;
+      });
+    } catch (err) {
+      console.warn('[SphericalWorld] horizon map unavailable:', err);
+      horizonState = null;
+    }
+  }
+
   // Atmosphere on every opaque surface in the world. It has to be EVERY
   // surface, not just the ground: a cloud shadow that darkens the terrain and
   // leaves the trees standing in it at full brightness reads as a texture bug
@@ -3722,6 +4101,19 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       // Three's chunk names, which are not in them, so it would silently do
       // nothing at best and break the compile at worst.
       if (!m || m.transparent || m.isMeshBasicMaterial || m.isShaderMaterial) continue;
+      // Shadows first, so the atmosphere (chained after) sees shadowed light
+      // and its sun rim can read `birbSunVis`. The ground reads the
+      // ground-eye horizons, every prop the envelope-eye set.
+      if (_horizonOn || _birdShadowOn) {
+        addHorizonShadow(m, THREE, {
+          receiver: object === sphereGround ? 'ground' : 'prop',
+          horizon: _horizonOn && !!horizonState,
+          birdShadow: _birdShadowOn,
+        });
+      }
+      // Clouds after the horizon patch (the cloud JOINS its sun visibility, so
+      // a fragment under a ridge and a cloud loses the sun once, by the
+      // product) and before the atmosphere (whose rim reads birbSunVis).
       if (cloudShadows) addCloudShadow(m, THREE);
       addAtmosphere(m, THREE, {
         baseRadius: sphereRadius,
@@ -3825,6 +4217,16 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     // Clouds with volume, for __BIRB.clouds()/goToCloud(): null with
     // ?cloudvol=0 or in a biome without clouds.
     clouds: cloudsInfo,
+    // Horizon-map readback for __BIRB.horizon(): build stats, bake result
+    // (null until it lands), texture memory. Null when ?horizon=0.
+    horizon: horizonState ? {
+      get width() { return horizonState?.width ?? 0; },
+      get height() { return horizonState?.height ?? 0; },
+      get stats() { return horizonState ? { ...horizonState.stats } : null; },
+      get result() { return horizonState?.result ? { ...horizonState.result } : null; },
+      get landed() { return !!horizonState?.result; },
+      find(opts) { return findHorizonShadow(horizonState, sphereRadius, opts); },
+    } : null,
     // Getters, not plain data properties: an object LITERAL copies
     // `groundResolutionKey`'s value at construction time, so a later
     // setGroundResolution() call — which reassigns the closure variables,
@@ -3877,6 +4279,22 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       // The in-cloud fog is a shared uniform; a world that is gone cannot
       // leave the next one standing in its cloud.
       cloudsInfo?.immersion?.reset();
+
+      // The horizon bake belongs to this world: stop it landing on the next
+      // one, and release the four maps.
+      if (horizonState) {
+        try {
+          horizonState.handle?.cancel();
+          for (const key of ['groundA', 'groundB', 'propA', 'propB', 'envelope']) {
+            const tex = horizonState.textures[key];
+            if (!tex) continue;
+            if (horizonUniforms[key].value === tex) horizonUniforms[key].value = null;
+            tex.dispose();
+          }
+          if (horizonUniforms.ready.value) horizonUniforms.ready.value.x = 1e9;
+        } catch (e) { console.warn('Error disposing horizon map:', e); }
+        horizonState = null;
+      }
 
       // Authored textures first: this releases them AND restores the procedural
       // material, so the traverse below finds no map to double-dispose.
