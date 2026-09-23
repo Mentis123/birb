@@ -40,9 +40,16 @@ jobs:
         run: |
           curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
           apt-get install -y -qq nodejs
-          mkdir -p .build/gltf && cd .build/gltf && npm install --silent gltf-validator
+          # `npm init` first, and it is not ceremony. With no package.json in
+          # this directory npm walks UP to the nearest one — the game's, at the
+          # repository root — and installs there, so the require() below found
+          # nothing and this step failed on every push from 2026-09-19 on,
+          # skipping every check after it.
+          mkdir -p .build/gltf && cd .build/gltf && npm init -y >/dev/null && npm install --silent gltf-validator
           cd "$GITHUB_WORKSPACE/humanoid"
-          for f in .build/corpus/*.vrm; do
+          # The clay exports are GLB, not VRM, and they are the files the app
+          # ships today; validating only *.vrm left them unchecked.
+          for f in .build/corpus/*.vrm .build/corpus/*.glb; do
             node -e "
               const v=require('$PWD/.build/gltf/node_modules/gltf-validator'), fs=require('fs');
               v.validateBytes(new Uint8Array(fs.readFileSync('$f'))).then(r=>{
@@ -132,16 +139,35 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build for the iPad simulator
+      # This step used to pass in two seconds without compiling anything. It
+      # named `Humanoid.xcodeproj` and a `HumanoidApp` scheme, which stopped
+      # existing when the product became Baby Blender, and it piped xcodebuild
+      # into xcpretty under the default `bash -e` — no pipefail — so the step
+      # took xcpretty's exit status: "'Humanoid.xcodeproj' does not exist",
+      # then green. The iPad app had never once been compiled by CI.
+      #
+      # Built for a DEVICE, in Release, because that is what goes on the iPad:
+      # the optimiser is where a Release-only error lives, and a device build
+      # needs only the SDK that ships inside Xcode, not a simulator runtime.
+      - name: Build the iPad app
         working-directory: humanoid/app
+        shell: bash
         run: |
-          xcodebuild build \
-            -project Humanoid.xcodeproj \
-            -scheme HumanoidApp \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || xcodebuild build \
-              -project Humanoid.xcodeproj \
-              -scheme HumanoidApp \
-              -destination 'generic/platform=iOS Simulator' \
+          set -euo pipefail
+          # Xcode 26 ships the Metal compiler as a separate download. Without
+          # it Shaders.metal fails with "missing Metal Toolchain" and the whole
+          # default library goes with it.
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcodebuild -version
+          for configuration in Release Debug; do
+            echo "::group::$configuration"
+            xcodebuild build -quiet \
+              -project BabyBlender.xcodeproj \
+              -scheme BabyBlender \
+              -configuration "$configuration" \
+              -destination 'generic/platform=iOS' \
               CODE_SIGNING_ALLOWED=NO
+            echo "::endgroup::"
+          done
