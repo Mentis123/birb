@@ -161,6 +161,11 @@ const CORE_ASSETS = [
   './src/environment/water.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
+  // Horizon shadows: the bake (and the worker that runs it — a Worker script
+  // the page cannot start offline is a world with no shadows), the patch.
+  './src/environment/horizon-map.js',
+  './src/environment/horizon-worker.js',
+  './src/environment/horizon-shadow.js',
   './src/nesting/drone-look.js',
   './src/environment/weather.js',
   './src/environment/visual-style.js',
@@ -185,6 +190,7 @@ const CORE_ASSETS = [
   './src/effects/energy-ring.js',
   './src/effects/ribbon-trail.js',
   './src/effects/contact-shadow.js',
+  './src/effects/bird-shadow.js',
   './src/effects/burst-signatures.js',
   './src/effects/particles.js',
   './src/effects/screen-shake.js',

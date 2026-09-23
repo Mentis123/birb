@@ -59,6 +59,11 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'smooth', group: 'Shading', kind: 'toggle', label: 'Smooth shading (soil rolls, rock fractures)' },
   { key: 'leaves', group: 'Shading', kind: 'toggle', label: 'Lacy canopy edges' },
   { key: 'snowline', group: 'Shading', kind: 'toggle', label: 'Snow on up-facing surfaces' },
+  // ---- Shadows without shadow maps (every preset) ----
+  { key: 'horizon', group: 'Shading', kind: 'toggle', label: 'Terrain + canopy shadows (horizon map)',
+    hint: 'Ridges, canopies, peaks, spires and towers shade the ground and each other, and valleys see less sky. Baked once per world in a worker; off is the old unshadowed light.' },
+  { key: 'birdshadow', group: 'Shading', kind: 'toggle', label: 'Bird casts a sun shadow (ellipsoids)',
+    hint: 'Body and both wings as analytic ellipsoids along the real sun direction. The straight-down contact disc stays either way — it is the altitude cue.' },
   { key: 'ibl', group: 'Shading', kind: 'select', label: 'Image-based lighting',
     options: [
       { value: null, label: 'Off' },
