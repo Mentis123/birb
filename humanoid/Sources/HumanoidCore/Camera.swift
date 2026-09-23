@@ -283,10 +283,27 @@ public struct Camera: Sendable {
         return Picking.raycast(mesh, origin: r.origin, direction: r.direction)
     }
 
+    /// How far in front of the eye a world point sits, measured along the VIEW
+    /// AXIS. This is the depth `metresPerPixel` and `worldDelta` mean.
+    ///
+    /// It is not the distance along a picking ray, and the difference was a
+    /// bug. `Picking.Hit.distance` runs along the ray, which is longer than the
+    /// view depth by 1/cos of the angle off-axis — 17% at the side of an iPad
+    /// in landscape, 24% in its corners — and the editor passed it straight in
+    /// as the depth. So a Grab moved the surface faster than the Pencil
+    /// everywhere but the middle of the screen, and a brush sized in points
+    /// grew toward the edges.
+    public func viewDepth(of point: Vec3) -> Double { dot(point - eye, forward) }
+
     /// How far a screen-space drag moves a point at a given depth.
     ///
     /// Grab needs this: the finger travels in pixels and the vertex has to
     /// travel in metres, or dragging feels wrong at every zoom but one.
+    ///
+    /// `depth` is a VIEW depth (`viewDepth(of:)`). With it, the result is
+    /// exact rather than approximate: a pinhole camera maps the plane at a
+    /// fixed view depth onto the screen linearly, so a point moved by this
+    /// delta projects exactly where the pointer went, anywhere on the screen.
     public func worldDelta(screenDelta: Vec2, viewport: Vec2, depth: Double) -> Vec3 {
         let perPixel = metresPerPixel(depth: depth, viewportHeight: viewport.y)
         return right * (screenDelta.x * perPixel) - up * (screenDelta.y * perPixel)
@@ -301,8 +318,8 @@ public struct Camera: Sendable {
     /// buys finer detail for free, and the hover ring stays the size the finger
     /// expects.
     ///
-    /// Depth is the distance from the eye to the surface being worked, so a
-    /// brush stays the same size on screen wherever it lands on the model.
+    /// Depth is the VIEW depth of the surface being worked (`viewDepth(of:)`),
+    /// so a brush stays the same size on screen wherever it lands on the model.
     public func metresPerPixel(depth: Double, viewportHeight: Double) -> Double {
         guard viewportHeight > 0 else { return 0 }
         return 2 * tan(fieldOfView / 2) * depth / viewportHeight

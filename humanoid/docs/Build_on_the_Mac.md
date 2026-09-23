@@ -3,11 +3,12 @@
 **Time: about twenty minutes the first time, most of it Xcode indexing.**
 
 > **Read this first.** Everything in `Sources/` is tested on Linux and green —
-> 224 tests. Everything in `app/` is **not compiled anywhere yet**: there is no
-> Apple SDK on the build box, so the SwiftUI, UIKit and Metal layer was written
-> without a compiler. Expect to fix a handful of small things on the first
-> build. That is the expected outcome, not a failure, and the fixes belong in a
-> commit rather than in your head.
+> 270 tests. Everything in `app/` is **compiled by CI** on every push (the
+> `macos` job in `.github/workflows/humanoid.yml`, Release and Debug, for a
+> device) — which it was not before 2026-09-23: that job named a project that
+> no longer existed and still passed. Compiled is not run: the app layer's
+> behaviour is only ever checked on the iPad, against the checklist in
+> `docs/Device_Pass_3.md` §8.
 >
 > The split is deliberate. Every decision that could be *interestingly* wrong —
 > where the camera is, what a touch hits, how far a drag moves a vertex, what a
@@ -115,12 +116,21 @@ A dark screen with a pale rounded cube in the middle.
 | One finger drag | Orbit |
 | Two finger drag | Pan |
 | Pinch | Zoom |
-| Double tap | Frame the model |
-| **Apple Pencil** | Sculpt or paint with the selected tool |
+| Double tap | On the model, orbit around that point; off it, frame the model |
+| **Two finger tap** | Undo |
+| Three finger tap | The readout: fps, frame time, **touch→glass latency**, pressure |
+| **Apple Pencil** | Sculpt or paint with the selected tool; pressure sets size and strength |
+| Pencil double tap / Pro squeeze | Whatever Settings → Apple Pencil says: eraser, previous tool, ignore; the palette settings (the squeeze's default) open Brush & Pencil |
 
-**Fingers navigate, the Pencil edits.** No mode switch. There is a
-`fingerEditing` flag on `EditorModel` if you want to try it without a Pencil,
-but leave it off by default — with it on, every orbit is also a stroke.
+**Fingers navigate, the Pencil edits.** No mode switch. Until a Pencil has ever
+been seen on this iPad (it is remembered), a finger that lands ON the model
+sculpts; the hand icon in the top bar keeps that rule on afterwards. A palm
+resting on the glass while you draw is ignored, and a Pencil that lands while
+a palm holds a stroke takes it over and throws the palm's stroke away.
+
+The pencil-tip button in the top bar opens **Brush & Pencil**: the pressure
+curve and the size and strength ranges, paint hardness, mirror, the rope
+stabiliser, size fixed on the model, and the low-latency drawing switch.
 
 Six tools along the bottom: Grab, Inflate, Deflate, Smooth, Paint, Erase, with
 size and strength. **Export** runs the real pre-flight and shows the checks.

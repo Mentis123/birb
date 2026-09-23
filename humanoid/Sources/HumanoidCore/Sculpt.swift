@@ -28,7 +28,7 @@ public enum Sculpt {
         case smooth
     }
 
-    public struct Settings: Sendable {
+    public struct Settings: Sendable, Equatable {
         /// World-space brush radius in metres.
         public var radius: Double
         /// 0...1. Scales the whole effect; Pencil pressure multiplies into this.
@@ -203,6 +203,25 @@ public enum Sculpt {
     /// either call site, and one number could not carry both meanings honestly.
     public static let inflatePerDabDriven = 0.22
 
+    /// One dab, fully specified: where, how big, how strong, and what.
+    ///
+    /// A stroke carries Pencil pressure, and pressure changes the radius and
+    /// strength of every dab it emits. Applying a frame's dabs with ONE
+    /// settings value — the last sample's — stamped the start of every frame
+    /// with the end of it: the taper a light touch-down should give a stroke
+    /// came out as steps, one per frame.
+    public struct Dab: Sendable, Equatable {
+        public var brush: Brush
+        public var centre: Vec3
+        public var settings: Settings
+
+        public init(_ brush: Brush, at centre: Vec3, settings: Settings) {
+            self.brush = brush
+            self.centre = centre
+            self.settings = settings
+        }
+    }
+
     /// Applies a whole run of dabs and rebuilds the normals once.
     ///
     /// Preferred over the single-dab form for a stroke: the normal pass is
@@ -215,8 +234,32 @@ public enum Sculpt {
                              at centres: [Vec3], settings: Settings) -> Set<Int> {
         var touched = Set<Int>()
         for centre in centres {
-            touched.formUnion(dabPair(brush, to: &mesh, tables: tables,
-                                      at: centre, settings: settings))
+            touched.formUnion(dab(brush, to: &mesh, tables: tables, at: centre, settings: settings))
+        }
+        mesh.recomputeNormals(tables, touching: touched)
+        return touched
+    }
+
+    /// Applies dabs that each carry their own brush and settings, then rebuilds
+    /// the normals once. What a pressure-sensitive stroke hands over per frame.
+    ///
+    /// `reference` is the surface as it was when the stroke began. When it is
+    /// given, each dab finds its vertices and takes its push direction from
+    /// THAT surface rather than from the one it is busy moving — Blender's
+    /// "accumulate off" and "original normal", and for the same reason: a
+    /// stroke whose dabs chase the surface they raise depends on when the
+    /// surface was sampled. Measured before this existed, the same Inflate
+    /// path came out 5.4 mm different delivered one sample a frame than three
+    /// a frame, and 8.3 mm different in one frame — the brush changed its
+    /// mind with the frame rate. With a reference, a dab's effect is a function
+    /// of the path and the stroke's starting shape alone, so it does not.
+    @discardableResult
+    public static func apply(_ dabs: [Dab], to mesh: inout MeshData, tables: MeshTables,
+                             reference: MeshData? = nil) -> Set<Int> {
+        var touched = Set<Int>()
+        for d in dabs {
+            touched.formUnion(dab(d.brush, to: &mesh, tables: tables, at: d.centre,
+                                  settings: d.settings, reference: reference))
         }
         mesh.recomputeNormals(tables, touching: touched)
         return touched
@@ -227,42 +270,91 @@ public enum Sculpt {
     @discardableResult
     public static func apply(_ brush: Brush, to mesh: inout MeshData, tables: MeshTables,
                              at centre: Vec3, settings: Settings) -> Set<Int> {
-        let touched = dabPair(brush, to: &mesh, tables: tables, at: centre, settings: settings)
+        let touched = dab(brush, to: &mesh, tables: tables, at: centre, settings: settings)
         mesh.recomputeNormals(tables, touching: touched)
         return touched
     }
 
-    /// One dab and, if symmetry is on, its mirror. No normal rebuild.
-    private static func dabPair(_ brush: Brush, to mesh: inout MeshData, tables: MeshTables,
-                                at centre: Vec3, settings: Settings) -> Set<Int> {
-        var touched = dab(brush, to: &mesh, tables: tables, at: centre, settings: settings)
-        if settings.symmetric {
-            // The mirrored dab is the mirror of the whole operation, not just of
-            // its centre: a Grab pulling +X on the left must pull -X on the
-            // right, or a symmetric stroke shears the model instead of widening
-            // it. Inflate and Smooth are direction-free and mirror as they are.
-            let mirroredBrush: Brush
-            switch brush {
-            case .grab(let d): mirroredBrush = .grab(Vec3(-d.x, d.y, d.z))
-            case .inflate, .smooth: mirroredBrush = brush
-            }
-            touched.formUnion(dab(mirroredBrush, to: &mesh, tables: tables,
-                                  at: Vec3(-centre.x, centre.y, centre.z),
-                                  settings: settings))
-        }
-        return touched
+    // MARK: - Symmetry
+
+    /// How the two halves of a symmetric brush combine where they overlap.
+    ///
+    /// ## The bug this replaces
+    ///
+    /// The mirrored half used to run as a second, independent dab, so every
+    /// vertex inside BOTH footprints moved twice. The footprints overlap
+    /// wherever the brush is near x = 0 — and the middle of the clay's front
+    /// face is x = 0, the first place anyone grabs. A symmetric Grab there
+    /// moved the surface twice as far as the Pencil (the sideways halves
+    /// cancel, the vertical ones add), and Inflate raised a doubled ridge down
+    /// the middle of any stroke that crossed it.
+    ///
+    /// ## The rule
+    ///
+    /// Each vertex takes the weighted mean of the two falloffs,
+    /// `(w1² + w2²) / (w1 + w2)`:
+    ///
+    /// - where only one half reaches, it is that half's weight, unchanged;
+    /// - it never exceeds the larger of the two, so no vertex moves further than
+    ///   one brush would move it;
+    /// - two coincident halves — a brush centred ON the plane — give exactly
+    ///   the one-sided result, which is right: that stroke is its own mirror;
+    /// - it is smooth across the plane, where a plain `max` would crease.
+    ///
+    /// The result stays exactly mirror-symmetric, because swapping the halves
+    /// swaps `w1` and `w2` and the rule is symmetric in them.
+    @inlinable
+    public static func symmetricWeight(primary w1: Double, mirror w2: Double) -> Double {
+        let sum = w1 + w2
+        guard sum > 0 else { return 0 }
+        guard w2 > 0 else { return w1 }
+        guard w1 > 0 else { return w2 }
+        return (w1 * w1 + w2 * w2) / sum
     }
 
+    /// How much of a vertex's pull belongs to the mirrored half, 0...1. A
+    /// Grab's direction is blended by it: on the plane the halves share
+    /// equally, the sideways components cancel, and the surface follows the
+    /// Pencil up and down exactly once.
+    @inlinable
+    public static func mirrorShare(primary w1: Double, mirror w2: Double) -> Double {
+        guard w2 > 0 else { return 0 }
+        guard w1 > 0 else { return 1 }
+        return w2 / (w1 + w2)
+    }
+
+    /// A Grab displacement as seen by a vertex with the given mirror share.
+    @inlinable
+    public static func grabDirection(_ delta: Vec3, mirrorShare share: Double) -> Vec3 {
+        guard share > 0 else { return delta }
+        let mirrored = Vec3(-delta.x, delta.y, delta.z)
+        guard share < 1 else { return mirrored }
+        return delta * (1 - share) + mirrored * share
+    }
+
+    /// The falloff at a point, or 0 outside the brush.
+    @inline(__always)
+    private static func reach(_ p: Vec3, from centre: Vec3, radius: Double,
+                              radiusSquared: Double) -> Double {
+        let offset = p - centre
+        let distanceSquared = dot(offset, offset)
+        guard distanceSquared <= radiusSquared else { return 0 }
+        return falloff(distance: distanceSquared.squareRoot(), radius: radius)
+    }
+
+    /// One dab, both halves of it in one pass when symmetry is on. No normal
+    /// rebuild.
     private static func dab(_ brush: Brush, to mesh: inout MeshData, tables: MeshTables,
-                            at centre: Vec3, settings: Settings) -> Set<Int> {
+                            at centre: Vec3, settings: Settings,
+                            reference: MeshData? = nil) -> Set<Int> {
         guard settings.radius > 0, settings.strength != 0 else { return [] }
 
         // Smooth reads the mesh as it was at the start of the dab, and must:
         // averaging against already-moved NEIGHBOURS makes the result depend on
         // vertex order, so the same stroke gives a different shape on a re-run.
         //
-        // Grab and Inflate do not need the snapshot and no longer take it.
-        // Weld groups are disjoint and each is written exactly once per dab, so
+        // Grab and Inflate do not need the snapshot and do not take it. Weld
+        // groups are disjoint and each is written exactly once per dab, so
         // neither brush can ever read a position its own dab has already
         // moved — the copy was 90 KB per dab (3,750 positions, through
         // copy-on-write) bought for nothing. Only Smooth crosses between
@@ -273,25 +365,36 @@ public enum Sculpt {
         case .grab, .inflate: snapshot = []
         }
         let radiusSquared = settings.radius * settings.radius
+        // The mirror of the whole operation, not just of its centre: a Grab
+        // pulling +X on the left must pull -X on the right, or a symmetric
+        // stroke shears the model instead of widening it. Inflate and Smooth
+        // are direction-free.
+        let mirrorCentre = Vec3(-centre.x, centre.y, centre.z)
         var touched = Set<Int>()
 
         for welded in 0..<tables.weldedCount {
             let representative = tables.weldMembers[welded][0]
-            let p = mesh.positions[representative]
-            let offset = p - centre
-            let distanceSquared = dot(offset, offset)
-            guard distanceSquared <= radiusSquared else { continue }
-
-            let weight = falloff(distance: distanceSquared.squareRoot(),
-                                 radius: settings.radius) * settings.strength
-            guard weight > 0 else { continue }
+            // Read through the optional rather than hoisting an array out of
+            // it: a local copy of `mesh.positions` would make the write below
+            // copy the whole array on every dab.
+            let p = reference?.positions[representative] ?? mesh.positions[representative]
+            let primary = reach(p, from: centre, radius: settings.radius,
+                                radiusSquared: radiusSquared)
+            let mirror = settings.symmetric
+                ? reach(p, from: mirrorCentre, radius: settings.radius, radiusSquared: radiusSquared)
+                : 0
+            guard primary > 0 || mirror > 0 else { continue }
+            let weight = symmetricWeight(primary: primary, mirror: mirror) * settings.strength
+            guard weight != 0 else { continue }
 
             let shift: Vec3
             switch brush {
             case .grab(let delta):
-                shift = delta * weight
+                shift = grabDirection(delta, mirrorShare: mirrorShare(primary: primary, mirror: mirror))
+                    * weight
             case .inflate(let amount):
-                shift = mesh.normals[representative] * (amount * weight)
+                let normal = reference?.normals[representative] ?? mesh.normals[representative]
+                shift = normal * (amount * weight)
             case .smooth:
                 let ring = tables.neighbours[welded]
                 guard !ring.isEmpty else { continue }
@@ -323,17 +426,18 @@ public enum Sculpt {
     /// TOTAL displacement: idempotent, drift-free, and exactly the set undo
     /// needs to record.
     ///
-    /// A vertex near x = 0 can fall inside both the primary and the mirrored
-    /// half. It is stored once per half, which is what the per-dab form did by
-    /// running twice, and `apply` accumulates.
+    /// Each vertex appears ONCE, with the two halves of a symmetric grab
+    /// already combined (`symmetricWeight`). It used to appear once per half
+    /// with the halves summed, which is the double-strength grab at the mirror
+    /// plane described there.
     public struct GrabSet: Sendable {
         /// Raw vertex indices — every weld member, so a seam moves as one point.
         public let vertices: [Int]
-        /// Falloff x strength, per entry.
+        /// Combined falloff x strength, per entry.
         public let weights: [Double]
-        /// Whether this entry belongs to the mirrored half, whose displacement
-        /// has its x negated.
-        public let mirrored: [Bool]
+        /// How much of each entry's pull is the mirrored half's, 0...1; its
+        /// displacement is blended toward the x-negated one by this much.
+        public let mirrorShares: [Double]
         /// Where each entry was when the gesture began.
         public let origins: [Vec3]
         /// Welded positions touched, for the incremental normal pass.
@@ -341,12 +445,14 @@ public enum Sculpt {
 
         public var isEmpty: Bool { vertices.isEmpty }
         public var weldedCount: Int { welded.count }
+        /// Whether the mirrored half holds any of each entry.
+        public var mirrored: [Bool] { mirrorShares.map { $0 > 0 } }
 
-        public init(vertices: [Int], weights: [Double], mirrored: [Bool],
+        public init(vertices: [Int], weights: [Double], mirrorShares: [Double],
                     origins: [Vec3], welded: Set<Int>) {
             self.vertices = vertices
             self.weights = weights
-            self.mirrored = mirrored
+            self.mirrorShares = mirrorShares
             self.origins = origins
             self.welded = welded
         }
@@ -357,39 +463,36 @@ public enum Sculpt {
                                    settings: Settings) -> GrabSet {
         var vertices = [Int]()
         var weights = [Double]()
-        var mirrored = [Bool]()
+        var shares = [Double]()
         var origins = [Vec3]()
         var welded = Set<Int>()
         guard settings.radius > 0, settings.strength != 0 else {
-            return GrabSet(vertices: vertices, weights: weights, mirrored: mirrored,
+            return GrabSet(vertices: vertices, weights: weights, mirrorShares: shares,
                            origins: origins, welded: welded)
         }
 
         let radiusSquared = settings.radius * settings.radius
-        var halves: [(centre: Vec3, mirrored: Bool)] = [(centre, false)]
-        if settings.symmetric {
-            halves.append((Vec3(-centre.x, centre.y, centre.z), true))
-        }
-
-        for half in halves {
-            for w in 0..<tables.weldedCount {
-                let representative = tables.weldMembers[w][0]
-                let offset = mesh.positions[representative] - half.centre
-                let distanceSquared = dot(offset, offset)
-                guard distanceSquared <= radiusSquared else { continue }
-                let weight = falloff(distance: distanceSquared.squareRoot(),
-                                     radius: settings.radius) * settings.strength
-                guard weight > 0 else { continue }
-                welded.insert(w)
-                for member in tables.weldMembers[w] {
-                    vertices.append(member)
-                    weights.append(weight)
-                    mirrored.append(half.mirrored)
-                    origins.append(mesh.positions[member])
-                }
+        let mirrorCentre = Vec3(-centre.x, centre.y, centre.z)
+        for w in 0..<tables.weldedCount {
+            let p = mesh.positions[tables.weldMembers[w][0]]
+            let primary = reach(p, from: centre, radius: settings.radius,
+                                radiusSquared: radiusSquared)
+            let mirror = settings.symmetric
+                ? reach(p, from: mirrorCentre, radius: settings.radius, radiusSquared: radiusSquared)
+                : 0
+            guard primary > 0 || mirror > 0 else { continue }
+            let weight = symmetricWeight(primary: primary, mirror: mirror) * settings.strength
+            guard weight != 0 else { continue }
+            let share = mirrorShare(primary: primary, mirror: mirror)
+            welded.insert(w)
+            for member in tables.weldMembers[w] {
+                vertices.append(member)
+                weights.append(weight)
+                shares.append(share)
+                origins.append(mesh.positions[member])
             }
         }
-        return GrabSet(vertices: vertices, weights: weights, mirrored: mirrored,
+        return GrabSet(vertices: vertices, weights: weights, mirrorShares: shares,
                        origins: origins, welded: welded)
     }
 
@@ -397,16 +500,13 @@ public enum Sculpt {
     ///
     /// Absolute rather than incremental, so calling it sixty times a frame apart
     /// with a growing displacement lands in exactly the same place as calling it
-    /// once with the final one. The reset pass runs first and separately: a
-    /// vertex that belongs to both halves must not have its mirror contribution
-    /// wiped by its own reset.
+    /// once with the final one.
     public static func apply(_ set: GrabSet, displacement: Vec3,
                              to mesh: inout MeshData, tables: MeshTables) {
         guard !set.vertices.isEmpty else { return }
-        for (i, v) in set.vertices.enumerated() { mesh.positions[v] = set.origins[i] }
-        let flipped = Vec3(-displacement.x, displacement.y, displacement.z)
         for (i, v) in set.vertices.enumerated() {
-            mesh.positions[v] += (set.mirrored[i] ? flipped : displacement) * set.weights[i]
+            mesh.positions[v] = set.origins[i]
+                + grabDirection(displacement, mirrorShare: set.mirrorShares[i]) * set.weights[i]
         }
         mesh.recomputeNormals(tables, touching: set.welded)
     }
