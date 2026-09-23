@@ -305,3 +305,27 @@ test('splatting a cone raises its footprint and nothing else', () => {
   assert.equal(g[(H / 2) * W + W / 2 + 12], 0);
   assert.equal(g[(H / 2 - 8) * W + W / 2], 0);
 });
+
+test('a footprint edge is anti-aliased: a texel it half covers is raised by its coverage', () => {
+  // A hard in/out test stands every canopy on a staircase of 1.5-unit steps,
+  // and a shadow is that outline projected along the sun. A box whose edge
+  // sits a quarter texel past the neighbours' centres must raise them by
+  // about three quarters, and not touch the texel beyond.
+  const g = new Float32Array(W * H);
+  const i0 = W / 2; const j0 = H / 2;
+  const dir = horizonTexelDirection(i0, j0, W, H);
+  const f = horizonFrame(dir.x, dir.y, dir.z, {});
+  const texel = (Math.PI * R) / H;
+  splatProp(g, W, H, R, {
+    dir: [dir.x, dir.y, dir.z], ex: [f.ex, f.ey, f.ez], ez: [f.nx, f.ny, f.nz],
+    halfX: 1.25 * texel, halfZ: 1.25 * texel, base: 0, span: 10, profile: null,
+  }, createGridTrig(W, H));
+  const at = (i, j) => g[j * W + i];
+  assert.equal(at(i0, j0), 10, 'the covered centre stands at the top');
+  for (const [i, j] of [[i0 + 1, j0], [i0 - 1, j0], [i0, j0 + 1], [i0, j0 - 1]]) {
+    const v = at(i, j);
+    assert.ok(v > 6.5 && v < 8.5, `an edge texel stands at its coverage, not the top (${v.toFixed(2)})`);
+  }
+  assert.equal(at(i0 + 2, j0), 0, 'past the edge nothing moved');
+  assert.equal(at(i0, j0 + 2), 0);
+});
