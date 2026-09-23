@@ -111,6 +111,9 @@ export const BOOT_FLAGS = Object.freeze([
       { value: 'v2', label: 'Bank to turn (v2)' },
     ],
     hint: 'Stunt is the shipping default: the stick is roll and pitch RATE, the Boost pill is rudder and throttle, and rolls, loops and hammerheads are flown rather than triggered. Stunt and Classic also toggle live in the gear menu; v2 is URL-only. See docs/realism/STUNT_FLIGHT_PLAN.md.' },
+  // ---- Audio ----
+  { key: 'airsound', group: 'Audio', kind: 'toggle', label: 'Hear the air (wind, whistle, stall buffet, wingbeats)',
+    hint: 'Procedural flight audio, no assets: the wind rises steeply with airspeed, a feather whistle at speed, a buffet near the stall, a whoosh on every downstroke. Off is the silent game. The SFX switch silences it too.' },
 ]);
 
 export function bootFlagByKey(key) {

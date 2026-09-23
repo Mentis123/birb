@@ -198,6 +198,8 @@ const CORE_ASSETS = [
   './src/effects/burst-signatures.js',
   './src/effects/particles.js',
   './src/effects/screen-shake.js',
+  // Hear the air: imported on the default boot path (?airsound=0 skips it).
+  './src/audio/flight-audio.js',
 ];
 
 const RUNTIME_CACHEABLE_HOSTS = new Set([
