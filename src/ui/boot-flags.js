@@ -85,6 +85,8 @@ export const BOOT_FLAGS = Object.freeze([
     hint: 'Off is the old blue jay palette and flat wings.' },
   { key: 'feathers', group: 'Bird', kind: 'toggle', label: 'Feather detail sheets', parent: 'authored' },
   { key: 'feathernormals', group: 'Bird', kind: 'toggle', label: 'Feather normal maps' },
+  { key: 'plumage', group: 'Bird', kind: 'toggle', label: 'Physical plumage (iridescent wings, sheen, sky reflections)',
+    hint: 'Off is the Standard-material bird: metal-faked bronze, no environment to reflect. v3 only.' },
   // ---- Flight ----
   { key: 'levelturn', group: 'Flight', kind: 'toggle', label: 'Level turns (yaw about the planet)',
     hint: 'Off yaws about the bird’s own up — the before, where a held dive spiralled and looped out of itself.' },

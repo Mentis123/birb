@@ -3702,6 +3702,10 @@
       // header for why this is being proved with a procedural map before the
       // authored biome skies (ASSET_JOBS.md job 02) are wired to it.
       var { installSkyEnvironment, iblRequested } = await import("./src/environment/sky-environment.js");
+      // Physical plumage for the v3 bird (thin-film wings, sheen body, a
+      // bird-only sky env map). `?plumage=0` builds the Standard bird exactly.
+      var { plumageRequested, plumageFor, plumageMaterialParams, installPlumageLighting, createBirdEnvironment } =
+        await import("./src/flight/plumage.js");
       var { loadTexture: loadAuthoredTexture, applyAuthoredFeathers, authoredFeathersRequested, authoredFeatherNormalsRequested } =
         await import("./src/environment/authored-textures.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
@@ -4669,6 +4673,11 @@
     // can retint them all at once.
     const birbRimUniforms = [];
     const _rimWhite = new THREE.Color(0xffffff);
+    // The v3 bird's own sky (src/flight/plumage.js). Declared HERE, above the
+    // first setEnvironment() call, because that call reads it: a binding
+    // declared beside the bird would sit in its temporal dead zone and throw
+    // inside initial setup, which only warns and skips everything after.
+    let birbPlumageEnv = null;
     // Weather is per-biome and rebuilt on every environment switch, because
     // the profile IS the biome: snow in the mountains, pollen in the forest,
     // dust in the canyons, drizzle in the city.
@@ -6747,6 +6756,13 @@
           console.warn('[ibl] sky environment failed; keeping direct lighting only', err);
         }
       }
+      // The bird reflects THIS biome's sky. Once per switch, never per frame;
+      // null until the v3 bird is built (the first call runs before it is).
+      if (birbPlumageEnv && definition.sky) {
+        try { birbPlumageEnv.setSky(definition.sky); } catch (err) {
+          console.warn('[plumage] bird sky bake failed; keeping the last one', err);
+        }
+      }
       // Aim the sky's sun at the env's key light so the visible sun disc and
       // the scene's directional lighting always agree.
       if (skyDome && typeof skyDome.setSunDirection === 'function' && lightingRig?.keyLight) {
@@ -8090,7 +8106,13 @@
       // each can carry its own authored sheet; they cost no extra draw calls,
       // because every part they cover is a separate mesh anyway — the wings and
       // tail have to be, since they rotate independently.
-      const contourMat = new THREE.MeshStandardMaterial({
+      //
+      // Physical plumage (the default): both become MeshPhysicalMaterial from
+      // the table in src/flight/plumage.js — thin-film wings, a sheen body, a
+      // sky to reflect; its header has the why. `?plumage=0` builds the two
+      // Standard materials below exactly as they were.
+      const plumage = plumageRequested(window.location?.search || '');
+      const contourMat = plumage ? new THREE.MeshPhysicalMaterial(plumageMaterialParams(THREE, 'contour', { pionus })) : new THREE.MeshStandardMaterial({
         vertexColors: true, metalness: 0.12, roughness: 0.55,
         // The ambient lift has to move with the palette. 0x0f1f45 is a blue,
         // and a blue lift under a violet-and-bronze bird tints every shadow
@@ -8103,7 +8125,7 @@
       // than pushed further because there is no envMap on the shipping path —
       // past about that, three's metal has nothing to reflect and the wing
       // goes DARK between highlights, which is the opposite of the ask.
-      const vaneMat = new THREE.MeshStandardMaterial({
+      const vaneMat = plumage ? new THREE.MeshPhysicalMaterial(plumageMaterialParams(THREE, 'vane', { pionus })) : new THREE.MeshStandardMaterial({
         vertexColors: true,
         metalness: pionus ? 0.34 : 0.16,
         roughness: pionus ? 0.36 : 0.48,
@@ -8657,6 +8679,20 @@
       // extend the program cache key.
       if (pionus) addFeatherSheen(vaneMat, THREE, { warm: 0xffc266, cool: 0x3f8f6e, power: 1.9, strength: 0.72 });
 
+      // Physical plumage: the sky is counted once (the hemisphere moves into
+      // the IBL slot, the env map keeps only its reflection), and the two
+      // hand-made patches above are scaled back, because the physical model
+      // now makes a real rim and a real colour shift of its own.
+      if (plumage) {
+        const table = plumageFor(pionus);
+        for (const m of [contourMat, vaneMat]) {
+          installPlumageLighting(m, THREE);
+          if (m.userData?.birbRim) m.userData.birbRim.uBirbRimStrength.value *= table.rimScale;
+        }
+        if (vaneMat.userData?.birbSheen) vaneMat.userData.birbSheen.uSheenStrength.value *= table.featherSheenScale;
+        birbModel.userData.plumageMaterials = { contour: contourMat, vane: vaneMat };
+      }
+
       // The two authored sheets, if this session wants them. Decode-gated and
       // reversible like every other authored surface in this repo.
       birbModel.userData.featherMaterials = { contour: contourMat, vane: vaneMat };
@@ -8680,6 +8716,23 @@
         : birdVariant === 'v2' ? createProceduralBirbV2()
           : createProceduralBirbV3(),
     );
+
+    // The v3 bird's own sky (physical plumage), baked now for the biome that
+    // is already loaded — the first setEnvironment() ran before the bird
+    // existed — and again by every later switch. v1/v2 never set
+    // plumageMaterials: they are A/B builds, frozen at what they were judged as.
+    {
+      const plumageMaterials = birbAnchor.children[0]?.userData?.plumageMaterials;
+      if (plumageMaterials) {
+        try {
+          birbPlumageEnv = createBirdEnvironment(THREE, renderer, [plumageMaterials.contour, plumageMaterials.vane]);
+          birbPlumageEnv.setSky(getEnvironmentDefinition(environmentState.id)?.sky);
+          birbPlumageEnv.update(birbAnchor.position);
+        } catch (err) {
+          console.warn('[plumage] bird sky failed; the feathers keep their lights only', err);
+        }
+      }
+    }
 
     // The authored feather sheets, on the v3 bird only (its UVs tile in
     // surface units for exactly this; Phase 0's inherited generator UVs do
@@ -12123,6 +12176,8 @@
         }
       }
       if (skyDome && cam) skyDome.followCamera(cam.position, motionState.elapsed);
+      // The bird's reflected sky keeps its zenith on the bird's radial up.
+      if (birbPlumageEnv && birbAnchor) birbPlumageEnv.update(birbAnchor.position);
 
       // IMPROVEMENT 1b: Cloud shell — slow drift + follow camera
       if (cloudShell && cam) {
@@ -13475,7 +13530,7 @@
         // restores exactly what this call actually changed (not a blanket
         // "turn everything back on"), so an environment switch mid-session can't
         // be clobbered by a restore that assumes what used to be there.
-        birdStudio: (on = true) => {
+        birdStudio: (on = true, { world = false } = {}) => {
           if (on) {
             // Returns what it actually found and hid, not just `true` — a
             // studio shot with an unexpected background artifact is a
@@ -13518,6 +13573,17 @@
             if (cloudShell?.mesh) cloudShell.mesh.visible = false;
             scene.background = new THREE.Color(0x808080);
             scene.fog = null;
+            // `{ world: true }`: the speed latch below without the grey box —
+            // the bird held still in front of the world it actually flies in
+            // (tools/birb-plumage-ab.mjs --world). What was just hidden is put
+            // back from the record, so birdStudio(false) stays exact.
+            if (world) {
+              if (sphericalWorld?.root && __birbStudioSaved.worldVisible !== null) sphericalWorld.root.visible = __birbStudioSaved.worldVisible;
+              if (skyDome?.mesh && __birbStudioSaved.skyVisible !== null) skyDome.mesh.visible = __birbStudioSaved.skyVisible;
+              if (cloudShell?.mesh && __birbStudioSaved.cloudShellVisible !== null) cloudShell.mesh.visible = __birbStudioSaved.cloudShellVisible;
+              scene.background = __birbStudioSaved.background;
+              scene.fog = __birbStudioSaved.fog;
+            }
             // Zero the speed the per-frame rewrite is being suppressed for
             // (the `!__birbStudioSaved` gate above), not just suppress the
             // rewrite: whatever `flight.speed`/`boostTimer` happened to be
@@ -13884,6 +13950,71 @@
             // draw-call cost — merging just means far fewer meshes.
             drawCalls: meshes,
             worldSize: size.toArray().map((v) => +v.toFixed(2)),
+          };
+        },
+        // Physical plumage (src/flight/plumage.js): what the two feather
+        // materials ARE on the live bird, and the bird's own sky. `set` tunes
+        // the live materials without a reboot — per part, any of color,
+        // metalness, roughness, ior, specularIntensity, iridescence,
+        // iridescenceIOR, iridescenceThicknessRange, sheen, sheenRoughness,
+        // sheenColor, envMapIntensity, emissiveIntensity, rim, featherSheen,
+        // hemi, envDiffuse, filmMask. `sky` bakes a caller's
+        // { top, mid, horizon, bottom } into the bird's env (null restores the
+        // biome's): a two-tone sky is how a check proves the reflection's
+        // zenith follows the radial up. `zenith` is the bird's radial up put
+        // through the matrix three builds from envMapRotation — (0, 1, 0) when
+        // the env is aimed right.
+        plumage: (opts = {}) => {
+          const built = birbAnchor?.children?.[0];
+          const fm = built?.userData?.featherMaterials || null;
+          const pm = built?.userData?.plumageMaterials || null;
+          if (pm && opts?.set) {
+            for (const part of ['contour', 'vane']) {
+              const s = opts.set[part]; const m = pm[part];
+              if (!s || !m) continue;
+              for (const k of ['metalness', 'roughness', 'ior', 'iridescence', 'iridescenceIOR', 'sheen', 'sheenRoughness', 'envMapIntensity', 'emissiveIntensity', 'specularIntensity']) {
+                if (Number.isFinite(s[k])) m[k] = s[k];
+              }
+              if (Array.isArray(s.iridescenceThicknessRange)) m.iridescenceThicknessRange = s.iridescenceThicknessRange.slice(0, 2);
+              if (s.sheenColor !== undefined) m.sheenColor.set(s.sheenColor);
+              if (s.color !== undefined) m.color.set(s.color);
+              if (Number.isFinite(s.rim) && m.userData.birbRim) m.userData.birbRim.uBirbRimStrength.value = s.rim;
+              if (Number.isFinite(s.featherSheen) && m.userData.birbSheen) m.userData.birbSheen.uSheenStrength.value = s.featherSheen;
+              if (Number.isFinite(s.hemi)) m.userData.birbPlumage.uPlumageHemi.value = s.hemi;
+              if (Number.isFinite(s.envDiffuse)) m.userData.birbPlumage.uPlumageEnvDiffuse.value = s.envDiffuse;
+              if (Number.isFinite(s.filmMask)) m.userData.birbPlumage.uPlumageFilmMask.value = s.filmMask;
+            }
+          }
+          if (pm && opts && opts.sky !== undefined && birbPlumageEnv) {
+            birbPlumageEnv.setSky(opts.sky === null ? getEnvironmentDefinition(environmentState.id)?.sky : opts.sky);
+          }
+          const r3 = (v) => (Number.isFinite(v) ? +v.toFixed(3) : v);
+          const describe = (m) => (m ? {
+            type: m.type, color: `#${m.color.getHexString()}`, metalness: r3(m.metalness), roughness: r3(m.roughness), ior: r3(m.ior),
+            specularIntensity: r3(m.specularIntensity ?? null),
+            iridescence: r3(m.iridescence), iridescenceIOR: r3(m.iridescenceIOR),
+            iridescenceThicknessRange: m.iridescenceThicknessRange ? m.iridescenceThicknessRange.slice() : null,
+            sheen: r3(m.sheen), sheenRoughness: r3(m.sheenRoughness),
+            sheenColor: m.sheenColor ? `#${m.sheenColor.getHexString()}` : null,
+            envMap: !!m.envMap, envMapIntensity: r3(m.envMapIntensity), emissiveIntensity: r3(m.emissiveIntensity),
+            rim: r3(m.userData?.birbRim?.uBirbRimStrength?.value),
+            featherSheen: r3(m.userData?.birbSheen?.uSheenStrength?.value),
+            hemi: r3(m.userData?.birbPlumage?.uPlumageHemi?.value ?? null),
+            envDiffuse: r3(m.userData?.birbPlumage?.uPlumageEnvDiffuse?.value ?? null),
+            filmMask: r3(m.userData?.birbPlumage?.uPlumageFilmMask?.value ?? null),
+          } : null);
+          let zenith = null;
+          if (pm?.vane?.envMap && birbAnchor) {
+            const e = pm.vane.envMapRotation;
+            const m4 = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(-e.x, -e.y, -e.z, e.order));
+            const z = birbAnchor.position.clone().normalize().applyMatrix4(m4);
+            zenith = [r3(z.x), r3(z.y), r3(z.z)];
+          }
+          return {
+            enabled: !!pm,
+            contour: describe(fm?.contour), vane: describe(fm?.vane),
+            env: birbPlumageEnv ? birbPlumageEnv.state() : null,
+            zenith,
           };
         },
         // Runs the rig contract oracle (src/flight/bird-contract.js)
