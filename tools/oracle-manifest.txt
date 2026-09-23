@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-23 at commit a918487 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-23 at commit 3204596 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -53,10 +53,12 @@
 cedb10676f6ae0abed73646653ef26594aea1332eb52ac82eb79f1dd236815e0  tests/bird-flight-stunt.test.js
 89bd71c169b3fdbd821df4784844e09b00324dd44eb787a6eb377171f963219c  tests/bird-shadow.test.js
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
+75c0877bd356ef6950e170aa27f9363eb773653b950483ec5d9413c0658d64e8  tests/hex-tiling.test.js
 06eaa4e627ef53e0dc1c6396ade658c0a47cf346fcb05e3f9fa2f28533559dab  tests/horizon-map.test.js
 09af5d0de1f5424af17c6ffbe43999539aa6d255bc8da08043e9b3c73dc51d81  tests/horizon-shadow.test.js
 0e15502745cd99f80b75369b2d78ecc2ca5b5ff4142e4238aa405759fbfb16a4  tests/plumage.test.js
 d4b7dd86aaa6f77c8ef2152a1ea9b29d532d7322547c821af94ee4ec13e5e341  tests/sky-dome-atmosphere.test.js
+e1830f1a5370bf64f6534d4112021659e4dfd24c88b0fc68b3a945c1aea0102f  tests/stunt-boost-trim.test.js
 164dad3c617966fe8370b410e5003d92f22b558afd1868c8229fa545d922afed  tests/stunt-detector.test.js
 24b61ddeb1aee31c8351a685c0f1d7f5c109cd2771f1902a6ee193fdaeb00fea  tests/stunt-pad.test.js
 a1522741c4d70db05b606cb429e6de98b31dd9cbe794c4c070350803bfcd2e8c  tests/sun-frame.test.js

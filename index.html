@@ -11750,6 +11750,10 @@
             // controllers honour a direct write as speed AND target.
             if (flightV2 || flight.isStunt) flight.cruise = target;
             else flight.speed = target;
+            // The stunt wing is trimmed for the UNBOOSTED cruise: a boost is
+            // thrust, so it moves the target, never the speed the wing is
+            // judged against (see liftCruise in bird-flight-stunt.js).
+            if (flight.isStunt) flight.liftCruise = resumeSpeed;
           }
         }
 

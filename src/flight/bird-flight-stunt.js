@@ -333,6 +333,20 @@ export class BirdFlightStunt extends BirdFlight {
         this.cruise = options.cruise ?? this.speed;
         this._lastTickSpeed = this.speed;
 
+        // The speed the WING is trimmed for, when that is not the energy
+        // target. A boost raises the target to 2.4x cruise for a surge, but
+        // lift, the stall and control authority belong to the airspeed
+        // against the wing's trim, not against where the thrust is pushing:
+        // judged against the boosted target, every boost began as a STALL
+        // (speed 11 against a 26.4 target is under the 0.5 stall line), the
+        // weathervane dropped the nose, the lift deficit sank the bird 1.4 to
+        // 1.55 units and the controls went to a third of their authority -
+        // for pressing the button that means "go". index.html writes it every
+        // frame the bird flies itself; null (the default, and every existing
+        // unit test) judges against `cruise` exactly as before, and so does
+        // any COMMANDED speed (walking, falling, the nest approach).
+        this.liftCruise = options.liftCruise ?? null;
+
         // Live throttle and rudder, both springing to neutral. The pad
         // (src/flight/stunt-pad.js) writes them through `tick`'s input.
         this._throttle01 = 1;
@@ -419,6 +433,16 @@ export class BirdFlightStunt extends BirdFlight {
     }
 
     /**
+     * The speed lift, the stall and authority are judged against: the wing's
+     * trim (`liftCruise`) while the energy model owns the speed, otherwise
+     * the target itself. See `liftCruise` in the constructor.
+     */
+    _trimCruise() {
+        const ref = (!this._commanded && this.liftCruise > 0) ? this.liftCruise : this._cruise;
+        return ref > 0 ? ref : 1;
+    }
+
+    /**
      * The wing's lift, 1 at cruise and upright. Falls with the square of
      * speed, and with the cosine of how far the bird's up has rolled from the
      * radial: a 60-degree bank carries half, a knife edge carries none, and
@@ -431,7 +455,7 @@ export class BirdFlightStunt extends BirdFlight {
         if (s.up.lengthSq() < 1e-12) return 1;
         s.up.normalize();
         s.bodyUp.set(0, 1, 0).applyQuaternion(this.quaternion).normalize();
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         const q = Math.min(1.6, (this.speed / cruise) * (this.speed / cruise));
         const lift = q * s.bodyUp.dot(s.up);
         // The assist knob puts a floor under it so nothing falls fast in Zen.
@@ -470,7 +494,7 @@ export class BirdFlightStunt extends BirdFlight {
      * will actually give. A stalled bird is not a bird with full elevator.
      */
     authority() {
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         return Math.max(0.35, Math.min(1.2, Math.abs(this.speed) / cruise));
     }
 
@@ -491,7 +515,7 @@ export class BirdFlightStunt extends BirdFlight {
 
     /** True while the wing is below flying speed. */
     isStalled() {
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         return this.isStunt && Math.abs(this.speed) < this.stallMul * cruise;
     }
 
@@ -694,7 +718,7 @@ export class BirdFlightStunt extends BirdFlight {
      * sliding back. Neither is a scripted move; both are this term.
      */
     _weathervaneStep(dt) {
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         const stallSpeed = this.stallMul * cruise;
         const spd = Math.abs(this.speed);
         if (spd >= stallSpeed) return false;
