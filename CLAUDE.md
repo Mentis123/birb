@@ -2336,6 +2336,15 @@ did-become-active observer stamping a frame that had never happened; the loop
 now judges on frames PRESENTED. **A watchdog that its own reset can satisfy
 is not watching anything.**
 
+**The live plan is `humanoid/docs/PLAN.md`** (2026-09-23): everything still
+open from the PRD's delivery plan, the three device passes and the Unity
+hand-off, consolidated into one backlog, plus ten new ideas (a stroke
+recorder with a Linux replay, sculpt layers, masking, four more brushes, a
+reset brush, matcap and cavity shading, clay shapes, Pencil Pro roll and
+haptics, AR Quick Look, a turntable capture). Add open items THERE; the pass
+documents are history. The two product-blocking facts it records: "Export
+Model" on the iPad writes no file, and documents do not persist.
+
 Unity/VRChat state: the FBX imports and Unity builds a Humanoid Avatar from it
 on the first attempt. Unity's auto-mapper leaves **Chest unmapped**, which Unity
 tolerates and VRChat's `AnalyzeIK` does not — assign it by hand for now. Mirror
@@ -2351,6 +2360,12 @@ A mobile-first 3D bird flight game built with Three.js. A bird flies on a spheri
 ## Who Made This
 
 **Mentis** (Adam Rappaport) — call him Mentis, not Adam.
+
+**When you give Mentis commands to run — on the Mac, the Windows box or a
+console — give the whole sequence as ONE copy-paste block, every time** (2026-09-23,
+in his words: "always want that for the console commands"). Prose that says
+"pull, generate, open" is not it; a fenced block that starts with `cd` and ends
+with the app open is.
 
 ## Default Interaction Mode
 
