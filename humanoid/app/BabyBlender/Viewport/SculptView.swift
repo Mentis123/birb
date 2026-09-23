@@ -583,9 +583,12 @@ final class FrameLoop {
         guard !drewThisUpdate, needsFrame || busy, let view else { return }
         drewThisUpdate = true
         view.draw()
-        if !busy, let link = link as? UIUpdateLink {
-            // Nothing is animating: stop asking the system for updates until
-            // something requests a frame.
+        // Nothing is animating and the frame just drawn asked for no other:
+        // stop asking the system for updates until something requests one.
+        // `needsFrame` is re-read AFTER the draw on purpose — the drain inside
+        // it can end a stroke and ask for one last frame, and switching the
+        // updates off under that request would leave it undrawn.
+        if !busy, !needsFrame, let link = link as? UIUpdateLink {
             link.requiresContinuousUpdates = false
         }
     }
@@ -774,6 +777,16 @@ struct SculptView: UIViewRepresentable {
             doubleTap.delegate = self
             view.addGestureRecognizer(doubleTap)
 
+            // Two fingers tapped together is undo in every iPad drawing and
+            // sculpting app — Procreate, Nomad, Freeform — so a hand that
+            // already knows it should not have to find a button mid-stroke.
+            let twoFingerTap = UITapGestureRecognizer(target: self,
+                                                      action: #selector(handleTwoFingerTap))
+            twoFingerTap.numberOfTouchesRequired = 2
+            twoFingerTap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            twoFingerTap.delegate = self
+            view.addGestureRecognizer(twoFingerTap)
+
             let tripleTap = UITapGestureRecognizer(target: self, action: #selector(handleTripleTap))
             tripleTap.numberOfTouchesRequired = 3
             tripleTap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
@@ -845,6 +858,15 @@ struct SculptView: UIViewRepresentable {
             let scale = Double(view.contentScaleFactor)
             editor.doubleTap(at: Vec2(Double(point.x) * scale, Double(point.y) * scale),
                              viewport: viewport(of: view))
+        }
+
+        @objc func handleTwoFingerTap() {
+            // Not while the Pencil is drawing: the hand holding it can land two
+            // fingers without meaning anything by it.
+            guard view?.pencilIsDown != true else { return }
+            guard editor.canUndo else { return }
+            editor.undo()
+            editor.say("Undo")
         }
 
         /// Three fingers shows the debug readout. Three is the first touch count

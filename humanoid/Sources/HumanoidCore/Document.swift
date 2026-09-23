@@ -232,6 +232,11 @@ public struct Document {
     private var surfaceMap: SurfacePaint.Map?
     private var paintStroke: SurfacePaint.Stroke?
     private var paintOrigin: PNG.Image?
+    /// The last stroke, kept for its alpha buffer. A stroke needs one byte per
+    /// texel — a megabyte at 1024², four at 2048² — and allocating and zeroing
+    /// it at every touch-down put that cost in the first frame of every
+    /// stroke. `reset` clears only the rectangle the last stroke dirtied.
+    private var spareStroke: SurfacePaint.Stroke?
 
     /// Builds the paint map if it is not built yet.
     ///
@@ -270,8 +275,16 @@ public struct Document {
         guard let surfaceMap else { return }
         endPaintStroke()
         paintOrigin = albedo
-        paintStroke = SurfacePaint.Stroke(map: surfaceMap, brush: brush, origin: albedo,
-                                          base: baseColour)
+        if var reused = spareStroke, reused.map.width == surfaceMap.width,
+           reused.map.height == surfaceMap.height {
+            spareStroke = nil
+            reused.reset(brush: brush, origin: albedo)
+            reused.base = baseColour
+            paintStroke = reused
+        } else {
+            paintStroke = SurfacePaint.Stroke(map: surfaceMap, brush: brush, origin: albedo,
+                                              base: baseColour)
+        }
     }
 
     /// Extends the open paint stroke to a point on the surface.
@@ -309,6 +322,7 @@ public struct Document {
         guard let stroke = paintStroke, let origin = paintOrigin else { return }
         paintStroke = nil
         paintOrigin = nil
+        spareStroke = stroke
         let rect = stroke.dirty
         guard !rect.isEmpty else { return }
         push(.paint(rect: rect, before: copy(origin, rect), after: copy(albedo, rect)))
@@ -430,32 +444,40 @@ public struct Document {
         }
     }
 
+    /// A rectangle of pixels, a row at a time.
+    ///
+    /// It used to append four bytes per pixel through a slice, and the undo
+    /// record of a big stroke is two of these at the moment the Pencil lifts —
+    /// a whole frame, at 2048², spent on bookkeeping in the frame the stroke
+    /// ends. Rows are contiguous; copying them as rows is a memcpy each.
     private func copy(_ image: PNG.Image, _ rect: Paint.Rect) -> [UInt8] {
         guard !rect.isEmpty else { return [] }
-        var out = [UInt8]()
-        out.reserveCapacity((rect.maxX - rect.minX + 1) * (rect.maxY - rect.minY + 1) * 4)
-        for y in rect.minY...rect.maxY {
-            let row = y * image.width
-            for x in rect.minX...rect.maxX {
-                let i = (row + x) * 4
-                out.append(contentsOf: image.rgba[i..<(i + 4)])
+        let rowBytes = (rect.maxX - rect.minX + 1) * 4
+        let rows = rect.maxY - rect.minY + 1
+        return [UInt8](unsafeUninitializedCapacity: rowBytes * rows) { out, count in
+            image.rgba.withUnsafeBufferPointer { source in
+                for r in 0..<rows {
+                    let from = ((rect.minY + r) * image.width + rect.minX) * 4
+                    (out.baseAddress! + r * rowBytes)
+                        .initialize(from: source.baseAddress! + from, count: rowBytes)
+                }
             }
+            count = rowBytes * rows
         }
-        return out
     }
 
     private mutating func paste(_ pixels: [UInt8], into rect: Paint.Rect) {
         guard !rect.isEmpty else { return }
-        var read = 0
-        for y in rect.minY...rect.maxY {
-            let row = y * albedo.width
-            for x in rect.minX...rect.maxX {
-                let i = (row + x) * 4
-                albedo.rgba[i] = pixels[read]
-                albedo.rgba[i + 1] = pixels[read + 1]
-                albedo.rgba[i + 2] = pixels[read + 2]
-                albedo.rgba[i + 3] = pixels[read + 3]
-                read += 4
+        let rowBytes = (rect.maxX - rect.minX + 1) * 4
+        let rows = rect.maxY - rect.minY + 1
+        let width = albedo.width
+        pixels.withUnsafeBufferPointer { source in
+            albedo.rgba.withUnsafeMutableBufferPointer { target in
+                for r in 0..<rows {
+                    let to = ((rect.minY + r) * width + rect.minX) * 4
+                    (target.baseAddress! + to)
+                        .update(from: source.baseAddress! + r * rowBytes, count: rowBytes)
+                }
             }
         }
     }

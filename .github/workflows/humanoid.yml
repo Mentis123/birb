@@ -104,6 +104,10 @@ jobs:
             /tmp/blender/blender --factory-startup --background \
               --python tools/blender_check_fbx.py -- "$f"
           done
+          # The exported texture read the way a consumer reads it: the paint
+          # has to be on the face it was painted on.
+          /tmp/blender/blender --factory-startup --background \
+            --python tools/blender_check_paint.py -- .build/corpus/clay-sculpted.glb
           # A picture of the exported file. Everything above proves the container
           # and the rig; none of it can tell a body from valid triangles.
           /tmp/blender/blender --factory-startup --background \

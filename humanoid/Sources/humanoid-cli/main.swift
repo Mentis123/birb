@@ -210,6 +210,23 @@ case "bench":
             }
             print("BENCH     dirty rect \(touched) texels")
         }
+
+        // What a paint stroke costs at its two ends, beyond the painting: the
+        // stroke's alpha buffer and origin at touch-down, and the undo record
+        // at lift. Both land in a single frame, so both are a hitch if large.
+        var document = Document(try TemplateFile.Bundled.clay.load(), id: "bench", version: "0",
+                                textureSize: size)
+        document.installPaintMap(map)
+        let wide = SurfacePaint.Brush(radius: 0.06, opacity: 1, colour: (0, 0, 0))
+        time("  whole stroke: begin + one r=0.06 dab + end, \(size)²", iterations: 10) {
+            document.beginPaintStroke(wide)
+            document.paint(to: centre.position, seed: centre.triangle)
+            document.endPaintStroke()
+        }
+        time("  undo + redo of that stroke, \(size)²", iterations: 10) {
+            document.undo()
+            document.redo()
+        }
     }
 
 case "gate":

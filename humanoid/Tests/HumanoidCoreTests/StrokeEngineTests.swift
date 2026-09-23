@@ -231,6 +231,28 @@ final class StrokeEngineTests: XCTestCase {
         XCTAssertGreaterThan(engine.last.lifted, 0)
     }
 
+    func testASecondStrokeOverTheFirstBuildsUpAndUndoesSeparately() throws {
+        // The document reuses one stroke's alpha buffer for the next, to keep a
+        // megabyte of allocation out of every touch-down. The buffer has to
+        // come back clean: a leftover alpha would stop the second stroke
+        // painting anywhere the first one had.
+        let at = try pixel(try front(0.02, 0.01).position)
+        var brush = options(.paint)
+        brush.strength = 0.5
+        var engine = StrokeEngine()
+        let spot = try front(0.02, 0.01)
+        stroke(&engine, [at, at + Vec2(1, 0)], options: brush)
+        let once = shown(at: spot)
+        stroke(&engine, [at, at + Vec2(1, 0)], options: brush)
+        let twice = shown(at: spot)
+        XCTAssertLessThan(Int(twice.r), Int(once.r) - 20, "the second stroke did not build up")
+        XCTAssertEqual(document.undoDepth, 2)
+        document.undo()
+        XCTAssertEqual(shown(at: spot).r, once.r)
+        document.undo()
+        XCTAssertTrue(isBase(shown(at: spot)))
+    }
+
     func testPaintedStrokeIsOneUndoStep() throws {
         var engine = StrokeEngine()
         let before = document.albedo.rgba
