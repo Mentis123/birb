@@ -12280,11 +12280,17 @@
             if (_aeroHasPrev && pose.position.distanceTo(_aeroPrevPos) < 80 * delta + 0.5) {
               ai.climbRate = (r1 - _aeroPrevPos.length()) / delta;
               _aeroDq.copy(_aeroPrevQuat).invert().multiply(pose.quaternion);
-              const k = _aeroDq.w < 0 ? -2 / delta : 2 / delta;
-              // Body +X is the right wing: + is nose up. Body +Z is astern: +
-              // carries the LEFT wing down, so it is negated to "+ rolls right".
-              ai.pitchRate = _aeroDq.x * k;
-              ai.rollRate = -_aeroDq.z * k;
+              // Same rule for the attitude: a snap of more than ~0.6 rad in
+              // one frame (a restorePose, the launch realign after a tumble)
+              // is a discontinuity, and read as a rate it would spike the
+              // load flex for a frame's worth of easing.
+              if (Math.abs(_aeroDq.w) > 0.955) {
+                const k = _aeroDq.w < 0 ? -2 / delta : 2 / delta;
+                // Body +X is the right wing: + is nose up. Body +Z is astern: +
+                // carries the LEFT wing down, so it is negated to "+ rolls right".
+                ai.pitchRate = _aeroDq.x * k;
+                ai.rollRate = -_aeroDq.z * k;
+              }
             }
             _aeroPrevPos.copy(pose.position);
             _aeroPrevQuat.copy(pose.quaternion);
