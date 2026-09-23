@@ -738,7 +738,15 @@ export function createFlightAudio(options = {}) {
   /** Fade to silence, then suspend the context (battery, and iOS etiquette). */
   function suspend(reason = 'paused') {
     if (!ctx) return;
-    st.suspendReason = reason;
+    // A mute never REPLACES a pause. The SFX switch and the master slider
+    // live in the settings overlay, which is itself a pause: muting there
+    // and unmuting again would otherwise find 'muted', resume, and play the
+    // wind over a paused game until the idle watchdog caught it. The pause
+    // is lifted by the next frame, which then finds the volume and settles
+    // on 'muted' itself (resume() below).
+    if (!(reason === 'muted' && st.suspendReason && st.suspendReason !== 'muted')) {
+      st.suspendReason = reason;
+    }
     if (n) {
       const rec = P.master;
       rec.last = 0;
@@ -750,7 +758,12 @@ export function createFlightAudio(options = {}) {
 
   function resume() {
     // Nothing to play is a reason to stay asleep, whatever woke us.
-    if (!(st.volume > 0)) { if (ctx) suspend('muted'); return; }
+    if (!(st.volume > 0)) {
+      // Called when the game is running (a frame, a fresh unlock): with
+      // nothing to play the reason becomes 'muted', which frames leave alone.
+      if (ctx) { st.suspendReason = null; suspend('muted'); }
+      return;
+    }
     st.suspendReason = null;
     if (st.suspendTimer) { timers.clearTimeout(st.suspendTimer); st.suspendTimer = 0; }
     if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') {

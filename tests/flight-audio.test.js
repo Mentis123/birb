@@ -590,6 +590,36 @@ test('graph: a tap does not wake a paused game — the next FRAME does', () => {
   assert.equal(fa.context.state, 'running');
 });
 
+test('graph: muting and unmuting INSIDE the paused settings menu does not wake it', () => {
+  // The SFX switch and the master slider live in the settings overlay, which
+  // pauses the game. Each tap there runs the control's handler and then
+  // bubbles to the page's unlock listener. Unmuting must not resume the
+  // audio of a paused game; the next frame does, as for any pause.
+  const { fa, fake } = makeAudio();
+  fa.setVolume(0.7, true);
+  fa.unlock();
+  fa.update(frame(), 1 / 60);
+  fa.suspend('paused'); fake.timers.flush();
+  fa.unlock({ type: 'click' }); // the gear tap
+  fa.setVolume(0.7, false); fa.unlock({ type: 'click' }); fake.timers.flush(); // SFX off
+  assert.equal(fa.context.state, 'suspended');
+  fa.setVolume(0.7, true); fa.unlock({ type: 'click' }); fake.timers.flush(); // SFX on
+  assert.equal(fa.context.state, 'suspended', 'unmuting in the menu played the wind over a paused game');
+  assert.equal(fa.probe().suspendReason, 'paused');
+  fa.update(frame(), 1 / 60);
+  assert.equal(fa.context.state, 'running', 'the next frame resumes it');
+  // Leave the menu still muted: the first frame settles on 'muted' and the
+  // frames after it leave it alone.
+  fa.suspend('paused'); fake.timers.flush();
+  fa.setVolume(0.7, false); fake.timers.flush();
+  fa.update(frame(), 1 / 60); fake.timers.flush();
+  assert.equal(fa.probe().suspendReason, 'muted');
+  assert.equal(fa.context.state, 'suspended');
+  const pendingBefore = fake.timers.pending.length;
+  fa.update(frame(), 1 / 60);
+  assert.equal(fake.timers.pending.length, pendingBefore, 'a muted frame schedules nothing');
+});
+
 test('graph: the idle watchdog counts frames, not time — a stopped loop is suspended', () => {
   // A pause path that does not say so (none known today: hidden, settings and
   // a lost GL context all call suspend) must not leave the wind blowing.
