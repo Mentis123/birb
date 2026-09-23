@@ -13575,6 +13575,26 @@
           setEnvironment(environmentState.id);
           return smoothShadingActive();
         },
+        // Hex-tiled ground map (?hextile=1, ground-detail.js), flipped at
+        // runtime for the A/B: a recompile, not a uniform, so off IS the
+        // default triplanar program byte for byte. No argument just reads.
+        // null: this ground was built without it (no flag, or not forest).
+        hexTile: async (on, params = null) => {
+          const { setGroundHexTile } = await import('./src/environment/ground-detail.js');
+          const g = sphericalWorld?.root?.getObjectByName('sphere-ground');
+          const s = g?.material?.userData?.birbGroundHex;
+          if (!s) return null;
+          if (on !== undefined && on !== null) setGroundHexTile(g.material, on);
+          if (params) {
+            const v = s.uniform.value;
+            v.set(params.rotation ?? v.x, params.falloff ?? v.y, params.exponent ?? v.z, params.cells ?? v.w);
+          }
+          return {
+            enabled: s.enabled,
+            define: !!g.material.defines && 'BIRB_GROUND_HEX' in g.material.defines,
+            params: s.uniform.value.toArray(),
+          };
+        },
         // Drop the bird to a given height above the real ground. Used by the
         // capture harness: the chase camera sits close behind the bird, so the
         // ground directly beneath it leaves the frame above roughly five

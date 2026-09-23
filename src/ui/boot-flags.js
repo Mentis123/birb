@@ -48,6 +48,12 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'city', group: 'Surfaces', kind: 'toggle', label: 'City concrete', parent: 'authored' },
   { key: 'ground', group: 'Surfaces', kind: 'toggle', label: 'Forest ground map', parent: 'authored' },
   { key: 'groundbump', group: 'Surfaces', kind: 'toggle', label: 'Ground bump (soil grain)', parent: 'authored' },
+  { key: 'hextile', group: 'Surfaces', kind: 'select', label: 'Ground map never repeats (hex tiling)',
+    options: [
+      { value: null, label: 'Off' },
+      { value: '1', label: 'On' },
+    ],
+    hint: 'Opt-in. Re-lays the forest ground map as randomly offset and rotated hex tiles on the two projections that face the ground best, so the 18-unit repeat disappears and valley walls stop streaking. Needs the forest ground map.' },
   { key: 'skytex', group: 'Surfaces', kind: 'select', label: 'Authored sky',
     options: [
       { value: null, label: 'On' },

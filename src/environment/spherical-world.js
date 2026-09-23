@@ -37,7 +37,7 @@ let disposeAuthoredGranite = null;
 let disposeAuthoredSnow = null;
 let disposeAuthoredCityFacades = []; // one disposer per buildingMats[i] that loaded
 let disposeAuthoredGround = null;
-import { addGroundDetail } from "./ground-detail.js";
+import { addGroundDetail, hexTileRequested } from "./ground-detail.js";
 import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
@@ -3807,7 +3807,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     bump: (wantsGroundTexture && typeof window !== 'undefined'
       && authoredGroundBumpRequested(window.location?.search)) ? GROUND_BUMP_STRENGTH : 0,
     groundMap: wantsGroundTexture
-      ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT }
+      ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT,
+        // ?hextile=1: the map never repeats (ground-detail.js, hex note). Opt-in.
+        hexTile: hexTileRequested(window.location?.search) }
       : null,
   });
   if (wantsGroundTexture) {
