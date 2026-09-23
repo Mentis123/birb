@@ -11,6 +11,22 @@
 export const name = 'aero-pose-gear';
 
 export default async function run(ctx) {
+  // The approach is flown from 10 units up, inside the air field's layer
+  // (src/flight/air-field.js): a thermal or a windward slope under the spawn
+  // can hold a slow idle-throttle descent level, and whether it does depends
+  // on where the wind has veered to by the time this check runs. That is the
+  // AIR's business (air-field-thermal), not the gear's, so the field is
+  // detached from the flight for this check and put back after it. Optional
+  // chaining: a build without the air runs this unchanged.
+  await ctx.page.evaluate(() => window.__BIRB.air?.(false));
+  try {
+    await runGear(ctx);
+  } finally {
+    await ctx.page.evaluate(() => window.__BIRB.air?.(true));
+  }
+}
+
+async function runGear(ctx) {
   const { page } = ctx;
   const climbSign = await page.evaluate(() => {
     const t = window.__BIRB.flightProbe()?.tuning;

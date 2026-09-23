@@ -4249,6 +4249,8 @@
       stallMul: 0.5, wingAngle: NaN, clearance: Infinity, overWater: false,
     };
     const _faPrevPos = new THREE.Vector3();
+    const _faStep = new THREE.Vector3();
+    const _faUp = new THREE.Vector3();
     let _faHavePrev = false;
     let _faPrevDelta = 0;
     let _faWing = null;
@@ -4262,13 +4264,25 @@
       _faPrevDelta = delta;
       f.paused = !(delta > 0);
       // Airspeed is what the bird actually moved — sink, falls, boosts and
-      // the nest auto-fly included, for every flight model alike. There is no
-      // wind in this world, so ground speed IS airspeed. A jump faster than
-      // any flight is a teleport or a restored pose, and reads as no sample.
+      // the nest auto-fly included, for every flight model alike — LESS what
+      // the air itself moved it. The air field (src/flight/air-field.js)
+      // carries the stunt bird up a thermal or a windward slope, and a bird
+      // riding rising air is not flying faster through it; so the radial
+      // step the law took for the air last tick (the tick this delta spans)
+      // comes back out before the length is taken. Gusts never move the
+      // bird, so there is nothing else to take out. Under ?air=0 the step
+      // is zero and this is ground speed, as before. A jump faster than any
+      // flight is a teleport or a restored pose, and reads as no sample.
       f.speed = NaN;
       if (fc && fc.position) {
         if (_faHavePrev && dt > 0) {
-          const v = fc.position.distanceTo(_faPrevPos) / dt;
+          _faStep.copy(fc.position).sub(_faPrevPos);
+          const airRise = (airField && fc.isStunt && Number.isFinite(fc.lastAirRise)) ? fc.lastAirRise : 0;
+          if (airRise && fc.position.lengthSq() > 1e-12) {
+            _faUp.copy(fc.position).normalize();
+            _faStep.addScaledVector(_faUp, -airRise);
+          }
+          const v = _faStep.length() / dt;
           if (v <= 120) f.speed = v;
         }
         _faPrevPos.copy(fc.position);
@@ -11841,10 +11855,22 @@
         // The air moves on before the bird flies through it: the wind veers,
         // the gust filters step, and every thermal re-reads its heat from the
         // key light (the same "position IS the sun direction" convention
-        // visualUniforms.sunDir and the shadow follow use).
+        // visualUniforms.sunDir and the shadow follow use). Under the planet
+        // sun (sun-frame.js) that key light is the sun in the BIRD's own
+        // horizon frame, last mapped at the bird's current position, so the
+        // position goes in too: each thermal gets the bird's sun carried to
+        // it along the great circle, and sees the bird's elevation over its
+        // own horizon. Handed the raw direction instead, a thermal's heat
+        // swung with where the bird happened to be: measured on the live
+        // page under a 19.5-degree sun, flying one 82-unit pass past it
+        // switched a thermal from 0 to 0.70 heat; carried, it held within
+        // 0.01. ?planetsun=0 keeps the world-fixed sun, the far side of the
+        // planet in night, exactly as before.
         if (airField) {
           const kl = lightingRig?.keyLight?.position;
-          airField.update(delta, kl ? kl.x : 0, kl ? kl.y : 1, kl ? kl.z : 0);
+          const obs = planetSunRequested ? flightController?.position : null;
+          airField.update(delta, kl ? kl.x : 0, kl ? kl.y : 1, kl ? kl.z : 0,
+            obs ? obs.x : undefined, obs ? obs.y : undefined, obs ? obs.z : undefined);
         }
 
         // 2. Physics Update
@@ -12338,8 +12364,11 @@
           ai.elevator = pitchInput * (stunt ? fc.pitchSign : 1);
           ai.bank = Math.abs(yawInput);
           ai.reducedMotion = reducedMotionState.enabled;
-          // An air field is being built in parallel; wired to 0 until it lands.
+          // The air (src/flight/air-field.js) is set below, once the height
+          // above ground is known. Still air until then, and always under
+          // ?air=0, where there is no field.
           ai.gust = 0;
+          ai.airLift = 0;
           // Climb and body rates from the flight frame's own motion, frame to
           // frame: the same for classic, v2 and stunt, and it sees what the
           // nest auto-fly and the launch boost do to the position. A step no
@@ -12350,6 +12379,14 @@
             const r1 = pose.position.length();
             if (_aeroHasPrev && pose.position.distanceTo(_aeroPrevPos) < 80 * delta + 0.5) {
               ai.climbRate = (r1 - _aeroPrevPos.length()) / delta;
+              // The share of that climb the AIR supplied (air-field.js): the
+              // radial step the stunt law took for it this frame, over the
+              // SAME delta, so the two cancel exactly at any frame rate (the
+              // law clamps its own step at 0.05 s and a SwiftShader frame is
+              // longer). Only where the climb itself was measured: across a
+              // teleport both are zero. The beat pays for climbRate - airLift
+              // — a bird carried up a thermal glides.
+              if (airField && stunt && Number.isFinite(fc.lastAirRise)) ai.airLift = fc.lastAirRise / delta;
               _aeroDq.copy(_aeroPrevQuat).invert().multiply(pose.quaternion);
               // Same rule for the attitude: a snap of more than ~0.6 rad in
               // one frame (a restorePose, the launch realign after a tumble)
@@ -12369,6 +12406,15 @@
             const terrain = (typeof sampleTerrainHeight === 'function')
               ? sampleTerrainHeight(pose.position.x, pose.position.y, pose.position.z) : 0;
             ai.aboveGround = sphericalWorld ? r1 - (sphericalWorld.sphereRadius + terrain) : NaN;
+            // The vertical air the wing meets: what carried the bird this
+            // frame, plus the layer's vertical turbulence (zero above the
+            // layer, like the air itself). aero-pose high-passes it into a
+            // flick of the wings, so entering a thermal is felt and a steady
+            // one flexes nothing.
+            if (airField) {
+              const carried = stunt && Number.isFinite(fc.lastAir) ? fc.lastAir : 0;
+              ai.gust = carried + airField.verticalGust(ai.aboveGround);
+            }
           }
           const a = aeroPose.update(ai, delta);
           const pb = 1 - perchBlend;
@@ -14400,6 +14446,7 @@
               target: r(ai.target), throttle: r(ai.throttle), stalled: ai.stalled,
               climbRate: r(ai.climbRate), pitchRate: r(ai.pitchRate), rollRate: r(ai.rollRate),
               elevator: r(ai.elevator), bank: r(ai.bank), aboveGround: r(ai.aboveGround), gust: r(ai.gust),
+              airLift: r(ai.airLift),
             },
           };
         },
@@ -14489,11 +14536,15 @@
             count: airField.count, time: d3(st.time), agl: d3(st.agl),
             updraft: d3(st.updraft), thermal: d3(st.thermal), ridge: d3(st.ridge),
             gust: d3(st.gust), gustSide: d3(st.gustSide), gustAlong: d3(st.gustAlong),
+            // The vertical gust in units/s, and what the WING meets of it at
+            // the bird's height (faded out with the layer) — the second term
+            // of aeroPose().input.gust, beside flightProbe().air.
+            gustW: d3(st.gustW), layerGust: d3(airField.verticalGust(st.agl)),
             wind: d3(st.wind), windVisual: d3(st.windVisual),
             applied: fc.lastAir != null ? d3(fc.lastAir) : null,
             nearestThermal,
             thermals: airField.thermals.map((t) => ({
-              index: t.index, dir: t.dir.slice(), heat: d3(airField.heat(t.index)),
+              index: t.index, dir: t.dir.slice(), normal: t.normal.slice(), heat: d3(airField.heat(t.index)),
               core15: d3(airField.thermalAt(t.index, 15).core),
             })),
           };

@@ -39,19 +39,34 @@ export default async function run(ctx) {
   await ctx.frames(2);
 
   // Strongest thermals first; a tree in the way invalidates a run rather
-  // than failing the physics, so up to three are tried.
+  // than failing the physics, so up to five are tried. 28 units up is inside
+  // the core's strongest third and above most of a forest's canopy (trees
+  // run 14-58 tall and the control pass holds its height), and every try and
+  // every pass starts FLYING at cruise (`freeze(false)` is setSpeed(11)): a
+  // knockdown on one try must not fail the next, and a bird left at the
+  // falling speed would stall through the one after.
   const ranked = await page.evaluate(() => (window.__BIRB.air().thermals || [])
     .slice().sort((a, b) => b.core15 - a.core15).map((t) => t.index));
-  const AGL = 18;
+  const AGL = 28;
   const N = 40;
   let result = null;
-  for (const index of ranked.slice(0, 3)) {
+  for (const index of ranked.slice(0, 5)) {
+    await page.evaluate(() => { const B = window.__BIRB; B.setRecovery?.('flying'); B.freeze(false); });
     const go = await page.evaluate(({ i, agl }) => window.__BIRB.goToThermal(i, agl), { i: index, agl: AGL });
-    if (!go || !(go.core > 0.8)) continue;
+    if (!go) continue;
     await ctx.frames(2);
+    // Read the core AFTER arriving: under the planet sun a jump this long
+    // re-bases the sun frame (sun-frame.js), so the heat ranked from the
+    // spawn is not the heat here.
+    const here = await page.evaluate(() => window.__BIRB.air().nearestThermal);
+    if (!here || here.index !== index || !(here.strength > 0.8)) {
+      ctx.log(`thermal ${index}: core ${here ? here.strength : '?'} u/s on arrival (heat ${here ? here.heat : '?'}), trying the next`);
+      continue;
+    }
+    go.core = here.strength; go.heat = here.heat;
     const pose = { position: go.position, quaternion: go.quaternion };
     const flyFrom = async () => {
-      await page.evaluate((p) => { const B = window.__BIRB; B.restorePose(p); }, pose);
+      await page.evaluate((p) => { const B = window.__BIRB; B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, pose);
       return ctx.hold({ x: 0, y: 0 }, N, PROBE);
     };
     const on = await flyFrom();
@@ -82,6 +97,54 @@ export default async function run(ctx) {
   ctx.check(gOn - gOff > 1.0, `the difference is the air: ${(gOn - gOff).toFixed(2)} units`);
   ctx.check(on.every((s) => s.air <= 2.5 + 1e-9 && s.air >= -1.5 - 1e-9), 'the applied air stays inside its bounds');
   globalThis.__airFieldThermalRun = { pose: { position: go.position, quaternion: go.quaternion }, gain: gOn, frames: N };
+
+  // The pose reads the air (src/flight/aero-pose.js, wired in index.html).
+  // Fly the core pose with the field detached until the wing settles, then
+  // fly the SAME pose with it attached: the vertical air the wing meets
+  // steps up by the core's updraft, which is what flying into a thermal is.
+  // The wings must flick up, stay inside the flick's bound and settle back
+  // (a high-pass, not a held flex), and the BEAT must not pay for a climb
+  // the air supplied. 24 frames each keeps the bird inside ~0.4 r2 of the
+  // axis, where the core is still well over 1 unit/s.
+  const aero = await page.evaluate(() => window.__BIRB.aeroPose?.());
+  if (aero && aero.enabled) {
+    const POSE = `const a = B.aeroPose(); const p = B.flightProbe(); const f = B.air();
+      return { flex: a.flex, demand: a.demand, gust: a.input.gust, lift: a.input.airLift, climb: a.input.climbRate,
+        air: p.air, layer: f.layerGust, rec: p.recovery };`;
+    const core = { position: go.position, quaternion: go.quaternion };
+    let detached;
+    await page.evaluate((p) => { const B = window.__BIRB; B.air(false); B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, core);
+    try {
+      detached = await ctx.hold({ x: 0, y: 0 }, 24, POSE);
+    } finally {
+      await page.evaluate((p) => { const B = window.__BIRB; B.air(true); B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, core);
+    }
+    const attached = await ctx.hold({ x: 0, y: 0 }, 24, POSE);
+    const clean = [...detached, ...attached].every((s) => s.rec === 'flying');
+    if (ctx.check(clean, 'the pose pass stayed in the air (no collision)')) {
+      const avg = (a, k) => a.reduce((t, s) => t + s[k], 0) / a.length;
+      const base = avg(detached.slice(-6), 'flex');
+      const peak = Math.max(...attached.map((s) => s.flex));
+      const tail = avg(attached.slice(-6), 'flex');
+      const dOff = avg(detached.slice(-12), 'demand');
+      const dOn = avg(attached.slice(8), 'demand');
+      const liftSeen = Math.max(...attached.map((s) => s.lift));
+      ctx.log(`pose: flex ${base.toFixed(3)} -> peak ${peak.toFixed(3)} -> ${tail.toFixed(3)}; gust input ${attached[0].gust} -> ${attached[attached.length - 1].gust} u/s;`
+        + ` demand ${dOff.toFixed(3)} detached vs ${dOn.toFixed(3)} carried (climb ${attached[attached.length - 1].climb}, airLift ${attached[attached.length - 1].lift})`);
+      // The wiring as an identity, every frame: the gust the pose is handed
+      // IS the air the flight applied plus the layer's vertical turbulence.
+      const worst = Math.max(...[...detached, ...attached].map((s) => Math.abs(s.gust - (s.air + s.layer))));
+      ctx.check(worst < 0.003, `the pose's gust is the air that carried the bird plus the layer's turbulence, every frame (worst ${worst.toFixed(4)})`);
+      const carried = avg(attached, 'air');
+      ctx.check(carried > 0.5 && detached.every((s) => s.air === 0),
+        `the attached pass is carried and the detached one is not (mean applied ${carried.toFixed(2)} u/s vs 0)`);
+      ctx.check(peak - base > 0.05, `entering the core flicks the wings up (+${(peak - base).toFixed(3)} rad)`);
+      ctx.check(peak - base <= 0.22 + 0.03, `and no further than the flick's bound (+${(peak - base).toFixed(3)} against gustMax 0.22)`);
+      ctx.check(Math.abs(tail - base) < 0.06, `a steady thermal holds no flex: it settles back (${base.toFixed(3)} -> ${tail.toFixed(3)})`);
+      ctx.check(liftSeen > 0.3 && Math.abs(dOn - dOff) < 0.06,
+        `the beat does not pay for a climb the air supplied (demand ${dOff.toFixed(3)} -> ${dOn.toFixed(3)}, airLift up to ${liftSeen.toFixed(2)})`);
+    }
+  }
 
   // Gusts: the foliage uniform breathes, the density lever does not.
   const gusts = await ctx.hold({ x: 0, y: 0 }, 40, 'const a = B.air(); return { w: a.windUniform, d: a.density, g: a.gust, gs: a.gustSide };');

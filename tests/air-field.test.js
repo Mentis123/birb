@@ -620,3 +620,171 @@ test('a hands-off level bird flown through a real thermal climbs, and without th
   assert.ok(Math.abs(held) < 0.05, `no field: ${held.toFixed(3)}`);
   assert.ok(climbed > 1.5, `through the core for 1.5 s: +${climbed.toFixed(2)}`);
 });
+
+// ---------------------------------------------------------------------------
+// 4. The pose reads the air (wiring into src/flight/aero-pose.js)
+// ---------------------------------------------------------------------------
+
+test('the pose\'s vertical gust lives in the convective layer: full low, faded by 0.7 zi, nothing at or above zi', () => {
+  const f = makeField();
+  let seen = 0;
+  for (let i = 0; i < 600; i += 1) {
+    f.update(1 / 60, 0.2, 1, 0.1);
+    const gw = f.state.gustW;
+    assert.equal(f.verticalGust(10), gw, 'low in the layer it is the filtered vertical gust itself');
+    assert.equal(f.verticalGust(0.5 * ZI), gw);
+    const mid = f.verticalGust(0.85 * ZI);
+    assert.ok(Math.abs(mid) <= Math.abs(gw) + 1e-12, 'faded, never amplified');
+    for (const agl of [ZI, ZI + 0.001, 61, 220, NaN, undefined]) assert.equal(f.verticalGust(agl), 0, `still at ${agl}`);
+    if (gw !== 0) seen += 1;
+  }
+  assert.ok(seen > 590, 'and it does move');
+});
+
+test('rising air is free to the beat: a climb the air supplies flaps like level flight, and the gear still times the GROUND', async () => {
+  const { createAeroPose, createAeroInput } = await import('../src/flight/aero-pose.js');
+  const settle = (input) => {
+    const p = createAeroPose();
+    for (let i = 0; i < 240; i += 1) p.update(input, 1 / 60);
+    return p.out;
+  };
+  const base = { ...createAeroInput(), airborne: true, airspeed: 11, cruise: 11, target: 11, aboveGround: 30 };
+  const level = settle({ ...base });
+  // Carried up a thermal at 2 u/s, hands off: the ground sees a climb, the air
+  // supplied all of it.
+  const carried = settle({ ...base, climbRate: 2, airLift: 2 });
+  // The same climb bought with the wing (the base before this wiring).
+  const powered = settle({ ...base, climbRate: 2, airLift: 0 });
+  assert.ok(Math.abs(carried.demand - level.demand) < 1e-9, `carried ${carried.demand} vs level ${level.demand}`);
+  assert.ok(Math.abs(carried.depth - level.depth) < 1e-9, 'the same stroke');
+  assert.ok(powered.demand > level.demand + 0.3, `a powered climb still costs (${powered.demand.toFixed(3)} vs ${level.demand.toFixed(3)})`);
+  // Sinking air costs: holding height in it is a climb relative to the air.
+  const heldInSink = settle({ ...base, climbRate: 0, airLift: -1 });
+  assert.ok(heldInSink.demand > level.demand, 'holding height in sinking air is work');
+  // Gear: descending toward the ground slowly, with or without the air's
+  // help in the number, is the SAME approach — contact is a ground event.
+  const approach = { ...base, airspeed: 8, target: 8, aboveGround: 1.6, climbRate: -1.5 };
+  const g1 = settle({ ...approach, airLift: 0 });
+  const g2 = settle({ ...approach, airLift: 1.4 });
+  assert.ok(g1.gear > 0.5, `the gear comes down on the approach (${g1.gear.toFixed(3)})`);
+  assert.equal(g2.gear, g1.gear, 'and the air does not move it');
+});
+
+test('the gust flick: entering a thermal flexes the wings for a moment, a steady one flexes nothing, and it cannot run away', async () => {
+  const { createAeroPose, createAeroInput, AERO_POSE_DEFAULTS } = await import('../src/flight/aero-pose.js');
+  const p = createAeroPose();
+  const input = { ...createAeroInput(), airborne: true, airspeed: 11, cruise: 11, target: 11, aboveGround: 25 };
+  for (let i = 0; i < 180; i += 1) p.update(input, 1 / 60);
+  const still = p.out.flex;
+  // Into the core over about a second and a half, then held there.
+  let peak = -Infinity;
+  for (let i = 0; i < 600; i += 1) {
+    input.gust = Math.min(2.5, (i / 90) * 2.5);
+    p.update(input, 1 / 60);
+    peak = Math.max(peak, p.out.flex);
+  }
+  assert.ok(peak - still > 0.03, `the wings flick up on the way in (+${(peak - still).toFixed(3)} rad)`);
+  assert.ok(peak - still <= AERO_POSE_DEFAULTS.gustMax + 1e-9, 'bounded by gustMax');
+  assert.ok(Math.abs(p.out.flex - still) < 1e-3, `a steady thermal flexes nothing (${(p.out.flex - still).toFixed(5)})`);
+  // A pathological input (a teleport into the strongest core every frame
+  // it flips) stays bounded.
+  for (let i = 0; i < 600; i += 1) {
+    input.gust = i % 2 ? 4 : -4;
+    p.update(input, 1 / 60);
+    assert.ok(Math.abs(p.out.flex) <= AERO_POSE_DEFAULTS.flexMax + AERO_POSE_DEFAULTS.gustMax + 1e-9, 'never runs away');
+  }
+});
+
+test('the stunt law reports the radial step the air took, over its own clamped dt', () => {
+  const bird = levelBird({ sampler: () => 1.5 });
+  const control = levelBird();
+  bird.tick({ x: 0, y: 0, active: false }, 1 / 60);
+  control.tick({ x: 0, y: 0, active: false }, 1 / 60);
+  assert.equal(bird.lastAir, 1.5);
+  assert.ok(Math.abs(bird.lastAirRise - 1.5 / 60) < 1e-15);
+  // A SwiftShader-length frame: the law clamps its step at 0.05 s, so the
+  // air moved the bird 0.075, not 0.195 — which is what a reader dividing a
+  // measured climb by the frame's 0.13 s has to take back out.
+  const gap0 = radiusOf(bird) - radiusOf(control);
+  bird.tick({ x: 0, y: 0, active: false }, 0.13);
+  control.tick({ x: 0, y: 0, active: false }, 0.13);
+  assert.ok(Math.abs(bird.lastAirRise - 0.075) < 1e-12, `${bird.lastAirRise}`);
+  const rise = radiusOf(bird) - radiusOf(control) - gap0;
+  assert.ok(Math.abs(rise - 0.075) < 1e-4, `and that is the rise against a still-air control (${rise.toFixed(6)})`);
+  bird.setSpeed(0);
+  bird.tick({ x: 0, y: 0, active: false }, 1 / 60);
+  assert.equal(bird.lastAirRise, 0, 'commanded: nothing');
+});
+
+// ---------------------------------------------------------------------------
+// 5. A LOCAL sun (src/environment/sun-frame.js): each thermal sees the sun
+//    carried to it from the bird, so its heat does not depend on where the
+//    bird happens to be
+// ---------------------------------------------------------------------------
+
+/** Rotate v about unit axis k by angle a (plain arrays). */
+function rotate(v, k, a) {
+  const c = Math.cos(a); const s = Math.sin(a);
+  const kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+  const cx = k[1] * v[2] - k[2] * v[1]; const cy = k[2] * v[0] - k[0] * v[2]; const cz = k[0] * v[1] - k[1] * v[0];
+  return [0, 1, 2].map((i) => v[i] * c + [cx, cy, cz][i] * s + k[i] * kv * (1 - c));
+}
+const unit = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+
+test('a local sun seen from right above a thermal heats it exactly as that world direction would', () => {
+  const f = makeField();
+  const t = f.thermals[2];
+  const sun = unit([0.3, 0.8, -0.2]);
+  f.update(0, ...sun);
+  const worldHeat = f.heat(2);
+  f.update(0, ...sun, ...t.dir.map((x) => x * 131));   // observer right over it, any radius
+  assert.ok(Math.abs(f.heat(2) - worldHeat) < 1e-12, `${f.heat(2)} vs ${worldHeat}`);
+});
+
+test('flying toward, past and away from a thermal under a sun that travels with the bird leaves its heat alone', () => {
+  const f = makeField();
+  const i = 1;
+  const t = f.thermals[i].dir;
+  // The bird starts 25 degrees of arc from the thermal and flies the great
+  // circle through it; its sun (38 degrees up, some azimuth) is carried with
+  // it exactly as sun-frame.js parallel-transports the frame.
+  const start = unit(rotate(t, unit([t[1], -t[0], 0.3]), -0.44));
+  const axis = unit([start[1] * t[2] - start[2] * t[1], start[2] * t[0] - start[0] * t[2], start[0] * t[1] - start[1] * t[0]]);
+  const tangent = unit([axis[1] * start[2] - axis[2] * start[1], axis[2] * start[0] - axis[0] * start[2], axis[0] * start[1] - axis[1] * start[0]]);
+  const el = 38 * Math.PI / 180;
+  const sun0 = unit(start.map((u, k) => u * Math.sin(el) + unit([tangent[0] + 0.4 * axis[0], tangent[1] + 0.4 * axis[1], tangent[2] + 0.4 * axis[2]])[k] * Math.cos(el)));
+  const carried = []; const raw = [];
+  for (let a = 0; a <= 0.88; a += 0.02) {   // 25 degrees before to 25 past
+    const bird = rotate(start, axis, a);
+    const sun = rotate(sun0, axis, a);
+    f.update(0, ...sun, ...bird);
+    carried.push(f.heat(i));
+    f.update(0, ...sun);                      // the same sun as one world direction
+    raw.push(f.heat(i));
+  }
+  const spread = (a) => Math.max(...a) - Math.min(...a);
+  assert.ok(carried[0] > 0.3, `lit (${carried[0].toFixed(3)})`);
+  assert.ok(spread(carried) < 1e-9, `carried to it: the same heat all the way (${spread(carried)})`);
+  assert.ok(spread(raw) > 0.1, `seen as one world direction it swung by ${spread(raw).toFixed(3)} as the bird moved`);
+});
+
+test('under a local sun every flat site sees the bird\'s own elevation: one heat for all, and no night side', () => {
+  const flat = createAirField({ seed: 'forest', sphereRadius: 120, terrainHeight: () => -5 });
+  const bird = unit([0.2, -0.9, 0.35]);      // anywhere — the south pole, say
+  for (const deg of [19.5, 39, 58.4]) {
+    const el = deg * Math.PI / 180;
+    const east = unit([bird[2], 0, -bird[0]]);
+    const sun = bird.map((u, k) => u * Math.sin(el) + east[k] * Math.cos(el));
+    flat.update(0, ...sun, ...bird.map((x) => x * 140));
+    const expected = sunHeat(Math.sin(el));
+    for (let i = 0; i < flat.count; i += 1) {
+      const dot = flat.thermals[i].dir.reduce((s, x, k) => s + x * bird[k], 0);
+      if (dot < -0.99) continue;   // the antipode keeps the world direction
+      assert.ok(Math.abs(flat.heat(i) - expected) < 1e-9, `thermal ${i} at ${deg} degrees: ${flat.heat(i)} vs ${expected}`);
+    }
+    flat.update(0, ...sun);                   // world-fixed: the far side is night
+    let dark = 0;
+    for (let i = 0; i < flat.count; i += 1) if (flat.heat(i) === 0) dark += 1;
+    assert.ok(dark > 0, `a world-fixed sun leaves some thermals in night (${dark})`);
+  }
+});

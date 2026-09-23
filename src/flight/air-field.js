@@ -127,9 +127,14 @@ export const AIR_FIELD_DEFAULTS = Object.freeze({
   // Eight, not ten, BECAUSE they are wider: what the thermals carry up the
   // environment carries down between them, so the sink between thermals
   // scales with the share of the planet they cover. Eight at 0.45 cover 16%
-  // of it (ten at 0.36 covered 13%), and with the sun heating about half of
-  // them — it is a planet — the sink between measures 0.05 units/s, a
-  // fifteenth of the 0.76 that G-STUNT-1 had to remove from relaxed flight.
+  // of it (ten at 0.36 covered 13%). Under a world-fixed sun about half of
+  // them are lit — the far side is night — and the sink between measured
+  // 0.05 units/s. Under the planet sun (sun-frame.js, the shipping default)
+  // every thermal sees the sun at the bird's own elevation, so all eight are
+  // lit and the sink between them measured 0.11-0.14 units/s at 10-30 up on
+  // the real terrain: a sixth of the 0.76 G-STUNT-1 removed from relaxed
+  // flight, and paid back in the cores. This, `wstar` and `unitsPerMetre`
+  // are the knobs if it nags (`?airtune=`).
   thermalCount: 8,
   // Great-circle spacing between thermal sites, radians (0.8 rad is 96 units
   // of arc on a 120 planet, about two horizons). Only the NEAREST thermal is
@@ -599,6 +604,9 @@ export function createAirField({
   let ax = kx; let ay = ky; let az = kz;   // current wind axis
   let windU = o.windSpeed;                // current mean wind speed
   let sunX = 0; let sunY = 1; let sunZ = 0;
+  // Where the sun above was measured from, when it is a LOCAL sun (see
+  // `update`): the unit direction of the observer, or none.
+  let obsX = 0; let obsY = 1; let obsZ = 0; let hasObserver = false;
   let envStrength = 1;                    // mean over thermals of wgain·heat
   let gu = 0; let gv = 0; let gw = 0;      // gust components
   let spare = 0; let hasSpare = false;
@@ -609,6 +617,9 @@ export function createAirField({
     nearest: -1, nearestDistance: 0,
     wind: 0, windVisual: 1,
     gust: 0, gustSide: 0, gustAlong: 0,
+    // The vertical gust itself, world units/s (unclamped; `gust` is it
+    // normalised to -1..1). See `verticalGust` for the value the pose reads.
+    gustW: 0,
     time: 0,
   };
 
@@ -634,7 +645,28 @@ export function createAirField({
     let up = 0;
     let lit = 0;
     for (let i = 0; i < count; i += 1) {
-      const ins = tNormal[i * 3] * sunX + tNormal[i * 3 + 1] * sunY + tNormal[i * 3 + 2] * sunZ;
+      let lx = sunX; let ly = sunY; let lz = sunZ;
+      if (hasObserver) {
+        // The observer's sun, carried to this thermal along the great circle
+        // between them. On a sphere that transport IS the rotation about the
+        // two points' common normal, so (Rodrigues, k = b × t, c = b · t):
+        //   R v = v c + k × v + k (k · v) / (1 + c),   R b = t exactly.
+        // The thermal then sees the sun at the observer's own elevation over
+        // ITS horizon, whatever the arc between them. At the antipode the
+        // great circle is undefined and the world direction stands.
+        const tx = tDir[i * 3]; const ty = tDir[i * 3 + 1]; const tz = tDir[i * 3 + 2];
+        const c = obsX * tx + obsY * ty + obsZ * tz;
+        if (c > -0.999) {
+          const kx = obsY * tz - obsZ * ty;
+          const ky = obsZ * tx - obsX * tz;
+          const kz = obsX * ty - obsY * tx;
+          const f = (kx * sunX + ky * sunY + kz * sunZ) / (1 + c);
+          lx = sunX * c + (ky * sunZ - kz * sunY) + kx * f;
+          ly = sunY * c + (kz * sunX - kx * sunZ) + ky * f;
+          lz = sunZ * c + (kx * sunY - ky * sunX) + kz * f;
+        }
+      }
+      const ins = tNormal[i * 3] * lx + tNormal[i * 3 + 1] * ly + tNormal[i * 3 + 2] * lz;
       const heat = sunHeatAt(ins, o.heatRef, o.heatFade, o.heatMax);
       tHeat[i] = heat;
       sum += heat * tWgain[i];
@@ -670,13 +702,27 @@ export function createAirField({
    * Advance the air by `dt` seconds under a sun shining FROM (sx, sy, sz)
    * (any length; the key light's position is fine). Veers the wind, breathes
    * its speed, steps the gust filters and re-reads every thermal's heat.
+   *
+   * (ox, oy, oz), optional, says the sun is LOCAL: measured in the frame of
+   * an observer at that point (any length; the bird's position is fine), as
+   * src/environment/sun-frame.js maps the key light through the bird's own
+   * horizon frame. Each thermal then gets that sun carried to it along the
+   * great circle, so it sees the same elevation over its own horizon that
+   * the bird sees over its — and its heat does not swing as the bird flies
+   * toward it, away from it or round it. Omitted, the sun is one world
+   * direction for the whole planet (a world-fixed sun: the far side is
+   * night), which is what `?planetsun=0` hands in.
    */
-  function update(dt, sx = sunX, sy = sunY, sz = sunZ) {
+  function update(dt, sx = sunX, sy = sunY, sz = sunZ, ox, oy, oz) {
     const step = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.25) : 0;
     time += step;
     state.time = time;
     const sl = Math.sqrt(sx * sx + sy * sy + sz * sz);
     if (sl > 1e-9) { sunX = sx / sl; sunY = sy / sl; sunZ = sz / sl; }
+    const ol = Number.isFinite(ox) && Number.isFinite(oy) && Number.isFinite(oz)
+      ? Math.sqrt(ox * ox + oy * oy + oz * oz) : 0;
+    hasObserver = ol > 1e-9;
+    if (hasObserver) { obsX = ox / ol; obsY = oy / ol; obsZ = oz / ol; }
     const veer = veerPhase + (2 * Math.PI * time) / o.windVeerPeriod;
     const ct = Math.cos(o.windTilt); const st = Math.sin(o.windTilt);
     const cv = Math.cos(veer); const sv = Math.sin(veer);
@@ -696,7 +742,22 @@ export function createAirField({
     state.gustAlong = sigU > 0 ? Math.max(-1, Math.min(1, gu / (2.5 * sigU))) : 0;
     state.gustSide = sigV > 0 ? Math.max(-1, Math.min(1, gv / (2.5 * sigV))) : 0;
     state.gust = sigW > 0 ? Math.max(-1, Math.min(1, gw / (2.5 * sigW))) : 0;
+    state.gustW = gw;
     refreshHeat();
+  }
+
+  /**
+   * The vertical gust the WING meets `agl` units above the ground, world
+   * units/s: the filtered vertical turbulence, faded out with the convective
+   * layer it belongs to (the ridge lift's own 0.7·zi..zi fade), so a bird
+   * above the layer meets exactly none — the same height at which the air
+   * that carries the flight is exactly zero. NaN or no height is still air.
+   * VISUAL ONLY: src/flight/aero-pose.js flicks the wings by it; nothing
+   * moves the bird by it. Scalar in, scalar out.
+   */
+  function verticalGust(agl) {
+    if (!(agl < o.zi)) return 0;
+    return gw * (1 - smoothstep(0.7 * o.zi, o.zi, agl));
   }
 
   /**
@@ -833,6 +894,7 @@ export function createAirField({
     update,
     sample,
     sampler,
+    verticalGust,
     nearest,
     thermalAt,
     windAt,

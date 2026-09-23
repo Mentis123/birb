@@ -364,9 +364,13 @@ export class BirdFlightStunt extends BirdFlight {
         // units/s, positive UP the local radial) — src/flight/air-field.js.
         // Null is the default and is the exact before: every frozen test
         // constructs this class without one. `lastAir` is what it applied on
-        // the last frame, for the probe.
+        // the last frame (units/s), for the probe; `lastAirRise` is the radial
+        // step that became (units, over the law's own clamped dt), so a reader
+        // that measures climb over the FRAME's delta can take the air's share
+        // back out exactly (index.html's aero-pose wiring).
         this.airSampler = options.airSampler ?? null;
         this.lastAir = 0;
+        this.lastAirRise = 0;
 
         this._scratch.right = new Vector3();
         this._scratch.bodyUp = new Vector3();
@@ -910,6 +914,7 @@ export class BirdFlightStunt extends BirdFlight {
         // zero sixty units up is not the everywhere-upward ratchet that
         // invariant exists to prevent.
         let air = 0;
+        let airRise = 0;
         if (this.airSampler && !this._commanded) {
             const w = this.airSampler(
                 s.oldPos.x - this.sphereCenter.x,
@@ -917,11 +922,13 @@ export class BirdFlightStunt extends BirdFlight {
                 s.oldPos.z - this.sphereCenter.z);
             if (Number.isFinite(w) && w) {
                 air = w;
-                s.sinkVec.copy(s.oldNormal).multiplyScalar(air * deltaTime);
+                airRise = air * deltaTime;
+                s.sinkVec.copy(s.oldNormal).multiplyScalar(airRise);
                 this.position.add(s.sinkVec);
             }
         }
         this.lastAir = air;
+        this.lastAirRise = airRise;
 
         s.radialOffset.copy(this.position).sub(this.sphereCenter);
         const radialDistance = s.radialOffset.length();
