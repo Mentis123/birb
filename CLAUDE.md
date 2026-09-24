@@ -2380,7 +2380,13 @@ A mobile-first 3D bird flight game built with Three.js. A bird flies on a spheri
 console — give the whole sequence as ONE copy-paste block, every time** (2026-09-23,
 in his words: "always want that for the console commands"). Prose that says
 "pull, generate, open" is not it; a fenced block that starts with `cd` and ends
-with the app open is.
+with the app open is. **Make it ONE line chained with `&&`, with no `#`
+comments**: the Mac's shell is zsh, which does not treat `#` as a comment when
+typed or pasted, so a trailing "# change the path" made the first `cd` fail
+and every line after it ran in the home directory (2026-09-24). The form that
+works there: `cd /Users/neo-chan/birb && git fetch origin && git checkout -B
+mac-build origin/main && cd humanoid/app && xcodegen generate && open
+BabyBlender.xcodeproj`.
 
 ## Default Interaction Mode
 
