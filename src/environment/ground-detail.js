@@ -171,8 +171,18 @@ export const GROUND_PROFILES = {
  *                    call, every field is required: this throws rather than
  *                    defaults a missing one, the same contract
  *                    `addInstancedUvScale` uses for an unknown geometry shape.
+ * @param wetMap     optional { texture, tint: [r,g,b], damp: [r,g,b],
+ *                    strength, core?: [lo, hi] } — the erosion's drainage
+ *                    (src/environment/erosion.js, `?erosion=1`) as an
+ *                    equirect byte map in the horizon map's convention (u =
+ *                    atan(z, -x) / 2PI, v = acos(y) / PI), read per fragment:
+ *                    the banks multiply toward `damp` with the wetness, the
+ *                    stream core — wetness between `core` lo and hi — toward
+ *                    `tint`. Same contract as groundMap — omitted, the shader
+ *                    and cache key are byte-for-byte what they were; passed,
+ *                    every field but `core` is required.
  */
-export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0 } = {}) {
+export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0, wetMap = null } = {}) {
   const profile = GROUND_PROFILES[biome];
   // The city's ground already carries a street grid and asphalt; mottling it
   // would fight the one thing that identifies it.
@@ -184,8 +194,26 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
       }
     }
   }
+  if (wetMap) {
+    for (const field of ['texture', 'tint', 'damp', 'strength']) {
+      if (wetMap[field] === undefined || wetMap[field] === null) {
+        throw new Error(`addGroundDetail: wetMap.${field} is required when wetMap is passed`);
+      }
+    }
+  }
+  // In the closure for the same reason texUniforms are: one object shared
+  // by every compile of this material.
+  const wetCore = wetMap && Array.isArray(wetMap.core) ? wetMap.core : [0.5, 0.8];
+  const wetUniforms = wetMap ? {
+    uGdWetMap: { value: wetMap.texture },
+    uGdWet: { value: new THREE.Vector4(wetMap.tint[0], wetMap.tint[1], wetMap.tint[2], wetMap.strength) },
+    uGdWetDamp: { value: new THREE.Vector3(wetMap.damp[0], wetMap.damp[1], wetMap.damp[2]) },
+    uGdWetCore: { value: new THREE.Vector2(wetCore[0], wetCore[1]) },
+  } : null;
   material.userData = material.userData || {};
   material.userData.birbGroundDetail = true;
+  // Live A/B: strength 0 is the ground without the wetness, same program.
+  if (wetUniforms) material.userData.birbGroundWetUniforms = wetUniforms;
 
   // Created here, in the closure, so the loader can raise uGroundMix at any
   // time — before or after the material's first compile, which is when
@@ -221,6 +249,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
     shader.uniforms.uGdDetail = { value: new THREE.Vector2(profile.detailScale, profile.detail) };
     shader.uniforms.uGdBand = { value: new THREE.Vector2(profile.band, profile.bandScale) };
     if (texUniforms) Object.assign(shader.uniforms, texUniforms);
+    if (wetUniforms) Object.assign(shader.uniforms, wetUniforms);
 
     // Shared with addAtmosphere and the city's street grid; whichever runs
     // first declares it. Declared twice the shader does not compile, Three
@@ -310,6 +339,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
           + 'uniform float uGroundFacet; uniform vec3 uGroundGain; uniform float uGroundMix;\n'
           + 'uniform float uGroundBump;\n'
         : '')
+      + (wetUniforms ? 'uniform sampler2D uGdWetMap; uniform vec4 uGdWet; uniform vec3 uGdWetDamp; uniform vec2 uGdWetCore;\n' : '')
       + `
       float gdHash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
@@ -407,6 +437,18 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
                    + texture2D(uGroundMap, gtUvY).rgb * gtW.y
                    + texture2D(uGroundMap, gtUvZ).rgb * gtW.z;
         gdTint *= mix(vec3(1.0), gtTex * uGroundGain, uGroundMix);
+` : '') + (wetUniforms ? `
+        // Where the water runs (erosion.js). The drainage is finer than the
+        // mesh, so it is read here, per fragment, off the fragment's own
+        // direction — the horizon map's equirect convention exactly. Two
+        // readings of one field: the whole of it darkens the banks toward
+        // damp ground, and only its upper part — cut crisp, so it is a line
+        // and not a smudge — is the stream itself, which therefore widens
+        // downstream exactly as the drainage grows.
+        float gdWet = texture2D(uGdWetMap, vec2(atan(gdUp.z, -gdUp.x) * 0.15915494,
+          acos(clamp(gdUp.y, -1.0, 1.0)) * 0.31830989)).r;
+        gdTint = mix(gdTint, gdTint * uGdWetDamp, gdWet * uGdWet.w);
+        gdTint = mix(gdTint, gdTint * uGdWet.rgb, smoothstep(uGdWetCore.x, uGdWetCore.y, gdWet) * uGdWet.w);
 ` : '') + `
         outgoingLight *= gdTint;
       }
@@ -417,7 +459,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
   material.customProgramCacheKey = () =>
-    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}`;
+    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}${wetUniforms ? '-wet' : ''}`;
   material.needsUpdate = true;
   return material;
 }
