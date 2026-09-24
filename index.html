@@ -5768,6 +5768,13 @@
     // harness asserting what CONTACT does has to be able to deliver one.
     let __birbGroundProbe = 0;
 
+    // Set only by the ?debug=1 realism checks (__BIRB.stillAir); false in
+    // production. Holds the gust's VISUAL out of the frame (foliage wind at
+    // its old steady value, no gust flick on the wings) so a check's
+    // identical-frame control pair is identical again. The air field keeps
+    // running and the flight still feels it.
+    let __birbStillAir = false;
+
     // Bird-studio state for tools/birb-bird-sheet.mjs — the bird alone against
     // a neutral background. Non-null while active; holds what was hidden/
     // changed so birdStudio(false) restores exactly that, not a guess.
@@ -12454,7 +12461,7 @@
             // layer, like the air itself). aero-pose high-passes it into a
             // flick of the wings, so entering a thermal is felt and a steady
             // one flexes nothing.
-            if (airField) {
+            if (airField && !__birbStillAir) {
               const carried = stunt && Number.isFinite(fc.lastAir) ? fc.lastAir : 0;
               ai.gust = carried + airField.verticalGust(ai.aboveGround);
             }
@@ -12689,7 +12696,7 @@
         airState.gust = st.gust; airState.gustSide = st.gustSide; airState.gustAlong = st.gustAlong;
         airState.wind = st.wind;
       }
-      visualUniforms.wind.value = airField
+      visualUniforms.wind.value = (airField && !__birbStillAir)
         ? windDensityEffective * airField.state.windVisual : windDensityEffective;
 
       // Boost drives the composite's radial smear, bloom lift and vignette.
@@ -13791,6 +13798,11 @@
         // One real ground contact on the next frame: the ground check sees the
         // bird `depth` below its floor, then applies its own rules to whatever
         // attitude the bird has at that frame. See __birbGroundProbe.
+        // Hold the gust's visuals steady for a capture (see __birbStillAir).
+        stillAir: (on = true) => {
+          __birbStillAir = !!on;
+          return __birbStillAir;
+        },
         probeGround: (depth = 0.05) => {
           __birbGroundProbe = Math.max(0, Number(depth) || 0);
           return __birbGroundProbe;

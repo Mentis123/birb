@@ -112,15 +112,24 @@ export default async function run(ctx) {
       return { flex: a.flex, demand: a.demand, gust: a.input.gust, lift: a.input.airLift, climb: a.input.climbRate,
         air: p.air, layer: f.layerGust, rec: p.recovery };`;
     const core = { position: go.position, quaternion: go.quaternion };
+    // Up to two attempts: 18 units over the forest a canopy or a wandering
+    // drone can knock the bird down mid-pass (seen once on the integrated
+    // wave-2 tree), and a knocked-down pass measures a tumble, not the air.
+    // Every assertion below is unchanged; a second spoiled pass still fails.
     let detached;
-    await page.evaluate((p) => { const B = window.__BIRB; B.air(false); B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, core);
-    try {
-      detached = await ctx.hold({ x: 0, y: 0 }, 24, POSE);
-    } finally {
-      await page.evaluate((p) => { const B = window.__BIRB; B.air(true); B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, core);
+    let attached;
+    let clean = false;
+    for (let attempt = 0; attempt < 2 && !clean; attempt += 1) {
+      await page.evaluate((p) => { const B = window.__BIRB; B.air(false); B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, core);
+      try {
+        detached = await ctx.hold({ x: 0, y: 0 }, 24, POSE);
+      } finally {
+        await page.evaluate((p) => { const B = window.__BIRB; B.air(true); B.setRecovery?.('flying'); B.freeze(false); B.restorePose(p); }, core);
+      }
+      attached = await ctx.hold({ x: 0, y: 0 }, 24, POSE);
+      clean = [...detached, ...attached].every((s) => s.rec === 'flying');
+      if (!clean) ctx.log(`pose pass ${attempt + 1} was knocked out of the air (${[...new Set([...detached, ...attached].map((s) => s.rec))].join(', ')})`);
     }
-    const attached = await ctx.hold({ x: 0, y: 0 }, 24, POSE);
-    const clean = [...detached, ...attached].every((s) => s.rec === 'flying');
     if (ctx.check(clean, 'the pose pass stayed in the air (no collision)')) {
       const avg = (a, k) => a.reduce((t, s) => t + s[k], 0) / a.length;
       const base = avg(detached.slice(-6), 'flex');
