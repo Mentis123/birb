@@ -342,14 +342,29 @@ async function putSunOnScreen(page) {
     window.__BIRB.setSunEnabled(true);
     window.__BIRB.setSunTime(0);
   });
-  await page.waitForTimeout(50);
+  // G-A9-SUNCLOCK gate decision (docs/perf/gates/G-A9-SUNCLOCK.md), the
+  // third authorised edit to this frozen file. The recipe above says "one
+  // FRAME"; this used to wait 50 MILLISECONDS. setSunTime() only moves a
+  // number — the key light is re-aimed by the next RENDERED frame — and an
+  // Amazing frame under SwiftShader is 70-130 ms, so about half the time no
+  // frame landed in the wait and faceSun() aimed the bird at the sun of
+  // whatever hour the session had reached (sunState starts at a random
+  // second), which the next frame then moved off screen. Measured: A9 red on
+  // main d28da11 and on realism/auto-exposure alike, in every run where the
+  // wait held no frame and in none where it held one. Frames, never
+  // milliseconds; two, so the light has certainly been re-aimed.
+  await sampleFrames(page, 2);
   let visible = 0;
   for (const pitch of [0.22, 0.35, 0.5, 0.65, 0.8]) {
-    visible = await page.evaluate((p) => {
+    await page.evaluate((p) => {
       window.__BIRB.setSunEnabled(false);
       window.__BIRB.faceSun(p);
-      return window.__BIRB.stats().sunUv[2];
     }, pitch);
+    // Read the projection a RENDERED frame made from the new heading — read
+    // in the same evaluate as faceSun() it was the previous frame's (the
+    // trap sampleFramesWithSun() above records), so this loop never re-aimed.
+    const [frame] = await sampleFramesWithSun(page, 1);
+    visible = frame.sunUv[2];
     if (visible > 0.001) break;
   }
   return visible;

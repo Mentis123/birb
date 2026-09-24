@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-24 at commit 4dcdaef by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-24 at commit ebf0231 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -55,6 +55,7 @@ cedb10676f6ae0abed73646653ef26594aea1332eb52ac82eb79f1dd236815e0  tests/bird-fli
 89bd71c169b3fdbd821df4784844e09b00324dd44eb787a6eb377171f963219c  tests/bird-shadow.test.js
 71ba6f096bb7ef2cb4b3426c389b947aaf23a870bb1fb156a1dd4c5c23e1a749  tests/cloud-volume.test.js
 eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.test.js
+952951a613d923865d97ab3c1e5de23848b51ca4cf8be0e9ae0a365e979a89e0  tests/exposure.test.js
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
 75c0877bd356ef6950e170aa27f9363eb773653b950483ec5d9413c0658d64e8  tests/hex-tiling.test.js
 06eaa4e627ef53e0dc1c6396ade658c0a47cf346fcb05e3f9fa2f28533559dab  tests/horizon-map.test.js
@@ -194,7 +195,7 @@ edd8f0fa06932d815bf9b7e11b5aa68132de55d32193bcb3b386e4000a4d4423  docs/perf/CONT
 839a5bee550e812df229f09c21940bd40a20c55cf759d94b6d3b31527bc85e33  tools/req-verify.mjs
 # --- Wave 1: the oracles Wave 2 spends (R5: implementers must not edit these) ---
 3b5974b1d9797b903ebe8117413691a01244b3387cbc6bbfad77d8a2308a8db2  tools/lib/quality-assertions.mjs
-15492b3f84e6249e63c5333b46e2d3a1c7c03678923d789ddf84232bc979af52  tools/birb-quality.mjs
+20fd0ab293fc4e39a2c7ee8722d6c3f6a7fdbd6154b0122a818ff9e55ba110e0  tools/birb-quality.mjs
 73a14e636dfbf1bcd7c6b0b16bb21b9b4c1af0edef233edaf7423938c94aa2ba  tests/frame-metrics-stats.test.js
 0f58a56fd72a386c17ea6bf514348dd71a06ce70ce079d87578a02985b87bae0  tests/quality-settings.test.js
 968016b32e29f80105a0a3ec43faa9ca28f4d67faf46cdde37fbac9ae3d52005  tests/frame-stats-totals.test.js
