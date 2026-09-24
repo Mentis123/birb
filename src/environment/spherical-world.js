@@ -43,6 +43,11 @@ import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
 import { worldRng } from "./seeded-random.js";
+import {
+  cloudVolumeRequested, addCloudVolume, addCloudShadow, setCloudShadowSpheres,
+  cloudShadowSphere, extraCloudPuffs, createCloudImmersion, createCloudsInfo,
+  createCloudSorter, updateCloudFocus, CLOUD_OWN_ATTRIBUTE,
+} from "./cloud-volume.js";
 
 const DEG2RAD = Math.PI / 180;
 
@@ -487,6 +492,81 @@ let _upwardSnow = true;
 // The air (src/flight/air-field.js): the mountain pines sway in the same
 // gusting wind as the forest canopies. `?air=0` leaves them still, as before.
 let _pineWind = true;
+
+// Clouds with volume (src/environment/cloud-volume.js), resolved per build;
+// `?cloudvol=0` restores the solid puffs and the sine-field shadows exactly.
+let _cloudVolume = true;
+// This build's clouds, recorded in BOTH states (data only — no draw, no
+// shader) so the capture hooks frame the same cloud either side of the A/B:
+// the collider centres, and when volumetric the shadow spheres, the flat
+// puff list and the camera-immersion state.
+let _cloudBuild = null;
+// Mobile draws ONE puff per cloud, and as a volume one puff is a soft ball,
+// not a cumulus. Its extra puffs ride a PRIVATE generator (extraCloudPuffs):
+// a draw from the world's shared stream would move every prop placed after
+// the clouds.
+const MOBILE_EXTRA_PUFFS = 2;
+
+function _recordCloud(THREE, puffs, first, center, cloudScale) {
+  if (!_cloudBuild) return;
+  _cloudBuild.clouds.push({ x: center.x, y: center.y, z: center.z, collider: 6 * cloudScale });
+  if (!_cloudBuild.volumetric) return;
+  if (_isMobile() && MOBILE_EXTRA_PUFFS > 0) {
+    const extra = extraCloudPuffs({ center, up: center, cloudScale, count: MOBILE_EXTRA_PUFFS });
+    for (const p of extra) puffs.push({ pos: new THREE.Vector3(p.x, p.y, p.z), scale: p.r });
+  }
+  const own = [];
+  for (let i = first; i < puffs.length; i++) {
+    own.push({ x: puffs[i].pos.x, y: puffs[i].pos.y, z: puffs[i].pos.z, r: puffs[i].scale });
+  }
+  const sphere = cloudShadowSphere(own);
+  if (!sphere) return;
+  // Every puff of this cloud (instance index = builder index) shades
+  // through this one sphere.
+  for (let i = first; i < puffs.length; i++) _cloudBuild.owner[i] = _cloudBuild.spheres.length;
+  _cloudBuild.spheres.push(sphere);
+}
+
+function _attachCloudVolume(THREE, mesh, puffs) {
+  if (!_cloudBuild) return;
+  _cloudBuild.mesh = mesh;
+  const flat = new Float32Array(puffs.length * 4);
+  for (let i = 0; i < puffs.length; i++) {
+    flat[i * 4] = puffs[i].pos.x; flat[i * 4 + 1] = puffs[i].pos.y;
+    flat[i * 4 + 2] = puffs[i].pos.z; flat[i * 4 + 3] = puffs[i].scale;
+  }
+  _cloudBuild.puffs = flat;
+  if (!_cloudBuild.volumetric) return;
+  // Each puff's own cloud sphere, per instance (CLOUD_OWN_ATTRIBUTE): the
+  // puff shades as part of its cluster through one sphere, not a loop over
+  // every cloud on the planet.
+  const own = new Float32Array(puffs.length * 4);
+  for (let i = 0; i < puffs.length; i++) {
+    const s = _cloudBuild.spheres[_cloudBuild.owner[i]];
+    if (!s) continue;
+    own[i * 4] = s.x; own[i * 4 + 1] = s.y; own[i * 4 + 2] = s.z; own[i * 4 + 3] = s.r;
+  }
+  const ownAttr = new THREE.InstancedBufferAttribute(own.slice(), 4);
+  mesh.geometry.setAttribute(CLOUD_OWN_ATTRIBUTE, ownAttr);
+  const immersion = createCloudImmersion(flat, puffs.length);
+  const sorter = createCloudSorter(flat, puffs.length, mesh.instanceMatrix.array,
+    { perPuff: own, perPuffOut: ownAttr.array });
+  // The in-cloud fog, the back-to-front order and the bird's position all
+  // follow whichever camera is about to draw the clouds; the matrix, not
+  // .position, so a parented camera still reads true. A re-sorted order
+  // uploads with the next frame (three has already sent this one's).
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    const e = camera.matrixWorld.elements;
+    immersion.update(e[12], e[13], e[14]);
+    if (sorter.update(e[12], e[13], e[14])) {
+      mesh.instanceMatrix.needsUpdate = true;
+      ownAttr.needsUpdate = true;
+    }
+    updateCloudFocus();
+  };
+  _cloudBuild.immersion = immersion;
+  _cloudBuild.sorter = sorter;
+}
 
 /**
  * Override the URL flag for the NEXT world build. `__BIRB.smooth()` sets this
@@ -1479,7 +1559,10 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
   // Desktop clouds are already `transparent`, and an alpha TEST on a
   // transparent material fights its own blend — the erosion is for the
   // opaque mobile puffs, which are the ones that read as floating rocks.
-  if (_leafEdge && _isMobile()) {
+  // With volume on, every puff is a transparent analytic volume instead.
+  if (_cloudVolume) {
+    addCloudVolume(cloudMat, THREE);
+  } else if (_leafEdge && _isMobile()) {
     addLeafEdge(cloudMat, THREE, { key: 'cloudF', cut: 0.34, rimStart: 0.30, rimEnd: 0.95, scale: 0.5 });
   }
   const cloudCount = _isMobile() ? 4 : 20;
@@ -1494,11 +1577,13 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     const up = center.clone().normalize();
     _cloudQuat.setFromUnitVectors(defaultUp, up);
     const cloudScale = randomInRange(1.5, 3.0);
+    const firstPuff = cloudPuffs.length;
     for (let j = 0; j < puffsPerCloud; j++) {
       _cloudOffset.set(randomInRange(-4, 4), randomInRange(-1, 2), randomInRange(-4, 4))
         .applyQuaternion(_cloudQuat).multiplyScalar(cloudScale);
       cloudPuffs.push({ pos: center.clone().add(_cloudOffset), scale: randomInRange(3, 6) * cloudScale });
     }
+    _recordCloud(THREE, cloudPuffs, firstPuff, center, cloudScale);
     // Soft collider so the bird can bump into clouds and get knocked down.
     collisionSystem.addCollider(center, 6 * cloudScale, 'cloud');
   }
@@ -1518,6 +1603,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     cloudInst.instanceMatrix.needsUpdate = true;
     cloudInst.computeBoundingSphere();
     root.add(cloudInst);
+    _attachCloudVolume(THREE, cloudInst, cloudPuffs);
   }
 
   _landmarks = buildForestLandmarks({
@@ -2987,6 +3073,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
 
   // --- Mist clouds — instanced puffs (1 draw call; was up to 54). Stay SOLID. ---
   const cloudMat = new THREE.MeshLambertMaterial({ color: 0xe7eef9, transparent: !_isMobile(), opacity: _isMobile() ? 1 : 0.6, flatShading: _softFlat() });
+  if (_cloudVolume) addCloudVolume(cloudMat, THREE);
   const mtnCloudCount = _isMobile() ? 4 : 18;
   const mtnPuffsPer = _isMobile() ? 1 : 3;
   const mtnPuffs = [];
@@ -2998,11 +3085,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     const center = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(25, 55));
     _mc.setFromUnitVectors(defaultUp, center.clone().normalize());
     const mtnCloudScale = randomInRange(1.5, 3.0);
+    const firstMtnPuff = mtnPuffs.length;
     for (let j = 0; j < mtnPuffsPer; j++) {
       _mo.set(randomInRange(-5, 5), randomInRange(-1, 2), randomInRange(-5, 5))
         .applyQuaternion(_mc).multiplyScalar(mtnCloudScale);
       mtnPuffs.push({ pos: center.clone().add(_mo), scale: randomInRange(3, 7) * mtnCloudScale });
     }
+    _recordCloud(THREE, mtnPuffs, firstMtnPuff, center, mtnCloudScale);
     collisionSystem.addCollider(center, 6 * mtnCloudScale, 'cloud');
   }
   if (mtnPuffs.length > 0) {
@@ -3021,6 +3110,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
     cloudInst.instanceMatrix.needsUpdate = true;
     cloudInst.computeBoundingSphere();
     root.add(cloudInst);
+    _attachCloudVolume(THREE, cloudInst, mtnPuffs);
   }
 
   _landmarks = buildBiomeLandmark({
@@ -3734,6 +3824,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   _leafEdge = typeof window !== 'undefined' ? leafEdgeRequested(_search) : true;
   _upwardSnow = typeof window !== 'undefined' ? upwardSnowRequested(_search) : true;
   _pineWind = typeof window !== 'undefined' ? airRequested(_search) : true;
+  _cloudVolume = typeof window !== 'undefined' ? cloudVolumeRequested(_search) : true;
+  _cloudBuild = {
+    volumetric: _cloudVolume, clouds: [], spheres: [], owner: [], puffs: null, immersion: null, sorter: null, mesh: null,
+  };
   // Horizon shadows and the bird's ellipsoid shadow (?horizon=0, ?birdshadow=0).
   const _horizonOn = typeof window !== 'undefined' ? horizonShadowRequested(_search) : false;
   const _birdShadowOn = typeof window !== 'undefined' ? birdShadowRequested(_search) : false;
@@ -4004,6 +4098,12 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // leaves the trees standing in it at full brightness reads as a texture bug
   // rather than as weather. Transparent layers (clouds, canopy ceilings, the
   // water) are skipped — mist over glass is fog on a lens.
+  //
+  // Where this world has real clouds (cloud-volume.js), each surface is
+  // shadowed by THOSE clouds and the sine field is switched off (strength 0,
+  // same program); without clouds it keeps the sine field.
+  const cloudShadows = _cloudBuild.volumetric && _cloudBuild.spheres.length > 0;
+  setCloudShadowSpheres(cloudShadows ? _cloudBuild.spheres : null);
   root.traverse((object) => {
     const material = object.material;
     if (!material) return;
@@ -4023,11 +4123,16 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
           birdShadow: _birdShadowOn,
         });
       }
+      // Clouds after the horizon patch (the cloud JOINS its sun visibility, so
+      // a fragment under a ridge and a cloud loses the sun once, by the
+      // product) and before the atmosphere (whose rim reads birbSunVis).
+      if (cloudShadows) addCloudShadow(m, THREE);
       addAtmosphere(m, THREE, {
         baseRadius: sphereRadius,
         // Sedimentary banding, canyons only. It is the one thing that makes a
         // steep wall read as a canyon rather than as a cliff.
         strata: variant === 'canyons' ? 0.115 : 0,
+        cloudStrength: cloudShadows ? 0 : undefined,
       });
     }
   });
@@ -4109,6 +4214,8 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     water = null;
   }
 
+  const cloudsInfo = _cloudBuild.puffs ? createCloudsInfo(THREE, _cloudBuild) : null;
+
   return {
     root,
     landmarks: _landmarks,
@@ -4119,6 +4226,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     nestablePositions,
     proximityTargets,
     features,
+    // Clouds with volume, for __BIRB.clouds()/goToCloud(): null with
+    // ?cloudvol=0 or in a biome without clouds.
+    clouds: cloudsInfo,
     // Horizon-map readback for __BIRB.horizon(): build stats, bake result
     // (null until it lands), texture memory. Null when ?horizon=0.
     horizon: horizonState ? {
@@ -4178,6 +4288,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     dispose() {
       // Remove from scene first to prevent visual artifacts during environment switch
       scene.remove(root);
+      // The in-cloud fog is a shared uniform; a world that is gone cannot
+      // leave the next one standing in its cloud.
+      cloudsInfo?.immersion?.reset();
 
       // The horizon bake belongs to this world: stop it landing on the next
       // one, and release the four maps.
