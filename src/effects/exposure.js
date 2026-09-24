@@ -39,6 +39,23 @@
  *    al. 2013), so the composite pays one extra bilinear fetch per pixel and
  *    edges stay where the full-resolution frame puts them.
  *
+ * THE PASSES, in the order bloom-pass.js runs them (after the blur, before
+ * the composite), with their targets. Full-screen triangles, no depth.
+ *
+ *   ?autoexp  meter    64x64 RGBA16F + mips  scene -> centre-weighted log2 L
+ *             adapt    1x1 RGBA32F (x2)      ping-pong: r EV, g metered, b target
+ *   ?localtm  exposures  W/4 x H/4 RGBA16F + mips  log2 of 3 synthetic exposures + guide
+ *             weights    W/4 x H/4 RGBA16F + mips  normalised well-exposedness
+ *             collapse   W/4 x H/4 RGBA16F         pyramid collapse -> local EV
+ *             guide      W/4 x H/4 RGBA16F         3x3 linear fit (a, b) of EV on log L
+ *   composite: + 1 texel fetch of the adapt state (uniform address) and
+ *              + 1 bilinear fetch of the guide; nothing else changes.
+ *
+ * Memory: the eye ~44 KiB whatever the resolution; the fusion
+ * 2 x (W/4 x H/4 x 8 B x 4/3) + 2 x (W/4 x H/4 x 8 B) — 746 KiB at 390x844
+ * (DPR 1, the harness), about 7 MB at an iPhone 16 Pro's native 1179x2556.
+ * `__BIRB.exposure()` reports the live number (`memoryBytes`).
+ *
  * Every constant the GLSL uses is emitted from the tables below, and the
  * unit suite (tests/exposure.test.js) runs the SAME math in JS: adaptation,
  * clamp, key, the display model and its inverse, the fusion weights, and a
@@ -101,19 +118,23 @@ export const AUTO_EXPOSURE = Object.freeze({
  * flight 30 units over the ground, nose 0.1 rad down, chase camera, the sun
  * at the elevation the palette was authored at (t = 165 s, ~42 degrees: the
  * atmosphere model's own reference), world seed 16160, Amazing preset, the
- * meter above. The MEDIAN of 16 views per biome (8 spots x 2 headings),
- * because the mean is dragged by the one view that stares into a canyon wall
- * (canyons: median -2.48, mean -3.07, min -6.88). At the median view the
- * multiplier is exactly 1. Table and spread in
+ * meter above. The MEDIAN of 16 views per biome (8 spots x 2 headings; the
+ * mean of the middle two), because the mean is dragged by the one view that
+ * stares into a canyon wall (canyons: median -2.55, mean -3.10, min -6.93).
+ * At the median view the multiplier is exactly 1. Re-measured on the build
+ * that merged realism wave 2 (clouds with volume are on by default there,
+ * and every key moved 0.04-0.13 darker); the live check
+ * tools/realism-checks/auto-exposure-calibration.mjs re-meters the same 16
+ * views and fails if a key drifts off its median. Table and spread in
  * docs/perf/gates/G-REALISM-AUTO-EXPOSURE.md.
  */
 export const EXPOSURE_KEYS = Object.freeze({
-  forest: -2.30,
-  canyons: -2.48,
-  mountain: -2.06,
-  city: -3.49,
+  forest: -2.43,
+  canyons: -2.55,
+  mountain: -2.14,
+  city: -3.53,
 });
-export const DEFAULT_EXPOSURE_KEY = -2.3;
+export const DEFAULT_EXPOSURE_KEY = -2.43;
 
 /** The key (log2) for an environment id; an unknown id gets the default. */
 export function exposureKeyFor(id) {
