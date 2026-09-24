@@ -11,6 +11,53 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **REALISM WAVE 3 (2026-09-24): the eye adapts, water carves the ground,
+> and the reviews that session limits cut short are finished.** Both new
+> packages are OPT-IN on the Flags tab and reviewed adversarially. Build v83.
+>
+> **Exposure like an eye** (`?autoexp=1`, `?localtm=1`;
+> `src/effects/exposure.js`). The GPU takes a log-average of scene luminance
+> and adapts it over time around each biome's measured key, clamped to EV
+> ±1.5, with no readback. With the key calibrated, the authored look is the
+> centre of the range. Results: a dark forest view comes up +0.46 EV (+22%)
+> and a sun-facing view comes down −0.78 EV (−24%); the control capture
+> moved 0.00. Local tone mapping by exposure fusion lifts the darkest 10%
+> of the frame by 7–16% while the brightest 1% moves under 0.2%. The cost
+> is 2 passes (+4 at quarter resolution) and ~7 MB of render targets at an
+> iPhone 16 Pro's native size. The default pass list and shader sources are
+> byte-identical to before. The keys (`EXPOSURE_KEYS`) were measured on the
+> wave-2 lighting; re-run `auto-exposure-calibration` if the lighting moves.
+>
+> **A landscape carved by water** (`?erosion=1`; `src/environment/erosion.js`
+> + a worker). Braun & Willett stream-power erosion on a cube-sphere grid,
+> carve-down only, feeds every terrain sampler that must agree: mesh, floor,
+> landing, props, water, the horizon bake and the air's ridge lift. The bake
+> takes 132–458 ms in the worker, or ~200–380 ms on the main-thread fallback.
+> **The review's major finding:** a carved channel bed curves DOWN between
+> mesh vertices, and the mesh draws a straight chord ABOVE it. So in deep
+> channels the ground you see stood over the flight floor about 1.7x as
+> often, and a skimming bird was inside it. The floor now reads the carve
+> through the ground mesh's own triangles (`createMeshLattice`); no vertex
+> moves, and the low pass reads −0.228 eroded vs −0.228 without. Known
+> quirk: the eroded forest grows a different set of trees (the RNG draw is
+> conditional).
+>
+> **The interrupted reviews, finished.** The clouds' NaN/Inf sweep after
+> their fixes: **253 poses, 0 bad pixels**, with the detector proven by a
+> planted NaN. A cloud over a ridge shadow removes the sun once, as the
+> product of the two (0.0144 vs 0.0144). The air never pushes a bird through
+> the floor (lowest clearance exactly 0.600 across 8 low passes through the
+> strongest sinking air). Landing, walking and nesting still work with the
+> air on. `?air=0` is bit-identical.
+>
+> **Three frozen-oracle gates, each a clock:** G-QUALITY-CLOCK (A1/A2's
+> second page gets 60 s), G-A9-SUNCLOCK (the sun moves on the NEXT frame, so
+> A9 waits for rendered frames before aiming at it), and G-A5-DRIFT, applied
+> at last (A5's two densities interleaved and counterbalanced). The quality
+> board passed 12/12 three runs in a row with both A5 mutations still caught.
+> **Still unmeasured: the phone** — now including float render targets on
+> Chrome-on-iOS for auto-exposure, and the erosion worker's start-up.
+
 > **REALISM WAVE 2 (2026-09-24): the air holds you up, the clouds have
 > insides, the ground stops repeating, and the two defects wave 1 left for
 > the owner are fixed.** Same rules as wave 1: every look behind a Flags-tab
@@ -84,11 +131,8 @@
 > 3/3 runs. Browser Health also stopped letting one red step skip every step
 > after it (`if: ${{ !cancelled() }}`).
 >
-> **Parked, not merged:** `realism/auto-exposure` (eye adaptation + exposure
-> fusion) and `realism/erosion` (stream-power carve-down with drainage) were
-> half-built when a session limit stopped their builders. Each is one WIP
-> commit on its own branch, unreviewed. Finish, review, then merge. **Still
-> unmeasured: the phone** — the thermals' feel, the clouds' overdraw on every
+> **Auto-exposure and erosion were parked here and shipped in wave 3
+> (above).** **Still unmeasured: the phone** — the thermals' feel, the clouds' overdraw on every
 > lit fragment in forest and mountain, and hex tiling's cost.
 
 > **THE REALISM WAVE (2026-09-23): the light learned it is on a planet, the
