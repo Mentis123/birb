@@ -52,8 +52,13 @@
  *    INTENT (stick times the controller's own pitch sign), dropping on a
  *    climb. It twists into a roll.
  *  - LOAD FLEXES THE WING UP: extra dihedral in proportion to the load
- *    factor (pitch rate x airspeed), and a brief flick on a gust. The gust
- *    input exists and is wired to zero until an air field exists to feed it.
+ *    factor (pitch rate x airspeed), and a brief flick on a gust: the
+ *    vertical air the wing meets (src/flight/air-field.js — what carries
+ *    the bird, plus the convective layer's turbulence), high-passed.
+ *  - RISING AIR IS FREE. The climb the beat pays for is the climb RELATIVE
+ *    TO THE AIR (`climbRate - airLift`): a bird carried up a thermal soars,
+ *    it does not flap. The landing gear keeps the ground-relative climb,
+ *    because the ground is what it is timing contact with.
  *  - THE FEET come down as landing gear on an approach — low, descending,
  *    slow, about 1-3 beats before contact — and tuck again climbing away.
  *
@@ -422,8 +427,14 @@ export function createAeroInput() {
     // The controller's stall multiple of cruise, and its own stall flag.
     stallMul: 0.5,
     stalled: false,
-    // Radial climb rate, units/s, + up.
+    // Radial climb rate, units/s, + up — relative to the GROUND (the gear
+    // times contact with it).
     climbRate: 0,
+    // How much of that climb the AIR supplied, units/s, + up: the vertical
+    // air velocity the flight model carried the bird by (a thermal, a
+    // windward slope, the sink between them). 0 in still air, and always 0
+    // under ?air=0. The beat pays only for climbRate - airLift.
+    airLift: 0,
     // Body rates, rad/s: pitch + nose up, roll + rolling RIGHT.
     pitchRate: 0,
     rollRate: 0,
@@ -432,8 +443,10 @@ export function createAeroInput() {
     bank: 0,
     // Height above the carved ground, units (NaN when unknown).
     aboveGround: NaN,
-    // Vertical air speed, units/s, + updraft. Wired to 0 until an air field
-    // exists to feed it.
+    // Vertical air speed the wing meets, units/s, + updraft (air-field.js:
+    // the air the flight applied plus the layer's vertical turbulence).
+    // High-passed into a flick, so a steady thermal flexes nothing. 0 under
+    // ?air=0.
     gust: 0,
     // prefers-reduced-motion: drops the decorative flick and flutter.
     reducedMotion: false,
@@ -517,6 +530,7 @@ export function createAeroPose(options = {}) {
     pitchRate: 0,
     rollRate: 0,
     climbRate: 0,
+    airLift: 0,
     time: 0,
   };
   const stroke = { angle: 0, span: 1, hand: 0, handSweep: 0, twist: 0, downstroke: false };
@@ -536,9 +550,13 @@ export function createAeroPose(options = {}) {
     const wantPitchRate = frozen ? 0 : clamp(num(i && i.pitchRate, 0), -6, 6);
     const wantRollRate = frozen ? 0 : clamp(num(i && i.rollRate, 0), -8, 8);
     const wantClimb = frozen ? 0 : clamp(num(i && i.climbRate, 0), -3 * cruise, 3 * cruise);
+    const wantAirLift = frozen ? 0 : clamp(num(i && i.airLift, 0), -3 * cruise, 3 * cruise);
     st.pitchRate = ease(st.pitchRate, wantPitchRate, dt, t.rateInputs);
     st.rollRate = ease(st.rollRate, wantRollRate, dt, t.rateInputs);
     st.climbRate = ease(st.climbRate, wantClimb, dt, t.rateInputs);
+    // Eased at the SAME rate as the climb it is subtracted from, so a bird
+    // entering a thermal (both rising together) reads no transient climb.
+    st.airLift = ease(st.airLift, wantAirLift, dt, t.rateInputs);
     st.bank = ease(st.bank, clamp01(num(i && i.bank, 0)), dt, t.rateTail);
 
     // Airspeed. The nest auto-fly writes position directly with the
@@ -549,7 +567,8 @@ export function createAeroPose(options = {}) {
     const stallRatio = r / stallMul;
     const target = frozen || landing ? speed : Math.abs(num(i && i.target, speed));
     const rTarget = target / cruise;
-    const climbN = st.climbRate / cruise;
+    // The climb the wing pays for: relative to the air, not the ground.
+    const climbN = (st.climbRate - st.airLift) / cruise;
     const elevator = frozen ? 0 : clamp(num(i && i.elevator, 0), -1, 1);
     const load = frozen ? 1 : loadFactor(st.pitchRate, speed, t);
     const stalled = !frozen && (!!(i && i.stalled) || stallRatio < 1);
@@ -662,6 +681,7 @@ export function createAeroPose(options = {}) {
     st.morph = 1; st.sweep = 0; st.splay = 0; st.spread = 0; st.fast = 0;
     st.tailPitch = 0; st.tailTwist = 0; st.bank = 0; st.flex = 0; st.gustLP = 0;
     st.feet = 1; st.gear = 0; st.pitchRate = 0; st.rollRate = 0; st.climbRate = 0;
+    st.airLift = 0;
     st.time = 0;
     out.beats = 0;
   }

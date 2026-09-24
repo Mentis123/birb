@@ -373,6 +373,19 @@ export class BirdFlightStunt extends BirdFlight {
         this._classicMaxPitch = this.maxPitch;
         if (this.isStunt) this.maxPitch = Math.PI;
 
+        // Air that is itself moving: an optional `(x, y, z) -> w` sampler,
+        // sphere-centred world position in, vertical AIR velocity out (world
+        // units/s, positive UP the local radial) — src/flight/air-field.js.
+        // Null is the default and is the exact before: every frozen test
+        // constructs this class without one. `lastAir` is what it applied on
+        // the last frame (units/s), for the probe; `lastAirRise` is the radial
+        // step that became (units, over the law's own clamped dt), so a reader
+        // that measures climb over the FRAME's delta can take the air's share
+        // back out exactly (index.html's aero-pose wiring).
+        this.airSampler = options.airSampler ?? null;
+        this.lastAir = 0;
+        this.lastAirRise = 0;
+
         this._scratch.right = new Vector3();
         this._scratch.bodyUp = new Vector3();
         this._scratch.velDir = new Vector3();
@@ -913,6 +926,33 @@ export class BirdFlightStunt extends BirdFlight {
             s.sinkVec.copy(s.oldNormal).multiplyScalar(-sink * deltaTime);
             this.position.add(s.sinkVec);
         }
+
+        // The AIR's own vertical motion — a thermal, a windward slope, the
+        // gentle sink between them — carries the bird with it, along the same
+        // radial and the same way the sink does: position, never orientation.
+        // Gated exactly like the sink (a commanded speed is walking, falling,
+        // a freeze or the nest's hand on the bird, and none of those should
+        // drift upward), and applied BEFORE the floor clamp below, which
+        // keeps the last word and is untouched: still a minimum radius that
+        // only carves down. A lift that is local, bounded, mass-balanced and
+        // zero sixty units up is not the everywhere-upward ratchet that
+        // invariant exists to prevent.
+        let air = 0;
+        let airRise = 0;
+        if (this.airSampler && !this._commanded) {
+            const w = this.airSampler(
+                s.oldPos.x - this.sphereCenter.x,
+                s.oldPos.y - this.sphereCenter.y,
+                s.oldPos.z - this.sphereCenter.z);
+            if (Number.isFinite(w) && w) {
+                air = w;
+                airRise = air * deltaTime;
+                s.sinkVec.copy(s.oldNormal).multiplyScalar(airRise);
+                this.position.add(s.sinkVec);
+            }
+        }
+        this.lastAir = air;
+        this.lastAirRise = airRise;
 
         s.radialOffset.copy(this.position).sub(this.sphereCenter);
         const radialDistance = s.radialOffset.length();

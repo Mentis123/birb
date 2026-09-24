@@ -108,6 +108,8 @@ export const BOOT_FLAGS = Object.freeze([
   // ---- Flight ----
   { key: 'levelturn', group: 'Flight', kind: 'toggle', label: 'Level turns (yaw about the planet)',
     hint: 'Off yaws about the bird’s own up — the before, where a held dive spiralled and looped out of itself.' },
+  { key: 'air', group: 'Flight', kind: 'toggle', label: 'Air: thermals, ridge lift, gusts',
+    hint: 'Off is the still air before: nothing rising to soar on below sixty units, no gusts in the canopies, no wind in the mountain pines. Stunt model only for the lift; see docs/perf/gates/G-REALISM-AIR-FIELD.md.' },
   { key: 'pitchinvert', group: 'Flight', kind: 'toggle', label: 'Pull back for nose up',
     hint: 'On (the default) is a control column: pull the stick back and the nose rises. Off is the direct sense, stick up for nose up. Stunt model only.' },
   { key: 'flight', group: 'Flight', kind: 'select', label: 'Flight model',
