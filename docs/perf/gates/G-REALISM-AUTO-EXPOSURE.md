@@ -255,30 +255,16 @@ passes. Every boot above: 0 console errors or warnings.
 | `node tools/birb-realism.mjs --only 'auto-exposure-*'` | **50/50** (off 4, adapt 19, calibration 4, local 11, both 8, and 4 boots with a clean console); run twice, every number above within 0.03 EV / 0.7% of p10 between the runs (backlit 0: +14.1% then +13.4%) |
 | `node tools/birb-modes.mjs` | **all 5 modes ok** |
 | `node tools/birb-default.mjs` | **ok** (production default is Ultra at its ceiling, and reversible) |
-| `node tools/birb-quality.mjs --check all` | **11/12 — A9 FAILS** in every `all` run on this branch (5 of 5); `--check A9` alone **passes** |
+| `node tools/birb-quality.mjs --check all` | builder: 11/12, A9 red 5 of 5. After the review's G-A9-SUNCLOCK amendment: see Review |
 
-**A9 is not made green here, and it is not this feature's behaviour.** A9
-("shafts off collapses 8 -> 5") needs the sun on screen for its "before"
-sample. In the `all` sequence the bird is GROUNDED by the time A9 runs, on
-main as well as here (instrumented copy: `recovery: "grounded"`,
-`aboveGround 0.600`, speed 0 on both trees — the landing coin toss CLAUDE.md
-records under "A level bird cannot land"). `faceSun()` then sets a heading
-the grounded pose does not keep, so whether the sun is in frame depends on
-WHERE the bird came down, which depends on the route the earlier checks flew
-in wall-clock time. On main `d28da11` it came down at heading 89 deg with the
-sun at uv (0.50, 0.44); on this branch at heading -148 with the sun behind.
-The capture also reads `sunUv` in the same evaluate as `faceSun()`, so its
-own re-aim loop always reads 0 and never retries. Bisected on a copy of this
-tree: main's `index.html` passes; main's `index.html` plus ONLY the two
-guarded, never-executed-at-tier-0 lines (`if (bloomPass && bloomPass.eye)
-...skipFrame()` / `...setEnvironment()`) fails; 29 lines of comments added to
-main's file pass; the same failing tree passes when extra `evaluate` calls
-are inserted before the sample. Timing decides it, not the pass: the flags
-are off in that boot, the composite is pristine, and A7 (5 passes with rays
-off) and A8 pass. On main the same `all` run failed A5 once in four
-(G-A5-DRIFT's known clock). `tools/birb-quality.mjs` is hash-frozen (R5), so
-the fix — wait for a rendered frame after `faceSun()`, and take the sample
-airborne — is a gate decision for the oracle's owner, not this branch.
+**A9 — builder's reading, SUPERSEDED by the review** (below and
+[G-A9-SUNCLOCK](G-A9-SUNCLOCK.md)). The builder saw A9 red in 5 of 5 `all`
+runs here and green in 4 of 4 on main, and blamed a grounded bird whose
+heading `faceSun()` could not hold. Instrumented, that is not the cause: the
+frozen `putSunOnScreen()` waited 50 ms where its recipe says "one frame", so
+whenever no frame rendered in the wait `faceSun()` aimed at a stale sun, and
+main fails A9 exactly the same way (2 of 3 instrumented runs). Fixed in the
+oracle under a gate decision; not a behaviour of this branch.
 
 ## What is NOT verified
 
@@ -299,3 +285,107 @@ airborne — is a gate decision for the oracle's owner, not this branch.
   the phone before either flag becomes a default.
 * **Taste.** Whether the lifted canopies and the damped sky read as better
   is the blind paired A/B on the phone's job.
+
+## Review (adversarial, 2026-09-24)
+
+**Verdict: SHIP WITH NOTES** (opt-in, both flags default Off). One blocker was
+found, and it was in a frozen oracle, not in this branch. It is fixed under
+its own gate decision. Nothing in `src/` needed changing.
+
+### A9 was a harness clock, and main had it too
+
+Details in [G-A9-SUNCLOCK](G-A9-SUNCLOCK.md). `putSunOnScreen()` waited
+**50 ms** where its own recipe says "one frame". `setSunTime(0)` only moves a
+number; the key light moves on the next rendered frame, and an Amazing
+SwiftShader frame takes 70-130 ms. In an instrumented copy, every failing
+run's `faceSun()` had aimed at the previous hour's sun (38.9 / 43.8 /
+49.5 degrees, against the t = 0 sun's 19.5). This happened on **main as
+well as here (2 of 3 runs each way)**. In the grounded failures the heading
+`faceSun()` set was still there, unchanged, at the sample, so the builder's
+grounded-heading diagnosis is refuted. The helper now waits two rendered
+frames and reads `sunUv` after a rendered frame. The manifest was
+regenerated in the same commit. Results with the amendment: A9 passed in
+every run (main 3/3 with a 12/12 board each time; branch 9/9), and the
+branch's board was **12/12 six times in a row** (q-final 1-6). Two earlier
+branch boards were red on A5 only, which is G-A5-DRIFT's unapplied clock.
+
+### Off path: byte-identical, measured, not argued
+
+Every shader source handed to WebGL was hooked (`shaderSource`) in one boot
+per tree. The boot pinned tier 0, then tier 1, then tier 0, and switched
+through all four biomes, at `quality=amazing` and `quality=ultra`. **Every
+one of main's unique sources (91 Amazing / 83 Ultra) is byte-identical on
+the branch.** The branch compiled 8 / 4 extra programs, and all of them
+are lazily compiled world materials that happened to come into view in that
+boot: drone shell, energy ring, city windows, and a pre-decode map-less
+variant. None is a post-pass source, and no source on either tree contains
+the eye's code. The three post-pass sources are the same hashes on both
+trees. The only default-path runtime additions are a static import of
+`exposure.js` (in `CORE_ASSETS`), one `await import` of the same cached
+module, two flag reads, and two `bloomPass.eye` null checks.
+
+### NaN / Inf
+
+Every log, divide and normalise in the chain is floored or scrubbed: meter
+luminance, `measured = r / max(g, 1e-6)`, `eyeSafeEv` on every read of the
+state, weights normalised by a sum that is at least 3·1e-4, guided-fit
+variance + epsilon (0.04), and collapse output clamped before `exp2`. A note
+for Apple GPUs: if the Metal compiler folds `isnan`/`isinf` under fast math,
+the scrubs still hold. `!(y > 0.0)` and `!(abs(ev) < 8.0)` are hardware
+comparisons that are false for NaN. +Inf reaches `clamp(log2(inf), -12, 12)`,
+which gives 12. The eye adds no NaN source; it can only spread one the
+scene already has.
+
+### Portability (WebGL2 / ANGLE-Metal / Chrome-on-iOS)
+
+- The RGBA32F state is used only with NEAREST filtering and three's
+  `NoBlending` for opaque materials (verified in the pinned r183 build). It
+  therefore needs `EXT_color_buffer_float`, which is probed, and needs
+  neither `OES_texture_float_linear` (absent on iOS) nor `EXT_float_blend`.
+- The RGBA16F meter and fusion targets use linear filtering, which is core
+  in ES 3.0. They need rendering and mip generation to be colour-renderable,
+  which is the same requirement the existing bloom targets already carry.
+  The fallback, a half state when `EXT_color_buffer_float` is missing, is
+  therefore coherent. The loops have constant bounds, or a uniform `break`
+  under a constant bound.
+- Booted at **Ultra with both flags** (4x MSAA scene target, DPR 3, scene
+  1170x2532), with a biome switch and a viewport resize: 11 passes, EV
+  finite, fusion 292x633 resized to 270x570, **6.94 MB** of eye memory
+  (which confirms the ~7 MB estimate), 0 console warnings or errors, and a
+  clean frame with no black blocks.
+- **Not verified on a device**: no iPhone and no Metal compiler were run.
+
+### Leaks and allocation
+
+Targets are created once in the stage. A resize is `setSize` on the four
+fusion targets (three reallocates them internally), and the meter and state
+are never resized. A biome switch keeps the targets and only snaps. A tier
+shed and restore keeps them and restarts the eye. `dispose()` covers all
+seven targets and six materials, and bloom-pass chains it. `render()`
+assigns numbers and uniforms only. `read()` and `configure()` allocate, but
+both are debug hooks.
+
+### Notes (not blockers)
+
+- The fusion's display model is Neutral + sRGB. If a biome's colour grade
+  uses a different tone curve, the synthetic exposures are judged against a
+  slightly wrong curve. This is harmless at the lift-only clamp, but worth
+  re-checking before localtm is ever made a default.
+- The keys are calibrated at Amazing and at the authored sun. Ultra meters
+  through the same scene target, so it should agree, but no Ultra
+  calibration was run.
+- Adaptation in free flight is still unflown (pumping), and there is no
+  phone number for either half.
+
+### Re-run by the review
+
+| check | result |
+|---|---|
+| `node --test tests/exposure.test.js` | 27/27 |
+| `npm test` | 1220 tests, **1010 pass, 0 fail**, 210 skipped (the manifest now pins `tests/exposure.test.js`) |
+| `BIRB_PERF_IMPL=1 node --test tests/build-identity.test.js` | 4/4 |
+| `sha256sum -c tools/oracle-manifest.txt` / `oracle-manifest-regen.mjs --check` | 0 failures / current |
+| `node tools/birb-realism.mjs --only 'auto-exposure-*'` | **50/50**. Dark +22.2%, bright -24.3%, canyon on the +1.5 clamp, backlit p10 +11.1 / +15.9 / +7.4% with p99 moving 0.0-0.2%, all with control 0.00 |
+| `node tools/birb-modes.mjs` | all 5 modes ok |
+| `node tools/birb-default.mjs` | ok |
+| `node tools/birb-quality.mjs --check all` (amended) | branch **12/12 x6 in a row**, main 12/12 x3 |
