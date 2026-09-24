@@ -42,21 +42,25 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-23 at commit a918487 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-24 at commit 46625e9 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
 4deed1af6bb07606594214cb55313c159b7ce2abf8aae58aeb8ef99dceafded2  tests/adaptive-quality-traces.test.js
 0ac41b4d162af55f267b3cdfc207227ef9fbc89969be85ecea34154fee63acef  tests/adaptive-quality.test.js
 65833373419bb323eece0467614d84c3aac50970815c97872d9d69056a20c5db  tests/aero-pose.test.js
+b758bac8cbcc5df11e8a860d6a7497c4db4e4d9bac7bef2b85e9ea46a7d1cdbc  tests/air-field.test.js
 3fb584f82805776b55d1018fcb6679bdf0b46c007951febf2140f14a747c1eeb  tests/atmosphere-model.test.js
 cedb10676f6ae0abed73646653ef26594aea1332eb52ac82eb79f1dd236815e0  tests/bird-flight-stunt.test.js
 89bd71c169b3fdbd821df4784844e09b00324dd44eb787a6eb377171f963219c  tests/bird-shadow.test.js
+71ba6f096bb7ef2cb4b3426c389b947aaf23a870bb1fb156a1dd4c5c23e1a749  tests/cloud-volume.test.js
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
+75c0877bd356ef6950e170aa27f9363eb773653b950483ec5d9413c0658d64e8  tests/hex-tiling.test.js
 06eaa4e627ef53e0dc1c6396ade658c0a47cf346fcb05e3f9fa2f28533559dab  tests/horizon-map.test.js
 09af5d0de1f5424af17c6ffbe43999539aa6d255bc8da08043e9b3c73dc51d81  tests/horizon-shadow.test.js
 0e15502745cd99f80b75369b2d78ecc2ca5b5ff4142e4238aa405759fbfb16a4  tests/plumage.test.js
 d4b7dd86aaa6f77c8ef2152a1ea9b29d532d7322547c821af94ee4ec13e5e341  tests/sky-dome-atmosphere.test.js
+e1830f1a5370bf64f6534d4112021659e4dfd24c88b0fc68b3a945c1aea0102f  tests/stunt-boost-trim.test.js
 164dad3c617966fe8370b410e5003d92f22b558afd1868c8229fa545d922afed  tests/stunt-detector.test.js
 24b61ddeb1aee31c8351a685c0f1d7f5c109cd2771f1902a6ee193fdaeb00fea  tests/stunt-pad.test.js
 a1522741c4d70db05b606cb429e6de98b31dd9cbe794c4c070350803bfcd2e8c  tests/sun-frame.test.js
@@ -199,5 +203,5 @@ d77a5feddd1d23950901b66430f44fa1dc29750603a703b6781ab6cb5d15097f  tests/gpu-time
 058b8c336d2722c3a9259244fd44257517c54e24cc359a6d4f27467bc2e2f72d  docs/perf/EXPECTED-RED.md
 b5ac0092f6773dd03b3c48978f44ba3a4b970f0a4cfa9dbff8fc3b02a256885f  docs/perf/ASSERTIONS.md
 # --- Wave 2R: capturers, the superseded RED manifest, the seeded generator ---
-c732e32e657b6f811170e8deed2e83d79e852d2b873fa42ce2cae41f5f11e7aa  tools/lib/quality-captures.mjs
+a522f68599ed59ea0f2f56c737577455a118bb073f29028ddae38202889e9e36  tools/lib/quality-captures.mjs
 9810099045fa2bcddb109fda68a1fc920c52a68b7f2f02464a51a93d1325d76c  src/environment/seeded-random.js

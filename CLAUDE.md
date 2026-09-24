@@ -11,6 +11,79 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **REALISM WAVE 2 (2026-09-24): the air holds you up, the clouds have
+> insides, the ground stops repeating, and the two defects wave 1 left for
+> the owner are fixed.** Same rules as wave 1: every look behind a Flags-tab
+> switch, reviewed adversarially, then merged.
+>
+> **Thermals and ridge lift** (`?air=0`; `src/flight/air-field.js`). Eight
+> Allen 2006 thermals per biome, heated by the planet-local sun, plus Bohrer
+> 2012 ridge lift under a veering wind, all zero above 60 units over the
+> ground. The stunt model gets an optional sampler that moves POSITION
+> radially, after the sink and before the unchanged floor clamp. A hands-off
+> level bird in the strongest thermal gains **+4.25 units in 1.95 s** against
+> +0.04 with `__BIRB.air(false)` or `?air=0`. With no sampler the stunt law
+> matches its pre-air self bit for bit (6,720 values per site, 0 different).
+> Gusts drive only visuals (`__BIRB.stillAir()` holds them for a capture): the foliage wind (mountain pines now sway too)
+> and aero-pose's gust flick, which is live now, no longer wired to 0.
+> Hands-off flight under 60 units is no longer altitude-neutral. A harness
+> that flies low and unfrozen should call `__BIRB.air(false)` or fly above 60.
+>
+> **Clouds with volume** (`?cloudvol=0`; `src/environment/cloud-volume.js`).
+> Each puff integrates an analytic density along the view ray, with
+> Beer-Powder self-shadow and a two-lobe Henyey-Greenstein silver lining. It
+> is transparent on the phone too (the opaque "floating rocks" are gone), at
+> the same draw calls. The ground's cloud shadows come from the real cloud
+> spheres, replacing the crossed-sine field that darkened half of all sunlit
+> ground at random. The review's major finding: merged as built, it would
+> have STACKED on the horizon shadow. It now multiplies into
+> horizon-shadow.js's own `birbSunVis`/`birbSkyVis`, so a fragment under
+> both a skyline and a cloud loses the sun once. The in-cloud fog follows
+> the atmosphere's ratio, and the bird takes cloud shade on its sun light.
+> One unexplained black block in a desktop capture led to every NaN-capable
+> operation being guarded. The capture sweep was NOT re-run after those
+> fixes (session limit).
+>
+> **Ground that never repeats** (`?hextile=1`, OPT-IN). Mikkelsen 2022 hex
+> tiling on Quilez biplanar projections: at most 6 `textureGrad` fetches,
+> and 3 over most of the planet. The one-tile autocorrelation of the forest
+> floor falls from **0.359 (z 18) to 0.030 (inside the null)**. It is opt-in
+> because frozen tests pin the default's three-fetch budget and bytes;
+> without the flag the default output is byte-identical.
+>
+> **A boost is thrust, not a stall** (no flag, a defect). The stunt model
+> judged lift, the stall, the weathervane and authority against the ENERGY
+> TARGET, which a boost raises to 2.4x. So every boost began at 11 against
+> 26.4: stalled, authority 0.43, sinking **1.47 units**. `liftCruise` is the
+> speed the wing is trimmed for, written by index.html from the unboosted
+> cruise. Null keeps the old reference exactly, and so does any commanded
+> speed. On the live page a boost now reads +0.024 radius against +0.012
+> without one. `tests/stunt-boost-trim.test.js` asserts the defect in its
+> control arm.
+>
+> **The bank dip lowers the inside wing** (aero-pose path). The group named
+> `leftWing` is the bird's RIGHT wing (the model faces +X, so right is +Z),
+> so the "dip the turn wing" term had raised the inside wing on every roll.
+> `tools/realism-checks/bank-dip-inside.mjs` picks wings by where their tips
+> are, never by name. Old sign: +0.836 in a right roll; now: −0.835.
+> `?aeropose=0` keeps the old sign as the true before.
+>
+> **The flight-v2 flake that hid main's CI was the floor coin toss.**
+> BirdFlight clamps to the floor BEFORE the landing check reads the
+> position, so "place it below the surface and wait" was a float-rounding
+> lottery. `__BIRB.probeGround(depth)` (debug only, one shot) delivers a real
+> contact. The harness now asserts both halves of the rule: inverted
+> contact → FALLING, upright → GROUNDED. It was deterministic on frame 1 in
+> 3/3 runs. Browser Health also stopped letting one red step skip every step
+> after it (`if: ${{ !cancelled() }}`).
+>
+> **Parked, not merged:** `realism/auto-exposure` (eye adaptation + exposure
+> fusion) and `realism/erosion` (stream-power carve-down with drainage) were
+> half-built when a session limit stopped their builders. Each is one WIP
+> commit on its own branch, unreviewed. Finish, review, then merge. **Still
+> unmeasured: the phone** — the thermals' feel, the clouds' overdraw on every
+> lit fragment in forest and mountain, and hex tiling's cost.
+
 > **THE REALISM WAVE (2026-09-23): the light learned it is on a planet, the
 > bird learned it is in the air, and three defects were measured before
 > anything was built.** Ten researched upgrades
@@ -108,7 +181,7 @@
 > Audio unless `navigator.audioSession` is 'playback' (unknown inside
 > Chrome-on-iOS). CLAUDE.md's "Web Audio doesn't work on iOS" is out of date.
 >
-> **Found and NOT fixed, for the flight owner:** the stunt model's
+> **Found and NOT fixed, for the flight owner (FIXED in wave 2, above):** the stunt model's
 > `liftFactor()`, `isStalled()` and `authority()` normalise by the BOOSTED
 > `_cruise`, so a boost reads as a stall and sinks the bird 1.4–1.55 units.
 > The audio and pose packages gate it out; the flight model still does it.
@@ -119,7 +192,7 @@
 > a heavier physical shader on the bird, a PMREM per biome switch — have no
 > device number. Each is one tap off on the Flags tab.
 >
-> **Also found by the reviews, NOT fixed, for the owner's eye:** the group
+> **Also found by the reviews, NOT fixed, for the owner's eye (the bank dip is FIXED in wave 2, above; the turret clock by G-MODES-CLOCK):** the group
 > named `leftWing` is built at model +Z, which is the bird's RIGHT, so the
 > same-signed bank dip raises the INSIDE wing about 7 degrees against the
 > turn. And the frozen `tools/birb-modes.mjs` gives the turret's nest landing

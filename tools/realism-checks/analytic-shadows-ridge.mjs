@@ -19,6 +19,10 @@ export const name = 'analytic-shadows-ridge';
 export default async function run(ctx) {
   const { page } = ctx;
   await page.evaluate(() => window.__BIRB.pinTier?.(0));
+  // The air field's gusts sway the foliage wind, so two captures of one pose
+  // differ (measured on the wave-2 tree: control pairs 0.0898/0.0901 and
+  // 3626 px brightened, exact under ?air=0). Hold the gust's visuals.
+  await page.evaluate(() => window.__BIRB.stillAir?.(true));
   const bake = await waitForBake(ctx);
   ctx.check(!!bake?.enabled && bake.landed && bake.ready >= 1,
     `the horizon map baked and faded in (${bake?.result?.mode}, ${bake?.result?.bakeMs} ms in the bake, `
@@ -65,4 +69,5 @@ export default async function run(ctx) {
     ctx.check(brighter <= n * 0.001, `turning the horizon on brightens no pixel (${brighter} of ${n})`);
   }
   await restore(ctx);
+  await page.evaluate(() => window.__BIRB.stillAir?.(false));
 }

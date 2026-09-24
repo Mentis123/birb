@@ -333,6 +333,20 @@ export class BirdFlightStunt extends BirdFlight {
         this.cruise = options.cruise ?? this.speed;
         this._lastTickSpeed = this.speed;
 
+        // The speed the WING is trimmed for, when that is not the energy
+        // target. A boost raises the target to 2.4x cruise for a surge, but
+        // lift, the stall and control authority belong to the airspeed
+        // against the wing's trim, not against where the thrust is pushing:
+        // judged against the boosted target, every boost began as a STALL
+        // (speed 11 against a 26.4 target is under the 0.5 stall line), the
+        // weathervane dropped the nose, the lift deficit sank the bird 1.4 to
+        // 1.55 units and the controls went to a third of their authority -
+        // for pressing the button that means "go". index.html writes it every
+        // frame the bird flies itself; null (the default, and every existing
+        // unit test) judges against `cruise` exactly as before, and so does
+        // any COMMANDED speed (walking, falling, the nest approach).
+        this.liftCruise = options.liftCruise ?? null;
+
         // Live throttle and rudder, both springing to neutral. The pad
         // (src/flight/stunt-pad.js) writes them through `tick`'s input.
         this._throttle01 = 1;
@@ -358,6 +372,19 @@ export class BirdFlightStunt extends BirdFlight {
         // somebody loops it.
         this._classicMaxPitch = this.maxPitch;
         if (this.isStunt) this.maxPitch = Math.PI;
+
+        // Air that is itself moving: an optional `(x, y, z) -> w` sampler,
+        // sphere-centred world position in, vertical AIR velocity out (world
+        // units/s, positive UP the local radial) — src/flight/air-field.js.
+        // Null is the default and is the exact before: every frozen test
+        // constructs this class without one. `lastAir` is what it applied on
+        // the last frame (units/s), for the probe; `lastAirRise` is the radial
+        // step that became (units, over the law's own clamped dt), so a reader
+        // that measures climb over the FRAME's delta can take the air's share
+        // back out exactly (index.html's aero-pose wiring).
+        this.airSampler = options.airSampler ?? null;
+        this.lastAir = 0;
+        this.lastAirRise = 0;
 
         this._scratch.right = new Vector3();
         this._scratch.bodyUp = new Vector3();
@@ -419,6 +446,16 @@ export class BirdFlightStunt extends BirdFlight {
     }
 
     /**
+     * The speed lift, the stall and authority are judged against: the wing's
+     * trim (`liftCruise`) while the energy model owns the speed, otherwise
+     * the target itself. See `liftCruise` in the constructor.
+     */
+    _trimCruise() {
+        const ref = (!this._commanded && this.liftCruise > 0) ? this.liftCruise : this._cruise;
+        return ref > 0 ? ref : 1;
+    }
+
+    /**
      * The wing's lift, 1 at cruise and upright. Falls with the square of
      * speed, and with the cosine of how far the bird's up has rolled from the
      * radial: a 60-degree bank carries half, a knife edge carries none, and
@@ -431,7 +468,7 @@ export class BirdFlightStunt extends BirdFlight {
         if (s.up.lengthSq() < 1e-12) return 1;
         s.up.normalize();
         s.bodyUp.set(0, 1, 0).applyQuaternion(this.quaternion).normalize();
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         const q = Math.min(1.6, (this.speed / cruise) * (this.speed / cruise));
         const lift = q * s.bodyUp.dot(s.up);
         // The assist knob puts a floor under it so nothing falls fast in Zen.
@@ -470,7 +507,7 @@ export class BirdFlightStunt extends BirdFlight {
      * will actually give. A stalled bird is not a bird with full elevator.
      */
     authority() {
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         return Math.max(0.35, Math.min(1.2, Math.abs(this.speed) / cruise));
     }
 
@@ -491,7 +528,7 @@ export class BirdFlightStunt extends BirdFlight {
 
     /** True while the wing is below flying speed. */
     isStalled() {
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         return this.isStunt && Math.abs(this.speed) < this.stallMul * cruise;
     }
 
@@ -694,7 +731,7 @@ export class BirdFlightStunt extends BirdFlight {
      * sliding back. Neither is a scripted move; both are this term.
      */
     _weathervaneStep(dt) {
-        const cruise = this._cruise > 0 ? this._cruise : 1;
+        const cruise = this._trimCruise();
         const stallSpeed = this.stallMul * cruise;
         const spd = Math.abs(this.speed);
         if (spd >= stallSpeed) return false;
@@ -889,6 +926,33 @@ export class BirdFlightStunt extends BirdFlight {
             s.sinkVec.copy(s.oldNormal).multiplyScalar(-sink * deltaTime);
             this.position.add(s.sinkVec);
         }
+
+        // The AIR's own vertical motion — a thermal, a windward slope, the
+        // gentle sink between them — carries the bird with it, along the same
+        // radial and the same way the sink does: position, never orientation.
+        // Gated exactly like the sink (a commanded speed is walking, falling,
+        // a freeze or the nest's hand on the bird, and none of those should
+        // drift upward), and applied BEFORE the floor clamp below, which
+        // keeps the last word and is untouched: still a minimum radius that
+        // only carves down. A lift that is local, bounded, mass-balanced and
+        // zero sixty units up is not the everywhere-upward ratchet that
+        // invariant exists to prevent.
+        let air = 0;
+        let airRise = 0;
+        if (this.airSampler && !this._commanded) {
+            const w = this.airSampler(
+                s.oldPos.x - this.sphereCenter.x,
+                s.oldPos.y - this.sphereCenter.y,
+                s.oldPos.z - this.sphereCenter.z);
+            if (Number.isFinite(w) && w) {
+                air = w;
+                airRise = air * deltaTime;
+                s.sinkVec.copy(s.oldNormal).multiplyScalar(airRise);
+                this.position.add(s.sinkVec);
+            }
+        }
+        this.lastAir = air;
+        this.lastAirRise = airRise;
 
         s.radialOffset.copy(this.position).sub(this.sphereCenter);
         const radialDistance = s.radialOffset.length();
