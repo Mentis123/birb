@@ -69,7 +69,9 @@ Inf a fixed cyan, both surviving the bloom composite.
   the owner rather than applied here because it would move EVERY material's
   shader off `d47fc7e`'s bytes, `?cloudvol=0` included, and belongs in its
   own commit.
-- **After the fixes**: the sweep was NOT re-run — the reviewer was stopped by a session limit before it could be. What stands after the fixes is the construction below, not a capture.
+- **After the fixes**: re-run on main `d28da11` (the merged, integrated
+  tree) by the completing review — see "Post-merge numbers" below: 253
+  poses, 0 NaN px, 0 Inf px.
 
 Every NaN-capable operation in this package's GLSL is now guarded (finding
 4), so the volume and shadow shaders are NaN-free for finite uniforms by
@@ -168,7 +170,107 @@ luminance than the same frame without the cloud's shadow (0.1143 vs 0.1708).
 
 ### Post-merge numbers
 
-Not filled by the reviewer (stopped by a session limit during re-verification). The integrated tree was verified by the integrator instead: see the "REALISM WAVE 2" entry in CLAUDE.md for the suite results.
+The interrupted reviewer never took these; a second review took them on
+main `d28da11` (report id `air-cloud-review`, branch
+`realism/review-air-cloud`). SwiftShader throughout — no phone number.
+
+**The NaN/Inf sweep, after the fixes.** Same detector as above (every
+fragment shader wrapped, NaN paints magenta and Inf cyan), re-proven in
+the same boot: a NaN written into `sunDepth` paints **56,071 px** of the
+clouds magenta, the frame after `clouds({ reset: true })` paints 0, and the
+canyon sine field at `atmosphere` 5 paints 0. Then forest and mountain,
+the sun at the cycle's lowest raised elevation (t = 0 s, 19.5 degrees) and
+its highest (t = 300 s, 58.4 degrees), at every kind of pose: the chase
+camera, straight down at the ground from 18 units at three spots, each
+cloud from the side, toward the sun through it and from behind at 40 units,
+from the side at 16 units (inside the 4-unit face hand-over band's reach),
+the bird and camera INSIDE a puff at two depths, and the ground UNDER a
+cloud's shadow (converged placement, visibility 0.156):
+
+| configuration | poses | NaN px | Inf px | console |
+|---|---|---|---|---|
+| phone 390x844, Amazing, bloom off (114 programs wrapped) | 68 | 0 | 0 | clean |
+| phone, Amazing, bloom on | 68 | 0 | 0 | clean |
+| phone, **Ultra** (post Full, VSM 2048, 4x MSAA; 81 programs) | 21 | 0 | 0 | clean |
+| desktop 800x600, Amazing, bloom on, 3 of 20 clouds per biome | 96 | 0 | 0 | clean |
+
+The under-cloud poses exist only at t = 300 s: at the 19.5-degree sun the
+march down the sun ray from a cloud did not meet dry ground on either
+biome. The low sun's cloud shadow is exercised instead by
+`cloud-volume-ridge` (below).
+
+**The 72 px black band is page layout, not a render.** Every desktop frame
+in that sweep carried 49,465-53,237 pixels under 3/255 — all of them in
+rows 528-599, and the canvas is 800x528 CSS px in an 800x600 window. It is
+the page below the canvas, the same with bloom on and off; 72 rows is
+exactly the band the builder saw in one `?cloudvol=0` boot. The 22x21 px
+block remains unreproduced after 253 poses with a proven detector.
+
+**Under a skyline AND a cloud, the sun is lost once.** The compose check
+above measures a cloud shadow in the open, where the horizon's visibility
+is 1 and the product is untestable. `tools/realism-checks/cloud-volume-ridge.mjs`
+(new) finds open ground in a ridge's shadow (`horizonFind`), plants one
+9-unit cloud sphere on the sun ray above it through the shared uniform,
+dials both shadows to partial strength (horizon lever 0.5, cloud 0.55),
+switches tone mapping and the cloud's sky share off, holds the clock, and
+reads the sun's own light (key on minus key off) in a 21x21 px box. Two
+runs, two different patches (the world's props are unseeded, so the search
+lands differently):
+
+| | run 1 (40.5-degree skyline) | run 2 (26.7-degree skyline) |
+|---|---|---|
+| sun term alone, S (linear) | 0.0607 | 0.0297 |
+| past the skyline, h = S_ridge / S | 0.501 | 0.502 |
+| through the cloud, c = S_cloud / S | 0.474 | 0.471 |
+| under both, measured | 0.0144 | 0.0070 |
+| the product law, S·h·c | 0.0144 | 0.0070 |
+| light the cloud removed under the ridge | 0.0160 | 0.0080 |
+| ...product law (1 - c)·S·h / a stacked law (1 - c)·S | 0.0160 / 0.0319 | 0.0079 / 0.0157 |
+| control (the both-frame twice) | 0.00000 | 0.00000 |
+
+The check's first version failed once in a full-suite run on a lee slope
+facing AWAY from the sun (S 0.0003: dark by its own Lambert term, nothing to
+lose to either shadow); it now requires a patch whose own sun term exceeds
+0.01 and tries three sun times.
+
+**`?cloudvol=0` compiles exactly the base's shaders.** Every GLSL source
+(vertex and fragment) the page hands WebGL across all four biomes, hashed:
+two `?cloudvol=0` boots of `d28da11` compiled 91 unique sources, and
+**every one of them** is byte-identical to a source the base `34c66c4` (main
+just before the cloud merge) compiled across its own two boots (96). The
+five base-only sources are coverage, not difference: the base's own two
+boots disagree by four the same way (drone and energy-ring variants compiled
+on whichever frame a drone first enters view). With the volume on, 28
+sources are new, as they should be.
+
+**The suite.** `node tools/birb-realism.mjs` on the review branch: 348/351
+on the first full run — the three failures all in the review's own two new
+checks (the patch facing away from the sun above, and a descent assertion
+in `air-field-floor` that judged the stunt law's contact rule rather than
+the air), both fixed and 29/29 on a re-run of the two; every pre-existing
+check green, every boot's console clean. The final full run is in the air
+gate's "Review completed" section.
+
+**Hostile read of the merged diff — nothing blocking.** Constant loop
+bounds everywhere (`BIRB_CLOUD_SHADOW_MAX` with a `break` on the uniform
+count; `NUM_DIR_LIGHTS`/`NUM_HEMI_LIGHTS`), array indices are loop indices
+only, every divisor floored and every unit vector through `birbCloudUnit`,
+no `pow` in either patch, highp positions; no allocation in the cloud
+meshes' `onBeforeRender` (immersion, sort, focus) and no other per-frame
+code; no scene-rendering camera (PMREM, cube camera) that would run that
+`onBeforeRender` with the wrong eye — both PMREMs are from equirect images;
+the clouds cast no shadow map, so Ultra cannot count a cloud twice. Two
+notes, not fixed: 20 `vec4` of shadow uniforms now sit in every lit
+world material's fragment shader in forest and mountain (20 of the 224
+fragment vectors WebGL2 guarantees; every program compiled and linked in
+`birb-shaders` at Ultra, none measured on the phone); and the latent
+`pow(1 - |N.V|, k)` rims in visual-style.js (above) are still there — not
+this package's code, and changing them moves every material's bytes. The cloud checks on this
+tree: bird 0.0% covered with the shipping margin (96.6% with the camera
+alone choosing), 31.3% darker in a cloud's shade at visibility 0.322, 0
+sort inversions; compose: the cloud removes 0.842 of the sun at a spot
+whose analytic occlusion is 0.844, worst excess over the sun -0.0049,
+control 0.0000.
 
 
 ## What was there

@@ -279,6 +279,96 @@ off, at 20 points on every 25th frame of 600.
   the field reads `keyLight.position` every frame, so a sun that follows the
   bird lights the thermals near the bird with no change here.
 
+## Review completed (2026-09-24)
+
+The adversarial review of this package was stopped by a session limit
+after its two fixes (`5c17480`: a malformed `?airtune=` cannot kill the
+boot; the thermal check always re-attaches the field) and the wave-1 wiring
+(`cb7740d`). A second review finished it on main `d28da11` (report id
+`air-cloud-review`, branch `realism/review-air-cloud`). SwiftShader and
+Node only; nothing here is a phone number.
+
+**The floor, under the air, on the live page** —
+`tools/realism-checks/air-field-c-floor.mjs` (new; the frozen harnesses that
+prove landing, walking and nesting boot `&flight=classic`, and the classic
+law never reads the sampler, so on their own they say nothing about the
+air). It flies the SHIPPING stunt model with the field attached:
+
+| question | measured |
+|---|---|
+| sinkiest air 4 units up, 900-point scan of the forest | −1.43 u/s (ceiling −1.5) |
+| 8 hands-off low passes through the six sinkiest spots (4 up level, 3 up nose-down 0.25 rad) | 71 frames with the air pushing down; lowest clearance while flying **0.600**; **0** frames below the floor's 0.6 |
+| a gentle push (stick 0.35) down through the 3 strongest cores from 4 up, with the air and detached | reaches the ground in exactly the cases the still-air control does (1 of 3 both ways; the other two cores never met the ground in 40 frames with the air detached either — the stunt law's pitch comfort, not the air) |
+| upright bird, one real ground contact (`probeGround`) in a core | GROUNDED (core reading 0.67-0.69 u/s) |
+| walking 18 frames in that core | GROUNDED throughout, air applied **exactly 0** every frame, clearance 0.6 → 0.6 |
+| `forceNest` with the air attached | NESTED; air 0 while nested; radius unchanged to 1e-3 over 12 frames |
+| knocked down (FALLING) in a 2.0 u/s core | air applied 0 on every falling frame |
+| environment switch forest → mountain → forest | field rebuilt each time, the SAME sampler stays attached, mountain has its own thermals, the forest gets identical ones back, clock restarts (22.4 s → 0.2 s) |
+| teleport out of a core (`setAltitude(120)`) | the next frame applies the new place's air: 1.99 → 0 |
+
+`tools/birb-walk.mjs` and `tools/birb-modes.mjs` (classic, as frozen): walk
+ok, all 5 modes ok.
+
+**State that needs no reset.** The field's own state is weather — time,
+the wind's veer, the three gust filters — and is global by design: a
+teleport or `restorePose` does not reset it and should not. What is
+per-position is re-read every frame: the stunt law samples at the frame's
+start position, `lastAir`/`lastAirRise` are written on every stunt update
+(zero while commanded), `aeroPoseInput.gust` and `.airLift` are zeroed at
+the top of every frame and set only when a climb was actually measured (a
+teleport skips them), and flight audio subtracts the air's step only under
+the stunt law. A live switch to classic leaves a stale `lastAirRise` on
+the controller, and both readers gate on `isStunt`, so nothing reads it.
+
+**Zero per-frame allocation.** `update()` + `sample()` + `verticalGust()`
+driven 2,000,000 times in Node (`--expose-gc`): 0.88 bytes per iteration of
+young-generation churn and **99 KB retained after GC** — V8 boxing doubles
+held in closure slots, not an object per call; 2.3 µs per update+sample
+pair against the synthetic terrain. The per-frame index.html path adds no
+allocation (typed reads and scalar writes). `thermalAt()`'s default `out`
+object and `gustComponents()`'s array allocate, and are called only from
+`__BIRB` debug hooks.
+
+**`?air=0` is the true before.** Unit: with no sampler the stunt law
+matches `e252ca1` bit for bit (6,720 values per site, 0 different) and a
+sampler returning NaN/±Infinity/undefined is still air; the air, cloud and
+boost-trim suites are 71/71. Live (`air-field-still`, its own `?air=0`
+boot): nothing built or attached, the thermal pose holds (+0.040 in 40
+frames against +2.43 with the air), the controller applied no air on any
+frame, the foliage uniform IS the decorative density every frame, the
+mountain pines carry no wind patch.
+
+**The gust flick is bounded** by construction (`clamp(±gustMax)`, 0.22
+rad, `num()` guards on every input) and live: entering a core flicks the
+wings +0.137 rad and they settle back (0.012 → 0.013); the pose's gust is
+the carried air plus the layer turbulence to 0.0009 every frame; the
+published gusts stay in −1..1.
+
+**Hostile read — nothing blocking or major.** No NaN path: `sample()`
+returns 0 for any non-finite height (`!(agl < zi)`) and a final
+`Number.isFinite` guard; `update()` ignores a non-finite or non-positive
+`dt`; the stunt law ignores a non-finite sampler value. Two things for the
+owner, neither a defect: rising air is not tapered at the floor, so a bird
+skimming the floor in a core or over a windward slope is lifted off it
+(the documented cushion) — landing there is by descending, which the table
+shows still works; and each frame now takes five terrain samples twice for
+the air (flight + visuals) plus the aero-pose's one, unmeasured on the
+phone.
+
+**Suite totals on the review branch** (the two new checks included):
+
+| check | result |
+|---|---|
+| `node tools/birb-realism.mjs`, full, run 1 | 348/351 — all three failures in the two NEW checks (fixed; see the cloud gate) |
+| `node tools/birb-realism.mjs`, full, run 2 (final) | **350/351**, 14 boots, every console clean. The one failure is the pre-existing `shadows-darken` control pair (0.0619 vs 0.0758 against a 2% band, frame mean half its usual 0.13-0.15); re-run with the two new checks ahead of it in the same boot: 0.1273 vs 0.1277, 31/31. Not held still by `stillAir` and placed over unseeded props with drones about — a flake of the check, reported rather than retuned |
+| `air-field-floor` + `cloud-volume-ridge` alone | 29/29 |
+| `npm test` | 1,193 tests: 983 pass, 210 skipped, 0 fail |
+| `BIRB_PERF_IMPL=1 node --test tests/build-identity.test.js` | 4/4 |
+| `sha256sum -c tools/oracle-manifest.txt` | 0 failures |
+| `tools/birb-modes.mjs` / `birb-walk.mjs` / `birb-stunt.mjs` | all 5 modes ok / walk ok / 41/41 |
+| `tools/birb-quality.mjs --check all` | 12/12. A9 failed in the first board run and once alone, then passed 3/3 alone and in a second full board — while the BASE `34c66c4` (the air merged, the clouds not yet) failed it 3/3 in the same window. A replay of its capture reads identically on this tree, on `?cloudvol=0` and on the base (sun off screen on the first sampled frame, shafts on from the second): the capture waits 50 ms of wall clock between aiming and sampling, so it is a clock under load, not the air or the clouds |
+| `tools/birb-shaders.mjs` | every program compiles in all 4 environments at Ultra (the first attempt timed out in `startGame`'s 30 s boot wait under a load of ~12; alone it passed) |
+
 ## Not verified
 
 - **The phone.** Every number above is the unit suite or SwiftShader.

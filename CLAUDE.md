@@ -41,8 +41,15 @@
 > both a skyline and a cloud loses the sun once. The in-cloud fog follows
 > the atmosphere's ratio, and the bird takes cloud shade on its sun light.
 > One unexplained black block in a desktop capture led to every NaN-capable
-> operation being guarded. The capture sweep was NOT re-run after those
-> fixes (session limit).
+> operation being guarded. A second review re-ran the capture sweep after
+> those fixes: 253 poses (phone Amazing with and without bloom, phone Ultra,
+> desktop), 0 NaN and 0 Inf px against a detector proven in the same boot;
+> the "72 px black band" was the page below an 800x528 canvas.
+> `cloud-volume-ridge` proves the product live (h 0.50 x c 0.47, measured to
+> 4 decimals; a stacked law would remove twice the light), and
+> `air-field-floor` flies the stunt bird through the sinkiest air near the
+> ground (lowest clearance 0.600) and lands, walks and nests it with the air
+> on. Both gates carry the numbers.
 >
 > **Ground that never repeats** (`?hextile=1`, OPT-IN). Mikkelsen 2022 hex
 > tiling on Quilez biplanar projections: at most 6 `textureGrad` fetches,
