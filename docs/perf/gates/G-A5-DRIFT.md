@@ -1,8 +1,15 @@
 # G-A5-DRIFT — A5 measures the clock, not the weather
 
-**Status: FINDING + proposed patch. NOT applied. Needs a gate decision,
-because the fix lands in a hash-frozen oracle (`tools/lib/quality-captures.mjs`,
-`tools/oracle-manifest.txt`, R5 "implementers must not edit these").**
+**Status: DECIDED 2026-09-24 — APPLIED.** The patch below is now in
+`tools/lib/quality-captures.mjs` (`captureA5`), and `tools/oracle-manifest.txt` is
+regenerated in the same commit. Evidence at application: `--selftest` still
+catches both A5 mutations (`M-A5-uniform-not-visibility -> fail`,
+`M-A5-tier-confound -> invalid`; 23 of 25 detected, the same two
+no-live-verifier gaps as before), and `--check all` passed 12/12 three runs in a
+row on the realism-wave-3 tree. It had gone red on A5 alone in the auto-exposure
+review's runs, on main and branch alike. (Originally: FINDING + proposed patch,
+NOT applied, needing a gate decision because the fix lands in a hash-frozen
+oracle.)
 
 Raised 2026-09-13 after `Browser Health` went red on `main` at `58e240a`.
 

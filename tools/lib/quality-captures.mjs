@@ -438,15 +438,38 @@ export async function captureA5(page) {
   await openPanel(page);
   await switchPanelView(page, 'Performance');
 
-  await setSliderByLabel(page, 'Weather density', 1);
-  await page.waitForTimeout(200);
-  const one = await sampleSceneCallsAndWeather(page, 10);
-  const tierOne = await page.evaluate(() => window.__BIRB.stats().tier);
-
-  await setSliderByLabel(page, 'Weather density', 0);
-  await page.waitForTimeout(200);
-  const zero = await sampleSceneCallsAndWeather(page, 10);
-  const tierZero = await page.evaluate(() => window.__BIRB.stats().tier);
+  // Gate G-A5-DRIFT (applied 2026-09-24): the scene's draw calls drift by
+  // up to six over a few seconds with nothing the harness controls changing,
+  // against ONE call of signal, and density 0 was always the later window.
+  // So the two densities are INTERLEAVED in four cycles, the order
+  // COUNTERBALANCED (cycles 0 and 2 sample density 1 first, 1 and 3 density 0
+  // first) so a linear drift lands on both medians and cancels, and each
+  // switch waits two RENDERED frames instead of 200 ms (2-4 fps under
+  // SwiftShader in CI). `visible` is each window's settled last-frame value,
+  // sticky-true across cycles. assertA5 is untouched: still zero < one.
+  const waitFrames = (n) => page.evaluate((k) => new Promise((resolve) => {
+    let seen = 0;
+    const step = () => { seen += 1; if (seen >= k) resolve(); else requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }), n);
+  const one = { calls: [], visible: false };
+  const zero = { calls: [], visible: false };
+  let tierOne = null;
+  let tierZero = null;
+  const sampleAt = async (density) => {
+    await setSliderByLabel(page, 'Weather density', density);
+    await waitFrames(2);
+    const w = await sampleSceneCallsAndWeather(page, 5);
+    const pool = density === 1 ? one : zero;
+    pool.calls.push(...w.calls);
+    pool.visible = pool.visible || w.visible === true;
+    const tier = await page.evaluate(() => window.__BIRB.stats().tier);
+    if (density === 1) tierOne = tier; else tierZero = tier;
+  };
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    const order = cycle % 2 === 0 ? [1, 0] : [0, 1];
+    for (const d of order) await sampleAt(d);
+  }
 
   // Put back everything this capturer moved. It unfroze but left the sun
   // DISABLED, the density at 0 and the tier pinned — and `--check all` runs

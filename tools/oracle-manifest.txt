@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-24 at commit ebf0231 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-24 at commit fa8b9c2 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -205,5 +205,5 @@ d77a5feddd1d23950901b66430f44fa1dc29750603a703b6781ab6cb5d15097f  tests/gpu-time
 058b8c336d2722c3a9259244fd44257517c54e24cc359a6d4f27467bc2e2f72d  docs/perf/EXPECTED-RED.md
 b5ac0092f6773dd03b3c48978f44ba3a4b970f0a4cfa9dbff8fc3b02a256885f  docs/perf/ASSERTIONS.md
 # --- Wave 2R: capturers, the superseded RED manifest, the seeded generator ---
-a522f68599ed59ea0f2f56c737577455a118bb073f29028ddae38202889e9e36  tools/lib/quality-captures.mjs
+13507b9760b5ef6e0aa5d4dbe73e38fcb5487e56d396689ddfd28f5f4e7f8343  tools/lib/quality-captures.mjs
 9810099045fa2bcddb109fda68a1fc920c52a68b7f2f02464a51a93d1325d76c  src/environment/seeded-random.js
