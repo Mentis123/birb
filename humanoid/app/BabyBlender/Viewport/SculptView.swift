@@ -506,11 +506,26 @@ final class FrameLoop {
     private var framesPresented = 0
     /// The `UIUpdateLink`, kept untyped so the property needs no availability.
     private var link: AnyObject?
-    /// How long the low-latency loop's draws hold the main thread. The
-    /// watchdog above catches a loop that stops drawing; this catches the
-    /// opposite, a loop that draws and starves everything else — which is
-    /// what the fifth device run found, and nothing noticed.
-    private var monitor = MainThreadMonitor()
+    /// How long the low-latency loop's frames spend WAITING — for a drawable,
+    /// and for the GPU to schedule the work before presenting in the
+    /// transaction. The watchdog above catches a loop that stops drawing;
+    /// this catches the opposite, a loop that draws and starves everything
+    /// else, which is what the fifth device run found and nothing noticed.
+    ///
+    /// Waits only, not the whole frame: draining a stroke's samples costs the
+    /// same on either loop, and a heavy stroke is no reason to switch. And
+    /// half the time, not most of it: on a loop that works, waiting is a
+    /// sliver of each frame.
+    private var monitor = MainThreadMonitor(saturatedShare: 0.5)
+    /// Frames drawn since the low-latency loop was switched on. The first few
+    /// are not judged: a loop's first frames are slow on any loop.
+    private var drawsSinceSwitch = 0
+    private static let warmUpDraws = 30
+    /// A fall-back has been asked for and runs on the next turn of the main
+    /// queue — never inside the update link's own action or a draw.
+    private var fallBackPending = false
+    /// The last frame's timing, from the renderer.
+    var lastFrameTiming: () -> FrameTiming? = { nil }
 
     /// Whether a Pencil stroke or hover is live: only then is it worth waiting
     /// for the low-latency dispatch before drawing.
@@ -673,7 +688,8 @@ final class FrameLoop {
             layer.presentsWithTransaction = true
             layer.maximumDrawableCount = Renderer.lowLatencyDrawableCount
         }
-        monitor.forgetSlowFrames()
+        monitor.forgetFrames()
+        drawsSinceSwitch = 0
 
         let link = UIUpdateLink(view: view)
         link.wantsLowLatencyEventDispatch = true
@@ -739,14 +755,14 @@ final class FrameLoop {
     private func drawIfNeeded() {
         guard !drewThisUpdate, needsFrame || busy, let view else { return }
         drewThisUpdate = true
-        let started = CACurrentMediaTime()
         view.draw()
-        // Judged only while something is happening: a cold start's first
-        // frames are slow on any loop, and they are not what this is for.
-        if busy {
-            let ended = CACurrentMediaTime()
-            if let reason = monitor.record((ended - started) * 1000, at: ended).giveUp {
-                fallBack(because: reason)
+        drawsSinceSwitch += 1
+        // Judged only while something is happening, and not during the
+        // warm-up: an idle loop has nothing to starve.
+        if busy, drawsSinceSwitch > FrameLoop.warmUpDraws, let timing = lastFrameTiming() {
+            let waited = timing.drawable + timing.submit
+            if let reason = monitor.record(waited, at: CACurrentMediaTime()).giveUp {
+                fallBack(because: "waiting for the display: " + reason)
                 return
             }
         }
@@ -760,12 +776,32 @@ final class FrameLoop {
         }
     }
 
-    private func fallBack(because reason: String) {
+    /// A stroke went five seconds without a Pencil sample while frames were
+    /// being drawn: the fifth device run's failure exactly, and a verdict on
+    /// this loop whatever the frame timing says.
+    func inputStalled() {
         guard mode == .lowLatency else { return }
-        NSLog("[BabyBlender] low-latency loop fell back to the display link: %@", reason)
-        gaveUp = true
-        useDisplayLink()
-        onModeChange?(.displayLink, reason)
+        fallBack(because: "no Pencil samples arrived for five seconds while it was drawing")
+    }
+
+    /// Hands over to the display link on the next turn of the main queue.
+    ///
+    /// Deferred, not done here, because the callers are inside the update
+    /// link's own action or inside a draw. Switching there released the link
+    /// from within its own callback and changed the layer's presenting mode
+    /// and drawable count mid-frame, and nothing documents either as safe.
+    private func fallBack(because reason: String) {
+        guard mode == .lowLatency, !fallBackPending else { return }
+        fallBackPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.fallBackPending = false
+            guard self.mode == .lowLatency else { return }
+            NSLog("[BabyBlender] low-latency loop fell back to the display link: %@", reason)
+            self.gaveUp = true
+            self.useDisplayLink()
+            self.onModeChange?(.displayLink, reason)
+        }
     }
 }
 
@@ -813,7 +849,8 @@ struct SculptView: UIViewRepresentable {
                 guard let editor, let loop else { return }
                 editor.loopDescription = loop.description
                 if reason != nil {
-                    editor.say("Low-latency drawing is unavailable here; using the standard loop")
+                    // Not "unavailable": it may have run and held the iPad up.
+                    editor.say("Low-latency drawing switched itself off; the standard loop is drawing")
                 }
             }
         }
@@ -836,6 +873,7 @@ struct SculptView: UIViewRepresentable {
             renderer.inputTimestamp = editor.measuresLatency ? editor.inputTimestampThisFrame : 0
         }
         renderer.afterDraw = { [weak loop] presented in loop?.frameEnded(presented: presented) }
+        loop.lastFrameTiming = { [weak renderer] in renderer?.stats.timing }
         renderer.requestFrame = { [weak loop] in loop?.request() }
         renderer.onPresented = { [weak editor] input, shown in
             // The presented handler runs on a Metal thread.
@@ -857,6 +895,7 @@ struct SculptView: UIViewRepresentable {
             coordinator.loop?.request()
         }
         editor.onActivity = { [weak loop] busy in loop?.setBusy(busy) }
+        editor.onStrokeStalled = { [weak loop] in loop?.inputStalled() }
         editor.requestDraw = { [weak loop] in loop?.request() }
 
         coordinator.install(on: view)

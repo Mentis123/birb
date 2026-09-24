@@ -26,7 +26,7 @@ the pass documents record what happened.
 |---|---|
 | Export core: VRM 1.0 and FBX 7400 writers, skeleton, rig gate | `verify.sh`, eight stages: unit tests, the golden corpus, the Khronos validator, a PNG decode, Blender's glTF import (with the paint check), Blender's FBX import through both of its importers, the shipped body template, and a render. Unity built a Humanoid Avatar from the FBX on the first attempt, with Chest left unmapped. |
 | Clay template: 3,750 vertices (3,458 welded), 6,912 triangles, mirror-exact | `tools/build_clay.py` and `check_template.py`, reproduced byte for byte in CI |
-| Engine: tables; Grab, Inflate/Deflate and Smooth with X symmetry; picking; surface paint (world-space brush, taper, hardness, mirror); pressure; `StrokeEngine`; a document with undo, redo and discard | 279 tests on Linux. Each defect found on the device became a test that fails on the old code. |
+| Engine: tables; Grab, Inflate/Deflate and Smooth with X symmetry; picking; surface paint (world-space brush, taper, hardness, mirror); pressure; `StrokeEngine`; a document with undo, redo and discard | 300 tests on Linux. Each defect found on the device became a test that fails on the old code. |
 | App: Metal viewport, camera gestures, Pencil input with coalesced and predicted touches, a low-latency loop with a fallback, a hover ring, palm rejection, two-finger undo, a readout that measures touch→glass, and Brush & Pencil settings | Built by CI in Release and Debug. Five device runs. The fifth (2026-09-24) found the low-latency loop holding up every stroke, so the display link is the default again (`Device_Pass_3.md` §11). |
 
 **Not built, and blocking any real use:** Export Model writes no file, and
@@ -398,7 +398,7 @@ In this order:
 | Regressions in `app/` between passes | M0's extractions, the review before every pass, and warnings as errors |
 | Memory at 2048² | M1's tiled, byte-bounded undo, gated by a test at 2048² |
 | Autosave causes a hitch | Only changed raw tiles, written off the main thread, held to the §6 budget |
-| The low-latency loop misbehaves on the owner's iPad | It did, on the fifth device run: 0.3–5 s hangs during strokes. It is off by default, gives way by itself when its frames hold the main thread, and every slow frame is logged with where its time went |
+| The low-latency loop misbehaves on the owner's iPad | It did, on the fifth device run: 0.3–5 s hangs during strokes. It is off by default. It gives way by itself when its waits keep the main thread busy or the Pencil's samples stop. Every slow or saturated second is logged with where its time went |
 | Pinned cards cost frame time during a stroke | The PRD's cap of four; M2's gate measures the stroke budget with four cards open |
 | TestFlight stalls on the account | Nothing else depends on it; the Mac block keeps working |
 | App Store rejection | D4 for the name, the privacy manifest, the encryption key, and an external beta first |

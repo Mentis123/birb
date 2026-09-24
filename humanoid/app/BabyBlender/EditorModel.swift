@@ -183,6 +183,9 @@ final class EditorModel: ObservableObject {
     var onActivity: ((Bool) -> Void)?
     /// Asks the viewport for one frame. Cheap and coalesced.
     var requestDraw: (() -> Void)?
+    /// A stroke went five seconds without a sample while frames were drawn.
+    /// The viewport's loop takes it as a verdict on itself.
+    var onStrokeStalled: (() -> Void)?
 
     // MARK: - The stroke
 
@@ -393,7 +396,8 @@ final class EditorModel: ObservableObject {
             let map = SurfacePaint.Map(template, width: size.width, height: size.height)
             let ms = (CACurrentMediaTime() - started) * 1000
             await MainActor.run { [weak self] in
-                self?.document.installPaintMap(map)
+                guard let self else { return }
+                self.timed("installing the paint map") { self.document.installPaintMap(map) }
                 NSLog("[BabyBlender] paint map ready (%.0f ms, off the main thread)", ms)
             }
         }
@@ -513,6 +517,7 @@ final class EditorModel: ObservableObject {
         if engine.isOpen, lastSampleTime > 0, now - lastSampleTime > EditorModel.strokeTimeout {
             NSLog("[BabyBlender] stroke had no samples for %.1f s; closing it",
                   now - lastSampleTime)
+            onStrokeStalled?()
             change.formUnion(translate(engine.close(&document)))
             strokeFinished()
         }
@@ -743,27 +748,50 @@ final class EditorModel: ObservableObject {
     // MARK: - Commands
 
     func undo() {
-        closeOpenStroke()
-        document.undo()
-        pendingWholeTexture = true
-        refresh(.all)
+        timed("undo") {
+            closeOpenStroke()
+            document.undo()
+            pendingWholeTexture = true
+            refresh(.all)
+        }
         requestDraw?()
     }
 
     func redo() {
-        closeOpenStroke()
-        document.redo()
-        pendingWholeTexture = true
-        refresh(.all)
+        timed("redo") {
+            closeOpenStroke()
+            document.redo()
+            pendingWholeTexture = true
+            refresh(.all)
+        }
         requestDraw?()
     }
 
     func fill() {
-        closeOpenStroke()
-        document.fill(colourRGB)
-        pendingWholeTexture = true
-        refresh(.texture)
+        timed("fill") {
+            closeOpenStroke()
+            document.fill(colourRGB)
+            pendingWholeTexture = true
+            refresh(.texture)
+        }
         requestDraw?()
+    }
+
+    /// Runs a command and writes it to the log if it held the main thread
+    /// long enough to feel. Frames are timed by the renderer; the fifth device
+    /// run's re-run still logged two hangs (0.36 and 0.73 s) with no slow
+    /// frame beside them, so they were somewhere else, and this is where to
+    /// look next. A hang with no line from here or the renderer next to it
+    /// was system UI — a sheet opening, the colour picker — not this code.
+    @discardableResult
+    private func timed<T>(_ label: String, _ body: () -> T) -> T {
+        let started = CACurrentMediaTime()
+        let result = body()
+        let milliseconds = (CACurrentMediaTime() - started) * 1000
+        if milliseconds > 50 {
+            NSLog("[BabyBlender] %@ held the main thread for %.0f ms", label, milliseconds)
+        }
+        return result
     }
 
     /// Two fingers tapped together: undo.
@@ -820,7 +848,7 @@ final class EditorModel: ObservableObject {
     }
 
     func export(named name: String) -> Gate.Report {
-        let report = document.validate()
+        let report = timed("the export pre-flight") { document.validate() }
         say(report.passes ? "Pre-flight passed" : "Pre-flight found problems")
         return report
     }

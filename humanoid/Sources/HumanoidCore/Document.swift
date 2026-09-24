@@ -149,13 +149,18 @@ public struct Document {
     /// the radius and strength of every dab, so one settings value per call
     /// would stamp a whole frame with its last sample.
     ///
-    /// `reference` is the shape the stroke started from; see
-    /// `Sculpt.apply(_:to:tables:reference:)` for why a stroke measures its
-    /// dabs against it.
+    /// `base` is the shape the stroke started from and how far the stroke may
+    /// move each point of it; see `Sculpt.apply(_:to:tables:base:)`. Without
+    /// one, each dab is measured against the live surface.
     @discardableResult
-    public mutating func sculpt(_ dabs: [Sculpt.Dab], reference: MeshData? = nil) -> Int {
+    public mutating func sculpt(_ dabs: [Sculpt.Dab], base: inout Sculpt.StrokeBase?) -> Int {
         guard !dabs.isEmpty else { return 0 }
-        let touched = Sculpt.apply(dabs, to: &current, tables: tables, reference: reference)
+        let touched: Set<Int>
+        if base != nil {
+            touched = Sculpt.apply(dabs, to: &current, tables: tables, base: &base!)
+        } else {
+            touched = Sculpt.apply(dabs, to: &current, tables: tables)
+        }
         guard !touched.isEmpty else { return 0 }
         let vertices = touched.flatMap { tables.weldMembers[$0] }.sorted()
         let before = vertices.map { sculptDelta[$0] }

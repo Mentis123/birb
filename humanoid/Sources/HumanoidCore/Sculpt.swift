@@ -203,6 +203,50 @@ public enum Sculpt {
     /// either call site, and one number could not carry both meanings honestly.
     public static let inflatePerDabDriven = 0.22
 
+    /// The most one Inflate or Deflate stroke can move a point, in brush radii
+    /// — scaled, like the dab itself, by the falloff and strength (pressure
+    /// included) of the dab that reaches it.
+    ///
+    /// A single pass lifts the middle of its path about 0.88 R
+    /// (`inflatePerDabDriven`) and never reaches this. Going back and forth
+    /// over the same place in ONE stroke did, and nothing stopped it: every
+    /// pass pushed along the normals the stroke started with and added
+    /// another 0.88 R, so a scribble became a spike several radii tall on a
+    /// mesh whose points are about a centimetre apart. The fifth device run's
+    /// screenshot is that spike, folded at its base.
+    ///
+    /// With the limit, a scribble fills up to a smooth ridge — the brush's own
+    /// falloff, one radius tall at full strength, less under a light touch —
+    /// and stops, which is the Layer brush of other sculpting tools. More
+    /// height is another stroke, which starts from the new surface and its
+    /// new normals. Applied only when the stroke's starting surface is known
+    /// (`reference`), because "this stroke" is measured from it.
+    public static let strokeHeightLimit = 1.0
+
+    /// What one Inflate, Deflate or Smooth stroke is measured against: the
+    /// surface as the stroke found it, and how far the stroke may move each
+    /// point of it.
+    public struct StrokeBase: Sendable {
+        /// The surface when the stroke began. Dabs find their points on it and
+        /// push along its normals; see `apply(_:to:tables:base:)`.
+        public let surface: MeshData
+        /// Per welded position, the most this stroke may move it: the largest
+        /// ceiling any of its dabs has allowed there so far
+        /// (`strokeHeightLimit` x radius x weight), zero until one reaches it.
+        ///
+        /// Kept for the whole stroke rather than taken from each dab alone,
+        /// because a pass's dabs weaken as they move away from a point. Taken
+        /// per dab, the trailing ones' lower ceilings refused them the rise a
+        /// single pass is meant to give: measured, one pass rose 0.755 radii
+        /// instead of 0.88, and that was the first version of this limit.
+        var ceilings: [Double]
+
+        public init(_ surface: MeshData, tables: MeshTables) {
+            self.surface = surface
+            ceilings = [Double](repeating: 0, count: tables.weldedCount)
+        }
+    }
+
     /// One dab, fully specified: where, how big, how strong, and what.
     ///
     /// A stroke carries Pencil pressure, and pressure changes the radius and
@@ -233,36 +277,128 @@ public enum Sculpt {
     public static func apply(_ brush: Brush, to mesh: inout MeshData, tables: MeshTables,
                              at centres: [Vec3], settings: Settings) -> Set<Int> {
         var touched = Set<Int>()
+        var noCeilings: [Double] = []
         for centre in centres {
-            touched.formUnion(dab(brush, to: &mesh, tables: tables, at: centre, settings: settings))
+            touched.formUnion(dab(brush, to: &mesh, tables: tables, at: centre, settings: settings,
+                                  reference: nil, ceilings: &noCeilings))
         }
         mesh.recomputeNormals(tables, touching: touched)
         return touched
     }
 
     /// Applies dabs that each carry their own brush and settings, then rebuilds
-    /// the normals once. What a pressure-sensitive stroke hands over per frame.
-    ///
-    /// `reference` is the surface as it was when the stroke began. When it is
-    /// given, each dab finds its vertices and takes its push direction from
-    /// THAT surface rather than from the one it is busy moving — Blender's
-    /// "accumulate off" and "original normal", and for the same reason: a
-    /// stroke whose dabs chase the surface they raise depends on when the
-    /// surface was sampled. Measured before this existed, the same Inflate
-    /// path came out 5.4 mm different delivered one sample a frame than three
-    /// a frame, and 8.3 mm different in one frame — the brush changed its
-    /// mind with the frame rate. With a reference, a dab's effect is a function
-    /// of the path and the stroke's starting shape alone, so it does not.
+    /// the normals once, measuring every dab against the live surface. Kept
+    /// for single dabs and tests; a stroke uses `apply(_:to:tables:base:)`.
     @discardableResult
-    public static func apply(_ dabs: [Dab], to mesh: inout MeshData, tables: MeshTables,
-                             reference: MeshData? = nil) -> Set<Int> {
+    public static func apply(_ dabs: [Dab], to mesh: inout MeshData, tables: MeshTables) -> Set<Int> {
         var touched = Set<Int>()
+        var noCeilings: [Double] = []
         for d in dabs {
             touched.formUnion(dab(d.brush, to: &mesh, tables: tables, at: d.centre,
-                                  settings: d.settings, reference: reference))
+                                  settings: d.settings, reference: nil, ceilings: &noCeilings))
         }
         mesh.recomputeNormals(tables, touching: touched)
         return touched
+    }
+
+    /// Applies one frame of a stroke's dabs, each with its own brush and
+    /// settings, then rebuilds the normals once. What a pressure-sensitive
+    /// stroke hands over per frame.
+    ///
+    /// Every dab finds its points and takes its push direction from the
+    /// surface the stroke STARTED on (`base.surface`), not the one it is busy
+    /// moving — Blender's "accumulate off" and "original normal", and for the
+    /// same reason: a stroke whose dabs chase the surface they raise depends
+    /// on when the surface was sampled. Measured before this existed, the
+    /// same Inflate path came out 5.4 mm different delivered one sample a
+    /// frame than three a frame, and 8.3 mm different in one frame — the brush
+    /// changed its mind with the frame rate. Measured against the start, a
+    /// dab's effect is a function of the path and the starting shape alone.
+    ///
+    /// Inflate and Deflate are also held to `strokeHeightLimit`, and never
+    /// turn the surface over within the stroke (`unfold`).
+    @discardableResult
+    public static func apply(_ dabs: [Dab], to mesh: inout MeshData, tables: MeshTables,
+                             base: inout StrokeBase) -> Set<Int> {
+        // The frame's starting positions, for putting back a move that turns a
+        // triangle over. Copy-on-write: this costs one copy of the positions
+        // per frame, at the first dab, and only for the brushes that need it.
+        let pushes = dabs.contains { if case .inflate = $0.brush { return true } else { return false } }
+        let start: [Vec3]? = pushes ? mesh.positions : nil
+        var touched = Set<Int>()
+        for d in dabs {
+            touched.formUnion(dab(d.brush, to: &mesh, tables: tables, at: d.centre,
+                                  settings: d.settings, reference: base.surface,
+                                  ceilings: &base.ceilings))
+        }
+        if let start {
+            unfold(&mesh, moved: touched, from: start, reference: base.surface, tables: tables)
+        }
+        mesh.recomputeNormals(tables, touching: touched)
+        return touched
+    }
+
+    /// Puts back this frame's move for every point of a triangle that the move
+    /// turned over, until no triangle it reached is turned over.
+    ///
+    /// "Turned over" is against the stroke's starting surface: the triangle's
+    /// normal now points more than 90 degrees from where it pointed when the
+    /// stroke began. Inflate and Deflate push along normals, and where those
+    /// converge — Deflate on a rounded edge, or the base of a bump pushed
+    /// again — points pushed far enough cross each other and the surface
+    /// folds through itself. The renderer then culls the folded faces and the
+    /// model shows holes, which is how the fifth device run's screenshot
+    /// looked.
+    ///
+    /// Putting a point back can turn over a neighbour whose other corners did
+    /// move, so the check repeats over the triangles around what was put back.
+    /// It ends: every round puts back at least one more point, and a triangle
+    /// whose moved corners are all back is exactly as it was at the start of
+    /// the frame, which was not turned over. The worst case is the whole frame
+    /// put back — the stroke stops rising there, rather than folding.
+    @discardableResult
+    static func unfold(_ mesh: inout MeshData, moved: Set<Int>, from start: [Vec3],
+                       reference: MeshData, tables: MeshTables) -> Set<Int> {
+        var carrying = moved
+        var restored = Set<Int>()
+        var faces = Set<Int32>()
+        for w in moved { faces.formUnion(tables.trianglesOfWelded[w]) }
+        while !faces.isEmpty {
+            var putBack = Set<Int>()
+            for face in faces where turnedOver(Int(face), mesh: mesh, reference: reference) {
+                let t = Int(face) * 3
+                for corner in 0..<3 {
+                    let w = tables.weldOf[Int(mesh.indices[t + corner])]
+                    if carrying.contains(w) { putBack.insert(w) }
+                }
+            }
+            guard !putBack.isEmpty else { return restored }
+            faces.removeAll(keepingCapacity: true)
+            restored.formUnion(putBack)
+            for w in putBack {
+                let original = start[tables.weldMembers[w][0]]
+                for member in tables.weldMembers[w] { mesh.positions[member] = original }
+                carrying.remove(w)
+                faces.formUnion(tables.trianglesOfWelded[w])
+            }
+        }
+        return restored
+    }
+
+    /// Whether a triangle now faces more than 90 degrees away from how it
+    /// faced on the reference surface. A triangle that was degenerate there
+    /// has no direction to compare with and is left alone.
+    @inline(__always)
+    static func turnedOver(_ face: Int, mesh: MeshData, reference: MeshData) -> Bool {
+        let t = face * 3
+        let a = Int(mesh.indices[t]), b = Int(mesh.indices[t + 1]), c = Int(mesh.indices[t + 2])
+        let was = cross(reference.positions[b] - reference.positions[a],
+                        reference.positions[c] - reference.positions[a])
+        let wasSize = dot(was, was)
+        guard wasSize > 1e-30 else { return false }
+        let now = cross(mesh.positions[b] - mesh.positions[a],
+                        mesh.positions[c] - mesh.positions[a])
+        return dot(now, was) <= 0
     }
 
     /// Applies one dab. Returns the welded positions it touched, which is what
@@ -270,7 +406,9 @@ public enum Sculpt {
     @discardableResult
     public static func apply(_ brush: Brush, to mesh: inout MeshData, tables: MeshTables,
                              at centre: Vec3, settings: Settings) -> Set<Int> {
-        let touched = dab(brush, to: &mesh, tables: tables, at: centre, settings: settings)
+        var noCeilings: [Double] = []
+        let touched = dab(brush, to: &mesh, tables: tables, at: centre, settings: settings,
+                          reference: nil, ceilings: &noCeilings)
         mesh.recomputeNormals(tables, touching: touched)
         return touched
     }
@@ -332,6 +470,20 @@ public enum Sculpt {
         return delta * (1 - share) + mirrored * share
     }
 
+    /// How much of a rise of `rise` a point already `height` above its start
+    /// may take without passing `ceiling` (a magnitude; the direction is the
+    /// rise's own). A point already past it stays where it is: a weaker dab
+    /// never pulls back what a stronger one raised.
+    @inline(__always)
+    static func limitedRise(height: Double, by rise: Double, ceiling: Double) -> Double {
+        if rise >= 0 {
+            guard height < ceiling else { return 0 }
+            return min(height + rise, ceiling) - height
+        }
+        guard height > -ceiling else { return 0 }
+        return max(height + rise, -ceiling) - height
+    }
+
     /// The falloff at a point, or 0 outside the brush.
     @inline(__always)
     private static func reach(_ p: Vec3, from centre: Vec3, radius: Double,
@@ -346,7 +498,7 @@ public enum Sculpt {
     /// rebuild.
     private static func dab(_ brush: Brush, to mesh: inout MeshData, tables: MeshTables,
                             at centre: Vec3, settings: Settings,
-                            reference: MeshData? = nil) -> Set<Int> {
+                            reference: MeshData?, ceilings: inout [Double]) -> Set<Int> {
         guard settings.radius > 0, settings.strength != 0 else { return [] }
 
         // Smooth reads the mesh as it was at the start of the dab, and must:
@@ -394,7 +546,19 @@ public enum Sculpt {
                     * weight
             case .inflate(let amount):
                 let normal = reference?.normals[representative] ?? mesh.normals[representative]
-                shift = normal * (amount * weight)
+                if let reference, !ceilings.isEmpty {
+                    // The most this stroke may move the point — the largest
+                    // any of its dabs has allowed — then how far it already
+                    // has along the normal it started with, and as much of
+                    // this dab as fits between the two.
+                    let ceiling = max(ceilings[welded], strokeHeightLimit * settings.radius * weight)
+                    ceilings[welded] = ceiling
+                    let height = dot(mesh.positions[representative] - reference.positions[representative],
+                                     normal)
+                    shift = normal * limitedRise(height: height, by: amount * weight, ceiling: ceiling)
+                } else {
+                    shift = normal * (amount * weight)
+                }
             case .smooth:
                 let ring = tables.neighbours[welded]
                 guard !ring.isEmpty else { continue }

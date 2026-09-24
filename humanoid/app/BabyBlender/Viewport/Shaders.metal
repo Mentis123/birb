@@ -43,11 +43,21 @@ vertex VertexOut model_vertex(VertexIn in [[stage_in]],
 }
 
 fragment float4 model_fragment(VertexOut in [[stage_in]],
+                               bool frontFacing [[front_facing]],
                                constant Uniforms &uniforms [[buffer(1)]],
                                texture2d<float> albedo [[texture(0)]],
                                sampler albedoSampler [[sampler(0)]]) {
     float3 base = albedo.sample(albedoSampler, in.uv).rgb;
     float3 n = normalize(in.worldNormal);
+    // The underside of a surface that has been folded through itself. It is
+    // drawn, lit from its own side and darker and cooler than the outside,
+    // so a fold reads as a fold. Culled, as it used to be, it read as a hole
+    // in the model with the background showing through, which is what the
+    // fifth device run's screenshot showed.
+    if (!frontFacing) {
+        n = -n;
+        base = base * 0.35 + float3(0.10, 0.12, 0.16);
+    }
     float3 l = normalize(-uniforms.lightDirection);
     float3 v = normalize(uniforms.cameraPosition - in.worldPosition);
     float3 h = normalize(l + v);

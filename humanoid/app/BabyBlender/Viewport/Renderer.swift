@@ -497,7 +497,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depthState)
-        encoder.setCullMode(.back)
+        // Both sides. The clay is closed, so an underside only ever shows where
+        // the surface has been folded through itself, and the shader draws it
+        // darker so a fold looks like one; culled, it was a hole to the
+        // background. Apple GPUs remove the hidden faces of opaque geometry
+        // before shading, so the other side of a closed model costs nothing.
+        encoder.setCullMode(.none)
         // `setFrontFacingWinding` in Objective-C; Swift imports it under this
         // name. The default is clockwise and the templates wind the other way,
         // so leaving it out turns the model inside out.
@@ -617,9 +622,11 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private var hasDrawnAFrame = false
 
-    /// Keeps the frame's breakdown for the readout, and writes a slow one to
-    /// the log with the loop that drew it — at most a line a second, with a
-    /// count of the slow frames in between.
+    /// Keeps the frame's breakdown for the readout, and writes trouble to the
+    /// log with the loop that drew it — at most a line a second, with a count
+    /// of the troubled frames in between. Two kinds: one slow frame, and
+    /// frames that are each quick but leave the main thread no time between
+    /// them, which is what the fifth device run looked like.
     private func record(_ timing: FrameTiming, at time: CFTimeInterval, in view: MTKView) {
         stats.timing = timing
         if timing.total >= stats.worstTiming.total || time - worstAt > 2 {
@@ -631,8 +638,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         let loop = (view.layer as? CAMetalLayer)?.presentsWithTransaction == true
             ? "low-latency loop" : "display link"
         let more = verdict.unreported > 0
-            ? " (+\(verdict.unreported) more slow frames since the last line)" : ""
-        NSLog("[BabyBlender] slow frame, %@: %@%@", loop, timing.summary, more)
+            ? " (+\(verdict.unreported) more since the last line)" : ""
+        if verdict.slow {
+            NSLog("[BabyBlender] slow frame, %@: %@%@", loop, timing.summary, more)
+        } else {
+            NSLog("[BabyBlender] main thread busy %d%% of the last second, %@; last frame %@%@",
+                  Int((verdict.busyShare * 100).rounded()), loop, timing.summary, more)
+        }
     }
 
     /// Builds the rings in world space, lying on the tangent plane at the hit.

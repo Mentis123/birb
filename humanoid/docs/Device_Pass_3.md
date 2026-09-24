@@ -382,8 +382,8 @@ to every check in the app, like a loop working perfectly.
 |---|---|
 | **The display link is the default again**; the low-latency loop is a switch marked experimental, stored under a new key (`lowLatencyLoop`) | So an iPad that saved the old default gets the new one. It is the configuration the fourth device run measured without repeated hangs. |
 | The low-latency loop takes **three drawables**, the system default, not two | It presents inside the update's Core Animation transaction, so when the next update starts, the drawable on screen and the one just committed can both still be held. With two, none is free, and `nextDrawable` blocks the main thread until the display gives one back; Apple documents a wait of up to a second. This is a suspect, not a measured cause: the new frame timing is what will say. |
-| **It gives way by itself** when its frames hold the main thread: one frame over 250 ms (Apple's own hang threshold), or three over 34 ms within two seconds, while something is happening | `MainThreadMonitor` in the core, with nine tests. The first piece of the plan's M0 `FrameWatchdog` to move out of `app/`. |
-| **Every frame is timed by phase**: draining input, waiting for a drawable, waiting for a vertex buffer, submitting. A frame over 34 ms is logged, `[BabyBlender] slow frame, <loop>: 812.0 ms: drawable 790.0, …`, at most once a second with a count of the rest. The readout gains the `main` and `slowest lately` lines. | So the next report names the call rather than the feeling. `FrameTiming.summary` puts the largest phase first. |
+| **It gives way by itself** when it keeps the main thread waiting, judged on its own waits (drawable plus submit) after a 30-frame warm-up and only while something is happening: one wait over 250 ms (Apple's hang threshold), three over 34 ms within two seconds, or waiting for more than half of a whole second. Also when a stroke goes five seconds without a Pencil sample, which is this run's failure exactly. The switch happens on the next turn of the main queue, never inside the update link's own callback. | `MainThreadMonitor` in the core, with 18 tests. It is the first piece of the plan's M0 `FrameWatchdog` to move out of `app/`. The first version judged only single frames and was blind to exactly this run's pattern (§11.1). |
+| **Every frame is timed by phase**: draining input, waiting for a drawable, waiting for a vertex buffer, submitting. A frame over 34 ms is logged, `[BabyBlender] slow frame, <loop>: 812.0 ms: drawable 790.0, …`, and so is a second in which frames kept the main thread busy more than 85% of the time. Both are logged at most once a second, with a count of the rest. The readout gains the `main` and `slowest lately` lines. | So the next report names the call rather than the feeling. `FrameTiming.summary` puts the largest phase first. |
 | The **Release scheme runs without GPU frame capture, Metal API validation and the thread checkers** | Each sits between the app and every Metal or UIKit call. The debugger stays attached, because its console is where these lines arrive. For a feel test, stop Xcode and launch from the home screen. |
 
 **What to send back from the next run:**
@@ -397,5 +397,54 @@ to every check in the app, like a loop working perfectly.
 4. Only then, turn on **Low-latency drawing (experimental)** and do 1–3
    again. If it gives way, the console line says why.
 
-**Unmeasured on the iPad: all of it.** 279 core tests and `verify.sh` PASS
+### 11.1 The re-run, a review, and the spike
+
+**The re-run on the display link logged two hangs instead of thirty-nine**,
+0.36 s and 0.73 s, and no `slow frame` line at all. Every frame the renderer
+drew was under 34 ms, so those two hangs were somewhere other than a frame.
+Undo, redo, fill, the export pre-flight and installing the paint map now log
+themselves when they hold the main thread over 50 ms (`… held the main
+thread for N ms`). A hang with no line from them or from the renderer next to
+it came from system UI (a sheet opening for the first time, or the colour
+picker), not from this code.
+
+**An adversarial review of the first version of this fix found that its
+self-fallback could not see the failure it was written for.** It judged single
+frames: one over 250 ms, or three over 34 ms. It was given five seconds of
+back-to-back 16 ms frames and returned no verdict and no log line. It also:
+- timed the whole draw, including the input drain, which costs the same on
+  either loop;
+- released the update link from inside its own callback;
+- claimed "each rule mutation-checked" in its commit message, when two rules
+  had no test that could fail.
+
+All four are fixed: the busy-share rule, waits only, the deferred switch, and
+18 tests. Eight mutations were run, and each is caught by at least one test.
+
+**The screenshot: a spike on the side of the clay, folded at its base, with
+holes where the renderer culled the folded faces.** Every dab of an Inflate
+stroke pushes along the normals the stroke started with, adding about 0.88 of
+a brush radius per pass. Nothing bounded how many passes over the same place
+could add up, so a scribble became a spike several radii tall on a mesh whose
+points are about a centimetre apart. Where the normals converge (the base of
+a bump, or Deflate on a rounded edge), points pushed that far cross each
+other and the surface folds through itself.
+
+| Change | Measured |
+|---|---|
+| **One Inflate or Deflate stroke moves a point at most one brush radius**, scaled by its dab's falloff and strength (`Sculpt.strokeHeightLimit`). The ceiling is kept per point for the whole stroke (`Sculpt.StrokeBase`), as the largest any of its dabs has allowed. | Twelve passes stop at 1.0 radius, where they used to reach twelve times one pass. One pass is untouched at 0.88. A ceiling taken per dab clipped a single pass to 0.755, because a pass's trailing dabs are weaker; that was this limit's first version, and a test caught it. |
+| **Inflate and Deflate never turn the surface over within a stroke** (`Sculpt.unfold`). After each frame, any point of a triangle that now faces more than 90° from where it faced at the stroke's start is put back to where the frame found it, and the check repeats around what was put back. | Deflating the rounded edge folds without it; with it, no triangle is turned over. A hand-built strip needs the second round. |
+| **The underside of a folded surface is drawn**, darker and cooler, instead of being culled. | A fold made on purpose (with Grab, for example) reads as a fold, not as a hole to the background. |
+
+The tests are `InflateLimitTests`, 12 of them. The mutations were:
+- no limit;
+- a ceiling taken per dab;
+- no guard;
+- a guard that stops after one round;
+- a guard that puts everything back.
+
+Each one is caught. The one test that does not exercise the guard says so in
+its own comment.
+
+**Unmeasured on the iPad: all of it.** 300 core tests and `verify.sh` PASS
 is what exists.

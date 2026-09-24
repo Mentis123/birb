@@ -256,9 +256,9 @@ struct BrushSettingsView: View {
                 } footer: {
                     Text("iPadOS 18 or later: the Pencil's samples arrive later in each frame and "
                          + "the frame is shown as soon as it is ready. Off by default: on one iPad "
-                         + "it held up every stroke. It switches itself off if its frames hold "
-                         + "the iPad up. Tap with three fingers to see the measured "
-                         + "touch-to-glass time, and compare.")
+                         + "it held up every stroke. It switches itself off if its frames keep "
+                         + "the iPad waiting, or if the Pencil's samples stop arriving. Tap with "
+                         + "three fingers to see the measured touch-to-glass time, and compare.")
                 }
             }
             .navigationTitle("Brush & Pencil")

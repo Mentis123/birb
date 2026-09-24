@@ -182,11 +182,12 @@ public struct StrokeEngine {
     private var grabDirty = false
     private var grabNormal: Vec3 = Vec3(0, 0, 1)
     private var grabRadius: Double = 0
-    /// The shape the open sculpt stroke started from. Dabs are placed on it
-    /// and measured against it, never against the surface they are raising;
-    /// see `Sculpt.apply(_:to:tables:reference:)`. A copy of the struct, so
-    /// it costs one copy-on-write of the positions when the first dab lands.
-    private var reference: MeshData?
+    /// The shape the open sculpt stroke started from, and how far the stroke
+    /// may move each point of it. Dabs are placed on it and measured against
+    /// it, never against the surface they are raising; see
+    /// `Sculpt.apply(_:to:tables:base:)`. A copy of the mesh struct, so it
+    /// costs one copy-on-write of the positions when the first dab lands.
+    private var base: Sculpt.StrokeBase?
     private var pendingDabs: [Sculpt.Dab] = []
     private var pendingPaint: [(point: Vec3, seed: Int, brush: SurfacePaint.Brush,
                                 mirror: (point: Vec3, seed: Int)?)] = []
@@ -260,7 +261,7 @@ public struct StrokeEngine {
                 }
                 let previous = lastPointer ?? point
                 lastPointer = point
-                guard let hit = pick(point, on: reference ?? document.mesh, camera: camera,
+                guard let hit = pick(point, on: base?.surface ?? document.mesh, camera: camera,
                                      viewport: viewport) else {
                     effect.formUnion(lift(document: &document))
                     continue
@@ -308,7 +309,7 @@ public struct StrokeEngine {
         // the ring belongs on the surface the person can SEE — on top of the
         // bump the stroke is raising, not buried under it. One raycast a
         // frame, after this frame's dabs have landed.
-        if isOpen, isArmed, reference != nil, effect.contains(.mesh), let point = lastPointer,
+        if isOpen, isArmed, base != nil, effect.contains(.mesh), let point = lastPointer,
            let hit = pick(point, on: document.mesh, camera: camera, viewport: viewport) {
             contact?.position = hit.position
             contact?.normal = hit.normal(in: document.mesh)
@@ -395,7 +396,7 @@ public struct StrokeEngine {
         grabDirty = false
         grabTotal = .zero
         sculptStroke = nil
-        reference = nil
+        base = nil
         contact = nil
         document.beginStroke()
         return effect
@@ -411,7 +412,7 @@ public struct StrokeEngine {
         grabDirty = false
         grabTotal = .zero
         sculptStroke = nil
-        reference = nil
+        base = nil
         lastPointer = nil
         ropeAnchor = nil
         contact = nil
@@ -462,7 +463,7 @@ public struct StrokeEngine {
             isArmed = true
             return .contact
         case .inflate, .deflate, .smooth:
-            reference = document.mesh
+            base = Sculpt.StrokeBase(document.mesh, tables: document.tables)
             let settings = sculptSettings(radius: radius, options: options)
             sculptStroke = Sculpt.Stroke(settings: settings)
             queueDabs(sculptStroke!.advance(to: hit.position), settings: settings)
@@ -578,7 +579,7 @@ public struct StrokeEngine {
             effect.insert(.mesh)
         }
         if !pendingDabs.isEmpty {
-            document.sculpt(pendingDabs, reference: reference)
+            document.sculpt(pendingDabs, base: &base)
             current.dabs += pendingDabs.count
             stepsThisFrame += pendingDabs.count
             pendingDabs.removeAll(keepingCapacity: true)

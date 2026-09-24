@@ -2349,7 +2349,19 @@ is timed by phase and a slow one logs `[BabyBlender] slow frame, <loop>: …`
 with its largest phase first. The Release scheme runs without GPU frame
 capture, Metal API validation or the thread checkers. **A watchdog that looks
 for a loop that stops drawing cannot see a loop that draws and starves
-everything else.**
+everything else**, and the first version of this fix repeated the mistake. It
+judged single slow frames, and a review ran five seconds of back-to-back 16 ms
+frames through it for no verdict. It now also measures the share of each
+second the loop spends waiting.
+
+The same run's screenshot was a **scribbled Inflate spike, folded at its
+base**. Every pass of a stroke pushes along the stroke's starting normals, and
+nothing bounded how many passes could stack. One Inflate or Deflate stroke now
+moves a point at most one brush radius (`Sculpt.strokeHeightLimit`, with the
+ceiling kept per point for the whole stroke in `Sculpt.StrokeBase`). A frame
+that would turn a triangle over is put back (`Sculpt.unfold`). Folded
+undersides are drawn darker instead of being culled into holes. A ceiling
+taken per dab clipped a single pass to 0.755 radii, and a test caught it.
 
 **The plan of record is `humanoid/docs/PLAN.md`** (2026-09-23, rewritten
 that evening). Six milestones, each ended by one device pass:
