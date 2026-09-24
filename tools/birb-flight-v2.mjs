@@ -328,6 +328,12 @@ async function main() {
         await setAltitude(page, 90);
         const flying = await sampleUntil(page, secToFrames(4), (p) => p.recovery === 'flying');
         check(flying.hit, `is FLYING again before the upright landing (recovery=${flying.probe ? flying.probe.recovery : 'unknown'})`);
+        // Let the takeoff's LAUNCH BOOST finish first (flight-recovery.js:
+        // 6 u/s radially outward for 0.4 s, applied after tick and before the
+        // ground check). Dropped inside it, the push outruns a 0.05 probe and
+        // the contact never happens: Browser Health run 162 read FLYING here
+        // with the bird level on the very first frame after takeoff.
+        await stepProbe(page, secToFrames(0.6));
         const relevel = await sampleUntil(page, secToFrames(4),
             (p) => Math.abs(p.rollDeg) < 10 && Math.abs(p.pitchDeg) < 10);
         check(relevel.hit, 'level again before the upright contact (roll/pitch < 10°) — '

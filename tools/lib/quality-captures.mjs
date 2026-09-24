@@ -149,7 +149,11 @@ async function openProductionPage(page) {
   // not say "after the splash flow", and waiting for the DOM node directly
   // is a stronger proof than clicking through splashes first: it shows the
   // workbench does not even need a started game.
-  await prodPage.waitForSelector('#birb-dev-quality-panel', { state: 'attached', timeout: 20000 });
+  // 60 s, not 20 (gate G-QUALITY-CLOCK): this is WALL CLOCK for module
+  // evaluation on a second page while the harness's own page keeps rendering
+  // the game. Measured 8.3-8.8 s here on base and branch alike; a CI runner
+  // about twice as slow sat on the old 20 s edge and read "no panel exists".
+  await prodPage.waitForSelector('#birb-dev-quality-panel', { state: 'attached', timeout: 60000 });
   return {
     page: prodPage,
     debugParamPresent: new URL(prodPage.url()).searchParams.has('debug'),
