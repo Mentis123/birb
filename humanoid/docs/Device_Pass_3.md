@@ -366,6 +366,13 @@ are stroke-, hover- and coast-length stretches on the same loop. The display
 link it replaced ran the fourth device run with no repeated hangs, and the
 loop is the only thing new between those two runs.
 
+Apple's own documentation for `wantsImmediatePresentation` gives the warning
+in advance: *"If you opt in to this behavior, keep the complexity of the code
+you submit to the render server to a minimum. When an app requests immediate
+frame presentation, but doesn't keep rendering complexity minimal, frames
+don't submit for presentation in time. Dropped frames cause hitches."* It
+also asks for thorough profiling. This loop was made the default without any.
+
 **What this run could not say is which call held each frame**, because nothing
 timed the phases. The FrameLoop watchdogs (§10) looked only for a loop that
 **stops** drawing. A loop that draws and starves everything else looked,
@@ -374,7 +381,7 @@ to every check in the app, like a loop working perfectly.
 | Change | Why |
 |---|---|
 | **The display link is the default again**; the low-latency loop is a switch marked experimental, stored under a new key (`lowLatencyLoop`) | So an iPad that saved the old default gets the new one. It is the configuration the fourth device run measured without repeated hangs. |
-| The low-latency loop takes **three drawables**, the system default, not two | It presents inside the update's Core Animation transaction, and the frame reaches the glass at the refresh after the commit. When the next update starts, the drawable on screen and the one just committed are both still held. With two, none is free, and taking one blocks the main thread until the display gives one back. |
+| The low-latency loop takes **three drawables**, the system default, not two | It presents inside the update's Core Animation transaction, so when the next update starts, the drawable on screen and the one just committed can both still be held. With two, none is free, and `nextDrawable` blocks the main thread until the display gives one back; Apple documents a wait of up to a second. This is a suspect, not a measured cause: the new frame timing is what will say. |
 | **It gives way by itself** when its frames hold the main thread: one frame over 250 ms (Apple's own hang threshold), or three over 34 ms within two seconds, while something is happening | `MainThreadMonitor` in the core, with nine tests. The first piece of the plan's M0 `FrameWatchdog` to move out of `app/`. |
 | **Every frame is timed by phase**: draining input, waiting for a drawable, waiting for a vertex buffer, submitting. A frame over 34 ms is logged, `[BabyBlender] slow frame, <loop>: 812.0 ms: drawable 790.0, …`, at most once a second with a count of the rest. The readout gains the `main` and `slowest lately` lines. | So the next report names the call rather than the feeling. `FrameTiming.summary` puts the largest phase first. |
 | The **Release scheme runs without GPU frame capture, Metal API validation and the thread checkers** | Each sits between the app and every Metal or UIKit call. The debugger stays attached, because its console is where these lines arrive. For a feel test, stop Xcode and launch from the home screen. |

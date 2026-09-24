@@ -180,13 +180,15 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     /// Drawables for the low-latency loop: the system's own default of three.
     ///
-    /// That loop presents inside the update's Core Animation transaction and
-    /// the frame is shown at the refresh after the commit, so when the next
-    /// update starts, the drawable on the glass AND the one just committed are
-    /// both still held. With two there is none left, and taking one blocks the
-    /// main thread until the display gives one back. The fifth device run,
-    /// the first with that loop on, reported the main thread busy for the
-    /// whole of every stroke.
+    /// That loop presents inside the update's Core Animation transaction, so
+    /// when the next update starts the drawable on the glass and the one just
+    /// committed can both still be held. With two, none is left, and
+    /// `nextDrawable` blocks the main thread until the display gives one back
+    /// — Apple documents a wait of up to a second. That is a reasoned
+    /// suspect, not a measured cause: the fifth device run, the first with
+    /// this loop on, showed the main thread busy for the whole of every
+    /// stroke, and nothing then timed where. Now the frame timing says, and
+    /// two was only ever a latency tweak made for the display link.
     static let lowLatencyDrawableCount = 3
 
     /// Every frame's main-thread time goes through this: it decides which
