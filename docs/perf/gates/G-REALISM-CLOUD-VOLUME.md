@@ -69,7 +69,7 @@ Inf a fixed cyan, both surviving the bloom composite.
   the owner rather than applied here because it would move EVERY material's
   shader off `d47fc7e`'s bytes, `?cloudvol=0` included, and belongs in its
   own commit.
-- **After the fixes**: {{NAN_AFTER}}
+- **After the fixes**: the sweep was NOT re-run — the reviewer was stopped by a session limit before it could be. What stands after the fixes is the construction below, not a capture.
 
 Every NaN-capable operation in this package's GLSL is now guarded (finding
 4), so the volume and shadow shaders are NaN-free for finite uniforms by
@@ -168,7 +168,7 @@ luminance than the same frame without the cloud's shadow (0.1143 vs 0.1708).
 
 ### Post-merge numbers
 
-{{NUMBERS}}
+Not filled by the reviewer (stopped by a session limit during re-verification). The integrated tree was verified by the integrator instead: see the "REALISM WAVE 2" entry in CLAUDE.md for the suite results.
 
 
 ## What was there
