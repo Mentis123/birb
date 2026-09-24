@@ -75,10 +75,13 @@ targets:
 # number about this app, so the release scheme is shipped rather than left as
 # an instruction nobody follows.
 #
-# Still worth doing by hand for a feel test, because a scheme cannot express
-# them: Edit Scheme -> Run -> Options -> Metal API Validation = Disabled and
-# GPU Frame Capture = Disabled, then stop Xcode and launch from the home
-# screen. A debugger attached to a Metal app is not the app.
+# The Release scheme also runs without Xcode's GPU frame capture layer, Metal
+# API validation and the thread checkers. Each of those sits between the app
+# and every Metal or UIKit call, and the fifth device run's numbers were taken
+# through all of them. (A scheme CAN say this; an earlier note here said it
+# could not.) The debugger stays attached, because its console is where the
+# `[BabyBlender]` lines arrive, but it is still not the app: for a feel test,
+# stop Xcode and launch from the home screen.
 schemes:
   BabyBlender:
     build:
@@ -98,6 +101,12 @@ schemes:
         BabyBlender: all
     run:
       config: Release
+      enableGPUFrameCaptureMode: disabled
+      # The string form, which every XcodeGen reads: newer ones take a Bool
+      # and still accept "disabled" for the enum it replaced.
+      enableGPUValidationMode: disabled
+      disableMainThreadChecker: true
+      disableThreadPerformanceChecker: true
     profile:
       config: Release
     analyze:

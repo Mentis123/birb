@@ -3,7 +3,7 @@
 **Time: about twenty minutes the first time, most of it Xcode indexing.**
 
 > **Read this first.** Everything in `Sources/` is tested on Linux and green —
-> 270 tests. Everything in `app/` is **compiled by CI** on every push (the
+> 279 tests. Everything in `app/` is **compiled by CI** on every push (the
 > `macos` job in `.github/workflows/humanoid.yml`, Release and Debug, for a
 > device) — which it was not before 2026-09-23: that job named a project that
 > no longer existed and still passed. Compiled is not run: the app layer's
@@ -130,7 +130,8 @@ a palm holds a stroke takes it over and throws the palm's stroke away.
 
 The pencil-tip button in the top bar opens **Brush & Pencil**: the pressure
 curve and the size and strength ranges, paint hardness, mirror, the rope
-stabiliser, size fixed on the model, and the low-latency drawing switch.
+stabiliser, size fixed on the model, and the low-latency drawing switch
+(experimental, off by default since 2026-09-24: `Device_Pass_3.md` §11).
 
 Six tools along the bottom: Grab, Inflate, Deflate, Smooth, Paint, Erase, with
 size and strength. **Export** runs the real pre-flight and shows the checks.

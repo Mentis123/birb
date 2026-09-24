@@ -2336,6 +2336,21 @@ did-become-active observer stamping a frame that had never happened; the loop
 now judges on frames PRESENTED. **A watchdog that its own reset can satisfy
 is not watching anything.**
 
+**Fifth device run (2026-09-24): the low-latency loop held up every stroke.**
+`humanoid/docs/Device_Pass_3.md` §11. There were thirty-nine `Hang detected`
+reports, from 0.26 to 5.05 s. Three were exactly the five seconds the stroke
+watchdog waits, and that watchdog runs INSIDE a frame, so it printing exactly
+5.0 s means frames were being drawn back to back while no Pencil sample
+arrived. The loop was keeping the main thread busy for as long as a stroke was
+open. **The display link is the default again** (`lowLatencyLoop`, a new key,
+so a saved "on" does not survive). The experiment takes three drawables and
+gives way by itself (`MainThreadMonitor`, in the core and tested). Every frame
+is timed by phase and a slow one logs `[BabyBlender] slow frame, <loop>: …`
+with its largest phase first. The Release scheme runs without GPU frame
+capture, Metal API validation or the thread checkers. **A watchdog that looks
+for a loop that stops drawing cannot see a loop that draws and starves
+everything else.**
+
 **The plan of record is `humanoid/docs/PLAN.md`** (2026-09-23, rewritten
 that evening). Six milestones, each ended by one device pass:
 - M0: close the loop — a recorder, a one-tap device report, and decisions

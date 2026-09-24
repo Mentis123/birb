@@ -245,7 +245,7 @@ struct BrushSettingsView: View {
                 }
 
                 Section {
-                    Toggle("Low-latency drawing", isOn: $editor.lowLatency)
+                    Toggle("Low-latency drawing (experimental)", isOn: $editor.lowLatency)
                     HStack {
                         Text("Drawing through")
                         Spacer()
@@ -255,8 +255,10 @@ struct BrushSettingsView: View {
                     Text("Latency")
                 } footer: {
                     Text("iPadOS 18 or later: the Pencil's samples arrive later in each frame and "
-                         + "the frame is shown as soon as it is ready. Tap with three fingers to "
-                         + "see the measured touch-to-glass time, and compare.")
+                         + "the frame is shown as soon as it is ready. Off by default: on one iPad "
+                         + "it held up every stroke. It switches itself off if its frames hold "
+                         + "the iPad up. Tap with three fingers to see the measured "
+                         + "touch-to-glass time, and compare.")
                 }
             }
             .navigationTitle("Brush & Pencil")

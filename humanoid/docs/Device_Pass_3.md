@@ -191,7 +191,8 @@ rectangle was read as "upload everything". It uploads nothing now.
 - **Display link** — MetalKit's own timer, as before: draws at the top of a
   display frame with whatever Pencil samples UIKit had dispatched, presents a
   refresh later.
-- **Low-latency (default on iPadOS 18+)** — a `UIUpdateLink` with Apple's two
+- **Low-latency (iPadOS 18+; off by default since the fifth device run, §11)**
+  — a `UIUpdateLink` with Apple's two
   drawing-app features: Pencil events dispatched in the *middle* of the UI
   update (`wantsLowLatencyEventDispatch`), and the frame shown immediately after
   the update's Core Animation commit (`wantsImmediatePresentation`, which Apple
@@ -283,14 +284,16 @@ and launch from the home screen. Three-finger tap for the readout.
 8. **Two-finger tap** undoes the last stroke, and the camera does not move.
    A small two-finger pinch or pan moves the camera and does NOT undo.
 9. **Latency — the number to send back.** Draw small circles for five seconds
-   and read `touch→glass` (median, p90) and the loop name after the dot. Then
-   Brush & Pencil → turn **Low-latency drawing** off, and repeat. Both pairs of
-   numbers, please, with the iPad model. If the loop name says `display link`
-   while the switch is on, the low-latency loop fell back; the console line
-   `[BabyBlender] low-latency loop fell back …` says why.
-10. **Console lines worth pasting:** `drawing through the low-latency
-    UIUpdateLink` (or the fall-back line), `paint map ready (… ms)`, and any
-    `Hang detected`.
+   and read `touch→glass` (median, p90), the `main` line and the loop name
+   after the dot. Then Brush & Pencil → turn **Low-latency drawing
+   (experimental)** on, and repeat. Both sets of numbers, please, with the
+   iPad model. If the loop name says `display link` while the switch is on,
+   the low-latency loop gave way; the console line `[BabyBlender] low-latency
+   loop fell back …` says why, with the number. (Before §11 this read the
+   other way round: the low-latency loop was the default.)
+10. **Console lines worth pasting:** any `[BabyBlender] slow frame` line (it
+    names the loop and where the time went), the fall-back line if there is
+    one, `paint map ready (… ms)`, and any `Hang detected`.
 11. **Palm first, on the first launch of this build.** Rest the heel of your
     hand on the MODEL, then put the Pencil down and draw. The Pencil draws
     from its first stroke, and whatever the palm did is taken back (the
@@ -341,3 +344,51 @@ samples) was left as it is.
 | The last samples of every stroke — the ones between the last move and the lift — were never applied, clipping a flicked stroke's tail. | The lift's coalesced samples are applied before the end. |
 | A stroke whose touch-down and lift fell in one frame left the viewport drawing at full rate while idle; toasts stayed up until the next touch; the brush colour was converted through UIKit twice a frame; the Size slider did nothing with the size locked on the model; "Let a finger sculpt" took the camera away from fingers entirely; loop changes were published from inside SwiftUI view updates. | All fixed as described in the code comments at each site. |
 
+## 11. The fifth device run (2026-09-24): the low-latency loop held up every stroke
+
+*"Working... performance still sucks / laggy and lame-ish."* The console: a
+Release build (the paint map ready in 34 ms), the debugger attached, `drawing
+through the low-latency UIUpdateLink`, the first frame at 2732x2048 — and
+**thirty-nine `Hang detected` lines, from 0.26 s to 5.05 s**, with `stroke had
+no samples for 5.0 s; closing it` three times, each followed by a hang of
+5.04–5.05 s.
+
+**The three five-second hangs say what the others are.** The stroke watchdog
+runs inside a frame's input drain, and it printed exactly 5.0 s all three
+times. A single slow call would have ended at an arbitrary moment and the
+watchdog would have printed 5.3 or 7.2. So frames were being drawn back to back
+for those five seconds, and in all that time not one Pencil sample arrived.
+The hang then ended within 50 ms of the watchdog closing the stroke, because
+closing it is what stops the loop drawing continuously. These were not a slow
+function. They were the loop keeping the main thread busy for as long as a
+stroke was open, while UIKit's own event delivery waited. The other thirty-six
+are stroke-, hover- and coast-length stretches on the same loop. The display
+link it replaced ran the fourth device run with no repeated hangs, and the
+loop is the only thing new between those two runs.
+
+**What this run could not say is which call held each frame**, because nothing
+timed the phases. The FrameLoop watchdogs (§10) looked only for a loop that
+**stops** drawing. A loop that draws and starves everything else looked,
+to every check in the app, like a loop working perfectly.
+
+| Change | Why |
+|---|---|
+| **The display link is the default again**; the low-latency loop is a switch marked experimental, stored under a new key (`lowLatencyLoop`) | So an iPad that saved the old default gets the new one. It is the configuration the fourth device run measured without repeated hangs. |
+| The low-latency loop takes **three drawables**, the system default, not two | It presents inside the update's Core Animation transaction, and the frame reaches the glass at the refresh after the commit. When the next update starts, the drawable on screen and the one just committed are both still held. With two, none is free, and taking one blocks the main thread until the display gives one back. |
+| **It gives way by itself** when its frames hold the main thread: one frame over 250 ms (Apple's own hang threshold), or three over 34 ms within two seconds, while something is happening | `MainThreadMonitor` in the core, with nine tests. The first piece of the plan's M0 `FrameWatchdog` to move out of `app/`. |
+| **Every frame is timed by phase**: draining input, waiting for a drawable, waiting for a vertex buffer, submitting. A frame over 34 ms is logged, `[BabyBlender] slow frame, <loop>: 812.0 ms: drawable 790.0, …`, at most once a second with a count of the rest. The readout gains the `main` and `slowest lately` lines. | So the next report names the call rather than the feeling. `FrameTiming.summary` puts the largest phase first. |
+| The **Release scheme runs without GPU frame capture, Metal API validation and the thread checkers** | Each sits between the app and every Metal or UIKit call. The debugger stays attached, because its console is where these lines arrive. For a feel test, stop Xcode and launch from the home screen. |
+
+**What to send back from the next run:**
+
+1. Build with **BabyBlender (Release)**, then stop Xcode and launch from the
+   home screen to feel it. Draw for a minute: is it smooth now?
+2. Three-finger tap and screenshot the readout while drawing: `main`,
+   `slowest lately` and `touch→glass`.
+3. If it still drags, run once more from Xcode and paste the console,
+   `slow frame` lines included.
+4. Only then, turn on **Low-latency drawing (experimental)** and do 1–3
+   again. If it gives way, the console line says why.
+
+**Unmeasured on the iPad: all of it.** 279 core tests and `verify.sh` PASS
+is what exists.

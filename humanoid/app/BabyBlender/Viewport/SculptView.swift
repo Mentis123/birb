@@ -506,6 +506,11 @@ final class FrameLoop {
     private var framesPresented = 0
     /// The `UIUpdateLink`, kept untyped so the property needs no availability.
     private var link: AnyObject?
+    /// How long the low-latency loop's draws hold the main thread. The
+    /// watchdog above catches a loop that stops drawing; this catches the
+    /// opposite, a loop that draws and starves everything else — which is
+    /// what the fifth device run found, and nothing noticed.
+    private var monitor = MainThreadMonitor()
 
     /// Whether a Pencil stroke or hover is live: only then is it worth waiting
     /// for the low-latency dispatch before drawing.
@@ -648,7 +653,10 @@ final class FrameLoop {
         link = nil
         mode = .displayLink
         guard let view else { return }
-        (view.layer as? CAMetalLayer)?.presentsWithTransaction = false
+        if let layer = view.layer as? CAMetalLayer {
+            layer.presentsWithTransaction = false
+            layer.maximumDrawableCount = Renderer.drawableCount
+        }
         view.isPaused = !busy
         view.enableSetNeedsDisplay = !busy
         view.setNeedsDisplay()
@@ -661,7 +669,11 @@ final class FrameLoop {
         // the update link's actions do.
         view.isPaused = true
         view.enableSetNeedsDisplay = false
-        (view.layer as? CAMetalLayer)?.presentsWithTransaction = true
+        if let layer = view.layer as? CAMetalLayer {
+            layer.presentsWithTransaction = true
+            layer.maximumDrawableCount = Renderer.lowLatencyDrawableCount
+        }
+        monitor.forgetSlowFrames()
 
         let link = UIUpdateLink(view: view)
         link.wantsLowLatencyEventDispatch = true
@@ -727,7 +739,17 @@ final class FrameLoop {
     private func drawIfNeeded() {
         guard !drewThisUpdate, needsFrame || busy, let view else { return }
         drewThisUpdate = true
+        let started = CACurrentMediaTime()
         view.draw()
+        // Judged only while something is happening: a cold start's first
+        // frames are slow on any loop, and they are not what this is for.
+        if busy {
+            let ended = CACurrentMediaTime()
+            if let reason = monitor.record((ended - started) * 1000, at: ended).giveUp {
+                fallBack(because: reason)
+                return
+            }
+        }
         // Nothing is animating and the frame just drawn asked for no other:
         // stop asking the system for updates until something requests one.
         // `needsFrame` is re-read AFTER the draw on purpose — the drain inside

@@ -94,6 +94,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         var triangles = 0
         /// Milliseconds the GPU spent, from the command buffer's own clock.
         var gpuMilliseconds: Double = 0
+        /// Where the last frame's main-thread time went.
+        var timing = FrameTiming()
+        /// The slowest frame of the last couple of seconds, itemised.
+        var worstTiming = FrameTiming()
     }
 
     private let device: MTLDevice
@@ -173,6 +177,22 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// being absorbed. The HUD's worst-frame figure is what says whether that
     /// happens on this device, and changing this back is one character.
     static let drawableCount = 2
+
+    /// Drawables for the low-latency loop: the system's own default of three.
+    ///
+    /// That loop presents inside the update's Core Animation transaction and
+    /// the frame is shown at the refresh after the commit, so when the next
+    /// update starts, the drawable on the glass AND the one just committed are
+    /// both still held. With two there is none left, and taking one blocks the
+    /// main thread until the display gives one back. The fifth device run,
+    /// the first with that loop on, reported the main thread busy for the
+    /// whole of every stroke.
+    static let lowLatencyDrawableCount = 3
+
+    /// Every frame's main-thread time goes through this: it decides which
+    /// slow frames are written to the log, at most one line a second.
+    private var monitor = MainThreadMonitor()
+    private var worstAt: CFTimeInterval = 0
 
     /// Staging for a partial texture upload, reused. `replace(region:)` wants
     /// tightly packed rows and the albedo is not, so the rectangle is gathered
@@ -413,25 +433,44 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        let started = CACurrentMediaTime()
+        var timing = FrameTiming()
         // Last frame's GPU time, now that it has certainly finished.
         if let previous = lastCommitted, previous.status == .completed {
             stats.gpuMilliseconds = (previous.gpuEndTime - previous.gpuStartTime) * 1000
             lastCommitted = nil
         }
         beforeDraw?()
+        timing.drain = (CACurrentMediaTime() - started) * 1000
         var presented = false
-        defer { afterDraw?(presented) }
+        // Every exit is timed, the ones that found no drawable included: those
+        // are the frames most worth seeing.
+        defer {
+            let ended = CACurrentMediaTime()
+            timing.total = (ended - started) * 1000
+            record(timing, at: ended, in: view)
+            afterDraw?(presented)
+        }
 
         birbSignpostBegin("frame")
         defer { birbSignpostEnd("frame") }
 
-        guard let descriptor = view.currentRenderPassDescriptor,
-              let drawable = view.currentDrawable,
+        // Asking for the pass descriptor asks the layer for a drawable, and
+        // that is the call that blocks: until the display gives one back, for
+        // up to a second. Timed on its own, and never asked twice — after an
+        // empty descriptor, `currentDrawable` would wait all over again.
+        let asking = CACurrentMediaTime()
+        let descriptor = view.currentRenderPassDescriptor
+        let drawable = descriptor == nil ? nil : view.currentDrawable
+        timing.drawable = (CACurrentMediaTime() - asking) * 1000
+        guard let descriptor, let drawable,
               let indexBuffer, indexCount > 0, !vertexBuffers.isEmpty,
               let buffer = queue.makeCommandBuffer() else { return }
 
         // Wait for a vertex buffer the GPU has finished with, then fill it.
+        let waiting = CACurrentMediaTime()
         inFlight.wait()
+        timing.buffers = (CACurrentMediaTime() - waiting) * 1000
         vertexSlot = (vertexSlot + 1) % Renderer.bufferCount
         let vertexBuffer = vertexBuffers[vertexSlot]
         scratch.withUnsafeBytes { bytes in
@@ -544,6 +583,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         // Read from the layer at the moment of presenting, so the renderer and
         // the loop that set it cannot disagree about which way to present.
+        let submitting = CACurrentMediaTime()
         if (view.layer as? CAMetalLayer)?.presentsWithTransaction == true {
             // The low-latency loop presents inside the UI update's own Core
             // Animation transaction, which is what lets the system show the
@@ -559,6 +599,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             buffer.present(drawable)
             buffer.commit()
         }
+        timing.submit = (CACurrentMediaTime() - submitting) * 1000
         presented = true
         lastCommitted = buffer
 
@@ -573,6 +614,24 @@ final class Renderer: NSObject, MTKViewDelegate {
     }
 
     private var hasDrawnAFrame = false
+
+    /// Keeps the frame's breakdown for the readout, and writes a slow one to
+    /// the log with the loop that drew it — at most a line a second, with a
+    /// count of the slow frames in between.
+    private func record(_ timing: FrameTiming, at time: CFTimeInterval, in view: MTKView) {
+        stats.timing = timing
+        if timing.total >= stats.worstTiming.total || time - worstAt > 2 {
+            stats.worstTiming = timing
+            worstAt = time
+        }
+        let verdict = monitor.record(timing.total, at: time)
+        guard verdict.report else { return }
+        let loop = (view.layer as? CAMetalLayer)?.presentsWithTransaction == true
+            ? "low-latency loop" : "display link"
+        let more = verdict.unreported > 0
+            ? " (+\(verdict.unreported) more slow frames since the last line)" : ""
+        NSLog("[BabyBlender] slow frame, %@: %@%@", loop, timing.summary, more)
+    }
 
     /// Builds the rings in world space, lying on the tangent plane at the hit.
     /// Returns how many it wrote: the brush, and the lightest-touch size if

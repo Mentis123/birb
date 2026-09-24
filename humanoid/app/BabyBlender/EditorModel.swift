@@ -137,7 +137,16 @@ final class EditorModel: ObservableObject {
     /// Drive the viewport from a `UIUpdateLink` with low-latency Pencil
     /// dispatch and immediate presentation (iPadOS 18). The viewport reads
     /// this once when it is built and switches when it changes.
-    @Published var lowLatency = true { didSet { save(lowLatency, "lowLatency") } }
+    ///
+    /// OFF by default since the fifth device run (2026-09-24), the first with
+    /// it on: thirty-nine `Hang detected` reports of 0.26 to 5.05 s, three of
+    /// them exactly the five seconds the stroke watchdog waits, i.e. the loop
+    /// drawing flat out while no Pencil sample arrived. The display link it
+    /// replaced ran the fourth device run with none. It stays one switch away
+    /// as an experiment, and gives way by itself if its frames hold the main
+    /// thread. Stored under a new key, so an iPad that saved the old default
+    /// gets the new one.
+    @Published var lowLatency = false { didSet { save(lowLatency, "lowLatencyLoop") } }
     /// Which loop is actually drawing, for the readout: the low-latency one
     /// can fall back on its own if it ever stops producing frames.
     @Published var loopDescription = "MTKView display link"
@@ -614,25 +623,35 @@ final class EditorModel: ObservableObject {
             latency = String(format: "touch→glass %.1f ms (p90 %.1f, n %d)", median, p90, sorted.count)
         }
         let last = engine.last
-        hud = String(format: "%.1f fps  cpu+gpu %.2f ms (worst %.2f)", mean > 0 ? 1000 / mean : 0,
-                     mean, worst)
-            + String(format: "\ngpu %.2f ms  draws %d  tris %d",
-                     stats.gpuMilliseconds, stats.drawCalls, stats.triangles)
-            + "\n" + latency + "  · " + loopDescription
-            + String(format: "\nbrush %.0f pt  pressure %.2f  steps/frame %d  picks %d",
-                     radiusPoints, engine.pressure, engine.stepsThisFrame, engine.picksThisFrame)
-            // The counter that proves the loop is alive: single digits during a
-            // stroke. Hundreds means samples are queuing with nothing draining
-            // them, which is what the second device run was.
-            + String(format: "\nqueue %d (worst %d)  scale %.0fx  hover %@",
-                     lastDrainDepth, worstDrainDepth, pointScale,
-                     hoverEvents > 0 ? "\(hoverEvents)" : "never (iPad may not have it)")
-            + "\nlast: \(last.tool.rawValue) \(framesLastStroke)f  samples \(last.samples)"
-            + "  steps \(last.dabs)  texels \(last.texels)  skipped \(last.skipped)"
-            + "  lifted \(last.lifted)  armed \(last.armed ? "yes" : "no")"
-            + (last.discarded ? "  discarded" : "")
-            + String(format: "  peak %.2f", last.peakPressure)
-            + "\ntool \(tool.rawValue)\(tool == .erase ? " (paints base colour)" : "")"
+        // Built a line at a time. One `+` chain this long is the kind of
+        // expression the type checker gives up on, and it grew by three terms
+        // on 2026-09-24.
+        var text = String(format: "%.1f fps  cpu+gpu %.2f ms (worst %.2f)",
+                          mean > 0 ? 1000 / mean : 0, mean, worst)
+        text += String(format: "\ngpu %.2f ms  draws %d  tris %d",
+                       stats.gpuMilliseconds, stats.drawCalls, stats.triangles)
+        // Where the main thread's time went, last frame and slowest lately.
+        // "Laggy" arrives as a sentence; this is the number behind it.
+        text += String(format: "\nmain %.1f ms: drain %.1f  drawable %.1f  buffers %.1f  submit %.1f",
+                       stats.timing.total, stats.timing.drain, stats.timing.drawable,
+                       stats.timing.buffers, stats.timing.submit)
+        text += "\nslowest lately " + stats.worstTiming.summary
+        text += "\n" + latency + "  · " + loopDescription
+        text += String(format: "\nbrush %.0f pt  pressure %.2f  steps/frame %d  picks %d",
+                       radiusPoints, engine.pressure, engine.stepsThisFrame, engine.picksThisFrame)
+        // The counter that proves the loop is alive: single digits during a
+        // stroke. Hundreds means samples are queuing with nothing draining
+        // them, which is what the second device run was.
+        let hover = hoverEvents > 0 ? "\(hoverEvents)" : "never (iPad may not have it)"
+        text += String(format: "\nqueue %d (worst %d)  scale %.0fx  hover ",
+                       lastDrainDepth, worstDrainDepth, pointScale) + hover
+        text += "\nlast: \(last.tool.rawValue) \(framesLastStroke)f  samples \(last.samples)"
+        text += "  steps \(last.dabs)  texels \(last.texels)  skipped \(last.skipped)"
+        text += "  lifted \(last.lifted)  armed \(last.armed ? "yes" : "no")"
+        if last.discarded { text += "  discarded" }
+        text += String(format: "  peak %.2f", last.peakPressure)
+        text += "\ntool \(tool.rawValue)" + (tool == .erase ? " (paints base colour)" : "")
+        hud = text
     }
 
     /// One touch-to-glass measurement: from the newest sample a frame consumed
@@ -878,7 +897,7 @@ final class EditorModel: ObservableObject {
         if let v = double("minimumStrength") { minimumStrength = min(1, max(0.05, v)) }
         if let raw = d.string(forKey: EditorModel.defaultsPrefix + "pressureCurve"),
            let curve = PressureResponse.Curve(rawValue: raw) { pressureCurve = curve }
-        if let v = bool("lowLatency") { lowLatency = v }
+        if let v = bool("lowLatencyLoop") { lowLatency = v }
         if let v = bool("pencilSeen") { pencilSeen = v }
     }
 }

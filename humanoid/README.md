@@ -53,7 +53,7 @@ The original product spec: [`../docs/PRD-humanoid-creator-v0.1.md`](../docs/PRD-
 ## What works today
 
 ```
-swift test                          # 270 tests, no Apple toolchain needed
+swift test                          # 279 tests, no Apple toolchain needed
 swift run humanoid-cli gate         # rig report for the frozen skeleton
 swift run humanoid-cli corpus out/  # write the golden corpus
 ./tools/verify.sh                   # the whole chain, eight stages
