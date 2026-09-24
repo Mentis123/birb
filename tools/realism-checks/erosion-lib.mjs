@@ -23,6 +23,9 @@ export const ERODED_VIEWS = Object.freeze([
   { label: 'channel-top', u: CHANNEL, alt: 48, pitch: 1.45, solo: true },
   { label: 'channel-low', u: [-0.53, 0.6, 0.6], alt: 26, pitch: 0.55, solo: false },
   { label: 'highland-top', u: HIGHLAND, alt: 62, pitch: 1.2, solo: true },
+  // The whole scene from altitude — trees, mist, clouds and all — looking
+  // down the channel's catchment, the way a player sees it from a climb.
+  { label: 'forest-high', u: [-0.55, 0.64, 0.54], alt: 92, pitch: 1.2, solo: false },
 ]);
 
 const norm = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
@@ -36,6 +39,9 @@ export async function seededForest(ctx) {
     B.pinTier(0);
     B.setSunTime(0);
     B.setSunEnabled(true);
+    // Hold the air field's gust visuals too, so a pair of boots differs only
+    // by the flag (wave 2's air moves the canopies and the clouds).
+    if (typeof B.stillAir === 'function') B.stillAir(true);
   });
   await ctx.frames(3);
   await ctx.page.evaluate(() => window.__BIRB.setSunEnabled(false));
@@ -81,6 +87,7 @@ export async function restoreView(ctx) {
     B.freeze(false);
     B.setCameraView('chase');
     B.setSunEnabled(true);
+    if (typeof B.stillAir === 'function') B.stillAir(false);
   });
   await ctx.frames(4);
 }

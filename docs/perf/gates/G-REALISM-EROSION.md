@@ -1,6 +1,8 @@
 # G-REALISM-EROSION — a landscape carved by water
 
-**Date:** 2026-09-23. **Branch:** `realism/erosion`, based on `d47fc7e`.
+**Date:** 2026-09-23, finished 2026-09-24. **Branch:** `realism/erosion`, based
+on `d47fc7e`, with main `d28da11` (realism wave 2: air field, cloud volume,
+hex tiling) merged in and every check below re-run on the merged tree.
 **Decision:** SHIP OPT-IN. `?erosion=1` (Flags tab → Terrain → "A landscape
 carved by water", default **Off**). Off is the true before: no bake, no
 worker, no texture, the ground shader byte-identical (a test diffs it), and
@@ -11,7 +13,9 @@ expected and only failure.
 
 **Not measured: the phone.** Every number below is this machine's Chromium
 on SwiftShader, or Node, on a shared 4-core box whose load average sat at
-**15-19** for the whole session (other builders' harnesses). No frame-time,
+**15-19** for the first session and **5-12** for the re-run on the merged
+tree (other builders' harnesses). Where the two sessions both measured a
+number, both are given. No frame-time,
 bake-time, memory or thermal number exists for the iPhone 16 Pro, and none
 is claimed. Nobody has looked at it on glass.
 
@@ -161,14 +165,14 @@ switched off, measured in the same boot where the check allows it.
 
 | | ms |
 |---|---|
-| first forest build, flag on (module-load worker had landed) | **0** (0.1 on a revisit) |
-| worker bakes, off the main thread | forest 566, canyons 518, mountain 235 |
-| main-thread fallback, forest, timed twice in one boot | **432**, **683** |
+| first forest build, flag on (module-load worker had landed) | **0** (0.1 on a revisit) — both sessions |
+| worker bakes, off the main thread | forest 458, canyons 258, mountain 132 (first session: 566 / 518 / 235) |
+| main-thread fallback, forest, timed twice in one boot | **379** (incl. building the grid), **196** (first session: 432, 683) |
 | same, Node, one thread | 266 (+137 building the grid, once per session) |
-| a whole cached world build around it | 358 (canyons 921, mountain 412, city 427) |
+| a whole cached world build around it | forest 269, canyons 400, mountain 565, city 256 (first session: 358 / 921 / 412 / 427) |
 
-The fallback is over the brief's ~300 ms mark, which is why the worker
-exists; it is what a phone would pay only if its worker lost the race to the
+The fallback straddles the brief's ~300 ms mark (196-683 ms depending on
+load and whether the grid is already built), which is why the worker exists; it is what a phone would pay only if its worker lost the race to the
 first build. The same bake measured anywhere from 210 to 1,708 ms on this
 box as its load went from ~10 to ~17 — **quote the ratio to the control,
 not the milliseconds.**
@@ -214,23 +218,24 @@ un-eroded one by at least 5.66 units (deepest: grid −12.127 = eroded
 `aboveGround` — the same sampler the floor, the landing check and the
 walking pose use — **never negative, minimum 0.560** over 26.3 units,
 flying and grounded. The clearance of the bird's centre above the DRAWN
-ground along the same path: **−0.888 eroded against −0.709 for the same
-flight over the un-eroded world** — the bird's centre already dips 0.7 units
+ground along the same path: **−0.850 eroded against −0.654 for the same
+flight over the un-eroded world** (first session −0.888 / −0.709) — the bird's centre already dips 0.7 units
 under the drawn skin of the un-eroded ground wherever the mesh skims above
 the floor, and the carve adds 0.18 to that.
 
 **A landing still lands, and the bird walks on the carved ground**: put
 over the deepest channel bed the forest has (cut 7.61 units) and brought down
-to the floor, the REAL ground collision grounded it (radius 108.937,
-`aboveGround` 0.56; 112.624 / 0.623 in an earlier run — where the flying
+to the floor, the REAL ground collision grounded it (radius 108.97,
+`aboveGround` 0.593 on the merged tree; 108.937 / 0.56 and 112.624 / 0.623
+in earlier runs — where the flying
 bird touches down varies, that it does not), then it walked 3.15 units with
-its clearance held at 0.560-0.638 — never under the ground, never lifting
+its clearance held at 0.562-0.640 (0.560-0.638 before the merge) — never under the ground, never lifting
 off it. (`tools/birb-walk.mjs` is frozen and boots without the flag; this is
 its flagged counterpart.)
 
 **The wetness is visible and is a network**: over the trunk channel, the
 live A/B (wet strength 1, 0, 1, 0 in one boot, no recompile) moves the
-frame by mean |ΔL| **1.54** against a control of **0.000** between the two
+frame by mean |ΔL| **1.51-1.54** (three runs) against a control of **0.000** between the two
 identical strength-1 frames; **12.0%** of the frame changes by more than 4
 levels (a network, not a wash), and **0.00%** of pixels get brighter (it
 only darkens).
@@ -318,7 +323,8 @@ clone.
 ## The look
 
 Captured with and without the flag from identical absolute poses (seeded
-props, sun time 0 held, tier 0 pinned). **Top-down over a trunk channel
+props, sun time 0 held, tier 0 pinned, and — since the merge — the air
+field's gust visuals held with `__BIRB.stillAir(true)`). **Top-down over a trunk channel
 (48 above base, ground solo'd): the eroded frame has a dark, sinuous, cool
 line running downhill across the hill that is a uniform slope in the control
 — it reads as a stream valley, continuous and joining, not as a noise
@@ -326,7 +332,14 @@ texture.** From the highland (62 above, solo'd) the change is fainter:
 darker gullies down the lower slopes under the valley mist, the ridge line
 unchanged (ridges are where water does not go). From a low oblique view in
 the trees the ground difference is small and the tree layout difference
-(trap 9) dominates. Map renders of the bake (hillshade + wetness overlay,
+(trap 9) dominates. **From altitude, whole scene** (`forest-high`: 92 above
+base, 1.2 rad nose-down, nothing solo'd — added on the merged tree because
+this is the view a player gets from a climb): one faint darker gully runs
+diagonally across the foreground hill in the eroded frame and not in the
+control; the rest of the frame is valley mist, lakes and trees, and the
+trees again differ by trap 9. A first attempt at 0.7 rad looked mostly into
+the mist and showed no ground difference at all. `node tools/birb-realism.mjs
+--only erosion-look,erosion-off --out DIR` writes all eight frames. Map renders of the bake (hillshade + wetness overlay,
 Node) show the network plainly: channels leaving every catchment, joining,
 and running into the lakes. At play distance this is a subtle change, and
 the subtlety is set by the mesh: the carve cannot go deeper or narrower
@@ -346,9 +359,17 @@ without failing the agreement table above.
 - **Desktop mesh density** (128 x 96) was not separately measured; it is
   denser than the phone mesh the table is sized against, so its gap can
   only be smaller.
-- **Interaction with the other realism branches** beyond the horizon bake
-  this branch is based on (the atmosphere's valley mist, the air field) —
-  none reads the terrain differently, but none was run with this flag.
+- **Interaction with wave 2 is wired, not separately measured.** The air
+  field's ridge lift reads `sampleTerrainHeight` (index.html hands it to
+  `createAirField`), which goes through `terrainDisplacement`, so it lifts
+  over the ERODED ridges by construction — but no check flies a ridge with
+  both flags and compares. `?hextile=1&erosion=1` compiles the wet block
+  after the hex overlay (one shader, both suffixes in the cache key) and
+  was never booted together. Cloud volume does not read the terrain. The
+  realism boots with `erosion=1` ran with every wave-2 default on and
+  reported zero console errors or warnings.
+- **The trees are a different draw, not the same trees on carved ground**
+  (trap 9) — an owner looking at a before/after will see that first.
 
 ## References
 
@@ -380,10 +401,38 @@ Shared files touched, each in one compact region:
   `erosion` and `groundAgreement()` on the returned world; the texture's
   dispose.
 - `src/environment/ground-detail.js`: the `wetMap` option (uniforms, one
-  fetch before `outgoingLight *= gdTint`, cache-key suffix).
+  fetch before `outgoingLight *= gdTint`, AFTER the hex/triplanar overlay,
+  cache-key suffix `-wet` after `-hex`). This was the one textual merge
+  conflict with main's hex tiling; both sides kept.
 - `src/ui/boot-flags.js`: one Terrain entry before the Light section.
 - `sw.js`: two `CORE_ASSETS` lines after `ground-detail.js`. `BIRB_BUILD` /
   `CACHE_VERSION` NOT bumped — the integrator bumps once.
 - `index.html`: one `__BIRB.erosion` hook after `horizonPatched`.
 - The integrator regenerates `tools/oracle-manifest.txt` for the new test
   file.
+
+## Merged-tree verification (2026-09-24)
+
+After merging main `d28da11` into this branch (conflicts only in
+`ground-detail.js` and `sw.js`, resolved keeping both sides):
+
+- `node tools/birb-realism.mjs --only erosion-*` (the six flagged checks plus
+  `erosion-off` on the default boot): **43/43**, zero console errors or
+  warnings on either boot; re-run of look/off with the new altitude view
+  **10/10**.
+- `node tools/birb-modes.mjs`: all 5 modes ok in forest (load ~11).
+- `node tools/birb-walk.mjs`: walk ok in forest.
+- `npm test`: 1211 tests, 999 pass, 210 skipped, 2 fail — both
+  `tests/oracle-manifest.test.js` reporting `tests/erosion.test.js` unpinned
+  (the expected failure; the integrator regenerates the manifest).
+  `tests/erosion.test.js` 18/18.
+- `BIRB_PERF_IMPL=1 node --test tests/build-identity.test.js`: 4/4.
+- `sha256sum -c tools/oracle-manifest.txt`: 0 failures.
+- The interrupted work item ("the page side: receive face arrays without
+  building a grid, and stop retaining per-node arrays in the cache") was
+  found complete in the WIP commit: the worker posts only the per-face
+  arrays and the wet bytes (transferred), the page rebuilds the field with
+  `erosionFieldFromFaces` (no grid), and a cache entry holds only
+  `{ field (face arrays), wetBytes, stats }`. The node graph is built on the
+  main thread only if the fallback bake runs, and is then kept (~3.3 MB)
+  for the session.
