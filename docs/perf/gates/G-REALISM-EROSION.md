@@ -228,7 +228,8 @@ the floor, and the carve adds 0.18 to that.
 > **Superseded by the review (below).** Restricted to the ground the water
 > actually cut, the planet-wide table above hid a real regression, and the
 > floor now reads the carve through the mesh's own triangles. The same low
-> pass measures **−0.228 eroded against −0.228 un-eroded**.
+> pass measures **−0.228 eroded against −0.228 un-eroded** (−0.245 / −0.245
+> on a second run: the flown path varies, the pair does not).
 
 **A landing still lands, and the bird walks on the carved ground**: put
 over the deepest channel bed the forest has (cut 7.61 units) and brought down
@@ -587,4 +588,11 @@ staleness checks for the new test file; build-identity 4/4;
 `sha256sum -c tools/oracle-manifest.txt` 0 failures;
 `node tools/birb-realism.mjs --only 'erosion-*'` **55/55** over three boots
 (`erosion=1`, `erosion=1&hextile=1`, default), zero console warnings;
-`birb-modes` all 5 modes ok; `birb-walk` ok; `birb-shaders`: see the report.
+`birb-modes` all 5 modes ok; `birb-walk` ok. **`birb-shaders` did not
+complete**: four runs at load 13-15 timed out in `startGame` waiting for 0.5 s
+of rendered game time at Ultra (its frozen 30 s wall-clock budget, ~2.6 s a
+frame), and the SAME harness from a `d28da11` checkout failed identically at
+the same line in the same minutes — a clock, not this branch. It boots the
+default, which the off-path fingerprint above shows is byte-identical in
+every patched shader; the flagged shaders compiled with zero console
+warnings in all three realism boots. Re-run it on a quiet box.
