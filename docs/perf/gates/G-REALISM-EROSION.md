@@ -203,7 +203,9 @@ control that re-displaces the same vertices with the carve off:
 | mountain | 1.606 | 1.642 | **+0.036** | +0.188 | +0.558 | 13.3% → 13.8% |
 
 Limits the check enforces: Δp99 0.25, Δp999 0.6, Δmax 0.8, Δshare 2
-points. **Read the control column first**: the un-eroded world already
+points. *(Builder's numbers, before the review's fix; averaged over all dry ground,
+two thirds of which the carve barely touches. See "Review" for the same
+measurement where the channels are.)* **Read the control column first**: the un-eroded world already
 draws its ground up to 1.5-1.9 units above the floor at the 99th percentile
 (the detail noise's sub-vertex skim) and 2.6-3.3 at worst. The carve moves
 that by hundredths.
@@ -222,6 +224,11 @@ ground along the same path: **−0.850 eroded against −0.654 for the same
 flight over the un-eroded world** (first session −0.888 / −0.709) — the bird's centre already dips 0.7 units
 under the drawn skin of the un-eroded ground wherever the mesh skims above
 the floor, and the carve adds 0.18 to that.
+
+> **Superseded by the review (below).** Restricted to the ground the water
+> actually cut, the planet-wide table above hid a real regression, and the
+> floor now reads the carve through the mesh's own triangles. The same low
+> pass measures **−0.228 eroded against −0.228 un-eroded**.
 
 **A landing still lands, and the bird walks on the carved ground**: put
 over the deepest channel bed the forest has (cut 7.61 units) and brought down
@@ -436,3 +443,148 @@ After merging main `d28da11` into this branch (conflicts only in
   `{ field (face arrays), wetBytes, stats }`. The node graph is built on the
   main thread only if the fallback bake runs, and is then kept (~3.3 MB)
   for the session.
+
+## Review (adversarial, 2026-09-24)
+
+Reviewer's brief: hunt the off path, the mesh/floor agreement, the worker
+race, the sampler, the shader, `?hextile=1&erosion=1`, the service worker,
+and claims without numbers. Reviewed `git diff d28da11..HEAD` at `800e7f3`.
+**Verdict: ship-with-notes** (opt-in; one major found and fixed, one flaky
+test fixed, two new checks).
+
+### MAJOR, fixed: the bird sank into the channels it was flying down
+
+The builder's agreement table samples 20,000 directions over ALL dry ground.
+The carve lowers 66% of nodes, most by a few hundredths, so its p99 is the
+un-eroded hillside's p99 and the table could not have seen a channel. The
+same exact ray-cast, restricted to directions the water cut (new
+`tools/realism-checks/erosion-7-review.mjs`), against the same directions
+un-eroded:
+
+| drawn ground above the floor | forest | canyons | mountain |
+|---|---|---|---|
+| cut > 1 unit, share > 0.6, un-eroded → builder | 14.2% → 18.5% | 20.2% → 23.3% | 15.3% → 17.8% |
+| cut > 3 units, share > 0.6, un-eroded → builder | 14.1% → **24.9%** | 18.0% → **27.7%** | 15.0% → **22.8%** |
+| cut > 3 units, p50 / p99, un-eroded → builder | −0.02 / 1.38 → +0.17 / 1.97 | −0.02 / 1.81 → +0.14 / 2.54 | −0.05 / 1.59 → +0.09 / 2.05 |
+
+The mechanism is geometric, not a tuning miss: a carved bed is CONCAVE at
+exactly mesh scale (the flank is an `exp(−L/flank)` profile with its cusp on
+the channel line), and the mesh draws a CHORD across it, which sits above the
+bed the floor samples analytically. So wherever the water cut 3+ units, a bird
+skimming the floor (centre 0.6 above it) was inside the drawn ground 23-28% of
+the time against 14-18% for the same directions un-eroded — the builder's own
+low pass (−0.850 against −0.654) was this, read as noise. By the builder's own
+planet-wide limits applied where the channels are, canyons was over (p99
++0.253 > 0.25; share +3.1 points > 2).
+
+**Smoothing was tried and rejected**: three more averaging passes per biome
+cut the excess by about a third (cut > 3: 21.4 / 23.3 / 19.9%) and cost a
+fifth of the depth (deepest cut 8.41 → 6.97, 10.93 → 8.80, 7.39 → 6.55).
+
+**The fix: the floor reads the carve AS THE MESH DRAWS IT.**
+`createMeshLattice(field, W, H)` samples the field at the ground mesh's own
+vertices (three's SphereGeometry convention); `sampleMeshLattice` reads it
+back through the triangle the radial ray hits — gnomonic weights against the
+flat triangle, three's own `(a, b, d)` / `(b, c, d)` split, stepping across a
+latitude chord (which bulges poleward of its row) rather than extrapolating.
+`displaceSphereGeometry` builds the lattice for every mesh it displaces, so a
+later `setGroundResolution()` (Ultra's terrain High) moves the floor with the
+mesh; `terrainDisplacement` uses it whenever it exists. At a vertex it IS the
+field, so **no vertex moved** (at 853 carved vertices of the 112x72 mesh the
+floor carries the field's carve to 4.9e-14, and equals the ray-cast drawn
+ground to 8.3e-6); between vertices it is the mesh's own straight line, so
+the carve adds nothing to the floor-to-mesh gap:
+
+| cut > 3 units, share > 0.6 (un-eroded → fixed) | forest 14.1% → 13.9% | canyons 18.0% → 17.8% | mountain 15.0% → 15.0% |
+|---|---|---|---|
+| planet-wide Δp99 / Δmax (was +0.013..+0.036 / +0.35..+0.56) | −0.022 / −0.003 | −0.017 / −0.001 | −0.009 / +0.048 |
+| the low pass, min clearance above the DRAWN ground | −0.228 eroded | −0.228 un-eroded | |
+
+Depth, wetness and the look are unchanged (deepest cuts 8.41 / 10.93 / 7.39;
+wet A/B mean |ΔL| 1.50, 11.9% of the frame, 0.00% brighter). Props, water,
+the landmark features and the horizon bake read the same function, so they
+now sit on the drawn carve too. What it does NOT change: the detail noise's
+own sub-vertex skim (the control column, p99 1.5-1.9, 12-17% of dry ground
+> 0.6) is pre-existing and untouched — the bird still dips into the drawn
+skin of the un-eroded hillside exactly as it always did. Cost: ~100 ns a
+call in Node against 84 for the field sampler; one Float64 lattice per
+ground mesh (66 KB at 112x72, 135 KB at Ultra's 160x104). Unit tests: the
+sampler against an independent brute-force ray-cast over every triangle of a
+24x16 sphere (poles, seam, both sides of every latitude chord) to 1e-9 —
+mutation-checked: removing the chord step fails it at 0.022 — plus exact
+vertex values, degenerate inputs and a zero-allocation test.
+
+### MINOR, fixed: the zero-allocation heap test was flaky
+
+`the sampler allocates nothing` failed in one parallel `npm test` and in
+roughly one in five solo runs on this box (load 10-14): 960 KB over 20k calls
+against 192 KB for bare arithmetic. That is exactly 48 bytes a call — V8
+boxing the arguments and result of a call it had not inlined, because the
+tiering of `sampleCubeField` depends on every earlier test in the file and on
+whether the background compile had landed. Longer warm-ups, pauses and fresh
+loop functions did not fix it (the decision is sticky per process). The
+measurement now runs in a FRESH node process with
+`--no-concurrent-recompilation` (10/10 green under load); an allocating
+variant still reads 585 KB against 171 KB there. The structural source scan is
+unchanged and remains the primary guard.
+
+### Checked and found sound
+
+- **(a) The off path is identical — in the browser, not just in the unit
+  test.** A one-off harness built every biome in the page's own module
+  instance, seeded, on `d28da11` and on this branch, and hashed every ground
+  and prop position/colour array, every instance matrix, 4,000 samples each
+  of the floor, the mesh height and the basin height, and the vertex and
+  fragment source of every patched material (`onBeforeCompile` run on three's
+  real ShaderLib source): **identical in all four biomes under the default,
+  `?hextile=1` and `?smooth=0`**, zero console warnings, before and after the
+  review's fix. The only difference anywhere is a `customProgramCacheKey`
+  string that is three's default `onBeforeCompile.toString()` of the edited
+  closure — a key, not a shader.
+- **(c) Worker and main thread bake the same ground.** Which path a biome's
+  bake came from is a race against the boot, so a divergence would be two
+  different worlds from one seed. Each biome's worker-sourced field, sampled
+  at 60,000 directions, equals a fresh main-thread bake **exactly** (max |Δ|
+  0 for delta and wet). The noise is a fixed-seed permutation (not
+  `worldSeed`), so the worker cannot drift from the page. A late worker result
+  only fills the per-variant cache and never touches a built world; a build
+  reads the cache synchronously, so there is no stale-bake-after-switch path
+  to guard. Memory: ~1 MB of cached fields for three biomes, the 3.3 MB node
+  graph only if the fallback ever ran.
+- **(d) The sampler**: face selection and the atan mapping agree with the
+  grid's lattice on all six faces; a NaN or zero direction returns 0 (both
+  samplers); the poles are ordinary interior points of faces 2/3.
+- **(e) The wetness shader**: `texture2D` on an R8 `RedFormat` /
+  `UnsignedByteType` texture (valid, filterable, WebGL2), linear filtering
+  with no mips (so the equirect seam cannot pick a tiny mip), `acos` clamped,
+  `atan(z, −x)` undefined only at the exact pole (Metal's `atan2(0,0)` is 0).
+  Not booted on ANGLE-Metal: this box has SwiftShader only.
+- **(f) `?hextile=1&erosion=1` booted** (new `erosion-8-hextile.mjs`): zero
+  console errors or warnings, a lit and textured ground frame (mean luminance
+  123.5, range 17-250), and the wetness still moves it under hex tiling (mean
+  |ΔL| 1.41, 10.7% of pixels, against a control of 0.000).
+- **(g)** `erosion.js` and `erosion-worker.js` are in `CORE_ASSETS`;
+  `BIRB_PERF_IMPL=1 node --test tests/build-identity.test.js` 4/4;
+  `BIRB_BUILD` / `CACHE_VERSION` not bumped.
+
+### Notes left for the owner / integrator
+
+- Trap 9 stands: the eroded forest is a different tree draw.
+- The fix makes the floor depend on the ground mesh's resolution — correct
+  (it follows what is drawn), but a `setGroundResolution()` after props were
+  placed moves the carved floor under them by the difference between the two
+  meshes' chords (sub-unit, carved ground only).
+- The phone is still unmeasured: the bake, the worker start, the extra
+  ground-fragment work and memory.
+- The integrator regenerates `tools/oracle-manifest.txt` for
+  `tests/erosion.test.js` (20 tests now).
+
+### Re-run on the reviewed tree
+
+`tests/erosion.test.js` 20/20 (10 consecutive solo runs green);
+`npm test` 1213 tests, the only failures the two `oracle-manifest.test.js`
+staleness checks for the new test file; build-identity 4/4;
+`sha256sum -c tools/oracle-manifest.txt` 0 failures;
+`node tools/birb-realism.mjs --only 'erosion-*'` **55/55** over three boots
+(`erosion=1`, `erosion=1&hextile=1`, default), zero console warnings;
+`birb-modes` all 5 modes ok; `birb-walk` ok; `birb-shaders`: see the report.

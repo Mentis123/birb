@@ -16,7 +16,7 @@ import { createValleyFeature } from "./landmark-valley.js";
 import { airRequested } from '../flight/air-field.js';
 import {
   erosionRequested, EROSION_PROFILES, getCubeSphereGrid, erodeTerrain, createErosionField, erosionFieldFromFaces,
-  bakeWetnessEquirect,
+  bakeWetnessEquirect, createMeshLattice, sampleMeshLattice,
 } from "./erosion.js";
 import {
   applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested,
@@ -114,6 +114,11 @@ let _activeWaterLevel = 0;
 // the landing check, the walking pose, the mesh, the props, the water and
 // the horizon bake all reach the terrain through free functions.
 let _activeErosion = null;
+// The carve AS THE GROUND MESH DRAWS IT (?erosion=1 only): the field sampled
+// at the current ground mesh's vertices, read back through its triangles.
+// Set by displaceSphereGeometry for every mesh it displaces; null whenever
+// _activeErosion is. See _erosionMeshDelta.
+let _erosionLattice = null;
 // The bake is a pure function of the biome (seeded noise, a fixed valley, a
 // fixed sea level), so a biome visited twice is eroded once.
 const _erosionCache = new Map();
@@ -785,8 +790,12 @@ function terrainDisplacement(nx, ny, nz, profile) {
   const valley = valleyCarveAt(nx, ny, nz);
   let h = Math.min(0, cont + detail + valley);
   // Water's carve (?erosion=1). <= 0 by construction, so h stays <= 0 and
-  // the floor still only ever dips below the base radius.
-  if (_activeErosion !== null) h += _activeErosion.delta(nx, ny, nz);
+  // the floor still only ever dips below the base radius. Read through the
+  // ground mesh's own triangles (see _erosionMeshDelta) once the mesh exists,
+  // so the floor and the drawn ground carry the SAME carve.
+  if (_activeErosion !== null) {
+    h += _erosionLattice !== null ? _erosionMeshDelta(nx, ny, nz) : _activeErosion.delta(nx, ny, nz);
+  }
 
   // ── Lake beds ──────────────────────────────────────────────────────────
   // Inside a basin deep enough to hold water, the detail roughness is pushed
@@ -904,6 +913,36 @@ export function sampleTerrainMeshHeight(x, y, z) {
 }
 
 // ── Erosion bake (?erosion=1) ─────────────────────────────────────────────
+
+// The carve the floor reads must be the carve the MESH draws. The floor
+// samples the terrain analytically at the bird's own direction; the ground
+// mesh samples it at vertices 5-7 units apart and draws flat triangles
+// between. For the noise that was always so (the bird's 0.6 clearance hides
+// the skim), but a carved channel is CONCAVE at exactly mesh scale, and a
+// chord across a concave bed sits above it: measured in the review
+// (G-REALISM-EROSION, "Review"), where the water cut more than 3 units the
+// drawn ground stood more than 0.6 above the floor over 23-28% of the ground
+// against 14-18% for the same directions un-eroded — a bird skimming the
+// floor of a channel was inside the ground it could see. So once the mesh
+// exists, the carve term is read THROUGH the mesh: the field at the mesh's
+// own vertices, interpolated across the triangle the direction projects into
+// (gnomonic weights: the radial ray against the flat triangle, the same
+// triangle split three's SphereGeometry draws). At a vertex it is the field
+// itself, so the mesh does not move; between vertices it is the straight
+// line the mesh draws, so the carve adds nothing to the floor-to-mesh gap.
+// Zero-allocation, one atan2 and one acos, like the field's own sampler.
+function _setErosionLattice(W, H) {
+  _erosionLattice = _activeErosion !== null ? createMeshLattice(_activeErosion, W, H) : null;
+}
+
+function _erosionMeshDelta(nx, ny, nz) {
+  // Carve-down only, EXACTLY: the weights are non-negative inside a triangle,
+  // but a direction the sampler has to extrapolate for (a hair outside every
+  // triangle it tried) could lift a hair above 0, and the floor must never
+  // rise above the base radius.
+  const v = sampleMeshLattice(_erosionLattice, nx, ny, nz);
+  return v < 0 ? v : 0;
+}
 
 /**
  * How much of the carve to withhold at a direction: 1 inside the landmark
@@ -1209,6 +1248,12 @@ function displaceSphereGeometry(geometry, sphereRadius, variant = 'forest') {
   const palette = TERRAIN_COLORS[variant] || TERRAIN_COLORS.forest;
   const posAttr = geometry.getAttribute('position');
   const count = posAttr.count;
+  // ?erosion=1: the floor reads the carve through THIS mesh's triangles
+  // (_erosionMeshDelta), so the lattice follows every mesh displaced here,
+  // including a later setGroundResolution(). Off, nothing happens.
+  if (_activeErosion !== null) {
+    _setErosionLattice(geometry.parameters?.widthSegments, geometry.parameters?.heightSegments);
+  }
 
   // Add vertex colors
   const colors = new Float32Array(count * 3);
@@ -4099,6 +4144,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // Synchronous on purpose: the world build is, and a carve that landed
   // after the props were placed would leave them standing on the old ground.
   _activeErosion = null;
+  _erosionLattice = null;
   let _erosionEntry = null;
   let _erosionMs = 0;
   let _erosionCached = false;
@@ -4115,6 +4161,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     } catch (err) {
       console.warn('[SphericalWorld] erosion bake failed; the ground stays as it was:', err);
       _activeErosion = null;
+      _erosionLattice = null;
       _erosionEntry = null;
     }
     _erosionMs = _horizonNow() - t0;

@@ -24,12 +24,12 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import v8 from 'node:v8';
-import vm from 'node:vm';
+import { execFileSync } from 'node:child_process';
 
 import {
   EROSION_PROFILES, erosionRequested, getCubeSphereGrid, erodeTerrain,
   faceValuesOf, sampleCubeField, createErosionField, erosionFieldFromFaces, bakeWetnessEquirect,
+  createMeshLattice, sampleMeshLattice,
 } from '../src/environment/erosion.js';
 import { horizonTexelDirection } from '../src/environment/horizon-map.js';
 import { bootFlagByKey, readBootFlag, withBootFlag } from '../src/ui/boot-flags.js';
@@ -238,24 +238,54 @@ test('the sampler allocates nothing: scalars in, one number out, no allocating s
   // traffic in a loop like this one — including the terrain function this
   // samples beside. What must hold is that the sampler adds nothing to what a
   // bare arithmetic function with the same signature costs.
-  v8.setFlagsFromString('--expose_gc');
-  const gc = vm.runInNewContext('gc');
-  const control = { delta(x, y, z) { return x * 0.5 + y * 0.25 - z; } };
-  const growth = (f) => {
-    let sink = 0;
-    for (let k = 0; k < 20000; k++) sink += f.delta(0.3, 0.8, 0.52 + k * 1e-6);   // warm up
-    gc();
-    const before = process.memoryUsage().heapUsed;
-    for (let k = 0; k < 20000; k++) sink += f.delta(0.3 + k * 1e-6, 0.8, 0.52);
-    const grew = process.memoryUsage().heapUsed - before;
-    assert.ok(Number.isFinite(sink));
-    return grew;
-  };
-  const base = Math.max(growth(control), growth(control));
-  const sampler = Math.min(growth(field), growth(field));
+  const { base, sampler } = heapGrowthInChild('field');
   assert.ok(sampler <= base + 64 * 1024,
     `20k samples grew the heap ${sampler} bytes against ${base} for bare arithmetic`);
 });
+
+// Heap growth of 20k sampler calls against 20k calls of bare arithmetic
+// with the same signature, measured in a FRESH node process. Why a child:
+// V8 boxes a double crossing an un-inlined call (48 bytes a call, 960 KB
+// over 20k calls), and whether it inlines depends on the tiering history of
+// the functions involved — in this file the samplers are exercised by every
+// test above with other arrays, and in a parallel `npm test` on a loaded box
+// the optimised code was sometimes not installed at all. Both made the
+// in-process measurement fail about one run in five on a sampler that does
+// not allocate. A clean isolate with synchronous optimisation has neither.
+// `which` is 'field' (sampleCubeField through createErosionField) or
+// 'lattice' (sampleMeshLattice).
+function heapGrowthInChild(which) {
+  const url = new URL('../src/environment/erosion.js', import.meta.url).href;
+  const src = `
+    import * as E from ${JSON.stringify(url)};
+    let sample;
+    if (${JSON.stringify(which)} === 'field') {
+      const g = E.getCubeSphereGrid(32);
+      const f = E.createErosionField(g, { delta: new Float32Array(g.count).fill(-1), wet: new Float32Array(g.count), stats: {} });
+      sample = (x, y, z) => f.delta(x, y, z);
+    } else {
+      const L = E.createMeshLattice({ delta: (x, y, z) => x - y * z }, 112, 72);
+      sample = (x, y, z) => E.sampleMeshLattice(L, x, y, z);
+    }
+    const bare = (x, y, z) => x * 0.5 + y * 0.25 - z;
+    const growth = (fn) => {
+      let sink = 0;
+      for (let k = 0; k < 50000; k++) sink += fn(0.3, 0.8, 0.52 + k * 1e-6);
+      globalThis.gc();
+      const before = process.memoryUsage().heapUsed;
+      for (let k = 0; k < 20000; k++) sink += fn(0.3 + k * 1e-6, 0.8, 0.52);
+      const grew = process.memoryUsage().heapUsed - before;
+      if (!Number.isFinite(sink)) throw new Error('non-finite sample');
+      return grew;
+    };
+    const base = Math.max(growth(bare), growth(bare));
+    const sampler = Math.min(growth(sample), growth(sample), growth(sample));
+    process.stdout.write(JSON.stringify({ base, sampler }));
+  `;
+  const out = execFileSync(process.execPath,
+    ['--expose-gc', '--no-concurrent-recompilation', '--input-type=module', '-e', src], { encoding: 'utf8' });
+  return JSON.parse(out);
+}
 
 // ── the bake ─────────────────────────────────────────────────────────────
 test('carve-down only: delta <= 0 at every node, on a cone and on rolling noise', () => {
@@ -487,4 +517,106 @@ test('a worker result survives the transfer: its face arrays rebuild the same fi
   // A wrong-sized array is refused, not sampled out of bounds.
   assert.throws(() => erosionFieldFromFaces(32, new Float32Array(10), got.wetFaces), /Float32Array/);
   assert.throws(() => erosionFieldFromFaces(16, got.deltaFaces, got.wetFaces), /Float32Array/);
+});
+
+// ── the carve as the ground mesh draws it (review, G-REALISM-EROSION) ────
+//
+// The floor reads the carve through the ground mesh's own triangles, so a
+// bird skimming a channel bed stands on the surface it sees. The oracle here
+// shares nothing with the sampler but three's SphereGeometry convention: it
+// builds every flat triangle of the W x H sphere exactly as three indexes
+// it, finds the one the radial ray hits by brute force, and interpolates the
+// vertex values with that ray's own barycentrics.
+function sphereVertex(W, H, ix, iy) {
+  const p = (ix / W) * Math.PI * 2; const t = (iy / H) * Math.PI;
+  return [-Math.cos(p) * Math.sin(t), Math.cos(t), Math.sin(p) * Math.sin(t)];
+}
+function meshReference(W, H, vals, D) {
+  // Every triangle three draws, tested against the ray (Moller-Trumbore).
+  let best = null;
+  for (let iy = 0; iy < H; iy++) {
+    for (let ix = 0; ix < W; ix++) {
+      const id = (x, y) => y * (W + 1) + x;
+      const tris = [];
+      if (iy !== 0) tris.push([[ix + 1, iy], [ix, iy], [ix + 1, iy + 1]]);
+      if (iy !== H - 1) tris.push([[ix, iy], [ix, iy + 1], [ix + 1, iy + 1]]);
+      for (const tri of tris) {
+        const [P0, P1, P2] = tri.map(([x, y]) => sphereVertex(W, H, x, y));
+        const e1 = P1.map((v, k) => v - P0[k]); const e2 = P2.map((v, k) => v - P0[k]);
+        const pv = [D[1] * e2[2] - D[2] * e2[1], D[2] * e2[0] - D[0] * e2[2], D[0] * e2[1] - D[1] * e2[0]];
+        const det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2];
+        if (Math.abs(det) < 1e-14) continue;
+        const tv = P0.map((v) => -v);
+        const u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) / det;
+        const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+        const w = (D[0] * q[0] + D[1] * q[1] + D[2] * q[2]) / det;
+        const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det;
+        if (!(t > 0)) continue;
+        const inside = Math.min(u, w, 1 - u - w);
+        if (!best || inside > best.inside) {
+          const [i0, i1, i2] = tri.map(([x, y]) => id(x, y));
+          best = { inside, value: (1 - u - w) * vals[i0] + u * vals[i1] + w * vals[i2] };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+test('the mesh lattice: the field at the mesh\'s vertices, read back through the triangle the ray hits', () => {
+  const W = 24; const H = 16;
+  // A field with real curvature at mesh scale (a sharp channel would do; a
+  // smooth function makes the vertex values easy to state).
+  const f = (x, y, z) => -3 * (1 + Math.sin(5 * x + 2 * y) * Math.cos(4 * z - y));
+  const L = createMeshLattice({ delta: f }, W, H);
+  assert.ok(L && L.W === W && L.H === H);
+  // At every vertex: the field itself, exactly.
+  for (let iy = 0; iy <= H; iy++) {
+    for (let ix = 0; ix <= W; ix++) {
+      const v = sphereVertex(W, H, ix, iy);
+      assert.ok(Math.abs(sampleMeshLattice(L, ...v) - f(...v)) < 1e-9, `vertex (${ix}, ${iy})`);
+    }
+  }
+  // Anywhere: what the flat triangle the ray hits interpolates, including
+  // next to the poles, along the u seam, and right beside latitude chords
+  // (which bulge poleward of the row they bound).
+  const dirs = [];
+  for (let k = 0; k < 600; k++) {
+    const z = 1 - 2 * (k + 0.5) / 600; const rr = Math.sqrt(1 - z * z); const a = k * 2.399963229728653;
+    dirs.push([rr * Math.cos(a), z, rr * Math.sin(a)]);
+  }
+  for (const t of [0.02, 0.1, Math.PI - 0.05]) for (const p of [0, 1e-9, -1e-9, 1.3, 4]) {
+    dirs.push([-Math.cos(p) * Math.sin(t), Math.cos(t), Math.sin(p) * Math.sin(t)]);
+  }
+  for (let iy = 1; iy < H; iy++) {
+    // Mid-edge of a latitude chord, a hair inside each neighbouring row.
+    const t = (iy / H) * Math.PI; const p = (2.5 / W) * Math.PI * 2;
+    for (const dt of [-2e-3, 2e-3]) dirs.push([-Math.cos(p) * Math.sin(t + dt), Math.cos(t + dt), Math.sin(p) * Math.sin(t + dt)]);
+  }
+  let worst = 0;
+  for (const D of dirs) {
+    const ref = meshReference(W, H, L.d, D);
+    assert.ok(ref && ref.inside > -1e-6, 'the reference found the triangle');
+    worst = Math.max(worst, Math.abs(sampleMeshLattice(L, ...D) - ref.value));
+  }
+  assert.ok(worst < 1e-9, `mesh-lattice sample differs from the ray-cast triangle by up to ${worst}`);
+  // And it is not just the field: between vertices the chord of a curved
+  // field is not the field.
+  let off = 0;
+  for (const D of dirs) off = Math.max(off, Math.abs(sampleMeshLattice(L, ...D) - f(...D)));
+  assert.ok(off > 0.05, `the chord departs from the curved field (${off})`);
+  // Degenerate input is 0, never NaN.
+  assert.equal(sampleMeshLattice(L, 0, 0, 0), 0);
+  assert.equal(sampleMeshLattice(L, NaN, 0.5, 0.5), 0);
+  assert.equal(createMeshLattice({ delta: f }, 2, 16), null);
+  assert.equal(createMeshLattice(null, 24, 16), null);
+});
+
+test('the mesh lattice sampler allocates nothing (it runs inside the flight floor every frame)', () => {
+  const src = sampleMeshLattice.toString();
+  for (const bad of [/\bnew\b/, /=>/, /\.\.\./, /\.(map|slice|concat|filter|from|of|push)\(/, /[=(,]\s*\[/, /[=(,:]\s*\{/]) {
+    assert.ok(!bad.test(src), `sampleMeshLattice contains ${bad}`);
+  }
+  const { base, sampler } = heapGrowthInChild('lattice');
+  assert.ok(sampler <= base + 64 * 1024, `20k samples grew the heap ${sampler} bytes against ${base} for bare arithmetic`);
 });

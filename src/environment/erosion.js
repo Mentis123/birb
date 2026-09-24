@@ -811,3 +811,101 @@ export function bakeWetnessEquirect(field, width = 512, height = 256, out = null
   }
   return bytes;
 }
+
+// ── The carve as a ground mesh draws it ──────────────────────────────────
+//
+// The flight floor samples the terrain analytically at the bird's own
+// direction; the ground mesh (three's SphereGeometry, W x H segments)
+// samples it at its vertices and draws flat triangles between. A carved
+// channel is CONCAVE at mesh scale, and a chord across a concave bed sits
+// above it — so a floor that read the field directly let the bird skim
+// INSIDE the drawn ground of every channel (G-REALISM-EROSION, "Review").
+// The lattice is the field at the mesh's own vertices; the sampler reads it
+// back through the triangle the direction projects into, with GNOMONIC
+// weights (the radial ray against the flat triangle) and three's own
+// triangle split. At a vertex it IS the field; between vertices it is the
+// straight line the mesh draws, so the carve adds nothing to the gap
+// between what the bird stands on and what it sees.
+
+const TWO_PI = Math.PI * 2;
+
+/**
+ * The field sampled at the vertices of three's SphereGeometry(r, W, H)
+ * (phiStart 0, thetaStart 0, full sweep). Build-time; allocates.
+ */
+export function createMeshLattice(field, W, H) {
+  W |= 0; H |= 0;
+  if (!field || typeof field.delta !== 'function' || !(W >= 3) || !(H >= 2)) return null;
+  const cosP = new Float64Array(W + 1); const sinP = new Float64Array(W + 1);
+  const cosT = new Float64Array(H + 1); const sinT = new Float64Array(H + 1);
+  for (let ix = 0; ix <= W; ix++) { const p = (ix / W) * TWO_PI; cosP[ix] = Math.cos(p); sinP[ix] = Math.sin(p); }
+  for (let iy = 0; iy <= H; iy++) { const t = (iy / H) * Math.PI; cosT[iy] = Math.cos(t); sinT[iy] = Math.sin(t); }
+  const d = new Float64Array((W + 1) * (H + 1));
+  for (let iy = 0; iy <= H; iy++) {
+    for (let ix = 0; ix <= W; ix++) {
+      d[iy * (W + 1) + ix] = field.delta(-cosP[ix] * sinT[iy], cosT[iy], sinP[ix] * sinT[iy]);
+    }
+  }
+  return { W, H, d, cosP, sinP, cosT, sinT };
+}
+
+// det(D, P, Q) = D . (P x Q). Top level: the per-frame path allocates nothing.
+function det3(dx, dy, dz, px, py, pz, qx, qy, qz) {
+  return dx * (py * qz - pz * qy) + dy * (pz * qx - px * qz) + dz * (px * qy - py * qx);
+}
+
+/**
+ * The lattice read back through the mesh's triangle at a unit direction.
+ * Zero-allocation (scalars only): one atan2, one acos, a few dozen flops.
+ * 0 for a zero or non-finite direction.
+ */
+export function sampleMeshLattice(L, nx, ny, nz) {
+  if (!(nx * nx + ny * ny + nz * nz > 0)) return 0;
+  const W = L.W; const H = L.H; const d = L.d;
+  let u = Math.atan2(nz, -nx) / TWO_PI; if (u < 0) u += 1;
+  const v = Math.acos(ny > 1 ? 1 : ny < -1 ? -1 : ny) / Math.PI;
+  let ix = Math.floor(u * W); if (ix > W - 1) ix = W - 1; else if (ix < 0) ix = 0;
+  let iy = Math.floor(v * H); if (iy > H - 1) iy = H - 1; else if (iy < 0) iy = 0;
+  let out = 0;
+  // A latitude row's edges are straight chords, which bulge poleward of the
+  // latitude circle, so a direction near one can project into the next row's
+  // triangle: step across (at most twice) rather than extrapolate.
+  for (let pass = 0; pass < 3; pass++) {
+    const cp0 = L.cosP[ix]; const sp0 = L.sinP[ix]; const cp1 = L.cosP[ix + 1]; const sp1 = L.sinP[ix + 1];
+    const st0 = L.sinT[iy]; const ct0 = L.cosT[iy]; const st1 = L.sinT[iy + 1]; const ct1 = L.cosT[iy + 1];
+    // Quad corners as three indexes them: b (ix, iy), a (ix+1, iy),
+    // c (ix, iy+1), e (ix+1, iy+1); triangles (a, b, e) unless iy is the top
+    // row, (b, c, e) unless it is the bottom one. Both wind outward.
+    const bx = -cp0 * st0; const by = ct0; const bz = sp0 * st0;
+    const ax = -cp1 * st0; const ay = ct0; const az = sp1 * st0;
+    const cx = -cp0 * st1; const cy = ct1; const cz = sp0 * st1;
+    const ex = -cp1 * st1; const ey = ct1; const ez = sp1 * st1;
+    const ib = iy * (W + 1) + ix; const ia = ib + 1; const ic = ib + W + 1; const ie = ic + 1;
+    let upMin = -Infinity; let wa = 0; let wb = 0; let we = 0;
+    if (iy !== 0) {
+      const A = det3(nx, ny, nz, bx, by, bz, ex, ey, ez);
+      const B = det3(nx, ny, nz, ex, ey, ez, ax, ay, az);
+      const E = det3(nx, ny, nz, ax, ay, az, bx, by, bz);
+      const s = A + B + E;
+      if (s > 0) { wa = A / s; wb = B / s; we = E / s; upMin = Math.min(wa, wb, we); }
+    }
+    let loMin = -Infinity; let vb = 0; let vc = 0; let ve = 0;
+    if (iy !== H - 1) {
+      const B = det3(nx, ny, nz, cx, cy, cz, ex, ey, ez);
+      const C = det3(nx, ny, nz, ex, ey, ez, bx, by, bz);
+      const E = det3(nx, ny, nz, bx, by, bz, cx, cy, cz);
+      const s = B + C + E;
+      if (s > 0) { vb = B / s; vc = C / s; ve = E / s; loMin = Math.min(vb, vc, ve); }
+    }
+    if (upMin >= loMin) {
+      out = wa * d[ia] + wb * d[ib] + we * d[ie];
+      if (upMin >= -1e-9 || !(we <= upMin && iy > 0)) break;
+      iy -= 1;                // beyond the top chord: the row above
+    } else {
+      out = vb * d[ib] + vc * d[ic] + ve * d[ie];
+      if (loMin >= -1e-9 || !(vb <= loMin && iy < H - 1)) break;
+      iy += 1;                // beyond the bottom chord: the row below
+    }
+  }
+  return out;
+}
