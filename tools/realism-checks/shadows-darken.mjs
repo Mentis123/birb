@@ -22,6 +22,11 @@ export default async function run(ctx) {
   });
   await ctx.frames(3);
   await page.evaluate(() => window.__BIRB.setSunEnabled(false));
+  // Hold the air field's gusts between the three shots: they sway the
+  // foliage, and the control pair once read 0.0619 vs 0.0758. NOT
+  // holdMotion: that pauses the render loop, every shot becomes the same
+  // frame and the check passes vacuously (measured: off = on = 0.3478).
+  await page.evaluate(() => window.__BIRB.stillAir?.(true));
 
   const measure = async (on, label) => {
     await page.evaluate((v) => window.__BIRB.setShadows({ enabled: v }), on);
@@ -40,5 +45,5 @@ export default async function run(ctx) {
 
   await page.evaluate(() => window.__BIRB.setShadows({ enabled: false }));
   await ctx.unfreeze();
-  await page.evaluate(() => window.__BIRB.setSunEnabled(true));
+  await page.evaluate(() => { const B = window.__BIRB; B.stillAir?.(false); B.setSunEnabled(true); });
 }
