@@ -44,7 +44,7 @@
 // cache would leave a phone with no flight controller at all — and SW-3
 // (build-identity.test.js) requires every src/ module to be listed regardless.
 // index.html's BIRB_BUILD is bumped to the same literal in the same change.
-const CACHE_VERSION = 'v81-2026-09-23-realism';
+const CACHE_VERSION = 'v82-2026-09-24-realism2';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -126,6 +126,10 @@ const CORE_ASSETS = [
   './src/flight/bird-flight-stunt.js',
   './src/flight/stunt-pad.js',
   './src/flight/stunt-detector.js',
+  // The air (thermals, ridge lift, gusts). Imported on the boot path by
+  // index.html AND statically by spherical-world.js, so an offline launch
+  // without it dies before the first frame.
+  './src/flight/air-field.js',
   './src/flight/bird-camera.js',
   './src/flight/bird-visual.js',
   './src/flight/touch-input.js',
@@ -165,6 +169,7 @@ const CORE_ASSETS = [
   './src/environment/water.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
+  './src/environment/cloud-volume.js',
   // Horizon shadows: the bake (and the worker that runs it — a Worker script
   // the page cannot start offline is a world with no shadows), the patch.
   './src/environment/horizon-map.js',
