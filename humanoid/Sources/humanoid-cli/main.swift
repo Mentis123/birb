@@ -157,12 +157,13 @@ case "bench":
     print("BENCH clay \(benchMesh.vertexCount) verts / \(benchMesh.triangleCount) tris")
 
     // One frame of an Inflate stroke as the editor applies it: three dabs,
-    // measured against the stroke's starting surface, held to the stroke's
-    // height limit and checked for folds. The fold check, and the copy of the
-    // positions it compares against, are new on 2026-09-24; this is what they
-    // cost, beside the same dabs measured against the live surface.
-    do {
-        let settings = Sculpt.Settings(radius: 0.028, strength: 1, symmetric: true)
+    // measured against the stroke's starting surface, each pushing one way
+    // (`Sculpt.pushDirections`), held to the stroke's limit, and checked for
+    // the surface crossing itself. The crossing check, and the copy of the
+    // positions it compares against, are new on 2026-09-24; this is what
+    // they cost, at the device's brush and at a large one.
+    for radius in [0.022, 0.056] {
+        let settings = Sculpt.Settings(radius: radius, strength: 1, symmetric: true)
         let brush = Sculpt.Brush.inflate(Sculpt.inflatePerDabDriven * settings.radius)
         var frameDabs: [Sculpt.Dab] = []
         for x in [-0.01, 0.0, 0.01] {
@@ -171,14 +172,23 @@ case "bench":
                 frameDabs.append(Sculpt.Dab(brush, at: hit.position, settings: settings))
             }
         }
+        let millimetres = Int((radius * 1000).rounded())
         var base = Sculpt.StrokeBase(benchMesh, tables: benchTables)
-        time("inflate frame: 3 dabs, stroke base + fold guard", iterations: 200) {
+        var moved = Set<Int>()
+        var after = benchMesh
+        time("inflate frame, \(millimetres) mm brush: 3 dabs + crossing guard", iterations: 200) {
             var mesh = benchMesh
-            Sculpt.apply(frameDabs, to: &mesh, tables: benchTables, base: &base)
+            moved = Sculpt.apply(frameDabs, to: &mesh, tables: benchTables, base: &base)
+            after = mesh
         }
-        time("inflate frame: 3 dabs, live surface, no guard", iterations: 200) {
+        time("inflate frame, \(millimetres) mm brush: 3 dabs, no guard", iterations: 200) {
             var mesh = benchMesh
-            Sculpt.apply(frameDabs, to: &mesh, tables: benchTables)
+            Sculpt.apply(frameDabs, to: &mesh, tables: benchTables, base: &base,
+                         preventCrossing: false)
+        }
+        time("  of which the crossing check (\(moved.count) points moved)", iterations: 200) {
+            _ = SelfIntersection.created(in: after, moved: moved, from: benchMesh.positions,
+                                         tables: benchTables)
         }
     }
 

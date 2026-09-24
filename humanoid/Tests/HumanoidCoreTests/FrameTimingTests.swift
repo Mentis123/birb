@@ -224,6 +224,50 @@ final class FrameTimingTests: XCTestCase {
                                     MainThreadMonitor.shareWindow - 1e-9,
                                     "a new loop is watched for a whole window before judging")
     }
+    // MARK: - Frame pacing
+
+    func testIdleGapsAreNotFrameIntervals() {
+        // The sixth device run's readout: strokes drawn every 12 to 20 ms,
+        // with fifteen seconds of nothing between them, read "3.4 fps".
+        var pacing = FramePacing()
+        var time = 0.0
+        for _ in 0..<2 {
+            for _ in 0..<60 {
+                pacing.frame(at: time, continuous: true)
+                time += 0.0125
+            }
+            pacing.frame(at: time, continuous: false)   // the last frame of a stroke
+            time += 15                                   // the iPad sits untouched
+            pacing.frame(at: time, continuous: false)   // a frame something asked for
+            time += 3
+        }
+        XCTAssertEqual(pacing.meanMilliseconds ?? 0, 12.5, accuracy: 1e-9)
+        XCTAssertEqual(pacing.worstMilliseconds ?? 0, 12.5, accuracy: 1e-9)
+        XCTAssertEqual(pacing.summary, "drawing 80 fps: a frame every 12.5 ms (worst 12.5)")
+    }
+
+    func testTheFirstContinuousFrameAfterAnIdleOneOpensNoInterval() {
+        var pacing = FramePacing()
+        pacing.frame(at: 0, continuous: false)
+        pacing.frame(at: 9, continuous: true)
+        XCTAssertNil(pacing.meanMilliseconds)
+        XCTAssertEqual(pacing.summary, "idle: nothing drawn continuously yet")
+        pacing.frame(at: 9.008, continuous: true)
+        XCTAssertEqual(pacing.meanMilliseconds ?? 0, 8, accuracy: 1e-9)
+    }
+
+    func testPacingRemembersTheLastSecondAtMost() {
+        var pacing = FramePacing()
+        var time = 0.0
+        pacing.frame(at: time, continuous: true)
+        for i in 0..<300 {
+            time += i < 150 ? 0.040 : 0.008
+            pacing.frame(at: time, continuous: true)
+        }
+        XCTAssertEqual(pacing.count, FramePacing.capacity)
+        XCTAssertEqual(pacing.worstMilliseconds ?? 0, 8, accuracy: 1e-9,
+                       "the slow frames of three seconds ago are forgotten")
+    }
 }
 
 /// A tiny deterministic generator, so the property test is the same test

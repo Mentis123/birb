@@ -22,7 +22,9 @@ public enum Sculpt {
     public enum Brush: Sendable, Equatable {
         /// Drag the surface bodily. The delta is world-space.
         case grab(Vec3)
-        /// Push along the surface normal. Negative deflates.
+        /// Push the surface out along the brush's own facing — the average
+        /// normal of the surface around it (`pushDirection`). Negative
+        /// presses it in, which is Deflate.
         case inflate(Double)
         /// Move each point toward the average of its neighbours.
         case smooth
@@ -207,21 +209,57 @@ public enum Sculpt {
     /// — scaled, like the dab itself, by the falloff and strength (pressure
     /// included) of the dab that reaches it.
     ///
-    /// A single pass lifts the middle of its path about 0.88 R
-    /// (`inflatePerDabDriven`) and never reaches this. Going back and forth
-    /// over the same place in ONE stroke did, and nothing stopped it: every
-    /// pass pushed along the normals the stroke started with and added
-    /// another 0.88 R, so a scribble became a spike several radii tall on a
-    /// mesh whose points are about a centimetre apart. The fifth device run's
-    /// screenshot is that spike, folded at its base.
+    /// **0.65, and the number is not a feel.** A dab pushes every point it
+    /// reaches the same way (`pushDirection`) by an amount that falls off
+    /// with the smoothstep, whose steepest slope is 1.5 per radius. Pushing a
+    /// surface in one direction by an amount that changes faster than the
+    /// surface does — more than one unit of push per unit along the push —
+    /// carries the near part of a wall past the far part, and the wall folds.
+    /// So the most a stroke may push is the depth whose steepest flank stays
+    /// under that: 1 / 1.5 = 0.67 radii, and 0.65 leaves the margin. It was
+    /// 1.0 until the sixth device run, over the smoothstep's 1.5: a limit
+    /// that let a single stroke fold a wall it pushed along.
     ///
-    /// With the limit, a scribble fills up to a smooth ridge — the brush's own
-    /// falloff, one radius tall at full strength, less under a light touch —
-    /// and stops, which is the Layer brush of other sculpting tools. More
-    /// height is another stroke, which starts from the new surface and its
-    /// new normals. Applied only when the stroke's starting surface is known
-    /// (`reference`), because "this stroke" is measured from it.
-    public static let strokeHeightLimit = 1.0
+    /// A single pass reaches it (one pass lifts the middle of its path
+    /// 0.88 R before the limit), so a confident stroke is 0.65 R, and a
+    /// scribble over one place fills up to the same smooth ridge and stops.
+    /// More is another stroke, which starts from the new surface.
+    ///
+    /// History: the fifth device run's screenshot was a scribbled spike
+    /// several radii tall, when nothing limited a stroke at all; the sixth
+    /// was a Deflate pit with the inside of the model showing through it,
+    /// when each point was still pushed along its own normal.
+    public static let strokeHeightLimit = 0.65
+
+    /// How wide an area decides which way a dab pushes, in brush radii.
+    ///
+    /// Inflate and Deflate used to push every point along ITS OWN normal,
+    /// which is what makes them converge: on a rounded edge, on the rim of a
+    /// pit, in the bottom of a dent, neighbouring normals point at each
+    /// other, points pushed along them cross, and the surface passes through
+    /// itself. Measured headless on the sixth device run's settings (a 35 pt
+    /// brush, strength 0.6, one place on the top face): the surface first
+    /// crossed itself at the tenth stroke and had 445 crossing triangle
+    /// pairs by the sixtieth; a pit dug into an edge or a corner crossed
+    /// within five.
+    ///
+    /// Now a dab pushes everything it reaches ONE way: the surface's average
+    /// facing over this many radii around it, on the shape the stroke
+    /// started from — Blender's Draw brush with its area normal, and Nomad's
+    /// Clay. Wider than the brush on purpose. Averaged over only the brush,
+    /// a stroke on the far wall of a pit (which is where the Pencil lands on
+    /// a pit seen at an angle) pushes that wall away from the viewer, and
+    /// the pit tunnels backwards stroke by stroke until it breaks out
+    /// through the back edge. Over 2.5 radii the pit's surroundings take
+    /// part, and it goes down.
+    ///
+    /// The trade: this is "raise" and "press", not "inflate". A thin part —
+    /// a limb pulled out with Grab — is pushed as a whole rather than
+    /// fattened, because the average facing of a thin part is whichever side
+    /// the brush is on. Clay has no thin parts until someone makes one; the
+    /// Humanoid, whose arms are, is milestone M5 and will want a brush of its
+    /// own for it.
+    public static let pushNormalRadius = 2.5
 
     /// What one Inflate, Deflate or Smooth stroke is measured against: the
     /// surface as the stroke found it, and how far the stroke may move each
@@ -230,9 +268,10 @@ public enum Sculpt {
         /// The surface when the stroke began. Dabs find their points on it and
         /// push along its normals; see `apply(_:to:tables:base:)`.
         public let surface: MeshData
-        /// Per welded position, the most this stroke may move it: the largest
-        /// ceiling any of its dabs has allowed there so far
-        /// (`strokeHeightLimit` x radius x weight), zero until one reaches it.
+        /// Per welded position, the furthest this stroke may take it from
+        /// where the stroke found it: the largest ceiling any of its dabs has
+        /// allowed there so far (`strokeHeightLimit` x radius x weight), zero
+        /// until one reaches it.
         ///
         /// Kept for the whole stroke rather than taken from each dab alone,
         /// because a pass's dabs weaken as they move away from a point. Taken
@@ -315,16 +354,27 @@ public enum Sculpt {
     /// changed its mind with the frame rate. Measured against the start, a
     /// dab's effect is a function of the path and the starting shape alone.
     ///
-    /// Inflate and Deflate are also held to `strokeHeightLimit`, and never
-    /// turn the surface over within the stroke (`unfold`).
+    /// Inflate and Deflate are also held to `strokeHeightLimit`, and a frame
+    /// of them never makes the surface pass through itself: if it would,
+    /// the whole frame's move is scaled back — halved, and halved again,
+    /// down to none — until it does not (`SelfIntersection`). Scaled as a
+    /// whole rather than point by point, because the fold guard this
+    /// replaces put back single points, and a surface with some points put
+    /// back and their neighbours moved is a staircase of shards. Measured on
+    /// the headless reproduction of the sixth device run, the push direction
+    /// alone leaves one frame in a hundred for this to catch.
+    ///
+    /// `preventCrossing` exists so a test can see what the brush does
+    /// without the guard; nothing else turns it off.
     @discardableResult
     public static func apply(_ dabs: [Dab], to mesh: inout MeshData, tables: MeshTables,
-                             base: inout StrokeBase) -> Set<Int> {
-        // The frame's starting positions, for putting back a move that turns a
-        // triangle over. Copy-on-write: this costs one copy of the positions
-        // per frame, at the first dab, and only for the brushes that need it.
+                             base: inout StrokeBase, preventCrossing: Bool = true) -> Set<Int> {
+        // The frame's starting positions, for scaling back a move that makes
+        // the surface cross itself. Copy-on-write: this costs one copy of the
+        // positions per frame, at the first dab, and only for the brushes
+        // that need it.
         let pushes = dabs.contains { if case .inflate = $0.brush { return true } else { return false } }
-        let start: [Vec3]? = pushes ? mesh.positions : nil
+        let start: [Vec3]? = pushes && preventCrossing ? mesh.positions : nil
         var touched = Set<Int>()
         for d in dabs {
             touched.formUnion(dab(d.brush, to: &mesh, tables: tables, at: d.centre,
@@ -332,73 +382,36 @@ public enum Sculpt {
                                   ceilings: &base.ceilings))
         }
         if let start {
-            unfold(&mesh, moved: touched, from: start, reference: base.surface, tables: tables)
+            untangle(&mesh, moved: touched, from: start, tables: tables)
         }
         mesh.recomputeNormals(tables, touching: touched)
         return touched
     }
 
-    /// Puts back this frame's move for every point of a triangle that the move
-    /// turned over, until no triangle it reached is turned over.
-    ///
-    /// "Turned over" is against the stroke's starting surface: the triangle's
-    /// normal now points more than 90 degrees from where it pointed when the
-    /// stroke began. Inflate and Deflate push along normals, and where those
-    /// converge — Deflate on a rounded edge, or the base of a bump pushed
-    /// again — points pushed far enough cross each other and the surface
-    /// folds through itself. The renderer then culls the folded faces and the
-    /// model shows holes, which is how the fifth device run's screenshot
-    /// looked.
-    ///
-    /// Putting a point back can turn over a neighbour whose other corners did
-    /// move, so the check repeats over the triangles around what was put back.
-    /// It ends: every round puts back at least one more point, and a triangle
-    /// whose moved corners are all back is exactly as it was at the start of
-    /// the frame, which was not turned over. The worst case is the whole frame
-    /// put back — the stroke stops rising there, rather than folding.
+    /// Scales back the move from `start` of the welded positions in `moved`
+    /// until it makes no two triangles cross that did not cross at `start`.
+    /// Returns the fraction of the move kept: 1 when nothing crossed, 0 when
+    /// even an eighth of it would have.
     @discardableResult
-    static func unfold(_ mesh: inout MeshData, moved: Set<Int>, from start: [Vec3],
-                       reference: MeshData, tables: MeshTables) -> Set<Int> {
-        var carrying = moved
-        var restored = Set<Int>()
-        var faces = Set<Int32>()
-        for w in moved { faces.formUnion(tables.trianglesOfWelded[w]) }
-        while !faces.isEmpty {
-            var putBack = Set<Int>()
-            for face in faces where turnedOver(Int(face), mesh: mesh, reference: reference) {
-                let t = Int(face) * 3
-                for corner in 0..<3 {
-                    let w = tables.weldOf[Int(mesh.indices[t + corner])]
-                    if carrying.contains(w) { putBack.insert(w) }
+    static func untangle(_ mesh: inout MeshData, moved: Set<Int>, from start: [Vec3],
+                         tables: MeshTables) -> Double {
+        guard SelfIntersection.created(in: mesh, moved: moved, from: start, tables: tables) else {
+            return 1
+        }
+        let after = mesh.positions
+        var kept = 0.5
+        while true {
+            for w in moved {
+                for member in tables.weldMembers[w] {
+                    mesh.positions[member] = start[member] + (after[member] - start[member]) * kept
                 }
             }
-            guard !putBack.isEmpty else { return restored }
-            faces.removeAll(keepingCapacity: true)
-            restored.formUnion(putBack)
-            for w in putBack {
-                let original = start[tables.weldMembers[w][0]]
-                for member in tables.weldMembers[w] { mesh.positions[member] = original }
-                carrying.remove(w)
-                faces.formUnion(tables.trianglesOfWelded[w])
+            if kept == 0 { return 0 }
+            if !SelfIntersection.created(in: mesh, moved: moved, from: start, tables: tables) {
+                return kept
             }
+            kept = kept > 0.125 ? kept * 0.5 : 0
         }
-        return restored
-    }
-
-    /// Whether a triangle now faces more than 90 degrees away from how it
-    /// faced on the reference surface. A triangle that was degenerate there
-    /// has no direction to compare with and is left alone.
-    @inline(__always)
-    static func turnedOver(_ face: Int, mesh: MeshData, reference: MeshData) -> Bool {
-        let t = face * 3
-        let a = Int(mesh.indices[t]), b = Int(mesh.indices[t + 1]), c = Int(mesh.indices[t + 2])
-        let was = cross(reference.positions[b] - reference.positions[a],
-                        reference.positions[c] - reference.positions[a])
-        let wasSize = dot(was, was)
-        guard wasSize > 1e-30 else { return false }
-        let now = cross(mesh.positions[b] - mesh.positions[a],
-                        mesh.positions[c] - mesh.positions[a])
-        return dot(now, was) <= 0
     }
 
     /// Applies one dab. Returns the welded positions it touched, which is what
@@ -470,18 +483,62 @@ public enum Sculpt {
         return delta * (1 - share) + mirrored * share
     }
 
-    /// How much of a rise of `rise` a point already `height` above its start
-    /// may take without passing `ceiling` (a magnitude; the direction is the
-    /// rise's own). A point already past it stays where it is: a weaker dab
-    /// never pulls back what a stronger one raised.
+    /// How much of `shift` a point already `offset` from where the stroke
+    /// found it may take, as a fraction 0...1, without ending further from
+    /// there than `ceiling` — or, when it is already past the ceiling, than
+    /// it already is. So a weaker dab never pulls back what a stronger one
+    /// pushed, and a move back towards the start is never refused.
     @inline(__always)
-    static func limitedRise(height: Double, by rise: Double, ceiling: Double) -> Double {
-        if rise >= 0 {
-            guard height < ceiling else { return 0 }
-            return min(height + rise, ceiling) - height
+    static func limitedMove(_ shift: Vec3, from offset: Vec3, ceiling: Double) -> Double {
+        let a = dot(shift, shift)
+        guard a > 0 else { return 1 }
+        let b = 2 * dot(offset, shift)
+        let c = dot(offset, offset) - ceiling * ceiling
+        if c >= 0 {
+            // At or past the ceiling: only inwards, and no further than back
+            // to the same distance on the other side.
+            return b < 0 ? min(1, -b / a) : 0
         }
-        guard height > -ceiling else { return 0 }
-        return max(height + rise, -ceiling) - height
+        // The larger root of |offset + t shift|^2 = ceiling^2; c < 0 makes it
+        // real and positive.
+        return min(1, (-b + (b * b - 4 * a * c).squareRoot()) / (2 * a))
+    }
+
+    /// Which way an Inflate dab pushes the points it reaches: the average
+    /// facing of `surface` over `pushNormalRadius` brush radii around
+    /// `centre`, and around its mirror image too when the brush is
+    /// symmetric. Both halves come from one pass. Nil where the surface
+    /// faces every way at once — a sheet seen from both sides — and there is
+    /// no direction to push.
+    static func pushDirections(centre: Vec3, mirrorCentre: Vec3?, radius: Double,
+                               surface: MeshData,
+                               tables: MeshTables) -> (primary: Vec3, mirror: Vec3)? {
+        let reachRadius = radius * pushNormalRadius
+        let reachSquared = reachRadius * reachRadius
+        var primary = Vec3.zero, mirror = Vec3.zero
+        for welded in 0..<tables.weldedCount {
+            let representative = tables.weldMembers[welded][0]
+            let p = surface.positions[representative]
+            let a = reach(p, from: centre, radius: reachRadius, radiusSquared: reachSquared)
+            if a > 0 { primary += surface.normals[representative] * a }
+            if let mirrorCentre {
+                let b = reach(p, from: mirrorCentre, radius: reachRadius, radiusSquared: reachSquared)
+                if b > 0 { mirror += surface.normals[representative] * b }
+            }
+        }
+        let tiny = 1e-12
+        let hasPrimary = dot(primary, primary) > tiny, hasMirror = dot(mirror, mirror) > tiny
+        switch (hasPrimary, hasMirror) {
+        case (false, false): return nil
+        case (true, false):
+            let p = normalize(primary)
+            return (p, Vec3(-p.x, p.y, p.z))
+        case (false, true):
+            let m = normalize(mirror)
+            return (Vec3(-m.x, m.y, m.z), m)
+        case (true, true):
+            return (normalize(primary), normalize(mirror))
+        }
     }
 
     /// The falloff at a point, or 0 outside the brush.
@@ -524,6 +581,18 @@ public enum Sculpt {
         let mirrorCentre = Vec3(-centre.x, centre.y, centre.z)
         var touched = Set<Int>()
 
+        // Inflate's one direction per half, from the same surface the dab
+        // reaches its points on.
+        var push = (primary: Vec3.zero, mirror: Vec3.zero)
+        if case .inflate = brush {
+            guard let found = pushDirections(centre: centre,
+                                             mirrorCentre: settings.symmetric ? mirrorCentre : nil,
+                                             radius: settings.radius,
+                                             surface: reference ?? mesh, tables: tables)
+            else { return [] }
+            push = found
+        }
+
         for welded in 0..<tables.weldedCount {
             let representative = tables.weldMembers[welded][0]
             // Read through the optional rather than hoisting an array out of
@@ -545,19 +614,24 @@ public enum Sculpt {
                 shift = grabDirection(delta, mirrorShare: mirrorShare(primary: primary, mirror: mirror))
                     * weight
             case .inflate(let amount):
-                let normal = reference?.normals[representative] ?? mesh.normals[representative]
+                // Blended across the mirror plane the way Grab is, so the
+                // two halves meet without a crease. Where one half owns the
+                // point, or both halves agree, it is that direction exactly.
+                let share = mirrorShare(primary: primary, mirror: mirror)
+                let direction = share <= 0 || push.primary == push.mirror ? push.primary
+                    : share >= 1 ? push.mirror
+                    : normalize(push.primary * (1 - share) + push.mirror * share)
+                let wanted = direction * (amount * weight)
                 if let reference, !ceilings.isEmpty {
-                    // The most this stroke may move the point — the largest
-                    // any of its dabs has allowed — then how far it already
-                    // has along the normal it started with, and as much of
-                    // this dab as fits between the two.
+                    // The furthest this stroke may take the point — the
+                    // largest any of its dabs has allowed — and as much of
+                    // this dab as fits inside it.
                     let ceiling = max(ceilings[welded], strokeHeightLimit * settings.radius * weight)
                     ceilings[welded] = ceiling
-                    let height = dot(mesh.positions[representative] - reference.positions[representative],
-                                     normal)
-                    shift = normal * limitedRise(height: height, by: amount * weight, ceiling: ceiling)
+                    let offset = mesh.positions[representative] - reference.positions[representative]
+                    shift = wanted * limitedMove(wanted, from: offset, ceiling: ceiling)
                 } else {
-                    shift = normal * (amount * weight)
+                    shift = wanted
                 }
             case .smooth:
                 let ring = tables.neighbours[welded]

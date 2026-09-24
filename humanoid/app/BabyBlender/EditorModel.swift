@@ -303,7 +303,7 @@ final class EditorModel: ObservableObject {
     // MARK: - Frame bookkeeping
 
     private var hudClock: CFTimeInterval = 0
-    private var frameSamples: [Double] = []
+    private var pacing = FramePacing()
     private var latencies: [Double] = []
     private var lastDrainDepth = 0
     private var worstDrainDepth = 0
@@ -369,7 +369,6 @@ final class EditorModel: ObservableObject {
         camera.frame(document.mesh)
         pending.reserveCapacity(64)
         draining.reserveCapacity(64)
-        frameSamples.reserveCapacity(128)
         latencies.reserveCapacity(128)
         loadSettings()
         colourRGB = colour.rgb8
@@ -609,15 +608,11 @@ final class EditorModel: ObservableObject {
 
     /// Folds the previous frame's cost into the readout. Called by the
     /// renderer, which is the only thing that knows what the GPU did.
-    func report(frame stats: Renderer.FrameStats, elapsed: Double) {
+    func report(frame stats: Renderer.FrameStats, at time: CFTimeInterval, continuous: Bool) {
         guard showStats else { return }
-        frameSamples.append(elapsed * 1000)
-        if frameSamples.count > 120 { frameSamples.removeFirst() }
-        let now = CACurrentMediaTime()
-        guard now - hudClock > 0.25 else { return }
-        hudClock = now
-        let mean = frameSamples.reduce(0, +) / Double(max(1, frameSamples.count))
-        let worst = frameSamples.max() ?? 0
+        pacing.frame(at: time, continuous: continuous)
+        guard time - hudClock > 0.25 else { return }
+        hudClock = time
         let latency: String
         if latencies.isEmpty {
             latency = "touch→glass: draw with the Pencil to measure"
@@ -630,9 +625,10 @@ final class EditorModel: ObservableObject {
         let last = engine.last
         // Built a line at a time. One `+` chain this long is the kind of
         // expression the type checker gives up on, and it grew by three terms
-        // on 2026-09-24.
-        var text = String(format: "%.1f fps  cpu+gpu %.2f ms (worst %.2f)",
-                          mean > 0 ? 1000 / mean : 0, mean, worst)
+        // on 2026-09-24. The first line is the frame rate while drawing,
+        // never across the idle gaps between strokes: the line it replaces
+        // divided by those, called the result "cpu+gpu", and read "3.4 fps".
+        var text = pacing.summary
         text += String(format: "\ngpu %.2f ms  draws %d  tris %d",
                        stats.gpuMilliseconds, stats.drawCalls, stats.triangles)
         // Where the main thread's time went, last frame and slowest lately.

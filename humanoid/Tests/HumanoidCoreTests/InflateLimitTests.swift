@@ -1,14 +1,15 @@
 import XCTest
 @testable import HumanoidCore
 
-/// Inflate and Deflate within one stroke: how far a point may move, and the
-/// guarantee that the surface is never turned over.
+/// Inflate and Deflate: which way a dab pushes, how far one stroke may push,
+/// and the guarantee that a frame never makes the surface pass through
+/// itself.
 ///
-/// Both come from the fifth device run's screenshot: a spike several radii
-/// tall on the side of the clay, folded at its base, with holes where the
-/// renderer culled the folded faces. Every dab of a stroke pushes along the
-/// normals the stroke started with, and nothing bounded how many passes over
-/// the same place could add up.
+/// The fifth device run's screenshot was a scribbled spike several radii
+/// tall, folded at its base: nothing bounded how far one stroke could push.
+/// The sixth was a Deflate pit with the inside of the model showing through
+/// it, dug by many strokes: every point was pushed along its own normal, and
+/// on a rim, an edge or the bottom of a dent those normals converge.
 final class InflateLimitTests: XCTestCase {
     private var template: MeshData!
     private var tables: MeshTables!
@@ -46,17 +47,35 @@ final class InflateLimitTests: XCTestCase {
     /// Applies a stroke the way the engine does: one base for the whole
     /// stroke, `perFrame` dabs at a time (all of them at once by default).
     private func stroke(_ dabs: [Sculpt.Dab], on mesh: inout MeshData, from start: MeshData,
-                        perFrame: Int = .max) {
+                        perFrame: Int = .max, preventCrossing: Bool = true) {
         var base = Sculpt.StrokeBase(start, tables: tables)
         var frame: [Sculpt.Dab] = []
         for d in dabs {
             frame.append(d)
             if frame.count == perFrame {
-                Sculpt.apply(frame, to: &mesh, tables: tables, base: &base)
+                Sculpt.apply(frame, to: &mesh, tables: tables, base: &base,
+                             preventCrossing: preventCrossing)
                 frame.removeAll()
             }
         }
-        if !frame.isEmpty { Sculpt.apply(frame, to: &mesh, tables: tables, base: &base) }
+        if !frame.isEmpty {
+            Sculpt.apply(frame, to: &mesh, tables: tables, base: &base,
+                         preventCrossing: preventCrossing)
+        }
+    }
+
+    /// `strokes` scribbles of `passes` passes over one place, each stroke
+    /// starting from the surface the last one left, `perFrame` dabs a frame.
+    private func strokes(_ count: Int, on mesh: inout MeshData, from a: Vec3, to b: Vec3,
+                         along direction: Vec3, passes: Int, deflating: Bool,
+                         settings: Sculpt.Settings, preventCrossing: Bool) {
+        for _ in 0..<count {
+            let reference = mesh
+            let dabs = scribble(on: reference, from: a, to: b, along: direction, passes: passes,
+                                brush: deflating ? deflate(settings) : inflate(settings),
+                                settings: settings)
+            stroke(dabs, on: &mesh, from: reference, perFrame: 3, preventCrossing: preventCrossing)
+        }
     }
 
     private func inflate(_ settings: Sculpt.Settings) -> Sculpt.Brush {
@@ -72,28 +91,39 @@ final class InflateLimitTests: XCTestCase {
         (0..<mesh.vertexCount).map { length(mesh.positions[$0] - start.positions[$0]) }.max() ?? 0
     }
 
-    /// Triangles facing more than 90 degrees from how they faced at the start.
-    private func turnedOver(_ mesh: MeshData, from start: MeshData) -> Int {
-        (0..<(mesh.indices.count / 3)).filter {
-            Sculpt.turnedOver($0, mesh: mesh, reference: start)
-        }.count
+    /// Where the surface passes through itself, by the independent oracle.
+    private func crossings(_ mesh: MeshData) -> Int {
+        CrossingOracle.pairs(in: mesh, tables: tables).count
     }
 
     private let front = (a: Vec3(-0.03, 0, 0), b: Vec3(0.03, 0, 0), direction: Vec3(0, 0, -1))
 
     // MARK: - The limit
 
-    func testOnePassIsNotLimited() {
-        // The limit is for going over the same place again; one pass must
-        // still do what the fourth device run tuned it to do.
+    func testOnePassReachesTheLimit() {
+        // One pass would lift the middle of its path 0.88 R; the limit is
+        // what a single confident stroke does now.
         let settings = Sculpt.Settings(radius: 0.028, strength: 1, symmetric: false)
         var mesh = template!
         let dabs = scribble(on: template, from: front.a, to: front.b, along: front.direction,
                             passes: 1, brush: inflate(settings), settings: settings)
         stroke(dabs, on: &mesh, from: template)
         let rise = peak(mesh, from: template) / settings.radius
-        XCTAssertGreaterThan(rise, 0.8, "one pass rose only \(rise) radii")
-        XCTAssertLessThan(rise, 0.95, "one pass rose \(rise) radii — the arithmetic says 0.88")
+        XCTAssertGreaterThan(rise, 0.6, "one pass rose only \(rise) radii")
+        XCTAssertLessThanOrEqual(rise, Sculpt.strokeHeightLimit + 1e-9)
+    }
+
+    func testTheLimitIsTheDepthASmoothstepCanPushWithoutFolding() {
+        // Not a feel: the smoothstep's steepest slope is 1.5 per radius, and a
+        // push whose flank changes faster than one unit per unit folds a wall
+        // it runs along.
+        XCTAssertLessThan(Sculpt.strokeHeightLimit * 1.5, 1)
+        XCTAssertEqual(
+            (0...1000).map { i -> Double in
+                let d = Double(i) / 1000
+                return abs(Sculpt.falloff(distance: d + 1e-6, radius: 1)
+                           - Sculpt.falloff(distance: d, radius: 1)) / 1e-6
+            }.max()!, 1.5, accuracy: 1e-3)
     }
 
     func testAScribbleRisesToTheLimitAndStops() {
@@ -105,8 +135,8 @@ final class InflateLimitTests: XCTestCase {
         let rise = peak(mesh, from: template) / settings.radius
         // Twelve passes used to be twelve times one pass: over ten radii.
         XCTAssertLessThanOrEqual(rise, Sculpt.strokeHeightLimit + 1e-9)
-        XCTAssertGreaterThan(rise, 0.9, "the scribble should fill up to the limit")
-        XCTAssertEqual(turnedOver(mesh, from: template), 0)
+        XCTAssertGreaterThan(rise, 0.6, "the scribble should fill up to the limit")
+        XCTAssertEqual(crossings(mesh), 0)
     }
 
     func testTheResultDoesNotDependOnHowTheFramesFell() {
@@ -145,7 +175,7 @@ final class InflateLimitTests: XCTestCase {
         stroke(dabs, on: &mesh, from: template)
         let depth = peak(mesh, from: template) / settings.radius
         XCTAssertLessThanOrEqual(depth, Sculpt.strokeHeightLimit + 1e-9)
-        XCTAssertGreaterThan(depth, 0.9)
+        XCTAssertGreaterThan(depth, 0.6)
     }
 
     func testTheNextStrokeStartsFromTheNewSurface() {
@@ -160,138 +190,169 @@ final class InflateLimitTests: XCTestCase {
             stroke(dabs, on: &mesh, from: reference)
         }
         let rise = peak(mesh, from: template) / settings.radius
-        XCTAssertGreaterThan(rise, 1.5, "two strokes should build past one stroke's limit")
+        XCTAssertGreaterThan(rise, 1.5 * Sculpt.strokeHeightLimit,
+                             "two strokes should build past one stroke's limit")
         XCTAssertLessThanOrEqual(rise, 2 * Sculpt.strokeHeightLimit + 1e-9)
     }
 
-    // MARK: - Never turned over
+    // MARK: - One direction per dab
 
-    /// Deflate on the rounded vertical edge between the front and right faces:
-    /// the normals there converge inwards, so points pushed along them cross.
+    /// The rounded vertical edge between the front and right faces, where the
+    /// normals of the points a brush reaches differ by up to ninety degrees.
     private let edge = (a: Vec3(0.12, -0.04, 0.12), b: Vec3(0.12, 0.04, 0.12),
                         direction: normalize(Vec3(-1, 0, -1)))
 
-    func testDeflatingAnEdgeNeverTurnsTheSurfaceOver() {
+    func testADabPushesEverythingItReachesOneWay() throws {
+        // The property that makes convergence impossible: points pushed the
+        // same way cannot meet. Pushed along their own normals, as they were,
+        // the two faces of this edge were pushed at each other.
+        let settings = Sculpt.Settings(radius: 0.06, strength: 1, symmetric: false)
+        let hit = try XCTUnwrap(Picking.raycast(template, origin: Vec3(0.12, 0, 0.12) - edge.direction * 5,
+                                                direction: edge.direction))
+        var mesh = template!
+        var base = Sculpt.StrokeBase(template, tables: tables)
+        let moved = Sculpt.apply([Sculpt.Dab(deflate(settings), at: hit.position, settings: settings)],
+                                 to: &mesh, tables: tables, base: &base)
+        XCTAssertGreaterThan(moved.count, 20)
+        let shifts = moved.map { mesh.positions[tables.weldMembers[$0][0]]
+                                 - template.positions[tables.weldMembers[$0][0]] }
+        let first = normalize(try XCTUnwrap(shifts.max { length($0) < length($1) }))
+        for shift in shifts where length(shift) > 1e-9 {
+            XCTAssertGreaterThan(dot(normalize(shift), first), 1 - 1e-9)
+        }
+        // And into the edge: the average facing of an edge is half way
+        // between its two faces.
+        XCTAssertGreaterThan(dot(first, normalize(Vec3(-1, 0, -1))), 0.95)
+    }
+
+    func testAFlatFaceIsPushedStraightIn() throws {
+        let settings = Sculpt.Settings(radius: 0.02, strength: 1, symmetric: false)
+        let direction = try XCTUnwrap(
+            Sculpt.pushDirections(centre: Vec3(0, 0, 0.12), mirrorCentre: nil,
+                                  radius: settings.radius, surface: template, tables: tables))
+        XCTAssertEqual(direction.primary.z, 1, accuracy: 1e-9)
+    }
+
+    func testAPitIsPushedDownWhereverTheBrushLandsInIt() throws {
+        // A pit seen at an angle is touched on its far wall. Pushed along
+        // the far wall's own facing, a pit tunnels away from the viewer
+        // stroke by stroke; measured with the facing taken over one radius,
+        // it broke out through the back edge of the top face. Taken over
+        // `pushNormalRadius`, the pit's surroundings count too.
+        let settings = Sculpt.Settings(radius: 0.022, strength: 1, symmetric: false)
+        var mesh = template!
+        strokes(4, on: &mesh, from: Vec3(-0.01, 0.2, 0), to: Vec3(0.01, 0.2, 0),
+                along: Vec3(0, -1, 0), passes: 6, deflating: true, settings: settings,
+                preventCrossing: true)
+        // The far wall: aim down the pit at an angle from the front.
+        let view = normalize(Vec3(0, -0.55, -0.85))
+        let hit = try XCTUnwrap(Picking.raycast(mesh, origin: Vec3(0, 0.12, 0) - view * 5, direction: view))
+        let wall = normalize(hit.normal(in: mesh))
+        let push = try XCTUnwrap(Sculpt.pushDirections(centre: hit.position, mirrorCentre: nil,
+                                                       radius: settings.radius, surface: mesh,
+                                                       tables: tables)).primary
+        let up = Vec3(0, 1, 0)
+        let wallTilt = acos(dot(wall, up)) * 180 / .pi
+        let pushTilt = acos(dot(push, up)) * 180 / .pi
+        // Measured: the wall faces 55.5 degrees off up, the push 4.5.
+        XCTAssertGreaterThan(wallTilt, 35, "the aim found the floor, not the far wall")
+        XCTAssertLessThan(pushTilt, 15, "the pit is pushed away from the viewer, not down")
+    }
+
+    // MARK: - Never through itself
+
+    func testDeflatingAnEdgeNeverCrossesTheSurface() {
         let settings = Sculpt.Settings(radius: 0.06, strength: 1, symmetric: false)
         var mesh = template!
         let dabs = scribble(on: template, from: edge.a, to: edge.b, along: edge.direction,
                             passes: 6, brush: deflate(settings), settings: settings)
         XCTAssertGreaterThan(dabs.count, 10, "the aim missed the edge")
         stroke(dabs, on: &mesh, from: template)
-        XCTAssertEqual(turnedOver(mesh, from: template), 0)
+        XCTAssertEqual(crossings(mesh), 0)
         XCTAssertGreaterThan(peak(mesh, from: template), settings.radius * 0.3,
-                             "the guard must stop a fold, not the whole stroke")
+                             "the guard must stop a crossing, not the whole stroke")
     }
 
-    func testInflatingABumpAgainNeverTurnsTheSurfaceOver() {
-        // The other way a fold starts: a stroke over the flank of a bump an
-        // earlier stroke raised, where the bump's base is concave and its
-        // normals converge. Several strokes, frame by frame, as on the iPad.
-        //
-        // Said plainly: with the height limit in, this does not fold even with
-        // the guard switched off — it is a check on the two together, not
-        // proof of the guard. The edge above and the two unit tests below are.
-        let settings = Sculpt.Settings(radius: 0.02, strength: 1, symmetric: false)
-        var mesh = template!
-        for stroke in 0..<6 {
+    /// Scribbles the way the Pencil landed in the sixth device run: rays at
+    /// the angle of the screenshot, three short back-and-forths about the
+    /// middle of the top face each stroke, in a new direction every stroke.
+    /// Seen at an angle, a pit is touched on its far wall — which is what
+    /// makes a pushed-along-its-own-normal pit fold, and a straight-down
+    /// scribble cannot show it.
+    private func anglesStrokes(_ tools: [Bool], on mesh: inout MeshData,
+                               settings: Sculpt.Settings, preventCrossing: Bool) {
+        let view = normalize(Vec3(0.1, -0.55, -0.83))
+        var generator = UInt64(7)
+        func unit() -> Double {
+            generator = generator &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Double(generator >> 11) / Double(1 << 53)
+        }
+        for deflating in tools {
             let reference = mesh
-            // Alternate a stroke along the middle with strokes along the two
-            // flanks, a little either side of it.
-            let offset = stroke % 3 == 0 ? 0.0 : (stroke % 3 == 1 ? 0.012 : -0.012)
-            let dabs = scribble(on: reference, from: Vec3(-0.02, offset, 0), to: Vec3(0.02, offset, 0),
-                                along: front.direction, passes: 8, brush: inflate(settings),
-                                settings: settings)
-            self.stroke(dabs, on: &mesh, from: reference, perFrame: 3)
-            XCTAssertEqual(turnedOver(mesh, from: reference), 0, "stroke \(stroke)")
+            var path = Sculpt.Stroke(settings: settings)
+            var dabs: [Sculpt.Dab] = []
+            let angle = unit() * .pi
+            let along = Vec3(cos(angle), 0, sin(angle)) * 0.025
+            let offset = Vec3(unit() - 0.5, 0, unit() - 0.5) * 0.02
+            var last: Vec3?
+            for i in 0..<90 {
+                let aim = Vec3(0, 0.12, 0) + offset + along * sin(Double(i) / 89 * .pi * 6)
+                guard let hit = Picking.raycast(reference, origin: aim - view * 5, direction: view)
+                else { last = nil; continue }
+                let travel = last.map { length(aim - $0) } ?? 0
+                last = aim
+                for centre in path.advance(to: hit.position, by: travel) {
+                    dabs.append(Sculpt.Dab(deflating ? deflate(settings) : inflate(settings),
+                                           at: centre, settings: settings))
+                }
+            }
+            stroke(dabs, on: &mesh, from: reference, perFrame: 3, preventCrossing: preventCrossing)
         }
     }
 
-    func testTheGuardPutsBackOnlyWhatTurnedATriangleOver() throws {
-        // One point on the front face pushed sideways past its neighbours —
-        // which turns its triangles over — and another moved an ordinary
-        // millimetre outwards, far away. Only the first is put back.
+    func testRepeatedDeflateStrokesStayCleanWithoutTheGuard() {
+        // The sixth device run, headless: twenty strokes over one place on the
+        // top face, a brush about two mesh spacings across. Measured WITHOUT
+        // the crossing guard, because the direction alone has to keep this
+        // clean or the guard would be carrying every stroke. Pushed along each
+        // point's own normal, the same run crossed itself 6 times by the tenth
+        // stroke and 21 by the twentieth.
+        let settings = Sculpt.Settings(radius: 0.022, strength: 0.6, symmetric: true)
         var mesh = template!
-        let start = mesh.positions
-        func welded(nearest target: Vec3) -> Int {
-            (0..<tables.weldedCount).min { a, b in
-                length(start[tables.weldMembers[a][0]] - target)
-                    < length(start[tables.weldMembers[b][0]] - target)
-            }!
-        }
-        let crossed = welded(nearest: Vec3(0, 0, 0.12))
-        let ordinary = welded(nearest: Vec3(-0.07, 0.05, 0.12))
-        for m in tables.weldMembers[crossed] { mesh.positions[m] += Vec3(0.025, 0, 0) }
-        for m in tables.weldMembers[ordinary] { mesh.positions[m] += Vec3(0, 0, 0.001) }
-        XCTAssertGreaterThan(turnedOver(mesh, from: template), 0, "the setup did not fold anything")
-
-        let restored = Sculpt.unfold(&mesh, moved: [crossed, ordinary], from: start,
-                                     reference: template, tables: tables)
-        XCTAssertEqual(restored, [crossed])
-        XCTAssertEqual(turnedOver(mesh, from: template), 0)
-        let o = tables.weldMembers[ordinary][0]
-        XCTAssertEqual(mesh.positions[o].z - start[o].z, 0.001, accuracy: 1e-12,
-                       "a move that folds nothing is kept")
+        anglesStrokes(Array(repeating: true, count: 20), on: &mesh, settings: settings,
+                      preventCrossing: false)
+        XCTAssertGreaterThan(peak(mesh, from: template), 0.05, "the pit was never dug")
+        XCTAssertEqual(crossings(mesh), 0)
     }
 
-    func testPuttingAPointBackCanTurnANeighbourOverAndThatIsPutBackToo() {
-        // Two rows of four points facing +z, a triangle pair per cell. `a` is
-        // pushed past its right-hand neighbour, which turns one triangle over.
-        // `b` is pushed past where `a` WAS, which is harmless while `a` is
-        // away — until the guard puts `a` back, and then `b`'s triangle is the
-        // one turned over. Only a guard that looks again finishes the job.
-        var positions: [Vec3] = []
-        for y in 0..<2 { for x in 0..<4 { positions.append(Vec3(Double(x), Double(y), 0)) } }
-        func point(_ x: Int, _ y: Int) -> UInt32 { UInt32(y * 4 + x) }
-        var indices: [UInt32] = []
-        for x in 0..<3 {
-            indices += [point(x, 0), point(x + 1, 0), point(x + 1, 1)]
-            indices += [point(x, 0), point(x + 1, 1), point(x, 1)]
-        }
-        let strip = MeshData(positions: positions,
-                             normals: Array(repeating: Vec3(0, 0, 1), count: positions.count),
-                             uvs: positions.map { Vec2($0.x / 3, $0.y) }, indices: indices,
-                             influences: Array(repeating: [], count: positions.count))
-        let stripTables = MeshTables(strip)
-        let a = Int(point(2, 0)), b = Int(point(1, 0))
-        var mesh = strip
-        mesh.positions[a] = Vec3(3.5, 0, 0)
-        mesh.positions[b] = Vec3(2.5, 0, 0)
-        XCTAssertEqual(turnedOver(mesh, from: strip), 1, "only the triangle past a's neighbour")
-
-        let restored = Sculpt.unfold(&mesh, moved: [stripTables.weldOf[a], stripTables.weldOf[b]],
-                                     from: strip.positions, reference: strip, tables: stripTables)
-        XCTAssertEqual(restored, [stripTables.weldOf[a], stripTables.weldOf[b]])
-        XCTAssertEqual(turnedOver(mesh, from: strip), 0)
-    }
-
-    func testAnOrdinaryPassPutsNothingBack() {
-        // Replays one ordinary pass frame by frame and asks the guard, after
-        // each frame, whether it had anything to do.
-        let settings = Sculpt.Settings(radius: 0.028, strength: 1, symmetric: false)
-        let dabs = scribble(on: template, from: front.a, to: front.b, along: front.direction,
-                            passes: 1, brush: inflate(settings), settings: settings)
+    func testInflatingInsideADentStaysCleanWithoutTheGuard() {
+        // The other convergence: the floor of a dent is concave, so its own
+        // normals point at each other, and Inflate pushed along them folded
+        // the dent shut — hundreds of crossings in the headless runs.
+        let settings = Sculpt.Settings(radius: 0.022, strength: 1, symmetric: true)
         var mesh = template!
-        var base = Sculpt.StrokeBase(template, tables: tables)
-        for d in dabs {
-            let before = mesh.positions
-            let moved = Sculpt.apply([d], to: &mesh, tables: tables, base: &base)
-            var probe = mesh
-            XCTAssertTrue(Sculpt.unfold(&probe, moved: moved, from: before,
-                                        reference: template, tables: tables).isEmpty)
-        }
+        anglesStrokes(Array(repeating: true, count: 4) + Array(repeating: false, count: 12),
+                      on: &mesh, settings: settings, preventCrossing: false)
+        XCTAssertEqual(crossings(mesh), 0)
     }
 
     // MARK: - The rule on its own
 
-    func testLimitedRise() {
-        XCTAssertEqual(Sculpt.limitedRise(height: 0, by: 0.3, ceiling: 1), 0.3)
-        XCTAssertEqual(Sculpt.limitedRise(height: 0.9, by: 0.3, ceiling: 1), 0.1, accuracy: 1e-15)
-        XCTAssertEqual(Sculpt.limitedRise(height: 1.2, by: 0.3, ceiling: 1), 0,
-                       "a weaker dab never pulls back what a stronger one raised")
-        XCTAssertEqual(Sculpt.limitedRise(height: 0, by: -0.3, ceiling: 1), -0.3)
-        XCTAssertEqual(Sculpt.limitedRise(height: -0.9, by: -0.3, ceiling: 1), -0.1, accuracy: 1e-15)
-        XCTAssertEqual(Sculpt.limitedRise(height: -1.2, by: -0.3, ceiling: 1), 0)
-        XCTAssertEqual(Sculpt.limitedRise(height: 0.5, by: -0.3, ceiling: 1), -0.3,
-                       "deflating a raised point is not limited by the raise")
+    func testLimitedMove() {
+        let up = Vec3(0, 0, 0.3)
+        XCTAssertEqual(Sculpt.limitedMove(up, from: .zero, ceiling: 1), 1)
+        XCTAssertEqual(Sculpt.limitedMove(up, from: Vec3(0, 0, 0.9), ceiling: 1), 1 / 3,
+                       accuracy: 1e-12)
+        XCTAssertEqual(Sculpt.limitedMove(up, from: Vec3(0, 0, 1.2), ceiling: 1), 0,
+                       "a weaker dab never pulls back what a stronger one pushed")
+        XCTAssertEqual(Sculpt.limitedMove(-up, from: Vec3(0, 0, 1.2), ceiling: 1), 1,
+                       "a point past the ceiling may always move back inside")
+        XCTAssertEqual(Sculpt.limitedMove(-up, from: Vec3(0, 0, 0.5), ceiling: 1), 1)
+        // Sideways at the ceiling: any move lengthens the offset.
+        XCTAssertEqual(Sculpt.limitedMove(Vec3(0.3, 0, 0), from: Vec3(0, 0, 1), ceiling: 1), 0)
+        // A magnitude, not a height: diagonal moves are held to the same sphere.
+        let t = Sculpt.limitedMove(Vec3(0.6, 0.8, 0), from: .zero, ceiling: 0.5)
+        XCTAssertEqual(length(Vec3(0.6, 0.8, 0) * t), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(Sculpt.limitedMove(.zero, from: Vec3(0, 0, 2), ceiling: 1), 1)
     }
 }

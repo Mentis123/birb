@@ -168,28 +168,25 @@ final class Renderer: NSObject, MTKViewDelegate {
     /// sculpted edge — which on a modelling tool is most of the silhouette.
     static let sampleCount = 4
 
-    /// Drawables in flight. Two rather than the default three, which is one
-    /// whole frame less between the Pencil moving and the pixel changing — at
-    /// 120 Hz, 8 ms of the 25-33 ms budget.
+    /// Drawables in flight: the system's default of three, for both loops.
     ///
-    /// The trade is real and it is why this is a named constant rather than a
-    /// literal: with two, a frame that overruns stalls the next one instead of
-    /// being absorbed. The HUD's worst-frame figure is what says whether that
-    /// happens on this device, and changing this back is one character.
-    static let drawableCount = 2
-
-    /// Drawables for the low-latency loop: the system's own default of three.
+    /// It was two on the display link, to take one frame out of the time
+    /// between the Pencil moving and the pixel changing, with a note that
+    /// the readout would say whether that stalled on this device. The sixth
+    /// device run said so: during every stroke each frame spent 11 to 20 ms
+    /// of its 12 to 20 in `nextDrawable`, the main thread was held 85 to 99%
+    /// of every second, frames came every 12 to 20 ms where the view asks
+    /// for 8, and touch-to-glass read 37 ms. With two, the next frame cannot
+    /// start until the display hands back the one before last, which on this
+    /// screen is a whole refresh; the wait was not an overrun being absorbed
+    /// but the pacing of every frame. With three a frame starts when it is
+    /// asked for and the main thread is free between frames for the Pencil
+    /// samples that feed the next one.
     ///
-    /// That loop presents inside the update's Core Animation transaction, so
-    /// when the next update starts the drawable on the glass and the one just
-    /// committed can both still be held. With two, none is left, and
-    /// `nextDrawable` blocks the main thread until the display gives one back
-    /// — Apple documents a wait of up to a second. That is a reasoned
-    /// suspect, not a measured cause: the fifth device run, the first with
-    /// this loop on, showed the main thread busy for the whole of every
-    /// stroke, and nothing then timed where. Now the frame timing says, and
-    /// two was only ever a latency tweak made for the display link.
-    static let lowLatencyDrawableCount = 3
+    /// The prediction, unmeasured until the next device run: `drawable` near
+    /// zero in the readout's `main` line, a frame about every 8 ms in its
+    /// first, and touch-to-glass lower, not higher.
+    static let drawableCount = 3
 
     /// Every frame's main-thread time goes through this: it decides which
     /// slow frames are written to the log, at most one line a second.
@@ -641,11 +638,16 @@ final class Renderer: NSObject, MTKViewDelegate {
             ? "low-latency loop" : "display link"
         let more = verdict.unreported > 0
             ? " (+\(verdict.unreported) more since the last line)" : ""
+        // "Held", not "busy": the sixth device run's lines said busy about a
+        // main thread that was blocked waiting for a drawable, not working.
+        let waiting = timing.parts.first?.name == "drawable"
+            ? ", mostly waiting for the display to give back a drawable" : ""
         if verdict.slow {
-            NSLog("[BabyBlender] slow frame, %@: %@%@", loop, timing.summary, more)
+            NSLog("[BabyBlender] slow frame, %@%@: %@%@", loop, waiting, timing.summary, more)
         } else {
-            NSLog("[BabyBlender] main thread busy %d%% of the last second, %@; last frame %@%@",
-                  Int((verdict.busyShare * 100).rounded()), loop, timing.summary, more)
+            NSLog("[BabyBlender] frames held the main thread %d%% of the last second, %@%@; "
+                  + "last frame %@%@",
+                  Int((verdict.busyShare * 100).rounded()), loop, waiting, timing.summary, more)
         }
     }
 

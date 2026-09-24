@@ -491,6 +491,10 @@ final class FrameLoop {
     /// SwiftUI update would flap between the two loops.
     private var gaveUp = false
     private var busy = false
+    /// Whether the loop is drawing every refresh — a stroke, a hover or a
+    /// coast — rather than when something asks. The readout's frame rate is
+    /// measured only across these.
+    var isContinuous: Bool { busy }
     /// A frame has been asked for that the next draw will serve. Cleared when
     /// a draw STARTS, so a request made during that draw's drain survives it.
     private var needsFrame = true
@@ -686,7 +690,7 @@ final class FrameLoop {
         view.enableSetNeedsDisplay = false
         if let layer = view.layer as? CAMetalLayer {
             layer.presentsWithTransaction = true
-            layer.maximumDrawableCount = Renderer.lowLatencyDrawableCount
+            layer.maximumDrawableCount = Renderer.drawableCount
         }
         monitor.forgetFrames()
         drawsSinceSwitch = 0
@@ -855,14 +859,13 @@ struct SculptView: UIViewRepresentable {
             }
         }
 
-        renderer.beforeDraw = { [weak view, weak renderer, weak loop, weak coordinator] in
-            guard let view, let renderer, let coordinator else { return }
+        renderer.beforeDraw = { [weak view, weak renderer, weak loop] in
+            guard let view, let renderer else { return }
             loop?.frameStarted()
-            let now = CACurrentMediaTime()
-            let elapsed = coordinator.lastFrame > 0 ? now - coordinator.lastFrame : 0
-            coordinator.lastFrame = now
-            // Last frame's cost, since this one has not happened yet.
-            if elapsed > 0 { editor.report(frame: renderer.stats, elapsed: elapsed) }
+            // Last frame's cost, since this one has not happened yet, and
+            // this frame's start for the readout's frame rate.
+            editor.report(frame: renderer.stats, at: CACurrentMediaTime(),
+                          continuous: loop?.isContinuous ?? false)
 
             let viewport = Vec2(Double(view.drawableSize.width), Double(view.drawableSize.height))
             guard viewport.x > 0, viewport.y > 0 else { return }
@@ -928,7 +931,6 @@ struct SculptView: UIViewRepresentable {
         var renderer: Renderer?
         var loop: FrameLoop?
         weak var view: SculptMTKView?
-        var lastFrame: CFTimeInterval = 0
         private var navigation: NavigationGesture?
         /// The camera when the current finger gesture began: what a palm's
         /// orbit is undone back to.

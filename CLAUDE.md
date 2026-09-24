@@ -2363,6 +2363,39 @@ that would turn a triangle over is put back (`Sculpt.unfold`). Folded
 undersides are drawn darker instead of being culled into holes. A ceiling
 taken per dab clipped a single pass to 0.755 radii, and a test caught it.
 
+**Sixth device run (2026-09-24): Deflate made a hole anyway, and every frame
+waited.** `humanoid/docs/Device_Pass_3.md` §12. *"Note the hole from all the
+deflate."* Reproduced headless first, through the stroke engine with the
+device's brush and view, with an independent crossing oracle and a software
+rasteriser. The drawing at ten strokes was the screenshot: 165 crossing
+triangle pairs, 445 by sixty. **Every point was pushed along its own normal**,
+and on a rim, an edge or a dent's floor those normals converge. Nine
+alternatives were measured before one shipped. Auto-smooth, a minimum brush
+size, a stretch limit, a per-dab flip guard and a lower limit all still
+crossed. A brush-sized average facing tunnelled backwards, because a pit seen
+at an angle is touched on its far wall.
+
+**What shipped:**
+- a dab pushes everything it reaches ONE way, the average facing over 2.5
+  radii (`Sculpt.pushDirections`);
+- one stroke moves a point at most 0.65 R, because the smoothstep's steepest
+  slope is 1.5 and a push steeper than 1 folds any wall it runs along;
+- a frame that would make the surface cross itself is scaled back as a whole
+  (`SelfIntersection`, `Sculpt.untangle`). This replaces the fold guard,
+  whose point-by-point put-backs were the screenshot's shards.
+
+Zero crossings in every scenario. The guard acts on 1% of frames and costs
+about 0.1 ms. The trade is stated in the code: Inflate raises and presses,
+it no longer fattens a thin limb. **A guard that compares only with the
+stroke's own start cannot see a fold built over many strokes.**
+
+The log's `main thread busy 85–99%` was the display link's **two drawables**,
+a latency tweak whose own comment said the readout would show a stall, and it
+did. Each frame waited 11 to 20 ms in `nextDrawable`, on the main thread.
+Three now. The readout's `3.4 fps, cpu+gpu 296 ms (worst 15325)` divided by
+the idle gaps between strokes. `FramePacing` counts only frames drawn
+continuously.
+
 **The plan of record is `humanoid/docs/PLAN.md`** (2026-09-23, rewritten
 that evening). Six milestones, each ended by one device pass:
 - M0: close the loop — a recorder, a one-tap device report, and decisions

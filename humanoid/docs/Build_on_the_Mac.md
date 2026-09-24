@@ -3,7 +3,7 @@
 **Time: about twenty minutes the first time, most of it Xcode indexing.**
 
 > **Read this first.** Everything in `Sources/` is tested on Linux and green —
-> 300 tests. Everything in `app/` is **compiled by CI** on every push (the
+> 314 tests. Everything in `app/` is **compiled by CI** on every push (the
 > `macos` job in `.github/workflows/humanoid.yml`, Release and Debug, for a
 > device) — which it was not before 2026-09-23: that job named a project that
 > no longer existed and still passed. Compiled is not run: the app layer's

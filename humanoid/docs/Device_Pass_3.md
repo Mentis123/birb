@@ -430,6 +430,11 @@ points are about a centimetre apart. Where the normals converge (the base of
 a bump, or Deflate on a rounded edge), points pushed that far cross each
 other and the surface folds through itself.
 
+*Superseded by §12 the same day: the limit is 0.65 of a radius, the push
+direction is the brush's average facing, and the fold guard below is gone,
+replaced by a guard against the surface crossing itself. The table is what
+shipped at the time.*
+
 | Change | Measured |
 |---|---|
 | **One Inflate or Deflate stroke moves a point at most one brush radius**, scaled by its dab's falloff and strength (`Sculpt.strokeHeightLimit`). The ceiling is kept per point for the whole stroke (`Sculpt.StrokeBase`), as the largest any of its dabs has allowed. | Twelve passes stop at 1.0 radius, where they used to reach twelve times one pass. One pass is untouched at 0.88. A ceiling taken per dab clipped a single pass to 0.755, because a pass's trailing dabs are weaker; that was this limit's first version, and a test caught it. |
@@ -448,3 +453,167 @@ its own comment.
 
 **Unmeasured on the iPad: all of it.** 300 core tests and `verify.sh` PASS
 is what exists.
+
+## 12. The sixth device run (2026-09-24): Deflate made a hole, and every frame waited
+
+*"And note the hole from all the deflate?!? =("* The screenshot: the top of
+the clay with a crater scribbled into it by many Deflate strokes, its middle
+crumpled into bluish-grey shards (the undersides the renderer has drawn since
+§11.1), and a spiky fold along the bottom edge of the front. The readout:
+`3.4 fps cpu+gpu 296.19 ms (worst 15325.81)`, `main 20.3 ms: drain 0.9
+drawable 19.2`, `touch→glass 37.0 ms (p90 41.0)`, `display link`, brush 35 pt
+at 2x, last stroke Deflate with 89 samples, 27 steps and peak pressure 0.60.
+The console: two hangs (0.36 s after launch, 0.52 s at the end) and about
+forty lines of `main thread busy 85–99% of the last second, display link;
+last frame 12–21 ms: drawable 11–20.5`.
+
+### 12.1 The hole
+
+**Reproduced headless before anything was changed.** The stroke engine with
+the device's settings: a 2732x2048 drawable, 35 pt on a 2x panel, strength
+0.6, pressure 0.85, symmetry on, four samples a frame, and the screenshot's
+view (azimuth 0.2, elevation 0.55). It scribbled Deflate over one place on
+the top face, stroke after stroke. Two instruments did the counting. One
+counts pairs of triangles that cross and share no corner. The other is a
+software rasteriser that draws front faces skin-coloured and back faces blue.
+At ten strokes the drawing was the screenshot.
+
+| Strokes | Crossing triangle pairs |
+|---|---|
+| 5 | 0 |
+| 10 | 165 |
+| 20 | 296 |
+| 60 | 445 |
+
+At full strength there were 85 crossings by the fifth stroke. Pressed into a
+cube corner at full strength, 199 by the fifth. Inflate alone never crossed.
+Inflate inside a dent crossed 196 to 628 times.
+
+**The cause: every point was pushed along its own normal.** On a rim, an edge
+or the floor of a dent, neighbouring normals point at each other, and points
+pushed far enough along them cross. The close-up showed where. The camera
+looks into the pit at an angle, so the Pencil lands on the pit's far wall.
+The rounded rim above that wall, pushed down and inward, rolled over the wall
+and through it. §11.1's limit bounded one stroke, but its fold guard compared
+each triangle only with the stroke's own start, so a fold that built up over
+several strokes was never seen. When the guard did act, it put back single
+points and left their neighbours moved. That is the staircase of shards in
+the screenshot.
+
+**What was measured and rejected.** The runs were headless with the same
+settings, counted at ten strokes unless stated.
+
+| Tried | Result |
+|---|---|
+| Auto-smooth each dab (Laplacian, 0.15 and 0.30) | 134 and 68 crossings |
+| A brush of at least three mesh spacings | far worse: 7,518 |
+| No edge stretched past 2.5 times its rest length | 69. The stretch limit held exactly, so the crossings are not stretch. |
+| Putting back any dab that turns a triangle over | 165, no better |
+| Own normals, with the limit lowered to 0.65 R | 104 |
+| One direction per dab: the average facing over one radius | 1, then 48 at twenty. The Pencil lands on the far wall, so the pit is pushed away from the viewer. It tunnelled back through the rear edge of the top face until the strokes hit nothing. |
+| The same over 2.5 radii, with the limit at 0.65 R | 0 in every scenario. The one exception was twenty full-strength strokes into a corner, with 5. |
+| That, plus the crossing guard below | **0 everywhere**. The guard acted on 38 of 3,814 frames. |
+| The crossing guard alone, on own normals | 0 crossings. But it acted on 62% of frames, and a pressed corner stalled at 15 mm. |
+
+**What shipped:**
+
+| Change | Why |
+|---|---|
+| **A dab pushes everything it reaches one way**: the surface's average facing over 2.5 brush radii of the shape the stroke started from (`Sculpt.pushDirections`, `pushNormalRadius`). Mirrored halves blend across the plane like Grab. | Points pushed the same way cannot meet. This is Blender's Draw brush with its area normal, and Nomad's Clay. It is wider than the brush so that a stroke landing on a pit's far wall pushes the pit down, not away. |
+| **One stroke moves a point at most 0.65 R** (`strokeHeightLimit`), measured as a distance from where the stroke found it (`limitedMove`), not as a height along a normal. | The smoothstep falloff's steepest slope is 1.5 per radius. A push whose flank changes faster than one unit per unit folds any wall it runs along, so the deepest safe push is 1 / 1.5 = 0.67 R. 1.0 was over it. |
+| **A frame never makes the surface cross itself.** After each frame of Inflate or Deflate, `SelfIntersection.created` asks whether any moved triangle crosses a triangle it shares no corner with, where the two did not cross before. If so, `Sculpt.untangle` scales the whole frame's move back to ½, ¼, ⅛ or nothing. This replaces `Sculpt.unfold`. | Seeing through the surface is exactly the surface crossing itself, so that is what is checked. The move is scaled as a whole, never point by point, which is what made shards. A crossing that was already there does not count, so a brush is never stuck beside one it did not make. |
+
+**The trade, stated.** Inflate and Deflate now raise and press; they no
+longer fatten or thin. A thin part, such as a limb pulled out with Grab, is
+pushed as a whole, because a thin part's average facing is whichever side the
+brush is on. Clay has no thin parts until someone makes one. The Humanoid,
+whose arms are thin, is M5 and will want a brush of its own for it. One
+stroke now lifts 0.65 of a radius where it lifted 0.88; more is another
+stroke.
+
+**Cost, release build on the build box** (`humanoid-cli bench`). A frame of
+three Inflate dabs costs:
+
+- at a 22 mm brush (the device's): 0.20 ms with the guard, 0.09 ms without;
+- at a 56 mm brush: 0.47 ms with the guard, 0.18 ms without.
+
+The check itself is 0.10 ms and 0.24 ms. Its first version bucketed the
+region into a hash-map grid, and cost 0.32 ms and 0.50 ms; the grid cost more
+to build than it saved, and a sort along x replaced it.
+
+**Tests.**
+
+- `InflateLimitTests`: the limit, and the constant's derivation from the
+  falloff.
+  - One direction per dab. On a rounded edge, and on a flat face.
+  - A pit touched on its far wall. The wall faces 55.5° off up, and the push
+    goes 4.5° off down.
+  - Repeated strokes at the screenshot's angle **with the guard off**,
+    Deflate and Inflate-inside-a-dent, which must stay clean on the direction
+    alone.
+- `SelfIntersectionTests`: hand-built crossings, and the detector against an
+  independent oracle over 24 random moves of the clay. The oracle decides a
+  crossing by plane distances and a point-in-triangle test, not by the
+  production ray test. The untangle keeps exactly the largest clean fraction.
+- `SculptCrossingTests`: this run's scenario, a corner pressed in at full
+  strength, and Inflate and Deflate in turn. All go through the stroke engine
+  and are checked by the oracle.
+
+Nine mutations were run, and each is caught:
+
+- the one-radius footprint;
+- own normals;
+- a 1.0 limit;
+- no guard;
+- counting old crossings;
+- skipping moved pairs;
+- a sweep that ignores triangle width;
+- an ignored limit;
+- a guard that gives up at once.
+
+### 12.2 Every frame waited for a drawable
+
+The display link ran with **two drawables**. That was a latency tweak, and its
+own comment said the readout would show whether it stalled on this device.
+It did. During every stroke each frame spent 11 to 20 ms of its 12 to 20 in
+`nextDrawable`, and the main thread was held 85 to 99% of every second.
+Frames came every 12 to 20 ms, where the view asks for 8. With two, the next
+frame cannot start until the display hands back the one before last, which on
+this screen takes a whole refresh. The wait was not an overrun being absorbed.
+It was the pacing of every frame, and it happened on the main thread. The
+Pencil samples for the next frame could not even be delivered until it ended.
+
+**Three drawables now, on both loops** (`Renderer.drawableCount`). The
+prediction, unmeasured until the next run: `drawable` near zero in the `main`
+line, a frame about every 8 ms, and touch-to-glass lower, not higher.
+
+### 12.3 The readout said 3.4 fps
+
+The first line divided by the gap between one frame and the next, whatever
+filled it, and called the result `cpu+gpu`. The loop draws on demand, so
+between strokes that gap was however long the iPad sat untouched: 15 seconds
+in the worst case. `FramePacing`, in the core with three tests, counts a gap
+only when the frame that opened it was drawn in continuous mode too. The line
+now reads `drawing 118 fps: a frame every 8.5 ms (worst 16.9)`, or `idle` when
+nothing has been drawn continuously. The log line that said `main thread busy`
+about a thread that was waiting now reads `frames held the main thread N% …`,
+and adds `mostly waiting for the display to give back a drawable` when that is
+where the time went.
+
+The two hangs in this run had no `held the main thread for N ms` line beside
+them. So they were not undo, redo, fill, the export check or the paint map;
+see §11.1.
+
+### 12.4 For the next run
+
+1. **Deflate one place twenty times**, from the same angle as the
+   screenshot. The dent gets deeper and never shows a blue or grey patch.
+   Then do the same with Inflate, and into a corner.
+2. **One stroke lifts or presses about two thirds of the brush radius.** To go
+   deeper or higher, lift the Pencil and stroke again.
+3. **The readout while drawing**: the first line (`drawing … fps: a frame
+   every … ms`), the `main` line's `drawable` figure, and `touch→glass`. The
+   prediction is about 8 ms, near 0, and under 37.
+4. **Console**: any `frames held the main thread` or `slow frame` line, and
+   any `Hang detected` with whatever `[BabyBlender]` line sits next to it.
+

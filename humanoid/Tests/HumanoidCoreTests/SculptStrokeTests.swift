@@ -128,29 +128,30 @@ final class SculptStrokeTests: XCTestCase {
         // the dab self-limits, because the surface inflates out of the brush;
         // following the surface means the falloff never decays.
         //
-        // The end state is the interesting part. The run does not simply build a
-        // tall bump — it stops being raycastable, because `Picking` is
-        // back-face culled and the extruded ring has folded through itself, so
-        // there is no front face left on the axis. That is precisely the
-        // "sometimes it goes inside out" from the first device test, reproduced
-        // headless.
+        // The end state used to be the interesting part: with every point
+        // pushed along its own normal, the extruded ring folded through
+        // itself and the surface stopped being raycastable — the "sometimes
+        // it goes inside out" of the first device test. Since the sixth
+        // device run a dab pushes everything it reaches one way, and the same
+        // abuse extrudes a straight column that never folds. The spike is
+        // still the witness that the per-event dab rate was the defect, which
+        // is what the resampler below answers.
         let settings = Sculpt.Settings(radius: 0.03, strength: 1.0, symmetric: false)
         var mesh = template!
         var survived = 0
-        var peakBeforeFolding = 0.0
+        var peak = 0.0
         for _ in 0..<120 {
             guard let hit = Picking.raycast(mesh, origin: Vec3(0, 0, 5),
                                             direction: Vec3(0, 0, -1)) else { break }
             survived += 1
-            peakBeforeFolding = (0..<mesh.vertexCount)
+            peak = (0..<mesh.vertexCount)
                 .map { length(mesh.positions[$0] - template.positions[$0]) }.max() ?? 0
             Sculpt.apply(.inflate(0.35 * settings.radius), to: &mesh, tables: tables,
                          at: hit.position, settings: settings)
         }
-        XCTAssertLessThan(survived, 120,
-                          "expected the surface to fold within a second of holding still")
-        XCTAssertGreaterThan(peakBeforeFolding, settings.radius * 2,
-                             "expected a spike; got \(peakBeforeFolding / settings.radius) radii")
+        XCTAssertEqual(survived, 120, "pushed one way per dab, the column must never fold")
+        XCTAssertGreaterThan(peak, settings.radius * 2,
+                             "expected a spike; got \(peak / settings.radius) radii")
     }
 
     func testAHeldPencilDoesNotCreepEvenAsTheSurfaceMovesUnderIt() {
@@ -334,6 +335,12 @@ final class SculptStrokeTests: XCTestCase {
         let settings = Sculpt.Settings(radius: 0.05, strength: 0.8, symmetric: true)
         let centre = try XCTUnwrap(mesh.positions.first { $0.x > 0.08 && $0.z > 0.08 })
 
+        // Inflate pushes each half one way, its average facing; taken from
+        // the unmoved mesh, which is what the brush reads it from.
+        let push = try XCTUnwrap(Sculpt.pushDirections(
+            centre: centre, mirrorCentre: Vec3(-centre.x, centre.y, centre.z),
+            radius: settings.radius, surface: mesh, tables: tables))
+
         for brush in [Sculpt.Brush.inflate(0.004), .grab(Vec3(0.01, 0.005, 0)), .smooth] {
             var live = mesh
             Sculpt.apply(brush, to: &live, tables: tables, at: [centre], settings: settings)
@@ -357,7 +364,7 @@ final class SculptStrokeTests: XCTestCase {
                     case .grab(let d):
                         shift = (mirrored ? Vec3(-d.x, d.y, d.z) : d) * weight
                     case .inflate(let amount):
-                        shift = mesh.normals[representative] * (amount * weight)
+                        shift = (mirrored ? push.mirror : push.primary) * (amount * weight)
                     case .smooth:
                         let ring = tables.neighbours[w]
                         guard !ring.isEmpty else { continue }

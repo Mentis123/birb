@@ -218,3 +218,61 @@ public struct MainThreadMonitor: Sendable {
         if ringCount == 0 { ringSum = 0 }
     }
 }
+
+/// How often frames arrive while the loop is drawing continuously: the
+/// readout's first line.
+///
+/// It used to divide by the gap between one frame and the next, whatever
+/// filled the gap, and label the result "cpu+gpu". The loop draws on demand,
+/// so between strokes that gap is however long the iPad sat untouched: the
+/// sixth device run's readout said "3.4 fps, cpu+gpu 296 ms (worst 15325)"
+/// about a loop that was drawing every 12 to 20 ms whenever anything moved.
+/// A gap counts as a frame interval only when the frame that opened it was
+/// drawn in continuous mode too; the rest is the app waiting for a touch.
+public struct FramePacing: Sendable {
+    /// Intervals remembered: a second at 120 Hz.
+    public static let capacity = 120
+
+    private var intervals = [Double](repeating: 0, count: FramePacing.capacity)
+    private var head = 0
+    public private(set) var count = 0
+    private var previous: Double?
+
+    public init() {}
+
+    /// A frame started at `time` (seconds, any monotonic clock).
+    /// `continuous` is whether the loop is drawing every refresh — a stroke,
+    /// a hover or a coast — rather than drawing because something asked.
+    public mutating func frame(at time: Double, continuous: Bool) {
+        if continuous, let previous, time > previous {
+            intervals[(head + count) % FramePacing.capacity] = (time - previous) * 1000
+            if count < FramePacing.capacity { count += 1 } else { head = (head + 1) % FramePacing.capacity }
+        }
+        previous = continuous ? time : nil
+    }
+
+    /// The mean interval in milliseconds, or nil before any was measured.
+    public var meanMilliseconds: Double? {
+        guard count > 0 else { return nil }
+        var sum = 0.0
+        for i in 0..<count { sum += intervals[(head + i) % FramePacing.capacity] }
+        return sum / Double(count)
+    }
+
+    /// The longest interval remembered, in milliseconds.
+    public var worstMilliseconds: Double? {
+        guard count > 0 else { return nil }
+        var worst = 0.0
+        for i in 0..<count { worst = max(worst, intervals[(head + i) % FramePacing.capacity]) }
+        return worst
+    }
+
+    /// "drawing 118 fps: a frame every 8.5 ms (worst 16.9)".
+    public var summary: String {
+        guard let mean = meanMilliseconds, let worst = worstMilliseconds, mean > 0 else {
+            return "idle: nothing drawn continuously yet"
+        }
+        return String(format: "drawing %.0f fps: a frame every %.1f ms (worst %.1f)",
+                      1000 / mean, mean, worst)
+    }
+}

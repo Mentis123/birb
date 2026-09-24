@@ -26,7 +26,7 @@ the pass documents record what happened.
 |---|---|
 | Export core: VRM 1.0 and FBX 7400 writers, skeleton, rig gate | `verify.sh`, eight stages: unit tests, the golden corpus, the Khronos validator, a PNG decode, Blender's glTF import (with the paint check), Blender's FBX import through both of its importers, the shipped body template, and a render. Unity built a Humanoid Avatar from the FBX on the first attempt, with Chest left unmapped. |
 | Clay template: 3,750 vertices (3,458 welded), 6,912 triangles, mirror-exact | `tools/build_clay.py` and `check_template.py`, reproduced byte for byte in CI |
-| Engine: tables; Grab, Inflate/Deflate and Smooth with X symmetry; picking; surface paint (world-space brush, taper, hardness, mirror); pressure; `StrokeEngine`; a document with undo, redo and discard | 300 tests on Linux. Each defect found on the device became a test that fails on the old code. |
+| Engine: tables; Grab, Inflate/Deflate and Smooth with X symmetry; picking; surface paint (world-space brush, taper, hardness, mirror); pressure; `StrokeEngine`; a document with undo, redo and discard | 314 tests on Linux. Each defect found on the device became a test that fails on the old code. |
 | App: Metal viewport, camera gestures, Pencil input with coalesced and predicted touches, a low-latency loop with a fallback, a hover ring, palm rejection, two-finger undo, a readout that measures touch→glass, and Brush & Pencil settings | Built by CI in Release and Debug. Five device runs. The fifth (2026-09-24) found the low-latency loop holding up every stroke, so the display link is the default again (`Device_Pass_3.md` §11). |
 
 **Not built, and blocking any real use:** Export Model writes no file, and
@@ -104,7 +104,7 @@ Two go into 1.0 because the device passes need them:
 
 | Block | Builds | Ends with | Owner, in parallel |
 |---|---|---|---|
-| Now | the §11 fix | **Pass 5 again**, on the fixed build: `Device_Pass_3.md` §8 and §11 | D1: the Apple Developer account and API key. The Windows Unity session: its corpus is ready. |
+| Now | the §11 and §12 fixes | **Pass 5 again**, on the fixed build: `Device_Pass_3.md` §8, §11 and §12 | D1: the Apple Developer account and API key. The Windows Unity session: its corpus is ready. |
 | A | M0 + M1 | **Pass 6**, the first report file | D2, D3 |
 | B | M2 | **Pass 7**: the PRD's Clay checklist, item by item | D5 |
 | C | M3 | External TestFlight beta, then **Clay 1.0**; the App Store once D4 is settled | D4, D6 |
@@ -157,9 +157,10 @@ Clay 1.0 is about four weeks away.
      synthetic sequences and with the owner's recorded palms.
    - **`FrameWatchdog`**: the clock from a frame request to a presented frame,
      the first-frame check, and what happens when the app becomes active
-     again. Tested with a fake clock. Its first piece landed on 2026-09-24:
+     again. Tested with a fake clock. Its first pieces landed on 2026-09-24:
      `MainThreadMonitor`, which decides when frames are holding the main
-     thread.
+     thread, and `FramePacing`, the readout's frame rate, which ignores the
+     idle gaps between strokes.
    - **`EditorSession`**: the input queue, "ignore until the next stroke",
      settle, close and discard, commands that arrive mid-stroke, and the start
      and end of activity. Tested headless.
@@ -369,13 +370,13 @@ In this order:
 
 | | Budget | Now |
 |---|---|---|
-| CPU per frame during a stroke | ≤ 4 ms (half a 120 Hz frame) | a paint dab (r = 0.04, 1024²) takes 0.72 ms; a raycast over 6,912 triangles takes 0.044 ms (build box) |
+| CPU per frame during a stroke | ≤ 4 ms (half a 120 Hz frame) | a paint dab (r = 0.04, 1024²) takes 0.72 ms; a raycast over 6,912 triangles takes 0.044 ms; an Inflate or Deflate frame of three dabs, crossing check included, 0.20 ms at a 22 mm brush and 0.47 ms at 56 mm (build box) |
 | A paint stroke's begin, one dab and end | ≤ 2 ms at 1024², ≤ 5 ms at 2048² | 1.73 ms and 4.91 ms (build box) |
 | Undo memory | ≤ 128 MB at 2048², holding the PRD's 30 sculpt and 20 paint strokes | no byte bound: 30 Fills take 240 MB at 1024² and 960 MB at 2048² |
 | Autosave | ≤ 5 ms on the main thread per stroke, with no encoding there | none exists yet |
 | Export at 2048² | ≤ 3 s, with progress and cancel | writes no file |
 | Paint map ready after opening a document | ≤ 0.5 s at 1024², ≤ 1 s at 2048² | 185 ms at 1024² on the iPad (pass 4) |
-| Touch→glass | pass 5's median; after that, 2 ms slower fails | unmeasured |
+| Touch→glass | pass 5's median; after that, 2 ms slower fails | 37 ms median, 41 ms p90, on the display link with two drawables, which held every frame back a refresh (`Device_Pass_3.md` §12); unmeasured with three |
 | Launch to first frame, in Release | ≤ 1 s | unmeasured |
 
 ## 7. Owner decisions
