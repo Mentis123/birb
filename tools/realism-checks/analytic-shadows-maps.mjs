@@ -33,7 +33,15 @@ export default async function run(ctx) {
   if (ridge) {
     const [on1, off1, on2, off2] = await abSeries(ctx, 'horizon', [1, 0, 1, 0], ridge.px, 30, 'maps-ridge');
     ctx.check(Math.abs(on1 - on2) + Math.abs(off1 - off2) <= 0.004 * off1, 'the control pairs agree');
-    ctx.check(1 - on1 / off1 > 0.15,
+    // The failure this guards is the maps CANCELLING the horizon (0%) — not
+    // a particular depth. How much a ridge removes depends on the patch's own
+    // sun share (its Lambert term), and the patch the finder lands on moves
+    // with the route-dependent sun azimuth: 13.0%, 37.1% and 54.4% on three
+    // boots of the v83 tree. So the bar is 5% AND ten times the control
+    // pairs' own disagreement, not a fixed 15% that a grazing-sun patch
+    // cannot reach.
+    const noise = (Math.abs(on1 - on2) + Math.abs(off1 - off2)) / off1;
+    ctx.check(1 - on1 / off1 > Math.max(0.05, 10 * noise),
       `with maps on the ridge still shadows the patch ${((1 - on1 / off1) * 100).toFixed(1)}% (${off1.toFixed(4)} -> ${on1.toFixed(4)})`);
   }
 
