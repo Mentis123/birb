@@ -500,8 +500,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         // Both sides. The clay is closed, so an underside only ever shows where
         // the surface has been folded through itself, and the shader draws it
         // darker so a fold looks like one; culled, it was a hole to the
-        // background. Apple GPUs remove the hidden faces of opaque geometry
-        // before shading, so the other side of a closed model costs nothing.
+        // background. Apple GPUs discard hidden fragments of opaque geometry
+        // before shading them, so the far side of a closed model is
+        // rasterised but not shaded: a few thousand extra triangles through
+        // the tiler, not a second model's worth of lighting.
         encoder.setCullMode(.none)
         // `setFrontFacingWinding` in Objective-C; Swift imports it under this
         // name. The default is clockwise and the templates wind the other way,
