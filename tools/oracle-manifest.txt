@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-24 at commit 46625e9 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-24 at commit 4dcdaef by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -54,6 +54,7 @@ b758bac8cbcc5df11e8a860d6a7497c4db4e4d9bac7bef2b85e9ea46a7d1cdbc  tests/air-fiel
 cedb10676f6ae0abed73646653ef26594aea1332eb52ac82eb79f1dd236815e0  tests/bird-flight-stunt.test.js
 89bd71c169b3fdbd821df4784844e09b00324dd44eb787a6eb377171f963219c  tests/bird-shadow.test.js
 71ba6f096bb7ef2cb4b3426c389b947aaf23a870bb1fb156a1dd4c5c23e1a749  tests/cloud-volume.test.js
+eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.test.js
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
 75c0877bd356ef6950e170aa27f9363eb773653b950483ec5d9413c0658d64e8  tests/hex-tiling.test.js
 06eaa4e627ef53e0dc1c6396ade658c0a47cf346fcb05e3f9fa2f28533559dab  tests/horizon-map.test.js
