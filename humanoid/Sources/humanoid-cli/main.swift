@@ -156,6 +156,32 @@ case "bench":
     benchMesh.recomputeNormals(benchTables)
     print("BENCH clay \(benchMesh.vertexCount) verts / \(benchMesh.triangleCount) tris")
 
+    // One frame of an Inflate stroke as the editor applies it: three dabs,
+    // measured against the stroke's starting surface, held to the stroke's
+    // height limit and checked for folds. The fold check, and the copy of the
+    // positions it compares against, are new on 2026-09-24; this is what they
+    // cost, beside the same dabs measured against the live surface.
+    do {
+        let settings = Sculpt.Settings(radius: 0.028, strength: 1, symmetric: true)
+        let brush = Sculpt.Brush.inflate(Sculpt.inflatePerDabDriven * settings.radius)
+        var frameDabs: [Sculpt.Dab] = []
+        for x in [-0.01, 0.0, 0.01] {
+            if let hit = Picking.raycast(benchMesh, origin: Vec3(x, 0, 5),
+                                         direction: Vec3(0, 0, -1)) {
+                frameDabs.append(Sculpt.Dab(brush, at: hit.position, settings: settings))
+            }
+        }
+        var base = Sculpt.StrokeBase(benchMesh, tables: benchTables)
+        time("inflate frame: 3 dabs, stroke base + fold guard", iterations: 200) {
+            var mesh = benchMesh
+            Sculpt.apply(frameDabs, to: &mesh, tables: benchTables, base: &base)
+        }
+        time("inflate frame: 3 dabs, live surface, no guard", iterations: 200) {
+            var mesh = benchMesh
+            Sculpt.apply(frameDabs, to: &mesh, tables: benchTables)
+        }
+    }
+
     // Picking is linear over triangles and runs once per queued sample plus
     // once per hover event, so it sets the ceiling on how dense Clay can get.
     time("Picking.raycast over \(benchMesh.triangleCount) triangles", iterations: 200) {
