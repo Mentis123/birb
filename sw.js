@@ -170,6 +170,12 @@ const CORE_ASSETS = [
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
   './src/environment/cloud-volume.js',
+  // Stream-power erosion (?erosion=1). Statically imported by
+  // spherical-world.js, so it is on the boot path with the flag OFF too;
+  // with it on, the worker prefetches every eroded biome's bake (the
+  // main-thread bake is the fallback).
+  './src/environment/erosion.js',
+  './src/environment/erosion-worker.js',
   // Horizon shadows: the bake (and the worker that runs it — a Worker script
   // the page cannot start offline is a world with no shadows), the patch.
   './src/environment/horizon-map.js',

@@ -15,6 +15,10 @@ import * as THREEImported from "https://esm.sh/three@0.183.2";
 import { createValleyFeature } from "./landmark-valley.js";
 import { airRequested } from '../flight/air-field.js';
 import {
+  erosionRequested, EROSION_PROFILES, getCubeSphereGrid, erodeTerrain, createErosionField, erosionFieldFromFaces,
+  bakeWetnessEquirect, createMeshLattice, sampleMeshLattice,
+} from "./erosion.js";
+import {
   applyAuthoredBark, authoredBarkRequested, applyAuthoredStone, authoredStoneRequested,
   applyAuthoredBarkInstanced, applyAuthoredSurfaceInstanced, PINE_BARK_TINT,
   authoredCanyonRequested, CANYON_TINT, CANYON_TILE_METRES, CANYON_DARK_SPIRE_SCALE,
@@ -103,6 +107,21 @@ let _activeRng = Math.random;
 // other and with what the player can see, and they reach the terrain through
 // free functions rather than through the world object.
 let _activeWaterLevel = 0;
+// Stream-power erosion of the world currently being built (?erosion=1,
+// src/environment/erosion.js): a carve-down delta every terrain function
+// adds, null when off — and null is the whole off path, one comparison.
+// Module-level for the reason the profile and the sea level are: the floor,
+// the landing check, the walking pose, the mesh, the props, the water and
+// the horizon bake all reach the terrain through free functions.
+let _activeErosion = null;
+// The carve AS THE GROUND MESH DRAWS IT (?erosion=1 only): the field sampled
+// at the current ground mesh's vertices, read back through its triangles.
+// Set by displaceSphereGeometry for every mesh it displaces; null whenever
+// _activeErosion is. See _erosionMeshDelta.
+let _erosionLattice = null;
+// The bake is a pure function of the biome (seeded noise, a fixed valley, a
+// fixed sea level), so a biome visited twice is eroded once.
+const _erosionCache = new Map();
 // Landmarks of the world currently being built, reported on the world object.
 let _landmarks = [];
 
@@ -770,6 +789,13 @@ function terrainDisplacement(nx, ny, nz, profile) {
   // but the plateau itself is the ceiling — nothing rises above the base radius.
   const valley = valleyCarveAt(nx, ny, nz);
   let h = Math.min(0, cont + detail + valley);
+  // Water's carve (?erosion=1). <= 0 by construction, so h stays <= 0 and
+  // the floor still only ever dips below the base radius. Read through the
+  // ground mesh's own triangles (see _erosionMeshDelta) once the mesh exists,
+  // so the floor and the drawn ground carry the SAME carve.
+  if (_activeErosion !== null) {
+    h += _erosionLattice !== null ? _erosionMeshDelta(nx, ny, nz) : _activeErosion.delta(nx, ny, nz);
+  }
 
   // ── Lake beds ──────────────────────────────────────────────────────────
   // Inside a basin deep enough to hold water, the detail roughness is pushed
@@ -886,6 +912,266 @@ export function sampleTerrainMeshHeight(x, y, z) {
   return terrainHeightDir(x * inv, y * inv, z * inv);
 }
 
+// ── Erosion bake (?erosion=1) ─────────────────────────────────────────────
+
+// The carve the floor reads must be the carve the MESH draws. The floor
+// samples the terrain analytically at the bird's own direction; the ground
+// mesh samples it at vertices 5-7 units apart and draws flat triangles
+// between. For the noise that was always so (the bird's 0.6 clearance hides
+// the skim), but a carved channel is CONCAVE at exactly mesh scale, and a
+// chord across a concave bed sits above it: measured in the review
+// (G-REALISM-EROSION, "Review"), where the water cut more than 3 units the
+// drawn ground stood more than 0.6 above the floor over 23-28% of the ground
+// against 14-18% for the same directions un-eroded — a bird skimming the
+// floor of a channel was inside the ground it could see. So once the mesh
+// exists, the carve term is read THROUGH the mesh: the field at the mesh's
+// own vertices, interpolated across the triangle the direction projects into
+// (gnomonic weights: the radial ray against the flat triangle, the same
+// triangle split three's SphereGeometry draws). At a vertex it is the field
+// itself, so the mesh does not move; between vertices it is the straight
+// line the mesh draws, so the carve adds nothing to the floor-to-mesh gap.
+// Zero-allocation, one atan2 and one acos, like the field's own sampler.
+function _setErosionLattice(W, H) {
+  _erosionLattice = _activeErosion !== null ? createMeshLattice(_activeErosion, W, H) : null;
+}
+
+function _erosionMeshDelta(nx, ny, nz) {
+  // Carve-down only, EXACTLY: the weights are non-negative inside a triangle,
+  // but a direction the sampler has to extrapolate for (a hair outside every
+  // triangle it tried) could lift a hair above 0, and the floor must never
+  // rise above the base radius.
+  const v = sampleMeshLattice(_erosionLattice, nx, ny, nz);
+  return v < 0 ? v : 0;
+}
+
+/**
+ * How much of the carve to withhold at a direction: 1 inside the landmark
+ * valley's reach, fading to 0 over 0.05 rad beyond it. The valley is
+ * AUTHORED — its waterfall, pool and river ribbon are placed on its own
+ * carve at build time — and a creek re-cutting its headwall would leave the
+ * falls hanging off a notch.
+ */
+function _erosionProtect(nx, ny, nz) {
+  if (!_valleyActive) return 0;
+  const d = _vaX * nx + _vaY * ny + _vaZ * nz;
+  const reach = Math.max(_valleyRadiusAng, _riverReachAng, _canyonReachAng) + 0.02;
+  const ang = Math.acos(d > 1 ? 1 : d < -1 ? -1 : d);
+  if (ang <= reach) return 1;
+  const t = 1 - (ang - reach) / 0.05;
+  return t <= 0 ? 0 : t * t * (3 - 2 * t);
+}
+
+/**
+ * Erode the ACTIVE biome's terrain. Must run with `_activeErosion === null`
+ * (it samples the un-eroded ground) and after the valley is set (the valley
+ * is part of the ground). Lakes are the outlets — exactly where the water
+ * sheet floods (the smooth basin field under sea level) — so rivers run to
+ * the water that is drawn.
+ */
+function _bakeErosion(profile) {
+  const level = _activeWaterLevel;
+  const grid = getCubeSphereGrid(profile.n);
+  const result = erodeTerrain({
+    grid,
+    heightAt: terrainHeightDir,
+    outletAt: level < 0 ? (x, y, z) => basinHeightDir(x, y, z) < level : null,
+    protectAt: _erosionProtect,
+    baseLevel: level < 0 ? level : -Infinity,
+    radius: SPHERE_RADIUS,
+    profile,
+  });
+  const field = createErosionField(grid, result);
+  return { field, wetBytes: bakeWetnessEquirect(field, 512, 256), stats: { ...result.stats, source: 'main' } };
+}
+
+/**
+ * Bake one biome's erosion without building its world: set that biome's
+ * terrain state, bake, put the previous state back. What the prefetch worker
+ * runs (erosion-worker.js imports this module — it has no DOM at load), so a
+ * biome switch finds its erosion already done. Deterministic, so the worker's
+ * bytes and a main-thread bake's are the same bytes.
+ */
+export function bakeErosionForVariant(variant) {
+  const profile = EROSION_PROFILES[variant];
+  if (!profile) return null;
+  const saved = { profile: _activeTerrainProfile, level: _activeWaterLevel, erosion: _activeErosion };
+  try {
+    _activeTerrainProfile = TERRAIN_PROFILES[variant] || TERRAIN_PROFILES.forest;
+    _activeWaterLevel = WATER_LEVELS[variant] ?? 0;
+    _activeErosion = null;
+    // The valley is the same in every biome; setting it is idempotent.
+    const frame = _tangentFrame(THREEImported, VALLEY_ANCHOR);
+    setActiveValley(VALLEY_ANCHOR, frame.forward, frame.right, VALLEY_PARAMS);
+    return _bakeErosion(profile);
+  } finally {
+    _activeTerrainProfile = saved.profile;
+    _activeWaterLevel = saved.level;
+    _activeErosion = saved.erosion;
+  }
+}
+
+// One prefetch per session: a module worker bakes every eroded biome into the
+// cache, so a world build that finds its biome there costs the main thread
+// nothing. Never needed for correctness — a biome whose bake has not landed
+// is baked on the main thread at build, and the late worker result is then
+// simply not used.
+let _erosionPrefetch = null;
+function _startErosionPrefetch(current) {
+  if (_erosionPrefetch || typeof Worker !== 'function' || typeof URL !== 'function') return;
+  const wanted = Object.keys(EROSION_PROFILES).filter((v) => EROSION_PROFILES[v] && v !== current && !_erosionCache.has(v));
+  _erosionPrefetch = { wanted, landed: [], failed: null, worker: null };
+  if (!wanted.length) return;
+  try {
+    const worker = new Worker(new URL('./erosion-worker.js', import.meta.url), { type: 'module' });
+    _erosionPrefetch.worker = worker;
+    const done = () => { if (_erosionPrefetch.worker) { _erosionPrefetch.worker.terminate(); _erosionPrefetch.worker = null; } };
+    worker.onmessage = (event) => {
+      const d = event.data || {};
+      if (!d.ok) { _erosionPrefetch.failed = d.error || 'worker bake failed'; done(); return; }
+      if (!d.skipped && !_erosionCache.has(d.variant) && EROSION_PROFILES[d.variant]) {
+        // Face arrays in, field out: no grid is built on this thread.
+        _erosionCache.set(d.variant, {
+          field: erosionFieldFromFaces(d.n, d.deltaFaces, d.wetFaces, d.stats),
+          wetBytes: d.wetBytes, stats: { ...d.stats, source: 'worker' },
+        });
+      }
+      _erosionPrefetch.landed.push(d.variant);
+      if (_erosionPrefetch.landed.length >= wanted.length) done();
+    };
+    // A worker that cannot start (no module workers, offline without the
+    // module) is not an error the player should see: every biome still
+    // erodes, on the main thread, when it is built.
+    worker.onerror = (event) => {
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      _erosionPrefetch.failed = 'worker failed to start';
+      done();
+    };
+    worker.postMessage({ variants: wanted });
+  } catch (err) {
+    _erosionPrefetch.failed = String((err && err.message) || err);
+  }
+}
+
+// With the flag on, the prefetch starts when this module LOADS rather than
+// after the first world: index.html imports it thousands of lines (and a
+// dozen awaited imports) before its first setEnvironment(), and the default
+// biome's bake can land in that gap — making even the first build free. If
+// it has not landed, the build bakes on the main thread and the worker's
+// copy is simply not used. Never in a worker (no window), so the worker that
+// imports this module does not start another.
+if (typeof window !== 'undefined' && erosionRequested(window.location?.search || '')) {
+  _startErosionPrefetch(null);
+}
+
+/**
+ * How far the drawn ground and the flight floor disagree. The floor is the
+ * analytic terrain at the bird's own direction; the mesh is that terrain at
+ * its vertices with straight lines between. `gap = mesh - floor`: positive
+ * is ground drawn ABOVE the floor (the bird can sink into what it sees),
+ * negative is ground drawn below it (the bird hovers). Exact per sample: a
+ * ray from the planet's centre against the real displaced triangles.
+ * Debug readback (allocates); never called per frame. Dry ground only — over
+ * a lake the floor is the water surface, which is the thing you see.
+ * `samples` may instead be an array of directions: { mesh, floor } heights
+ * at each are returned (a flight path's clearance above what it sees).
+ */
+function measureGroundAgreement(geometry, { samples = 20000, seed = 7, capY = 0.985, control = false } = {}) {
+  const pos = geometry?.getAttribute?.('position');
+  const W = geometry?.parameters?.widthSegments; const H = geometry?.parameters?.heightSegments;
+  if (!pos || !W || !H) return null;
+  // `control`: the same samples against the mesh and floor this world would
+  // have WITHOUT erosion — vertices re-displaced on the fly with the carve
+  // switched off — so an eroded world is compared with itself, un-eroded,
+  // in one boot, over the same directions.
+  const saved = _activeErosion;
+  if (control) _activeErosion = null;
+  try {
+    return _groundAgreement(pos.array, W, H, { samples, seed, capY, control });
+  } finally {
+    _activeErosion = saved;
+  }
+}
+
+function _groundAgreement(P0, W, H, { samples, seed, capY, control }) {
+  const idx = (ix, iy) => iy * (W + 1) + ix;
+  // Vertex coordinates: the mesh's own, or (control) the same lat-long
+  // vertex three's SphereGeometry makes, displaced by the current terrain.
+  const V = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const put = (slot, id) => {
+    if (!control) { V[slot] = P0[id * 3]; V[slot + 1] = P0[id * 3 + 1]; V[slot + 2] = P0[id * 3 + 2]; return; }
+    const ix = id % (W + 1); const iy = (id - ix) / (W + 1);
+    const u = ix / W; const v = iy / H;
+    const x = -Math.cos(u * 2 * Math.PI) * Math.sin(v * Math.PI);
+    const y = Math.cos(v * Math.PI);
+    const z = Math.sin(u * 2 * Math.PI) * Math.sin(v * Math.PI);
+    const l = Math.hypot(x, y, z) || 1;
+    const r = SPHERE_RADIUS + terrainHeightDir(x / l, y / l, z / l);
+    V[slot] = (x / l) * r; V[slot + 1] = (y / l) * r; V[slot + 2] = (z / l) * r;
+  };
+  const hit = (dx, dy, dz, a, b, c) => {
+    put(0, a); put(3, b); put(6, c);
+    const ax = V[0]; const ay = V[1]; const az = V[2];
+    const e1x = V[3] - ax; const e1y = V[4] - ay; const e1z = V[5] - az;
+    const e2x = V[6] - ax; const e2y = V[7] - ay; const e2z = V[8] - az;
+    const px = dy * e2z - dz * e2y; const py = dz * e2x - dx * e2z; const pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-12) return NaN;
+    const inv = 1 / det;
+    const u = (-ax * px - ay * py - az * pz) * inv;
+    if (u < -1e-7 || u > 1 + 1e-7) return NaN;
+    const qx = -ay * e1z + az * e1y; const qy = -az * e1x + ax * e1z; const qz = -ax * e1y + ay * e1x;
+    const v = (dx * qx + dy * qy + dz * qz) * inv;
+    if (v < -1e-7 || u + v > 1 + 1e-7) return NaN;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    return t > 0 ? t : NaN;
+  };
+  // Radius of the drawn ground along a unit direction (NaN if no triangle).
+  const meshRadius = (dx, dy, dz) => {
+    let u = Math.atan2(dz, -dx) / (2 * Math.PI); if (u < 0) u += 1;
+    const v = Math.acos(dy > 1 ? 1 : dy < -1 ? -1 : dy) / Math.PI;
+    const ix0 = Math.min(W - 1, Math.floor(u * W)); const iy0 = Math.min(H - 1, Math.floor(v * H));
+    let t = NaN;
+    for (let k = 0; k < 5 && !(t > 0); k++) {
+      const ix = (ix0 + (k === 1 ? 1 : k === 2 ? -1 : 0) + W) % W;
+      const iy = Math.max(0, Math.min(H - 1, iy0 + (k === 3 ? 1 : k === 4 ? -1 : 0)));
+      if (iy !== 0) t = hit(dx, dy, dz, idx(ix + 1, iy), idx(ix, iy), idx(ix + 1, iy + 1));
+      if (!(t > 0) && iy !== H - 1) t = hit(dx, dy, dz, idx(ix, iy), idx(ix, iy + 1), idx(ix + 1, iy + 1));
+    }
+    return t;
+  };
+  if (Array.isArray(samples)) {
+    // Explicit directions: the drawn ground's height and the floor's at each
+    // (for a flight path), not a distribution.
+    return samples.map((d) => {
+      const l = Math.hypot(d[0], d[1], d[2]) || 1;
+      const x = d[0] / l; const y = d[1] / l; const z = d[2] / l;
+      return { mesh: meshRadius(x, y, z) - SPHERE_RADIUS, floor: terrainFloorDir(x, y, z) };
+    });
+  }
+  let s = seed >>> 0 || 1;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  const gaps = [];
+  for (let n = 0; n < samples; n++) {
+    const z = 2 * rnd() - 1; const a = 2 * Math.PI * rnd(); const r = Math.sqrt(1 - z * z);
+    const dx = r * Math.cos(a); const dy = z; const dz = r * Math.sin(a);
+    if (Math.abs(dy) > capY) continue;
+    if (_activeWaterLevel < 0 && terrainHeightDir(dx, dy, dz) < _activeWaterLevel) continue;
+    const t = meshRadius(dx, dy, dz);
+    if (!(t > 0)) continue;
+    gaps.push(t - SPHERE_RADIUS - terrainFloorDir(dx, dy, dz));
+  }
+  if (!gaps.length) return null;
+  gaps.sort((p, q) => p - q);
+  const at = (q) => +gaps[Math.min(gaps.length - 1, Math.floor(q * gaps.length))].toFixed(3);
+  const share = (lim) => +(gaps.filter((g) => g > lim).length / gaps.length).toFixed(4);
+  return {
+    samples: gaps.length, segments: [W, H],
+    p001: at(0.001), p01: at(0.01), p50: at(0.5), p99: at(0.99), p999: at(0.999),
+    min: +gaps[0].toFixed(3), max: +gaps[gaps.length - 1].toFixed(3),
+    over03: share(0.3), over06: share(0.6),
+  };
+}
+
 // Height-based color palettes per biome (low altitude → high altitude).
 // Beauty pass: richer, more saturated stops derived from each biome's own
 // sky/light/ground identity (world-shell.js ENVIRONMENT_VARIANTS) — same world,
@@ -962,6 +1248,12 @@ function displaceSphereGeometry(geometry, sphereRadius, variant = 'forest') {
   const palette = TERRAIN_COLORS[variant] || TERRAIN_COLORS.forest;
   const posAttr = geometry.getAttribute('position');
   const count = posAttr.count;
+  // ?erosion=1: the floor reads the carve through THIS mesh's triangles
+  // (_erosionMeshDelta), so the lattice follows every mesh displaced here,
+  // including a later setGroundResolution(). Off, nothing happens.
+  if (_activeErosion !== null) {
+    _setErosionLattice(geometry.parameters?.widthSegments, geometry.parameters?.heightSegments);
+  }
 
   // Add vertex colors
   const colors = new Float32Array(count * 3);
@@ -3844,6 +4136,37 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   const _valleyFrame = _tangentFrame(THREE, VALLEY_ANCHOR);
   setActiveValley(VALLEY_ANCHOR, _valleyFrame.forward, _valleyFrame.right, VALLEY_PARAMS);
 
+  // Erosion (?erosion=1): baked HERE — after the valley is carved (it is part
+  // of the ground the water runs over) and before anything samples the
+  // terrain. The mesh, every prop, the water, the landmark features and the
+  // horizon bake (whose worker is handed its grid from this thread) all read
+  // terrainDisplacement, so every one of them sees the same eroded ground.
+  // Synchronous on purpose: the world build is, and a carve that landed
+  // after the props were placed would leave them standing on the old ground.
+  _activeErosion = null;
+  _erosionLattice = null;
+  let _erosionEntry = null;
+  let _erosionMs = 0;
+  let _erosionCached = false;
+  if (typeof window !== 'undefined' && erosionRequested(_search) && EROSION_PROFILES[variant]) {
+    const t0 = _horizonNow();
+    try {
+      _erosionEntry = _erosionCache.get(variant) || null;
+      _erosionCached = !!_erosionEntry;
+      if (!_erosionEntry) {
+        _erosionEntry = _bakeErosion(EROSION_PROFILES[variant]);
+        _erosionCache.set(variant, _erosionEntry);
+      }
+      _activeErosion = _erosionEntry.field;
+    } catch (err) {
+      console.warn('[SphericalWorld] erosion bake failed; the ground stays as it was:', err);
+      _activeErosion = null;
+      _erosionLattice = null;
+      _erosionEntry = null;
+    }
+    _erosionMs = _horizonNow() - t0;
+  }
+
   const root = new THREE.Group();
   root.name = `spherical-world-${variant}`;
   scene.add(root);
@@ -3901,6 +4224,27 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   // canyon/granite/snow/city; ?ground=0 or ?authored=0 opts out.
   const wantsGroundTexture = variant === 'forest'
     && typeof window !== 'undefined' && authoredGroundRequested(window.location?.search);
+  // Where the water runs, the ground is wet: the erosion's drainage as a
+  // 512x256 byte map in the horizon map's equirect convention, read per
+  // FRAGMENT — the channels are finer than the mesh and never touch the
+  // floor, so this is where the network the mesh cannot draw still shows.
+  let wetTexture = null;
+  if (_erosionEntry) {
+    const erosionProfile = EROSION_PROFILES[variant];
+    wetTexture = new THREE.DataTexture(_erosionEntry.wetBytes, 512, 256, THREE.RedFormat, THREE.UnsignedByteType);
+    wetTexture.name = 'erosion-wetness';
+    wetTexture.wrapS = THREE.RepeatWrapping;       // longitude wraps
+    wetTexture.wrapT = THREE.ClampToEdgeWrapping;  // colatitude stops at the poles
+    wetTexture.magFilter = THREE.LinearFilter;
+    wetTexture.minFilter = THREE.LinearFilter;     // no mips: u jumps 1 -> 0 at the seam
+    wetTexture.generateMipmaps = false;
+    wetTexture.unpackAlignment = 1;
+    wetTexture.needsUpdate = true;
+    wetTexture.userData.erosion = {
+      tint: erosionProfile.wetTint, damp: erosionProfile.wetDamp, strength: erosionProfile.wetStrength,
+      core: erosionProfile.wetCore,
+    };
+  }
   addGroundDetail(sphereMaterial, THREE, {
     baseRadius: sphereRadius,
     biome: variant,
@@ -3915,6 +4259,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
         // ?hextile=1: the map never repeats (ground-detail.js, hex note). Opt-in.
         hexTile: hexTileRequested(window.location?.search) }
       : null,
+    ...(wetTexture ? { wetMap: { texture: wetTexture, ...wetTexture.userData.erosion } } : {}),
   });
   if (wantsGroundTexture) {
     try {
@@ -4069,6 +4414,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
         stats: { ...job.stats, bytes: job.width * job.height * (4 * 4 + 1) },
         result: null,
         handle: null,
+        // ?erosion=1 only: the terrain grid the bake (and its worker) was
+        // handed, so a check can prove the shadows were marched over the
+        // ERODED ground. 512 KB, kept only while the flag is on.
+        terrain: _activeErosion ? job.terrain : null,
       };
       horizonState.handle = startHorizonBake(job, sphereRadius, (result) => {
         if (!horizonState) return;
@@ -4238,7 +4587,46 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
       get result() { return horizonState?.result ? { ...horizonState.result } : null; },
       get landed() { return !!horizonState?.result; },
       find(opts) { return findHorizonShadow(horizonState, sphereRadius, opts); },
+      // The bake's input height at texel (i, j); null unless ?erosion=1.
+      terrainGrid(i, j) {
+        const t = horizonState?.terrain;
+        return t ? t[j * horizonState.width + i] : null;
+      },
     } : null,
+    // Erosion readback for __BIRB.erosion() (?erosion=1; null when off or in
+    // a biome with no erosion profile). `ms` is what THIS build spent on it:
+    // the whole bake on a first visit, a cache hit after.
+    erosion: _erosionEntry ? {
+      variant,
+      ms: +_erosionMs.toFixed(1),
+      cached: _erosionCached,
+      stats: { ..._erosionEntry.stats },
+      get prefetch() {
+        return _erosionPrefetch ? {
+          wanted: _erosionPrefetch.wanted.slice(), landed: _erosionPrefetch.landed.slice(),
+          failed: _erosionPrefetch.failed, running: !!_erosionPrefetch.worker,
+        } : null;
+      },
+      wetTexture: !!wetTexture,
+      // The wetness tint, live (no recompile): strength 0 is the same frame
+      // without it, which is the A/B a capture needs. Returns what is set.
+      setWet({ strength, tint, damp, core } = {}) {
+        const w = sphereMaterial.userData?.birbGroundWetUniforms;
+        if (!w) return null;
+        const u = w.uGdWet.value; const d = w.uGdWetDamp.value; const c = w.uGdWetCore.value;
+        if (Number.isFinite(strength)) u.w = strength;
+        if (Array.isArray(tint) && tint.length === 3) { u.x = tint[0]; u.y = tint[1]; u.z = tint[2]; }
+        if (Array.isArray(damp) && damp.length === 3) { d.x = damp[0]; d.y = damp[1]; d.z = damp[2]; }
+        if (Array.isArray(core) && core.length === 2) { c.x = core[0]; c.y = core[1]; }
+        return { strength: u.w, tint: [u.x, u.y, u.z], damp: [d.x, d.y, d.z], core: [c.x, c.y] };
+      },
+      delta: (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return _erosionEntry.field.delta(x / l, y / l, z / l); },
+      wet: (x, y, z) => { const l = Math.hypot(x, y, z) || 1; return _erosionEntry.field.wet(x / l, y / l, z / l); },
+    } : null,
+    // Drawn ground against the flight floor, sampled exactly (see
+    // measureGroundAgreement). On every world, so the flag-off boot is the
+    // control. Debug readback; allocates.
+    groundAgreement(opts) { return measureGroundAgreement(sphereGeometry, opts); },
     // Getters, not plain data properties: an object LITERAL copies
     // `groundResolutionKey`'s value at construction time, so a later
     // setGroundResolution() call — which reassigns the closure variables,
@@ -4352,6 +4740,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
         try { disposeAuthoredGround(); } catch (e) { console.warn('Error disposing authored ground:', e); }
         disposeAuthoredGround = null;
       }
+      // The wetness map is a uniform, not a map slot, so the traverse below
+      // would never find it.
+      if (wetTexture) { wetTexture.dispose(); wetTexture = null; }
 
       // Then dispose geometries and materials
       try {

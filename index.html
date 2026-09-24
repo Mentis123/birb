@@ -15406,6 +15406,34 @@
           });
           return seen.size;
         },
+        // Stream-power erosion (?erosion=1, src/environment/erosion.js): what
+        // this world's bake did and cost (null fields when off), the carve and
+        // wetness at `at`, and the drawn ground against the flight floor —
+        // measured on EVERY world, so the flag-off boot is the control.
+        // `agreement: false` skips that (it ray-casts ~20k samples). Debug
+        // readback; allocates.
+        erosion: (opts = {}) => {
+          const e = sphericalWorld?.erosion || null;
+          const at = Array.isArray(opts.at) ? opts.at : null;
+          const wet = e && (opts.wetStrength !== undefined || opts.wetTint || opts.wetDamp || opts.wetCore)
+            ? e.setWet({ strength: opts.wetStrength, tint: opts.wetTint, damp: opts.wetDamp, core: opts.wetCore })
+            : (e ? e.setWet() : null);
+          return {
+            enabled: !!e,
+            env: sphericalWorld?.root?.name ?? null,
+            ms: e ? e.ms : null,
+            cached: e ? e.cached : null,
+            stats: e ? e.stats : null,
+            prefetch: e ? e.prefetch : null,
+            wetTexture: e ? e.wetTexture : false,
+            wet,
+            at: at && e ? { delta: e.delta(at[0], at[1], at[2]), wet: e.wet(at[0], at[1], at[2]) } : null,
+            // The horizon bake's own input heights at texels [[i, j], ...].
+            horizonGrid: Array.isArray(opts.texels)
+              ? opts.texels.map(([i, j]) => sphericalWorld?.horizon?.terrainGrid?.(i, j) ?? null) : null,
+            agreement: opts.agreement === false ? null : (sphericalWorld?.groundAgreement?.(opts) ?? null),
+          };
+        },
         // The bird's ellipsoid sun shadow (src/effects/bird-shadow.js).
         birdShadow: (strength) => {
           if (!birdShadowDriver) return null;

@@ -78,6 +78,13 @@ export const BOOT_FLAGS = Object.freeze([
       { value: '1', label: 'On' },
     ],
     hint: 'Off is the shipping default. On prefilters the sky once at boot and lights the scene with it.' },
+  // ---- Terrain ----
+  { key: 'erosion', group: 'Terrain', kind: 'select', label: 'A landscape carved by water (stream-power erosion)',
+    options: [
+      { value: null, label: 'Off' },
+      { value: '1', label: 'On' },
+    ],
+    hint: 'Rivers routed to the lakes and eroded into the ground at world build (carve-down only), with the ground wet where they run. Forest, canyons and mountain; the city keeps its streets. Off is the shipping default.' },
   // ---- Light: one sun, one sky, for a planet ----
   { key: 'planetsun', group: 'Light', kind: 'toggle', label: 'Sun in the bird’s own horizon (planet sun)',
     hint: 'Off is the before: a world-fixed sun that sat below the local horizon over half the planet, a hemisphere light pointing at world +Y, and a point light buried in the planet’s core.' },
