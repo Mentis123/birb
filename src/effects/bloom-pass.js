@@ -55,7 +55,18 @@
  * a console warning and never a broken frame. Only `sceneTarget` gets
  * `samples`; `blurA`/`blurB`/`rayTarget` stay single-sample — they are
  * half-res full-screen quads with no geometric edges to smooth.
+ *
+ * ---------------------------------------------------------------------------
+ * EXPOSURE LIKE AN EYE (?autoexp=1, ?localtm=1 — opt-in)
+ * ---------------------------------------------------------------------------
+ * `autoExposure` / `localTone` build `src/effects/exposure.js`'s stage: its
+ * passes run just before the composite, and the composite is rebuilt from
+ * this file's source with the eye patched in. With both false (the default)
+ * there is no stage, no extra pass, and the composite's source is exactly
+ * COMPOSITE_FRAG — `compositePristine` reports it.
  */
+
+import { createExposureStage } from './exposure.js';
 
 const FULLSCREEN_VERT = `
   varying vec2 vUv;
@@ -175,8 +186,9 @@ const RAYS_FRAG = `
 /**
  * The one full-resolution pass. Bloom add and vignette are merged here rather
  * than being two passes, which is the whole reason this is hand-written.
+ * Exported so exposure.js's patch is tested against THIS string.
  */
-const COMPOSITE_FRAG = `
+export const COMPOSITE_FRAG = `
   uniform sampler2D tScene;
   uniform sampler2D tBloom;
   uniform sampler2D tRays;
@@ -293,6 +305,11 @@ export function createBloomPass(THREE, renderer, {
   // constructor call; raise it live via setSamples() from a panel request
   // only (see the file-header note above).
   samples = 0,
+  // Exposure like an eye (src/effects/exposure.js). Both default off, and off
+  // builds nothing. `environment` seeds the adaptation's key.
+  autoExposure = false,
+  localTone = false,
+  environment = null,
 } = {}) {
   const size = renderer.getSize(new THREE.Vector2());
   const pixelRatio = renderer.getPixelRatio();
@@ -384,6 +401,14 @@ export function createBloomPass(THREE, renderer, {
     depthWrite: false,
   });
 
+  // The eye: null unless a flag asked for it (then its passes run before the
+  // composite, and the composite below is rebuilt with it patched in).
+  const eye = (autoExposure || localTone)
+    ? createExposureStage(THREE, renderer, {
+      autoExposure, localTone, vertexShader: FULLSCREEN_VERT, environment,
+    })
+    : null;
+
   const compositeMaterial = new THREE.ShaderMaterial({
     vertexShader: FULLSCREEN_VERT,
     fragmentShader: COMPOSITE_FRAG,
@@ -400,6 +425,10 @@ export function createBloomPass(THREE, renderer, {
     depthTest: false,
     depthWrite: false,
   });
+  if (eye) {
+    compositeMaterial.fragmentShader = eye.patchComposite(COMPOSITE_FRAG);
+    Object.assign(compositeMaterial.uniforms, eye.compositeUniforms);
+  }
 
   // One triangle, not a quad. A quad rasterises the screen diagonal twice;
   // a single oversized triangle covers the viewport with no seam and no
@@ -466,6 +495,7 @@ export function createBloomPass(THREE, renderer, {
     blurA.setSize(bw, bh);
     blurB.setSize(bw, bh);
     rayTarget.setSize(bw, bh);
+    if (eye) eye.setSize(w, h);
   }
   setSize(size.x, size.y, pixelRatio);
 
@@ -681,13 +711,22 @@ export function createBloomPass(THREE, renderer, {
       drawWith(blurMaterial, blurA);
       if (tally) tally(false);
 
+      // The eye, only when a flag built it: meter + adapt, then the fusion.
+      if (eye) eye.render(sceneTarget.texture, drawWith, tally);
+
       // Composite plus vignette, the one full-resolution pass.
       compositeMaterial.uniforms.tBloom.value = blurA.texture;
       drawWith(compositeMaterial, null);
       if (tally) tally(false);
     },
 
+    /** The eye (exposure.js's stage), or null — the shipping default. */
+    get eye() { return eye; },
+    /** True while the composite is built from the untouched source. */
+    get compositePristine() { return compositeMaterial.fragmentShader === COMPOSITE_FRAG; },
+
     dispose() {
+      if (eye) eye.dispose();
       sceneTarget.dispose();
       blurA.dispose();
       blurB.dispose();

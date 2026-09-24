@@ -75,6 +75,19 @@ export const BOOT_FLAGS = Object.freeze([
     hint: 'Off is the before: a world-fixed sun that sat below the local horizon over half the planet, a hemisphere light pointing at world +Y, and a point light buried in the planet’s core.' },
   { key: 'atmos', group: 'Light', kind: 'toggle', label: 'Physical atmosphere moves the palette',
     hint: 'A small Earth atmosphere (Hillaire 2020 / Bruneton) tints key, sky, fog, mist and lakes by how the sun’s height changes them. Exactly the authored look at the authored sun height; off is the warmth heuristic.' },
+  // ---- Exposure: an eye, not a fixed stop (opt-in, post pass only) ----
+  { key: 'autoexp', group: 'Exposure', kind: 'select', label: 'Eye adaptation (auto-exposure)',
+    options: [
+      { value: null, label: 'Off' },
+      { value: '1', label: 'On' },
+    ],
+    hint: 'The exposure follows the frame: a dark valley lifts, an open sky comes down, over about a second, within 1.5 stops of the biome’s authored exposure (exactly it at the reference view). Needs the post pass (Ultra, or Amazing at full tier).' },
+  { key: 'localtm', group: 'Exposure', kind: 'select', label: 'Local tone mapping (exposure fusion)',
+    options: [
+      { value: null, label: 'Off' },
+      { value: '1', label: 'On' },
+    ],
+    hint: 'Three synthetic exposures of each frame blended through Laplacian pyramids (Mertens 2007): detail comes up out of the shadows while the sky keeps its brightness. Four quarter-resolution passes; needs the post pass.' },
   // ---- The bird ----
   { key: 'bird', group: 'Bird', kind: 'select', label: 'Bird build',
     options: [

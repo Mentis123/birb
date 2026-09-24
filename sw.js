@@ -190,6 +190,9 @@ const CORE_ASSETS = [
   './src/nesting/rocket.js',
   './src/nesting/drone-system.js',
   './src/effects/bloom-pass.js',
+  // Statically imported by bloom-pass.js (the ?autoexp / ?localtm eye), so
+  // it is on the boot path whether or not a flag is set.
+  './src/effects/exposure.js',
   './src/effects/wake.js',
   './src/effects/energy-ring.js',
   './src/effects/ribbon-trail.js',

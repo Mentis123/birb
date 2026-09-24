@@ -3739,6 +3739,8 @@
       var { createAtmosphereModel, createAtmosphereOutput, relativeInto: atmosRelativeInto } =
         await import("./src/environment/atmosphere-model.js");
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
+      // Exposure like an eye (?autoexp=1, ?localtm=1 — opt-in; the pass builds it).
+      var { autoExposureRequested, localToneRequested } = await import("./src/effects/exposure.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
@@ -4859,6 +4861,10 @@
         softness: 0.24,
         strength: SHIPPING_BLOOM_STRENGTH,
         vignette: 0.42,
+        // Eye adaptation and local tone mapping, both OFF unless the URL
+        // asks: off, the pass and its composite are exactly as before.
+        autoExposure: autoExposureRequested(window.location?.search || ''),
+        localTone: localToneRequested(window.location?.search || ''),
       });
     } catch (bloomError) {
       console.warn('Bloom unavailable; rendering without it', bloomError);
@@ -4953,6 +4959,9 @@
         return;
       }
       frameRenderTotals.statsPath = 'renderer-info';
+      // The screen shows the authored exposure this frame; an eye (?autoexp)
+      // restarts from it when the post pass comes back, never from stale.
+      if (bloomPass && bloomPass.eye) bloomPass.eye.skipFrame();
       renderer.setRenderTarget(null);
       renderer.render(scene, cameraState.camera);
       tallyRenderPass(true);
@@ -7029,6 +7038,9 @@
       // a standing panel request on tone/exposure/bloomThreshold survives
       // this switch even though the meshes it applies to do not.
       applyColorGrade(definition);
+      // A biome switch is a cut: the eye (?autoexp) takes this biome's key
+      // and snaps to the first frame of it — no stale adaptation carried in.
+      if (bloomPass && bloomPass.eye) bloomPass.eye.setEnvironment(definition.id);
 
       // ===== IMPROVEMENT 1: Update sky dome colors =====
       if (skyDome && definition.sky) {
@@ -14692,6 +14704,23 @@
             if (view !== undefined) bloomPass.setDebugView(view);
           }
           return { enabled: bloomEnabled, present: !!bloomPass, tier: adaptiveTier.getTier() };
+        },
+        // Exposure like an eye (?autoexp=1, ?localtm=1 — src/effects/exposure.js).
+        // Async: reads the adapted 1x1 state back through a pixel-pack buffer
+        // (no stall; a debug readback, never the frame loop) and takes live
+        // A/B switches and tuning: { auto, local, snap, restart, debug: 0-3,
+        // strength, tauBright, tauDark, key, shadowsEv, highlightsEv, ... }.
+        exposure: async (opts) => {
+          const eye = bloomPass ? bloomPass.eye : null;
+          if (eye && opts) eye.configure(opts);
+          return {
+            present: !!eye,
+            compositePristine: bloomPass ? bloomPass.compositePristine : null,
+            postActive: isPostPassActive(),
+            environment: environmentState?.id ?? null,
+            authoredExposure: renderer.toneMappingExposure,
+            ...(eye ? await eye.read() : { autoexp: false, localtm: false }),
+          };
         },
         // Lighting + colour-grade overrides for side-by-side comparison
         // captures. The brief asks for palette tuning on physical phones
