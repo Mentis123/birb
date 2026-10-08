@@ -273,11 +273,26 @@ where the line drops below the baseline, and a climbing chicane.
 ### `race/race-logic.js` — **PURE. No THREE, no DOM.**
 
 ```js
-export const RACE_CONFIG          // laps, countdown ms, gate radius, ...
+export const RACE_CONFIG          // laps, countdown ms, gate radius, step limits
+                                  // (maxDt, maxRacerSpeed, gateCrossMaxStep,
+                                  // gateCrossMaxT), ...
 createRaceState({ laps, gateCount, racerCount }) -> state
-resetRaceState(state)
+resetRaceState(state)             // also forgets every racer's sample history
 recordGate(state, racerIndex, gateIndex, nowMs) -> boolean   // true if it counted
-racerProgress(state, racerIndex)  // -> laps + fraction, monotonic, for standings
+passGate(state, racerIndex, t, x, y, z, gatePositions, nowMs) -> gate | -1
+                                  // THE gate rule, player and rivals alike: counts
+                                  // the due gate when the step from the last sample
+                                  // crosses its plane, the crossing point (interpolated
+                                  // along the step) is inside gateRadius, and the step
+                                  // is forward and not a warp; files it via recordGate
+seedGateCrossing(state, racerIndex, t, x, y, z)
+                                  // start the sample history passGate and updateRacerT
+                                  // diff against, judging no step: on the grid at the
+                                  // green light, after a respawn or a warp
+racerProgress(state, racerIndex)  // -> laps + fraction, for standings. Monotonic
+                                  // during valid forward racing; flying backwards
+                                  // loses sub-gate progress (never a counted gate),
+                                  // and up to one span behind the last gate reads 0
 updateStandings(state)            // sorts in place into state.order
 isWrongWay(state, racerIndex, t)  // -> boolean
 formatTime(ms)                    // "1:23.45"
@@ -296,6 +311,9 @@ createAIRacers(THREE, { course, count, quality, seed, createBirdFn }) -> {
   reset(),
   dispose()
 }
+rubberBand(gap) -> pace term   // the band alone, capped at +7% / -5%
+paceAdjust(band, pack, clever) // what a rival runs on: the sum, at most
+                               // AI_CONFIG.assistMax (10%); published as r.paceAdj
 ```
 Spline-following with lookahead steering. Five personalities: aggressive
 (cuts inside, brakes late, bumps), clean (holds the ideal line, consistent),

@@ -13,8 +13,10 @@
  * spacing in t is uniform. That single choice is what lets this module compute
  * sub-gate progress without knowing any geometry.
  *
- * Racers line up ON the start/finish line, so the first gate they must pass is
- * gate 1, and passing gate 0 again is what completes a lap. Hence:
+ * Racers line up ON (or a touch behind) the start/finish line, so the first
+ * gate they must pass is gate 1, and passing gate 0 again is what completes a
+ * lap. A gate is passed when the racer crosses its plane (see passGate).
+ * Hence:
  *
  *     nextGate starts at 1     lap starts at 1
  *     recordGate(..., 0)  ->   lap split recorded, lap++, maybe finish
@@ -32,6 +34,14 @@
  * knockdown recovery, debug jump) and ignored entirely.
  */
 
+/** The frame loop's dt cap, seconds: index.html clamps every frame to it and
+ *  ai-racer clamps its own update to it, so no racer ever steps further than
+ *  its speed times this. */
+const MAX_DT = 0.05;
+/** At or above anything that races: the player's boost ceiling is 54, a
+ *  rival's 43. */
+const MAX_RACER_SPEED = 58;
+
 /** Tunables. Times in ms, gate radius in world units, thresholds in lap-t. */
 export const RACE_CONFIG = Object.freeze({
     laps: 3,
@@ -41,8 +51,22 @@ export const RACE_CONFIG = Object.freeze({
     countdownMs: 3200,
     countdownBeeps: 3,
 
-    /** How close (world units) the bird must be to a gate centre to count it. */
+    /** How close (world units) the bird must be to a gate centre, at the gate
+     *  plane, to count it. The visible ring is radius 9. */
     gateRadius: 11,
+
+    maxDt: MAX_DT,
+    maxRacerSpeed: MAX_RACER_SPEED,
+    /** World distance a racer may move in one step and still be judged to
+     *  have flown through a gate plane: 4x the 2.9 units a capped step can
+     *  cover, and short of the 22-unit counting diameter, so no single step
+     *  can jump a ring. A longer step is a warp, not a crossing. */
+    gateCrossMaxStep: MAX_RACER_SPEED * MAX_DT * 4,
+    /** The same bound in lap-t (a step can be short in the world and long in
+     *  t where the circuit passes close to itself): ~13 units on the ~640-unit
+     *  lap. The longest legal step in t is a capped one on the inside of the
+     *  hairpin, 7.6 off-line, where t runs ~1.5x fast: under 0.007. */
+    gateCrossMaxT: 0.02,
 
     /** Backwards lap-fraction that must accumulate before WRONG WAY shows. */
     wrongWayEnterT: 0.012,
@@ -145,6 +169,13 @@ export function createRaceState(opts = {}) {
         wrongAccum: new Float64Array(racerCount),
         wrongWay: new Uint8Array(racerCount),
 
+        // --- passGate's memory: the previous sample of each racer ------------
+        crossT: new Float64Array(racerCount),
+        crossX: new Float64Array(racerCount),
+        crossY: new Float64Array(racerCount),
+        crossZ: new Float64Array(racerCount),
+        crossHas: new Uint8Array(racerCount),
+
         // --- standings -------------------------------------------------------
         progress: new Float64Array(racerCount),   // laps completed + fraction
         order: new Int32Array(racerCount),        // racer indices, best first
@@ -173,6 +204,11 @@ export function resetRaceState(state) {
         state.subT[i] = 0;
         state.wrongAccum[i] = 0;
         state.wrongWay[i] = 0;
+        state.crossT[i] = 0;
+        state.crossX[i] = 0;
+        state.crossY[i] = 0;
+        state.crossZ[i] = 0;
+        state.crossHas[i] = 0;
         state.progress[i] = 0;
         state.order[i] = i;
         state.place[i] = i + 1;
@@ -239,6 +275,88 @@ export function recordGate(state, racerIndex, gateIndex, nowMs) {
         }
     }
     return true;
+}
+
+/**
+ * THE gate rule — the player (index.html) and the rivals (ai-racer.js) both
+ * call this, so they cannot disagree about what "through a gate" means. Call
+ * it once per frame per racer with its course `t` and world position.
+ *
+ * A gate counts on the frame the racer's t reaches or passes the gate's t
+ * (gate g sits at t = g/gateCount), if the point where its path crosses the
+ * plane is inside `gateRadius` of the gate centre. That point is interpolated
+ * between this sample and the last one, at the fraction of the step in t
+ * that reached the plane, so a ring threaded 10.99 out between two samples
+ * 11.1 out counts and one entered from inside but crossed 11.8 out does not.
+ * The step must be forward and a step, not a warp: no more than
+ * `gateCrossMaxT` in t and `gateCrossMaxStep` in the world.
+ *
+ * It used to count anywhere inside the radius, up to 11 units SHORT of the
+ * plane, which read the racer a whole gate ahead until it crossed the plane
+ * and then took the gate back off it.
+ *
+ * The first call after a reset only records the sample; seedGateCrossing
+ * records one without a step, for the grid and after a warp. Only `nextGate`
+ * is ever tested and recordGate does the filing, so skipping a ring still
+ * counts for nothing. Returns the gate that counted, or -1.
+ */
+export function passGate(state, racerIndex, t, x, y, z, gatePositions, nowMs) {
+    if (racerIndex < 0 || racerIndex >= state.racerCount) return -1;
+    const tw = wrapT(t);
+    const had = state.crossHas[racerIndex] === 1;
+    const prevT = state.crossT[racerIndex];
+    const px = state.crossX[racerIndex], py = state.crossY[racerIndex], pz = state.crossZ[racerIndex];
+    writeCrossing(state, racerIndex, tw, x, y, z);
+    if (!had) return -1;
+
+    // Forward, and a step rather than a warp.
+    const step = deltaT(prevT, tw);
+    if (!(step > 0) || step > RACE_CONFIG.gateCrossMaxT) return -1;
+    const sx = x - px, sy = y - py, sz = z - pz;
+    const maxStep = RACE_CONFIG.gateCrossMaxStep;
+    if (sx * sx + sy * sy + sz * sz > maxStep * maxStep) return -1;
+
+    // The plane lies in (prevT, tw]: the racer reached or passed it this step.
+    const g = state.nextGate[racerIndex];
+    const toPlane = forwardT(prevT, g / state.gateCount);
+    if (!(toPlane > 0 && toPlane <= step)) return -1;
+
+    // Where the path crosses it.
+    const o = g * 3;
+    if (!gatePositions || gatePositions.length < o + 3) return -1;
+    const a = toPlane / step;
+    const dx = px + sx * a - gatePositions[o];
+    const dy = py + sy * a - gatePositions[o + 1];
+    const dz = pz + sz * a - gatePositions[o + 2];
+    const r = RACE_CONFIG.gateRadius;
+    if (dx * dx + dy * dy + dz * dz > r * r) return -1;
+
+    return recordGate(state, racerIndex, g, nowMs) ? g : -1;
+}
+
+function writeCrossing(state, racerIndex, tw, x, y, z) {
+    state.crossHas[racerIndex] = 1;
+    state.crossT[racerIndex] = tw;
+    state.crossX[racerIndex] = x;
+    state.crossY[racerIndex] = y;
+    state.crossZ[racerIndex] = z;
+}
+
+/**
+ * Start a racer's sample history at (t, x, y, z) without judging a step: the
+ * next passGate and updateRacerT measure from here. Call it wherever a racer
+ * is PLACED rather than flown — on the grid at the green light, after a
+ * respawn or a warp — so the first real step from there can count a gate, and
+ * the jump to there can neither count one nor read as wrong-way travel.
+ * Changes nothing else: no gate, no wrong-way accumulation, no lap.
+ */
+export function seedGateCrossing(state, racerIndex, t, x, y, z) {
+    if (racerIndex < 0 || racerIndex >= state.racerCount) return;
+    const tw = wrapT(t);
+    writeCrossing(state, racerIndex, tw, x, y, z);
+    state.hasT[racerIndex] = 1;
+    state.lastT[racerIndex] = tw;
+    state.subT[racerIndex] = subGateFraction(state, racerIndex, tw);
 }
 
 /** Total race time so far (or final time once finished). */
@@ -325,16 +443,25 @@ export function updateRacerT(state, racerIndex, t) {
 /**
  * How far past the last gate the racer is, expressed as a fraction of ONE LAP
  * clamped to a single gate spacing. Because gates are evenly spaced in t this
- * needs no geometry at all.
+ * needs no geometry at all. With fwd the forward lap-t from the last gate:
+ *
+ *     [0, span)          fwd: between the last gate and the next
+ *     [1 - span, 1)      0: up to one span BEHIND the last gate
+ *     [span, 1 - span)   span * 0.999: at or past the next gate, not counted
  */
 function subGateFraction(state, racerIndex, tw) {
     const n = state.gateCount;
     const span = 1 / n;
     const lastGate = (state.nextGate[racerIndex] - 1 + n) % n;
     const fwd = forwardT(lastGate * span, tw);
+    if (fwd < span) return fwd;
+    // Short of the last gate (on the grid behind the line, or drifting back
+    // through a plane): no distance past it at all. Reading that as "nearly
+    // a whole span on" put such a racer a gate ahead of the field.
+    if (fwd >= 1 - span) return 0;
     // Past the next gate (gate not registered yet) — hold at the gate spacing
     // so progress never overshoots and un-does itself when the gate fires.
-    return fwd >= span ? span * 0.999 : fwd;
+    return span * 0.999;
 }
 
 /**
@@ -346,9 +473,11 @@ export function isWrongWay(state, racerIndex, t) {
 }
 
 /**
- * Monotonic progress in laps: gates passed / gateCount, plus the fraction of
- * the current gate span already travelled. A racer who has crossed the line
- * reports their full race distance so finishers never fall below runners.
+ * Progress in laps: gates passed / gateCount, plus the fraction of the
+ * current gate span already travelled. Monotonic during valid forward racing
+ * (through each gate in turn); a racer flying backwards loses the sub-gate
+ * part, never a counted gate. A racer who has crossed the line reports their
+ * full race distance so finishers never fall below runners.
  */
 export function racerProgress(state, racerIndex) {
     if (racerIndex < 0 || racerIndex >= state.racerCount) return 0;

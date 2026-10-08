@@ -1417,6 +1417,12 @@ async function boot(requestedMode) {
                 phase = 'racing';
                 hud.hideCountdown();
                 raceLogic.startRace && raceLogic.startRace(race, now);
+                // The bird is still on its grid pose (it first moves below):
+                // race-logic's sample history starts here, so the first step
+                // is judged like any other and the countdown fed it nothing.
+                if (def.rivals) raceLogic.seedGateCrossing(race, 0,
+                    course.nearestT(flight.position.x, flight.position.y, flight.position.z),
+                    flight.position.x, flight.position.y, flight.position.z);
             }
             chase.setMode('orbit');
         } else {
@@ -1496,9 +1502,10 @@ async function boot(requestedMode) {
         // corrupt the wrong-way accumulator.
         if (def.rivals) {
             if (phase !== 'countdown') {
-                raceLogic.updateRacerT(race, 0, course.nearestT(pose.position.x, pose.position.y, pose.position.z));
+                const playerT = course.nearestT(pose.position.x, pose.position.y, pose.position.z);
+                raceLogic.updateRacerT(race, 0, playerT);
+                if (phase === 'racing') checkGates(0, pose.position, playerT);
             }
-            if (phase === 'racing') checkGates(0, pose.position);
             raceLogic.updateStandings(race);
         }
 
@@ -2002,19 +2009,18 @@ async function boot(requestedMode) {
         });
     }
 
-    function checkGates(racerIndex, position) {
-        const g = race.nextGate[racerIndex];
+    function checkGates(racerIndex, position, t) {
+        // The one gate rule, shared with the rivals: a gate counts on the
+        // frame the bird crosses its plane inside the counting radius, and
+        // only if it was the gate that racer was actually due to pass, so
+        // skipping one or re-triggering the last one changes nothing. That is
+        // what makes the ribbon the only legal line.
+        const g = raceLogic.passGate(race, racerIndex, t, position.x, position.y, position.z,
+            course.gatePositions, performance.now());
+        if (g < 0) return;
         const gx = course.gatePositions[g * 3];
         const gy = course.gatePositions[g * 3 + 1];
         const gz = course.gatePositions[g * 3 + 2];
-        const dx = position.x - gx, dy = position.y - gy, dz = position.z - gz;
-        const radius = raceLogic.RACE_CONFIG.gateRadius;
-        if (dx * dx + dy * dy + dz * dz > radius * radius) return;
-
-        // recordGate returns false unless this was the gate that racer was
-        // actually due to pass, so skipping one or re-triggering the last one
-        // changes nothing. That is what makes the ribbon the only legal line.
-        if (!raceLogic.recordGate(race, racerIndex, g, performance.now())) return;
 
         if (racerIndex === 0) {
             audio.gate(race.gatesPassed[0]);
@@ -2154,13 +2160,17 @@ async function boot(requestedMode) {
          * Fly the player forward along the course for `seconds` of game time.
          * Snaps the rig afterwards: this is a teleport as far as the camera is
          * concerned, and letting it smooth across that distance leaves it
-         * somewhere in front of the bird looking back.
+         * somewhere in front of the bird looking back. It is one to the race
+         * too: the sample history restarts where the bird lands, so the jump
+         * neither counts the gates it skipped nor reads as a wrong way.
          */
         debugAdvance(seconds, input) {
             const step = 1 / 60;
             const held = input || ZERO_INPUT;
             for (let t = 0; t < seconds; t += step) flight.tick(held, step);
             chase.snapToTarget(flight.position, flight.quaternion);
+            const p = flight.position;
+            if (def.rivals) raceLogic.seedGateCrossing(race, 0, course.nearestT(p.x, p.y, p.z), p.x, p.y, p.z);
         },
         get phase() { return phase; },
         /**

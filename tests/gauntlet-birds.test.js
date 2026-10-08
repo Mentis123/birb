@@ -232,12 +232,13 @@ test('the overtake measure has no phantom gate jump, so the crow cannot caw at n
     updateRacerT(s, 0, 0.0);
     updateRacerT(s, 1, 0.988);
     assert.ok(fineProgress(s, 1, 0.988) < fineProgress(s, 0, 0.0));
-    // Racer 1 files gate 1 eleven units early (t 0.06 < gate t 0.0714)
-    // while racer 0 is already past the gate centre on the same gate count.
+    // Racer 1 has gate 1 on its books while still short of it (t 0.06 < gate
+    // t 0.0714) — gates now count at the plane, but recordGate itself does
+    // not know where a racer is — while racer 0 is already past the gate.
     recordGate(s, 0, 1, 1000); updateRacerT(s, 0, 0.074);
     recordGate(s, 1, 1, 1000); updateRacerT(s, 1, 0.060);
-    assert.ok(racerProgress(s, 1) > racerProgress(s, 0), 'race-logic reads the early filer a gate ahead');
-    assert.ok(fineProgress(s, 1, 0.060) < fineProgress(s, 0, 0.074), 'fineProgress does not');
+    assert.ok(racerProgress(s, 1) < racerProgress(s, 0), 'race-logic no longer reads the short racer a gate ahead');
+    assert.ok(fineProgress(s, 1, 0.060) < fineProgress(s, 0, 0.074), 'nor does fineProgress');
     assert.ok(Math.abs(fineProgress(s, 1, 0.060) - 0.060) < 1e-9, 'and equals the true distance');
 });
 

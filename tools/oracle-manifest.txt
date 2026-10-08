@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-24 at commit adbeb9b by tools/oracle-manifest-regen.mjs.
+# Generated 2026-10-08 at commit cf2b7e6 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -68,7 +68,25 @@ eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.
 # across the planet must leave draft01 at exactly 0 and must not bias its
 # altitude. Loosening those bounds to turn a red run green is what R5 exists
 # to make loud.
-1ed0816e7f1082f2624bfee3318db25c069b74e0e385235f0ffdefda76d1bf39  tests/gauntlet-birds.test.js
+#
+# 2026-10-08, gate-plane + rubber-band fix (owner-approved code change, not a
+# perf wave): ONE assertion in gauntlet-birds.test.js deliberately flips. It
+# read `racerProgress(short racer) > racerProgress(racer past the gate)` —
+# that was the bug (a racer short of its last filed gate read a whole span
+# on), described as current behaviour. It now asserts the opposite; the
+# fineProgress assertions beside it are unchanged.
+a8257c57c3941dd1d37185b8f3028213eb67b697369b2d21e4380c3fdf530c5c  tests/gauntlet-birds.test.js
+# tests/gauntlet-gate-crossing.test.js and tests/gauntlet-rubber-band.test.js
+# added 2026-10-08 with the same fix. Gate crossing: a gate counts when the
+# racer crosses its plane inside gateRadius (race-logic's passGate, shared by
+# the player and the rivals) — never up to 11 units short of it; progress is
+# monotonic through gates; a skipped ring never counts; top speed never hops
+# a ring. Rubber band: with a race state the band and field mean read every
+# rival on racerProgress (no lap gained by crossing the line from the grid),
+# the band responds to the player in both directions, and catch-up is capped
+# at rubberMaxBehind = 7%.
+7713f1d74568b35c18d2b8a0ccbc6452183fae2e969def0e7a68d7707fc0c125  tests/gauntlet-gate-crossing.test.js
+b2b10f0c73d093939a55cc2360b6574752d8055ccf80a85f64cff2a890ffab5a  tests/gauntlet-rubber-band.test.js
 75c0877bd356ef6950e170aa27f9363eb773653b950483ec5d9413c0658d64e8  tests/hex-tiling.test.js
 06eaa4e627ef53e0dc1c6396ade658c0a47cf346fcb05e3f9fa2f28533559dab  tests/horizon-map.test.js
 09af5d0de1f5424af17c6ffbe43999539aa6d255bc8da08043e9b3c73dc51d81  tests/horizon-shadow.test.js

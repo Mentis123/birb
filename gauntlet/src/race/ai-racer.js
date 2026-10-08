@@ -96,7 +96,7 @@ import { floorRadius, PLANET_RADIUS } from '../core/terrain.js';
 import { makeRng } from '../core/rng.js';
 import { createBird as defaultCreateBird } from '../bird/bird-model.js';
 import { createBirdAnimator } from '../bird/bird-anim.js';
-import { recordGate, updateRacerT, racerProgress, RACE_CONFIG } from './race-logic.js';
+import { passGate, seedGateCrossing, updateRacerT, racerProgress } from './race-logic.js';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -169,6 +169,12 @@ const CFG = Object.freeze({
      *  caught shinies. Under `rubberMaxBehind` (7%) on purpose: the crow's
      *  cleverness may win it a pass, never a drag race against a boost. */
     cleverMax: 0.06,
+    /** Ceiling on the band, the pack and the crow's bonus ADDED TOGETHER.
+     *  Each has its own cap, but at once they reach 17.5%; past 10% a rival
+     *  starts to out-drag a boosting player, which the caps above exist to
+     *  rule out. Slowdowns are not limited by it. (The owl's mainspring is a
+     *  separate multiplier, its own pace cycle, not assistance.) */
+    assistMax: 0.10,
     /** Lead (laps) the crow must open on the player before it caws, and lose
      *  before it can caw again — hysteresis, so a side-by-side duel near the
      *  same progress cannot machine-gun the sound. */
@@ -460,6 +466,24 @@ export function stepShinyNudge(nudge, caught, dt, cl) {
     return n > cl.shinyMax ? cl.shinyMax : (n > 0 ? n : 0);
 }
 
+/**
+ * The rubber band's pace term for a rival `gap` laps behind the player
+ * (negative = ahead of them): +rubberMaxBehind (7%) at most, -rubberMaxAhead
+ * at least. Both sides of the gap must be on the same progress scale.
+ */
+export function rubberBand(gap) {
+    return clamp(gap * CFG.rubberGain, -CFG.rubberMaxAhead, CFG.rubberMaxBehind);
+}
+
+/**
+ * The pace term a rival actually runs on: band + pack + crow bonus, at most
+ * CFG.assistMax (10%) however the three line up. Negative totals pass through.
+ */
+export function paceAdjust(band, pack, clever) {
+    const sum = band + pack + clever;
+    return sum < CFG.assistMax ? sum : CFG.assistMax;
+}
+
 /** Every crow pace bonus combined, hard-capped at CFG.cleverMax. */
 export function cleverBonus(drafting, slingEnv, shiny, cl) {
     const b = (drafting ? cl.draftBonus : 0) + slingEnv * cl.slingBonus + shiny;
@@ -468,12 +492,12 @@ export function cleverBonus(drafting, slingEnv, shiny, cl) {
 
 /**
  * Seam-safe race distance for overtake detection: gates filed plus where the
- * racer actually is relative to the last gate it filed — NEGATIVE while it is
- * still short of that gate's centre. race-logic's own sub-gate fraction holds
- * a full gate span in that window (a gate is filed 11 units before its
- * centre), so comparing two racers on racerProgress reads one of them a whole
- * gate ahead for a moment, which is a phantom overtake. Finishers report the
- * full distance.
+ * racer actually is relative to the last gate it filed — NEGATIVE if it is
+ * short of that gate's plane. Gates now count at the plane (race-logic's
+ * passGate), and race-logic floors a racer short of its last gate at 0 rather
+ * than reading it a whole span on, so this mostly agrees with racerProgress;
+ * it stays the overtake measure because it is never quantised to a gate and
+ * never holds. Finishers report the full distance.
  */
 export function fineProgress(state, racerIndex, t) {
     if (state.finished[racerIndex]) return state.laps;
@@ -662,7 +686,14 @@ export function createAIRacers(THREE, opts = {}) {
             t: 0,
             lap: 1,
             speed: 0,
+            /** Race distance in laps: race-logic's racerProgress when update()
+             *  is given a race state, else the kinematic lap counter. */
             progress: 0,
+            /** The rubber-band and pack-cohesion pace terms last computed, and
+             *  the total actually applied (see paceAdjust). */
+            band: 0,
+            pack: 0,
+            paceAdj: 0,
             finished: false,
             boosting: false,
 
@@ -783,9 +814,15 @@ export function createAIRacers(THREE, opts = {}) {
             const t0 = r.gridT - Math.floor(r.gridT);
             r.t = t0;
             r.lastT = t0;
-            r.laps = 0;
+            // Behind the line the kinematic counter starts at lap -1, so
+            // reaching the line takes it to 0 rather than handing the rival a
+            // lap it has not flown.
+            r.laps = t0 > 0.5 ? -1 : 0;
             r.lap = 1;
-            r.progress = 0;
+            r.progress = r.laps + t0;
+            r.band = 0;
+            r.pack = 0;
+            r.paceAdj = 0;
             r.finished = false;
 
             course.sampleAt(t0, _tp);
@@ -858,7 +895,9 @@ export function createAIRacers(THREE, opts = {}) {
 
     /**
      * @param {number} dt
-     * @param {number} [playerProgress]  laps + fraction, for rubber-banding
+     * @param {number} [playerProgress]  laps + fraction, for rubber-banding.
+     *                                   With a raceState, pass racerProgress
+     *                                   (the rivals are read on that scale too)
      * @param {object} [raceState]       race-logic state; gates + standings
      * @param {THREE.Vector3} [playerPosition] optional, so rivals avoid (and
      *                                         Talon leans on) the player too
@@ -873,6 +912,9 @@ export function createAIRacers(THREE, opts = {}) {
 
         let fieldMean = 0;
         const running = raceState ? !!raceState.running : true;
+        // The first racing frame since a reset: every rival is still on its
+        // grid slot, so that is where race-logic's sample history starts.
+        const greenLight = running && !raceRunning;
         if (running) {
             if (!raceRunning && raceState) clockMs = raceState.startMs;
             raceRunning = true;
@@ -892,9 +934,24 @@ export function createAIRacers(THREE, opts = {}) {
             const t = course.nearestT(r.position.x, r.position.y, r.position.z);
             const d = deltaT(r.lastT, t);
             if (d > 0 && t < r.lastT) r.laps++;
+            else if (d < 0 && t > r.lastT) r.laps--;
             r.lastT = t;
             r.t = t;
-            r.progress = r.laps + t;
+
+            // Race bookkeeping, on this sample's t AND position (the gate rule
+            // needs the two to agree), once the race is running: the
+            // countdown feeds race-logic nothing. Then progress: with a race
+            // state it is race-logic's, the very figure the player's is, so
+            // the rubber band and the field mean compare like with like.
+            if (raceState && autoGates && running) {
+                if (greenLight) {
+                    seedGateCrossing(raceState, r.raceIndex, t, r.position.x, r.position.y, r.position.z);
+                }
+                updateRacerT(raceState, r.raceIndex, t);
+                passGate(raceState, r.raceIndex, t, r.position.x, r.position.y, r.position.z,
+                    course.gatePositions, clockMs);
+            }
+            r.progress = raceState ? racerProgress(raceState, r.raceIndex) : r.laps + t;
             r._up.copy(r.position).normalize();
             sideAt(t, r._side);
 
@@ -935,9 +992,9 @@ export function createAIRacers(THREE, opts = {}) {
             // things are the rings themselves: approaching the next gate, the
             // line bends toward its centre — which sits ON the centreline, so
             // the target lateral is 0 — harder the closer it gets. The gate is
-            // found by spline position, not raceState.nextGate, because a gate
-            // is filed 11 units out and the crow wants the centre, not the
-            // edge of the counting radius.
+            // found by spline position, not raceState.nextGate: it needs no
+            // race state, and a ring the crow has already flown past, counted
+            // or not, is behind it and not worth turning back for.
             const cl = p.clever;
             r.covet = 0;
             r.covetGate = -1;
@@ -1108,7 +1165,7 @@ export function createAIRacers(THREE, opts = {}) {
                 r.finished = raceState.finished[r.raceIndex] === 1;
                 r.lap = raceState.lap[r.raceIndex];
             } else {
-                r.lap = r.laps + 1;
+                r.lap = Math.max(1, r.laps + 1);
             }
 
             // --- lateral spring ---------------------------------------------
@@ -1167,6 +1224,9 @@ export function createAIRacers(THREE, opts = {}) {
 
             // --- speed --------------------------------------------------------
             let targetSpeed;
+            r.band = 0;
+            r.pack = 0;
+            r.paceAdj = 0;
             if (!running) {
                 targetSpeed = 0;
             } else if (r.finished) {
@@ -1182,15 +1242,17 @@ export function createAIRacers(THREE, opts = {}) {
                 targetSpeed = CFG.baseSpeed * p.speedMul * (1 - p.cornerBrake * kMax);
 
                 // Rubber band. Positive gap = the player is up the road.
-                const gap = pProg - r.progress;
-                const band = clamp(gap * CFG.rubberGain,
-                    -CFG.rubberMaxAhead, CFG.rubberMaxBehind);
+                const band = rubberBand(pProg - r.progress);
                 const pack = clamp((fieldMean - r.progress) * CFG.packGain,
                     -CFG.packMax, CFG.packMax);
+                r.band = band;
+                r.pack = pack;
                 // The crow's cleverness, capped as a whole (see cleverBonus).
                 const clever = p.clever ? cleverBonus(r.drafting, r.slingEnv, r.shiny, p.clever) : 0;
                 r.cleverBonus = clever;
-                targetSpeed *= 1 + band + pack + clever;
+                // All three together, capped as a whole (see paceAdjust).
+                r.paceAdj = paceAdjust(band, pack, clever);
+                targetSpeed *= 1 + r.paceAdj;
                 r.boosting = band > CFG.rubberMaxBehind * 0.7 && kMax < 0.25;
 
                 // The owl's mainspring. Only runs while racing, so every owl
@@ -1248,10 +1310,12 @@ export function createAIRacers(THREE, opts = {}) {
                     const dz = r.position.z - course.gatePositions[o + 2];
                     const rr = p.clever.shinyCatch;
                     if (dx * dx + dy * dy + dz * dz < rr * rr) {
-                        // One catch per ring per lap. Rounding progress to the
-                        // nearest gate gives the same key either side of the
-                        // centre, even across the lap seam at gate 0.
-                        const key = Math.round(r.progress * course.gateCount);
+                        // One catch per ring per lap. Rounding the kinematic
+                        // distance (laps + t) to the nearest gate gives the
+                        // same key either side of the centre, even across the
+                        // lap seam at gate 0 — and, unlike race progress, it
+                        // still moves on past a ring that was not counted.
+                        const key = Math.round((r.laps + r.t) * course.gateCount);
                         if (key !== r.caughtKey) { r.caughtKey = key; caught = true; r.shinyCaught++; }
                     }
                 }
@@ -1274,22 +1338,6 @@ export function createAIRacers(THREE, opts = {}) {
                         r.cawEvent = true;
                     } else if (r.aheadOfPlayer && lead < -CFG.cawHysteresis) {
                         r.aheadOfPlayer = false;
-                    }
-                }
-            }
-
-            // --- race bookkeeping ----------------------------------------------
-            if (raceState && autoGates) {
-                updateRacerT(raceState, r.raceIndex, r.t);
-                const g = raceState.nextGate[r.raceIndex];
-                if (g >= 0 && g < course.gateCount && !r.finished) {
-                    const o = g * 3;
-                    const dx = r.position.x - course.gatePositions[o];
-                    const dy = r.position.y - course.gatePositions[o + 1];
-                    const dz = r.position.z - course.gatePositions[o + 2];
-                    const gr = RACE_CONFIG.gateRadius;
-                    if (dx * dx + dy * dy + dz * dz < gr * gr) {
-                        recordGate(raceState, r.raceIndex, g, clockMs);
                     }
                 }
             }
