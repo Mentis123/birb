@@ -2,9 +2,34 @@
 
 A Birb Labs racing artefact.
 
-A stylised arcade bird-racing game on a miniature planet. Four birds, three
+A stylised arcade bird-racing game on a miniature planet. Six birds, three
 laps, one glowing ribbon threading ridges and canyons all the way around a
 world you can see the curve of.
+
+## The field
+
+You race five rivals, each defined by one row in `src/race/ai-racer.js`'s
+`PERSONALITIES`: **Talon** (aggressive), **Zephyr** (clean), **Pip** (erratic),
+and two newer birds with a twist you can see from the chase camera:
+
+- **Corvus**, a glossy blue-black crow. It drafts: it tucks in behind whoever
+  is just ahead (you included), charges a slipstream, and slingshots out. It
+  also covets shiny things, and since the race has no pickups it covets the
+  gate centres, threading every ring dead centre for a small, decaying pace
+  nudge. All its bonuses together are capped under the rubber band's 7%. It
+  caws when it overtakes you.
+- **Tock**, a brass clockwork owl with a wind-up key on its back. It runs on a
+  mainspring that unwinds over 8 s (pace easing down as it goes), stalls for
+  1 s to rewind (the key spins, the wings ratchet, the tick speeds up), then
+  releases slightly above cruise. It never wanders and never makes a mistake.
+  Its average pace matches the field, so catch it on a rewind. You hear it
+  tick when it is near.
+
+You can fly a Crow or a Clockwork Owl yourself (Settings → Your Bird, or
+`?bird=crow|owl|birb`, which works with `autostart=1`). It's cosmetic plus a
+signature sound: a caw when you boost, a tick while you fly. Your flight stats
+don't change. If you pick the same species as a rival, that rival wears an
+alternate tint (an ash-grey crow, a steel owl).
 
 Birb Gauntlet is an **unlisted Birb Labs artefact**. It ships inside the Birb Mobile
 repo and deploys with it, but it lives at its own path and is linked from
@@ -76,7 +101,7 @@ The harness serves the repo, drives a headless Chromium, waits for
 a captured PNG is proof the code ran, not proof a file was written.
 
 Useful flags: `--query "autostart=1"` skips the entry pages straight into a
-race; `--query "three=local"` loads Three from `node_modules` for environments
+race (add `&bird=crow` or `&bird=owl` to fly the other species); `--query "three=local"` loads Three from `node_modules` for environments
 with no CDN egress; `--eval` runs an expression against `window.__gauntlet` to
 drive the game to a specific moment before capturing.
 

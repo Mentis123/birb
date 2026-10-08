@@ -1,5 +1,24 @@
 /**
- * race/ai-racer.js — Birb Gauntlet's three rivals.
+ * race/ai-racer.js — Birb Gauntlet's five rivals.
+ *
+ * Talon, Zephyr and Pip are the original trio (aggressive, clean, erratic).
+ * Two more joined them, each with one twist the camera can see:
+ *
+ *   - CORVUS, the crow ('clever'). Drafts: tucks in behind whoever is just
+ *     ahead, charges a slipstream meter, then slingshots out to the side.
+ *     And it covets shiny things — the race has no pickups, so it covets the
+ *     GATE CENTRES, bending its line (and dropping its altitude) to thread
+ *     the dead middle of every ring. A ring threaded close enough is a
+ *     "caught shiny": a small, decaying pace nudge. Every crow bonus combined
+ *     is capped at `cleverMax`, under the rubber band's 7% and well under
+ *     the ~12% a boost is worth. It caws when it overtakes the player.
+ *
+ *   - TOCK, the clockwork owl ('clockwork'). Runs on a mainspring: the
+ *     energy unwinds over `unwindTime` and the pace eases down with it, then
+ *     it stalls for `rewindTime` while the key spins back up, then releases a
+ *     little above cruise. Fully deterministic — no wander, no mistakes — the
+ *     opposite of Pip. Its cycle-average pace is matched to the others (see
+ *     `mainspringAverage`), so it is beatable: catch it on a rewind.
  *
  * ---------------------------------------------------------------------------
  * WHY KINEMATIC AND NOT THE REAL FLIGHT MODEL
@@ -77,13 +96,13 @@ import { floorRadius, PLANET_RADIUS } from '../core/terrain.js';
 import { makeRng } from '../core/rng.js';
 import { createBird as defaultCreateBird } from '../bird/bird-model.js';
 import { createBirdAnimator } from '../bird/bird-anim.js';
-import { recordGate, updateRacerT, RACE_CONFIG } from './race-logic.js';
+import { recordGate, updateRacerT, racerProgress, RACE_CONFIG } from './race-logic.js';
 
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
 
-const CFG = {
+const CFG = Object.freeze({
     /** Pace a rival holds on the ridge straight, world units/sec. The player's
      *  cruise is 34 and their ceiling is 58, so a rival at 36 is beatable by
      *  anyone using the boost and uncatchable by anyone who never turns. */
@@ -109,7 +128,9 @@ const CFG = {
      *  that they are following it. */
     altAbove: 3.4,
     /** Per-racer vertical lane separation so a three-wide pack still has three
-     *  silhouettes rather than one. */
+     *  silhouettes rather than one. A bigger field packs its lanes tighter and
+     *  lifts the stack, so the lowest bird never sits closer than 1.7 above
+     *  the ribbon (see `gridLayout`). */
     altLane: 1.7,
 
     /** Never closer than this to the flight floor. The ribbon itself clears the
@@ -144,22 +165,40 @@ const CFG = {
     packGain: 1.1,
     packMax: 0.045,
 
+    /** Ceiling on EVERY crow pace bonus combined — slipstream, slingshot and
+     *  caught shinies. Under `rubberMaxBehind` (7%) on purpose: the crow's
+     *  cleverness may win it a pass, never a drag race against a boost. */
+    cleverMax: 0.06,
+    /** Lead (laps) the crow must open on the player before it caws, and lose
+     *  before it can caw again — hysteresis, so a side-by-side duel near the
+     *  same progress cannot machine-gun the sound. */
+    cawHysteresis: 0.003,
+
     /** Angular rate that maps to animator `turn` = 1. Deliberately BELOW the
      *  personalities' max turn rate: a bird that only reaches full bank at its
      *  physical steering limit spends the whole lap looking bolt upright, and
      *  an arcade racer wants the lean to read on an ordinary sweeper. */
     turnNorm: 1.6,
-};
+});
 
 /**
- * The three rivals. Every field here changes something you can SEE from the
+ * The five rivals. Every field here changes something you can SEE from the
  * chase camera, not just a number in a log.
+ *
+ * Shared by all: the line shape, spring, steering, pace and flap fields, plus
+ * `species` (which model createBird builds) and `uiColor` (the minimap and
+ * results swatch). The twist blocks are capabilities, not name checks:
+ * `clever` (drafting + coveting) and `spring` (the mainspring) are null on
+ * every personality that does not have them. `altColor` is the tint used when
+ * the player flies the same species, so the rival never reads as you.
  */
-const PERSONALITIES = [
+const PERSONALITIES = Object.freeze([
     {
         key: 'aggressive',
         name: 'Talon',
+        species: 'birb',
         color: PALETTE.birdRival1,
+        uiColor: PALETTE.birdRival1,
         // Dives at the apex from wherever it happens to be, cuts the kerb,
         // barely lifts for the corner and leans on anyone alongside.
         speedMul: 1.03,
@@ -178,11 +217,14 @@ const PERSONALITIES = [
         bully: 1.0,
         mistakeEvery: [12, 20], mistakeDur: [0.55, 0.95],
         mistakeLat: 4.6, mistakeSlow: 0.80, mistakeTumble: 0.0,
+        clever: null, spring: null,
     },
     {
         key: 'clean',
         name: 'Zephyr',
+        species: 'birb',
         color: PALETTE.birdRival2,
+        uiColor: PALETTE.birdRival2,
         // Textbook out-in-out, brakes early and consistently, almost never
         // deviates. The benchmark you measure your own lap against.
         speedMul: 1.06,
@@ -201,11 +243,14 @@ const PERSONALITIES = [
         bully: 0,
         mistakeEvery: [26, 42], mistakeDur: [0.4, 0.7],
         mistakeLat: 2.4, mistakeSlow: 0.92, mistakeTumble: 0.0,
+        clever: null, spring: null,
     },
     {
         key: 'erratic',
         name: 'Pip',
+        species: 'birb',
         color: PALETTE.birdRival3,
+        uiColor: PALETTE.birdRival3,
         // Wanders across the whole corridor, over-corrects when it catches
         // itself, and once every few corners genuinely throws one away.
         speedMul: 1.05,
@@ -224,8 +269,100 @@ const PERSONALITIES = [
         bully: 0.2,
         mistakeEvery: [8, 14], mistakeDur: [0.8, 1.5],
         mistakeLat: 7.4, mistakeSlow: 0.82, mistakeTumble: 0.55,
+        clever: null, spring: null,
     },
-];
+    {
+        key: 'clever',
+        name: 'Corvus',
+        species: 'crow',
+        color: PALETTE.birdRival4,
+        belly: PALETTE.crowBelly,
+        uiColor: PALETTE.birdRival4Ui,
+        altColor: PALETTE.birdRival4Alt,
+        // A tidy, slightly tight line (it wants to be on someone's tail, not
+        // out wide on its own), a fairly settled spring, and a habit of
+        // dropping in behind whoever is just ahead. Its base pace is the
+        // trio's lowest; the slipstream and the shinies make up the rest.
+        speedMul: 1.03,
+        cornerBrake: 0.24,
+        brakeLead: 12,
+        lookahead: 15,
+        lookaheadSpeedK: 0.34,
+        apexInside: 1.10,
+        outInOut: 0.90,
+        latStiff: 40, latDamp: 10.8,  // zeta ~ 0.85: commits, barely overshoots
+        steerGain: 6.0, turnRate: 2.75,
+        accel: 24, brake: 30,
+        wanderAmp: 0.30, wanderRate: 0.22,
+        flapHz: 0.74, flapAmp: 0.86, flapBeat: 4,
+        avoid: 0.55,                  // happy to sit close — that is the point
+        bully: 0.1,
+        mistakeEvery: [18, 30], mistakeDur: [0.5, 0.9],
+        mistakeLat: 3.4, mistakeSlow: 0.88, mistakeTumble: 0.0,
+        clever: {
+            // Slipstream: a target counts if it is 1.5..draftRange units
+            // ahead, within draftLat*2.4 sideways and within draftUp above or
+            // below (about two altitude lanes: a wake is a tube behind a bird,
+            // not a slab through the planet); the crow tucks toward it, and
+            // while within draftLat it charges a meter. It tucks in
+            // at a GAP: inside draftGap (clear of the bump range) it stops
+            // pulling in and pops the slingshot early, rather than flying
+            // into the tail it is drafting and eating a shove.
+            draftRange: 16, draftGap: 6.0, draftLat: 3.2, draftUp: 4.0, draftPull: 0.9, draftCharge: 0.75,
+            draftBonus: 0.025,
+            // Full meter -> slingshot: swing out sideways and kick on.
+            slingTime: 1.3, slingLat: 3.6, slingBonus: 0.05,
+            // Coveting: within covetRange of a gate, blend the line toward the
+            // ring's centre and drop toward covetAlt (just above the ribbon).
+            covetRange: 34, covetPull: 0.75, covetAlt: 1.6, covetAltPull: 0.8,
+            // A ring threaded within shinyCatch of its centre is caught.
+            shinyCatch: 3.0, shinyGain: 0.03, shinyMax: 0.035, shinyDecay: 0.5,
+        },
+        spring: null,
+    },
+    {
+        key: 'clockwork',
+        name: 'Tock',
+        species: 'clockwork-owl',
+        color: PALETTE.birdRival5,
+        uiColor: PALETTE.birdRival5Ui,
+        altColor: PALETTE.birdRival5Alt,
+        // Metronomic: the textbook line, a critically damped spring, zero
+        // wander and no mistakes at all. Everything interesting it does comes
+        // from the mainspring. speedMul is high because the spring's cycle
+        // average is ~0.963 (mainspringAverage), which lands its real pace at
+        // ~1.04 — level with the others.
+        speedMul: 1.08,
+        cornerBrake: 0.25,
+        brakeLead: 14,
+        lookahead: 16,
+        lookaheadSpeedK: 0.36,
+        apexInside: 1.00,
+        outInOut: 1.00,
+        latStiff: 50, latDamp: 14.1,  // zeta = 1.0: never overshoots
+        steerGain: 5.6, turnRate: 2.6,
+        accel: 22, brake: 30,
+        wanderAmp: 0.0, wanderRate: 0.1,
+        flapHz: 1.25, flapAmp: 0.80, flapBeat: 2,
+        avoid: 0.9,
+        bully: 0,
+        mistakeEvery: null, mistakeDur: [0, 0],
+        mistakeLat: 0, mistakeSlow: 1, mistakeTumble: 0.0,
+        clever: null,
+        spring: {
+            unwindTime: 8.0,     // s from fully wound to run down
+            rewindTime: 1.0,     // s stalled while the key winds it back
+            paceTop: 1.07,       // just released: a little above cruise
+            paceFloor: 0.84,     // nearly run down
+            rewindPace: 0.72,    // stalled
+            keyUnwind: 1.4,      // rad/s the key turns as the spring lets go
+            keyRewind: 26,       // rad/s it spins (backwards) while winding
+        },
+    },
+]);
+
+/** How many rivals a full race fields: every personality, once. */
+export const RIVAL_COUNT = PERSONALITIES.length;
 
 const K_TABLE = 256;
 /** Blur half-width for kbar, in table entries (~26 world units on this lap). */
@@ -239,6 +376,131 @@ function deltaT(a, b) {
     let d = (b - Math.floor(b)) - (a - Math.floor(a));
     if (d > 0.5) d -= 1; else if (d <= -0.5) d += 1;
     return d;
+}
+
+// ---------------------------------------------------------------------------
+// Pure twist maths. No THREE, no allocation: exported so the rules can be
+// unit-tested without a course or a renderer.
+// ---------------------------------------------------------------------------
+
+/** Mainspring phases. */
+export const SPRING_UNWIND = 0;
+export const SPRING_REWIND = 1;
+
+/** A mainspring state. Build-time only; step it in place every frame. */
+export function createMainspring() {
+    return { energy: 1, phase: SPRING_UNWIND, phaseT: 0, pace: 1, keyRate: 0, cycles: 0, released: false };
+}
+
+export function resetMainspring(m) {
+    m.energy = 1; m.phase = SPRING_UNWIND; m.phaseT = 0;
+    m.pace = 1; m.keyRate = 0; m.cycles = 0; m.released = false;
+    return m;
+}
+
+/**
+ * Pace multiplier for a spring state. While unwinding it eases down with the
+ * square of how far the spring has run, so most of the run sits near cruise
+ * and the slow-down arrives late, the way a wind-up toy dies; while rewinding
+ * it is the flat stall pace.
+ */
+export function mainspringPace(m, sp) {
+    if (m.phase === SPRING_REWIND) return sp.rewindPace;
+    const low = 1 - m.energy;
+    return sp.paceFloor + (sp.paceTop - sp.paceFloor) * (1 - low * low);
+}
+
+/**
+ * Advance the spring by `dt`. Unwind -> rewind -> release -> unwind, forever.
+ * Overshoot past a phase boundary is carried into the next phase, so the
+ * cycle period is exact under any frame rate. Writes `pace`, `keyRate`
+ * (rad/s, negative while winding back) and `released` (true only on the step
+ * the rewind completes). Returns the pace.
+ */
+export function stepMainspring(m, sp, dt) {
+    m.released = false;
+    if (!(dt > 0)) return m.pace;
+    if (m.phase === SPRING_UNWIND) {
+        m.energy -= dt / sp.unwindTime;
+        if (m.energy <= 0) {
+            m.phaseT = -m.energy * sp.unwindTime;
+            m.energy = 0;
+            m.phase = SPRING_REWIND;
+        }
+    } else {
+        m.phaseT += dt;
+        m.energy = m.phaseT >= sp.rewindTime ? 1 : m.phaseT / sp.rewindTime;
+    }
+    if (m.phase === SPRING_REWIND && m.phaseT >= sp.rewindTime) {
+        m.energy = 1 - (m.phaseT - sp.rewindTime) / sp.unwindTime;
+        m.phase = SPRING_UNWIND;
+        m.phaseT = 0;
+        m.cycles++;
+        m.released = true;
+    }
+    m.pace = mainspringPace(m, sp);
+    m.keyRate = m.phase === SPRING_UNWIND ? sp.keyUnwind : -sp.keyRewind;
+    return m.pace;
+}
+
+/** Closed-form cycle-average pace (the tests check it against stepping). */
+export function mainspringAverage(sp) {
+    const unwindMean = sp.paceFloor + (sp.paceTop - sp.paceFloor) * (2 / 3);
+    return (sp.unwindTime * unwindMean + sp.rewindTime * sp.rewindPace) / (sp.unwindTime + sp.rewindTime);
+}
+
+/**
+ * The crow's caught-shiny nudge: decays exponentially, a catch adds
+ * `shinyGain`, and it can never exceed `shinyMax` however many rings are
+ * threaded back to back.
+ */
+export function stepShinyNudge(nudge, caught, dt, cl) {
+    let n = nudge * Math.exp(-cl.shinyDecay * (dt > 0 ? dt : 0));
+    if (caught) n += cl.shinyGain;
+    return n > cl.shinyMax ? cl.shinyMax : (n > 0 ? n : 0);
+}
+
+/** Every crow pace bonus combined, hard-capped at CFG.cleverMax. */
+export function cleverBonus(drafting, slingEnv, shiny, cl) {
+    const b = (drafting ? cl.draftBonus : 0) + slingEnv * cl.slingBonus + shiny;
+    return clamp(b, 0, CFG.cleverMax);
+}
+
+/**
+ * Seam-safe race distance for overtake detection: gates filed plus where the
+ * racer actually is relative to the last gate it filed — NEGATIVE while it is
+ * still short of that gate's centre. race-logic's own sub-gate fraction holds
+ * a full gate span in that window (a gate is filed 11 units before its
+ * centre), so comparing two racers on racerProgress reads one of them a whole
+ * gate ahead for a moment, which is a phantom overtake. Finishers report the
+ * full distance.
+ */
+export function fineProgress(state, racerIndex, t) {
+    if (state.finished[racerIndex]) return state.laps;
+    const n = state.gateCount;
+    const lastGate = (state.nextGate[racerIndex] - 1 + n) % n;
+    let fwd = t - lastGate / n;
+    fwd -= Math.floor(fwd);
+    if (fwd > 0.5) fwd -= 1;
+    return state.gatesPassed[racerIndex] / n + fwd;
+}
+
+/**
+ * Grid slot `i` of `n`: lateral offset, lap-t behind the line, vertical lane.
+ * Three racers get exactly the original layout. A bigger field narrows the
+ * lateral spacing to stay inside the lane, staggers further back so wings do
+ * not overlap, and packs the vertical lanes tighter while lifting the stack
+ * so the lowest bird stays 1.7 clear of the ribbon. Writes into `out`.
+ */
+export function gridLayout(i, n, out) {
+    const big = n > 3;
+    const half = (n - 1) * 0.5;
+    const gap = big ? Math.min(4.4, 13.2 / (n - 1)) : 4.4;
+    const step = big ? CFG.altLane * Math.sqrt(2 / (n - 1)) : CFG.altLane;
+    out.lat = (i - half) * gap;
+    out.t = -0.0022 * (big ? 1.5 : 1) * i - 0.0018;
+    out.altLane = (i - half) * step + Math.max(0, half * step - CFG.altLane);
+    return out;
 }
 
 /**
@@ -260,13 +522,16 @@ function bellyOf(THREE, hex, scratch, cream) {
  * @param {object} THREE
  * @param {object} opts
  * @param {object}   opts.course        the object returned by createCourse
- * @param {number}   [opts.count=3]
+ * @param {number}   [opts.count=RIVAL_COUNT]  rivals to field, in PERSONALITIES order
+ * @param {string}   [opts.playerSpecies]  the player's species; a rival of the
+ *                                         same species is built in its altColor
  * @param {string}   [opts.quality='high']
  * @param {number}   [opts.seed=20260801]
  * @param {Function} [opts.createBirdFn]  defaults to bird-model.js's createBird
  * @param {number}   [opts.birdScale=2.0]
  * @param {number}   [opts.firstRacerIndex=1]  index of racer 0 in the race state
  *                                             (the player is normally index 0)
+ * @param {number}   [opts.playerIndex=0]      the player's index in the race state
  * @param {boolean}  [opts.autoGates=true]     let the AI file its own gate
  *                                             crossings into the race state
  */
@@ -274,12 +539,15 @@ export function createAIRacers(THREE, opts = {}) {
     const course = opts.course;
     if (!course) throw new Error('createAIRacers: opts.course is required');
 
-    const count = Math.max(0, Math.min(PERSONALITIES.length, opts.count ?? 3)) | 0;
+    const count = Math.max(0, Math.min(PERSONALITIES.length, opts.count ?? RIVAL_COUNT)) | 0;
+    const playerSpecies = opts.playerSpecies || null;
     const quality = opts.quality || 'high';
     const seed = (opts.seed ?? 20260801) >>> 0;
     const createBirdFn = opts.createBirdFn || defaultCreateBird;
     const birdScale = opts.birdScale ?? 2.0;
     const firstRacerIndex = opts.firstRacerIndex ?? 1;
+    /** The player's index in the race state (the crow's overtake check). */
+    const playerIndex = opts.playerIndex ?? 0;
     const autoGates = opts.autoGates !== false;
 
     const length = course.length || 640;
@@ -349,6 +617,7 @@ export function createAIRacers(THREE, opts = {}) {
     const _mat = new THREE.Matrix4();
     const _roll = new THREE.Quaternion();
     const _rollAxis = new THREE.Vector3(0, 0, 1);
+    const _grid = { lat: 0, t: 0, altLane: 0 };
 
     // ---- the racers ---------------------------------------------------------
     const cream = new THREE.Color(PALETTE.uiCream);
@@ -357,12 +626,21 @@ export function createAIRacers(THREE, opts = {}) {
     const racers = [];
     for (let i = 0; i < count; i++) {
         const p = PERSONALITIES[i % PERSONALITIES.length];
+        // Same species as the player -> the alternate tint, so two crows (or
+        // two owls) on screen can never be confused. Colour is the clash
+        // handling; the silhouette is the same by design.
+        const clash = !!playerSpecies && p.species === playerSpecies && p.altColor !== undefined;
+        const bodyColor = clash ? p.altColor : p.color;
+        const bellyColor = (!clash && p.belly !== undefined)
+            ? p.belly : bellyOf(THREE, bodyColor, colScratch, cream);
+        const uiColor = clash ? p.altColor : (p.uiColor !== undefined ? p.uiColor : p.color);
         const bird = createBirdFn(THREE, {
-            bodyColor: p.color,
-            bellyColor: bellyOf(THREE, p.color, colScratch, cream),
+            bodyColor,
+            bellyColor,
             scale: birdScale,
             quality,
             outline: true,
+            species: p.species,
         });
         const anim = createBirdAnimator(THREE, bird);
         group.add(bird.group);
@@ -375,7 +653,10 @@ export function createAIRacers(THREE, opts = {}) {
             bird,
             anim,
             name: p.name,
-            color: p.color,
+            color: bodyColor,
+            uiColor,
+            altTint: clash,
+            species: p.species,
             personality: p.key,
             raceIndex: firstRacerIndex + i,
             t: 0,
@@ -419,11 +700,30 @@ export function createAIRacers(THREE, opts = {}) {
             mistakeLat: 0,
             mistakeSlow: 1,
             mistakeTumble: 0,
+            // --- clever (crow) ---------------------------------------------
+            covet: 0,             // 0..1, how hard it is bending toward a ring
+            covetGate: -1,
+            drafting: false,
+            draft01: 0,           // slipstream meter
+            slingT: 0,
+            slingSide: 0,
+            slingEnv: 0,
+            altBias: 0,
+            shiny: 0,             // current caught-shiny nudge
+            shinyCaught: 0,       // rings threaded this race (diagnostic)
+            caughtKey: -1,
+            cleverBonus: 0,
+            aheadOfPlayer: false,
+            /** True on the single frame the crow takes the lead off the player. */
+            cawEvent: false,
+            // --- clockwork (owl) -----------------------------------------
+            mainspring: createMainspring(),
             // The animator's caller-owned state object. Allocated ONCE.
             animState: {
                 speed01: 0, turn: 0, pitch: 0, boosting: false, flapImpulse: 0,
                 tumbling: false, grounded: false, celebrating: false,
                 phase: (i * 0.37) % 1,
+                keySpin: 0, rewinding: false,
             },
         });
     }
@@ -443,6 +743,9 @@ export function createAIRacers(THREE, opts = {}) {
 
     function scheduleMistake(r) {
         const e = r.cfg.mistakeEvery;
+        // No schedule = no mistakes, ever (the clockwork owl). Infinity minus
+        // dt stays Infinity, so the trigger below can never fire.
+        if (!e) { r.mistakeIn = Infinity; return; }
         r.mistakeIn = e[0] + (e[1] - e[0]) * r.rng();
     }
 
@@ -472,9 +775,10 @@ export function createAIRacers(THREE, opts = {}) {
             // Grid: staggered across the line and a touch behind it, so the
             // first thing they do is cross gate 0 (which does not count — the
             // convention in race-logic.js is nextGate starts at 1).
-            r.gridLat = (i - (racers.length - 1) * 0.5) * 4.4;
-            r.gridT = -0.0022 * i - 0.0018;
-            r.altLane = (i - (racers.length - 1) * 0.5) * CFG.altLane;
+            gridLayout(i, racers.length, _grid);
+            r.gridLat = _grid.lat;
+            r.gridT = _grid.t;
+            r.altLane = _grid.altLane;
 
             const t0 = r.gridT - Math.floor(r.gridT);
             r.t = t0;
@@ -510,12 +814,19 @@ export function createAIRacers(THREE, opts = {}) {
             r.mistakeTumble = 0;
             scheduleMistake(r);
 
+            r.covet = 0; r.covetGate = -1;
+            r.drafting = false; r.draft01 = 0;
+            r.slingT = 0; r.slingSide = 0; r.slingEnv = 0; r.altBias = 0;
+            r.shiny = 0; r.shinyCaught = 0; r.caughtKey = -1; r.cleverBonus = 0;
+            r.aheadOfPlayer = false; r.cawEvent = false;
+            resetMainspring(r.mainspring);
+
             writePose(r);
 
             const s = r.animState;
             s.speed01 = 0; s.turn = 0; s.pitch = 0; s.boosting = false;
             s.flapImpulse = 0; s.tumbling = false; s.grounded = false;
-            s.celebrating = false;
+            s.celebrating = false; s.keySpin = 0; s.rewinding = false;
         }
     }
 
@@ -551,10 +862,14 @@ export function createAIRacers(THREE, opts = {}) {
      * @param {object} [raceState]       race-logic state; gates + standings
      * @param {THREE.Vector3} [playerPosition] optional, so rivals avoid (and
      *                                         Talon leans on) the player too
+     * @param {THREE.Vector3} [draftTarget]    optional player position used ONLY
+     *                                         so the crow can draft the player;
+     *                                         it does not switch on avoidance
      */
-    function update(dt, playerProgress, raceState, playerPosition) {
+    function update(dt, playerProgress, raceState, playerPosition, draftTarget) {
         if (!(dt > 0)) return;
         if (dt > 0.05) dt = 0.05;
+        for (let i = 0; i < racers.length; i++) racers[i].cawEvent = false;
 
         let fieldMean = 0;
         const running = raceState ? !!raceState.running : true;
@@ -563,8 +878,11 @@ export function createAIRacers(THREE, opts = {}) {
             raceRunning = true;
             clockMs += dt * 1000;
         }
-        const pProg = typeof playerProgress === 'number' ? playerProgress : 0;
+        const hasPlayerProg = typeof playerProgress === 'number';
+        const pProg = hasPlayerProg ? playerProgress : 0;
         const hasPlayerPos = !!(playerPosition && playerPosition.isVector3);
+        const draftPos = (draftTarget && draftTarget.isVector3) ? draftTarget
+            : (hasPlayerPos ? playerPosition : null);
 
         // ---- pass A: where everyone is, and what line they want -------------
         for (let i = 0; i < racers.length; i++) {
@@ -611,6 +929,33 @@ export function createAIRacers(THREE, opts = {}) {
                 // sin envelope: the error creeps in, peaks, and is caught.
                 const env = Math.sin(Math.PI * (1 - r.mistakeT / r.mistakeDur));
                 lat += r.mistakeLat * env;
+            }
+
+            // Coveting (the crow). The race has no pickups, so the shiny
+            // things are the rings themselves: approaching the next gate, the
+            // line bends toward its centre — which sits ON the centreline, so
+            // the target lateral is 0 — harder the closer it gets. The gate is
+            // found by spline position, not raceState.nextGate, because a gate
+            // is filed 11 units out and the crow wants the centre, not the
+            // edge of the counting radius.
+            const cl = p.clever;
+            r.covet = 0;
+            r.covetGate = -1;
+            if (cl && course.gateT && course.gateCount > 0) {
+                let g = -1, ahead = 2;
+                for (let k = 0; k < course.gateCount; k++) {
+                    let a = course.gateT[k] - t;
+                    a -= Math.floor(a);
+                    if (a < ahead) { ahead = a; g = k; }
+                }
+                const dist = ahead * length;
+                if (g >= 0 && dist < cl.covetRange) {
+                    let w = 1 - dist / cl.covetRange;
+                    w = w * w * (3 - 2 * w);
+                    r.covet = w;
+                    r.covetGate = g;
+                    lat -= lat * w * cl.covetPull;
+                }
             }
 
             r.latTarget = clamp(lat, -CFG.laneMax, CFG.laneMax);
@@ -679,6 +1024,81 @@ export function createAIRacers(THREE, opts = {}) {
             }
         }
 
+        // ---- pass B2: drafting (the crow) -----------------------------------
+        // Runs after avoidance so the tuck-in can override it: the crow WANTS
+        // to sit on a tail. The target is the nearest racer (or the player,
+        // when we were told where they are) that is properly ahead and close
+        // to the crow's own line. Tucked inside `draftLat`, the slipstream
+        // meter charges; full, the crow slingshots out sideways and kicks on.
+        for (let i = 0; i < racers.length; i++) {
+            const r = racers[i];
+            const cl = r.cfg.clever;
+            r.drafting = false;
+            r.altBias = 0;
+            if (!cl) continue;
+            if (!running || r.finished) {
+                r.draft01 = 0; r.slingT = 0; r.slingEnv = 0;
+                continue;
+            }
+
+            // The wake is bounded on all three axes. Forward and sideways alone
+            // are tangent-plane projections: a bird far overhead, or one on the
+            // far side of the planet, can project inside them. So the radial
+            // separation is checked too, and the straight-line distance is
+            // capped as a backstop for when `dir` is not perpendicular to up.
+            let found = false, best = cl.draftRange, bestLat = 0, bestUp = 0;
+            const latMax = cl.draftLat * 2.4;
+            const reach2 = cl.draftRange * cl.draftRange + latMax * latMax + cl.draftUp * cl.draftUp;
+            const n = racers.length + (draftPos ? 1 : 0);
+            for (let j = 0; j < n; j++) {
+                if (j === i) continue;
+                const o = j < racers.length ? racers[j].position : draftPos;
+                _rel.subVectors(o, r.position);
+                if (_rel.lengthSq() > reach2) continue;
+                const ahead = _rel.dot(r.dir);
+                if (ahead < 1.5 || ahead > best) continue;
+                const side = _rel.dot(r._side);
+                if (Math.abs(side) > latMax) continue;
+                const up = _rel.dot(r._up);
+                if (Math.abs(up) > cl.draftUp) continue;
+                found = true; best = ahead; bestLat = side; bestUp = up;
+            }
+
+            if (r.slingT > 0) {
+                // Slingshot: a sin envelope out and back, pace kick riding it.
+                r.slingT -= dt;
+                if (r.slingT <= 0) { r.slingT = 0; r.slingEnv = 0; } else {
+                    r.slingEnv = Math.sin(Math.PI * (1 - r.slingT / cl.slingTime));
+                    r.avoidPush += r.slingSide * cl.slingLat * r.slingEnv;
+                }
+            } else if (found && best < cl.draftGap) {
+                // Too close to keep tucking in. With some slipstream banked,
+                // that is the moment to pull out; otherwise just stop pulling
+                // in and let mutual avoidance open the gap again.
+                if (r.draft01 >= 0.3) {
+                    r.draft01 = 0;
+                    r.slingT = cl.slingTime;
+                    r.slingSide = r.lat > 0 ? -1 : 1;
+                }
+            } else if (found) {
+                r.avoidPush += bestLat * cl.draftPull;
+                r.altBias = clamp(bestUp, -3, 3) * 0.8;
+                if (Math.abs(bestLat) < cl.draftLat) {
+                    r.drafting = true;
+                    r.draft01 += cl.draftCharge * dt;
+                    if (r.draft01 >= 1) {
+                        r.draft01 = 0;
+                        r.slingT = cl.slingTime;
+                        // Pull out toward the middle of the corridor, never
+                        // into the wall of the lane it is already near.
+                        r.slingSide = r.lat > 0 ? -1 : 1;
+                    }
+                }
+            } else {
+                r.draft01 = Math.max(0, r.draft01 - dt * 0.5);
+            }
+        }
+
         // ---- pass C: steer, integrate, pose, animate ------------------------
         for (let i = 0; i < racers.length; i++) {
             const r = racers[i];
@@ -706,7 +1126,16 @@ export function createAIRacers(THREE, opts = {}) {
             _tpUp.copy(_tp).normalize();
             course.tangentAt(tl, _tan);
             _side.crossVectors(_tan, _tpUp).normalize();
-            r.alt = damp(r.alt, CFG.altAbove + r.altLane, 2.2, dt);
+            // The crow leaves its altitude lane twice: dropping toward a ring
+            // it covets, and matching the height of a tail it is drafting.
+            let altGoal = CFG.altAbove + r.altLane;
+            let altRate = 2.2;
+            if (p.clever) {
+                altGoal += (p.clever.covetAlt - altGoal) * r.covet * p.clever.covetAltPull;
+                altGoal += r.altBias;
+                altRate += 3 * r.covet;
+            }
+            r.alt = damp(r.alt, altGoal, altRate, dt);
             _tp.addScaledVector(_side, r.lat).addScaledVector(_tpUp, r.alt);
 
             _des.subVectors(_tp, r.position);
@@ -758,8 +1187,16 @@ export function createAIRacers(THREE, opts = {}) {
                     -CFG.rubberMaxAhead, CFG.rubberMaxBehind);
                 const pack = clamp((fieldMean - r.progress) * CFG.packGain,
                     -CFG.packMax, CFG.packMax);
-                targetSpeed *= 1 + band + pack;
+                // The crow's cleverness, capped as a whole (see cleverBonus).
+                const clever = p.clever ? cleverBonus(r.drafting, r.slingEnv, r.shiny, p.clever) : 0;
+                r.cleverBonus = clever;
+                targetSpeed *= 1 + band + pack + clever;
                 r.boosting = band > CFG.rubberMaxBehind * 0.7 && kMax < 0.25;
+
+                // The owl's mainspring. Only runs while racing, so every owl
+                // leaves the grid fully wound and the cycle is the same race
+                // to race.
+                if (p.spring) targetSpeed *= stepMainspring(r.mainspring, p.spring, dt);
 
                 if (r.mistakeT > 0) {
                     const env = Math.sin(Math.PI * (1 - r.mistakeT / r.mistakeDur));
@@ -801,6 +1238,46 @@ export function createAIRacers(THREE, opts = {}) {
 
             writePose(r);
 
+            // --- the crow: shinies and the caw -----------------------------------
+            if (p.clever) {
+                let caught = false;
+                if (running && !r.finished && r.covetGate >= 0) {
+                    const o = r.covetGate * 3;
+                    const dx = r.position.x - course.gatePositions[o];
+                    const dy = r.position.y - course.gatePositions[o + 1];
+                    const dz = r.position.z - course.gatePositions[o + 2];
+                    const rr = p.clever.shinyCatch;
+                    if (dx * dx + dy * dy + dz * dz < rr * rr) {
+                        // One catch per ring per lap. Rounding progress to the
+                        // nearest gate gives the same key either side of the
+                        // centre, even across the lap seam at gate 0.
+                        const key = Math.round(r.progress * course.gateCount);
+                        if (key !== r.caughtKey) { r.caughtKey = key; caught = true; r.shinyCaught++; }
+                    }
+                }
+                r.shiny = stepShinyNudge(r.shiny, caught, dt, p.clever);
+
+                // Caw on taking the lead off the player, with hysteresis. With
+                // a race state and the player's position, both birds are
+                // measured on fineProgress (seam-safe, no phantom gate jumps);
+                // otherwise on the progress figures we were handed.
+                if (running && !r.finished && hasPlayerProg) {
+                    let lead;
+                    if (raceState && draftPos) {
+                        const pt = course.nearestT(draftPos.x, draftPos.y, draftPos.z);
+                        lead = fineProgress(raceState, r.raceIndex, r.t) - fineProgress(raceState, playerIndex, pt);
+                    } else {
+                        lead = (raceState ? racerProgress(raceState, r.raceIndex) : r.progress) - pProg;
+                    }
+                    if (!r.aheadOfPlayer && lead > CFG.cawHysteresis) {
+                        r.aheadOfPlayer = true;
+                        r.cawEvent = true;
+                    } else if (r.aheadOfPlayer && lead < -CFG.cawHysteresis) {
+                        r.aheadOfPlayer = false;
+                    }
+                }
+            }
+
             // --- race bookkeeping ----------------------------------------------
             if (raceState && autoGates) {
                 updateRacerT(raceState, r.raceIndex, r.t);
@@ -836,6 +1313,13 @@ export function createAIRacers(THREE, opts = {}) {
             s.tumbling = r.mistakeTumble > 0 && r.mistakeT > 0;
             s.celebrating = r.finished;
             s.grounded = false;
+            // The owl: the key follows the spring, and a rewind cuts the beat.
+            if (p.spring) {
+                const m = r.mainspring;
+                s.rewinding = running && !r.finished && m.phase === SPRING_REWIND;
+                s.keySpin = m.keyRate;
+                if (s.rewinding) s.flapImpulse = 0;
+            }
             r.anim.update(dt, s);
         }
     }
@@ -873,3 +1357,6 @@ export function createAIRacers(THREE, opts = {}) {
         length,
     };
 }
+
+// Read-only views for the unit tests and the integrator (both are frozen).
+export { PERSONALITIES, CFG as AI_CONFIG };

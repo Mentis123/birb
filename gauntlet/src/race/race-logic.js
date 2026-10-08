@@ -35,7 +35,7 @@
 /** Tunables. Times in ms, gate radius in world units, thresholds in lap-t. */
 export const RACE_CONFIG = Object.freeze({
     laps: 3,
-    racerCount: 4,
+    racerCount: 6,          // the player + ai-racer.js's five rivals
     gateCount: 12,
 
     countdownMs: 3200,

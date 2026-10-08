@@ -27,10 +27,24 @@
  *
  * Layout: forward is -Z, up is +Y. The bird's own right hand side is +X (same
  * convention as a camera looking down -Z), so `leftWing` sits at -X.
+ *
+ * Species (`opts.species`): 'birb' (the default, and byte-for-byte the model
+ * this file always built), 'crow' and 'clockwork-owl'. A species is the same
+ * rig re-proportioned — same parts, same deformers, same anchors — so the
+ * animator, the FX and the camera never need to know which bird they have.
+ *   - crow: sleeker torso, a long heavy dark beak, no crest, a wedge tail and
+ *     a blue iridescent rim (the toon rim term, tinted — no new shader).
+ *   - clockwork-owl: round brass body, big head with pale facial discs behind
+ *     oversized eyes, ear tufts, gear discs merged into the wings, plus TWO
+ *     extra meshes: a wind-up key and a back gear, exposed on `mech` so the
+ *     animator can spin them. The gear sits inside the silhouette and goes
+ *     unoutlined; the key sticks out of it and is inked except on 'low'.
+ *     That is +3 draw calls (+2 on 'low') over the birb.
  */
 
 import { PALETTE } from '../core/palette.js';
 import { createToonMaterial } from '../core/toon.js';
+import { parseSpecies } from './species.js';
 import {
     ensureSmoothNormals,
     createOutlineMaterial,
@@ -145,12 +159,16 @@ function loftBlade(THREE, stations, tip) {
  * trailing edge reads as a fan, costs a third of the triangles, and spreads
  * cleanly under the `uTailFan` deformer (which scales X).
  */
-function tailPlate(THREE, len, halfAngle, points, thick) {
+function tailPlate(THREE, len, halfAngle, points, thick, wedge) {
     const rim = [];
     for (let i = 0; i < points; i++) {
         const t = (i / (points - 1)) * 2 - 1;
         const a = t * halfAngle;
-        const r = len * (i % 2 === 1 ? 1.0 : 0.82);
+        // `wedge` (the crow) grades the feathers so the centre pair is
+        // longest and the fan comes to a blunt point instead of a scallop.
+        const r = wedge
+            ? len * (1.0 - 0.34 * Math.abs(t)) * (i % 2 === 1 ? 1.0 : 0.94)
+            : len * (i % 2 === 1 ? 1.0 : 0.82);
         rim.push([Math.sin(a) * r, 0, Math.cos(a) * r]);
     }
     const root = [0, 0, 0];
@@ -500,17 +518,51 @@ const TAIL_Z = 0.54;
 const TAIL_LEN = 0.88;
 const WING_SPAN = 1.06;
 
-function bodyEntries(THREE, S, col, hullOnly) {
+// Species proportions. The birb's numbers stay inline below as literals; these
+// only ever replace them for the other two, so the default bird cannot drift.
+const CROW_TAIL_LEN = 1.04;
+const OWL_TAIL_LEN = 0.62;
+/** Owl eyes sit further out (in front of the facial discs) and are bigger. */
+const OWL_EYE_SET = 0.40;
+const OWL_EYE_K = 1.13;
+
+function tailLenOf(sp) {
+    return sp === 'crow' ? CROW_TAIL_LEN : (sp === 'clockwork-owl' ? OWL_TAIL_LEN : TAIL_LEN);
+}
+
+/**
+ * A low-poly gear lying in the XZ plane (axis +Y), centred on the origin:
+ * a disc plus radial teeth. Returns bare geometries so the caller can place
+ * and colour them. ~100 triangles at six teeth.
+ */
+function gearGeos(THREE, S, radius, thick, teeth) {
+    const out = [new THREE.CylinderGeometry(radius, radius, thick, S(8), 1, false)];
+    for (let i = 0; i < teeth; i++) {
+        const a = (i / teeth) * Math.PI * 2;
+        // Rotating about Y by -a turns local +X onto the radial direction, so
+        // each tooth's long side points outward.
+        out.push(xform(THREE, new THREE.BoxGeometry(radius * 0.38, thick * 0.9, radius * 0.32),
+            Math.cos(a) * radius * 1.06, 0, Math.sin(a) * radius * 1.06, 0, -a, 0));
+    }
+    return out;
+}
+
+function bodyEntries(THREE, S, col, hullOnly, sp) {
     const e = [];
     const bodyCol = col.body, bellyCol = col.belly;
+    const crow = sp === 'crow', owl = sp === 'clockwork-owl';
 
     // Egg torso. Belly colour is painted by height so the underside reads pale
     // from below (which is the only angle a trailing racer ever sees).
+    // The crow is longer and narrower; the owl is rounder.
     const bellyPaint = gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.30) / 0.24; });
     const torso = xform(
         THREE,
         new THREE.SphereGeometry(0.42, S(14), S(10)),
-        0, -0.01, 0.05, 0, 0, 0, 0.91, 0.96, 1.26
+        0, -0.01, 0.05, 0, 0, 0,
+        crow ? 0.84 : (owl ? 0.97 : 0.91),
+        crow ? 0.90 : (owl ? 1.00 : 0.96),
+        crow ? 1.34 : (owl ? 1.12 : 1.26)
     );
     e.push({ geo: torso, color: bellyPaint });
 
@@ -545,77 +597,131 @@ function bodyEntries(THREE, S, col, hullOnly) {
         return ((z - TAIL_Z - 0.12) / 0.56) * 0.42;
     });
     e.push({
-        geo: xform(THREE, tailPlate(THREE, TAIL_LEN, 0.74, 7, 0.055),
+        geo: xform(THREE, crow
+            ? tailPlate(THREE, CROW_TAIL_LEN, 0.46, 7, 0.050, true)
+            : (owl ? tailPlate(THREE, OWL_TAIL_LEN, 0.66, 5, 0.060)
+                : tailPlate(THREE, TAIL_LEN, 0.74, 7, 0.055)),
             0, 0.07, TAIL_Z, -0.05, 0, 0, 1, 1, 1),
         color: hullOnly ? bodyCol : tailPaint,
     });
     return e;
 }
 
-function headEntries(THREE, S, col, hullOnly) {
+function headEntries(THREE, S, col, hullOnly, sp) {
     const e = [];
     const bodyCol = col.body, bellyCol = col.belly;
+    const crow = sp === 'crow', owl = sp === 'clockwork-owl';
 
     // Skull: oversized relative to the torso — the whole chibi read depends on
-    // this ratio. Centre sits forward and up of the neck pivot.
+    // this ratio. Centre sits forward and up of the neck pivot. The crow's is a
+    // touch smaller and flatter-crowned; the owl's is the biggest in the game.
     const skull = xform(
-        THREE, new THREE.SphereGeometry(0.43, S(14), S(10)),
-        0, 0.05, -0.10, 0, 0, 0, 1.00, 0.98, 0.97
+        THREE, new THREE.SphereGeometry(crow ? 0.41 : (owl ? 0.45 : 0.43), S(14), S(10)),
+        0, 0.05, -0.10, 0, 0, 0,
+        owl ? 1.04 : 1.00, crow ? 0.93 : (owl ? 1.00 : 0.98), crow ? 1.02 : (owl ? 0.96 : 0.97)
     );
     e.push({
         geo: skull,
         color: gradient(THREE, bellyCol, bodyCol, function (x, y) { return (y + 0.10) / 0.16; }),
     });
 
-    // Beak: two flattened cones, upper long and hooked slightly down, lower
-    // short. "Prominent" is the brief — this one is 0.44 long on a 0.40 skull.
-    // The cone's local Z becomes vertical after the -90deg X rotation, so the
-    // vertical flatten is applied there.
-    e.push({
-        geo: xform(THREE, new THREE.ConeGeometry(0.175, 0.48, S(7), 1, false),
-            0, 0.010, -0.55, -Math.PI / 2 - 0.07, 0, 0, 1, 1, 0.70),
-        color: hullOnly ? bodyCol : PALETTE.beak,
-    });
-    e.push({
-        geo: xform(THREE, new THREE.ConeGeometry(0.132, 0.31, S(6), 1, false),
-            0, -0.085, -0.44, -Math.PI / 2 + 0.11, 0, 0, 1, 1, 0.55),
-        color: hullOnly ? bodyCol : PALETTE.beak,
-    });
+    if (crow) {
+        // A crow's whole identity is the beak: long, deep at the root, nearly
+        // straight, and as dark as the bird. Inked so it reads against sky.
+        e.push({
+            geo: xform(THREE, new THREE.ConeGeometry(0.155, 0.70, S(7), 1, false),
+                0, 0.020, -0.66, -Math.PI / 2 - 0.035, 0, 0, 1, 1, 0.66),
+            color: hullOnly ? bodyCol : PALETTE.crowBeak,
+        });
+        e.push({
+            geo: xform(THREE, new THREE.ConeGeometry(0.120, 0.48, S(6), 1, false),
+                0, -0.070, -0.56, -Math.PI / 2 + 0.06, 0, 0, 1, 1, 0.50),
+            color: hullOnly ? bodyCol : PALETTE.crowBeak,
+        });
+    } else if (owl) {
+        // A small hooked bill tucked between the facial discs.
+        e.push({
+            geo: xform(THREE, new THREE.ConeGeometry(0.10, 0.26, S(6), 1, false),
+                0, -0.03, -0.55, -Math.PI / 2 - 0.55, 0, 0, 1, 1, 0.80),
+            color: hullOnly ? bodyCol : PALETTE.owlCopper,
+        });
+    } else {
+        // Beak: two flattened cones, upper long and hooked slightly down, lower
+        // short. "Prominent" is the brief — this one is 0.44 long on a 0.40 skull.
+        // The cone's local Z becomes vertical after the -90deg X rotation, so the
+        // vertical flatten is applied there.
+        e.push({
+            geo: xform(THREE, new THREE.ConeGeometry(0.175, 0.48, S(7), 1, false),
+                0, 0.010, -0.55, -Math.PI / 2 - 0.07, 0, 0, 1, 1, 0.70),
+            color: hullOnly ? bodyCol : PALETTE.beak,
+        });
+        e.push({
+            geo: xform(THREE, new THREE.ConeGeometry(0.132, 0.31, S(6), 1, false),
+                0, -0.085, -0.44, -Math.PI / 2 + 0.11, 0, 0, 1, 1, 0.55),
+            color: hullOnly ? bodyCol : PALETTE.beak,
+        });
+    }
 
     // Crest: three little quills, swept back. Cheap, and it gives the
     // silhouette something to read against the sky besides a circle.
+    // Crows have none; the owl gets two ear tufts in the same paint instead.
     const crestPaint = gradient(THREE, bodyCol, PALETTE.inkSoft, function () { return 0.34; });
-    for (let i = 0; i < 3; i++) {
-        const t = (i - 1) * 0.5;
-        e.push({
-            geo: xform(THREE, new THREE.ConeGeometry(0.054, 0.24 - Math.abs(t) * 0.06, S(5), 1, false),
-                t * 0.105, 0.40, 0.01 + Math.abs(t) * 0.02, 0.62, t * 0.45, 0, 1, 1, 1),
-            color: hullOnly ? bodyCol : crestPaint,
-        });
+    if (owl) {
+        for (let s = -1; s <= 1; s += 2) {
+            e.push({
+                geo: xform(THREE, new THREE.ConeGeometry(0.078, 0.30, S(5), 1, false),
+                    s * 0.21, 0.45, -0.04, 0.22, 0, -s * 0.48, 1, 1, 0.7),
+                color: hullOnly ? bodyCol : crestPaint,
+            });
+        }
+    } else if (!crow) {
+        for (let i = 0; i < 3; i++) {
+            const t = (i - 1) * 0.5;
+            e.push({
+                geo: xform(THREE, new THREE.ConeGeometry(0.054, 0.24 - Math.abs(t) * 0.06, S(5), 1, false),
+                    t * 0.105, 0.40, 0.01 + Math.abs(t) * 0.02, 0.62, t * 0.45, 0, 1, 1, 1),
+                color: hullOnly ? bodyCol : crestPaint,
+            });
+        }
     }
 
     if (hullOnly) return e;
 
     // Eyes. Big, forward-set, with a domed pupil and a specular dot. Masked so
     // the blink deformer can squash exactly this geometry and nothing else.
+    // The owl's are pushed out and scaled up so they sit proud of its discs.
+    const eyeSet = owl ? OWL_EYE_SET : EYE_SET;
+    const k = owl ? OWL_EYE_K : 1;
     const dl = Math.hypot(EYE_DIR_X, EYE_DIR_Y, EYE_DIR_Z);
     for (let s = -1; s <= 1; s += 2) {
         const nx = (s * EYE_DIR_X) / dl, ny = EYE_DIR_Y / dl, nz = EYE_DIR_Z / dl;
-        const ex = nx * EYE_SET, ey = 0.05 + ny * EYE_SET, ez = -0.10 + nz * EYE_SET;
+        const ex = nx * eyeSet, ey = 0.05 + ny * eyeSet, ez = -0.10 + nz * eyeSet;
+        if (owl) {
+            // Facial disc: a pale, flattened dish behind each eye, its flat
+            // axis turned onto the eye direction. Unmasked, so it stays put
+            // while the eye blinks in front of it.
+            const dd = eyeSet - 0.012;
+            e.push({
+                geo: xform(THREE, new THREE.SphereGeometry(0.245, S(10), S(7)),
+                    nx * dd, 0.05 + ny * dd, -0.10 + nz * dd,
+                    -Math.asin(ny), Math.atan2(nx, nz), 0, 1, 1, 0.36),
+                color: PALETTE.owlDisc,
+            });
+        }
         e.push({
-            geo: xform(THREE, new THREE.SphereGeometry(0.146, S(10), S(7)), ex, ey, ez),
+            geo: xform(THREE, new THREE.SphereGeometry(0.146 * k, S(10), S(7)), ex, ey, ez),
             color: PALETTE.eyeWhite,
             mask: 1.0,
         });
         e.push({
-            geo: xform(THREE, new THREE.SphereGeometry(0.097, S(8), S(6)),
-                ex + nx * 0.078, ey + ny * 0.078, ez + nz * 0.078),
+            geo: xform(THREE, new THREE.SphereGeometry(0.097 * k, S(8), S(6)),
+                ex + nx * 0.078 * k, ey + ny * 0.078 * k, ez + nz * 0.078 * k),
             color: PALETTE.eyeDark,
             mask: 0.6,
         });
         e.push({
-            geo: xform(THREE, new THREE.SphereGeometry(0.031, S(5), S(3)),
-                ex + nx * 0.128 + s * 0.030, ey + ny * 0.128 + 0.044, ez + nz * 0.128),
+            geo: xform(THREE, new THREE.SphereGeometry(0.031 * k, S(5), S(3)),
+                ex + nx * 0.128 * k + s * 0.030 * k, ey + ny * 0.128 * k + 0.044 * k, ez + nz * 0.128 * k),
             color: PALETTE.eyeWhite,
             mask: 1.0,
         });
@@ -623,7 +729,22 @@ function headEntries(THREE, S, col, hullOnly) {
     return e;
 }
 
-function wingEntries(THREE, S, col, hullOnly) {
+/**
+ * The owl's wind-up key, built along +Y from its base so the mesh can spin on
+ * its own shaft: collar, shaft, and a two-lobed bow lying in the YZ plane.
+ */
+function keyEntries(THREE, S) {
+    const c = PALETTE.owlKey;
+    return [
+        { geo: xform(THREE, new THREE.CylinderGeometry(0.065, 0.075, 0.05, S(8), 1, false), 0, 0.025, 0), color: PALETTE.owlGear },
+        { geo: xform(THREE, new THREE.CylinderGeometry(0.030, 0.030, 0.26, S(6), 1, false), 0, 0.15, 0), color: c },
+        { geo: xform(THREE, new THREE.SphereGeometry(0.105, S(7), S(5)), 0, 0.33, 0.088, 0, 0, 0, 0.32, 0.80, 1.0), color: c },
+        { geo: xform(THREE, new THREE.SphereGeometry(0.105, S(7), S(5)), 0, 0.33, -0.088, 0, 0, 0, 0.32, 0.80, 1.0), color: c },
+        { geo: xform(THREE, new THREE.SphereGeometry(0.046, S(6), S(4)), 0, 0.29, 0), color: c },
+    ];
+}
+
+function wingEntries(THREE, S, col, hullOnly, sp) {
     // Always built along +X (the bird's right). The left wing is the same
     // geometry run through mirrorX() after the merge, which flips winding too.
     const e = [];
@@ -660,16 +781,37 @@ function wingEntries(THREE, S, col, hullOnly) {
 
     // Splayed primary "fingers" past the wrist — the detail that stops the wing
     // ending in a blunt edge and reads as feathers even in a 40px silhouette.
-    for (let i = 0; i < 3; i++) {
+    // A crow's hand is its signature in flight: four long, widely splayed
+    // fingers rather than three short ones.
+    const crow = sp === 'crow';
+    const fingers = crow ? 4 : 3;
+    for (let i = 0; i < fingers; i++) {
         const g = loftBlade(THREE, [
             [0.00, 0.070, 0.024, 0, 0],
             [0.20, 0.055, 0.016, 0.010, 0],
-        ], [0.36 - i * 0.04, -0.004, 0.030]);
-        xform(THREE, g, 0.86, -0.012 - i * 0.014, 0.10 + i * 0.075,
-            0, -(0.16 + i * 0.15), 0, 1, 1, 1);
+        ], [(crow ? 0.44 : 0.36) - i * 0.04, -0.004, 0.030]);
+        xform(THREE, g, 0.86, -0.012 - i * 0.014, 0.10 + i * (crow ? 0.062 : 0.075),
+            0, -(0.16 + i * (crow ? 0.17 : 0.15)), 0, 1, 1, 1);
         e.push({ geo: g, color: paint });
     }
+
+    // The owl's wing gear: a brass disc lying on the upper surface over the
+    // inner wing, merged into the wing mesh so it costs no draw call. It sits
+    // inside the silhouette, so the hull skips it.
+    if (sp === 'clockwork-owl' && !hullOnly) {
+        const gg = gearGeos(THREE, S, 0.105, 0.032, 6);
+        for (let i = 0; i < gg.length; i++) {
+            e.push({ geo: xform(THREE, gg[i], 0.36, 0.098, 0.05), color: PALETTE.owlGear });
+        }
+    }
     return e;
+}
+
+/** Same toon options object for the birb; a tinted copy for the others. */
+function toonFor(sp, base, crowExtra, owlExtra) {
+    if (sp === 'crow') return Object.assign({}, base, crowExtra);
+    if (sp === 'clockwork-owl') return Object.assign({}, base, owlExtra);
+    return base;
 }
 
 // ---------------------------------------------------------------------------
@@ -685,10 +827,17 @@ function wingEntries(THREE, S, col, hullOnly) {
  * @param {string}  [opts.quality]   'low' | 'mid' | 'high'
  * @param {boolean} [opts.outline]   default true
  * @param {number}  [opts.outlinePixels]
+ * @param {string}  [opts.species]   'birb' (default) | 'crow' | 'clockwork-owl'
  */
 export function createBird(THREE, opts = {}) {
-    const bodyColor = opts.bodyColor === undefined ? PALETTE.birdPlayer : opts.bodyColor;
-    const bellyColor = opts.bellyColor === undefined ? PALETTE.birdPlayerBelly : opts.bellyColor;
+    const sp = parseSpecies(opts.species) || 'birb';
+    const crow = sp === 'crow', owl = sp === 'clockwork-owl';
+    const bodyColor = opts.bodyColor === undefined
+        ? (crow ? PALETTE.birdRival4 : (owl ? PALETTE.owlBrass : PALETTE.birdPlayer))
+        : opts.bodyColor;
+    const bellyColor = opts.bellyColor === undefined
+        ? (crow ? PALETTE.crowBelly : (owl ? PALETTE.owlDisc : PALETTE.birdPlayerBelly))
+        : opts.bellyColor;
     const scale = opts.scale === undefined ? 1 : opts.scale;
     const quality = opts.quality || 'high';
     const wantOutline = opts.outline !== false;
@@ -717,15 +866,22 @@ export function createBird(THREE, opts = {}) {
         uTailPitch: { value: 0 },
         uTailFan: { value: 1 },
         uTailZ: { value: TAIL_Z },
-        uTailInv: { value: 1 / TAIL_LEN },
+        uTailInv: { value: 1 / tailLenOf(sp) },
     };
     const tailDef = tailDeform('objectNormal');
     const tailDefHull = tailDeform('objNormal');
 
-    const bodyGeo = mergeGeos(THREE, bodyEntries(THREE, S, col, false), false);
+    // The crow's iridescence is the stock rim term tinted blue and pushed a
+    // little harder, with a tighter gloss; the owl's brass gets a broader,
+    // brighter specular band so it reads as metal rather than feathers. Both
+    // are uniforms, so every species still shares one compiled program.
+    const bodyGeo = mergeGeos(THREE, bodyEntries(THREE, S, col, false, sp), false);
     const bodyMat = toonWithDeform(
         THREE,
-        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.10, specThreshold: 0.74 },
+        toonFor(sp,
+            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.10, specThreshold: 0.74 },
+            { rimColor: PALETTE.crowRim, rimStrength: 0.72, specStrength: 0.20, specThreshold: 0.70 },
+            { rimStrength: 0.42, specStrength: 0.34, specThreshold: 0.62 }),
         TAIL_UNIFORMS_GLSL, tailDef, tailUniforms, 'gauntlet-bird-body-v1'
     );
     const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
@@ -735,7 +891,7 @@ export function createBird(THREE, opts = {}) {
     materials.push(bodyMat);
 
     if (wantOutline) {
-        const hullGeo = mergeGeos(THREE, bodyEntries(THREE, S, col, true), false);
+        const hullGeo = mergeGeos(THREE, bodyEntries(THREE, S, col, true, sp), false);
         makeHull(THREE, hullGeo, bodyMesh, {
             pixels: outlinePixels, maxPush: 0.14,
             deform: tailDefHull, uniformsGlsl: TAIL_UNIFORMS_GLSL, uniforms: tailUniforms,
@@ -750,15 +906,19 @@ export function createBird(THREE, opts = {}) {
     head.position.set(0, 0.28, -0.31);
     body.add(head);
 
+    const eyeSet = owl ? OWL_EYE_SET : EYE_SET;
     const headUniforms = {
         uBlink: { value: 0 },
-        uEyeY: { value: 0.05 + (EYE_DIR_Y / Math.hypot(EYE_DIR_X, EYE_DIR_Y, EYE_DIR_Z)) * EYE_SET },
+        uEyeY: { value: 0.05 + (EYE_DIR_Y / Math.hypot(EYE_DIR_X, EYE_DIR_Y, EYE_DIR_Z)) * eyeSet },
         uLidColor: { value: new THREE.Color(bodyColor) },
     };
-    const headGeo = mergeGeos(THREE, headEntries(THREE, S, col, false), true);
+    const headGeo = mergeGeos(THREE, headEntries(THREE, S, col, false, sp), true);
     const headMat = toonWithDeform(
         THREE,
-        { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.11, specThreshold: 0.74 },
+        toonFor(sp,
+            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.5, specStrength: 0.11, specThreshold: 0.74 },
+            { rimColor: PALETTE.crowRim, rimStrength: 0.72, specStrength: 0.22, specThreshold: 0.70 },
+            { rimStrength: 0.42, specStrength: 0.30, specThreshold: 0.64 }),
         BLINK_UNIFORMS_GLSL, null, headUniforms, 'gauntlet-bird-head-v1',
         {
             vertBody: BLINK_POSITION_GLSL,
@@ -776,7 +936,7 @@ export function createBird(THREE, opts = {}) {
         // Hull covers skull + beak + crest only. Inking the eye domes as well
         // would double the head's triangle cost for lines that sit inside the
         // silhouette anyway.
-        const hullGeo = mergeGeos(THREE, headEntries(THREE, S, col, true), false);
+        const hullGeo = mergeGeos(THREE, headEntries(THREE, S, col, true, sp), false);
         makeHull(THREE, hullGeo, headMesh, { pixels: outlinePixels, maxPush: 0.12 });
         geometries.push(hullGeo);
     }
@@ -801,11 +961,14 @@ export function createBird(THREE, opts = {}) {
         const def = wingDeform('objectNormal');
         const defHull = wingDeform('objNormal');
 
-        const geo = mergeGeos(THREE, wingEntries(THREE, S, col, false), false);
+        const geo = mergeGeos(THREE, wingEntries(THREE, S, col, false, sp), false);
         if (side < 0) mirrorX(geo);
         const mat = toonWithDeform(
             THREE,
-            { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.26, specStrength: 0.0, specThreshold: 0.72 },
+            toonFor(sp,
+                { color: 0xffffff, ramp: 'hero', vertexColors: true, rimStrength: 0.26, specStrength: 0.0, specThreshold: 0.72 },
+                { rimColor: PALETTE.crowRim, rimStrength: 0.44 },
+                { specStrength: 0.18, specThreshold: 0.66 }),
             WING_UNIFORMS_GLSL, def, u, 'gauntlet-bird-wing-v1'
         );
         const mesh = new THREE.Mesh(geo, mat);
@@ -815,7 +978,7 @@ export function createBird(THREE, opts = {}) {
         materials.push(mat);
 
         if (wantOutline) {
-            const hullGeo = mergeGeos(THREE, wingEntries(THREE, S, col, true), false);
+            const hullGeo = mergeGeos(THREE, wingEntries(THREE, S, col, true, sp), false);
             if (side < 0) mirrorX(hullGeo);
             makeHull(THREE, hullGeo, mesh, {
                 pixels: outlinePixels, maxPush: 0.12,
@@ -826,6 +989,59 @@ export function createBird(THREE, opts = {}) {
 
         wings.push(g);
         wingUniformSets.push(u);
+    }
+
+    // ---- clockwork (owl only) ---------------------------------------------
+    // The key and the back gear are the only parts of any bird that rotate
+    // rigidly on their own axis, so they are the only parts that cannot be
+    // merged into a parent mesh. Each sits in a tilted mount group (matching
+    // the slope of the back) and the MESH spins on its local Y inside it, so
+    // the animator writes one float per part per frame.
+    let mech = null;
+    if (owl) {
+        const keyMount = new THREE.Group();
+        keyMount.name = 'windKeyMount';
+        keyMount.position.set(0, 0.33, 0.24);
+        keyMount.rotation.x = 0.30;          // lean back with the shoulders
+        body.add(keyMount);
+        const keyGeo = mergeGeos(THREE, keyEntries(THREE, S), false);
+        const keyMat = createToonMaterial(THREE, {
+            color: 0xffffff, ramp: 'hero', vertexColors: true,
+            rimStrength: 0.4, specStrength: 0.42, specThreshold: 0.6,
+        });
+        const keyMesh = new THREE.Mesh(keyGeo, keyMat);
+        keyMesh.name = 'windKey';
+        keyMount.add(keyMesh);
+        geometries.push(keyGeo);
+        materials.push(keyMat);
+        // The key breaks the silhouette, so it is inked — except on 'low',
+        // where the draw call buys more elsewhere.
+        if (wantOutline && quality !== 'low') {
+            const hullGeo = mergeGeos(THREE, keyEntries(THREE, S), false);
+            makeHull(THREE, hullGeo, keyMesh, { pixels: outlinePixels, maxPush: 0.08 });
+            geometries.push(hullGeo);
+        }
+
+        const gearMount = new THREE.Group();
+        gearMount.name = 'backGearMount';
+        gearMount.position.set(0, 0.255, 0.43);
+        gearMount.rotation.x = 0.62;
+        body.add(gearMount);
+        const gg = gearGeos(THREE, S, 0.12, 0.036, 6);
+        const gearList = [];
+        for (let i = 0; i < gg.length; i++) gearList.push({ geo: gg[i], color: PALETTE.owlGear });
+        const gearGeo = mergeGeos(THREE, gearList, false);
+        const gearMat = createToonMaterial(THREE, {
+            color: 0xffffff, ramp: 'hero', vertexColors: true,
+            rimStrength: 0.3, specStrength: 0.36, specThreshold: 0.6,
+        });
+        const gearMesh = new THREE.Mesh(gearGeo, gearMat);
+        gearMesh.name = 'backGear';
+        gearMount.add(gearMesh);
+        geometries.push(gearGeo);
+        materials.push(gearMat);
+
+        mech = { key: keyMesh, gear: gearMesh };
     }
 
     // ---- anchors ----------------------------------------------------------
@@ -846,15 +1062,15 @@ export function createBird(THREE, opts = {}) {
     for (let s = -1; s <= 1; s += 2) {
         const nx = (s * EYE_DIR_X) / dl, ny = EYE_DIR_Y / dl, nz = EYE_DIR_Z / dl;
         eyeAnchors.push(anchor(head, s < 0 ? 'leftEye' : 'rightEye',
-            nx * EYE_SET, 0.05 + ny * EYE_SET, -0.10 + nz * EYE_SET));
+            nx * eyeSet, 0.05 + ny * eyeSet, -0.10 + nz * eyeSet));
         pupilAnchors.push(anchor(head, s < 0 ? 'leftPupil' : 'rightPupil',
-            nx * (EYE_SET + 0.08), 0.05 + ny * (EYE_SET + 0.08), -0.10 + nz * (EYE_SET + 0.08)));
+            nx * (eyeSet + 0.08), 0.05 + ny * (eyeSet + 0.08), -0.10 + nz * (eyeSet + 0.08)));
     }
 
     const parts = {
         body: body,
         head: head,
-        beak: anchor(head, 'beak', 0, -0.02, -0.80),
+        beak: anchor(head, 'beak', 0, crow ? 0.0 : -0.02, crow ? -1.00 : (owl ? -0.66 : -0.80)),
         leftWing: wings[0],
         rightWing: wings[1],
         leftFoot: anchor(body, 'leftFoot', -0.135, -0.40, 0.03),
@@ -898,6 +1114,10 @@ export function createBird(THREE, opts = {}) {
             rightCurl: wingUniformSets[1].uCurl,
             rightSweep: wingUniformSets[1].uSweep,
         },
+        species: sp,
+        // Clockwork handles: { key, gear } meshes the animator spins about
+        // their local Y. Null for every species without a mechanism.
+        mech: mech,
         triangleCount: triangles,
         drawCallCount: drawCalls,
         dispose: function dispose() {

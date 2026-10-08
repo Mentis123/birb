@@ -183,13 +183,18 @@ Budget: <= 8 draw calls, <= 6k triangles. Gradient dome (BackSide shader using
 ### `bird/bird-model.js`
 
 ```js
-createBird(THREE, { bodyColor, bellyColor, scale, quality, outline }) -> {
+createBird(THREE, { bodyColor, bellyColor, scale, quality, outline, species }) -> {
   group,                    // faces -Z, up +Y, ~2.4 units long at scale 1
   parts: { body, head, beak, leftWing, rightWing, leftFoot, rightFoot,
            tail, leftEye, rightEye, leftPupil, rightPupil },
+  species,                  // 'birb' (default) | 'crow' | 'clockwork-owl'
+  mech,                     // owl only: { key, gear } meshes to spin on local Y
   dispose()
 }
 ```
+`species` re-proportions the same rig (see `bird/species.js`); the default is
+the original birb, unchanged. The clockwork owl adds two rigid spinning parts
+(+3 draw calls, +2 on `low` where the key goes un-inked).
 Budget: <= 9 draw calls, <= 2.5k triangles per bird *including outline hulls*
 (4 birds on screen). Chibi silhouette: round body, big eyes, prominent beak,
 layered-cone wings. Wings pivot at the shoulder so a rotation on the group
@@ -292,9 +297,11 @@ createAIRacers(THREE, { course, count, quality, seed, createBirdFn }) -> {
   dispose()
 }
 ```
-Spline-following with lookahead steering. Three personalities: aggressive
+Spline-following with lookahead steering. Five personalities: aggressive
 (cuts inside, brakes late, bumps), clean (holds the ideal line, consistent),
-erratic (wide swings, occasional real mistakes). Mild rubber-banding so races
+erratic (wide swings, occasional real mistakes), clever (the crow: drafts,
+slingshots, threads gate centres for a capped nudge) and clockwork (the owl:
+a deterministic mainspring pace cycle, no mistakes). Mild rubber-banding so races
 stay close, mutual avoidance so they don't stack, and genuine mistakes so
 beating them feels earned. Kinematic, not full physics — 3 birds of full flight
 sim is neither stable nor affordable.

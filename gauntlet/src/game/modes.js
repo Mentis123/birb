@@ -80,7 +80,7 @@ export const MODE_DEFS = {
     [MODES.RACE]: {
         id: MODES.RACE,
         label: 'Gauntlet Race',
-        blurb: 'Three laps, three rivals.',
+        blurb: 'Three laps, five rivals.',
         hint: 'Follow the ribbon. Pass every gate in order.',
         course: true, laps: 3, rivals: true,
         drones: 'off', nesting: false, rings: false,

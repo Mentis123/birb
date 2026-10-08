@@ -499,9 +499,12 @@ export function createHUD(rootEl, options = {}) {
     const posCard = el('div', 'vh-card vh-pos', tr);
     el('span', 'vh-lab', posCard).textContent = 'Pos';
     const posVal = el('span', 'vh-val', posCard);
-    posVal.innerHTML = '1<small>ST</small>';
+    // "3RD/6": the ordinal, then the field size, which is no longer a given
+    // now that the grid is six birds deep.
+    posVal.innerHTML = '1<small>ST</small><small class="of">/6</small>';
     const posNum = posVal.firstChild;
     const posSuffix = posVal.querySelector('small');
+    const posOf = posVal.querySelector('.of');
 
     // ---- minimap: top-right, under the position card ---------------------
     // The bottom corners belong to the player's thumbs, not to readouts.
@@ -655,7 +658,12 @@ export function createHUD(rootEl, options = {}) {
     let mapPx = 0, mapHalf = 0, mapScale = 1;
     const VIEW_RANGE = 78; // world units from the player to the map edge
 
-    const RACER_COLORS = [CSS.birdPlayer, CSS.birdRival1, CSS.birdRival2, CSS.birdRival3];
+    // Indexed by race index: the player, then ai-racer.js's five in order.
+    // The crow and owl use their lighter UI swatches — a true crow black
+    // vanishes on the ink dish. The integrator can overwrite entries with
+    // setRacerColors (e.g. a rival wearing its alternate tint).
+    const RACER_COLORS = [CSS.birdPlayer, CSS.birdRival1, CSS.birdRival2, CSS.birdRival3,
+        CSS.birdRival4Ui, CSS.birdRival5Ui];
 
     function sizeMap() {
         const dpr = Math.min(win.devicePixelRatio || 1, quality === 'high' ? 3 : 2);
@@ -931,7 +939,10 @@ export function createHUD(rootEl, options = {}) {
             posSuffix.textContent = ordinalSuffix(pos);
             posCard.classList.toggle('is-lead', pos === 1);
         }
-        _posTotal = total;
+        if (total !== _posTotal) {
+            _posTotal = total;
+            posOf.textContent = '/' + total;
+        }
     }
 
     function setSpeed(kmh, speed01) {
@@ -1322,6 +1333,18 @@ export function createHUD(rootEl, options = {}) {
 
     function resize() { sizeMap(); }
 
+    /**
+     * Override racer swatches by race index (CSS colour strings; null/empty
+     * entries keep the default). Build-time — call once after the field is
+     * known, never per frame.
+     */
+    function setRacerColors(list) {
+        if (!list) return;
+        for (let i = 0; i < list.length; i++) {
+            if (list[i]) RACER_COLORS[i] = list[i];
+        }
+    }
+
     function dispose() {
         shareBtn.removeEventListener('click', onShare);
         if (motionMq) {
@@ -1359,6 +1382,7 @@ export function createHUD(rootEl, options = {}) {
         setResultsActions,
         hideResults,
         minimap: { update: drawMap, resize },
+        setRacerColors,
         resize,
         dispose,
         /** Exposed for the probe page / integrator debugging. */

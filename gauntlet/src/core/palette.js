@@ -54,6 +54,26 @@ export const PALETTE = {
     birdRival1: 0xf2764b, // "Talon" — aggressive
     birdRival2: 0xb47ff0, // "Zephyr" — clean
     birdRival3: 0xf5d84e, // "Pip"    — erratic
+    // The two newer rivals are dark/metal birds, so their minimap and results
+    // swatches are tuned a few steps lighter than the in-world plumage — a
+    // true crow black would vanish on the minimap's ink dish.
+    birdRival4: 0x2a3550, // "Corvus" — clever; glossy blue-black
+    birdRival5: 0xc98a3d, // "Tock"   — clockwork; brass
+    birdRival4Ui: 0x6f86c2,
+    birdRival5Ui: 0xe0a85a,
+    // Alternate tints, used only when the player picks the same species so the
+    // rival can never be mistaken for you: a rook-grey crow and a cold steel
+    // owl. Both still separate from green lowland and pale alpine.
+    birdRival4Alt: 0x8f98ab, // hooded-crow ash
+    birdRival5Alt: 0x7f93ad, // cold steel
+    crowRim: 0x7fb6ff,    // iridescent blue rim for the crow's toon rim term
+    crowBeak: 0x262c3a,
+    crowBelly: 0x46557a,  // barely lighter than the body: crows are not two-tone
+    owlBrass: 0xd9a441,
+    owlCopper: 0xb8683a,
+    owlDisc: 0xf6ead0,    // pale facial disc
+    owlGear: 0x8a6a33,
+    owlKey: 0xf2d27a,
     beak: 0xffb03a,
     foot: 0xf09a2e,
     eyeWhite: 0xffffff,

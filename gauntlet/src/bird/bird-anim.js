@@ -28,6 +28,13 @@
  * Everything is driven from a caller-owned state object that is mutated in
  * place. `update` allocates nothing: every value below is a captured number,
  * and every write is a float store into an existing Euler / Vector3 / uniform.
+ *
+ * Species: the crow uses this rig unchanged. The clockwork owl (a bird with
+ * `bird.mech`) is MECHANICAL: its wingbeat is quantised into a few hard steps
+ * per cycle with almost no tip whip, its wind-up key and back gear spin, and
+ * while `state.rewinding` is set the beat stalls to a stiff ratchet tick.
+ * Optional state fields it reads: `keySpin` (rad/s; defaults to a slow
+ * steady wind) and `rewinding` (boolean). Every other bird ignores them.
  */
 
 import { makeRng } from '../core/rng.js';
@@ -101,6 +108,15 @@ const CFG = {
     blinkMax: 5.6,
     blinkDur: 0.13,
     tumbleSpin: 9.5,
+
+    // --- clockwork (owl) ---------------------------------------------------
+    mechSteps: 6,           // positions per wingbeat — the stepped, ticking stroke
+    mechCurl: 0.18,         // fraction of the normal tip whip: brass does not flex
+    mechTickHz: 9,          // ratchet rate while rewinding
+    mechTickAmp: 0.05,      // rad of wing twitch per ratchet tick
+    keySpinIdle: 1.6,       // rad/s when nobody tells the key otherwise
+    gearSpinBase: 0.9,      // rad/s at a standstill...
+    gearSpinSpeed: 3.4,     // ...plus this at full speed
 };
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -124,6 +140,10 @@ export function createBirdAnimator(THREE, bird) {
     const head = parts.head;
     const leftWing = parts.leftWing;
     const rightWing = parts.rightWing;
+    const mech = bird.mech || null;
+    const mechanical = !!mech;
+    let keyAngle = 0;
+    let gearAngle = 0;
 
     // Rest transforms captured once so every frame writes absolute values
     // rather than accumulating drift.
@@ -226,13 +246,18 @@ export function createBirdAnimator(THREE, bird) {
         // which is backwards: perched is the one state where the wings are
         // folded and still.
         const scripted = Boolean(sIn.celebrating || sIn.tumbling);
-        const wantStroke = bursting || climbing || stall01 > 0.02 || scripted;
+        // A rewinding clockwork bird has no power to beat with at all.
+        const rewinding = mechanical && Boolean(sIn.rewinding);
+        const wantStroke = !rewinding && (bursting || climbing || stall01 > 0.02 || scripted);
 
         // Once a stroke is running it FINISHES. Cutting the wing dead the frame
         // you release the stick leaves it frozen mid-downbeat; a real bird gets
         // one last beat in and then locks out, and that trailing stroke is what
         // sells the transition into the glide.
         if (wantStroke) stroking = true;
+        // ...except a mechanism that has run down. A clock does not finish its
+        // swing; it stops where it is, and the stop IS the tell.
+        if (rewinding) { stroking = false; flapPhase = 0; }
 
         let rate;
         if (bursting) rate = CFG.burstRate;
@@ -276,11 +301,15 @@ export function createBirdAnimator(THREE, bird) {
         // wingbeat audio. The caller must not have to diff flap01 itself.
         api.strokeEvent = wrapped;
 
+        // Clockwork quantises the cycle into a few held positions, so the wing
+        // jumps between them like an escapement rather than sweeping.
+        const cycW = mechanical ? Math.floor(cyc * CFG.mechSteps) / CFG.mechSteps : cyc;
+
         // Time warp: compress the first DOWNSTROKE of the cycle into the first
         // half of the waveform. Fast, powerful down; long, soft recovery.
-        const warp = cyc < DOWNSTROKE
-            ? (cyc / DOWNSTROKE) * 0.5
-            : 0.5 + ((cyc - DOWNSTROKE) / (1 - DOWNSTROKE)) * 0.5;
+        const warp = cycW < DOWNSTROKE
+            ? (cycW / DOWNSTROKE) * 0.5
+            : 0.5 + ((cycW - DOWNSTROKE) / (1 - DOWNSTROKE)) * 0.5;
         const stroke = Math.cos(warp * TAU);        // +1 top, -1 bottom
 
         // --- amplitude --------------------------------------------------------
@@ -311,6 +340,12 @@ export function createBirdAnimator(THREE, bird) {
         rest += air;
 
         shoulder = rest + amp * stroke;
+        // Rewinding: the beat is gone and the wings ratchet — a hard two-state
+        // twitch at the pawl rate, timed off the animator clock so it is the
+        // same under any frame rate.
+        if (rewinding) {
+            shoulder = rest + ((Math.floor(t * CFG.mechTickHz) & 1) ? CFG.mechTickAmp : -CFG.mechTickAmp);
+        }
 
         // --- follow-through --------------------------------------------------
         // The tip is a mass on a spring hanging off the shoulder. The lag
@@ -353,8 +388,9 @@ export function createBirdAnimator(THREE, bird) {
         applyWing(leftWing, -1, shoulder + diff, sweepBack, spanScale, tumbleFold);
         applyWing(rightWing, 1, shoulder - diff, sweepBack, spanScale, tumbleFold);
 
-        const curl = lag * CFG.curlGain * (1 - tumble * 0.7);
-        const sweep = lag * CFG.sweepGain + tuck * 0.10;
+        const stiff = mechanical ? CFG.mechCurl : 1;
+        const curl = lag * CFG.curlGain * (1 - tumble * 0.7) * stiff;
+        const sweep = lag * CFG.sweepGain * stiff + tuck * 0.10;
         u.leftCurl.value = curl + turnS * 0.10;
         u.rightCurl.value = curl - turnS * 0.10;
         u.leftSweep.value = sweep;
@@ -425,6 +461,21 @@ export function createBirdAnimator(THREE, bird) {
             + spread * 0.45
             + celebrate * 0.7
             - tuck * 0.22;
+
+        // --- clockwork -----------------------------------------------------------
+        // The key turns slowly as the spring lets go and spins hard the other
+        // way while it rewinds (the caller says how fast via `keySpin`). The
+        // back gear follows airspeed, and runs backwards fast on a rewind, so
+        // the mechanism visibly reverses. Angles are wrapped so a long session
+        // never loses float precision.
+        if (mechanical) {
+            const ks = typeof sIn.keySpin === 'number' ? sIn.keySpin : CFG.keySpinIdle;
+            keyAngle = (keyAngle + ks * dt) % TAU;
+            const gs = (CFG.gearSpinBase + CFG.gearSpinSpeed * speedS) * (rewinding ? -3.5 : 1);
+            gearAngle = (gearAngle + gs * dt) % TAU;
+            mech.key.rotation.y = keyAngle;
+            mech.gear.rotation.y = gearAngle;
+        }
     }
 
     /**

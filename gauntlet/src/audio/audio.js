@@ -60,7 +60,19 @@ const MIX = {
     explode: 0.5,
     kill: 0.42,
     alarm: 0.34,
+    // Bird voices. The caw is an event and may be heard; the clockwork tick
+    // is texture and must sit under the wingbeats, or a near-miss with the
+    // owl sounds like a metronome strapped to the speaker.
+    caw: 0.30,
+    tick: 0.13,
 };
+
+/** Bird-voice timing. */
+const CAW_MIN_GAP = 1.4;        // s — no two caws closer than this, whoever cawed
+const TICK_HZ = 4.0;            // owl escapement while flying
+const TICK_HZ_REWIND = 14.0;    // ...and the ratchet while it rewinds
+const TICK_HZ_PLAYER = 3.0;     // your own owl: a slower, quieter clock
+const TICK_PLAYER_LEVEL = 0.45;
 
 /** Major pentatonic in semitones. Gate chimes walk up this, forever. */
 const PENTATONIC = [0, 2, 4, 7, 9];
@@ -102,6 +114,12 @@ export function createAudio(opts = {}) {
     let musicOn = true, sfxOn = true;
     let lastSpeed = -1;
     let gateStreakPitch = 0;
+    let lastCawAt = -1e9;
+    // Tick schedulers: slot 0 = the rival owl, slot 1 = the player's owl.
+    // Phase accumulators and tick-tock parity live in preallocated arrays so
+    // the per-frame tick calls touch numbers only.
+    const tickPhase = new Float64Array(2);
+    const tickParity = new Uint8Array(2);
 
     const rng = makeRng(seed);
 
@@ -596,6 +614,99 @@ export function createAudio(opts = {}) {
         triggerHaptic(44);
     }
 
+    // --- bird voices -------------------------------------------------------
+
+    /**
+     * Crow caw. A harsh, nasal, falling "kraa": a sawtooth and a detuned
+     * square an octave down through a sweeping bandpass (the nasal formant),
+     * with a fast square LFO chopping the gain into a throat rattle — without
+     * that flutter it is a horn, not a bird. `level` 0..1 is the caller's
+     * distance attenuation. Rate-limited globally (CAW_MIN_GAP), so a duel
+     * near the line or a boost spam cannot turn it into a car alarm.
+     */
+    function caw(level = 1) {
+        if (!ready || disposed) return;
+        let lv = level;
+        if (!(lv > 0.03)) return; else if (lv > 1) lv = 1;
+        const t = now();
+        if (t - lastCawAt < CAW_MIN_GAP) return;
+        lastCawAt = t;
+        const peak = MIX.caw * lv;
+        const dur = 0.32;
+        const g = ctx.createGain();
+        shape(g.gain, t, peak, 0.018, 0.24, 0.06);
+        const filt = ctx.createBiquadFilter();
+        filt.type = 'bandpass';
+        filt.Q.value = 2.6;
+        filt.frequency.setValueAtTime(1550, t);
+        filt.frequency.exponentialRampToValueAtTime(950, t + dur);
+        const a = ctx.createOscillator();
+        a.type = 'sawtooth';
+        a.frequency.setValueAtTime(620, t);
+        a.frequency.linearRampToValueAtTime(700, t + 0.05);
+        a.frequency.exponentialRampToValueAtTime(430, t + dur);
+        const b = ctx.createOscillator();
+        b.type = 'square';
+        b.detune.value = 48;          // a quarter-tone off: the beating is the rasp
+        b.frequency.setValueAtTime(310, t);
+        b.frequency.linearRampToValueAtTime(350, t + 0.05);
+        b.frequency.exponentialRampToValueAtTime(215, t + dur);
+        const lfo = ctx.createOscillator();
+        lfo.type = 'square';
+        lfo.frequency.value = 38;
+        const lfoGain = ctx.createGain();
+        lfoGain.gain.value = peak * 0.35;
+        lfo.connect(lfoGain).connect(g.gain);
+        a.connect(filt); b.connect(filt);
+        filt.connect(g).connect(sfxBus);
+        a.start(t); b.start(t); lfo.start(t);
+        a.stop(t + dur + 0.1); b.stop(t + dur + 0.1); lfo.stop(t + dur + 0.1);
+        noiseVoice(t, 'bandpass', 2300, 1200, 2.0, peak * 0.4, 0.01, 0.22, 1, 1);
+    }
+
+    /** One escapement click: tick (high) or tock (low). */
+    function voiceTick(level, high, fast) {
+        const t = now();
+        const f = high ? 3400 : 2500;
+        const pk = MIX.tick * level;
+        noiseVoice(t, 'bandpass', f, f * 0.8, 5, pk, 0.001, fast ? 0.016 : 0.03, 1, 1);
+        // The ratchet is fast enough already; only the walking tick gets the
+        // little metallic ping under the click.
+        if (!fast) toneVoice(t, 'square', high ? 1760 : 1320, high ? 1760 : 1320, pk * 0.35, 0.001, 0.02);
+    }
+
+    /**
+     * Advance tick scheduler `slot`. Per frame this is arithmetic on two
+     * preallocated arrays; nodes are only built on the frame a tick lands,
+     * exactly like a wingbeat.
+     */
+    function stepTicker(slot, dt, hz, level, fast) {
+        tickPhase[slot] += dt * hz;
+        if (tickPhase[slot] < 1) return;
+        tickPhase[slot] -= Math.floor(tickPhase[slot]);
+        tickParity[slot] ^= 1;
+        if (level > 0.02) voiceTick(level, tickParity[slot] === 1, fast);
+    }
+
+    /**
+     * The rival clockwork owl. Call every frame with `near01` = 1 alongside
+     * the player falling to 0 at the edge of earshot (0 = silent, and the
+     * clock does not advance). Squared, so it swells in rather than snapping
+     * on. Ticks four times a second walking, a fast ratchet while rewinding.
+     */
+    function owlTick(dt, near01, rewinding) {
+        if (!ready || disposed || !(dt > 0)) return;
+        let n = near01;
+        if (!(n > 0)) return; else if (n > 1) n = 1;
+        stepTicker(0, dt, rewinding ? TICK_HZ_REWIND : TICK_HZ, n * n, Boolean(rewinding));
+    }
+
+    /** The player's own owl: a slow, quiet clock while flying. Every frame. */
+    function playerTick(dt, flying) {
+        if (!ready || disposed || !(dt > 0) || !flying) return;
+        stepTicker(1, dt, TICK_HZ_PLAYER, TICK_PLAYER_LEVEL, false);
+    }
+
     /** Music (wind bed) and SFX buses, independently muteable. */
     function setEnabled(music, sfx) {
         musicOn = music !== false;
@@ -648,6 +759,9 @@ export function createAudio(opts = {}) {
         kill,
         alarm,
         reload,
+        caw,
+        owlTick,
+        playerTick,
         triggerHaptic,
         dispose,
         // --- inspection hooks (dev probe / HUD debug; never used in the loop) ---

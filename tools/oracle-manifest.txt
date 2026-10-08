@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-09-24 at commit fa8b9c2 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-09-24 at commit adbeb9b by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -57,6 +57,18 @@ cedb10676f6ae0abed73646653ef26594aea1332eb52ac82eb79f1dd236815e0  tests/bird-fli
 eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.test.js
 952951a613d923865d97ab3c1e5de23848b51ca4cf8be0e9ae0a365e979a89e0  tests/exposure.test.js
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
+# tests/gauntlet-birds.test.js added 2026-10-08 with the Birb Gauntlet roster
+# wave (Corvus the crow, Tock the clockwork owl, the bird picker). Like the
+# birb-lighting.mjs note below, this is NOT an ULTRACODE_PERFORMANCE_PLAN wave,
+# so there is no docs/perf/gates/G<n>.md for it; it is recorded here instead,
+# in the same change as the file it pins. It is the oracle for the owl's
+# mainspring clock, the crow's capped bonuses, the species/settings tables,
+# zero-allocation per-frame twist maths, and (after an independent review
+# finding) the crow's slipstream wake: a target far above/below the crow or
+# across the planet must leave draft01 at exactly 0 and must not bias its
+# altitude. Loosening those bounds to turn a red run green is what R5 exists
+# to make loud.
+1ed0816e7f1082f2624bfee3318db25c069b74e0e385235f0ffdefda76d1bf39  tests/gauntlet-birds.test.js
 75c0877bd356ef6950e170aa27f9363eb773653b950483ec5d9413c0658d64e8  tests/hex-tiling.test.js
 06eaa4e627ef53e0dc1c6396ade658c0a47cf346fcb05e3f9fa2f28533559dab  tests/horizon-map.test.js
 09af5d0de1f5424af17c6ffbe43999539aa6d255bc8da08043e9b3c73dc51d81  tests/horizon-shadow.test.js
