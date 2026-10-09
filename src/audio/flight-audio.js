@@ -168,6 +168,29 @@ export const FLIGHT_AUDIO_TUNING = Object.freeze({
   noiseSeconds: 2,
   // A measured airspeed above this is a teleport or a restored pose.
   maxSpeed: 120,
+
+  // ---- species voices (the bird picker; never built for the Pionus) ----
+  // The clockwork owl: a short high click per escapement step (band-passed
+  // noise, a 2 ms attack and a ~12 ms decay — a ratchet pawl, not a beep),
+  // and a soft gear WHIR under the beat and the boost (narrow-band noise).
+  owlTickLevel: 0.05,
+  owlTickHz: 3400,
+  owlTickQ: 3,
+  owlTickDecay: 0.012,
+  owlWhirLevel: 0.022,
+  owlWhirHz: 820,
+  owlWhirQ: 9,
+  // The crow: a synthesized two-note "caw" on take-off and on a boost — a
+  // buzzy sawtooth through a nasal formant, each note dropping in pitch —
+  // no closer together than `crowCawCooldown` seconds.
+  crowCawLevel: 0.06,
+  crowCawHz: 560,
+  crowCawDropHz: 380,
+  crowCawFormantHz: 1250,
+  crowCawFormantQ: 3.5,
+  crowCawNote: 0.17,
+  crowCawGap: 0.23,
+  crowCawCooldown: 8,
 });
 
 // ---------------------------------------------------------------------------
@@ -657,6 +680,7 @@ export function createFlightAudio(options = {}) {
     gustA.start(); gustB.start(); whistle.start(); vibrato.start(); tremA.start(); tremB.start();
 
     n = {
+      buffer,
       master, windSrc, windLP, windBP, gust, windGain, gustA, gustB,
       whistle, vibrato, whistleGain, buffetSrc, buffetLP, trem, tremA, tremB, buffetGain,
       whooshSrc, whooshBP, whooshGain, rushSrc, rushLP, rushGain,
@@ -833,6 +857,62 @@ export function createFlightAudio(options = {}) {
     st.whooshLast = level;
   }
 
+  // ---- species voices -----------------------------------------------------
+  // Built the first time a frame names a species that has one (owl, crow),
+  // so a session that only ever flies the Pionus builds exactly the graph it
+  // always did. Connected through the same master, so the volume, the SFX
+  // switch, every suspend and the iOS unlock path govern it unchanged.
+  let sv = null;
+  function buildSpeciesVoice() {
+    if (sv || !n) return !!sv;
+    const tickSrc = noiseSource(n.buffer, 0.37, 1.11);
+    const tickBP = biquad('bandpass', t.owlTickHz, t.owlTickQ);
+    const tickGain = gain(0);
+    tickSrc.connect(tickBP); tickBP.connect(tickGain); tickGain.connect(n.master);
+    const whirSrc = noiseSource(n.buffer, 0.83, 0.93);
+    const whirBP = biquad('bandpass', t.owlWhirHz, t.owlWhirQ);
+    const whirGain = gain(0);
+    whirSrc.connect(whirBP); whirBP.connect(whirGain); whirGain.connect(n.master);
+    const caw = osc('sawtooth', t.crowCawHz);
+    const cawBP = biquad('bandpass', t.crowCawFormantHz, t.crowCawFormantQ);
+    const cawGain = gain(0);
+    caw.connect(cawBP); cawBP.connect(cawGain); cawGain.connect(n.master);
+    caw.start();
+    sv = { tickSrc, tickBP, tickGain, whirSrc, whirBP, whirGain, caw, cawBP, cawGain, cawLast: -Infinity, ticks: 0, caws: 0 };
+    track('owlWhir', whirGain.gain, t.paramTau, 0.01);
+    return true;
+  }
+  function envelope(param, at, peak, attack, decay) {
+    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(at);
+    else { param.cancelScheduledValues(at); param.setValueAtTime(param.value, at); }
+    param.linearRampToValueAtTime(peak, at + attack);
+    param.setTargetAtTime(0, at + attack, decay);
+  }
+  function speciesVoice(frame, airborne) {
+    if (!sv && !buildSpeciesVoice()) return;
+    const owl = frame.species === 'owl';
+    send(P.owlWhir, owl && airborne ? t.owlWhirLevel * clamp01(+frame.speciesWhir || 0) * bandpassMakeup(t.owlWhirHz, t.owlWhirQ, n.rate) : 0);
+    // The clock is read only on an event frame (a getter per frame boxes a
+    // double, the reason applyMaster reads no DOM).
+    if (owl && airborne && frame.speciesTick) {
+      envelope(sv.tickGain.gain, ctx.currentTime, t.owlTickLevel * bandpassMakeup(t.owlTickHz, t.owlTickQ, n.rate), 0.002, t.owlTickDecay);
+      sv.ticks += 1;
+    }
+    if (frame.species === 'crow' && frame.speciesCall && ctx.currentTime - sv.cawLast >= t.crowCawCooldown) {
+      const now = ctx.currentTime;
+      sv.cawLast = now;
+      sv.caws += 1;
+      const peak = t.crowCawLevel * bandpassMakeup(t.crowCawFormantHz, t.crowCawFormantQ, n.rate);
+      const f = sv.caw.frequency;
+      for (let k = 0; k < 2; k += 1) {
+        const at = now + k * t.crowCawGap;
+        f.setValueAtTime(t.crowCawHz * (k ? 0.94 : 1), at);
+        f.linearRampToValueAtTime(t.crowCawDropHz * (k ? 0.94 : 1), at + t.crowCawNote);
+        envelope(sv.cawGain.gain, at, peak, 0.015, t.crowCawNote * 0.35);
+      }
+    }
+  }
+
   /** Per frame. Zero allocation: numbers in, AudioParam automation out. */
   function update(frame, dt) {
     st.frames = (st.frames + 1) & 0x3fffffff;
@@ -886,11 +966,17 @@ export function createFlightAudio(options = {}) {
     send(P.rushGain, rush * lowpassMakeup(rushHz, n.rate));
 
     if (strength > 0 && airborne) triggerWhoosh(strength);
+    // The species voice: only for a bird that has one; silence the whir when
+    // the Pionus is back.
+    const species = frame ? frame.species : null;
+    if (species === 'owl' || species === 'crow') speciesVoice(frame, airborne);
+    else if (sv) send(P.owlWhir, 0);
     applyMaster();
   }
 
   function probe() {
     return {
+      speciesVoice: sv ? { ticks: sv.ticks, caws: sv.caws } : null,
       state: unavailable ? 'unavailable' : (ctx ? ctx.state : 'idle'),
       suspendReason: st.suspendReason,
       volume: st.volume,

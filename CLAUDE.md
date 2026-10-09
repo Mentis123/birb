@@ -11,6 +11,94 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **THE BIRD PICKER (2026-10-08): fly the crow or the clockwork owl.** Build
+> v84. The ⚙ panel has a **Bird** button that cycles Birb (the v3 Pionus,
+> DEFAULT) → Crow → Clockwork Owl as a LIVE swap. The choice is saved in
+> `localStorage['birb.species']`. `?bird=crow|owl|birb` overrides it for one
+> load and is not written back. `?bird=v1|v2|v3` is still the Pionus A/B,
+> unchanged. Debug: `__BIRB.species()`, `setSpecies(id)`, `speciesInfo()`,
+> `speciesTune({...})`.
+>
+> **Where it lives.** Gauntlet stays airtight, so `src/flight/species/`
+> holds PORTED copies of `gauntlet/src/bird/realistic/*`; every root change
+> in them is marked `ROOT:`. `species-select.js` (pure) is the only species
+> module on every boot. `species-bird.js` and the builders under it are a
+> LAZY import, taken only for a crow or an owl. The Pionus boot runs the
+> same calls in the same order: the builder is never fetched, and the bird
+> is still 9 draws / 1,518 tris.
+>
+> **The rig.** Gauntlet meshes keep their own frame (−Z forward) under a
+> −90° node; the root rig nodes are built in the ROOT frame. `leftWing` sits
+> at +Z with scale.z +1 and `rightWing` at −Z with scale.z −1 (the same
+> right-wing geometry, which under the mirror IS Gauntlet's mirrorX). Each
+> wrist has a `hand` node and the tail has a `tail` node. They own no
+> geometry: the rig rotates them, and uniform GETTERS feed Gauntlet's wrist
+> and tail deformers. Signs: root +handX drops the hand, Gauntlet +uCurl
+> raises it, so `uCurl = −handX/0.75`. aero-pose drives banking, flap,
+> tuck, landing gear, walking and the tumble unchanged.
+>
+> **New legs, and species motion.** The legs are new: separate STANDING meshes
+> that also draw in to 30% of their length as the rig tucks them (otherwise
+> the toes hung below the belly in flight). The crow's fingered primaries
+> splay on the downstroke. The owl's stroke is an escapement: aero-pose's
+> stroke is re-evaluated at 6 steps per beat and the difference is added to
+> the rig's writes. The owl's back train ticks a tooth at a time with the
+> beat, and its key whirs under boost.
+>
+> **Light.** High and mid are lit by the root game's own bird-only sky
+> (`createBirdEnvironment`), turned and rebaked by the existing hooks. The
+> shader routes the hemisphere into the IBL slot as plumage.js does. Under
+> the root sky, Gauntlet's tuning was wrong in three ways, each measured and
+> fixed:
+> - The crow read royal blue. The chase view sees its back at grazing
+>   angles, where it mirrors the saturated zenith. Fixes: film ×0.3, env
+>   0.3, and a new `uSpecNeutral` 0.5 that pulls the reflected sky's hue
+>   toward neutral. It now reads near-black with a blue-violet sheen.
+> - The owl's steel read ice-blue and its bay blue. A new `uMetalNeutral`
+>   0.6 keeps each metal's own F0 colour.
+> - The owl's discs and irises, with the sun behind it, went blue-grey and
+>   olive with the shade fix OFF (`owl-backlit-face-noshade` vs
+>   `owl-backlit-face`). With neutral and floor at 0.8 they read cream and
+>   amber.
+>
+> All three knobs are constants in species-bird.js, and all-zero is
+> Gauntlet's shader exactly.
+>
+> **Budget.** The Ultra forest spawn is already 75–77k tris with the Pionus,
+> so the species LOOK follows the render tier while the geometry is one
+> step leaner than Gauntlet's at the top:
+>
+> | Render tier | Materials | Crow (tris / draws) | Owl (tris / draws) |
+> |---|---|---|---|
+> | 0 | Physical | 2,722 / 7 | 3,461 / 6 (`OWL_ROOT_MID`: no wing train) |
+> | 1 | Standard | 2,722 / 7 | 3,461 / 6 |
+> | 2 | Phong | 1,690 / 6 | 2,404 / 6 |
+>
+> Every tier is inside BIRD_BUDGET (8 / 4,000). Measured whole-frame peaks
+> are crow 78.3k and owl 79.4k, under 80k but with little margin.
+>
+> **Audio.** flight-audio.js builds a species voice lazily, so the Pionus
+> graph is untouched: owl escapement ticks plus a gear whir, and a
+> synthesized crow caw on take-off and boost, at most every 8 s.
+>
+> **Gotcha found on the way.** Calling `renderFrame(performance.now())`
+> after an `await`, while the loop runs, gives the integrators a NEGATIVE
+> delta, and the view went flat teal. The species button repaints only
+> while the loop is paused.
+>
+> **The adversarial review's fixes:**
+> - A swap or re-LOD BUILDS the incoming bird before tearing down the old
+>   one, so the refcounted feather textures are not regenerated.
+> - The re-LOD poll runs before the frame's rig lookup (it used to run
+>   after, leaving a detached ribbon anchor).
+> - A swapped bird inherits the shadow lever and the biome rim tint.
+> - The choice is saved only once the new bird has built, and a saved
+>   choice that fails at boot is forgotten.
+> - `__BIRB.setSpecies` does not persist unless `{ persist: true }`.
+>
+> Tests: `tests/species-{select,bird,audio}.test.js`. **Unmeasured: the
+> phone** (Physical crow/owl cost, the first-swap compile hitch).
+
 > **REALISM WAVE 3 (2026-09-24): the eye adapts, water carves the ground,
 > and the reviews that session limits cut short are finished.** Both new
 > packages are OPT-IN on the Flags tab and reviewed adversarially. Build v83.
@@ -2695,6 +2783,9 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |
+| `src/flight/species/species-select.js` | Bird picker resolution: `?bird=crow\|owl\|birb` (this load, not saved) > `localStorage['birb.species']` > birb; `?bird=v1\|v2\|v3` stays the Pionus A/B. Pure, the only species module on every boot |
+| `src/flight/species/species-bird.js` | Corvus (crow) and Tock (clockwork owl) as root-game birds: Gauntlet frame under a -90° node, root-frame rig nodes (rig contract), hand/tail nodes → shader uniforms via getters, standing legs that retract, owl escapement/gears/key, LOD per render tier. Lazy import |
+| `src/flight/species/{mesh-kit,film,gears,feather-textures,crow,owl,materials}.js` | PORTED copies of `gauntlet/src/bird/realistic/*` (Gauntlet stays airtight). Root adaptations are marked `ROOT:` |
 | `docs/ULTRACODE_REALISM_PLAN.md` | How to run the realism backlog with an agent fleet: the tiering law + art corollary, the 16-wave plan, the cost model, and the blind paired forced-choice check that is the only thing able to catch a green stage that did not improve the game |
 | `docs/realism/AUTHORED_ASSETS.md` | The authored-asset contract + the brief an external image agent (Codex) works from. Root Birb only — the siblings keep their zero-asset rules |
 | `tools/asset-check.mjs` | Structural acceptance for authored textures (tiling, baked light, colour space by suffix, POT, budget). Runs in CI over `assets/`; empty root exits 0 |

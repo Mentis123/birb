@@ -44,7 +44,13 @@
 // cache would leave a phone with no flight controller at all — and SW-3
 // (build-identity.test.js) requires every src/ module to be listed regardless.
 // index.html's BIRB_BUILD is bumped to the same literal in the same change.
-const CACHE_VERSION = 'v83-2026-09-24-realism3';
+//
+// Bumped for the bird picker (Birb / Crow / Clockwork Owl): the ten modules
+// under src/flight/species/ join CORE_ASSETS below. species-select.js is on
+// every boot path; the builders are a LAZY import taken only when the saved
+// or URL species is crow/owl (or on the first swap), and a lazy import absent
+// here is a dead button offline. index.html's BIRB_BUILD moves with it.
+const CACHE_VERSION = 'v84-2026-10-08-species';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -139,6 +145,20 @@ const CORE_ASSETS = [
   // Physical plumage: imported on every boot path (the v3 bird reads it at
   // build time), so an offline launch without it dies on a dynamic import.
   './src/flight/plumage.js',
+  // The bird picker. species-select.js resolves the choice on EVERY boot;
+  // the rest build the crow and the owl (ported from Birb Gauntlet) and are
+  // imported lazily, only when one is chosen — offline that is still a boot
+  // path, so all ten are core.
+  './src/flight/species/species-select.js',
+  './src/flight/species/species-bird.js',
+  './src/flight/species/species-palette.js',
+  './src/flight/species/mesh-kit.js',
+  './src/flight/species/film.js',
+  './src/flight/species/gears.js',
+  './src/flight/species/feather-textures.js',
+  './src/flight/species/crow.js',
+  './src/flight/species/owl.js',
+  './src/flight/species/materials.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',
