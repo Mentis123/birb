@@ -49,7 +49,9 @@ import {
     contourTileData, vaneTileData, brushedTileData, engraveAtlasData, featherTextureRefs,
     TEXTURE_SIZES, ENGRAVE_BLANK_V,
 } from '../gauntlet/src/bird/realistic/feather-textures.js';
-import { patchRealShader, SHADE_WARM, dielectricWeight } from '../gauntlet/src/bird/realistic/materials.js';
+import {
+    patchRealShader, SHADE_WARM, SHADE_GLASS_DIM, dielectricWeight,
+} from '../gauntlet/src/bird/realistic/materials.js';
 import {
     birdEnvironmentRefs, envRotationFor, equirectSkyData, rowUpComponent, birdSkyColors, skyRadianceAt,
 } from '../gauntlet/src/bird/realistic/environment.js';
@@ -801,9 +803,23 @@ test('every family carries the shade neutralisation and floor', () => {
         const floor = /outgoingLight = max\( outgoingLight, diffuseColor\.rgb \* realFloorW \);/;
         assert.match(s, floor, family + ': the floor');
         assert.doesNotMatch(s, /realLit/, family + ': no raw-diffuse measure');
-        assert.match(s, /\( 1\.0 - vMask \) \* uShadeFloor/, family + ': not on the eye glass');
+        assert.match(s, /\( 1\.0 - uBlink \* vMask \) \* uShadeFloor/, family + ': on the eye glass too, lifted by a blink');
         assert.ok(s.search(floor) < s.indexOf('outgoingLight += uRimColor'), family + ': floor before rim');
         assert.ok(s.indexOf('realFloorW') < s.indexOf('#include <opaque_fragment>'), family);
+        // The eye glass's probe reflection: desaturated and dimmed on high/mid,
+        // per bird (uShadeNeutral), dielectric under the eye mask only.
+        const glass = /radiance = mix\( radiance, vec3\( dot\( radiance, vec3\( 0\.2126, 0\.7152, 0\.0722 \) \) \), realGlass \) \* realGlassDim;/;
+        if (family === 'standard') {
+            assert.match(s, /float realGlass = clamp\( 1\.0 - 5\.0 \* vSurf\.x, 0\.0, 1\.0 \) \* vMask \* uShadeNeutral;/);
+            assert.match(s, glass);
+            assert.ok(s.includes('float realGlassDim = 1.0 - ' + SHADE_GLASS_DIM.toFixed(4) + ' * realGlass;'));
+            assert.match(s, /clearcoatRadiance = mix\( clearcoatRadiance, vec3\( dot\( clearcoatRadiance,/, 'clearcoat too');
+            // After the probe is sampled (lights_fragment_maps), before it is used.
+            assert.ok(s.search(glass) > s.indexOf('#include <lights_fragment_maps>'));
+            assert.ok(s.search(glass) < s.indexOf('#include <opaque_fragment>'));
+        } else {
+            assert.doesNotMatch(s, /realGlass/, 'low has no probe to tint');
+        }
     }
     // SHADE_WARM is a warm neutral at unit luminance (the pull keeps brightness).
     assert.ok(Math.abs(lum(SHADE_WARM) - 1) < 1e-9);
@@ -839,6 +855,82 @@ test('Tock\'s cream disc reads ivory in the sun\'s shadow, the crow stays black'
         assert.ok(Math.abs(lum(pulled) - lum(base)) / lum(base) < 0.15, 'luminance kept: ' + hex.toString(16));
     }
     assert.ok(lum(shadeModel(PALETTE.realCrowBlack, SHADE.crow)) < 0.004, 'crow shade stays near-black');
+});
+
+/**
+ * CPU model of the eye glass (dielectric, eye mask, no blink) facing away
+ * from the sun: shadeModel's diffuse plus, on high/mid (`probe`), the sky
+ * probe's mirror reflection — taken as PALETTE.skyMid x 0.08 linear, a
+ * harsher cyan than the operator's measured unpatched high iris — which
+ * SHADE_GLASS (`glass`) desaturates by `neutral` and dims by
+ * SHADE_GLASS_DIM x neutral; the sum is then floored. Returns linear.
+ */
+function glassModel(albedoHex, shade, probe, glass = true) {
+    const albedo = hexToLinear(albedoHex);
+    const amb = hexToLinear(PALETTE.skyMid).map((c) => c * 0.55);
+    const y = lum(amb);
+    const irr = amb.map((c, i) => c + (y * SHADE_WARM[i] - c) * shade.neutral);
+    const sky = probe ? hexToLinear(PALETTE.skyMid).map((c) => c * 0.08) : [0, 0, 0];
+    const g = glass ? shade.neutral : 0;
+    const ry = lum(sky);
+    const refl = sky.map((c) => (c + (ry - c) * g) * (1 - SHADE_GLASS_DIM * g));
+    return albedo.map((a, i) => Math.max(a * irr[i] / Math.PI + refl[i], a * shade.floor));
+}
+
+test('Tock\'s iris reads saturated amber on every tier, the pupil stays black, the crow is unchanged', () => {
+    const owl = SHADE['clockwork-owl'];
+    // The iris (and pupil) qualify for the shade terms on every tier: enamel
+    // (dielectric) under the eye mask; the only other masked parts, the
+    // aperture blades, are metal and so untouched.
+    const near = (a, b) => Math.abs(a - b) < 1e-6;
+    const iris = hexToLinear(PALETTE.realEnamel), pupil = hexToLinear(PALETTE.realEnamelPupil);
+    for (const quality of TIERS) {
+        const head = buildOwl({ quality }).meshes.find((m) => m.role === 'head').data;
+        let irisVerts = 0;
+        for (let v = 0; v < head.vertexCount; v++) {
+            const c = [head.arrays.color[v * 3], head.arrays.color[v * 3 + 1], head.arrays.color[v * 3 + 2]];
+            const metal = head.arrays.aSurf[v * 4], mask = head.arrays.aMask[v];
+            const isIris = near(c[0], iris[0]) && near(c[1], iris[1]) && near(c[2], iris[2]);
+            if (isIris) {
+                irisVerts++;
+                assert.equal(mask, 1, quality + ': the iris is the eye glass');
+                // The shader's weights: SHADE_FLOOR (no blink) and SHADE_GLASS.
+                assert.ok(dielectricWeight(metal) * owl.floor > 0.5, quality + ': iris floored');
+                assert.ok(dielectricWeight(metal) * mask * owl.neutral > 0.5, quality + ': iris reflection tinted');
+            }
+            if (mask > 0 && !isIris) {
+                const isPupil = near(c[0], pupil[0]) && near(c[1], pupil[1]) && near(c[2], pupil[2]);
+                assert.ok(isPupil || dielectricWeight(metal) === 0, quality + ': masked and dielectric is only the enamel');
+            }
+        }
+        assert.ok(irisVerts > 0, quality + ' amber iris present');
+    }
+
+    const inBand = (s) => s[0] >= 170 && s[0] <= 225 && s[1] >= 100 && s[1] <= 150 && s[2] >= 15 && s[2] <= 60
+        && s[0] > s[1] && s[1] > s[2] && (s[0] - s[2]) / s[0] > 0.7;
+    // Regression guard: unpatched, the iris models dark and cyan-grey on high/mid.
+    const before = toSrgb8(glassModel(PALETTE.realEnamel, { neutral: 0, floor: 0 }, true));
+    assert.ok(before[0] < 100 && !inBand(before), 'unpatched: ' + before);
+    // high/mid (probe) and low (no probe) all land in the amber band.
+    for (const probe of [true, false]) {
+        const s = toSrgb8(glassModel(PALETTE.realEnamel, owl, probe));
+        assert.ok(inBand(s), (probe ? 'high/mid' : 'low') + ' amber iris: ' + s);
+    }
+    // The floor alone is not enough on high/mid: the untinted sky reflection
+    // lifts blue past the band (greys the amber); SHADE_GLASS is what holds it.
+    const floorOnly = toSrgb8(glassModel(PALETTE.realEnamel, owl, true, false));
+    assert.ok(floorOnly[2] > 60, 'without SHADE_GLASS: ' + floorOnly);
+    // The pupil stays black (its floor is ~0.8 x near-black).
+    for (const probe of [true, false]) {
+        assert.ok(Math.max(...toSrgb8(glassModel(PALETTE.realEnamelPupil, owl, probe))) < 60, 'pupil stays dark');
+    }
+
+    // The crow: uniforms 0, so every term is the identity.
+    assert.deepEqual(SHADE.crow, { neutral: 0, floor: 0 });
+    for (const probe of [true, false]) {
+        assert.deepEqual(glassModel(PALETTE.realCrowBlack, SHADE.crow, probe),
+            glassModel(PALETTE.realCrowBlack, { neutral: 0, floor: 0 }, probe, false));
+    }
 });
 
 test('a missing or repeated anchor leaves the shader untouched (never half-patched)', () => {

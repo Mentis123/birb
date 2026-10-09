@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-10-08 at commit 52ed975 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-10-08 at commit 545e7ad by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -68,7 +68,7 @@ eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.
 # teal->blue->violet travel and blued steel's blue, and zero allocation in
 # the new per-frame paths. Loosening a budget or a meshing tolerance to turn a
 # red run green is what R5 exists to make loud.
-af3ee262d45a82bcb5332105848c9f4e95365a56510961a1ee8a894b1851ee6f  tests/gauntlet-realistic-birds.test.js
+2d60d0aedfd54cbafb1d797134160cea672d4e9bb3423cbcc11e3d0eaa2478bc  tests/gauntlet-realistic-birds.test.js
 # tests/gauntlet-birds.test.js added 2026-10-08 with the Birb Gauntlet roster
 # wave (Corvus the crow, Tock the clockwork owl, the bird picker). Like the
 # birb-lighting.mjs note below, this is NOT an ULTRACODE_PERFORMANCE_PLAN wave,

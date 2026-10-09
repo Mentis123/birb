@@ -46,9 +46,10 @@
  *     - A thin Fresnel rim (Birb Mobile visual-style.js `addRimLight`): the
  *       readability device that replaces the toon birds' ink hull.
  *     - Shade on dielectrics, per bird: the cyan ambient's hue is mostly
- *       neutralised (SHADE_NEUTRAL) and unmasked dielectric gets a floor of
- *       its own albedo (SHADE_FLOOR) — the owl's cream disc in the sun's
- *       shadow. Same on all three families.
+ *       neutralised (SHADE_NEUTRAL) and dielectric gets a floor of its own
+ *       albedo (SHADE_FLOOR) — the owl's cream disc and amber iris in the
+ *       sun's shadow. Same on all three families. On high and mid the eye
+ *       glass's probe reflection is also desaturated and dimmed (SHADE_GLASS).
  */
 
 import { FILM_RAMP_COS, thinFilmReflectance, hexToLinear } from './film.js';
@@ -225,8 +226,31 @@ const SHADE_NEUTRAL = /* glsl */`
     }
 `;
 
+/** How much of the eye glass's probe reflection SHADE_GLASS removes (owl). */
+export const SHADE_GLASS_DIM = 0.7;
+
+// The eye glass (dielectric under the eye mask: the owl's enamel iris and
+// pupil) is a near-mirror, so on high and mid it shows the cyan sky probe,
+// and a cyan reflection over amber reads grey-mauve. On that surface only,
+// the reflection (base and clearcoat) loses uShadeNeutral of its hue and
+// SHADE_GLASS_DIM x uShadeNeutral of its strength: a pale glint on glazed
+// enamel, not a sky. Per bird via uShadeNeutral (0 on the crow: mix by 0,
+// times 1, the identity); the metal aperture blades are untouched.
+const SHADE_GLASS = /* glsl */`
+#if defined( RE_IndirectSpecular )
+    {
+        float realGlass = clamp( 1.0 - 5.0 * vSurf.x, 0.0, 1.0 ) * vMask * uShadeNeutral;
+        float realGlassDim = 1.0 - ${SHADE_GLASS_DIM.toFixed(4)} * realGlass;
+        radiance = mix( radiance, vec3( dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) ) ), realGlass ) * realGlassDim;
+#ifdef USE_CLEARCOAT
+        clearcoatRadiance = mix( clearcoatRadiance, vec3( dot( clearcoatRadiance, vec3( 0.2126, 0.7152, 0.0722 ) ) ), realGlass ) * realGlassDim;
+#endif
+    }
+#endif
+`;
+
 // installPlumageLighting's sky routing (Birb Mobile src/flight/plumage.js).
-const AFTER_MAPS = SHADE_NEUTRAL + /* glsl */`
+const AFTER_MAPS = SHADE_NEUTRAL + SHADE_GLASS + /* glsl */`
 #if defined( RE_IndirectDiffuse ) && defined( RE_IndirectSpecular )
     iblIrradiance = iblIrradiance * uPlumEnvDiffuse + irradiance * uPlumHemi;
     irradiance = vec3( 0.0 );
@@ -243,15 +267,16 @@ const RIM = /* glsl */`
 // Even neutralised, the 0.55 fill only lights an albedo to ~9% of itself, so
 // the owl's cream disc (it faces forward, the sun is behind) still read as
 // dark. A shade FLOOR, not a fill: a final linear-light floor on the
-// composited colour (before the rim), so dielectric, unmasked (the eye glass
-// keeps its own look) surfaces never read darker than uShadeFloor x albedo,
-// and anything already lit past that (sun, specular) is untouched, so the
-// sunlit side cannot blow out. Per bird (0 on the crow: max with 0 is the
-// identity); on the owl only the disc is dielectric and unmasked, so this is
-// the enamel's term, not a brighten.
+// composited colour (before the rim), so dielectric surfaces never read
+// darker than uShadeFloor x albedo, and anything already lit past that (sun,
+// specular) is untouched, so the sunlit side cannot blow out. Per bird (0 on
+// the crow: max with 0 is the identity); on the owl only the enamel is
+// dielectric — the cream disc and the eye glass (amber iris; the pupil's
+// floor is ~black) — so this is the enamel's term, not a brighten. A blink
+// lifts it off the eye, so the steel shutter keeps its own look.
 const SHADE_FLOOR = /* glsl */`
     {
-        float realFloorW = clamp( 1.0 - 5.0 * vSurf.x, 0.0, 1.0 ) * ( 1.0 - vMask ) * uShadeFloor;
+        float realFloorW = clamp( 1.0 - 5.0 * vSurf.x, 0.0, 1.0 ) * ( 1.0 - uBlink * vMask ) * uShadeFloor;
         outgoingLight = max( outgoingLight, diffuseColor.rgb * realFloorW );
     }
 `;

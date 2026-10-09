@@ -83,9 +83,10 @@ const RIM = {
 
 /** Probe reflection strength: kept low on the crow so the sky never greys the black. */
 const ENV_INTENSITY = { crow: 0.42, 'clockwork-owl': 0.8 };
-// Shade lighting on dielectrics (materials.js SHADE_NEUTRAL / SHADE_FLOOR):
-// the owl's cream enamel disc faces away from the sun and must read ivory,
-// not teal; the crow keeps the stylised fill its black and grey were tuned in.
+// Shade lighting on dielectrics (materials.js SHADE_NEUTRAL / SHADE_FLOOR /
+// SHADE_GLASS): the owl's cream enamel disc and amber enamel iris face away
+// from the sun and must read ivory and amber, not teal and grey; the crow
+// keeps the stylised fill its black and grey were tuned in.
 export const SHADE = { crow: { neutral: 0, floor: 0 }, 'clockwork-owl': { neutral: 0.8, floor: 0.8 } };
 
 /** The build-time spec for a species/tier/variant (pure; the tests use it). */
