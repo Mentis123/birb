@@ -12,13 +12,21 @@ You race five rivals, each defined by one row in `src/race/ai-racer.js`'s
 `PERSONALITIES`: **Talon** (aggressive), **Zephyr** (clean), **Pip** (erratic),
 and two newer birds with a twist you can see from the chase camera:
 
-- **Corvus**, a glossy blue-black crow. It drafts: it tucks in behind whoever
+- **Corvus**, a realistic carrion crow: heavy arched bill with nasal
+  bristles, flat crown, long broad wings of individual feather plates with
+  six fingered primaries that fan on the downstroke, a big head sitting on a
+  short thick neck, and near-black plumage with a restrained blue-violet gloss
+  on its back, wings and tail only (none on the belly or wing undersides). It drafts: it tucks in behind whoever
   is just ahead (you included), charges a slipstream, and slingshots out. It
   also covets shiny things, and since the race has no pickups it covets the
   gate centres, threading every ring dead centre for a small, decaying pace
   nudge. All its bonuses together are capped under the rubber band's 7%. It
   caws when it overtakes you.
-- **Tock**, a brass clockwork owl with a wind-up key on its back. It runs on a
+- **Tock**, a tawny owl machined in brushed and aged brass over steel (its
+  head sunk into a broad shoulder mantle, a cream enamel facial disc): riveted panels,
+  engraved metal feather plates, a gear train with real meshing teeth in a
+  bay on its back (and another on each wing), enamel eyes behind iris
+  apertures, and a wind-up key on its back. It runs on a
   mainspring that unwinds over 8 s (pace easing down as it goes), stalls for
   1 s to rewind (the key spins, the wings ratchet, the tick speeds up), then
   releases slightly above cruise. It never wanders and never makes a mistake.
@@ -28,8 +36,14 @@ and two newer birds with a twist you can see from the chase camera:
 You can fly a Crow or a Clockwork Owl yourself (Settings → Your Bird, or
 `?bird=crow|owl|birb`, which works with `autostart=1`). It's cosmetic plus a
 signature sound: a caw when you boost, a tick while you fly. Your flight stats
-don't change. If you pick the same species as a rival, that rival wears an
-alternate tint (an ash-grey crow, a steel owl).
+don't change. If you pick the same species as a rival, that rival becomes its
+alternate: a hooded crow (ash-grey body, black hood and wings) or a blued and
+gunmetal steel owl with brass accents.
+
+The crow and the owl are the only physically lit things in the game
+(`src/bird/realistic/`); everything else, the Birb and the other three rivals
+included, keeps the cel look. Every texel they sample is generated at load
+and every mesh is built in code, same as the rest of Birb Gauntlet.
 
 Birb Gauntlet is an **unlisted Birb Labs artefact**. It ships inside the Birb Mobile
 repo and deploys with it, but it lives at its own path and is linked from
@@ -62,6 +76,7 @@ gauntlet/
   src/core/             terrain sampler, cel pipeline, outlines, palette, rng
   src/world/            planet (terrain + instanced props), sky
   src/bird/             procedural chibi bird, its animation rig, flight model
+  src/bird/realistic/   the realistic crow and clockwork owl (PBR, gear trains)
   src/camera/           spring-damped chase camera
   src/race/             course spline + gates, pure race logic, AI racers
   src/fx/               feather particle system, screen shake

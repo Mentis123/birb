@@ -29,9 +29,16 @@
  * convention as a camera looking down -Z), so `leftWing` sits at -X.
  *
  * Species (`opts.species`): 'birb' (the default, and byte-for-byte the model
- * this file always built), 'crow' and 'clockwork-owl'. A species is the same
- * rig re-proportioned — same parts, same deformers, same anchors — so the
- * animator, the FX and the camera never need to know which bird they have.
+ * this file always built), 'crow' and 'clockwork-owl'.
+ *
+ * Corvus (crow) and Tock (clockwork owl) are REALISTIC by default: they are
+ * built by `realistic/realistic-bird.js` — physical plumage and machined
+ * metal, feather plates, real gear trains — behind this same contract, for
+ * rivals and for the player. Pass `realistic: false` to get the cel versions
+ * below (kept for the A/B; `dev/species.html?realistic=0`). In that build a
+ * species is the same rig re-proportioned — same parts, same deformers, same
+ * anchors — so the animator, the FX and the camera never need to know which
+ * bird they have.
  *   - crow: sleeker torso, a long heavy dark beak, no crest, a wedge tail and
  *     a blue iridescent rim (the toon rim term, tinted — no new shader).
  *   - clockwork-owl: round brass body, big head with pale facial discs behind
@@ -45,6 +52,7 @@
 import { PALETTE } from '../core/palette.js';
 import { createToonMaterial } from '../core/toon.js';
 import { parseSpecies } from './species.js';
+import { createRealisticBird } from './realistic/realistic-bird.js';
 import {
     ensureSmoothNormals,
     createOutlineMaterial,
@@ -828,10 +836,17 @@ function toonFor(sp, base, crowExtra, owlExtra) {
  * @param {boolean} [opts.outline]   default true
  * @param {number}  [opts.outlinePixels]
  * @param {string}  [opts.species]   'birb' (default) | 'crow' | 'clockwork-owl'
+ * @param {boolean} [opts.realistic] crow/owl only; default true. false builds
+ *                                   the cel version below.
+ * @param {boolean} [opts.altTint]   crow/owl: the clash variant (a hooded
+ *                                   crow; a blued-steel owl)
  */
 export function createBird(THREE, opts = {}) {
     const sp = parseSpecies(opts.species) || 'birb';
     const crow = sp === 'crow', owl = sp === 'clockwork-owl';
+    if ((crow || owl) && opts.realistic !== false) {
+        return createRealisticBird(THREE, Object.assign({}, opts, { species: sp }));
+    }
     const bodyColor = opts.bodyColor === undefined
         ? (crow ? PALETTE.birdRival4 : (owl ? PALETTE.owlBrass : PALETTE.birdPlayer))
         : opts.bodyColor;

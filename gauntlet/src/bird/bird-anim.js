@@ -35,6 +35,12 @@
  * while `state.rewinding` is set the beat stalls to a stiff ratchet tick.
  * Optional state fields it reads: `keySpin` (rad/s; defaults to a slow
  * steady wind) and `rewinding` (boolean). Every other bird ignores them.
+ *
+ * The realistic crow and owl (bird/realistic/) take the same writes: their
+ * shader reads `curl` as the HAND lagging at the wrist, and an optional
+ * `uniforms.splay` (written here as the downstroke amount) fans the crow's
+ * fingered primaries. The owl's gears and key read `mech.gear`/`mech.key`
+ * rotation.y exactly as the toon owl's meshes did.
  */
 
 import { makeRng } from '../core/rng.js';
@@ -372,6 +378,10 @@ export function createBirdAnimator(THREE, bird) {
         // negative on the way down — that sign is the whole tell, and it is the
         // difference between a wing that beats and a wing that waves.
         const down = clamp(-Math.sin(warp * TAU), 0, 1) * power;
+        // The realistic crow's emarginated primaries fan apart on the same
+        // signal (its shader rotates each finger about its own root). Optional:
+        // the toon birds have no `splay` uniform and skip this.
+        if (u.splay) u.splay.value = down;
 
         // A dive tuck used to sweep the wings so far back that they vanished
         // inside the torso from the chase camera. Swept + slightly drooped, but

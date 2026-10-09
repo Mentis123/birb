@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Birb Gauntlet dev · species close-up</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a1324; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #stats { position: fixed; left: 10px; bottom: 8px; color: #fff6dc;
+           font: 600 12px/1.4 ui-monospace, monospace; text-shadow: 0 1px 2px #0f1c33; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="stats"></div>
+<script type="module">
+// One bird, close up, for before/after review of a species.
+//   ?species=birb|crow|clockwork-owl   ?quality=high|mid|low
+//   ?view=chase|profile|front|top      ?flap=0..1 (animator flap01 to stop at)
+//   ?color=<hex>                       body colour override (e.g. a rival tint)
+//   ?variant=alt                       the clash tint: hooded crow / blued owl
+//   ?realistic=0                       the cel crow/owl (the "before")
+//   ?bg=sky|lowland|alpine             backdrop, for the readability check
+//   ?anim=1                            keep animating (gears, key, fingers)
+import { loadThree } from '/gauntlet/src/core/three-loader.js';
+import { PALETTE } from '/gauntlet/src/core/palette.js';
+import { createLightRig } from '/gauntlet/src/core/toon.js';
+import { updateOutlineProjection } from '/gauntlet/src/core/outline.js';
+import { createBird } from '/gauntlet/src/bird/bird-model.js';
+import { createBirdAnimator } from '/gauntlet/src/bird/bird-anim.js';
+
+const q = new URLSearchParams(location.search);
+const species = q.get('species') || 'birb';
+const quality = q.get('quality') || 'high';
+const view = q.get('view') || 'chase';
+const flapTarget = q.has('flap') ? +q.get('flap') : 0.45;
+const colorHex = q.get('color') ? parseInt(q.get('color').replace('#', ''), 16) : undefined;
+const animate = q.get('anim') === '1';
+const BACKDROPS = { sky: PALETTE.skyMid, lowland: PALETTE.meadowMid, alpine: PALETTE.alpineLit };
+
+const THREE = await loadThree();
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 3));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.setClearColor(BACKDROPS[q.get('bg')] ?? PALETTE.skyMid);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.05, 200);
+createLightRig(THREE, scene);
+
+const opts = { species, scale: 1, quality, outline: true };
+if (colorHex !== undefined) opts.bodyColor = colorHex;
+if (q.get('variant') === 'alt') opts.altTint = true;
+if (q.get('realistic') === '0') opts.realistic = false;
+const bird = createBird(THREE, opts);
+scene.add(bird.group);
+// createBird may expose an env/sky hook for physical materials; let it see the scene.
+if (typeof bird.attachToScene === 'function') bird.attachToScene(scene, renderer);
+
+const anim = createBirdAnimator(THREE, bird);
+const st = { speed01: 0.55, turn: 0, pitch: 0, boosting: false, flapImpulse: 0,
+             tumbling: false, grounded: false, celebrating: false, phase: 0 };
+const dt = 1 / 60;
+for (let s = 0; s < 260; s++) anim.update(dt, st);
+for (let s = 0; s < 400; s++) {
+  const before = anim.flap01; anim.update(dt, st);
+  if (before < flapTarget && anim.flap01 >= flapTarget) break;
+}
+
+// The bird flies toward -Z (its back faces +Z, the chase camera's side). Fit the camera to its bounds.
+const box = new THREE.Box3().setFromObject(bird.group);
+const c = box.getCenter(new THREE.Vector3());
+const r = box.getSize(new THREE.Vector3()).length() * 0.5;
+const VIEWS = {
+  chase:   [-0.55, 0.42, 1.0],
+  profile: [1.0, 0.05, 0.0],
+  front:   [0.0, 0.12, -1.0],
+  top:     [0.0, 1.0, 0.02],
+};
+function place() {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  const d = r / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) * 1.15 / Math.min(1, camera.aspect);
+  const v = new THREE.Vector3(...(VIEWS[view] || VIEWS.chase)).normalize();
+  camera.position.copy(c).addScaledVector(v, d);
+  camera.lookAt(c);
+  camera.updateProjectionMatrix();
+  updateOutlineProjection(camera, renderer.domElement.height, renderer.getPixelRatio());
+}
+addEventListener('resize', place);
+place();
+let frames = 0;
+const kind = bird.realistic ? `realistic ${bird.variant || 'normal'}` : 'cel';
+function loop() {
+  if (animate) anim.update(dt, st);
+  renderer.render(scene, camera);
+  if (++frames === 3) {
+    document.getElementById('stats').textContent =
+      `${species} · ${kind} · ${quality} · ${bird.drawCallCount} draws / ${bird.triangleCount} tris per bird`;
+    window.__GAUNTLET_STATS = () => ({ species, quality, kind, variant: bird.variant || null,
+      perBirdDrawCalls: bird.drawCallCount, perBirdTriangles: bird.triangleCount,
+      drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+      programs: renderer.info.programs ? renderer.info.programs.length : null });
+    window.__GAUNTLET_READY = true;
+  }
+  if (animate || frames < 3) requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

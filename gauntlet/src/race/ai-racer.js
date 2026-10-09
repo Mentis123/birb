@@ -665,6 +665,9 @@ export function createAIRacers(THREE, opts = {}) {
             quality,
             outline: true,
             species: p.species,
+            // The realistic crow/owl turn a clash into a hooded crow / a
+            // blued-steel owl rather than a recolour; toon birds ignore it.
+            altTint: clash,
         });
         const anim = createBirdAnimator(THREE, bird);
         group.add(bird.group);
@@ -1372,6 +1375,19 @@ export function createAIRacers(THREE, opts = {}) {
         }
     }
 
+    /**
+     * Give birds that reflect a sky (the realistic crow and owl) their probe.
+     * Build time only; birds without the hook are skipped.
+     */
+    function attachToScene(scene, renderer) {
+        let n = 0;
+        for (let i = 0; i < racers.length; i++) {
+            const b = racers[i].bird;
+            if (b && typeof b.attachToScene === 'function' && b.attachToScene(scene, renderer)) n++;
+        }
+        return n;
+    }
+
     function dispose() {
         for (let i = 0; i < racers.length; i++) {
             racers[i].anim.dispose();
@@ -1395,6 +1411,7 @@ export function createAIRacers(THREE, opts = {}) {
         racers,
         update,
         reset,
+        attachToScene,
         dispose,
 
         // --- measured / diagnostic ------------------------------------------

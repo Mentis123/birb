@@ -1197,6 +1197,9 @@ async function boot(requestedMode) {
     const playerSwatch = isBirb ? plumage.body
         : (playerSpecies === 'crow' ? PALETTE.birdRival4Ui : PALETTE.birdRival5Ui);
     scene.add(bird.group);
+    // The realistic crow and owl reflect a sky probe baked once here (the
+    // birb has no such hook).
+    if (typeof bird.attachToScene === 'function') bird.attachToScene(scene, renderer);
     const animator = createBirdAnimator(THREE, bird);
 
     const _startPos = new THREE.Vector3();
@@ -1264,6 +1267,7 @@ async function boot(requestedMode) {
         playerSpecies,
     });
     scene.add(ai.group);
+    ai.attachToScene(scene, renderer);
     // The two rivals with a voice, found once here rather than every frame.
     let crowRacer = null, owlRacer = null;
     for (let i = 0; i < ai.racers.length; i++) {

@@ -66,7 +66,9 @@ clipping into it.
 Everything lit goes through `createToonMaterial` from `src/core/toon.js`
 (MeshToonMaterial + NearestFilter ramp, patched with a quantised Fresnel rim and
 a banded specular). Everything with a silhouette worth reading gets an
-inverted-hull outline from `src/core/outline.js`.
+inverted-hull outline from `src/core/outline.js`. The one deliberate
+exception is the realistic crow and owl (`src/bird/realistic/`, see
+`bird/bird-model.js` below): physically lit, no hulls.
 
 Verified working in a captured frame: 4-band ramp, hard-edged rim, hard-edged
 specular shape, clean hulls on both smooth and hard-edged geometry.
@@ -129,6 +131,15 @@ gauntlet/
   src/world/sky.js            AGENT: sky
   src/bird/bird-model.js      AGENT: bird
   src/bird/bird-anim.js       AGENT: bird
+  src/bird/realistic/         AGENT: bird — the realistic crow and owl
+    realistic-bird.js           createRealisticBird (THREE adapter, the contract)
+    crow.js, owl.js             PURE species builders (MeshData + rig numbers)
+    mesh-kit.js                 PURE geometry kit: lofts, feather plates, stamping
+    gears.js                    PURE gear trains + toothed gear geometry
+    feather-textures.js         procedural detail maps, shared + refcounted
+    materials.js                per-tier materials + shader patches
+    environment.js              the birds' own sky probe (PMREM, refcounted per renderer)
+    film.js                     PURE thin-film maths (the gloss, blued steel)
   src/bird/flight.js          AGENT: flight
   src/camera/chase-camera.js  AGENT: flight
   src/race/course.js          AGENT: course
@@ -183,22 +194,70 @@ Budget: <= 8 draw calls, <= 6k triangles. Gradient dome (BackSide shader using
 ### `bird/bird-model.js`
 
 ```js
-createBird(THREE, { bodyColor, bellyColor, scale, quality, outline, species }) -> {
+createBird(THREE, { bodyColor, bellyColor, scale, quality, outline, species,
+                   realistic, altTint }) -> {
   group,                    // faces -Z, up +Y, ~2.4 units long at scale 1
   parts: { body, head, beak, leftWing, rightWing, leftFoot, rightFoot,
            tail, leftEye, rightEye, leftPupil, rightPupil },
   species,                  // 'birb' (default) | 'crow' | 'clockwork-owl'
-  mech,                     // owl only: { key, gear } meshes to spin on local Y
+  mech,                     // owl only: { key, gear } nodes to spin on local Y
+  attachToScene?,           // realistic crow/owl only (see below)
   dispose()
 }
 ```
-`species` re-proportions the same rig (see `bird/species.js`); the default is
-the original birb, unchanged. The clockwork owl adds two rigid spinning parts
-(+3 draw calls, +2 on `low` where the key goes un-inked).
+The default `species` is the original birb, unchanged (its builder source is
+pinned by hash in tests/gauntlet-realistic-birds.test.js).
 Budget: <= 9 draw calls, <= 2.5k triangles per bird *including outline hulls*
 (4 birds on screen). Chibi silhouette: round body, big eyes, prominent beak,
 layered-cone wings. Wings pivot at the shoulder so a rotation on the group
 reads as a flap.
+
+**Corvus (`crow`) and Tock (`clockwork-owl`) are realistic** — built by
+`bird/realistic/` behind the same contract, for rivals and the player alike
+(`realistic: false` builds the old cel versions for A/B). Additions to the
+returned object: `attachToScene(scene, renderer)` (binds the shared sky probe
+on high/mid; call once after adding the group — index.html and
+`ai.attachToScene` do), `uniforms.splay` (finger fan; the animator writes it
+if present), `variant` (`altTint: true` -> hooded crow / blued-steel owl).
+
+| per bird | high | mid | low |
+|---|---|---|---|
+| crow draws / tris | 5 / 4.6k | 5 / 2.7k | 4 / 1.7k |
+| owl draws / tris | 4 / 5.9k | 4 / 4.8k | 4 / 2.3k |
+| material | Physical: film, sheen, clearcoat, probe | Standard + probe + faux film | Phong, per-surface lobe, baked detail |
+
+**Display scale.** The realistic builds keep real proportions, so at 1.0
+their wingspan matches the cel birds' but their bodies are much smaller.
+`REAL_DISPLAY_SCALE` (crow 1.35, owl 1.55) scales the whole bird, multiplying
+`opts.scale`, so player and rivals both get it: body length is 81% / 74% of
+the cel build's, span ~3.9 / ~4.5. The test pins the ratios against the cel
+bounds measured in headless Chrome.
+
+**Finish.** The crow is near-black (albedo ~0.025 linear, keratin roughness
+0.42-0.48, env intensity 0.42) with a RESTRAINED blue-violet gloss: a 300 nm
+film (blue face-on, blue-violet at chase angles, purple at grazing) weighted
+0.14-0.18 on the dorsal vanes, under 0.08 on the mantle and zero below, and
+gated in the shader to upward-facing surfaces, so the belly and wing
+undersides carry none. Sheen 0.2-0.25 in near-black blue. The owl is brushed
+brass (effective roughness ~0.5, a 0.1 lacquer coat), aged-brass mantle and
+rear panels, a steel underside, steel gears, a blackened-steel bay, deep
+oxidised seam grooves and rivets sized to read at chase distance. Polished
+brass is only on rims, rivets, bezels and the key. The facial disc is cream
+enamel (dielectric) on every tier, so Phong and PBR agree.
+
+Everything that moves on its own (wrist, finger splay, tail, every gear, the
+key) moves in the vertex shader from per-vertex attributes, which is how a
+bird with two gear trains is four draws. **No ink hulls** on these two: an
+inverted hull reads as a sticker on a lit, reflective bird and doubles the
+draws; readability comes from size (the display scale), value (the darkest
+and the warmest thing over both lowland and alpine), the restrained gloss
+and a thin Fresnel rim (strongest on low). The shader patch checks every
+anchor it needs, per family, appears exactly once before it changes anything,
+and otherwise leaves the shader untouched with one warning. Textures are
+built once per THREE and refcounted. The probe is refcounted per renderer:
+baked when the first bird attaches and destroyed when the last one releases,
+so a later race bakes it again. `dispose()` gives back everything, clears
+the render callbacks, and a disposed bird refuses `attachToScene`.
 
 ### `bird/bird-anim.js`
 

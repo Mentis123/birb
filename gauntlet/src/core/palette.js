@@ -74,6 +74,35 @@ export const PALETTE = {
     owlDisc: 0xf6ead0,    // pale facial disc
     owlGear: 0x8a6a33,
     owlKey: 0xf2d27a,
+    // Realistic Corvus and Tock (src/bird/realistic/). These are physically
+    // lit ALBEDOS and metal base colours, not cel art colours: a crow's black
+    // is ~3% reflectance and brass is its own F0. The toon trio never read
+    // them. Their readability comes from size, value, a restrained gloss and
+    // the sky reflection, so these sit darker than anything in the cel set.
+    realCrowBlack: 0x2b2d34,      // contour plumage: blue-black, ~0.025 linear
+    realCrowFlight: 0x282b35,     // flight feathers, a shade bluer
+    realCrowBill: 0x131418,
+    realCrowLeg: 0x17171b,
+    realCrowIris: 0x2e1c12,       // dark brown
+    realCrowPupil: 0x050506,
+    realCrowMembrane: 0x9aaabd,   // nictitating membrane: the crow's blink
+    realCrowSheen: 0x161c2c,      // near-black blue: never greys the bird
+    realHoodedGrey: 0x8b8c88,     // hooded crow mantle and underparts
+    realHoodedSheen: 0x34363a,
+    realBrass: 0xb08d57,          // brushed brass
+    realBrassDark: 0x7a5f36,      // aged brass/bronze: panels, recesses, collars
+    realOxide: 0x3a2e1e,          // oxidised seam grooves
+    realOwlDisc: 0xe3d8bd,        // cream enamel facial disc (every tier)
+    realCopper: 0xc98257,
+    realSteel: 0xbcc0c6,
+    realNickel: 0xcdcabf,
+    realGunmetal: 0x4f555d,
+    realBluedSteel: 0x3b475c,
+    realEnamel: 0xd98a1c,         // amber enamel iris
+    realEnamelPupil: 0x0a0a0d,
+    realShutter: 0x5d636b,        // the owl's eye shutter (its blink)
+    realBacking: 0x1c1d20,        // blackened steel: the plate the gears turn over
+    realGround: 0x4d6b3c,         // the planet below, in the bird's sky probe
     beak: 0xffb03a,
     foot: 0xf09a2e,
     eyeWhite: 0xffffff,
