@@ -2089,6 +2089,30 @@ async function boot(requestedMode) {
         onMenu() { location.href = location.pathname + '?menu=1'; },
     });
 
+    // Shader warm-up: ask three to compile the programs the scene needs at
+    // boot (the realistic birds' patched shaders above all) before the first
+    // frame, to take the compile hitch off the frame they come into view.
+    // Best effort: compileAsync is bounded by a 2.5 s watchdog and boot goes
+    // on either way (a timeout just means the rest compile on first use);
+    // the synchronous compile is only the fallback where compileAsync is absent.
+    try {
+        if (typeof renderer.compileAsync === 'function') {
+            let watchdog;
+            const compiling = renderer.compileAsync(scene, camera);
+            compiling.catch(() => {}); // a late failure after the watchdog must not go unhandled
+            const timedOut = await Promise.race([
+                compiling.then(() => false),
+                new Promise((resolve) => { watchdog = setTimeout(() => resolve(true), 2500); }),
+            ]);
+            clearTimeout(watchdog);
+            if (timedOut) console.info('gauntlet: shader warm-up timed out after 2500 ms; continuing boot');
+        } else {
+            renderer.compile(scene, camera);
+        }
+    } catch (e) {
+        console.info('gauntlet: shader warm-up skipped (' + (e && e.message) + ')');
+    }
+
     requestAnimationFrame(frame);
 
     // ---------------------------------------------------------------------
@@ -2199,6 +2223,7 @@ async function boot(requestedMode) {
     window.__GAUNTLET_STATS = () => ({
         drawCalls: renderer.info.render.calls,
         triangles: renderer.info.render.triangles,
+        programs: renderer.info.programs ? renderer.info.programs.length : 0,
         fps: Math.round(fps),
         quality,
         // Run state travels with the frame stats so a capture is evidence of

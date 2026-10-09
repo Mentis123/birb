@@ -45,6 +45,10 @@
  *       chunk-body anchor silently never matched).
  *     - A thin Fresnel rim (Birb Mobile visual-style.js `addRimLight`): the
  *       readability device that replaces the toon birds' ink hull.
+ *     - Shade on dielectrics, per bird: the cyan ambient's hue is mostly
+ *       neutralised (SHADE_NEUTRAL) and unmasked dielectric gets a floor of
+ *       its own albedo (SHADE_FLOOR) — the owl's cream disc in the sun's
+ *       shadow. Same on all three families.
  */
 
 import { FILM_RAMP_COS, thinFilmReflectance, hexToLinear } from './film.js';
@@ -153,6 +157,8 @@ uniform float uRimStrength;
 uniform float uRimPower;
 uniform float uPlumHemi;
 uniform float uPlumEnvDiffuse;
+uniform float uShadeNeutral;
+uniform float uShadeFloor;
 #ifdef REAL_FAUX_FILM
 uniform vec3 uFilmFace;
 uniform vec3 uFilmMid;
@@ -189,8 +195,38 @@ const AFTER_PHYSICAL = /* glsl */`
 #endif
 `;
 
+/**
+ * The warm neutral the ambient's hue is pulled toward (#fff1dc, linear,
+ * scaled to unit luminance so the pull never brightens or darkens).
+ */
+export const SHADE_WARM = (() => {
+    const c = hexToLinear(0xfff1dc);
+    const y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    return [c[0] / y, c[1] / y, c[2] / y];
+})();
+
+/** Dielectric weight: 1 on vSurf.x = 0, gone by 0.2 (the oxidised seams). */
+export function dielectricWeight(metal) {
+    return Math.min(1, Math.max(0, 1 - 5 * metal));
+}
+
+// Gauntlet's AmbientLight is a stylised cel-world fill: PALETTE.skyMid, pure
+// cyan. The realistic birds are lit as if the ambient were sky + ground
+// bounce, which is near-neutral and a little warm, so on dielectrics the
+// ambient keeps its luminance but loses most of its hue (uShadeNeutral; 0 on
+// the crow, whose blue-black and grey were tuned under the cyan). Without
+// this a cream disc facing away from the sun is albedo x cyan = teal. Metal
+// is untouched: it takes its colour from the probe, not the diffuse fill.
+const SHADE_NEUTRAL = /* glsl */`
+    {
+        float realNeutral = clamp( 1.0 - 5.0 * vSurf.x, 0.0, 1.0 ) * uShadeNeutral;
+        vec3 realWarm = vec3( ${SHADE_WARM.map((v) => v.toFixed(4)).join(', ')} );
+        irradiance = mix( irradiance, dot( irradiance, vec3( 0.2126, 0.7152, 0.0722 ) ) * realWarm, realNeutral );
+    }
+`;
+
 // installPlumageLighting's sky routing (Birb Mobile src/flight/plumage.js).
-const AFTER_MAPS = /* glsl */`
+const AFTER_MAPS = SHADE_NEUTRAL + /* glsl */`
 #if defined( RE_IndirectDiffuse ) && defined( RE_IndirectSpecular )
     iblIrradiance = iblIrradiance * uPlumEnvDiffuse + irradiance * uPlumHemi;
     irradiance = vec3( 0.0 );
@@ -201,6 +237,22 @@ const RIM = /* glsl */`
     {
         float realRimF = 1.0 - abs( dot( normalize( normal ), normalize( vViewPosition ) ) );
         outgoingLight += uRimColor * pow( realRimF, uRimPower ) * uRimStrength;
+    }
+`;
+
+// Even neutralised, the 0.55 fill only lights an albedo to ~9% of itself, so
+// the owl's cream disc (it faces forward, the sun is behind) still read as
+// dark. A shade FLOOR, not a fill: a final linear-light floor on the
+// composited colour (before the rim), so dielectric, unmasked (the eye glass
+// keeps its own look) surfaces never read darker than uShadeFloor x albedo,
+// and anything already lit past that (sun, specular) is untouched, so the
+// sunlit side cannot blow out. Per bird (0 on the crow: max with 0 is the
+// identity); on the owl only the disc is dielectric and unmasked, so this is
+// the enamel's term, not a brighten.
+const SHADE_FLOOR = /* glsl */`
+    {
+        float realFloorW = clamp( 1.0 - 5.0 * vSurf.x, 0.0, 1.0 ) * ( 1.0 - vMask ) * uShadeFloor;
+        outgoingLight = max( outgoingLight, diffuseColor.rgb * realFloorW );
     }
 `;
 
@@ -224,11 +276,11 @@ const PHONG_METAL_FILL = /* glsl */`
 /** Every anchor the injection needs, per shader family, for the guard. */
 const REQUIRED = {
     vertex: ['#include <beginnormal_vertex>', '#include <begin_vertex>'],
-    fragment: ['#include <color_fragment>', '#include <opaque_fragment>'],
+    fragment: ['#include <color_fragment>', '#include <lights_fragment_maps>', '#include <opaque_fragment>'],
     phong: ['#include <specularmap_fragment>', '#include <emissivemap_fragment>', '#include <lights_phong_fragment>'],
     standard: [
         '#include <normal_fragment_begin>', '#include <metalnessmap_fragment>', '#include <roughnessmap_fragment>',
-        '#include <lights_physical_fragment>', '#include <lights_fragment_maps>',
+        '#include <lights_physical_fragment>',
     ],
 };
 
@@ -274,13 +326,14 @@ export function patchRealShader(shader, flags) {
     let f = defs + FRAG_HEAD + shader.fragmentShader
         .replace('#include <color_fragment>',
             '#include <color_fragment>\ndiffuseColor.rgb = mix( diffuseColor.rgb, uLidColor, uBlink * vMask );')
-        .replace('#include <opaque_fragment>', RIM + '#include <opaque_fragment>');
+        .replace('#include <opaque_fragment>', SHADE_FLOOR + RIM + '#include <opaque_fragment>');
     if (flags.family === 'phong') {
         f = f
             .replace('#include <specularmap_fragment>',
                 '#include <specularmap_fragment>\nspecularStrength *= mix( 0.45, 1.0, vSurf.x ) * clamp( 1.25 - vSurf.y, 0.2, 1.0 );')
             .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + PHONG_METAL_FILL)
-            .replace('#include <lights_phong_fragment>', '#include <lights_phong_fragment>\n' + AFTER_PHONG);
+            .replace('#include <lights_phong_fragment>', '#include <lights_phong_fragment>\n' + AFTER_PHONG)
+            .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n' + SHADE_NEUTRAL);
     } else {
         f = f
             .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = vSurf.x;')
@@ -305,8 +358,13 @@ function vec3Lin(hex) {
     return { x: c[0], y: c[1], z: c[2] };
 }
 
-/** The per-material look uniforms (rim, lid, sky routing, faux film). */
+/**
+ * The per-material look uniforms (rim, lid, sky routing, shade neutral/floor,
+ * faux film). `o.shade` is { neutral, floor }; omitted = 0 (the stylised fill
+ * as is).
+ */
 export function lookUniforms(o) {
+    const shade = o.shade || { neutral: 0, floor: 0 };
     const u = {
         uLidColor: { value: vec3Lin(o.lid) },
         uRimColor: { value: vec3Lin(o.rim.color) },
@@ -314,6 +372,8 @@ export function lookUniforms(o) {
         uRimPower: { value: o.rim.power },
         uPlumHemi: { value: 1 },
         uPlumEnvDiffuse: { value: 0 },
+        uShadeNeutral: { value: shade.neutral },
+        uShadeFloor: { value: shade.floor },
     };
     if (o.film) {
         const s = filmStops(o.film);

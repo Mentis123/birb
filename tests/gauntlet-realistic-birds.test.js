@@ -34,7 +34,7 @@ import { Vector3, Quaternion, Matrix4 } from 'three';
 import { createBird } from '../gauntlet/src/bird/bird-model.js';
 import { createBirdAnimator } from '../gauntlet/src/bird/bird-anim.js';
 import {
-    createRealisticBird, buildRealisticSpec, resolveVariant, REALISTIC_SPECIES, REAL_DISPLAY_SCALE,
+    createRealisticBird, buildRealisticSpec, resolveVariant, REALISTIC_SPECIES, REAL_DISPLAY_SCALE, SHADE,
 } from '../gauntlet/src/bird/realistic/realistic-bird.js';
 import {
     buildCrow, CROW_FILM, CROW_LOD, CROW_RIG, CROW_BODY_ROWS, CROW_HEAD_ROWS,
@@ -49,7 +49,7 @@ import {
     contourTileData, vaneTileData, brushedTileData, engraveAtlasData, featherTextureRefs,
     TEXTURE_SIZES, ENGRAVE_BLANK_V,
 } from '../gauntlet/src/bird/realistic/feather-textures.js';
-import { patchRealShader } from '../gauntlet/src/bird/realistic/materials.js';
+import { patchRealShader, SHADE_WARM, dielectricWeight } from '../gauntlet/src/bird/realistic/materials.js';
 import {
     birdEnvironmentRefs, envRotationFor, equirectSkyData, rowUpComponent, birdSkyColors, skyRadianceAt,
 } from '../gauntlet/src/bird/realistic/environment.js';
@@ -725,7 +725,7 @@ test('the shader patch lands on every anchor, per family', () => {
     const frag = inc(['color_fragment', 'normal_fragment_begin', 'metalnessmap_fragment', 'roughnessmap_fragment',
         'lights_physical_fragment', 'lights_fragment_maps', 'opaque_fragment']);
     const phongFrag = inc(['color_fragment', 'specularmap_fragment', 'normal_fragment_begin', 'emissivemap_fragment',
-        'lights_phong_fragment', 'opaque_fragment']);
+        'lights_phong_fragment', 'lights_fragment_maps', 'opaque_fragment']);
     const pbr = patchRealShader({ vertexShader: vert, fragmentShader: frag },
         { mech: true, fauxFilm: true, filmUp: true, family: 'standard' });
     assert.match(pbr.vertexShader, /^#define REAL_MECH/);
@@ -753,6 +753,92 @@ test('the shader patch lands on every anchor, per family', () => {
     assert.match(phong.fragmentShader, /material\.specularColor = mix\( material\.specularColor, diffuseColor\.rgb, vSurf\.x/);
     assert.match(phong.fragmentShader, /totalEmissiveRadiance \+= diffuseColor\.rgb \* 0\.16 \* vSurf\.x;/);
     assert.ok(phong.fragmentShader.indexOf('specularShininess = clamp') > phong.fragmentShader.indexOf('#include <lights_phong_fragment>'));
+});
+
+// ---------------------------------------------------------------------------
+// shade lighting: the cyan ambient on dielectrics (Tock's teal disc)
+// ---------------------------------------------------------------------------
+
+/**
+ * CPU model of a dielectric facing away from the sun, as the patched shader
+ * lights it under createLightRig: AmbientLight PALETTE.skyMid x 0.55 is the
+ * only diffuse (three: albedo x irradiance / PI), its hue pulled toward
+ * SHADE_WARM by `neutral`; the composited colour (no sun, so no specular
+ * here) is then floored at `floor` x albedo, as the shader's final
+ * max( outgoingLight, albedo x floor ). Returns linear.
+ */
+function shadeModel(albedoHex, shade, metal = 0) {
+    const albedo = hexToLinear(albedoHex);
+    const amb = hexToLinear(PALETTE.skyMid).map((c) => c * 0.55);
+    const y = 0.2126 * amb[0] + 0.7152 * amb[1] + 0.0722 * amb[2];
+    const k = dielectricWeight(metal) * shade.neutral;
+    const irr = amb.map((c, i) => c + (y * SHADE_WARM[i] - c) * k);
+    const fl = dielectricWeight(metal) * shade.floor;
+    return albedo.map((a, i) => Math.max(a * irr[i] / Math.PI, a * fl));
+}
+const toSrgb8 = (lin) => lin.map((c) => Math.round(255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055)));
+const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+test('every family carries the shade neutralisation and floor', () => {
+    const vert = '#include <beginnormal_vertex>\n#include <begin_vertex>\n';
+    const inc = (list) => list.map((c) => '#include <' + c + '>').join('\n');
+    const pbr = inc(['color_fragment', 'normal_fragment_begin', 'metalnessmap_fragment', 'roughnessmap_fragment',
+        'lights_physical_fragment', 'lights_fragment_maps', 'opaque_fragment']);
+    const phong = inc(['color_fragment', 'specularmap_fragment', 'normal_fragment_begin', 'emissivemap_fragment',
+        'lights_phong_fragment', 'lights_fragment_maps', 'opaque_fragment']);
+    const neutral = /irradiance = mix\( irradiance, dot\( irradiance, vec3\( 0\.2126, 0\.7152, 0\.0722 \) \) \* realWarm, realNeutral \);/;
+    // high (physical) and mid (standard) share the 'standard' family; low is phong.
+    for (const [family, frag] of [['standard', pbr], ['phong', phong]]) {
+        const s = patchRealShader({ vertexShader: vert, fragmentShader: frag }, { mech: false, fauxFilm: false, family }).fragmentShader;
+        assert.match(s, /uniform float uShadeNeutral;/, family);
+        assert.match(s, /clamp\( 1\.0 - 5\.0 \* vSurf\.x, 0\.0, 1\.0 \) \* uShadeNeutral/, family + ': dielectric only');
+        assert.match(s, neutral, family);
+        // The neutralisation lands after lights_fragment_maps (where the
+        // ambient sits in `irradiance`), before PBR routes it to the IBL slot.
+        assert.ok(s.search(neutral) > s.indexOf('#include <lights_fragment_maps>'), family);
+        if (family === 'standard') assert.ok(s.search(neutral) < s.indexOf('iblIrradiance = iblIrradiance'), family);
+        // A final linear-light floor on the composited colour, before the rim.
+        const floor = /outgoingLight = max\( outgoingLight, diffuseColor\.rgb \* realFloorW \);/;
+        assert.match(s, floor, family + ': the floor');
+        assert.doesNotMatch(s, /realLit/, family + ': no raw-diffuse measure');
+        assert.match(s, /\( 1\.0 - vMask \) \* uShadeFloor/, family + ': not on the eye glass');
+        assert.ok(s.search(floor) < s.indexOf('outgoingLight += uRimColor'), family + ': floor before rim');
+        assert.ok(s.indexOf('realFloorW') < s.indexOf('#include <opaque_fragment>'), family);
+    }
+    // SHADE_WARM is a warm neutral at unit luminance (the pull keeps brightness).
+    assert.ok(Math.abs(lum(SHADE_WARM) - 1) < 1e-9);
+    assert.ok(SHADE_WARM[0] > SHADE_WARM[1] && SHADE_WARM[1] > SHADE_WARM[2]);
+});
+
+test('Tock\'s cream disc reads ivory in the sun\'s shadow, the crow stays black', () => {
+    const owl = SHADE['clockwork-owl'];
+    const before = shadeModel(PALETTE.realOwlDisc, { neutral: 0, floor: 0 });
+    assert.ok(before[1] > before[0], 'regression guard: unpatched, the disc models teal (G > R)');
+
+    const disc = shadeModel(PALETTE.realOwlDisc, owl);
+    const s = toSrgb8(disc);
+    assert.ok(s[0] >= s[1] && s[1] > s[2], 'R >= G > B: ' + s);
+    assert.ok(s[0] >= 200 && s[0] <= 235 && s[1] >= 190 && s[1] <= 220 && s[2] >= 160 && s[2] <= 195, 'cream band: ' + s);
+    const h = hueDegrees(disc);
+    assert.ok(h >= 30 && h <= 55, 'warm cream hue, not cyan: ' + h);
+    // Neutralisation alone (no floor) already turns the hue warm.
+    const neutralOnly = shadeModel(PALETTE.realOwlDisc, { neutral: owl.neutral, floor: 0 });
+    assert.ok(neutralOnly[0] >= neutralOnly[1] && neutralOnly[1] > neutralOnly[2], 'neutralised: ' + neutralOnly);
+
+    // Metal (brass, the alt's gunmetal disc) is untouched by both terms.
+    for (const hex of [PALETTE.realBrass, PALETTE.realGunmetal]) {
+        assert.deepEqual(shadeModel(hex, owl, 1), shadeModel(hex, { neutral: 0, floor: 0 }, 1));
+    }
+
+    // The crow: unchanged by design, and the neutralisation would not lift
+    // it even if applied (it keeps the ambient's luminance).
+    assert.deepEqual(SHADE.crow, { neutral: 0, floor: 0 });
+    for (const hex of [PALETTE.realCrowBlack, PALETTE.realHoodedGrey]) {
+        const base = shadeModel(hex, SHADE.crow);
+        const pulled = shadeModel(hex, { neutral: owl.neutral, floor: 0 });
+        assert.ok(Math.abs(lum(pulled) - lum(base)) / lum(base) < 0.15, 'luminance kept: ' + hex.toString(16));
+    }
+    assert.ok(lum(shadeModel(PALETTE.realCrowBlack, SHADE.crow)) < 0.004, 'crow shade stays near-black');
 });
 
 test('a missing or repeated anchor leaves the shader untouched (never half-patched)', () => {
