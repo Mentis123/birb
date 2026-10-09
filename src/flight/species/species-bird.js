@@ -28,8 +28,9 @@
  *              (handX drops it, handY sweeps it forward, scale.x spreads it)
  *              and the shader reads it back through uniform GETTERS — the
  *              Gauntlet wrist joint (uCurl/uSweep) driven by the root rig. The
- *              wing tip anchor (tipFeather) is a child of the hand, so the
- *              ribbon trail follows the bending wrist.
+ *              wing tip anchor (tipFeather) is a child of the WING GROUP,
+ *              placed every update() where the shader draws the tip vertex
+ *              (wing-tip.js), so the ribbon leaves the bent, swept wingtip.
  *   tail       a node at the tail root; its rotation.y (yaw), rotation.z
  *              (pitch, the aero rig) and scale.z (fan) feed the tail deformer.
  *   leftFoot / rightFoot  real legs. Gauntlet bakes the crow's and owl's legs
@@ -58,6 +59,11 @@ import { acquireFeatherTextures, releaseFeatherTextures } from './feather-textur
 import { createRealMaterial, lookUniforms } from './materials.js';
 import { PALETTE, makeRng } from './species-palette.js';
 import { pionusStroke, AERO_POSE_DEFAULTS } from '../aero-pose.js';
+import { createWingTipTracker, findWingTipDef } from './wing-tip.js';
+
+// The shared feather textures' live reference count, for index.html's
+// lifecycle evidence (__BIRB.speciesInfo().textureRefs).
+export { featherTextureRefs } from './feather-textures.js';
 
 export const SPECIES_IDS = Object.freeze(['crow', 'owl']);
 export const SPECIES_TIERS = Object.freeze(['high', 'mid', 'low']);
@@ -154,8 +160,11 @@ export const OWL_CLOCKWORK = Object.freeze({
 
 const BLINK = Object.freeze({ min: 2.4, max: 5.6, dur: 0.13 });
 
-function toGeometry(THREE, md) {
+function toGeometry(THREE, md, sink) {
   const g = new THREE.BufferGeometry();
+  // Owned from the moment it exists: a throw while it is filled still
+  // disposes it (createSpeciesBird's unwind).
+  sink.push(g);
   for (const name in md.layout) {
     g.setAttribute(name, new THREE.BufferAttribute(new Float32Array(md.arrays[name]), md.layout[name]));
   }
@@ -227,18 +236,41 @@ export function buildSpeciesSpec(species, quality) {
  */
 export function createSpeciesBird(THREE, opts = {}) {
   const species = opts.species === 'crow' ? 'crow' : 'owl';
-  const crow = species === 'crow';
   const quality = SPECIES_TIERS.includes(opts.quality) ? opts.quality : 'high';
-  const form = SPECIES_FORM[species];
   const spec = buildSpeciesSpec(species, quality);
-  const rig = spec.rig;
   const textures = acquireFeatherTextures(THREE);
+  // EXCEPTION-SAFE CONSTRUCTION. Everything GPU-side the build makes is
+  // recorded in `owned` the moment it exists, so a throw at any stage (a
+  // geometry, a material, a mesh, a node) disposes exactly what was made and
+  // gives the shared feather textures back exactly ONE reference — the one
+  // taken above. The caller still has the bird it was flying, and no leak.
+  const owned = { geometries: [], materials: [], model: null };
+  try {
+    return assembleSpeciesBird(THREE, species, quality, spec, textures, owned);
+  } catch (err) {
+    for (let i = 0; i < owned.geometries.length; i++) {
+      try { owned.geometries[i].dispose(); } catch (_) { /* keep unwinding */ }
+    }
+    for (let i = 0; i < owned.materials.length; i++) {
+      try { owned.materials[i].envMap = null; owned.materials[i].dispose(); } catch (_) { /* keep unwinding */ }
+    }
+    releaseFeatherTextures(THREE);
+    if (owned.model && owned.model.parent) owned.model.parent.remove(owned.model);
+    throw err;
+  }
+}
 
-  const geometries = [];
-  const materials = [];
+function assembleSpeciesBird(THREE, species, quality, spec, textures, owned) {
+  const crow = species === 'crow';
+  const form = SPECIES_FORM[species];
+  const rig = spec.rig;
+
+  const geometries = owned.geometries;
+  const materials = owned.materials;
   const meshes = [];
 
   const model = new THREE.Group();
+  owned.model = model;
   model.name = crow ? 'birbSpeciesCrow' : 'birbSpeciesOwl';
   model.scale.setScalar(form.scale);
 
@@ -272,10 +304,14 @@ export function createSpeciesBird(THREE, opts = {}) {
     hand.position.set(wristLocal[0], wristLocal[1], wristLocal[2]);
     hand.userData.baseRotation = new THREE.Euler(0, 0, 0);
     g.add(hand);
+    // The ribbon's anchor: a child of the wing GROUP, written every update()
+    // with the shader's own deformation of the tip vertex (wing-tip.js) —
+    // under the hand it followed the hand's rigid turn and missed the drawn
+    // tip by 3% of the span at rest and up to ~40% in a deep tuck.
     const tip = new THREE.Object3D();
     tip.name = 'tipFeather';
-    tip.position.set(wingTipLocal[0] - wristLocal[0], 0, wingTipLocal[2] - wristLocal[2]);
-    hand.add(tip);
+    tip.position.set(wingTipLocal[0], wingTipLocal[1], wingTipLocal[2]);
+    g.add(tip);
     const secondary = new THREE.Object3D();
     secondary.name = 'secondaryFeather';
     const sec = toRoot([rig.wristX * 0.55, 0, 0.22]);
@@ -374,25 +410,25 @@ export function createSpeciesBird(THREE, opts = {}) {
       lowSpecular,
       uniforms: Object.assign({}, deform, tailSet, blink, look, mechUniforms || {}),
     });
-    if (m.isMeshPhysicalMaterial && m.iridescence > 0) m.iridescence = SPECIES_FILM_STRENGTH[species];
     materials.push(m);
+    if (m.isMeshPhysicalMaterial && m.iridescence > 0) m.iridescence = SPECIES_FILM_STRENGTH[species];
     return m;
   };
+  const wingUniforms = [wingSet(hands[0]), wingSet(hands[1])];
   const lowMerged = crow && quality === 'low';
   const bodyMat = crow ? material('contour', wingOff, lowMerged ? tail : tailOff) : material('metal', wingOff, tail);
   const tailMat = crow && !lowMerged ? material('vane', wingOff, tail) : null;
   const wingMats = [
-    material(crow ? 'vane' : 'metal', wingSet(hands[0]), tailOff),
-    material(crow ? 'vane' : 'metal', wingSet(hands[1]), tailOff),
+    material(crow ? 'vane' : 'metal', wingUniforms[0], tailOff),
+    material(crow ? 'vane' : 'metal', wingUniforms[1], tailOff),
   ];
 
   const add = (parent, name, md, mat, rotateIn) => {
-    const geo = toGeometry(THREE, md);
+    const geo = toGeometry(THREE, md, geometries);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = name;
     if (rotateIn) mesh.rotation.y = -Math.PI / 2;
     parent.add(mesh);
-    geometries.push(geo);
     meshes.push(mesh);
     return mesh;
   };
@@ -405,6 +441,18 @@ export function createSpeciesBird(THREE, opts = {}) {
   }
   add(wings[0], 'speciesWing', wingData, wingMats[0], true);
   add(wings[1], 'speciesWing', wingData, wingMats[1], true);
+  // The ribbon anchors follow the DRAWN tip: the tip vertex's own deformer
+  // weights, read from the uploaded wing data, re-deformed each update() from
+  // the same uniform getters the shader reads. Both wings share the point;
+  // rightWing's scale.z = -1 mirrors it as it mirrors the mesh.
+  const tipDef = findWingTipDef(wingData.arrays.position, wingData.arrays.aDef, spec.anchors.wingTip, wingData.arrays.aAxis);
+  const tipTracker = createWingTipTracker({ tip: spec.anchors.wingTip, def: tipDef.def });
+  const tips = [wings[0].userData.tipFeather, wings[1].userData.tipFeather];
+  function trackTips() {
+    tipTracker.update(wingUniforms[0], tips[0]);
+    tipTracker.update(wingUniforms[1], tips[1]);
+  }
+  trackTips();
   // Feet: the leg meshes are modelled at the hip in Gauntlet's frame. The
   // left foot group (+Z, the bird's right) carries the right leg.
   const legMeshes = [
@@ -440,8 +488,10 @@ export function createSpeciesBird(THREE, opts = {}) {
   // rate-limits the caw.
   const events = { tick: false, whir: 0, call: false };
   let prevStep = -1;
-  let prevBoost = false;
-  let prevAir = 0;
+  // null until the first update: a bird built in mid-air or mid-boost (the
+  // boot, a swap, a re-LOD) has not just taken off or just boosted.
+  let prevBoost = null;
+  let prevAirborne = null;
 
   /**
    * After the root rig has posed the wings, tail and feet for this frame.
@@ -477,10 +527,21 @@ export function createSpeciesBird(THREE, opts = {}) {
     const phase = a ? a.phase01 : 0;
     const beating = a ? a.air * a.envelope * a.depth : 0;
     const boosting = !!(s && s.boosting);
-    const air = a ? a.air : 0;
-    events.call = crow && ((boosting && !prevBoost) || (air > 0.7 && prevAir <= 0.3));
+    // Take-off is the RISING EDGE of being airborne. The frame carries the
+    // flight controller's own state (`s.airborne`; index.html sets it, and it
+    // is the only signal under ?aeropose=0, where the aero pose never runs and
+    // `air` stays 0). Without it, the aero pose's `air` decides with
+    // hysteresis: up above 0.7, down at or below 0.3, held in between — so a
+    // gradual climb counts however many frames it takes.
+    let airborne;
+    if (s && typeof s.airborne === 'boolean') airborne = s.airborne;
+    else {
+      const air = a ? a.air : 0;
+      airborne = air > 0.7 ? true : (air <= 0.3 ? false : prevAirborne === true);
+    }
+    events.call = crow && ((boosting && prevBoost === false) || (airborne && prevAirborne === false));
     prevBoost = boosting;
-    prevAir = air;
+    prevAirborne = airborne;
     const step = Math.floor(phase * OWL_CLOCKWORK.steps);
     events.tick = !crow && beating > 0.05 && step !== prevStep;
     prevStep = step;
@@ -493,6 +554,7 @@ export function createSpeciesBird(THREE, opts = {}) {
       if (a && phase < downFrac) down = Math.sin(Math.PI * phase / downFrac) * Math.min(1, beating * 2.2);
       const lift = a ? a.air * (a.splay || 0) : 0;
       splay.value = s && s.reducedMotion ? 0 : Math.min(1, Math.max(down, lift)) * pb;
+      trackTips();
       return;
     }
 
@@ -517,6 +579,17 @@ export function createSpeciesBird(THREE, opts = {}) {
       hands[0].rotation.x += dH;
       hands[1].rotation.x += dH;
     }
+    splay.value = 0;
+    // After the escapement's writes to the hands: the tips follow the step.
+    trackTips();
+    // Reduced motion: the train and the key are decoration, so they HOLD
+    // where they are — gliding, beating and boosting alike. The phase memory
+    // is dropped too, so leaving reduced motion resumes from here with no
+    // catch-up jump (the first frame back measures no travel).
+    if (s && s.reducedMotion) {
+      prevPhase = -1;
+      return;
+    }
     // Gears turn with the wingbeat (a tooth at a time), idle on a glide.
     let dPhase = 0;
     if (a) {
@@ -527,9 +600,8 @@ export function createSpeciesBird(THREE, opts = {}) {
       + OWL_CLOCKWORK.gearIdle * dt) % (TAU * 64);
     mech.gear.rotation.y = Math.floor(gearAccum / OWL_CLOCKWORK.gearTooth) * OWL_CLOCKWORK.gearTooth;
     // The key: unwinding slowly, whirring under boost.
-    keyAngle = (keyAngle + (s && s.boosting ? OWL_CLOCKWORK.keyBoost : OWL_CLOCKWORK.keyIdle) * dt) % TAU;
+    keyAngle = (keyAngle + (boosting ? OWL_CLOCKWORK.keyBoost : OWL_CLOCKWORK.keyIdle) * dt) % TAU;
     mech.key.rotation.y = keyAngle;
-    splay.value = 0;
   }
 
   let disposed = false;

@@ -50,7 +50,11 @@
 // every boot path; the builders are a LAZY import taken only when the saved
 // or URL species is crow/owl (or on the first swap), and a lazy import absent
 // here is a dead button offline. index.html's BIRB_BUILD moves with it.
-const CACHE_VERSION = 'v84-2026-10-08-species';
+//
+// Bumped for the picker's review fixes: species-bird.js, feather-textures.js,
+// plumage.js and flight-audio.js changed, and wing-tip.js (the ribbon anchor
+// on the drawn wingtip) joins CORE_ASSETS as the eleventh species module.
+const CACHE_VERSION = 'v85-2026-10-08-species-fixes';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -148,7 +152,7 @@ const CORE_ASSETS = [
   // The bird picker. species-select.js resolves the choice on EVERY boot;
   // the rest build the crow and the owl (ported from Birb Gauntlet) and are
   // imported lazily, only when one is chosen — offline that is still a boot
-  // path, so all ten are core.
+  // path, so all eleven are core.
   './src/flight/species/species-select.js',
   './src/flight/species/species-bird.js',
   './src/flight/species/species-palette.js',
@@ -159,6 +163,7 @@ const CORE_ASSETS = [
   './src/flight/species/crow.js',
   './src/flight/species/owl.js',
   './src/flight/species/materials.js',
+  './src/flight/species/wing-tip.js',
   './src/game/game-modes.js',
   './src/game/frame-metrics.js',
   './src/game/frame-stats.js',

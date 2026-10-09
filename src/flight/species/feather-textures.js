@@ -383,24 +383,39 @@ export function acquireFeatherTextures(THREE) {
         const vane = vaneTileData(vw, vh);
         const brushed = brushedTileData(bw, bh);
         const engrave = engraveAtlasData(ew, eh);
-        const set = {
-            contour: {
-                map: dataTexture(THREE, contour.albedo, cw, ch, R, 4),
-                normal: dataTexture(THREE, contour.normal, cw, ch, R, 4),
-                surf: dataTexture(THREE, contour.surf, cw, ch, R, 4),
-            },
-            vane: {
-                map: dataTexture(THREE, vane.albedo, vw, vh, C, 8),
-                normal: dataTexture(THREE, vane.normal, vw, vh, C, 8),
-                surf: dataTexture(THREE, vane.surf, vw, vh, C, 8),
-            },
-            brushed: {
-                map: dataTexture(THREE, brushed.albedo, bw, bh, R, 8),
-                normal: dataTexture(THREE, brushed.normal, bw, bh, R, 8),
-                surf: dataTexture(THREE, brushed.surf, bw, bh, R, 8),
-            },
-            engrave: dataTexture(THREE, engrave.albedo, ew, eh, C, 8),
+        // ROOT: a throw part-way through the set (a driver refusing a texture)
+        // disposes what was made and leaves no entry behind, so the next
+        // acquire starts clean and nothing is held by a set nobody owns.
+        const made = [];
+        const tex = (data, w, h, wrap, aniso) => {
+            const t = dataTexture(THREE, data, w, h, wrap, aniso);
+            made.push(t);
+            return t;
         };
+        let set;
+        try {
+            set = {
+                contour: {
+                    map: tex(contour.albedo, cw, ch, R, 4),
+                    normal: tex(contour.normal, cw, ch, R, 4),
+                    surf: tex(contour.surf, cw, ch, R, 4),
+                },
+                vane: {
+                    map: tex(vane.albedo, vw, vh, C, 8),
+                    normal: tex(vane.normal, vw, vh, C, 8),
+                    surf: tex(vane.surf, vw, vh, C, 8),
+                },
+                brushed: {
+                    map: tex(brushed.albedo, bw, bh, R, 8),
+                    normal: tex(brushed.normal, bw, bh, R, 8),
+                    surf: tex(brushed.surf, bw, bh, R, 8),
+                },
+                engrave: tex(engrave.albedo, ew, eh, C, 8),
+            };
+        } catch (err) {
+            for (let i = 0; i < made.length; i++) made[i].dispose();
+            throw err;
+        }
         // The engraving rides the second UV set so the brushed grain can tile
         // on the first.
         set.engrave.channel = 1;

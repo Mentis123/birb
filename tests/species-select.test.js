@@ -123,8 +123,10 @@ test('index.html: the species builder is imported lazily and only off the birb p
   const boot = html.indexOf("if (birbSpecies === 'birb') {");
   assert.ok(boot > 0, 'the boot branches on the resolved species');
   const birbArm = html.slice(boot, html.indexOf('} else {', boot));
-  assert.ok(birbArm.includes('buildBirbPionus();') && birbArm.includes('installBirbPlumageSky();') && birbArm.includes('installBirbFeathers();'),
-    'the birb arm builds the Pionus with its plumage sky and feathers, in that order');
+  const order = ['makePionusModel()', 'positionBirbModel(pionus)', 'makePionusSky(pionus)', 'makePionusFeathers(pionus)']
+    .map((s) => birbArm.indexOf(s));
+  assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])),
+    `the birb arm builds and mounts the Pionus, then its plumage sky and feathers, in that order (${order})`);
   assert.ok(!birbArm.includes('species-bird.js') && !birbArm.includes('createSpeciesBird'),
     'the birb arm neither imports nor constructs a species bird');
   // Every import of the builder sits behind a non-birb condition.
@@ -136,31 +138,59 @@ test('index.html: the species builder is imported lazily and only off the birb p
   }
 });
 
-test('index.html: a swap and a re-LOD build the incoming bird BEFORE tearing down the old one', () => {
+const bodyOf = (html, header) => {
+  const at = html.indexOf(header);
+  assert.ok(at > 0, header);
+  return html.slice(at, html.indexOf('\n    };', at));
+};
+
+test('index.html: a swap and a re-LOD STAGE the incoming bird complete, then COMMIT, then tear down the old one', () => {
   // The procedural feather textures are refcounted; teardown first would drop
-  // them to zero and regenerate all ten on every swap and every re-tier.
+  // them to zero and regenerate all ten on every swap and every re-tier. And
+  // a build that throws must leave the outgoing bird flying.
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  for (const header of ['const setBirdSpecies = async', 'const respeciesForTier = () => {']) {
-    const at = html.indexOf(header);
-    assert.ok(at > 0, header);
-    const body = html.slice(at, html.indexOf('\n    };', at));
-    const make = body.indexOf('makeSpeciesBird(');
-    const tear = body.indexOf('teardownBird(');
-    assert.ok(make > 0 && tear > make, `${header}: make ${make} before teardown ${tear}`);
-    assert.ok(body.indexOf('syncSwappedBird();') > tear, `${header}: the mounted bird inherits shadows/rim`);
+  // STAGE never touches the anchor; it unwinds everything it made on a throw.
+  const stage = bodyOf(html, 'const stageBird = (id, quality) => {');
+  assert.ok(!stage.includes('mountBirbModel(') && !stage.includes('birbAnchor.clear') && !stage.includes('positionBirbModel('),
+    'staging builds off the anchor');
+  for (const s of ['makePionusModel()', 'makePionusSky(', 'makePionusFeathers(', 'makeSpeciesBird(', 'makeBirdSky(', 'prepareBirbModel(']) {
+    assert.ok(stage.includes(s), `staging includes ${s} (the Pionus's post-build hooks too)`);
   }
+  const unwind = stage.slice(stage.indexOf('} catch (err) {'));
+  for (const s of ['staged.feathers()', 'staged.env.dispose()', 'staged.sb.dispose()', 'disposeBirdObject(staged.model)', 'throw err']) {
+    assert.ok(unwind.includes(s), `a failed stage unwinds: ${s}`);
+  }
+  // COMMIT mounts first, hands the references over, then disposes the old.
+  const commit = bodyOf(html, 'const commitBird = (staged) => {');
+  const mount = commit.indexOf('mountBirbModel(staged.model)');
+  assert.ok(mount > 0 && commit.indexOf('outEnv.dispose()') > mount && commit.indexOf('outSb.dispose()') > mount
+    && commit.indexOf('disposeBirdObject(outModel)') > mount, 'the outgoing bird is torn down after the new one is mounted');
+  assert.ok(commit.indexOf('syncSwappedBird();') > commit.indexOf('outSb.dispose()'), 'the mounted bird inherits shadows/rim');
+  // The swap: stage, commit, and only then persist the choice.
+  const swap = bodyOf(html, 'const setBirdSpecies = async');
+  const st = swap.indexOf('stageBird(');
+  const cm = swap.indexOf('commitBird(staged)');
+  const save = swap.indexOf('writeSavedSpecies(', cm);
+  assert.ok(st > 0 && cm > st && save > cm, `stage ${st} < commit ${cm} < persist ${save}`);
+  assert.ok(/try \{[\s\S]*\} catch \(err\) \{[\s\S]*console\.warn/.test(swap), 'the swap never rejects');
+  // The re-LOD is the same transaction.
+  assert.ok(bodyOf(html, 'runSpeciesRetier = () => {').includes('commitBird(stageBird('));
 });
 
-test('index.html: the per-frame species hook does nothing while the Pionus flies', () => {
+test('index.html: nothing is built inside renderFrame; the species hook does nothing while the Pionus flies', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const at = html.indexOf('speciesBird.update(_speciesFrame)');
   assert.ok(at > 0);
   const guard = html.lastIndexOf('if (speciesBird) {', at);
-  assert.ok(guard > 0 && at - guard < 800, 'the update sits inside if (speciesBird)');
-  // The re-LOD poll is guarded too, and runs BEFORE the frame looks the rig
-  // up (so a rebuilt bird is posed on its first frame and the ribbon never
-  // samples a detached wing).
-  const poll = html.indexOf('if (speciesBird) respeciesForTier();');
-  const lookup = html.indexOf("const leftWing = birbAnchor.getObjectByName('leftWing');", poll);
-  assert.ok(poll > 0 && lookup > poll && lookup - poll < 3000, 'the poll precedes this frame\'s wing lookup');
+  assert.ok(guard > 0 && at - guard < 1200, 'the update sits inside if (speciesBird)');
+  // The re-LOD is a deferred task, requested by the tier controller and run
+  // between frames: renderFrame itself constructs no bird and bakes no probe.
+  const frame = bodyOf(html, 'const renderFrame = (time = 0) => {');
+  for (const s of ['stageBird(', 'commitBird(', 'makeSpeciesBird(', 'createSpeciesBird(', 'createBirdEnvironment(', 'makeBirdSky(', 'runSpeciesRetier(', 'respeciesForTier(']) {
+    assert.ok(!frame.includes(s), `renderFrame must not call ${s}`);
+  }
+  const sched = bodyOf(html, 'const scheduleSpeciesRetier = () => {');
+  assert.ok(sched.includes('setTimeout(') && sched.includes('speciesRetierQueued'), 'one coalesced task');
+  const applyTier = html.slice(html.indexOf('function applyTier(newTier) {'), html.indexOf('return {', html.indexOf('function applyTier(newTier) {')));
+  assert.ok(applyTier.includes('scheduleSpeciesRetier();'), 'every tier change asks for it');
 });

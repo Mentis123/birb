@@ -138,11 +138,11 @@ test('the rig is in the ROOT frame: leftWing at +Z (the bird\'s right), rightWin
       const mesh = w.children.find((o) => o.isMesh);
       assert.ok(Math.abs(mesh.rotation.y + Math.PI / 2) < 1e-12);
     }
-    // The wingtip anchor sits out along +Z (span) in the wing's own frame,
-    // inside the hand so the ribbon follows the wrist.
-    const hand = lw.userData.hand;
-    assert.equal(lw.userData.tipFeather.parent, hand);
-    assert.ok(hand.position.z + lw.userData.tipFeather.position.z > 0.9, 'tip reaches out along the span');
+    // The wingtip anchor sits out along +Z (span) in the wing's own frame.
+    // It is the wing GROUP's child, placed where the shader draws the tip
+    // (tests/species-wing-tip.test.js), so the ribbon follows the bent wrist.
+    assert.equal(lw.userData.tipFeather.parent, lw);
+    assert.ok(lw.userData.tipFeather.position.z > 0.9, 'tip reaches out along the span');
     b.dispose();
   }
 });

@@ -417,10 +417,16 @@ export function hueDegrees([r, g, b]) {
  * allocates them and every later bake re-renders into the same target, so a
  * biome switch costs a re-render and no GPU allocation. `dispose()` releases
  * both and takes the map back off the materials.
+ *
+ * `pmrem`: a generator the CALLER owns (sharedBirdPmrem below). The bird
+ * picker builds a new probe per bird — a swap, a re-LOD — and each private
+ * generator would compile its own blur programs and allocate its own
+ * ping-pong target; with a shared one a new probe costs only its own cube
+ * target, and `dispose()` releases that target and leaves the generator.
  */
-export function createBirdEnvironment(THREE, renderer, materials, { width = 64, height = 32 } = {}) {
+export function createBirdEnvironment(THREE, renderer, materials, { width = 64, height = 32, pmrem: sharedPmrem = null } = {}) {
   const mats = (materials || []).filter(Boolean);
-  let pmrem = null;
+  let pmrem = sharedPmrem;
   let target = null;
   let bakes = 0;
   let sky = null;
@@ -486,11 +492,29 @@ export function createBirdEnvironment(THREE, renderer, materials, { width = 64, 
         }
       }
       target?.dispose();
-      pmrem?.dispose();
+      if (pmrem !== sharedPmrem) pmrem?.dispose();
       target = null;
       pmrem = null;
       sky = null;
     },
   };
   return env;
+}
+
+const _birdPmrems = new WeakMap();
+
+/**
+ * The renderer's ONE generator for every bird sky (createBirdEnvironment's
+ * `pmrem` option): made and its equirect shader compiled on first use, then
+ * kept for the page — it belongs to the renderer, not to any one bird, so no
+ * bird's dispose() releases it.
+ */
+export function sharedBirdPmrem(THREE, renderer) {
+  let g = _birdPmrems.get(renderer);
+  if (!g) {
+    g = new THREE.PMREMGenerator(renderer);
+    g.compileEquirectangularShader();
+    _birdPmrems.set(renderer, g);
+  }
+  return g;
 }

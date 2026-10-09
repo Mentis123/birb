@@ -191,6 +191,9 @@ export const FLIGHT_AUDIO_TUNING = Object.freeze({
   crowCawNote: 0.17,
   crowCawGap: 0.23,
   crowCawCooldown: 8,
+  // A change of bird cuts the old voice off with this time constant: short
+  // enough that nothing is left after ~15 ms, long enough not to click.
+  speciesCutTau: 0.004,
 });
 
 // ---------------------------------------------------------------------------
@@ -491,6 +494,9 @@ function makeNoiseBuffer(ctx, seconds) {
  *   unlock(event?)      create/resume in a gesture; sets the iOS audio session
  *   update(frame, dt)   per frame, zero allocation — see the frame shape below
  *   setVolume(m, sfx)   live master volume / SFX toggle
+ *   setSpecies(id)      the bird picker: 'crow' or 'owl' builds that voice
+ *                       (now, or at unlock if there is no graph yet); any
+ *                       change of bird silences the old one — see below
  *   suspend(reason)     fade and suspend ('hidden', 'paused', ...)
  *   ensureContext()     the shared AudioContext (the ring chime uses it too)
  *   probe()             a snapshot for __BIRB.flightAudio()
@@ -499,7 +505,7 @@ function makeNoiseBuffer(ctx, seconds) {
  *
  * The frame object (one, refilled by the caller every frame):
  *   { speed, paused, airborne, stalled, authority, stallMul, wingAngle,
- *     clearance, overWater }
+ *     clearance, overWater, species, speciesTick, speciesWhir, speciesCall }
  * `speed` NaN keeps the last estimate; `authority` NaN means "no stall
  * model"; `wingAngle` NaN means "no wing"; `dt` is the time the sampled pose
  * advanced by.
@@ -699,6 +705,9 @@ export function createFlightAudio(options = {}) {
     track('whooshHz', whooshBP.frequency, t.paramTau, 0.01);
     track('rushGain', rushGain.gain, t.paramTau, 0.01);
     track('rushLP', rushLP.frequency, t.paramTau, 0.01);
+    // A crow or an owl chosen before the gesture gets its voice now, with
+    // the rest of the graph, rather than on some later frame.
+    if (voiceWanted) buildSpeciesVoice();
 
     ctx.onstatechange = onStateChange;
     onStateChange();
@@ -858,11 +867,24 @@ export function createFlightAudio(options = {}) {
   }
 
   // ---- species voices -----------------------------------------------------
-  // Built the first time a frame names a species that has one (owl, crow),
-  // so a session that only ever flies the Pionus builds exactly the graph it
-  // always did. Connected through the same master, so the volume, the SFX
-  // switch, every suspend and the iOS unlock path govern it unchanged.
+  // Built by setSpecies('owl' | 'crow') — at once if the graph exists, else
+  // by build() at the unlock — and NEVER by a frame: a session that only
+  // ever flies the Pionus builds exactly the graph it always did, and the
+  // frame loop stays free of construction. Connected through the same
+  // master, so the volume, the SFX switch, every suspend and the iOS unlock
+  // path govern it unchanged. One voice serves both birds (the parts the
+  // other bird does not use sit at gain 0).
   let sv = null;
+  // The bird setSpecies last named ('owl', 'crow' or null for the Pionus) —
+  // what build() gives a voice — and the bird the voice currently speaks
+  // for, which setSpecies and the frames both move: a change of it is a
+  // swap, and a swap silences everything the old bird had scheduled.
+  let voiceWanted = null;
+  let voiceFor = null;
+  const vst = { unbuilt: 0, resets: 0 };
+  function voiceId(id) {
+    return id === 'owl' || id === 'crow' ? id : null;
+  }
   function buildSpeciesVoice() {
     if (sv || !n) return !!sv;
     const tickSrc = noiseSource(n.buffer, 0.37, 1.11);
@@ -888,8 +910,57 @@ export function createFlightAudio(options = {}) {
     param.linearRampToValueAtTime(peak, at + attack);
     param.setTargetAtTime(0, at + attack, decay);
   }
+  /**
+   * Cut a param off at `now`: every event at or after now is removed — the
+   * second caw note and both notes' pitch ramps are scheduled AHEAD, and
+   * cancelAndHoldAtTime is missing on older Safari — then it decays to 0
+   * from wherever it is (an envelope already decaying keeps decaying, just
+   * faster). Nothing is left on the timeline after `now`.
+   */
+  function cut(param, now) {
+    param.cancelScheduledValues(now);
+    param.setTargetAtTime(0, now, t.speciesCutTau);
+  }
+  /**
+   * A change of bird: silence everything the old one had in flight — the
+   * owl's tick envelope and whir, the crow's caw notes and their pitch
+   * ramps — so nothing of it sounds after the swap. The whir's smoothing
+   * record is told it is at 0, so no later frame ramps it back up. The caw
+   * cooldown is reset: a crow you have just chosen is a fresh bird and may
+   * caw on its first take-off (swaps are taps, so this cannot run away).
+   * Safe while suspended or muted: it only edits the timeline.
+   */
+  function silenceSpeciesVoice() {
+    vst.resets += 1;
+    if (!sv || !ctx) return;
+    const now = ctx.currentTime;
+    cut(sv.tickGain.gain, now);
+    cut(sv.cawGain.gain, now);
+    cut(sv.whirGain.gain, now);
+    P.owlWhir.last = 0;
+    const f = sv.caw.frequency;
+    f.cancelScheduledValues(now);
+    f.setValueAtTime(t.crowCawHz, now);
+    sv.cawLast = -Infinity;
+  }
+  /**
+   * The bird picker. Call at boot once the species is resolved and on every
+   * committed swap. 'owl' / 'crow' build the voice (at once if the graph
+   * exists, otherwise build() does it at the unlock); anything else is the
+   * Pionus, which builds nothing. A change of bird silences the old voice.
+   * Not per frame: this may construct nodes.
+   */
+  function setSpecies(id) {
+    const want = voiceId(id);
+    voiceWanted = want;
+    if (want && n && !sv) buildSpeciesVoice();
+    if (want !== voiceFor) {
+      silenceSpeciesVoice();
+      voiceFor = want;
+    }
+    return want;
+  }
   function speciesVoice(frame, airborne) {
-    if (!sv && !buildSpeciesVoice()) return;
     const owl = frame.species === 'owl';
     send(P.owlWhir, owl && airborne ? t.owlWhirLevel * clamp01(+frame.speciesWhir || 0) * bandpassMakeup(t.owlWhirHz, t.owlWhirQ, n.rate) : 0);
     // The clock is read only on an event frame (a getter per frame boxes a
@@ -966,17 +1037,31 @@ export function createFlightAudio(options = {}) {
     send(P.rushGain, rush * lowpassMakeup(rushHz, n.rate));
 
     if (strength > 0 && airborne) triggerWhoosh(strength);
-    // The species voice: only for a bird that has one; silence the whir when
-    // the Pionus is back.
-    const species = frame ? frame.species : null;
-    if (species === 'owl' || species === 'crow') speciesVoice(frame, airborne);
-    else if (sv) send(P.owlWhir, 0);
+    // The species voice: only for a bird that has one, and never built here.
+    // A frame naming another bird than the voice last spoke for is a swap
+    // setSpecies did not announce: silence the old bird all the same.
+    const species = voiceId(frame ? frame.species : null);
+    if (species !== voiceFor) {
+      silenceSpeciesVoice();
+      voiceFor = species;
+    }
+    if (species) {
+      if (sv) speciesVoice(frame, airborne);
+      else vst.unbuilt += 1;
+    } else if (sv) {
+      send(P.owlWhir, 0);
+    }
     applyMaster();
   }
 
   function probe() {
     return {
       speciesVoice: sv ? { ticks: sv.ticks, caws: sv.caws } : null,
+      // The bird the voice speaks for; frames that named a bird whose voice
+      // was never built (no setSpecies); bird changes seen (each a silence).
+      species: voiceFor,
+      speciesUnbuilt: vst.unbuilt,
+      speciesResets: vst.resets,
       state: unavailable ? 'unavailable' : (ctx ? ctx.state : 'idle'),
       suspendReason: st.suspendReason,
       volume: st.volume,
@@ -1068,12 +1153,15 @@ export function createFlightAudio(options = {}) {
     }
     ctx = null;
     n = null;
+    sv = null;
+    voiceFor = null;
   }
 
   return {
     unlock,
     update,
     setVolume,
+    setSpecies,
     suspend,
     resume,
     ensureContext,

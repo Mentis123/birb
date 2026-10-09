@@ -3753,7 +3753,7 @@
       var { installSkyEnvironment, iblRequested } = await import("./src/environment/sky-environment.js");
       // Physical plumage for the v3 bird (thin-film wings, sheen body, a
       // bird-only sky env map). `?plumage=0` builds the Standard bird exactly.
-      var { plumageRequested, plumageFor, plumageMaterialParams, installPlumageLighting, createBirdEnvironment } =
+      var { plumageRequested, plumageFor, plumageMaterialParams, installPlumageLighting, createBirdEnvironment, sharedBirdPmrem } =
         await import("./src/flight/plumage.js");
       // The bird picker (Birb / Crow / Clockwork Owl). Only the tiny, pure
       // resolver loads at boot; the crow and owl builders
@@ -3971,7 +3971,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v84-2026-10-08-species';
+    const BIRB_BUILD = 'v85-2026-10-08-species-fixes';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -7479,9 +7479,15 @@
       return forwardGuess;
     };
 
+    // positionBirbModel is the two halves below, in this order: PREPARE (the
+    // per-mesh setup, which the bird picker runs on a bird it is still
+    // staging, off the anchor) and MOUNT (the swap on the anchor itself).
     const positionBirbModel = (model, isGLB = false) => {
       if (!model) return;
-
+      prepareBirbModel(model, isGLB);
+      mountBirbModel(model);
+    };
+    const prepareBirbModel = (model, isGLB = false) => {
       model.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = false;
@@ -7520,8 +7526,6 @@
       // off-body every time the wingspan or tail length changes; the
       // constructor's own origin does not.
 
-      birbAnchor.clear();
-      birbAnchor.add(model);
       // Clouds with volume: the bird takes a cloud's shadow on its SUN light
       // (and the same share of sky light) like the ground under it, so a bird
       // under or inside a cloud is not the one sunlit thing in its shade. No
@@ -7536,6 +7540,10 @@
           }
         });
       }
+    };
+    const mountBirbModel = (model) => {
+      birbAnchor.clear();
+      birbAnchor.add(model);
       birbAnchor.scale.setScalar(0.52);
     };
 
@@ -9223,98 +9231,240 @@
     // The live crow/owl (species-bird.js), or null while the Pionus flies.
     let speciesBird = null;
     let speciesModule = null;
-    const _speciesFrame = { dt: 0, aero: null, aeroLive: false, perch: 0, boosting: false, reducedMotion: false };
+    // How many crow/owl birds this page has BUILT (boot, swaps, re-LODs) —
+    // __BIRB.speciesInfo().builds; a crow booting on Okay must read 1.
+    let speciesBuilds = 0;
+    const _speciesFrame = { dt: 0, aero: null, aeroLive: false, perch: 0, boosting: false, reducedMotion: false, airborne: false };
 
-    // Build the Pionus (whichever A/B variant this load asked for) into the
-    // anchor. The default boot runs exactly this, in this order, as it always
-    // has; a live swap back to Birb runs it again.
-    const buildBirbPionus = () => {
-      positionBirbModel(
-        birdVariant === 'v1' ? createProceduralBirb()
-          : birdVariant === 'v2' ? createProceduralBirbV2()
-            : createProceduralBirbV3(),
-      );
-    };
+    // The Pionus (whichever A/B variant this load asked for), built OFF the
+    // anchor. The default boot mounts it at once with positionBirbModel,
+    // exactly as it always has; a live swap back to Birb stages it first.
+    const makePionusModel = () => (
+      birdVariant === 'v1' ? createProceduralBirb()
+        : birdVariant === 'v2' ? createProceduralBirbV2()
+          : createProceduralBirbV3()
+    );
 
-    // The v3 bird's own sky (physical plumage), baked now for the biome that
-    // is already loaded — the first setEnvironment() ran before the bird
-    // existed — and again by every later switch. v1/v2 never set
-    // plumageMaterials: they are A/B builds, frozen at what they were judged as.
-    const installBirbPlumageSky = () => {
-      const plumageMaterials = birbAnchor.children[0]?.userData?.plumageMaterials;
-      if (plumageMaterials) {
-        try {
-          birbPlumageEnv = createBirdEnvironment(THREE, renderer, [plumageMaterials.contour, plumageMaterials.vane]);
-          birbPlumageEnv.setSky(getEnvironmentDefinition(environmentState.id)?.sky);
-          birbPlumageEnv.update(birbAnchor.position);
-        } catch (err) {
-          console.warn('[plumage] bird sky failed; the feathers keep their lights only', err);
-        }
+    // The bird's own sky (plumage.js): a PMREM of the biome's sky gradient on
+    // the given materials, baked now for the biome that is already loaded —
+    // the first setEnvironment() ran before the bird existed — and again by
+    // every later switch. Every bird's probe renders through the renderer's
+    // ONE generator (sharedBirdPmrem): a swap or a re-LOD allocates only the
+    // new probe's cube target, and disposing a probe releases exactly that. A
+    // probe that fails half-way is disposed here, and the bird keeps its
+    // lights only, as before.
+    const makeBirdSky = (materials, label) => {
+      if (!materials || !materials.length) return null;
+      let env = null;
+      try {
+        env = createBirdEnvironment(THREE, renderer, materials, { pmrem: sharedBirdPmrem(THREE, renderer) });
+        env.setSky(getEnvironmentDefinition(environmentState.id)?.sky);
+        env.update(birbAnchor.position);
+        return env;
+      } catch (err) {
+        if (env) { try { env.dispose(); } catch (_) { /* half-made */ } }
+        console.warn(label, err);
+        return null;
       }
+    };
+    // The v3 bird's sky. v1/v2 never set plumageMaterials: they are A/B
+    // builds, frozen at what they were judged as.
+    const makePionusSky = (model) => {
+      const plumageMaterials = model?.userData?.plumageMaterials;
+      return plumageMaterials
+        ? makeBirdSky([plumageMaterials.contour, plumageMaterials.vane], '[plumage] bird sky failed; the feathers keep their lights only')
+        : null;
     };
 
     // The authored feather sheets, on the v3 bird only (its UVs tile in
     // surface units for exactly this; Phase 0's inherited generator UVs do
     // not). Decode-gated on all four images and reversible, like every other
-    // authored surface. `?feathers=0` opts out for the A/B.
+    // authored surface. `?feathers=0` opts out for the A/B. Returns the
+    // disposer (or null).
     let __birbFeatherDisposer = null;
-    const installBirbFeathers = () => {
+    const makePionusFeathers = (model) => {
       if (birdVariant !== 'v1' && birdVariant !== 'v2' && authoredFeathersRequested(window.location?.search || '')) {
-        const builtBird = birbAnchor.children[0];
-        const featherMaterials = builtBird?.userData?.featherMaterials;
+        const featherMaterials = model?.userData?.featherMaterials;
         if (featherMaterials) {
-          __birbFeatherDisposer = applyAuthoredFeathers(THREE, featherMaterials, './assets/textures', {
+          return applyAuthoredFeathers(THREE, featherMaterials, './assets/textures', {
             normals: authoredFeatherNormalsRequested(window.location?.search || ''),
             onError: (err) => console.warn('feather texture failed to load; keeping the procedural feathers', err),
           });
         }
       }
+      return null;
     };
 
-    // A crow or an owl: built at the LOD the render tier asks for, posed by
-    // the same rig, lit by the same bird-only sky (high and mid; low is Phong).
-    const makeSpeciesBird = (id) => speciesModule.createSpeciesBird(THREE, {
-      species: id, quality: speciesModule.speciesTierFor(adaptiveTierReadout()),
-    });
-    const buildSpeciesBird = (id) => mountSpeciesBird(makeSpeciesBird(id));
-    const mountSpeciesBird = (sb) => {
-      positionBirbModel(sb.model);
-      speciesBird = sb;
-      if (sb.envMaterials.length) {
-        try {
-          birbPlumageEnv = createBirdEnvironment(THREE, renderer, sb.envMaterials);
-          birbPlumageEnv.setSky(getEnvironmentDefinition(environmentState.id)?.sky);
-          birbPlumageEnv.update(birbAnchor.position);
-        } catch (err) {
-          console.warn('[species] bird sky failed; the bird keeps its lights only', err);
-        }
-      }
+    // A crow or an owl at a given look tier (speciesTierFor of the render
+    // tier), built off the anchor. species-bird.js unwinds its own partial
+    // build, so a throw here leaves nothing behind.
+    const makeSpeciesBird = (id, quality) => {
+      const sb = speciesModule.createSpeciesBird(THREE, { species: id, quality });
+      speciesBuilds += 1;
       return sb;
     };
-    // The render tier before adaptiveTier exists (it is created further
-    // down): the boot bird is built at tier 0 and re-LODs on its first frame.
-    let adaptiveTierReadout = () => 0;
+    const disposeBirdObject = (root) => {
+      root?.traverse?.((o) => {
+        if (!o.isMesh) return;
+        o.geometry?.dispose?.();
+        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m?.dispose?.();
+      });
+      root?.parent?.remove(root);
+    };
+
+    // ---- Bird transactions: STAGE, then COMMIT -----------------------------
+    // The bird picker and the per-tier LOD change the bird the same way.
+    // STAGE builds the incoming bird COMPLETE and OFF the anchor: its model,
+    // the per-mesh preparation positionBirbModel does, its sky probe, and for
+    // the Pionus its authored feathers and its rim handles. If any of that
+    // throws, everything staged is disposed and the error goes back to the
+    // caller with the outgoing bird untouched. COMMIT then cannot fail: it
+    // swaps the model on the anchor, hands the live references over and only
+    // THEN tears the outgoing bird down — so the refcounted feather textures
+    // the two crows/owls share never reach zero mid-swap. Neither runs inside
+    // renderFrame: a swap is a click, a re-LOD a deferred task.
+    let speciesStageFault = false;
+    const stageBird = (id, quality) => {
+      const staged = { species: id, quality: id === 'birb' ? null : quality, sb: null, model: null, env: null, feathers: null, rim: null };
+      // The Pionus builders push their rim handles straight into the shared
+      // birbRimUniforms (the biome switch retints from it). Staged, they are
+      // lifted out and the outgoing bird's handles put back until commit.
+      const rimBefore = birbRimUniforms.slice();
+      try {
+        if (id === 'birb') {
+          staged.model = makePionusModel();
+          staged.rim = birbRimUniforms.filter((u) => rimBefore.indexOf(u) < 0);
+          prepareBirbModel(staged.model);
+          staged.env = makePionusSky(staged.model);
+          staged.feathers = makePionusFeathers(staged.model);
+        } else {
+          staged.sb = makeSpeciesBird(id, quality);
+          staged.model = staged.sb.model;
+          prepareBirbModel(staged.model);
+          staged.env = makeBirdSky(staged.sb.envMaterials, '[species] bird sky failed; the bird keeps its lights only');
+        }
+        if (speciesStageFault) { speciesStageFault = false; throw new Error('injected stage fault (__BIRB.speciesFault)'); }
+      } catch (err) {
+        if (staged.feathers) { try { staged.feathers(); } catch (_) { /* unwinding */ } }
+        if (staged.env) { try { staged.env.dispose(); } catch (_) { /* unwinding */ } }
+        if (staged.sb) { try { staged.sb.dispose(); } catch (_) { /* unwinding */ } }
+        else if (staged.model) { try { disposeBirdObject(staged.model); } catch (_) { /* unwinding */ } }
+        throw err;
+      } finally {
+        birbRimUniforms.length = 0;
+        for (const u of rimBefore) birbRimUniforms.push(u);
+      }
+      return staged;
+    };
+    // What a freshly mounted bird must inherit from the running game: the
+    // shadow lever (positionBirbModel turns casting off; only the lever turns
+    // it back on), and the biome's rim tint for a rebuilt Pionus. Reads
+    // bindings declared further down, so it is only ever called after boot.
+    const syncSwappedBird = () => {
+      birbAnchor.traverse((o) => { if (o.isMesh) o.castShadow = shadowsEnabled; });
+      if (birbRimUniforms.length && skyDome?.getMidColor) {
+        for (const u of birbRimUniforms) u.uBirbRimColor.value.copy(skyDome.getMidColor()).lerp(_rimWhite, 0.45);
+      }
+      // A swap costs a build and a compile: not a frame-rate signal.
+      frameSampler.reset();
+    };
+    const commitBird = (staged) => {
+      const outSb = speciesBird;
+      const outModel = birbAnchor.children[0] || null;
+      const outEnv = birbPlumageEnv;
+      const outFeathers = __birbFeatherDisposer;
+      mountBirbModel(staged.model);
+      speciesBird = staged.sb;
+      birbPlumageEnv = staged.env;
+      __birbFeatherDisposer = staged.feathers;
+      birbRimUniforms.length = 0;
+      if (staged.rim) for (const u of staged.rim) birbRimUniforms.push(u);
+      birbSpecies = staged.species;
+      // The outgoing bird, now off the anchor: its sky, then its model (the
+      // species bird's own dispose, or the Pionus's geometry, materials and
+      // authored feather sheets).
+      if (outEnv) { try { outEnv.dispose(); } catch (_) { /* already gone */ } }
+      if (outSb) outSb.dispose();
+      else if (outModel) {
+        if (outFeathers) outFeathers();
+        disposeBirdObject(outModel);
+      }
+      flightAudio?.setSpecies?.(birbSpecies);
+      syncSwappedBird();
+    };
+
+    // Bumped from `birbQuality` when the default moved to Ultra. A stored
+    // preference from before that change would otherwise silently defeat the
+    // new default for every returning player, including the one who asked for
+    // it — and "I set it to max and it did not change" is indistinguishable
+    // from the change not shipping.
+    const QUALITY_STORAGE_KEY = 'birbQuality2';
+    // The quality preset id this load asks for: `?quality=` (a link or a
+    // harness) over the saved choice; null means the default (Ultra).
+    // restoreQualityPreset() applies it; the bird build reads it first.
+    function readQualityPresetChoice() {
+      const fromUrl = (/[?&]quality=(ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
+      let saved = null;
+      try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
+      return fromUrl || saved || null;
+    }
+
+    // The render tier the boot will SETTLE on, known before adaptiveTier
+    // exists: restoreQualityPreset() (much further down) pins Ultra at 0, Okay
+    // at 1 and Light at 2, and leaves Amazing on AUTO, which starts at 0. Read
+    // from the same ?quality= / saved preset it reads (readQualityPresetChoice),
+    // so a crow or owl booting on Okay or Light is BUILT once at that LOD —
+    // not built at Ultra and rebuilt on the pin. tests/species-lifecycle
+    // checks this table against QUALITY_PRESETS.
+    const BOOT_TIER_BY_PRESET = { ultra: 0, amazing: 0, okay: 1, light: 2 };
+    // The re-LOD request from adaptiveTier (applyTier, which can run inside
+    // renderFrame): coalesced into ONE task after the current one, so the
+    // build never lands inside a frame. `runSpeciesRetier` is installed with
+    // the picker once every binding it touches exists; it catches up on its
+    // own first call if a request came earlier.
+    let runSpeciesRetier = null;
+    let speciesRetierQueued = false;
+    const scheduleSpeciesRetier = () => {
+      if (!speciesBird || speciesRetierQueued) return;
+      speciesRetierQueued = true;
+      setTimeout(() => {
+        speciesRetierQueued = false;
+        if (runSpeciesRetier) runSpeciesRetier();
+      }, 0);
+    };
+    let adaptiveTierReadout = () => BOOT_TIER_BY_PRESET[readQualityPresetChoice()] ?? 0;
 
     if (birbSpecies === 'birb') {
-      buildBirbPionus();
-      installBirbPlumageSky();
-      installBirbFeathers();
+      const pionus = makePionusModel();
+      positionBirbModel(pionus);
+      birbPlumageEnv = makePionusSky(pionus);
+      __birbFeatherDisposer = makePionusFeathers(pionus);
     } else {
+      let sb = null;
       try {
         speciesModule = await import('./src/flight/species/species-bird.js');
-        buildSpeciesBird(birbSpecies);
+        sb = makeSpeciesBird(birbSpecies, speciesModule.speciesTierFor(adaptiveTierReadout()));
+        positionBirbModel(sb.model);
+        speciesBird = sb;
+        birbPlumageEnv = makeBirdSky(sb.envMaterials, '[species] bird sky failed; the bird keeps its lights only');
       } catch (err) {
         console.warn('[species] could not build the ' + birbSpecies + '; flying the Pionus', err);
         // A SAVED choice that cannot build is forgotten, so this warning is
         // not repeated on every later boot. A URL choice is left alone.
         if (speciesBoot.source === 'saved') { try { writeSavedSpecies(window.localStorage, 'birb'); } catch (_) { /* private mode */ } }
+        if (sb) { try { sb.dispose(); } catch (_) { /* unwinding */ } }
+        if (birbPlumageEnv) { try { birbPlumageEnv.dispose(); } catch (_) { /* unwinding */ } birbPlumageEnv = null; }
         birbSpecies = 'birb';
         speciesBird = null;
-        buildBirbPionus();
-        installBirbPlumageSky();
-        installBirbFeathers();
+        const pionus = makePionusModel();
+        positionBirbModel(pionus);
+        birbPlumageEnv = makePionusSky(pionus);
+        __birbFeatherDisposer = makePionusFeathers(pionus);
       }
     }
+    // The flight audio builds the crow's or owl's voice NOW (or at its unlock),
+    // never inside a frame; for the Pionus it builds nothing.
+    if (flightAudio) flightAudio.setSpecies(birbSpecies);
 
     // Default to the procedural birb — it's richer, animates per-part (wings +
     // feet are named groups), and behaves identically on iOS. The GLB path is
@@ -9477,6 +9627,10 @@
           if (cloudShell && cloudShell.mesh) cloudShell.mesh.visible = false;
         }
 
+        // The crow/owl LOD follows the tier, rebuilt OUTSIDE the frame (this
+        // runs inside renderFrame when the sampler downshifts).
+        scheduleSpeciesRetier();
+
         if (window.__birbPerfDebug) {
           console.log(`[perf] adaptive tier -> ${newTier}`);
         }
@@ -9529,8 +9683,10 @@
         unpin() { state.pinned = false; },
       };
     })();
-    // The bird picker's LOD follows the render tier from here on.
-    adaptiveTierReadout = () => adaptiveTier.getTier();
+    // The bird picker's LOD follows adaptiveTier only once restoreQualityPreset()
+    // has pinned the boot preset (it switches adaptiveTierReadout over there):
+    // until then the controller still reads its initial 0, and a crow booted
+    // on Okay would be rebuilt at Ultra and back.
 
     // ─── Performance workbench routing (P2.3b) ────────────────────────────
     // CONTRACT §7.1 precedence: panel request > adaptive tier > capability
@@ -12323,10 +12479,6 @@
 
       const ambientOffsets = flightController.getAmbientOffsets ? flightController.getAmbientOffsets() : EMPTY_AMBIENT_OFFSETS;
 
-      // The crow/owl re-LODs to the render tier HERE, before this frame looks
-      // up its wings, tail and feet (null-cheap while the Pionus flies).
-      if (speciesBird) respeciesForTier();
-
       birbAnchor.position.copy(pose.position);
       if (ambientOffsets.position) birbAnchor.position.add(ambientOffsets.position);
 
@@ -12770,6 +12922,10 @@
         _speciesFrame.perch = perchBlend;
         _speciesFrame.boosting = boostTimer > 0 || !!sprintState.active;
         _speciesFrame.reducedMotion = !!reducedMotionState.enabled;
+        // The flight controller's own airborne state (the flight audio's
+        // definition): its rising edge is the crow's take-off caw, with or
+        // without the aero pose (?aeropose=0 never moves `air`).
+        _speciesFrame.airborne = !isNested && flightRecoveryState !== FLIGHT_RECOVERY_STATES.GROUNDED;
         speciesBird.update(_speciesFrame);
       }
 
@@ -13500,12 +13656,8 @@
     ];
     /** The preset every lever is measured against; the panel's reset lands here. */
     const QUALITY_PRESET_BASELINE = 1;
-    // Bumped from `birbQuality` when the default moved to Ultra. A stored
-    // preference from before that change would otherwise silently defeat the
-    // new default for every returning player, including the one who asked for
-    // it — and "I set it to max and it did not change" is indistinguishable
-    // from the change not shipping.
-    const QUALITY_STORAGE_KEY = 'birbQuality2';
+    // QUALITY_STORAGE_KEY and readQualityPresetChoice() are declared beside
+    // the bird build, which needs the boot preset before this point.
     let qualityPresetIndex = 0; // Ultra — see restoreQualityPreset()
 
     function applyQualityPreset(index, { persist = true } = {}) {
@@ -13567,10 +13719,7 @@
       // tools/birb-default.mjs is the one check that boots with no flag and
       // proves the production default is Ultra with every lever at its
       // ceiling.
-      const fromUrl = (/[?&]quality=(ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
-      let saved = null;
-      try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
-      const found = QUALITY_PRESETS.findIndex((q) => q.id === (fromUrl || saved));
+      const found = QUALITY_PRESETS.findIndex((q) => q.id === readQualityPresetChoice());
       // Default ULTRA (index 0), by the owner's explicit call: the old MAX
       // REALISM set, tier PINNED at 0, native resolution.
       //
@@ -13685,14 +13834,14 @@
     }
 
     // ---- Bird picker (Birb / Crow / Clockwork Owl) ------------------------
-    // A LIVE swap: the old model leaves the anchor and is disposed (its
-    // geometry, materials, feather sheets and bird-only sky), the new one is
-    // positioned by positionBirbModel exactly as the boot bird was, and every
-    // per-frame reader (the rig, the ribbons, the flight audio's wing, the bird
-    // shadow, the contact shadow) looks its parts up by name each frame, so
-    // nothing else has to be told. The Pionus's post-build hooks (plumage sky,
-    // authored feathers) run only for the Pionus. `?bird=` wins for the load
-    // and is never written back; a click is the player's choice and persists.
+    // A LIVE swap through the bird transaction (stageBird / commitBird, by the
+    // bird build): the incoming bird is built complete off the anchor — the
+    // Pionus with its plumage sky, authored feathers and rim handles — and
+    // only then mounted, the outgoing one torn down after it. Every per-frame
+    // reader (the rig, the ribbons, the flight audio's wing, the bird shadow,
+    // the contact shadow) looks its parts up by name each frame, so nothing
+    // else has to be told. `?bird=` wins for the load and is never written
+    // back; a click is the player's choice and persists — once it has MOUNTED.
     const speciesLabelEl = document.querySelector('[data-species-label]');
     const settingsSpeciesButton = document.querySelector('[data-control="species"]');
     let speciesSwapToken = 0;
@@ -13700,99 +13849,57 @@
       if (speciesLabelEl) speciesLabelEl.textContent = SPECIES_LABELS[birbSpecies] || 'Birb';
       if (settingsSpeciesButton) settingsSpeciesButton.setAttribute('title', 'Bird: ' + (SPECIES_LABELS[birbSpecies] || 'Birb'));
     };
-    const disposeBirdObject = (root) => {
-      root?.traverse?.((o) => {
-        if (!o.isMesh) return;
-        o.geometry?.dispose?.();
-        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m?.dispose?.();
-      });
-      root?.parent?.remove(root);
-    };
-    // Tear down the bird that is leaving: its sky, then its model (the
-    // species bird's own dispose, or the Pionus's geometry, materials and
-    // authored feather sheets). Called AFTER the incoming crow/owl is built,
-    // so the shared procedural feather textures (feather-textures.js,
-    // refcounted) never reach zero and are not regenerated on a swap.
-    const teardownBird = (oldSpecies, oldModel) => {
-      if (birbPlumageEnv) { try { birbPlumageEnv.dispose(); } catch (_) { /* already gone */ } birbPlumageEnv = null; }
-      if (oldSpecies) {
-        oldSpecies.dispose();
-        if (speciesBird === oldSpecies) speciesBird = null;
-      } else {
-        if (__birbFeatherDisposer) { __birbFeatherDisposer(); __birbFeatherDisposer = null; }
-        disposeBirdObject(oldModel);
-        // The Pionus's rim handles belong to the model just disposed.
-        birbRimUniforms.length = 0;
-      }
-    };
-    // What a freshly mounted bird must inherit from the running game: the
-    // shadow lever (positionBirbModel turns casting off; only the lever turns
-    // it back on), and the biome's rim tint for a rebuilt Pionus.
-    const syncSwappedBird = () => {
-      birbAnchor.traverse((o) => { if (o.isMesh) o.castShadow = shadowsEnabled; });
-      if (birbRimUniforms.length && skyDome?.getMidColor) {
-        for (const u of birbRimUniforms) u.uBirbRimColor.value.copy(skyDome.getMidColor()).lerp(_rimWhite, 0.45);
-      }
-      // A swap costs a build and a compile: not a frame-rate signal.
-      frameSampler.reset();
-    };
+    // Never rejects: a failure anywhere (the lazy import, the build, the sky)
+    // warns, disposes whatever was staged and resolves to the bird that is
+    // still flying, with the saved choice untouched.
     const setBirdSpecies = async (id, { persist = true } = {}) => {
-      if (id !== 'birb' && id !== 'crow' && id !== 'owl') return birbSpecies;
-      const token = ++speciesSwapToken;
-      if (id === birbSpecies) {
-        if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
-        labelSpecies();
-        return birbSpecies;
-      }
-      let incoming = null;
       try {
+        if (id !== 'birb' && id !== 'crow' && id !== 'owl') return birbSpecies;
+        const token = ++speciesSwapToken;
+        if (id === birbSpecies) {
+          if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
+          labelSpecies();
+          return birbSpecies;
+        }
         if (id !== 'birb' && !speciesModule) {
           speciesModule = await import('./src/flight/species/species-bird.js');
           // A later click won the race while the module loaded.
           if (token !== speciesSwapToken) return birbSpecies;
         }
-        if (id !== 'birb') incoming = makeSpeciesBird(id);
+        const staged = stageBird(id, id === 'birb' ? null : speciesModule.speciesTierFor(adaptiveTierReadout()));
+        commitBird(staged);
+        speciesRetierFailed = false;
+        // Saved only once the new bird has mounted: a failed import or build
+        // never leaves a choice behind that warns on every later boot.
+        if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
       } catch (err) {
         console.warn('[species] could not build the ' + id + '; keeping the ' + birbSpecies, err);
-        return birbSpecies;
       }
-      // Saved only once the new bird exists: a failed import never leaves a
-      // choice behind that warns on every later boot.
-      if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
-      teardownBird(speciesBird, birbAnchor.children[0]);
-      birbSpecies = id;
-      if (id === 'birb') {
-        buildBirbPionus();
-        installBirbPlumageSky();
-        installBirbFeathers();
-      } else {
-        mountSpeciesBird(incoming);
-      }
-      syncSwappedBird();
       labelSpecies();
       return birbSpecies;
     };
     // LOD follows the render tier (Ultra/Amazing/Okay/Light and the adaptive
-    // controller). Polled at the TOP of the bird block, before anything looks
-    // the rig up for the frame, so the rebuilt bird is posed on the frame it
-    // first draws and the ribbon never samples a detached wing. New bird
-    // first, old torn down second (the shared textures stay referenced).
+    // controller). adaptiveTier's applyTier asks for this through
+    // scheduleSpeciesRetier, which runs it as its own task — between frames,
+    // never inside renderFrame, where the sampler's downshift is decided. The
+    // whole next frame then poses and draws the rebuilt bird. Same
+    // transaction as a swap: new bird staged first, old torn down second.
     let speciesRetierFailed = false;
-    const respeciesForTier = () => {
+    const speciesRetierLog = [];
+    runSpeciesRetier = () => {
       if (!speciesBird || !speciesModule || speciesRetierFailed) return;
-      const want = speciesModule.speciesTierFor(adaptiveTier.getTier());
+      const want = speciesModule.speciesTierFor(adaptiveTierReadout());
       if (want === speciesBird.quality) return;
-      let incoming = null;
+      // The last few re-LODs, for __BIRB.speciesInfo() (a lifecycle event,
+      // never a per-frame write).
+      if (speciesRetierLog.length >= 8) speciesRetierLog.shift();
+      speciesRetierLog.push(speciesBird.quality + '->' + want + ' @' + Math.round(performance.now()) + 'ms');
       try {
-        incoming = makeSpeciesBird(speciesBird.species);
+        commitBird(stageBird(speciesBird.species, want));
       } catch (err) {
         speciesRetierFailed = true;
         console.warn('[species] re-LOD failed; keeping the ' + speciesBird.quality + ' bird', err);
-        return;
       }
-      teardownBird(speciesBird, null);
-      mountSpeciesBird(incoming);
-      syncSwappedBird();
     };
     // Cycle from the PENDING choice, so a double tap during the first lazy
     // import goes birb -> crow -> owl, not crow twice.
@@ -13826,6 +13933,11 @@
       });
     }
     restoreQualityPreset();
+    // The boot preset is in force: the crow/owl LOD follows the live tier
+    // from here, and catches up once if the pin disagreed with the guess
+    // (BOOT_TIER_BY_PRESET) the boot bird was built at.
+    adaptiveTierReadout = () => adaptiveTier.getTier();
+    runSpeciesRetier();
 
     if (settingsEnvButton) {
       settingsEnvButton.addEventListener('click', () => {
@@ -15310,7 +15422,24 @@
           drawCalls: speciesBird ? speciesBird.drawCallCount : null,
           moduleLoaded: !!speciesModule,
           env: birbPlumageEnv ? birbPlumageEnv.state() : null,
+          // Lifecycle evidence: crow/owl builds this page (boot + swaps +
+          // re-LODs), the shared feather textures' live references (one per
+          // crow/owl alive), and the renderer's GPU object counts.
+          builds: speciesBuilds,
+          retiers: speciesRetierLog.slice(),
+          mech: speciesBird && speciesBird.mech
+            ? { gear: speciesBird.mech.gear.rotation.y, key: speciesBird.mech.key.rotation.y } : null,
+          textureRefs: speciesModule ? speciesModule.featherTextureRefs(THREE) : 0,
+          gpu: {
+            geometries: renderer.info.memory.geometries,
+            textures: renderer.info.memory.textures,
+            programs: renderer.info.programs ? renderer.info.programs.length : null,
+          },
         }),
+        // Fault injection for the swap's failure path (harness only): the
+        // next stageBird throws once everything is staged, so the unwind must
+        // dispose all of it and the outgoing bird must keep flying.
+        speciesFault: (on = true) => { speciesStageFault = !!on; return speciesStageFault; },
         // Tune the live crow/owl without a rebuild (the look knobs exposed as
         // constants in species-bird.js): envIntensity, sheen, iridescence,
         // roughness, rim, shadeNeutral, shadeFloor, specNeutral, metalNeutral.
