@@ -11,6 +11,32 @@
 > The profile JSON is a proposal, not a current runtime import. No phone
 > performance or thermal certification is claimed by the research package.
 
+> **AUTO GRAPHICS (2026-10-10): the game watches its own frame rate and
+> offers, never forces, a step down.** Build v86. The gear menu's quality
+> button now cycles **Auto** → Ultra → Amazing → Okay → Light → Auto, and
+> Auto is the default for anyone with no saved choice (a saved fixed preset
+> is respected). Auto renders a normal preset (it starts on Ultra, so the
+> default's pixels and `tools/birb-default.mjs` are unchanged) and adds a
+> chip in the TOP-LEFT corner: **yellow** "Frame rate dipping · Tap for
+> Amazing" when the average holds under **48 fps for 3 s**; **red** "Frame
+> rate struggling" under **38 fps for 3 s**, or when a yellow is ignored for
+> **20 s** while still under 48; it clears by itself at **54+ fps for 6 s**
+> (48-54 is hysteresis). One tap steps down ONE preset, stays on Auto and
+> is remembered in `birbQualityAutoLevel`, so the next session starts where
+> this one settled. Picking Auto from the gear menu starts it on Ultra again.
+> No chip at Light, none outside Auto. The average is a 2.5 s EMA of the
+> frame sampler's readings, with a 4 s grace after boot, any preset change
+> and any pause, so a shader-compile hitch cannot trip it. The judge is
+> `src/game/perf-advisor.js` (pure, `tests/perf-advisor.test.js`); the DOM is
+> touched only when the level changes. The red chip pulses three times on
+> `transform` and stops: an infinite box-shadow pulse would repaint every
+> frame on exactly the phone that is short of frames. `?quality=auto` boots
+> it by URL; `__BIRB.perfAdvisor()` reads it and `perfAdvisor('warn'|'bad')`
+> pins a level for a capture. `tools/birb-auto-quality.mjs` (Browser Health)
+> proves the chip rises from REAL samples under SwiftShader, not a forced
+> level. **Unmeasured: the phone** — whether 48/38 match what the owner's
+> eye calls "degraded" on glass is the first thing to tune.
+
 > **THE BIRD PICKER (2026-10-08): fly the crow or the clockwork owl.** Build
 > v84. The ⚙ panel has a **Bird** button that cycles Birb (the v3 Pionus,
 > DEFAULT) → Crow → Clockwork Owl as a LIVE swap. The choice is saved in

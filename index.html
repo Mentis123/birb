@@ -1661,6 +1661,55 @@
     }
 
     /* Settings Gear Button */
+    /* Auto graphics chip (top-left; the minimap owns top-right, the gear
+       bottom-right). Under the settings overlay (z 100) by design. */
+    .perf-chip {
+      position: absolute;
+      top: max(0.75rem, env(safe-area-inset-top, 0px));
+      left: max(0.75rem, env(safe-area-inset-left, 0px));
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      min-height: 44px;
+      padding: 0.4rem 0.8rem 0.4rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 204, 64, 0.75);
+      background: rgba(58, 42, 6, 0.82);
+      color: #ffd54a;
+      font: 600 0.72rem/1.15 system-ui, -apple-system, sans-serif;
+      text-align: left;
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(10px);
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      animation: perf-chip-in 220ms ease-out;
+    }
+    .perf-chip[hidden] { display: none; }
+    .perf-chip svg {
+      width: 1.35rem; height: 1.35rem; flex-shrink: 0;
+      fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+    }
+    .perf-chip__text { display: flex; flex-direction: column; }
+    .perf-chip__action { font-weight: 500; color: #fff3c4; opacity: 0.92; }
+    .perf-chip:active { transform: scale(0.97); }
+    .perf-chip--bad {
+      border-color: rgba(255, 92, 80, 0.9);
+      background: rgba(72, 12, 10, 0.86);
+      color: #ff6b5e;
+      /* Three pulses, then still: an infinite animation would repaint every
+         frame on exactly the phone that is already short of frames, and
+         transform is compositor-only where a box-shadow pulse is not. */
+      animation: perf-chip-in 220ms ease-out, perf-chip-pulse 0.9s ease-in-out 220ms 3;
+    }
+    .perf-chip--bad .perf-chip__action { color: #ffd9d4; }
+    @keyframes perf-chip-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    @keyframes perf-chip-pulse { 0%, 100% { transform: none; } 50% { transform: scale(1.06); } }
+    @media (prefers-reduced-motion: reduce) {
+      .perf-chip, .perf-chip--bad { animation: none; }
+    }
+
     .settings-gear-button {
       position: absolute;
       bottom: var(--space-2);
@@ -2658,6 +2707,19 @@
       <canvas id="scene" role="img" aria-label="Stylized blue bird gliding through a dark sky"></canvas>
       <!-- Cinematic vignette: one static composited gradient, no per-frame cost -->
       <div class="cinematic-vignette" aria-hidden="true"></div>
+      <!-- Auto graphics: frame-rate chip. Hidden unless Auto is on and the
+           frame rate has sagged; one tap steps the preset down one notch. -->
+      <button type="button" class="perf-chip" data-perf-chip hidden aria-live="polite">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4.5 17.5a8.5 8.5 0 1 1 15 0" />
+          <path d="M12 14.5 8.2 9.6" />
+          <circle cx="12" cy="14.5" r="1.4" fill="currentColor" stroke="none" />
+        </svg>
+        <span class="perf-chip__text">
+          <span class="perf-chip__title" data-perf-chip-title>Frame rate dipping</span>
+          <span class="perf-chip__action" data-perf-chip-action>Tap for Amazing</span>
+        </span>
+      </button>
       <!-- Settings gear button (corner) -->
       <button type="button" class="settings-gear-button" data-control="settings-open" aria-label="Open settings">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -3471,6 +3533,9 @@
     const settingsGameModeButton = document.querySelector('[data-control="game-mode"]');
     const settingsQualityButton = document.querySelector('[data-control="quality"]');
     const qualityLabelEl = document.querySelector('[data-quality-label]');
+    const perfChipEl = document.querySelector('[data-perf-chip]');
+    const perfChipTitleEl = document.querySelector('[data-perf-chip-title]');
+    const perfChipActionEl = document.querySelector('[data-perf-chip-action]');
     const settingsFlightModelButton = document.querySelector('[data-control="flight-model"]');
     const flightModelLabelEl = document.querySelector('[data-flight-model-label]');
     const settingsCameraViewButton = document.querySelector('[data-control="camera-view"]');
@@ -3802,6 +3867,8 @@
       var { createQualitySettings, QUALITY_MODES, REQUEST_SOURCES, RESET_TAGS: QS_RESET_TAGS } =
         await import("./src/game/quality-settings.js");
       var { evaluateAcceptanceGates, ACCEPTANCE_THRESHOLDS } = await import("./src/game/frame-stats.js");
+      // The Auto graphics setting's frame-rate judge (the yellow/red chip).
+      var { createPerfAdvisor, PERF_LEVELS, nextLighterPreset } = await import("./src/game/perf-advisor.js");
       var { createGpuTimer } = await import("./src/game/gpu-timer.js");
       // Constructed HERE, not beside its first read. setEnvironment resets the
       // sampler and is called during initial setup, hundreds of lines before
@@ -3811,6 +3878,11 @@
       // system and the rocket collision targets. The world still rendered, so
       // the game looked fine and simply had no nests and no rings.
       var frameSampler = createFrameSampler();
+      // Auto graphics (see applyQualityPreset): `var`, not `let`, for the same
+      // temporal-dead-zone reason as frameSampler — updateFpsReadout reads
+      // both, and must never be able to throw on its first frame.
+      var qualityAutoMode = false;
+      var perfAdvisor = createPerfAdvisor();
       var { blendToward, perchPose, tumbleFlap, tailPitchOffset, wingBeat, beatEnvelope } = await import("./src/flight/bird-pose.js");
       var { createAeroPose, createAeroInput, aeroPoseRequested } = await import("./src/flight/aero-pose.js");
       var { ScreenShake } = await import("./src/effects/screen-shake.js");
@@ -3971,7 +4043,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v85-2026-10-08-species-fixes';
+    const BIRB_BUILD = 'v86-2026-10-10-auto-graphics';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -9402,11 +9474,28 @@
     // The quality preset id this load asks for: `?quality=` (a link or a
     // harness) over the saved choice; null means the default (Ultra).
     // restoreQualityPreset() applies it; the bird build reads it first.
-    function readQualityPresetChoice() {
-      const fromUrl = (/[?&]quality=(ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
+    // AUTO (the default since v86) is not a preset of its own: it is a preset
+    // plus the frame-rate chip. Its current preset is remembered separately,
+    // so a phone that stepped down once does not start back at Ultra and ask
+    // again every session; picking Auto from the gear menu starts it on Ultra.
+    const QUALITY_AUTO_LEVEL_KEY = 'birbQualityAutoLevel';
+    function readQualityRaw() {
+      const fromUrl = (/[?&]quality=(auto|ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
       let saved = null;
       try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
       return fromUrl || saved || null;
+    }
+    /** True when this load runs the Auto setting: `?quality=auto`, a saved 'auto', or nothing chosen at all. */
+    function readQualityAutoChoice() {
+      const raw = readQualityRaw();
+      return raw === null || raw === 'auto';
+    }
+    function readQualityPresetChoice() {
+      const raw = readQualityRaw();
+      if (raw !== null && raw !== 'auto') return raw;
+      let level = null;
+      try { level = window.localStorage?.getItem(QUALITY_AUTO_LEVEL_KEY); } catch (_) { level = null; }
+      return /^(ultra|amazing|okay|light)$/.test(level || '') ? level : null;
     }
 
     // The render tier the boot will SETTLE on, known before adaptiveTier
@@ -9579,6 +9668,7 @@
         fpsMetric.textContent = Math.max(0, Math.round(fps)).toString().padStart(2, "0");
       }
       adaptiveTier.sampleFps(fps, time);
+      if (qualityAutoMode && perfAdvisor.sample(fps, time, pauseReason === null)) syncPerfChip();
     }
 
     // ============ ADAPTIVE QUALITY TIER ============
@@ -13660,10 +13750,17 @@
     // the bird build, which needs the boot preset before this point.
     let qualityPresetIndex = 0; // Ultra — see restoreQualityPreset()
 
-    function applyQualityPreset(index, { persist = true } = {}) {
+    // AUTO GRAPHICS. `auto: true` keeps the Auto setting on (its chip watches
+    // the frame rate and offers the step down); every other caller — the gear
+    // menu's fixed presets, the panel's strip, `__BIRB.qualityPreset` — is a
+    // manual choice and turns Auto off. Auto never changes the preset by
+    // itself: the player decides, from the chip.
+    function applyQualityPreset(index, { persist = true, auto = false } = {}) {
       const i = ((index % QUALITY_PRESETS.length) + QUALITY_PRESETS.length) % QUALITY_PRESETS.length;
       const preset = QUALITY_PRESETS[i];
       qualityPresetIndex = i;
+      qualityAutoMode = auto;
+      perfAdvisor.reset();
       qualityDprCap = preset.dprCap;
       // 1. The true before. Every override null, every lever at its shipping
       //    value, the tier handed back to the controller, mode AUTO. Cheap
@@ -13690,20 +13787,65 @@
       for (const [key, value] of preset.levers()) {
         qualitySettings.request({ source: src, key, value });
       }
-      if (qualityLabelEl) qualityLabelEl.textContent = preset.label;
-      if (settingsQualityButton) settingsQualityButton.setAttribute('title', preset.hint);
+      if (qualityLabelEl) qualityLabelEl.textContent = auto ? `Auto · ${preset.label}` : preset.label;
+      if (settingsQualityButton) {
+        settingsQualityButton.setAttribute('title', auto
+          ? `Auto: starts at the best look and offers a step down if the frame rate sags. Now ${preset.label}.`
+          : preset.hint);
+      }
       if (persist) {
         // A private window or blocked site data throws here; a remembered
         // preference is a convenience and must never be able to break boot.
-        try { window.localStorage?.setItem(QUALITY_STORAGE_KEY, preset.id); } catch (_) { /* ignore */ }
+        try {
+          window.localStorage?.setItem(QUALITY_STORAGE_KEY, auto ? 'auto' : preset.id);
+          if (auto) window.localStorage?.setItem(QUALITY_AUTO_LEVEL_KEY, preset.id);
+        } catch (_) { /* ignore */ }
       }
+      syncPerfChip();
       return preset;
+    }
+
+    /**
+     * The chip reflects perfAdvisor's level. Called only when that level (or
+     * the preset) changes — never per frame. Shown only under Auto, and only
+     * while there is a lighter preset left to offer.
+     */
+    function syncPerfChip() {
+      if (!perfChipEl) return;
+      const level = perfAdvisor.getLevel();
+      const next = nextLighterPreset(qualityPresetIndex, QUALITY_PRESETS.length);
+      const show = qualityAutoMode && level !== PERF_LEVELS.OK && next >= 0;
+      perfChipEl.hidden = !show;
+      if (!show) return;
+      const bad = level === PERF_LEVELS.BAD;
+      perfChipEl.classList.toggle('perf-chip--bad', bad);
+      if (perfChipTitleEl) perfChipTitleEl.textContent = bad ? 'Frame rate struggling' : 'Frame rate dipping';
+      if (perfChipActionEl) perfChipActionEl.textContent = `Tap for ${QUALITY_PRESETS[next].label}`;
+      perfChipEl.setAttribute('aria-label',
+        `${bad ? 'Frame rate struggling' : 'Frame rate dipping'}. Lower graphics to ${QUALITY_PRESETS[next].label}.`);
+    }
+
+    function stepQualityDownFromChip() {
+      const next = nextLighterPreset(qualityPresetIndex, QUALITY_PRESETS.length);
+      if (!qualityAutoMode || next < 0) { syncPerfChip(); return; }
+      const preset = applyQualityPreset(next, { auto: true });
+      if (statusMetric) statusMetric.textContent = `Graphics lowered to ${preset.label}. Still on Auto.`;
+    }
+    if (perfChipEl) {
+      perfChipEl.addEventListener('click', (event) => {
+        // The chip sits over the canvas: its tap must not also reach the
+        // flight controls or the start/resume handlers underneath.
+        event.stopPropagation();
+        stepQualityDownFromChip();
+      });
+      perfChipEl.addEventListener('pointerdown', (event) => event.stopPropagation());
+      perfChipEl.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
     }
 
     /** What the gear menu, the panel strip and the debug hook all report. */
     function readQualityPresetState() {
       const p = QUALITY_PRESETS[qualityPresetIndex];
-      return { id: p.id, index: qualityPresetIndex, label: p.label };
+      return { id: p.id, index: qualityPresetIndex, label: p.label, auto: qualityAutoMode };
     }
 
     function restoreQualityPreset() {
@@ -13730,7 +13872,7 @@
       // it is two taps to undo from the gear menu (or one on the panel's
       // strip), which is why it is an acceptable default and would not be an
       // acceptable hard-coding.
-      applyQualityPreset(found >= 0 ? found : 0, { persist: false });
+      applyQualityPreset(found >= 0 ? found : 0, { persist: false, auto: readQualityAutoChoice() });
     }
 
     // ---- Flight model toggle -------------------------------------------
@@ -13925,7 +14067,11 @@
 
     if (settingsQualityButton) {
       settingsQualityButton.addEventListener('click', () => {
-        applyQualityPreset(qualityPresetIndex + 1);
+        // Auto -> Ultra -> Amazing -> Okay -> Light -> Auto. Arriving at Auto
+        // starts it on the best look, which is the whole idea of it.
+        if (qualityAutoMode) applyQualityPreset(0);
+        else if (qualityPresetIndex === QUALITY_PRESETS.length - 1) applyQualityPreset(0, { auto: true });
+        else applyQualityPreset(qualityPresetIndex + 1);
         // Repaint behind the semi-transparent settings overlay so the change
         // is visible while the panel is still open, the way the environment
         // toggle already does.
@@ -15709,7 +15855,18 @@
         // applies (without persisting) and reads back. Reads EFFECTIVE values
         // through panelGetControlState, never the preset table — a preset that
         // did not reach the renderer must report as not having reached it.
+        // Auto graphics' chip. `perfAdvisor()` reads the judge's state;
+        // `perfAdvisor('warn'|'bad'|'ok')` pins a level so the chip can be
+        // photographed (it shows only under Auto), `perfAdvisor(null)` releases.
+        perfAdvisor: (level) => {
+          if (level !== undefined) { perfAdvisor.force(level); syncPerfChip(); }
+          return { ...perfAdvisor.snapshot(), auto: qualityAutoMode, chipVisible: !!perfChipEl && !perfChipEl.hidden };
+        },
         qualityPreset: (id) => {
+          if (id === 'auto') {
+            applyQualityPreset(0, { persist: false, auto: true });
+            id = undefined;
+          }
           if (id !== undefined && id !== null) {
             const idx = typeof id === 'number' ? id : QUALITY_PRESETS.findIndex((p) => p.id === id);
             if (idx < 0) return { error: `unknown preset ${id}`, presets: QUALITY_PRESETS.map((p) => p.id) };

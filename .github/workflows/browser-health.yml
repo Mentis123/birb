@@ -94,6 +94,14 @@ jobs:
         # SwiftShader an Ultra frame is 2.6 s (docs/perf/gates/G-ULTRA-DEFAULT.md).
         run: node tools/birb-default.mjs
 
+      - name: Auto graphics raises its chip by itself and steps down one preset on a tap
+        if: ${{ !cancelled() }}
+        # A fresh boot is Auto on Ultra; SwiftShader's frame rate raises the
+        # chip from real samples (never forced); a tap steps exactly one
+        # preset down, stays Auto and is remembered; a manual preset or Light
+        # leaves no chip. Any console warning fails it.
+        run: node tools/birb-auto-quality.mjs
+
       - name: Game starts and is actually playable
         if: ${{ !cancelled() }}
         # Asserts a rendered frame AND that the nesting and collectibles

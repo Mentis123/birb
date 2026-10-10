@@ -54,7 +54,10 @@
 // Bumped for the picker's review fixes: species-bird.js, feather-textures.js,
 // plumage.js and flight-audio.js changed, and wing-tip.js (the ribbon anchor
 // on the drawn wingtip) joins CORE_ASSETS as the eleventh species module.
-const CACHE_VERSION = 'v85-2026-10-08-species-fixes';
+//
+// Bumped for Auto graphics: src/game/perf-advisor.js (the frame-rate chip's
+// judge) is a static boot-path import and joins CORE_ASSETS.
+const CACHE_VERSION = 'v86-2026-10-10-auto-graphics';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -169,6 +172,7 @@ const CORE_ASSETS = [
   './src/game/frame-stats.js',
   './src/game/gpu-timer.js',
   './src/game/quality-settings.js',
+  './src/game/perf-advisor.js',
   './src/game/perf-constants.js',
   './src/camera/camera-state.js',
   './src/camera/follow-camera.js',
