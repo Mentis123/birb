@@ -3826,6 +3826,11 @@
       // and only when the resolved species is not birb.
       var { resolveSpecies, writeSavedSpecies, nextSpecies, SPECIES_LABELS } =
         await import("./src/flight/species/species-select.js");
+      // How a bird is replaced (stage, then commit) and the re-LOD's retry
+      // gate: pure, small, and on every boot, since a swap FROM the Pionus
+      // goes through it too.
+      var { createBirdTransaction, createRetierGate } =
+        await import("./src/flight/species/bird-transaction.js");
       // Clouds with volume (?cloudvol=0 is the before). Already loaded by
       // spherical-world.js; imported here for the bird's share of it.
       var { cloudVolumeRequested, addCloudShadow, setCloudFocusObject, captureCloudFogBase } =
@@ -3840,8 +3845,9 @@
       var { ParticleSystem } = await import("./src/effects/particles.js");
       var { createContactShadow } = await import("./src/effects/contact-shadow.js");
       // The bird's sun shadow as three analytic ellipsoids (?birdshadow=0),
-      // and the horizon-map readback for __BIRB.horizon (?horizon=0).
-      var { createBirdShadowDriver, birdShadowRequested } = await import("./src/effects/bird-shadow.js");
+      // the bird's own shadow-MAP depth materials (prepareBirbModel), and the
+      // horizon-map readback for __BIRB.horizon (?horizon=0).
+      var { createBirdShadowDriver, birdShadowRequested, isolateBirdShadowDepth } = await import("./src/effects/bird-shadow.js");
       var { setHorizonStrength, horizonReadiness, horizonUniforms } = await import("./src/environment/horizon-shadow.js");
       var { createFrameSampler, createIntervalRecorder } = await import("./src/game/frame-metrics.js");
       var { sunDirectionAt, sunWarmth } = await import("./src/environment/sun-cycle.js");
@@ -4043,7 +4049,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v86-2026-10-10-auto-graphics';
+    const BIRB_BUILD = 'v87-2026-10-11-species-final';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -7566,6 +7572,14 @@
           child.receiveShadow = false;
         }
       });
+      // The bird's shadow-map depth pass draws with depth materials the bird
+      // owns (bird-shadow.js isolateBirdShadowDepth): three's ONE shared depth
+      // material keeps the last caster's `map` in its uniform, and once a
+      // swapped-out bird's feather sheet or species tile was disposed, the
+      // next shadow pass re-uploaded it and leaked it — two textures per
+      // picker round with the shadows lever on. Set on every bird whatever
+      // the lever, because the lever only flips castShadow.
+      isolateBirdShadowDepth(THREE, model);
 
       model.updateMatrixWorld(true);
 
@@ -9324,8 +9338,10 @@
     // ONE generator (sharedBirdPmrem): a swap or a re-LOD allocates only the
     // new probe's cube target, and disposing a probe releases exactly that. A
     // probe that fails half-way is disposed here, and the bird keeps its
-    // lights only, as before.
-    const makeBirdSky = (materials, label) => {
+    // lights only, as before. bakeBirdSky THROWS (the bird transaction decides
+    // what a failed sky means, and warns); makeBirdSky, for the boot, warns and
+    // returns null itself.
+    const bakeBirdSky = (materials) => {
       if (!materials || !materials.length) return null;
       let env = null;
       try {
@@ -9335,18 +9351,26 @@
         return env;
       } catch (err) {
         if (env) { try { env.dispose(); } catch (_) { /* half-made */ } }
+        throw err;
+      }
+    };
+    const makeBirdSky = (materials, label) => {
+      try {
+        return bakeBirdSky(materials);
+      } catch (err) {
         console.warn(label, err);
         return null;
       }
     };
+    const PIONUS_SKY_WARNING = '[plumage] bird sky failed; the feathers keep their lights only';
+    const SPECIES_SKY_WARNING = '[species] bird sky failed; the bird keeps its lights only';
     // The v3 bird's sky. v1/v2 never set plumageMaterials: they are A/B
     // builds, frozen at what they were judged as.
-    const makePionusSky = (model) => {
+    const pionusSkyMaterials = (model) => {
       const plumageMaterials = model?.userData?.plumageMaterials;
-      return plumageMaterials
-        ? makeBirdSky([plumageMaterials.contour, plumageMaterials.vane], '[plumage] bird sky failed; the feathers keep their lights only')
-        : null;
+      return plumageMaterials ? [plumageMaterials.contour, plumageMaterials.vane] : null;
     };
+    const makePionusSky = (model) => makeBirdSky(pionusSkyMaterials(model), PIONUS_SKY_WARNING);
 
     // The authored feather sheets, on the v3 bird only (its UVs tile in
     // surface units for exactly this; Phase 0's inherited generator UVs do
@@ -9385,49 +9409,66 @@
     };
 
     // ---- Bird transactions: STAGE, then COMMIT -----------------------------
-    // The bird picker and the per-tier LOD change the bird the same way.
-    // STAGE builds the incoming bird COMPLETE and OFF the anchor: its model,
-    // the per-mesh preparation positionBirbModel does, its sky probe, and for
-    // the Pionus its authored feathers and its rim handles. If any of that
-    // throws, everything staged is disposed and the error goes back to the
-    // caller with the outgoing bird untouched. COMMIT then cannot fail: it
-    // swaps the model on the anchor, hands the live references over and only
-    // THEN tears the outgoing bird down — so the refcounted feather textures
-    // the two crows/owls share never reach zero mid-swap. Neither runs inside
+    // The bird picker and the per-tier LOD change the bird the same way,
+    // through src/flight/species/bird-transaction.js (where the rules live,
+    // tested against fakes in tests/species-transaction.test.js); the hooks
+    // below are this page's half. STAGE builds the incoming bird COMPLETE and
+    // OFF the anchor: its model, the per-mesh preparation positionBirbModel
+    // does, its sky probe, and for the Pionus its authored feathers and its
+    // rim handles. If any of that throws, everything staged is disposed and
+    // the error goes back to the caller with the outgoing bird untouched (a
+    // failed sky alone keeps the bird on its lights, with one warning, as at
+    // boot). COMMIT swaps the model on the anchor — a mount that throws is
+    // unwound the same way — hands the live references over and only THEN
+    // tears the outgoing bird down, so the refcounted feather textures the
+    // two crows/owls share never reach zero mid-swap. Past the mount, the
+    // teardown, the audio switch and syncSwappedBird are each guarded: a
+    // throw there warns and the new bird flies on. Neither runs inside
     // renderFrame: a swap is a click, a re-LOD a deferred task.
-    let speciesStageFault = false;
+    //
+    // The Pionus builders push their rim handles straight into the shared
+    // birbRimUniforms (the biome switch retints from it). Staged, they are
+    // lifted out and the outgoing bird's handles put back until commit.
+    let rimBeforeStage = [];
     const stageBird = (id, quality) => {
-      const staged = { species: id, quality: id === 'birb' ? null : quality, sb: null, model: null, env: null, feathers: null, rim: null };
-      // The Pionus builders push their rim handles straight into the shared
-      // birbRimUniforms (the biome switch retints from it). Staged, they are
-      // lifted out and the outgoing bird's handles put back until commit.
-      const rimBefore = birbRimUniforms.slice();
-      try {
-        if (id === 'birb') {
+      rimBeforeStage = birbRimUniforms.slice();
+      return birdTransaction.stage(id, quality);
+    };
+    const birdTransaction = createBirdTransaction({
+      build: (staged) => {
+        if (staged.species === 'birb') {
           staged.model = makePionusModel();
-          staged.rim = birbRimUniforms.filter((u) => rimBefore.indexOf(u) < 0);
+          staged.rim = birbRimUniforms.filter((u) => rimBeforeStage.indexOf(u) < 0);
           prepareBirbModel(staged.model);
-          staged.env = makePionusSky(staged.model);
-          staged.feathers = makePionusFeathers(staged.model);
         } else {
-          staged.sb = makeSpeciesBird(id, quality);
+          staged.sb = makeSpeciesBird(staged.species, staged.quality);
           staged.model = staged.sb.model;
           prepareBirbModel(staged.model);
-          staged.env = makeBirdSky(staged.sb.envMaterials, '[species] bird sky failed; the bird keeps its lights only');
         }
-        if (speciesStageFault) { speciesStageFault = false; throw new Error('injected stage fault (__BIRB.speciesFault)'); }
-      } catch (err) {
-        if (staged.feathers) { try { staged.feathers(); } catch (_) { /* unwinding */ } }
-        if (staged.env) { try { staged.env.dispose(); } catch (_) { /* unwinding */ } }
-        if (staged.sb) { try { staged.sb.dispose(); } catch (_) { /* unwinding */ } }
-        else if (staged.model) { try { disposeBirdObject(staged.model); } catch (_) { /* unwinding */ } }
-        throw err;
-      } finally {
+      },
+      sky: (staged) => bakeBirdSky(staged.sb ? staged.sb.envMaterials : pionusSkyMaterials(staged.model)),
+      skyWarning: (staged) => (staged.sb ? SPECIES_SKY_WARNING : PIONUS_SKY_WARNING),
+      feathers: (staged) => (staged.sb ? null : makePionusFeathers(staged.model)),
+      settle: () => {
         birbRimUniforms.length = 0;
-        for (const u of rimBefore) birbRimUniforms.push(u);
-      }
-      return staged;
-    };
+        for (const u of rimBeforeStage) birbRimUniforms.push(u);
+      },
+      outgoing: () => ({ sb: speciesBird, model: birbAnchor.children[0] || null, env: birbPlumageEnv, feathers: __birbFeatherDisposer }),
+      mount: (model) => mountBirbModel(model),
+      mounted: () => birbAnchor.children[0] || null,
+      handover: (staged) => {
+        speciesBird = staged.sb;
+        birbPlumageEnv = staged.env;
+        __birbFeatherDisposer = staged.feathers;
+        birbRimUniforms.length = 0;
+        if (staged.rim) for (const u of staged.rim) birbRimUniforms.push(u);
+        birbSpecies = staged.species;
+      },
+      disposeModel: (model) => disposeBirdObject(model),
+      audio: (species) => flightAudio?.setSpecies?.(species),
+      sync: () => syncSwappedBird(),
+      warn: (message, err) => console.warn(message, err),
+    });
     // What a freshly mounted bird must inherit from the running game: the
     // shadow lever (positionBirbModel turns casting off; only the lever turns
     // it back on), and the biome's rim tint for a rebuilt Pionus. Reads
@@ -9440,30 +9481,9 @@
       // A swap costs a build and a compile: not a frame-rate signal.
       frameSampler.reset();
     };
-    const commitBird = (staged) => {
-      const outSb = speciesBird;
-      const outModel = birbAnchor.children[0] || null;
-      const outEnv = birbPlumageEnv;
-      const outFeathers = __birbFeatherDisposer;
-      mountBirbModel(staged.model);
-      speciesBird = staged.sb;
-      birbPlumageEnv = staged.env;
-      __birbFeatherDisposer = staged.feathers;
-      birbRimUniforms.length = 0;
-      if (staged.rim) for (const u of staged.rim) birbRimUniforms.push(u);
-      birbSpecies = staged.species;
-      // The outgoing bird, now off the anchor: its sky, then its model (the
-      // species bird's own dispose, or the Pionus's geometry, materials and
-      // authored feather sheets).
-      if (outEnv) { try { outEnv.dispose(); } catch (_) { /* already gone */ } }
-      if (outSb) outSb.dispose();
-      else if (outModel) {
-        if (outFeathers) outFeathers();
-        disposeBirdObject(outModel);
-      }
-      flightAudio?.setSpecies?.(birbSpecies);
-      syncSwappedBird();
-    };
+    // Throws only if the mount did, with the outgoing bird back on the anchor
+    // and everything staged disposed.
+    const commitBird = (staged) => birdTransaction.commit(staged);
 
     // Bumped from `birbQuality` when the default moved to Ultra. A stored
     // preference from before that change would otherwise silently defeat the
@@ -9513,6 +9533,11 @@
     // own first call if a request came earlier.
     let runSpeciesRetier = null;
     let speciesRetierQueued = false;
+    // A re-LOD that FAILED is not retried for that same species and tier — it
+    // would fail the same way on every wobble of the tier — but nothing else
+    // is held back: another tier asked for, a picker click or a quality-preset
+    // change tries again (bird-transaction.js createRetierGate).
+    const speciesRetierGate = createRetierGate();
     const scheduleSpeciesRetier = () => {
       if (!speciesBird || speciesRetierQueued) return;
       speciesRetierQueued = true;
@@ -9535,7 +9560,7 @@
         sb = makeSpeciesBird(birbSpecies, speciesModule.speciesTierFor(adaptiveTierReadout()));
         positionBirbModel(sb.model);
         speciesBird = sb;
-        birbPlumageEnv = makeBirdSky(sb.envMaterials, '[species] bird sky failed; the bird keeps its lights only');
+        birbPlumageEnv = makeBirdSky(sb.envMaterials, SPECIES_SKY_WARNING);
       } catch (err) {
         console.warn('[species] could not build the ' + birbSpecies + '; flying the Pionus', err);
         // A SAVED choice that cannot build is forgotten, so this warning is
@@ -13776,6 +13801,9 @@
       //    a phone is never.
       if (preset.tier !== null) adaptiveTier.pin(preset.tier);
       updateRendererSize(true);
+      //    A preset is the player's choice: a crow/owl re-LOD that failed
+      //    may try again, even if this preset leaves the tier where it was.
+      if (speciesRetierGate.reset()) scheduleSpeciesRetier();
       // 3. The levers, through the panel's own request path — CONTRACT §7.1
       //    says shadow state (and the rest) changes by that path and no other,
       //    and a boot-time poke at shadowsSetEnabled would be the per-frame-
@@ -13997,6 +14025,10 @@
     const setBirdSpecies = async (id, { persist = true } = {}) => {
       try {
         if (id !== 'birb' && id !== 'crow' && id !== 'owl') return birbSpecies;
+        // A player's action: a re-LOD that failed earlier may try again (a
+        // swap builds at the live tier anyway; re-choosing the bird that is
+        // flying retries its LOD).
+        if (speciesRetierGate.reset()) scheduleSpeciesRetier();
         const token = ++speciesSwapToken;
         if (id === birbSpecies) {
           if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
@@ -14010,7 +14042,6 @@
         }
         const staged = stageBird(id, id === 'birb' ? null : speciesModule.speciesTierFor(adaptiveTierReadout()));
         commitBird(staged);
-        speciesRetierFailed = false;
         // Saved only once the new bird has mounted: a failed import or build
         // never leaves a choice behind that warns on every later boot.
         if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
@@ -14026,11 +14057,15 @@
     // never inside renderFrame, where the sampler's downshift is decided. The
     // whole next frame then poses and draws the rebuilt bird. Same
     // transaction as a swap: new bird staged first, old torn down second.
-    let speciesRetierFailed = false;
+    // A failure blocks only ITS request (speciesRetierGate, by the bird
+    // build): it used to stop every later re-LOD until the next swap.
     const speciesRetierLog = [];
     runSpeciesRetier = () => {
-      if (!speciesBird || !speciesModule || speciesRetierFailed) return;
+      if (!speciesBird || !speciesModule) return;
       const want = speciesModule.speciesTierFor(adaptiveTierReadout());
+      // Asked BEFORE the no-change test: a tier that moves away from the
+      // failed one, even back to the bird's own, lifts the block.
+      if (!speciesRetierGate.allows(speciesBird.species, want)) return;
       if (want === speciesBird.quality) return;
       // The last few re-LODs, for __BIRB.speciesInfo() (a lifecycle event,
       // never a per-frame write).
@@ -14039,7 +14074,7 @@
       try {
         commitBird(stageBird(speciesBird.species, want));
       } catch (err) {
-        speciesRetierFailed = true;
+        speciesRetierGate.failed(speciesBird.species, want);
         console.warn('[species] re-LOD failed; keeping the ' + speciesBird.quality + ' bird', err);
       }
     };
@@ -15573,6 +15608,9 @@
           // crow/owl alive), and the renderer's GPU object counts.
           builds: speciesBuilds,
           retiers: speciesRetierLog.slice(),
+          // The one re-LOD request a failure has blocked ({ species, tier }),
+          // or null.
+          retierBlocked: speciesRetierGate.blocked(),
           mech: speciesBird && speciesBird.mech
             ? { gear: speciesBird.mech.gear.rotation.y, key: speciesBird.mech.key.rotation.y } : null,
           textureRefs: speciesModule ? speciesModule.featherTextureRefs(THREE) : 0,
@@ -15582,10 +15620,14 @@
             programs: renderer.info.programs ? renderer.info.programs.length : null,
           },
         }),
-        // Fault injection for the swap's failure path (harness only): the
-        // next stageBird throws once everything is staged, so the unwind must
-        // dispose all of it and the outgoing bird must keep flying.
-        speciesFault: (on = true) => { speciesStageFault = !!on; return speciesStageFault; },
+        // Fault injection for the swap's failure paths (harness only): the
+        // next bird transaction throws ONCE at the named stage — 'stage' (once
+        // everything is staged; also `true`), 'sky', 'feathers', 'mount',
+        // 'dispose' (once the outgoing teardown has run), 'audio', 'sync'.
+        // Before the mount the outgoing bird must keep flying with all of the
+        // staged one disposed; from the mount on the new bird must fly, with
+        // one warning. `false`/null disarms. Returns what is armed.
+        speciesFault: (stage = 'stage') => birdTransaction.fault(stage === true ? 'stage' : stage === false ? null : stage),
         // Tune the live crow/owl without a rebuild (the look knobs exposed as
         // constants in species-bird.js): envIntensity, sheen, iridescence,
         // roughness, rim, shadeNeutral, shadeFloor, specNeutral, metalNeutral.

@@ -200,23 +200,59 @@ export function speciesTierFor(renderTier) {
 }
 
 /**
+ * What every root tier of both birds drops because nothing on screen shows it
+ * (the builders' root-only LOD keys; Gauntlet's own tables leave them off):
+ *   minTriArea  1e-6 (bird units squared): the zero-area triangles the lathe
+ *               leaves at every ellipsoid pole, every feather plate's
+ *               collapsed tip row and the rivet domes' 0.1 mm tip rings
+ *               (mesh-kit.js dropSlivers). They rasterise nothing.
+ *   legLean     the standing legs' toes (and the owl's collar and ankle) at
+ *               3 (5, 4x3) sides: in flight the gear is retracted to 30%
+ *               under the belly (the look check found a 2-3 px row of it at
+ *               the chase distance); on the ground a toe is a pixel or two
+ *               across.
+ * And on the owl:
+ *   gearRimRoots  the gears' flat rim face rebuilt from 6 triangles a tooth
+ *                 instead of 8 (gears.js), the outline and plane unchanged.
+ *   dropHidden    0.7: the body and head triangles buried inside the two
+ *                 closed shells (owl.js dropOwlHidden).
+ * (`discInner: false`, the facial dish's centre under the eye, is NOT used:
+ * the deterministic look check showed it through the gap under the eye's
+ * bezel in a 3/4 front view.)
+ */
+const ROOT_CLEAN = Object.freeze({ minTriArea: 1e-6, legLean: true });
+const OWL_CLEAN = Object.freeze(Object.assign({ gearRimRoots: true, dropHidden: 0.7 }, ROOT_CLEAN));
+
+/**
  * The owl's root-game mid mesh: Gauntlet's mid with the gear tooth walls,
  * the wing train on the arm coverts (552 of the triangles, two wings), some
- * rivets, a breast column and a few plates dropped: ~3.4k triangles with legs
- * instead of 5.0k. The back train in the bay — the one the chase camera
- * looks down on — keeps all three gears and every tooth, and turns with the
- * wingbeat.
+ * rivets, a breast column and a few plates dropped. The back train in the
+ * bay — the one the chase camera looks down on — keeps all three gears and
+ * every tooth, and turns with the wingbeat.
+ *
+ * Trimmed again for frame headroom (3,461 -> 2,88x triangles; the Ultra
+ * forest spawn measured 73.3-75.1k without the bird): OWL_CLEAN, plus two
+ * segment counts the chase camera cannot resolve — 3-sided rivet domes and
+ * 4-sided gear hubs, each ~2 px across there. Every part Gauntlet's mid
+ * draws is still drawn, at its own size and place.
  */
-export const OWL_ROOT_MID = Object.freeze({
+export const OWL_ROOT_MID = Object.freeze(Object.assign({
   gearWalls: false, wingGears: false, seamRivets: 3, discRivets: 3, breast: Object.freeze([2, 3]), eyeSegs: 10,
   tail: 5, tCoverts: 2, primaries: 7, secondaries: 5, gCoverts: 5, blades: 4,
-  discSegs: 12, headSegs: 14, bodySegs: 14, legSegs: 4, plateSegs: 2, keySegs: 6, perTooth: 3, hubSegs: 5,
-});
+  discSegs: 12, headSegs: 14, bodySegs: 14, legSegs: 4, plateSegs: 2, keySegs: 6, perTooth: 3, hubSegs: 4,
+  rivetSegs: 3,
+}, OWL_CLEAN));
+
+/** The owl's low tier: Gauntlet's low with only what is never seen dropped. */
+export const OWL_ROOT_LOW = OWL_CLEAN;
+
+/** The crow, every tier: Gauntlet's mesh with only what is never seen dropped. */
+export const CROW_ROOT = ROOT_CLEAN;
 
 /** Geometry per (species, look tier). */
 export const SPECIES_DETAIL = Object.freeze({
-  crow: Object.freeze({ high: Object.freeze({ geometry: 'mid', lod: null }), mid: Object.freeze({ geometry: 'mid', lod: null }), low: Object.freeze({ geometry: 'low', lod: null }) }),
-  owl: Object.freeze({ high: Object.freeze({ geometry: 'mid', lod: OWL_ROOT_MID }), mid: Object.freeze({ geometry: 'mid', lod: OWL_ROOT_MID }), low: Object.freeze({ geometry: 'low', lod: null }) }),
+  crow: Object.freeze({ high: Object.freeze({ geometry: 'mid', lod: CROW_ROOT }), mid: Object.freeze({ geometry: 'mid', lod: CROW_ROOT }), low: Object.freeze({ geometry: 'low', lod: CROW_ROOT }) }),
+  owl: Object.freeze({ high: Object.freeze({ geometry: 'mid', lod: OWL_ROOT_MID }), mid: Object.freeze({ geometry: 'mid', lod: OWL_ROOT_MID }), low: Object.freeze({ geometry: 'low', lod: OWL_ROOT_LOW }) }),
 });
 
 /** The pure build (no THREE): the spec the adapter uploads. The tests use it. */

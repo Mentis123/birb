@@ -47,11 +47,12 @@
 >
 > **Where it lives.** Gauntlet stays airtight, so `src/flight/species/`
 > holds PORTED copies of `gauntlet/src/bird/realistic/*`; every root change
-> in them is marked `ROOT:`. `species-select.js` (pure) is the only species
-> module on every boot. `species-bird.js` and the builders under it are a
-> LAZY import, taken only for a crow or an owl. The Pionus boot runs the
-> same calls in the same order: the builder is never fetched, and the bird
-> is still 9 draws / 1,518 tris.
+> in them is marked `ROOT:`. `species-select.js` and `bird-transaction.js`
+> (both pure, no THREE) are the only species modules on every boot.
+> `species-bird.js` and the builders under it are a LAZY import, taken only
+> for a crow or an owl. The Pionus boot runs the same calls in the same
+> order: the builder is never fetched, and the bird is still 9 draws / 1,518
+> tris.
 >
 > **The rig.** Gauntlet meshes keep their own frame (−Z forward) under a
 > −90° node; the root rig nodes are built in the ROOT frame. `leftWing` sits
@@ -96,12 +97,12 @@
 >
 > | Render tier | Materials | Crow (tris / draws) | Owl (tris / draws) |
 > |---|---|---|---|
-> | 0 | Physical | 2,722 / 7 | 3,461 / 6 (`OWL_ROOT_MID`: no wing train) |
-> | 1 | Standard | 2,722 / 7 | 3,461 / 6 |
-> | 2 | Phong | 1,690 / 6 | 2,404 / 6 |
+> | 0 | Physical | 2,604 / 7 (v84: 2,722) | 2,911 / 6 (v84: 3,461; `OWL_ROOT_MID`: no wing train) |
+> | 1 | Standard | 2,604 / 7 | 2,911 / 6 |
+> | 2 | Phong | 1,614 / 6 (v84: 1,690) | 2,080 / 6 (v84: 2,404) |
 >
-> Every tier is inside BIRD_BUDGET (8 / 4,000). Measured whole-frame peaks
-> are crow 78.3k and owl 79.4k, under 80k but with little margin.
+> Every tier is inside BIRD_BUDGET (8 / 4,000). v86 numbers after the trim
+> (see "Species final", below); the whole-frame table is there too.
 >
 > **Audio.** flight-audio.js builds a species voice lazily, so the Pionus
 > graph is untouched: owl escapement ticks plus a gear whir, and a
@@ -124,6 +125,103 @@
 >
 > Tests: `tests/species-{select,bird,audio}.test.js`. **Unmeasured: the
 > phone** (Physical crow/owl cost, the first-swap compile hitch).
+>
+> **Species final (2026-10-09, build v86).** Five defects closed, each with a
+> test that fails on the old code path.
+> - **The GPU texture leak was three's shadow pass, not our disposers.** With
+>   the shadows lever on (the Ultra default, VSM), three r183 draws every
+>   caster with ONE shared `MeshDepthMaterial` and copies `map` onto it per
+>   draw, but only rewrites the `map` uniform when the caster HAS a map. The
+>   next map-less caster (the ground, the bird's eyes and feet) bound the last
+>   bird map; after a swap that texture was already disposed, so three
+>   re-uploaded it and nothing ever freed it: +1 feather albedo (512²) and +1
+>   species tile (128²) per swap back to Birb. Fix:
+>   `isolateBirdShadowDepth` (src/effects/bird-shadow.js), called from
+>   `prepareBirbModel`, gives every bird mesh its own `customDepthMaterial`
+>   (one per source material, disposed by that material's `dispose` event), so
+>   the shared depth program never samples a bird texture. Same pixels
+>   (A/B in one frozen frame: 0 of 1,316,640 differ). Proof: 10 rounds of
+>   crow→owl→Birb and of crow↔Birb hold textures/geometries/programs at
+>   25 / 34 / 33 EVERY round (were 27, 29 … 47 and 49 … 69; the base level
+>   is the boot's world, e.g. 25 / 36 / 35 on another boot, flat all the same).
+>   `tests/species-gpu-leak.test.js`, `tools/species-lifecycle-check.mjs
+>   --only leak --rounds 10`. Any other code that disposes a texture while it
+>   may still be a shadow caster's `map` has the same hazard. The source ↔
+>   depth pairing lives in module WeakMaps, never in `userData` (the final
+>   review: there it was a cycle, and three's `material.clone()`/`toJSON()`
+>   serialise userData, so cloning any prepared bird material or the Pionus
+>   model threw).
+> - **The swap is a transaction module** (`src/flight/species/
+>   bird-transaction.js`, pure; index.html supplies the hooks). Any failure
+>   BEFORE the anchor swap (build, feathers, the mount itself) disposes all
+>   that was staged, puts the old model back if the mount got that far, and
+>   keeps the saved choice. From the swap on the new bird IS the bird: the
+>   outgoing teardown (each piece tried even if one throws), the audio switch
+>   and the sync are each guarded (one warning, the commit goes on). A failed
+>   sky is still lights-only plus one warning. `__BIRB.speciesFault(stage)`
+>   arms one throw at 'stage' | 'sky' | 'feathers' | 'mount' | 'dispose' |
+>   'audio' | 'sync'. Tests: `tests/species-transaction.test.js` (every
+>   stage, four routes) and the `failure` section of the lifecycle check.
+> - **A failed re-LOD only blocks itself**: `createRetierGate` blocks the
+>   failed (species, tier); a change of requested tier, a picker click /
+>   `setSpecies`, or a quality preset retries. `speciesInfo().retierBlocked`.
+> - **`sharedBirdPmrem`** disposes (and does not cache) a generator whose
+>   `compileEquirectangularShader()` throws; the next call tries again.
+> - **The audio `cut()` never steps**: `cancelAndHoldAtTime(now)` where it
+>   exists, else read `.value`, cancel, `setValueAtTime(value)`, then decay.
+>   `tests/species-audio-cut.test.js` models the ramps (attack and decay,
+>   both code paths). `envelope()`/`triggerWhoosh()` still use the old
+>   fallback order (harmless in Chrome, untested on old Safari).
+>
+> **Trim.** Only invisible geometry, root-only options in the ported
+> builders (Gauntlet's tables untouched): zero-area triangles, gear rims at 6
+> tris a tooth, triangles wholly buried inside another shell, 3-sided toes,
+> and on owl high/mid 3-sided rivets and 4-sided hubs. A deterministic
+> builder render (fixed light, pose, no clock; 10 views × 3 tiers × flying
+> and standing) shows the only differences: rivet/hub glints, a few px of
+> tucked toes, and the standing legs. The "red/green lights" in the earlier
+> compare were bloomed brass rivet glints under a different random world and
+> sun, i.e. a harness artefact.
+>
+> **Whole-frame budget** (`tools/species-frame-budget.mjs`: renderer.info
+> summed over every pass of a frame, species × Ultra/Okay/Light × forest,
+> boost, tumble, city, mountain; exits 1 on a breach or any console
+> message; serves its own frozen copy of the tree, because index.html reloads
+> on a new service worker). Ultra, v86 (v84 in brackets):
+>
+> | Ultra | Pionus | Crow | Owl |
+> |---|---|---|---|
+> | Forest, fixed world seed | 76,138 | 77,224 | 77,531 |
+> | Forest spawn, random world | 79,000 (75,892) | 78,870 (76,554) | 77,861 (78,533) |
+> | Boost | 76,436 (76,508) | 77,130 (77,170) | 77,829 (79,149) |
+> | City / Mountain | 57.5k / 46.9k | 58.2k / 47.6k | 58.9k / 49.1k |
+>
+> Okay and Light: 29k–61.1k; draws ≤37 everywhere. **The random forest
+> world itself swings 73.3k–77.5k between boots**, so the 78k gate is held on
+> the fixed seed (where every bird fits) and the random row on 80k: the
+> Pionus alone can read 79k. That world variance is not a bird problem and is
+> open. `tests/species-budget.test.js` pins the per-bird counts.
+>
+> **Offline.** sw.js precaches every species module (CORE_ASSETS) and now
+> crawls the pinned esm.sh entry modules (`CDN_MODULES`: three@0.183.2, its
+> BufferGeometryUtils, nipplejs) into the runtime cache at install (each fetch
+> bounded at 20 s, so a stalled esm.sh cannot hold an update; a failure only
+> skips that module, never the install). Before,
+> the SW registered after the page had already fetched three itself, so one
+> online visit plus an evicted HTTP cache could not boot offline.
+> `tools/species-offline-check.mjs` (online warm-up, then CDP offline for
+> page AND worker): default, saved crow, saved owl and a first-visit boot, and
+> live swaps incl. the real Bird button, all with zero failed requests and
+> zero console messages. `tests/sw-cdn.test.js`. Not offline by design:
+> `?glb=1`, other biomes' authored textures (procedural fallback). The old
+> "504 (Offline)" errors in a v84 budget run were the SW's offline fallback
+> answering after that run's private server had stopped: a harness artefact.
+>
+> **Known limits.** `tools/species-lifecycle-check.mjs --only swaps` is not
+> world-frozen and can see programs/geometries grow by a few as drones,
+> rings and landmarks come into view (the `leak` and `failure` sections use
+> `birdStudio` and are flat). Phone cost and the first-swap compile hitch
+> remain unmeasured.
 
 > **REALISM WAVE 3 (2026-09-24): the eye adapts, water carves the ground,
 > and the reviews that session limits cut short are finished.** Both new
@@ -2809,7 +2907,10 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/collectibles.js` | Ring collection with proximity detection |
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |
-| `src/flight/species/species-select.js` | Bird picker resolution: `?bird=crow\|owl\|birb` (this load, not saved) > `localStorage['birb.species']` > birb; `?bird=v1\|v2\|v3` stays the Pionus A/B. Pure, the only species module on every boot |
+| `src/flight/species/species-select.js` | Bird picker resolution: `?bird=crow\|owl\|birb` (this load, not saved) > `localStorage['birb.species']` > birb; `?bird=v1\|v2\|v3` stays the Pionus A/B. Pure, on every boot |
+| `src/flight/species/bird-transaction.js` | The swap/re-LOD transaction (STAGE off the anchor, COMMIT, guarded teardown/audio/sync), named fault injection for `__BIRB.speciesFault(stage)`, and the per-(species, tier) re-LOD retry gate. Pure, on every boot |
+| `src/effects/bird-shadow.js` | Bird shadow helpers incl. `isolateBirdShadowDepth`: per-bird-mesh depth materials, so three's shared shadow depth material never holds (and re-uploads) a disposed bird texture |
+| `tools/species-lifecycle-check.mjs` / `species-frame-budget.mjs` / `species-offline-check.mjs` | Headless checks: picker boots/swaps/failure-per-stage/leak (10 flat rounds); whole-frame tris/draws per species × tier × scenario; offline boot + swaps through the service worker |
 | `src/flight/species/species-bird.js` | Corvus (crow) and Tock (clockwork owl) as root-game birds: Gauntlet frame under a -90° node, root-frame rig nodes (rig contract), hand/tail nodes → shader uniforms via getters, standing legs that retract, owl escapement/gears/key, LOD per render tier. Lazy import |
 | `src/flight/species/{mesh-kit,film,gears,feather-textures,crow,owl,materials}.js` | PORTED copies of `gauntlet/src/bird/realistic/*` (Gauntlet stays airtight). Root adaptations are marked `ROOT:` |
 | `docs/ULTRACODE_REALISM_PLAN.md` | How to run the realism backlog with an agent fleet: the tiering law + art corollary, the 16-wave plan, the cost model, and the blind paired forced-choice check that is the only thing able to catch a green stage that did not improve the game |

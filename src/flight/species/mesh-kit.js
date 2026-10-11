@@ -71,6 +71,96 @@ export function triangleCount(md) {
     return md.index.length / 3;
 }
 
+/**
+ * ROOT: drop the triangles that draw nothing — every one smaller than
+ * `minArea` (mesh units squared). The lathe closes a pole by collapsing a
+ * ring to a point, so an ellipsoid spends two of its rows on zero-area
+ * triangles, a feather plate's rounded tip collapses its last row the same
+ * way, and a rivet's dome ends in a ring 0.1 mm across. They rasterise no
+ * pixel and the vertex shader still pays for them: the root game's frame
+ * budget counts them. Vertices are kept (no attribute is rewritten), only
+ * the index shrinks. Returns how many were dropped. Gauntlet never calls it.
+ */
+export function dropSlivers(md, minArea) {
+    const p = md.arrays.position, idx = md.index;
+    const keep = [];
+    for (let t = 0; t < idx.length; t += 3) {
+        const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+        const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+        const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+        const area = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+        if (area >= minArea) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+    }
+    const dropped = (idx.length - keep.length) / 3;
+    md.index = keep;
+    return dropped;
+}
+
+/**
+ * ROOT: the inside of a CLOSED loft() shell, as a test: true when (x, y, z)
+ * (in the loft's frame shifted by `offset`) lies within `zMin..zMax` and
+ * within the fraction `level` of the row's superellipse (the loft's own
+ * shape: |x/w|^p + |(y - yc)/h|^p, h and p the upper or lower half's), the
+ * rows interpolated linearly as the loft is. The mesh is INSCRIBED in that
+ * shape (vertices on it, chords and seam pinches inside), so `level` well
+ * under 1 keeps the test strictly inside the drawn shell.
+ */
+export function loftInside(rows, { pTop = 2, pBot = 2, level = 0.7, zMin = -Infinity, zMax = Infinity, offset = [0, 0, 0] } = {}) {
+    const zs = rows.map((r) => r.z);
+    const lo = Math.max(Math.min(...zs), zMin), hi = Math.min(Math.max(...zs), zMax);
+    const asc = rows.slice().sort((a, b) => a.z - b.z);
+    return (px, py, pz) => {
+        const x = px - offset[0], y = py - offset[1], z = pz - offset[2];
+        if (!(z > lo && z < hi)) return false;
+        let i = 0;
+        while (i < asc.length - 2 && z > asc[i + 1].z) i++;
+        const a = asc[i], b = asc[i + 1];
+        const t = b.z === a.z ? 0 : (z - a.z) / (b.z - a.z);
+        const L = (k) => (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t;
+        const dy = y - L('y');
+        const up = dy >= 0;
+        const p = up ? pTop : pBot;
+        const f = Math.pow(Math.abs((x - L('x')) / L('w')), p) + Math.pow(Math.abs(dy / L(up ? 't' : 'b')), p);
+        return f < level;
+    };
+}
+
+/**
+ * ROOT: drop every triangle that lies wholly inside a closed volume — part of
+ * the SAME rigid model that can never be seen through (a head shell's back
+ * sunk into the body, the body's front under the head, a bezel's skirt and
+ * the plates' roots buried in the shell). A triangle goes only when its three
+ * corners, its edge midpoints and its centroid all test inside one of
+ * `insides`, and none of its corners is `moving(i)` (a vertex the shader
+ * moves: a spinning gear or key, the tail deformer), so what is dropped
+ * stays buried in every pose. Vertices are kept; only the index shrinks.
+ */
+export function dropInside(md, insides, moving = null) {
+    const p = md.arrays.position, idx = md.index;
+    const keep = [];
+    for (let t = 0; t < idx.length; t += 3) {
+        const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
+        let hidden = !(moving && (moving(i0) || moving(i1) || moving(i2)));
+        if (hidden) {
+            const a = i0 * 3, b = i1 * 3, c = i2 * 3;
+            const pts = [
+                [p[a], p[a + 1], p[a + 2]], [p[b], p[b + 1], p[b + 2]], [p[c], p[c + 1], p[c + 2]],
+                [(p[a] + p[b]) / 2, (p[a + 1] + p[b + 1]) / 2, (p[a + 2] + p[b + 2]) / 2],
+                [(p[b] + p[c]) / 2, (p[b + 1] + p[c + 1]) / 2, (p[b + 2] + p[c + 2]) / 2],
+                [(p[c] + p[a]) / 2, (p[c + 1] + p[a + 1]) / 2, (p[c + 2] + p[a + 2]) / 2],
+                [(p[a] + p[b] + p[c]) / 3, (p[a + 1] + p[b + 1] + p[c + 1]) / 3, (p[a + 2] + p[b + 2] + p[c + 2]) / 3],
+            ];
+            // One volume must hold the whole triangle: two overlapping
+            // volumes each holding part of it can leave a sliver outside both.
+            hidden = insides.some((f) => pts.every((q) => f(q[0], q[1], q[2])));
+        }
+        if (!hidden) keep.push(i0, i1, i2);
+    }
+    const dropped = (idx.length - keep.length) / 3;
+    md.index = keep;
+    return dropped;
+}
+
 // ---------------------------------------------------------------------------
 // 3x4 affine matrices (row-major, translation in [3], [7], [11])
 // ---------------------------------------------------------------------------

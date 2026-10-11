@@ -55,9 +55,12 @@
 // plumage.js and flight-audio.js changed, and wing-tip.js (the ribbon anchor
 // on the drawn wingtip) joins CORE_ASSETS as the eleventh species module.
 //
-// Bumped for Auto graphics: src/game/perf-advisor.js (the frame-rate chip's
-// judge) is a static boot-path import and joins CORE_ASSETS.
-const CACHE_VERSION = 'v86-2026-10-10-auto-graphics';
+// v86 Auto graphics: src/game/perf-advisor.js (the frame-rate chip's judge)
+// is a static boot-path import and joins CORE_ASSETS.
+// v87 species final: bird-transaction.js (on EVERY boot) joins CORE_ASSETS as
+// the twelfth species module, the builders and bird-shadow.js changed, and
+// install now crawls CDN_MODULES (below).
+const CACHE_VERSION = 'v87-2026-10-11-species-final';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -69,8 +72,9 @@ const CORE_CACHE = `birb-core-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `birb-runtime-${CACHE_VERSION}`;
 
 // Same-origin assets the game needs to boot offline. CDN modules
-// (three, nipplejs from esm.sh) are populated into RUNTIME_CACHE on
-// first fetch instead — they pull in transitive deps we can't predict.
+// (three, nipplejs from esm.sh) go to RUNTIME_CACHE instead: CDN_MODULES
+// below are crawled into it at install (their transitive deps are followed,
+// not predicted), and anything else from esm.sh is cached on first fetch.
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -152,11 +156,12 @@ const CORE_ASSETS = [
   // Physical plumage: imported on every boot path (the v3 bird reads it at
   // build time), so an offline launch without it dies on a dynamic import.
   './src/flight/plumage.js',
-  // The bird picker. species-select.js resolves the choice on EVERY boot;
-  // the rest build the crow and the owl (ported from Birb Gauntlet) and are
-  // imported lazily, only when one is chosen — offline that is still a boot
-  // path, so all eleven are core.
+  // The bird picker. species-select.js resolves the choice and
+  // bird-transaction.js swaps the bird on EVERY boot; the rest build the crow
+  // and the owl (ported from Birb Gauntlet) and are imported lazily, only when
+  // one is chosen — offline that is still a boot path, so all twelve are core.
   './src/flight/species/species-select.js',
+  './src/flight/species/bird-transaction.js',
   './src/flight/species/species-bird.js',
   './src/flight/species/species-palette.js',
   './src/flight/species/mesh-kit.js',
@@ -250,12 +255,70 @@ const RUNTIME_CACHEABLE_HOSTS = new Set([
   'cdn.esm.sh',
 ]);
 
+// The pinned esm.sh entry modules EVERY boot imports (index.html and the
+// src/ modules that import three directly). Runtime caching alone never
+// catches them on the FIRST visit: the page imports them at boot and this
+// worker registers on window load, so they are fetched before it controls
+// anything. Measured (tools/species-offline-check.mjs --only first-visit):
+// one online visit, HTTP cache cleared, offline -> `https://esm.sh/three@0.183.2`
+// answered 504 and the game never reached the title. So install fetches each
+// entry and follows its esm.sh imports into RUNTIME_CACHE. The graph is
+// small and fixed per pin (the entries are 2-line re-export stubs).
+// GLTFLoader is deliberately absent: it is the ?glb=1 A/B only, like birb.glb.
+// tests/sw-cdn.test.js pins this list against every esm.sh URL in the code.
+const CDN_MODULES = [
+  'https://esm.sh/three@0.183.2',
+  'https://esm.sh/three@0.183.2/examples/jsm/utils/BufferGeometryUtils.js',
+  'https://esm.sh/nipplejs@0.10.1',
+];
+
+// The esm.sh module URLs a module's text imports, resolved against its URL.
+// Only esm.sh .js/.mjs specifiers are followed; a false match in a minified
+// bundle costs one failed fetch, and the crawl is capped.
+function esmImports(text, base) {
+  const out = [];
+  for (const m of text.matchAll(/(?:\bfrom|\bimport)\s*["']([^"'\s]+\.m?js)["']/g)) {
+    try {
+      const url = new URL(m[1], base);
+      if (RUNTIME_CACHEABLE_HOSTS.has(url.host)) out.push(url.href);
+    } catch (err) { /* not a URL */ }
+  }
+  return out;
+}
+
+const CDN_FETCH_TIMEOUT_MS = 20000;
+
+async function precacheCdn() {
+  const cache = await caches.open(RUNTIME_CACHE);
+  const seen = new Set();
+  const visit = async (url) => {
+    if (seen.has(url) || seen.size >= 32) return;
+    seen.add(url);
+    try {
+      // The default cache mode: these URLs are versioned and immutable, so an
+      // HTTP-cache hit from the page's own boot is as good as the network.
+      // Bounded: install waits on this crawl, and a THIRD-PARTY host that
+      // stalls (rather than failing) would otherwise hold the update until the
+      // browser kills the install event — a deploy that never activates. A
+      // fetch (or body) past the limit counts as failed, like offline.
+      const response = await fetch(url, typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? { signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS) } : undefined);
+      if (!response.ok) return;
+      await cache.put(url, response.clone());
+      await Promise.all(esmImports(await response.text(), url).map(visit));
+    } catch (err) {
+      // Offline or blocked — the runtime cacheFirst path still gets a chance.
+    }
+  };
+  await Promise.all(CDN_MODULES.map(visit));
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CORE_CACHE);
     // addAll is all-or-nothing; do them individually so one missing file
     // doesn't sink the whole install.
-    await Promise.all(CORE_ASSETS.map(async (url) => {
+    await Promise.all([...CORE_ASSETS.map(async (url) => {
       try {
         const response = await fetch(url, { cache: 'reload' });
         if (response.ok || response.type === 'opaque') {
@@ -264,7 +327,7 @@ self.addEventListener('install', (event) => {
       } catch (err) {
         // Network failed for one asset — skip it; runtime fetch will retry.
       }
-    }));
+    }), precacheCdn()]);
     await self.skipWaiting();
   })());
 });

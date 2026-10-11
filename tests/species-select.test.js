@@ -149,23 +149,28 @@ test('index.html: a swap and a re-LOD STAGE the incoming bird complete, then COM
   // them to zero and regenerate all ten on every swap and every re-tier. And
   // a build that throws must leave the outgoing bird flying.
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  // STAGE never touches the anchor; it unwinds everything it made on a throw.
-  const stage = bodyOf(html, 'const stageBird = (id, quality) => {');
-  assert.ok(!stage.includes('mountBirbModel(') && !stage.includes('birbAnchor.clear') && !stage.includes('positionBirbModel('),
+  // The ORDER (stage unwinds, mount before teardown, each post-mount step
+  // guarded) is bird-transaction.js's, proved against fakes in
+  // tests/species-transaction.test.js. Here: index.html goes through it, and
+  // its hooks are the right half. Staging builds off the anchor...
+  assert.ok(html.includes('const birdTransaction = createBirdTransaction({'));
+  assert.ok(/const stageBird = \(id, quality\) => \{\s*rimBeforeStage = birbRimUniforms\.slice\(\);\s*return birdTransaction\.stage\(id, quality\);/.test(html));
+  assert.ok(html.includes('const commitBird = (staged) => birdTransaction.commit(staged);'));
+  const hooks = bodyOf(html, 'const birdTransaction = createBirdTransaction({');
+  const build = hooks.slice(hooks.indexOf('build: (staged) => {'), hooks.indexOf('sky: (staged) =>'));
+  assert.ok(!build.includes('mountBirbModel(') && !build.includes('birbAnchor') && !build.includes('positionBirbModel('),
     'staging builds off the anchor');
-  for (const s of ['makePionusModel()', 'makePionusSky(', 'makePionusFeathers(', 'makeSpeciesBird(', 'makeBirdSky(', 'prepareBirbModel(']) {
-    assert.ok(stage.includes(s), `staging includes ${s} (the Pionus's post-build hooks too)`);
+  for (const s of ['makePionusModel()', 'makeSpeciesBird(', 'prepareBirbModel(']) assert.ok(build.includes(s), `build: ${s}`);
+  // ...with the Pionus's post-build hooks: its sky (the THROWING bake — the
+  // transaction warns and keeps the lights) and its authored feathers.
+  for (const s of ['sky: (staged) => bakeBirdSky(', 'feathers: (staged) => (staged.sb ? null : makePionusFeathers(staged.model))',
+    'mount: (model) => mountBirbModel(model)', 'disposeModel: (model) => disposeBirdObject(model)',
+    'audio: (species) => flightAudio?.setSpecies?.(species)', 'sync: () => syncSwappedBird()']) {
+    assert.ok(hooks.includes(s), `hook: ${s}`);
   }
-  const unwind = stage.slice(stage.indexOf('} catch (err) {'));
-  for (const s of ['staged.feathers()', 'staged.env.dispose()', 'staged.sb.dispose()', 'disposeBirdObject(staged.model)', 'throw err']) {
-    assert.ok(unwind.includes(s), `a failed stage unwinds: ${s}`);
-  }
-  // COMMIT mounts first, hands the references over, then disposes the old.
-  const commit = bodyOf(html, 'const commitBird = (staged) => {');
-  const mount = commit.indexOf('mountBirbModel(staged.model)');
-  assert.ok(mount > 0 && commit.indexOf('outEnv.dispose()') > mount && commit.indexOf('outSb.dispose()') > mount
-    && commit.indexOf('disposeBirdObject(outModel)') > mount, 'the outgoing bird is torn down after the new one is mounted');
-  assert.ok(commit.indexOf('syncSwappedBird();') > commit.indexOf('outSb.dispose()'), 'the mounted bird inherits shadows/rim');
+  // The boot keeps the warning-and-null sky: makeBirdSky is bakeBirdSky + warn.
+  const makeSky = bodyOf(html, 'const makeBirdSky = (materials, label) => {');
+  assert.ok(makeSky.includes('return bakeBirdSky(materials);') && makeSky.includes('console.warn(label, err);'));
   // The swap: stage, commit, and only then persist the choice.
   const swap = bodyOf(html, 'const setBirdSpecies = async');
   const st = swap.indexOf('stageBird(');

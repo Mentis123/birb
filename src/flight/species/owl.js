@@ -44,7 +44,8 @@
 
 import {
     LAYOUT_MECH, createMeshData, loft, lathe, ellipsoid, cylinder, featherPlate,
-    featherTip, stamp, trs, mul, alignY, applyPoint, triangleCount, smooth,
+    featherTip, stamp, trs, mul, alignY, applyPoint, triangleCount, smooth, dropSlivers,
+    loftInside, dropInside,
 } from './mesh-kit.js';
 import {
     SPIN, OWL_BACK_TRAIN, OWL_WING_TRAIN, solveTrain, gearPrim, backingPrim,
@@ -238,9 +239,10 @@ function stampTrain(md, train, plane, opts) {
     }
     const centres = [];
     for (const g of placed) {
+        // ROOT: `rimRoots` (gears.js) — the same rim face from fewer triangles.
         const prim = gearPrim(g.teeth, {
             module: OWL_MODULE, thick: opts.thick, perTooth: opts.perTooth, spokes: g.spokes,
-            phi0: g.phi0, hubSegs: opts.hubSegs, walls: opts.walls,
+            phi0: g.phi0, hubSegs: opts.hubSegs, walls: opts.walls, rimRoots: opts.rimRoots,
         });
         const m = mul(plane, trs(g.center[0], 0.003, g.center[1]));
         const pivot = applyPoint(m, 0, 0, 0, [0, 0, 0]);
@@ -307,7 +309,7 @@ function owlBody(L, F, separateLegs) {
     const back = stampTrain(md, OWL_BACK_TRAIN, plane, {
         count: L.backGears, thick: 0.012, perTooth: L.perTooth, hubSegs: L.hubSegs, walls: L.gearWalls,
         bezel: 0.040, bezelColor: F.accent, gearColor: PALETTE.realSteel, pinionColor: PALETTE.realGunmetal,
-        backSegs: L.bodySegs,
+        backSegs: L.bodySegs, rimRoots: !!L.gearRimRoots,
     });
 
     // --- the wind-up key, behind the bay (the head now sits where the key
@@ -405,21 +407,25 @@ function owlBody(L, F, separateLegs) {
 function owlLeg(L, F, s, len) {
     const md = createMeshData(LAYOUT_MECH, s < 0 ? 'leftLegMesh' : 'rightLegMesh');
     const foot = [0, -len, -0.010];
-    stamp(md, cylinder(0.030, 0.024, -0.020, 0.012, Math.max(6, L.legSegs), true, true), {
+    // ROOT: `legLean` — the gear spends its flight retracted under the belly
+    // and is a few pixels across on the ground: a five-sided collar, a 4x3
+    // ankle knuckle and three-sided talons.
+    const lean = !!L.legLean;
+    stamp(md, cylinder(0.030, 0.024, -0.020, 0.012, lean ? 5 : Math.max(6, L.legSegs), true, true), {
         m: trs(0, -0.012, 0), color: F.aged, surf: F.agedSurf,
     });
     stamp(md, cylinder(0.018, 0.014, 0, Math.hypot(foot[1] + 0.03, foot[2]), L.legSegs, false, false), {
         m: alignY(0, -0.03, 0, foot[0], foot[1] + 0.03, foot[2]), color: F.steel, surf: S_STEEL,
     });
     // A polished ankle knuckle where the talons hinge.
-    stamp(md, ellipsoid(0.018, 0.014, 0.018, Math.max(5, L.legSegs), 4), {
+    stamp(md, ellipsoid(0.018, 0.014, 0.018, lean ? 4 : Math.max(5, L.legSegs), lean ? 3 : 4), {
         m: trs(foot[0], foot[1] + 0.006, foot[2]), color: F.accent, surf: S_BRASS_POL,
     });
     for (let k = 0; k < 4; k++) {
         const fwd = k < 2;
         const a = fwd ? (k - 0.5) * 0.55 * s : Math.PI + (k - 2.5) * 0.55 * s;
         const dir = [Math.sin(a), -0.12, -Math.cos(a)];
-        stamp(md, cylinder(0.0085, 0.0015, 0, fwd ? 0.062 : 0.050, Math.max(4, L.legSegs - 2), false, false), {
+        stamp(md, cylinder(0.0085, 0.0015, 0, fwd ? 0.062 : 0.050, lean ? 3 : Math.max(4, L.legSegs - 2), false, false), {
             m: alignY(foot[0], foot[1] + 0.004, foot[2], dir[0], dir[1], dir[2]), color: 0x2a2d33, surf: [1, 0.4, 0, 0],
         });
     }
@@ -467,7 +473,22 @@ function owlHead(L, F) {
         const n = [a[0] / al, a[1] / al, a[2] / al];
         const dm = alignY(c[0], c[1], c[2], n[0], n[1], n[2]);
         // Facial disc: a turned dish, rim (the ruff) in brass.
+        // ROOT: `discInner: false` drops the dish's centre (r < 0.04): it
+        // lies under the eye (the enamel dome covers r < 0.043, the bezel
+        // ring 0.041-0.053, both standing proud of the dish), so it is never
+        // seen. Only triangles go; the lathe's vertices, uvs and normals are
+        // Gauntlet's, so the brushed rim's texture does not shift.
         const dish = lathe(DISC_PROFILE, L.discSegs);
+        if (L.discInner === false) {
+            const r2 = (i) => dish.pos[i * 3] ** 2 + dish.pos[i * 3 + 2] ** 2;
+            const lim = (DISC_PROFILE[1][0] + 1e-4) ** 2;
+            const kept = [];
+            for (let t = 0; t < dish.idx.length; t += 3) {
+                const a = dish.idx[t], b = dish.idx[t + 1], c = dish.idx[t + 2];
+                if (!(r2(a) < lim && r2(b) < lim && r2(c) < lim)) kept.push(a, b, c);
+            }
+            dish.idx = kept;
+        }
         stamp(md, dish, {
             m: dm,
             color: (x, y, z, u, v, lx, ly, lz) => (Math.hypot(lx, lz) > 0.112 ? F.accent : F.disc),
@@ -633,6 +654,36 @@ function owlWing(L, F) {
     return { md, tip, wingGears };
 }
 
+/**
+ * ROOT: `dropHidden` (a level, e.g. 0.7) — drop the body and head triangles
+ * buried inside the two closed shells, which nothing can see: the head's back
+ * and underside sunk into the mantle, the body's front and shoulders inside
+ * the head (the head is rigid on the body: the rig never turns it), the
+ * bezel's skirt and the roots of the breast and tail plates under the body
+ * shell, the dish backs inside the head. The shells themselves sit ON the
+ * test surface, never inside it; `level` < 1 keeps the test clear of the
+ * chords and seam pinches the drawn shell has inside the analytic one. The
+ * body's open front (z -0.38) is left out of its volume, and nothing the
+ * shader moves is touched (the spinning train and key, aAxis.w != 0; the tail
+ * deformer, z > tailZ), so what goes stays buried in every pose.
+ */
+function dropOwlHidden(bodyMd, headMd, level) {
+    const head = OWL_RIG.head;
+    const bodyShape = { pTop: BODY_PTOP, pBot: BODY_PBOT, level, zMin: BODY_BASE[0].z + 0.02 };
+    const headShape = { pTop: 2.2, pBot: 2.2, level };
+    const moving = (md) => (i) => md.arrays.aAxis[i * 4 + 3] !== 0 || md.arrays.position[i * 3 + 2] > OWL_RIG.tailZ;
+    dropInside(bodyMd, [
+        loftInside(BODY_BASE, bodyShape),
+        loftInside(HEAD_BASE, Object.assign({ offset: head }, headShape)),
+    ], moving(bodyMd));
+    // The head's own volume is NOT used: its front is a flat cap the tilted
+    // facial discs cut through, and the look check (a 3/4 front view) showed
+    // a sliver of a ruff's back wall that the analytic test called buried.
+    dropInside(headMd, [
+        loftInside(BODY_BASE, Object.assign({ offset: [-head[0], -head[1], -head[2]] }, bodyShape)),
+    ], moving(headMd));
+}
+
 // ---------------------------------------------------------------------------
 // the whole bird
 // ---------------------------------------------------------------------------
@@ -648,6 +699,14 @@ export function buildOwl(o = {}) {
     const body = owlBody(L, F, !!legs);
     const head = owlHead(L, F);
     const wing = owlWing(L, F);
+    // ROOT: `minTriArea` drops the zero-area pole and tip triangles
+    // (mesh-kit.js dropSlivers) before anything is counted. Root-only keys,
+    // all off in OWL_LOD (Gauntlet's mesh): minTriArea, gearRimRoots,
+    // discInner, dropHidden.
+    if (L.minTriArea) {
+        for (const md of [body.md, head.md, wing.md].concat(legs ? [legs.left, legs.right] : [])) dropSlivers(md, L.minTriArea);
+    }
+    if (L.dropHidden) dropOwlHidden(body.md, head.md, L.dropHidden);
     const meshes = [
         { name: 'bodyMesh', part: 'body', material: 'metal', role: 'body', data: body.md },
         { name: 'headMesh', part: 'head', material: 'metal', role: 'head', data: head.md },

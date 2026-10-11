@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-10-08 at commit 90a5edc by tools/oracle-manifest-regen.mjs.
+# Generated 2026-10-10 at commit 9f67de2 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -59,11 +59,16 @@ eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
 4085c194d973a405c2b27a620d1041b094a5f9769ba4880afcb4ca2cce40b3bd  tests/helpers/species-three-stub.js
 445ff78c97a88a81687da7b4dfd9dde42f24643b7180513f5946ebc0ea5afd8a  tests/perf-advisor.test.js
+87e9425eed94afda6d53f4b6ca44f7ceeab6181ea0453781dc84bfda22f6c955  tests/species-audio-cut.test.js
 301e414b13575c3edfe6ea521b603da0847145fd207ba9fbf0b78ab579284f07  tests/species-audio.test.js
 70aa804d8d1f3ade162a782b7b2ace8670411fa144105559e07d580a8c2e9686  tests/species-bird.test.js
+f36f52d5a0ac6c8d6532ec877e322cbd583d1678845e18de99610b0b0488ffd5  tests/species-budget.test.js
+50a97a7fbec41656f3c7c694ce0f69bb48a9ee3a0292b57d8673e0bcaf793e9f  tests/species-gpu-leak.test.js
 3d95e906636724c639527a733e34ded240cd8bf066be8ee4584be49346db11cb  tests/species-lifecycle.test.js
-72350154bd71b492898ca43940291b3d834077ecb0f6ab461abd485eb703a5d8  tests/species-select.test.js
+3bc4e5b4fc8fe1de780796818113265b189563c5da92fb21ac085b8c3668d0ea  tests/species-select.test.js
+132af0a7788e5262d9d3c38c3822ecedc4103af08da504763f318c52427f0651  tests/species-transaction.test.js
 d9b56ebbd4fbdd3d65225823b88c36fa7364ee2e46ae36de26bc02b133747658  tests/species-wing-tip.test.js
+81c139b8fa8d06547d0eee94b98780cdf2dab6c7dfa87d7f8db1a35193e02220  tests/sw-cdn.test.js
 # tests/gauntlet-realistic-birds.test.js added 2026-10-08 with the realistic
 # Corvus / Tock rebuild (owner-approved code change, not a perf wave, so no
 # docs/perf/gates/G<n>.md; recorded here in the same change as the file). It

@@ -197,19 +197,38 @@ export function gearPrim(teeth, opts = {}) {
     }
     const in0 = prim.pos.length / 3;
     const innerR = solid ? Math.max(rimIn, 0.001) : rimIn;
+    // ROOT: `rimRoots` (trapezoid teeth only) builds the SAME flat top face
+    // from fewer triangles: each tooth is its own trapezoid (2 triangles) and
+    // only the two ROOT corners of a tooth reach the inner ring, so the
+    // annulus is 2 quads a tooth instead of 4 (6 triangles a tooth, not 8;
+    // a solid web fans from half the ring). Same outline, same plane, same
+    // uv formula; the inner edge's polygon loses the vertices at the tip
+    // angles, a chord ~1e-4 units off the circle. Gauntlet's default is
+    // unchanged.
+    const roots = opts.rimRoots && perTooth !== 6;
+    const ringIdx = [];
     for (let i = 0; i < P; i++) {
+        if (roots && (i % 4 === 1 || i % 4 === 2)) continue;
+        ringIdx.push(i);
         const ph = pts[i][1];
         vtx(prim, Math.sin(ph) * innerR, h, Math.cos(ph) * innerR, ph * innerR * uvK, innerR * uvK);
     }
-    for (let i = 0; i < P; i++) {
-        const j = (i + 1) % P;
-        triToward(prim, top0 + i, top0 + j, in0 + i, 0, 1, 0);
-        triToward(prim, top0 + j, in0 + j, in0 + i, 0, 1, 0);
+    const R = ringIdx.length;
+    if (roots) {
+        for (let k = 0; k < P; k += 4) {
+            triToward(prim, top0 + k, top0 + k + 1, top0 + k + 2, 0, 1, 0);
+            triToward(prim, top0 + k, top0 + k + 2, top0 + k + 3, 0, 1, 0);
+        }
+    }
+    for (let i = 0; i < R; i++) {
+        const j = (i + 1) % R;
+        triToward(prim, top0 + ringIdx[i], top0 + ringIdx[j], in0 + i, 0, 1, 0);
+        triToward(prim, top0 + ringIdx[j], in0 + j, in0 + i, 0, 1, 0);
     }
     if (solid) {
         // Web: fan the inner ring to the centre.
         const c = vtx(prim, 0, h, 0, 0, 0);
-        for (let i = 0; i < P; i++) triToward(prim, c, in0 + i, in0 + (i + 1) % P, 0, 1, 0);
+        for (let i = 0; i < R; i++) triToward(prim, c, in0 + i, in0 + (i + 1) % R, 0, 1, 0);
     }
 
     // --- outer walls: the teeth's flanks and lands -------------------------

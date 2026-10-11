@@ -152,6 +152,89 @@ export function ellipsoidRows(axes, halves) {
   return axes.map((a, i) => [a[0] / halves[i], a[1] / halves[i], a[2] / halves[i]]);
 }
 
+// ── The shadow MAP's depth pass (the shadows lever, on at Ultra) ────────────
+
+/**
+ * Give every mesh of a bird its OWN shadow depth material, one per source
+ * material, disposed with that material. Returns how many it made.
+ *
+ * With the shadows lever on (Ultra) the bird also casts into the real shadow
+ * map, and three's WebGLShadowMap draws EVERY caster with one shared
+ * MeshDepthMaterial, copying `result.map = material.map` onto it per draw
+ * (r183 getDepthMaterial). That copy outlives the bird, which is the bug this
+ * exists for. The shared material's program is only rebuilt when its version
+ * or an object-level key (instancing, morphs) changes — never because `map`
+ * did — and WebGLMaterials writes `uniforms.map.value` only `if
+ * (material.map)`. So once a bird's feather albedo has gone through it, the
+ * USE_MAP depth program keeps that texture in its `map` uniform, and every
+ * MAP-LESS caster after it (the ground, which VSM draws as a receiver, the
+ * bird's own eyes and feet) binds it again. Swap the bird and its maps are
+ * disposed; the next shadow pass binds the disposed texture, three re-uploads
+ * it (`version > 0`, properties gone) and nothing ever deletes that GL
+ * texture again. Measured on the bird picker: +2 textures per crow -> owl ->
+ * Birb round, exactly one feather_contour_albedo (the last map the uniform
+ * held) and one 128-px species tile, each bound by WebGLShadowMap.render ->
+ * renderObject -> setTexture2D after its own dispose
+ * (shots/main-species-final/leak/). Lever off, or `?feathers=0` for the
+ * albedo, and that texture stops leaking.
+ *
+ * A `customDepthMaterial` is the one door three leaves open: the copy still
+ * lands, but on a material the bird owns. One per SOURCE material, so no depth
+ * uniform ever holds another material's map, and torn down by that material's
+ * own 'dispose' event — the same rule three applies to the per-material depth
+ * clones it makes for alpha-tested casters (`_materialCache` /
+ * `onMaterialDispose`), so no teardown path (a swap, a re-LOD, a staged bird
+ * unwinding) needs to know about it. The depth it writes is the shared
+ * material's exactly: same class, same defaults, and getDepthMaterial applies
+ * the same side/visibility/map/clipping copies to a custom material.
+ *
+ * No customDistanceMaterial: no point light in this game casts shadows, and
+ * three only reads that slot for one.
+ *
+ * The pairing lives in two module WeakMaps, NOT in either material's
+ * userData: three's Material.copy (so every material.clone()) and toJSON
+ * JSON-serialise userData, and a source <-> depth pair there is a cycle —
+ * cloning or serialising any prepared bird material, or the Pionus model
+ * (its userData lists its materials), threw "Converting circular structure
+ * to JSON". A multi-material mesh (no bird has one) gets its FIRST material's
+ * depth material, released with that material.
+ */
+const _birdDepthOf = new WeakMap();      // source material -> its depth material
+const _birdDepthSource = new WeakMap();  // depth material -> its source material
+
+/** The bird material a depth material made by isolateBirdShadowDepth serves (or undefined). */
+export function birdShadowDepthSource(depth) {
+  return depth ? _birdDepthSource.get(depth) : undefined;
+}
+
+export function isolateBirdShadowDepth(THREE, root) {
+  let made = 0;
+  root?.traverse?.((o) => {
+    if (!o.isMesh || !o.material) return;
+    const source = Array.isArray(o.material) ? o.material[0] : o.material;
+    if (!source) return;
+    // Idempotent: a model prepared twice keeps the depth material it has.
+    if (o.customDepthMaterial && _birdDepthSource.get(o.customDepthMaterial) === source) return;
+    let depth = _birdDepthOf.get(source);
+    if (!depth) {
+      depth = new THREE.MeshDepthMaterial();
+      depth.name = 'birb-shadow-depth';
+      _birdDepthOf.set(source, depth);
+      _birdDepthSource.set(depth, source);
+      const release = () => {
+        source.removeEventListener('dispose', release);
+        if (_birdDepthOf.get(source) === depth) _birdDepthOf.delete(source);
+        depth.map = null;
+        depth.dispose();
+      };
+      source.addEventListener('dispose', release);
+      made += 1;
+    }
+    o.customDepthMaterial = depth;
+  });
+  return made;
+}
+
 // ── The per-frame driver ────────────────────────────────────────────────────
 
 /**

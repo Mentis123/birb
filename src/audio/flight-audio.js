@@ -911,14 +911,27 @@ export function createFlightAudio(options = {}) {
     param.setTargetAtTime(0, at + attack, decay);
   }
   /**
-   * Cut a param off at `now`: every event at or after now is removed — the
-   * second caw note and both notes' pitch ramps are scheduled AHEAD, and
-   * cancelAndHoldAtTime is missing on older Safari — then it decays to 0
-   * from wherever it is (an envelope already decaying keeps decaying, just
-   * faster). Nothing is left on the timeline after `now`.
+   * Cut a param off at `now`: every event after now is removed — the second
+   * caw note and both notes' pitch ramps are scheduled AHEAD — then it decays
+   * to 0 from wherever it is (an envelope already decaying keeps decaying,
+   * just faster). Nothing is left on the timeline after `now`.
+   *
+   * From wherever it IS, not from where the last event left it: a swap that
+   * lands mid-ramp (a tick's 2 ms attack, a caw note's rise, a decay) would
+   * otherwise drop the ramp it is inside, and cancelScheduledValues alone
+   * leaves the decay starting from the ramp's START value — a step in the
+   * gain, which is a click. cancelAndHoldAtTime pins the ramp's value at
+   * `now`; older Safari has no cancelAndHoldAtTime, so there the value is
+   * read BEFORE the cancel (the cancel is what moves it) and set back at
+   * `now` by hand.
    */
   function cut(param, now) {
-    param.cancelScheduledValues(now);
+    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(now);
+    else {
+      const held = param.value;
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(held, now);
+    }
     param.setTargetAtTime(0, now, t.speciesCutTau);
   }
   /**

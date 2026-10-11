@@ -508,12 +508,23 @@ const _birdPmrems = new WeakMap();
  * `pmrem` option): made and its equirect shader compiled on first use, then
  * kept for the page — it belongs to the renderer, not to any one bird, so no
  * bird's dispose() releases it.
+ *
+ * A compile that throws (a lost context, a driver refusing the program) gets
+ * the half-made generator DISPOSED, not cached: nothing else holds it, so it
+ * would otherwise leak, and a cached broken one would fail every later bird
+ * the same way. The error goes on to the caller — makeBirdSky's fallback
+ * keeps the bird on its lights only — and the next bird's sky tries afresh.
  */
 export function sharedBirdPmrem(THREE, renderer) {
   let g = _birdPmrems.get(renderer);
   if (!g) {
     g = new THREE.PMREMGenerator(renderer);
-    g.compileEquirectangularShader();
+    try {
+      g.compileEquirectangularShader();
+    } catch (err) {
+      try { g.dispose(); } catch (_) { /* half-made */ }
+      throw err;
+    }
     _birdPmrems.set(renderer, g);
   }
   return g;

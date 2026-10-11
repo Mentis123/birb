@@ -42,7 +42,7 @@
 
 import {
     LAYOUT_FEATHER, createMeshData, loft, ellipsoid, cylinder, featherPlate, featherTip,
-    stamp, trs, alignY, applyPoint, triangleCount, smooth, mixLin,
+    stamp, trs, alignY, applyPoint, triangleCount, smooth, mixLin, dropSlivers,
 } from './mesh-kit.js';
 import { PALETTE } from './species-palette.js';
 import { makeRng } from './species-palette.js';
@@ -247,7 +247,11 @@ function crowLeg(L, s, len) {
         const hallux = k === 3;
         const a = hallux ? Math.PI : (k - 1) * 0.36 * s;
         const dir = [Math.sin(a), -0.10, -Math.cos(a)];
-        const toe = cylinder(0.0078, 0.0016, 0, hallux ? 0.042 : 0.058, Math.max(4, L.legSegs - 2), false, false);
+        // ROOT: `legLean` — three-sided toes: in flight the feet are drawn up
+        // into the belly feathers, and on the ground a toe is a pixel or two
+        // across.
+        const toeSegs = L.legLean ? 3 : Math.max(4, L.legSegs - 2);
+        const toe = cylinder(0.0078, 0.0016, 0, hallux ? 0.042 : 0.058, toeSegs, false, false);
         stamp(md, toe, {
             m: alignY(foot[0], foot[1] + 0.004, foot[2], dir[0], dir[1], dir[2]),
             color: PALETTE.realCrowLeg, surf: S_LEG,
@@ -583,6 +587,12 @@ export function buildCrow(o = {}) {
         meshes.push({ name: 'tailMesh', part: 'body', material: 'vane', role: 'tail', data: crowTail(L, hooded) });
     }
     meshes.push({ name: 'rightWingMesh', part: 'rightWing', material: 'vane', role: 'wing', side: 1, data: wing.md });
+    // ROOT: `minTriArea` (a root-only key, off in CROW_LOD, as is legLean) drops the
+    // zero-area pole and feather-tip triangles (mesh-kit.js dropSlivers)
+    // before anything is counted.
+    if (L.minTriArea) {
+        for (const md of meshes.map((m) => m.data).concat(legs ? [legs.left, legs.right] : [])) dropSlivers(md, L.minTriArea);
+    }
     let triangles = 0;
     for (const m of meshes) triangles += triangleCount(m.data);
     triangles += triangleCount(wing.md);         // the mirrored left wing
