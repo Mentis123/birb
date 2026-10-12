@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-10-11 at commit bdb750e by tools/oracle-manifest-regen.mjs.
+# Generated 2026-10-12 at commit 109c683 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -68,7 +68,7 @@ eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.
 # the world; forest-seeds judged seed by seed), a GL count below the scene
 # count failing as a missed frame, no rows / a missing bird count failing,
 # and the distributions' nearest-rank statistics.
-602eb5a3b420c5a6db646a3b32cb22bc2dbfc0930ad7d4ba24828fa36949dd05  tests/species-frame-budget.test.js
+1432e01623baaa6d28b8bf4e974f295302fcd81105fea12c519db7ac6d6056da  tests/species-frame-budget.test.js
 # tests/species-audio-cut.test.js re-hashed 2026-10-11 with the envelope /
 # whoosh continuity fix (owner-approved code change, not a perf wave). It is
 # additive: every existing cut test and assertion is unchanged; new tests
@@ -86,7 +86,7 @@ f68526618cbe5ca6a4824061f8af03339f695a867b7aa3fc4df593e0e1198b42  tests/species-
 # shots/main-species-leftovers/glints/). The seeded-world constant follows the
 # v88 measurement (74,620 -> 74,774). Every other assertion is unchanged; the
 # seeded-world headroom test still holds (74,774 + 2,959 = 77,733).
-582d3416517cbfa84d761845831189de22ecf160ccaa1466a7b8fc0eab98004c  tests/species-budget.test.js
+b92345f58389b81451fd7e9cf24bb86af38dd6e79ed89e584fddb9090e023969  tests/species-budget.test.js
 50a97a7fbec41656f3c7c694ce0f69bb48a9ee3a0292b57d8673e0bcaf793e9f  tests/species-gpu-leak.test.js
 3d95e906636724c639527a733e34ded240cd8bf066be8ee4584be49346db11cb  tests/species-lifecycle.test.js
 3bc4e5b4fc8fe1de780796818113265b189563c5da92fb21ac085b8c3668d0ea  tests/species-select.test.js

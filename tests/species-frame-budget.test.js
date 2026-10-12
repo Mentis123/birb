@@ -1,12 +1,13 @@
 // tools/species-frame-budget.mjs's verdict, on hand-made rows: the two
 // budgets (SCENE = renderer.info over the frame's renders, CLAUDE.md's
 // "<100 draw calls, <80k triangles"; SHADOW-INCLUSIVE = every draw WebGL
-// received, the shadow map included), the 78k Ultra-forest headroom and who
-// owns a breach of it (the species, or the world), and the distributions.
+// received, the shadow map included), the INFORMATIONAL 78k Ultra-forest mark
+// (listed with who owns it, never failed: 80k is the hard limit, owner
+// decision 2026-10-13), blank counts, build-safe merging, and the distributions.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  verdict, worldBreaches, speciesHeadroomBreaches, distributions, spread, LIMITS, PIONUS_TRIANGLES,
+  verdict, worldBreaches, speciesHeadroomBreaches, distributions, spread, mergeBuild, LIMITS, PIONUS_TRIANGLES,
 } from '../tools/species-frame-budget.mjs';
 import { BIRD_BUDGET } from '../src/flight/bird-contract.js';
 
@@ -49,51 +50,56 @@ test('the scene budget is still gated on its own (80k / 100)', () => {
   assert.match(verdict([row({ frameDrawCalls: 100 })])[0], /scene 100 draws >= 100/);
 });
 
-test('the 78k headroom: a crow/owl over it where the Pionus would fit is the SPECIES\' breach — failed on the fixed seeds, on random boots with strictHeadroom', () => {
+test('78k is informational: a crow/owl over it (Pionus would fit) is LISTED, never failed — 80k is the limit', () => {
   // world 75,500: the Pionus reads 77,018, the crow 78,104.
   const r = row({ frameTriangles: 75500 + 2604, worldTriangles: 75500 });
-  assert.deepEqual(verdict([r]), [], 'a random boot: listed, not failed, by default');
+  assert.deepEqual(verdict([r]), []);
+  assert.deepEqual(verdict([Object.assign({}, r, { scenario: 'forest-seeds', bootSeed: null })]), [], 'fixed seeds too');
   assert.deepEqual(speciesHeadroomBreaches([r]).map((b) => [b.id, b.over, b.pionusWouldRead]), [['crow/ultra/forest-spawn@seed1', 104, 77018]]);
-  const strict = verdict([r], { strictHeadroom: true });
-  assert.equal(strict.length, 1);
-  assert.match(strict[0], /crow\/ultra\/forest-spawn@seed1: Ultra forest 78104 tris > 78000 where the Pionus would read 77018/);
   assert.deepEqual(worldBreaches([r]), []);
-  // The fixed-seed forest always fails.
-  assert.equal(verdict([Object.assign({}, r, { scenario: 'forest-seeds', bootSeed: null })]).length, 1);
+  // 79,999 passes; 80,000 fails.
+  assert.deepEqual(verdict([row({ frameTriangles: 79999, worldTriangles: 77395 })]), []);
+  assert.match(verdict([row({ frameTriangles: 80000, worldTriangles: 77396 })]).join(), /scene 80000 tris >= 80000/);
 });
 
-test("the 78k headroom: a world over it BY ITSELF is the world's breach — reported, not a species failure", () => {
-  // world 76,700: the Pionus would read 78,218 there.
+test("a world over 78k by itself is attributed to the world, and nothing under 80k fails", () => {
   const crow = row({ frameTriangles: 76700 + 2604, worldTriangles: 76700 });
-  assert.deepEqual(verdict([crow], { strictHeadroom: true }), [], 'held to 80k, not to the headroom, even strict');
+  assert.deepEqual(verdict([crow]), []);
   assert.deepEqual(speciesHeadroomBreaches([crow]), []);
   const birb = row({ species: 'birb', frameTriangles: 76700 + PIONUS_TRIANGLES, worldTriangles: 76700, birdTriangles: PIONUS_TRIANGLES, birdDrawCalls: 9 });
-  assert.deepEqual(verdict([birb]), [], 'the Pionus is never failed for its world');
-  const wb = worldBreaches([crow, birb]);
-  assert.equal(wb.length, 2);
-  assert.deepEqual(wb.map((b) => [b.species, b.worldTriangles, b.pionusWouldRead]), [['crow', 76700, 78218], ['birb', 76700, 78218]]);
-  // Not an Ultra forest row: no headroom at all.
+  assert.deepEqual(verdict([birb]), []);
+  assert.deepEqual(worldBreaches([crow, birb]).map((b) => [b.species, b.worldTriangles, b.pionusWouldRead]), [['crow', 76700, 78218], ['birb', 76700, 78218]]);
   assert.deepEqual(worldBreaches([row({ scenario: 'boost', frameTriangles: 79000, worldTriangles: 76396 })]), []);
 });
 
-test('forest-seeds is judged SEED BY SEED: a species breach at one seed is not hidden by a heavier world at another', () => {
-  // Seed A: world 75,500 -> crow 78,084 (Pionus 77,018: the species broke it).
-  // Seed B: world 76,600 -> crow 79,184 (Pionus 78,118: the world's). The
-  // row's max (B) alone would file the row as a world breach and pass.
+test('forest-seeds is listed SEED BY SEED against the 78k mark', () => {
   const bird = 2584;
   const r = row({
     scenario: 'forest-seeds', bootSeed: null, birdTriangles: bird,
-    frameTriangles: 76600 + bird, worldTriangles: 76600,           // the row's max: seed 2
+    frameTriangles: 76600 + bird, worldTriangles: 76600,
     perSeed: [
       { seed: 1, frameTriangles: 75500 + bird, birdTriangles: bird, frameDrawCalls: 30, glTriangles: 110000, glDrawCalls: 40 },
       { seed: 2, frameTriangles: 76600 + bird, birdTriangles: bird, frameDrawCalls: 30, glTriangles: 111000, glDrawCalls: 40 },
     ],
   });
-  const fails = verdict([r]);
-  assert.equal(fails.length, 1, fails.join('\n'));
-  assert.match(fails[0], /crow\/ultra\/forest-seeds@world1: Ultra forest 78084 tris > 78000 where the Pionus would read 77018/);
+  assert.deepEqual(verdict([r]), []);
   assert.deepEqual(worldBreaches([r]).map((b) => b.id), ['crow/ultra/forest-seeds@world2']);
   assert.deepEqual(speciesHeadroomBreaches([r]).map((b) => b.id), ['crow/ultra/forest-seeds@world1']);
+});
+
+test('a blank, non-finite or negative scene count fails instead of passing', () => {
+  for (const bad of [null, undefined, NaN, -1, '']) {
+    assert.match(verdict([row({ frameTriangles: bad })]).join(), /missing or invalid scene count/, String(bad));
+    assert.match(verdict([row({ frameDrawCalls: bad })]).join(), /missing or invalid scene count/, String(bad));
+  }
+});
+
+test('--merge refuses mixed builds and inputs without a build', () => {
+  const run = (build, file = 'a.json') => ({ file, json: { build, rows: [] } });
+  assert.equal(mergeBuild([run('v89'), run('v89', 'b.json')]), 'v89');
+  assert.throws(() => mergeBuild([run('v88'), run('v89', 'b.json')]), /different builds: v88, v89/);
+  assert.throws(() => mergeBuild([run(null)]), /a\.json records no build/);
+  assert.throws(() => mergeBuild([]), /nothing to merge/);
 });
 
 test('nothing measured is not a pass, and a missing bird count fails BIRD_BUDGET', () => {

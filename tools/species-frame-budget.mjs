@@ -23,8 +23,9 @@
  *     budget table in it). In three r183 it does NOT include the shadow map:
  *     render() draws the shadow casters BEFORE it resets renderer.info, so the
  *     shadow pass is gone from the count by the time tallyRenderPass reads it.
- *     Gated: < 80,000 triangles and < 100 draws on every row, and the 78,000
- *     headroom at the Ultra forest (below).
+ *     Gated: < 80,000 triangles and < 100 draws on every row — the HARD limit
+ *     (owner decision 2026-10-13). The old 78,000 Ultra-forest headroom is
+ *     informational only (reported, never failed).
  *
  *   SHADOW-INCLUSIVE (`glTriangles`, `glDrawCalls`) — every draw the page hands
  *     WebGL in that frame (GL_COUNTER, wrapped around drawElements/drawArrays
@@ -62,7 +63,7 @@
  *                 seeds (`--seeds`, default 16160,1,2; worldSeed +
  *                 setEnvironment), the bird restored to its spawn pose each
  *                 time, the MAX kept (and each seed listed in `perSeed`,
- *                 which the 78k headroom judges seed by seed). Comparable to
+ *                 which the informational 78k mark lists seed by seed). Comparable to
  *                 within a prop or two: drones, rings and nests still draw
  *                 on Math.random (measured: the seeded world read 74,774
  *                 with the Pionus, 74,228 with the crow/owl, v88).
@@ -87,12 +88,8 @@
  * (`--scenarios ...,stunt`).
  *
  * FAILS (exit 1) when any row reaches the SCENE budget (80,000 triangles or
- * 100 draw calls) or the SHADOW-INCLUSIVE one (LIMITS.inclusive), when a
- * crow/owl row at the Ultra forest exceeds the 78,000 scene headroom IN A
- * WORLD WHERE THE PIONUS WOULD NOT (world + 1,518 <= 78,000: the species is
- * what broke it — see verdict()) on the fixed seeds (forest-seeds), or on a
- * random boot (forest-spawn) with `--strict-headroom` (without it those are
- * listed in `speciesHeadroomBreaches`, attributed and counted),
+ * 100 draw calls — the hard limit) or the SHADOW-INCLUSIVE one
+ * (LIMITS.inclusive), when a row's scene or GL count is missing/non-finite,
  * when a crow/owl row's bird leaves BIRD_BUDGET (8 draws / 4,000 triangles;
  * the Pionus is the 9-draw baseline that budget was written around and is
  * reported, not gated), or on ANY console error or warning (boot messages are
@@ -161,7 +158,10 @@ export const PIONUS_TRIANGLES = 1518;
 export const LIMITS = Object.freeze({
   // SCENE: renderer.info over every renderer.render() of the frame — the
   // budget CLAUDE.md states ("<100 draw calls, <80k triangles").
-  triangles: 80000, drawCalls: 100, forestUltra: 78000,
+  triangles: 80000, drawCalls: 100,
+  // INFORMATIONAL ONLY since 2026-10-13 (owner: 80k is the hard limit; 78k
+  // is no longer a target): rows over it are listed, never failed.
+  forestUltra: 78000,
   // SHADOW-INCLUSIVE: every draw WebGL receives in the frame. 120,000
   // triangles: the Pionus's worst Ultra frame measured with the shadow pass
   // in it (113.8k on a random v86 boot; the world casts ~33-35k into the
@@ -186,7 +186,7 @@ function parseArgs(argv) {
     quick: false, out: null, url: null,
     frames: 12, warm: 6, species: ['birb', 'crow', 'owl'], tiers: ['ultra', 'okay', 'light'],
     scenarios: DEFAULT_SCENARIOS.slice(), seeds: DEFAULT_SEEDS.slice(), seedFrames: 6,
-    bootSeeds: [null], merge: null, strictHeadroom: false,
+    bootSeeds: [null], merge: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -201,7 +201,6 @@ function parseArgs(argv) {
     else if (a === '--scenarios') o.scenarios = next().split(',').filter(Boolean);
     else if (a === '--seeds') o.seeds = next().split(',').map(Number).filter(Number.isFinite);
     else if (a === '--seed-frames') o.seedFrames = Math.max(1, Number(next()) | 0);
-    else if (a === '--strict-headroom') o.strictHeadroom = true;
     // Positive integers: SEED_MATH_RANDOM maps 0 onto 1's stream, and an
     // empty list (no boots) fails the run as "no rows".
     else if (a === '--boot-seeds') o.bootSeeds = next().split(',').filter((s) => s.trim() !== '').map(Number).filter((n) => Number.isInteger(n) && n > 0);
@@ -215,7 +214,7 @@ function parseArgs(argv) {
 
 const HELP = 'node tools/species-frame-budget.mjs [--quick] [--out file] [--url base] [--frames N] [--warm N]\n'
   + '  [--species birb,crow,owl] [--tiers ultra,okay,light] [--scenarios ' + ALL_SCENARIOS.join(',') + ']\n'
-  + '  [--seeds ' + DEFAULT_SEEDS.join(',') + '] [--seed-frames 6] [--boot-seeds 1,2,3] [--strict-headroom]\n'
+  + '  [--seeds ' + DEFAULT_SEEDS.join(',') + '] [--seed-frames 6] [--boot-seeds 1,2,3]\n'
   + 'node tools/species-frame-budget.mjs --merge a.json b.json ... [--out merged.json]\n';
 
 // ---------------------------------------------------------------- puppeteer
@@ -596,7 +595,7 @@ const rowId = (r) => `${r.species}/${r.quality}/${r.scenario}${r.bootSeed !== nu
   + (r.worldSeed !== undefined ? '@world' + r.worldSeed : '');
 
 /**
- * What the 78k headroom judges: a row, or for forest-seeds EACH world seed
+ * What the informational 78k mark lists: a row, or for forest-seeds EACH world seed
  * (its own frame and its own world) — the row's max would pair one seed's
  * frame with that seed's world and miss a species breach at another seed.
  */
@@ -618,7 +617,7 @@ const headroomRow = (r) => r.renderTier === 0 && (r.scenario === 'forest-spawn' 
 const worldOf = (r) => (Number.isFinite(r.worldTriangles) ? r.worldTriangles : r.frameTriangles - (r.birdTriangles || 0));
 
 /**
- * The 78k headroom breaches that are the WORLD's, not a species': every
+ * Rows over the informational 78k mark that are the WORLD's, not a species': every
  * Pionus row over it, and every crow/owl row whose world alone would put the
  * Pionus over it. Reported (precisely: the world's own count), never fixed by
  * changing the default bird.
@@ -636,13 +635,10 @@ export function worldBreaches(rows) {
 }
 
 /**
- * The 78k headroom breaches the SPECIES owns: a crow/owl row at the Ultra
- * forest over 78,000 in a world where the Pionus would fit (world + 1,518 <=
- * 78,000). On the fixed seeds (forest-seeds) verdict() fails them; on random
- * boots (forest-spawn) they are listed here and fail only with
- * `--strict-headroom` (2026-10-11: the invisible trims are spent — see
- * CLAUDE.md "Species leftovers" for the measured gap and what closing it
- * would cost to look at).
+ * Rows over the INFORMATIONAL 78k mark that the SPECIES owns: a crow/owl
+ * row at the Ultra forest over 78,000 in a world where the Pionus would fit
+ * (world + 1,518 <= 78,000). Listed in the report only; never failed (owner
+ * decision 2026-10-13: 80k is the hard limit, 78k is not a target).
  */
 export function speciesHeadroomBreaches(rows) {
   return rows.flatMap(headroomSamples).filter((r) => headroomRow(r) && r.species !== 'birb' && r.frameTriangles > LIMITS.forestUltra
@@ -650,13 +646,19 @@ export function speciesHeadroomBreaches(rows) {
     .map((r) => ({ id: rowId(r), species: r.species, scenario: r.scenario, bootSeed: r.bootSeed ?? null, frameTriangles: r.frameTriangles, over: r.frameTriangles - LIMITS.forestUltra, worldTriangles: worldOf(r), pionusWouldRead: worldOf(r) + PIONUS_TRIANGLES }));
 }
 
-export function verdict(rows, { strictHeadroom = false } = {}) {
+export function verdict(rows) {
   const fails = [];
   if (!rows.length) fails.push('no rows: nothing was measured (or merged), so nothing passed');
   for (const r0 of rows) {
     const r = Object.assign({ errors: [], warnings: [] }, r0);
     const id = rowId(r);
-    // SCENE: CLAUDE.md's budget, renderer.info over the frame's renders.
+    // SCENE: CLAUDE.md's budget, renderer.info over the frame's renders. A
+    // blank/non-finite count cannot be judged (`null >= 80000` is false), so
+    // it is a failure, not a pass.
+    if (!Number.isFinite(r.frameTriangles) || r.frameTriangles < 0 || !Number.isFinite(r.frameDrawCalls) || r.frameDrawCalls < 0) {
+      fails.push(`${id}: missing or invalid scene count (tris ${r.frameTriangles}, draws ${r.frameDrawCalls})`);
+      continue;
+    }
     if (r.frameTriangles >= LIMITS.triangles) fails.push(`${id}: scene ${r.frameTriangles} tris >= ${LIMITS.triangles}`);
     if (r.frameDrawCalls >= LIMITS.drawCalls) fails.push(`${id}: scene ${r.frameDrawCalls} draws >= ${LIMITS.drawCalls}`);
     // SHADOW-INCLUSIVE: everything WebGL drew, the shadow map included. A row
@@ -669,18 +671,6 @@ export function verdict(rows, { strictHeadroom = false } = {}) {
     } else {
       if (r.glTriangles >= LIMITS.inclusive.triangles) fails.push(`${id}: shadow-inclusive ${r.glTriangles} tris >= ${LIMITS.inclusive.triangles}`);
       if (r.glDrawCalls >= LIMITS.inclusive.drawCalls) fails.push(`${id}: shadow-inclusive ${r.glDrawCalls} draws >= ${LIMITS.inclusive.drawCalls}`);
-    }
-    // The 78k scene headroom at the Ultra forest: a crow/owl over it where
-    // the Pionus, in the same world, would not be (world + 1,518 <= 78,000)
-    // — the species broke it. FAILS on the fixed seeds; on random boots only
-    // with strictHeadroom (speciesHeadroomBreaches() lists them either way).
-    // A world over it by itself is worldBreaches()' to report.
-    if (headroomRow(r) && (r.scenario === 'forest-seeds' || strictHeadroom) && r.species !== 'birb') {
-      for (const s of headroomSamples(r)) {
-        if (s.frameTriangles > LIMITS.forestUltra && worldOf(s) + PIONUS_TRIANGLES <= LIMITS.forestUltra) {
-          fails.push(`${rowId(s)}: Ultra forest ${s.frameTriangles} tris > ${LIMITS.forestUltra} where the Pionus would read ${worldOf(s) + PIONUS_TRIANGLES}`);
-        }
-      }
     }
     if (r.species !== 'birb') {
       // A missing count is a failure: `null <= 4000` would pass.
@@ -804,10 +794,9 @@ async function main() {
 
 /** The JSON (with the verdict, the world breaches and the distributions), the tables, the exit code. */
 async function report(meta, rows, opts, log) {
-  const fails = verdict(rows, { strictHeadroom: opts.strictHeadroom });
+  const fails = verdict(rows);
   const out = Object.assign({}, meta, {
     limits: LIMITS,
-    strictHeadroom: !!opts.strictHeadroom,
     pass: fails.length === 0,
     failures: fails,
     worldBreaches: worldBreaches(rows),
@@ -825,11 +814,11 @@ async function report(meta, rows, opts, log) {
   log(table(rows));
   log(distributionTable(out.distributions));
   if (out.worldBreaches.length) {
-    log('WORLD over the 78k headroom by itself (reported, not a species failure):\n  '
+    log('WORLD over the informational 78k mark by itself:\n  '
       + out.worldBreaches.map((b) => `${b.id}: frame ${b.frameTriangles}, world ${b.worldTriangles} (the Pionus would read ${b.pionusWouldRead})`).join('\n  '));
   }
   if (out.speciesHeadroomBreaches.length) {
-    log(`SPECIES over the 78k headroom where the Pionus fits (${opts.strictHeadroom ? 'FAILING: --strict-headroom' : 'reported; --strict-headroom gates it'}):\n  `
+    log(`SPECIES over the informational 78k mark where the Pionus fits (informational; 80k is the limit):\n  `
       + out.speciesHeadroomBreaches.map((b) => `${b.id}: frame ${b.frameTriangles} (+${b.over}), world ${b.worldTriangles} (the Pionus would read ${b.pionusWouldRead})`).join('\n  '));
   }
   log(`${rows.length} rows${meta.runSeconds !== undefined ? ' in ' + meta.runSeconds + ' s' : ''}${opts.out ? ' -> ' + opts.out : ''}`);
@@ -840,17 +829,31 @@ async function report(meta, rows, opts, log) {
   log('PASS');
 }
 
+/**
+ * The one build every --merge input was measured on. Refuses (throws) inputs
+ * with no build, or from different builds: a verdict over mixed builds
+ * judges no build at all. Exported for tests.
+ */
+export function mergeBuild(runs) {
+  const builds = new Set();
+  for (const { file, json } of runs) {
+    if (!json || typeof json.build !== 'string' || !json.build) throw new Error(`--merge: ${file} records no build; refusing to merge`);
+    builds.add(json.build);
+  }
+  if (builds.size > 1) throw new Error('--merge: refusing to merge runs of different builds: ' + [...builds].join(', '));
+  if (!builds.size) throw new Error('--merge: nothing to merge');
+  return [...builds][0];
+}
+
 /** --merge: several runs' JSON (one command is time-capped) judged as one. */
 async function merge(opts, log) {
   const rows = [];
   const builds = new Set();
-  for (const f of opts.merge) {
-    const j = JSON.parse(await readFile(f, 'utf8'));
-    if (j.build) builds.add(j.build);
-    rows.push(...j.rows);
-  }
-  if (builds.size > 1) log('WARNING: merging runs of different builds: ' + [...builds].join(', '));
-  await report({ build: [...builds].join(',') || null, mergedAt: new Date().toISOString(), mergedFrom: opts.merge.map((f) => path.relative(REPO_ROOT, f)) }, rows, opts, log);
+  const runs = [];
+  for (const f of opts.merge) runs.push({ file: path.relative(REPO_ROOT, f), json: JSON.parse(await readFile(f, 'utf8')) });
+  const build = mergeBuild(runs);
+  for (const { json } of runs) rows.push(...json.rows);
+  await report({ build, mergedAt: new Date().toISOString(), mergedFrom: opts.merge.map((f) => path.relative(REPO_ROOT, f)) }, rows, opts, log);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

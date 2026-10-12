@@ -47,7 +47,8 @@ const PINNED = Object.freeze({
  * leftovers": the owl's real cost against the 78k headroom, the owner's call).
  */
 const FOREST_ULTRA_WORLD_SEEDED = 74774;
-const FOREST_ULTRA_GATE = 78000;
+// The hard limit (owner decision 2026-10-13); 78k is informational only.
+const FOREST_ULTRA_GATE = 80000;
 
 function cost(spec) {
   let tris = 0;

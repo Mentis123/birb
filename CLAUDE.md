@@ -280,12 +280,44 @@
 >   stale. Left: a caw's SECOND note is scheduled 0.23 s ahead, where the
 >   fallback can only hold the present value (as before).
 >
+> **Budget decision (2026-10-13, owner).** The HARD limit is the scene
+> budget: < 80,000 triangles and < 100 draws per frame (renderer.info), plus
+> the shadow-inclusive gate < 120,000 / < 100. The 78,000 Ultra-forest
+> headroom is NO LONGER A TARGET: `tools/species-frame-budget.mjs` still lists
+> rows over 78k (`speciesHeadroomBreaches` / `worldBreaches`) for information
+> but never fails them; `--strict-headroom` is gone. The tool also now fails a
+> row with a blank/non-finite/negative scene count, and `--merge` refuses
+> inputs from different builds or with no build (`mergeBuild`, tested).
+> Re-measured with the CORRECTED per-frame GL counter (v88, Ultra, boot seeds
+> 1-8 per bird, every row max over the tool's frames; all 96 rows PASS, zero
+> console messages; evidence shots/budget-v88-incl/, git-ignored):
+>
+> | Bird | Scenario | Scene tris min / median / max | Scene draws max | Shadow-incl. tris min / median / max | Incl. draws max |
+> |---|---|---|---|---|---|
+> | Pionus | forest-spawn | 75,708 / 76,454 / 77,732 | 36 | 110,452 / 111,198 / 112,488 | 49 |
+> | Pionus | boost | 76,324 / 76,678 / 78,340 | 41 | 111,068 / 111,422 / 113,096 | 54 |
+> | Pionus | tumble | 75,844 / 76,182 / 77,604 | 36 | 110,588 / 110,902 / 112,360 | 49 |
+> | Pionus | stunt | 68,762 / 69,276 / 70,706 | 32 | 103,446 / 103,996 / 105,462 | 45 |
+> | Crow | forest-spawn | 77,148 / 77,516 / 78,552 | 33 | 112,978 / 113,322 / 114,394 | 44 |
+> | Crow | boost | 77,802 / 78,506 / 79,042 | 49 | 113,632 / 114,276 / 114,884 | 60 |
+> | Crow | tumble | 77,268 / 77,676 / 78,538 | 34 | 113,074 / 113,506 / 114,392 | 45 |
+> | Crow | stunt | 70,240 / 70,720 / 71,768 | 29 | 106,010 / 106,538 / 107,622 | 40 |
+> | Owl | forest-spawn | 77,149 / 77,879 / 79,149 | 32 | 113,334 / 114,040 / 115,358 | 42 |
+> | Owl | boost | 77,765 / 78,495 / 79,765 | 37 | 113,950 / 114,656 / 115,974 | 47 |
+> | Owl | tumble | 77,285 / 77,639 / 79,669 | 34 | 113,470 / 113,824 / 115,878 | 44 |
+> | Owl | stunt | 70,203 / 70,733 / 72,507 | 28 | 106,328 / 106,918 / 108,716 | 38 |
+>
+> Tightest: owl boost 79,765 scene (235 under the limit) and 115,974
+> inclusive (4,026 under). These replace the earlier inclusive figures taken
+> with the defective first counter (e.g. the 115.5k "max" below).
+>
 > **The budget, defined.** CLAUDE.md's "<100 draw calls, <80k triangles"
 > has always been measured with renderer.info: per frame, the scene render
 > plus the post-pass quads, summed (`__BIRB.frameTotals()`). That leaves
 > out the SHADOW MAP: three r183 draws it inside render() before it resets
 > renderer.info. So `tools/species-frame-budget.mjs` gates both: SCENE
-> < 80,000 / < 100 (and the 78,000 headroom at the Ultra forest), and
+> < 80,000 / < 100 (the HARD limit; the 78,000 Ultra-forest mark is
+> informational only since 2026-10-13, see "Budget decision"), and
 > SHADOW-INCLUSIVE (every GL draw, counted by wrapping drawElements /
 > drawArrays and the instanced forms before any page script, per game
 > requestAnimationFrame callback) < 120,000 / < 100. 120k is the worst Pionus frame measured with its shadow pass
@@ -298,8 +330,8 @@
 > world: a crow/owl over it where the Pionus WOULD fit (world + 1,518 <=
 > 78,000) is the species' breach (`speciesHeadroomBreaches`); a world over
 > it by itself is the world's (`worldBreaches`), never fixed by touching
-> Birb. Fixed seeds fail on a species breach; random boots list it and fail
-> only with `--strict-headroom` (below).
+> Birb. Both are LISTED only — never failed (owner decision 2026-10-13;
+> `--strict-headroom` removed).
 >
 > **Random worlds, measured** (v88, Ultra, forest spawn, 20 boots per bird,
 > `--boot-seeds 1..20`: the page's Math.random seeded before any script, so
@@ -326,9 +358,9 @@
 > would do it are visible: segment counts alone take the crow to 2,156 (faceted
 > silhouettes, plates), and the owl down that far needs its low mesh (no
 > seams, rivets or the third gear: the glints this round put back). Not
-> done; the owner's call. So the gate: SPECIES headroom breaches FAIL on the
-> fixed seeds (forest-seeds, judged seed by seed) and are listed, counted
-> and attributed on random boots, failing only with `--strict-headroom`.
+> done; the owner's call — decided 2026-10-13: 80k is the hard limit and 78k
+> is not a target (see "Budget decision"). The paragraph below records the
+> pre-decision gate behaviour.
 > And the fixed seeds are NOT boot-independent: a world seed pins the
 > forest's props, not the drones, rings and nests the boot placed. On boot
 > seed 1 forest-seeds reads crow 76,832 *, owl 77,187 (pass); on boot seed
@@ -396,7 +428,7 @@
 > changed: `tests/species-frame-budget.test.js` (new), `tests/species-
 > {transaction,budget,audio-cut}.test.js`, `tests/sw-cdn.test.js`,
 > `tools/species-frame-budget.mjs` (two budgets, `--boot-seeds`,
-> `--merge`, `--strict-headroom`, partial JSON after every boot),
+> `--merge` (refuses mixed or missing builds), partial JSON after every boot),
 > `tools/species-lifecycle-check.mjs` (frozen swaps, `--swaps-unfrozen`,
 > `--swaps-control`, the double failure), and every species tool also
 > finds puppeteer-core in /workspace/birb/tools/node_modules.
