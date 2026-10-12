@@ -9,10 +9,16 @@
 // 2,404 -> 2,080 (low). What went: zero-area pole/tip triangles (minTriArea),
 // three-sided toes and a leaner standing gear (legLean), the gears' rim face
 // from 6 triangles a tooth (gearRimRoots), the owl's body/head triangles
-// buried inside the two shells (dropHidden), and on the owl's high/mid mesh
-// 3-sided rivet domes and 4-sided gear hubs (~2 px at the chase camera).
-// Draw calls unchanged. Evidence: shots/main-species-final/look/ (before/after
-// pixel diffs, deterministic harness).
+// buried inside the two shells (dropHidden). Draw calls unchanged. Evidence:
+// shots/main-species-final/look/ (before/after pixel diffs, deterministic
+// harness).
+//
+// 2026-10-11: the owl's high/mid rivet domes (4 sides) and gear hubs (5) are
+// back — the v86 cut to 3 and 4 took their brass glints with it: 2,911 ->
+// 2,959. Evidence: shots/main-species-leftovers/glints/ (90a5edc / bdb750e /
+// now, same deterministic harness: the glint counts match 90a5edc exactly).
+// The crow is unchanged (its 20 "buried" triangles, dropHidden, were tried and
+// one showed in a close view: not trimmed).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BIRD_BUDGET } from '../src/flight/bird-contract.js';
@@ -24,18 +30,23 @@ import { triangleCount, dropSlivers, dropInside, loftInside } from '../src/fligh
 /** Per (species, look tier): [triangles, draw calls]. */
 const PINNED = Object.freeze({
   crow: { high: [2604, 7], mid: [2604, 7], low: [1614, 6] },
-  owl: { high: [2911, 6], mid: [2911, 6], low: [2080, 6] },
+  owl: { high: [2959, 6], mid: [2959, 6], low: [2080, 6] },
 });
 
 /**
  * The SEEDED Ultra forest spawn without a bird: tools/species-frame-budget.mjs
  * `forest-seeds` (max over world seeds 16160, 1, 2), which measured 74,620 for
  * all three birds on 2026-10-09 (frame minus bird: Pionus 76,138 - 1,518,
- * crow 77,224 - 2,604, owl 77,531 - 2,911). The boot's RANDOM world is not
- * pinnable — 73.3k-77.5k measured, so the 1,518-triangle Pionus itself read
- * 79,000 on one boot — and is held to the 80k budget, not this headroom.
+ * crow 77,224 - 2,604, owl 77,531 - 2,911) and at most 74,774 on 2026-10-11
+ * (v88: the Pionus's 76,292 - 1,518; the crow/owl's 74,228 — drones, rings and
+ * nests still draw on Math.random), all on boot seed 1. The fixed world seed
+ * does NOT pin those: on boot seed 14 the same world seeds read 75,404, and
+ * the owl 78,363 — over the headroom this test holds on boot 1's world. The
+ * boot's RANDOM world: 20 seeded random boots (v88) put it at 73.9k-76.4k,
+ * and the crow and owl over 78k on 5 and 9 of them (CLAUDE.md "Species
+ * leftovers": the owl's real cost against the 78k headroom, the owner's call).
  */
-const FOREST_ULTRA_WORLD_SEEDED = 74620;
+const FOREST_ULTRA_WORLD_SEEDED = 74774;
 const FOREST_ULTRA_GATE = 78000;
 
 function cost(spec) {

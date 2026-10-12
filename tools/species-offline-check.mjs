@@ -72,7 +72,8 @@ const CDN_ENTRIES = [...(/const CDN_MODULES = \[([\s\S]*?)\];/.exec(swText) || [
 async function loadPuppeteer() {
   try { return (await import('puppeteer-core')).default; } catch (_) { /* fall through */ }
   const require = createRequire(import.meta.url);
-  for (const p of [process.env.PUPPETEER_CORE, '/workspace/frontfootprep-launch/tools/node_modules/puppeteer-core'].filter(Boolean)) {
+  for (const p of [process.env.PUPPETEER_CORE, '/workspace/frontfootprep-launch/tools/node_modules/puppeteer-core',
+    '/workspace/birb/tools/node_modules/puppeteer-core'].filter(Boolean)) {
     try { return require(p); } catch (_) { /* next */ }
   }
   throw new Error('puppeteer-core not found (set PUPPETEER_CORE)');

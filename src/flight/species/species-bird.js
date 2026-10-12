@@ -230,23 +230,29 @@ const OWL_CLEAN = Object.freeze(Object.assign({ gearRimRoots: true, dropHidden: 
  * bay — the one the chase camera looks down on — keeps all three gears and
  * every tooth, and turns with the wingbeat.
  *
- * Trimmed again for frame headroom (3,461 -> 2,88x triangles; the Ultra
- * forest spawn measured 73.3-75.1k without the bird): OWL_CLEAN, plus two
- * segment counts the chase camera cannot resolve — 3-sided rivet domes and
- * 4-sided gear hubs, each ~2 px across there. Every part Gauntlet's mid
- * draws is still drawn, at its own size and place.
+ * Trimmed again for frame headroom (3,461 -> 2,959 triangles): OWL_CLEAN
+ * only. Every part Gauntlet's mid draws is still drawn, at its own size and
+ * place. The rivet domes keep their 4 sides and the gear hubs their 5: v86
+ * cut them to 3 and 4 (48 triangles) and the fixed-light builder renders
+ * showed it — the brass glints on the seams, the disc rim and the hubs
+ * changed shape and place (shots/main-species-leftovers/glints/: the hubs
+ * read as 4-point diamonds). They are back, pixel for pixel 90a5edc's.
  */
 export const OWL_ROOT_MID = Object.freeze(Object.assign({
   gearWalls: false, wingGears: false, seamRivets: 3, discRivets: 3, breast: Object.freeze([2, 3]), eyeSegs: 10,
   tail: 5, tCoverts: 2, primaries: 7, secondaries: 5, gCoverts: 5, blades: 4,
-  discSegs: 12, headSegs: 14, bodySegs: 14, legSegs: 4, plateSegs: 2, keySegs: 6, perTooth: 3, hubSegs: 4,
-  rivetSegs: 3,
+  discSegs: 12, headSegs: 14, bodySegs: 14, legSegs: 4, plateSegs: 2, keySegs: 6, perTooth: 3, hubSegs: 5,
 }, OWL_CLEAN));
 
 /** The owl's low tier: Gauntlet's low with only what is never seen dropped. */
 export const OWL_ROOT_LOW = OWL_CLEAN;
 
-/** The crow, every tier: Gauntlet's mesh with only what is never seen dropped. */
+/**
+ * The crow, every tier: Gauntlet's mesh with only what is never seen dropped.
+ * (v88 tried the owl's dropHidden on it: 20 triangles, and the deterministic
+ * look check showed one of them, a scapular's edge in a close face view — so
+ * not. The crow has no invisible triangles left.)
+ */
 export const CROW_ROOT = ROOT_CLEAN;
 
 /** Geometry per (species, look tier). */

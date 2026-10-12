@@ -11,16 +11,35 @@
  * shadow map, the world's culling depends on where the camera points, and the
  * post pass adds its own quads. So this boots the game for real and reads it.
  *
- * WHAT IT READS. `__BIRB.frameTotals()` — the per-frame accumulator
- * presentFrame() resets once and tallies after EVERY renderer.render() call
- * (index.html `frameRenderTotals` / `tallyRenderPass`): the scene pass (which
- * already includes the shadow-map renders three issues inside render()), the
- * bloom bright / blur / ray / composite passes at tier 0, the single scene
- * render at tier >= 1. Unlike `__BIRB.stats()`, which at tier 0 reports the
- * bloom pass's scene snapshot alone, this is the whole frame. It is a
- * per-frame snapshot, so each row is the MAX over `--frames` rendered frames
- * (default 20), sampled on requestAnimationFrame after `--warm` frames
- * (default 6) that absorb shader compiles. Beside it: the bird's own cost
+ * WHAT IT READS, AND THE TWO BUDGETS. Two counts per frame, both gated:
+ *
+ *   SCENE (`frameTriangles`, `frameDrawCalls`) — `__BIRB.frameTotals()`, the
+ *     per-frame accumulator presentFrame() resets once and tallies after EVERY
+ *     renderer.render() call (index.html `frameRenderTotals` /
+ *     `tallyRenderPass`): the scene pass, the bloom bright / blur / ray /
+ *     composite quads at tier 0, the single scene render at tier >= 1. This is
+ *     renderer.info, and it is what CLAUDE.md's "<100 draw calls, <80k
+ *     triangles" has always been measured with (stats(), the TEL rows, every
+ *     budget table in it). In three r183 it does NOT include the shadow map:
+ *     render() draws the shadow casters BEFORE it resets renderer.info, so the
+ *     shadow pass is gone from the count by the time tallyRenderPass reads it.
+ *     Gated: < 80,000 triangles and < 100 draws on every row, and the 78,000
+ *     headroom at the Ultra forest (below).
+ *
+ *   SHADOW-INCLUSIVE (`glTriangles`, `glDrawCalls`) — every draw the page hands
+ *     WebGL in that frame (GL_COUNTER, wrapped around drawElements/drawArrays
+ *     and their instanced forms before any page script): the scene, the post
+ *     quads AND the shadow map's depth pass with the VSM blur. On Ultra (the
+ *     shadows lever on) the shadow pass is ~33-35k triangles of world casters
+ *     plus the bird drawn a second time; on Okay/Light it is identical to the
+ *     scene count. Gated against LIMITS.inclusive (see there for why 120k):
+ *     a bird that fits the scene budget may not push the frame's real GPU
+ *     submission past it either (tests/species-frame-budget.test.js holds a
+ *     row that passes the scene gate and fails this one).
+ *
+ * Each is a per-frame snapshot, so each row is the MAX over `--frames`
+ * rendered frames, sampled on requestAnimationFrame after `--warm` frames
+ * that absorb shader compiles. Beside them: the bird's own cost
  * (`__BIRB.birdStats()`, every mesh under the bird anchor) and the species
  * readout (`__BIRB.speciesInfo()`: which LOD tier the crow/owl was built at,
  * and `renderTier`, the `adaptiveTier.getTier()` that LOD follows).
@@ -31,13 +50,22 @@
  * downshift it — the recorded renderTier proves it) x scenario:
  *
  *   forest-spawn  the boot view: forest, chase cam, flying from the spawn.
- *                 The boot world is RANDOMLY seeded, so this row moves by
- *                 up to ~4k triangles from run to run (world 73.3k-77.5k
- *                 measured at Ultra); it is what a player gets.
+ *                 The boot world is RANDOM (seeded-random.js falls back to
+ *                 Math.random with no world seed), so this row moves by
+ *                 several thousand triangles from boot to boot; it is what a
+ *                 player gets. `--boot-seeds 1,2,...` boots once per seed with
+ *                 the page's Math.random replaced (before any page script) by
+ *                 a seeded generator: a random world, but one that can be
+ *                 booted again. Each row records its `bootSeed` (null = a true
+ *                 Math.random boot).
  *   forest-seeds  the comparable one: the forest rebuilt at fixed world
- *                 seeds (`--seeds`, default 16160,1,2,3,4; worldSeed +
+ *                 seeds (`--seeds`, default 16160,1,2; worldSeed +
  *                 setEnvironment), the bird restored to its spawn pose each
- *                 time, the MAX kept (and each seed listed in `perSeed`).
+ *                 time, the MAX kept (and each seed listed in `perSeed`,
+ *                 which the 78k headroom judges seed by seed). Comparable to
+ *                 within a prop or two: drones, rings and nests still draw
+ *                 on Math.random (measured: the seeded world read 74,774
+ *                 with the Pionus, 74,228 with the crow/owl, v88).
  *                 Every scenario after it runs in the last seed's world.
  *   boost        `__BIRB.boost(true)` (the sprint: the species sees
  *                 `boosting`, the camera pulls back) in the forest.
@@ -58,15 +86,25 @@
  * two forest rows at Ultra for each species (~6-10 min). `stunt` is opt-in
  * (`--scenarios ...,stunt`).
  *
- * FAILS (exit 1) when any row reaches 80,000 frame triangles or 100 draw
- * calls, when the SEEDED forest (forest-seeds, the max over the seeds) at
- * Ultra exceeds 78,000 for any species (the headroom the picker keeps; the
- * random-world forest-spawn row is held to 80k only, see verdict()), when a
- * crow/owl row's bird leaves
- * BIRD_BUDGET (8 draws / 4,000 triangles; the Pionus is the 9-draw baseline
- * that budget was written around and is reported, not gated), or on ANY
- * console error or warning (boot messages are charged to the first row
- * measured on that page).
+ * FAILS (exit 1) when any row reaches the SCENE budget (80,000 triangles or
+ * 100 draw calls) or the SHADOW-INCLUSIVE one (LIMITS.inclusive), when a
+ * crow/owl row at the Ultra forest exceeds the 78,000 scene headroom IN A
+ * WORLD WHERE THE PIONUS WOULD NOT (world + 1,518 <= 78,000: the species is
+ * what broke it — see verdict()) on the fixed seeds (forest-seeds), or on a
+ * random boot (forest-spawn) with `--strict-headroom` (without it those are
+ * listed in `speciesHeadroomBreaches`, attributed and counted),
+ * when a crow/owl row's bird leaves BIRD_BUDGET (8 draws / 4,000 triangles;
+ * the Pionus is the 9-draw baseline that budget was written around and is
+ * reported, not gated), or on ANY console error or warning (boot messages are
+ * charged to the first row measured on that page). A world that is over the
+ * headroom by itself (the Pionus rows, or a crow/owl row whose world alone
+ * breaks it) is a WORLD breach: listed in `worldBreaches`, never "fixed" by
+ * degrading the default bird.
+ *
+ * DISTRIBUTIONS. Every run (and `--merge`, which combines the JSON of several
+ * runs — one command is capped at ~10 min here) reports per species x quality
+ * x scenario the min / median / p95 / max of the scene and shadow-inclusive
+ * triangles and of the world without the bird, over every boot and seed.
  *
  * THE SERVER. Without --url it serves THIS checkout itself (a tiny static
  * server on an ephemeral port that lives exactly as long as the run), so a
@@ -87,8 +125,9 @@
  *   node tools/species-frame-budget.mjs [--quick] [--out <file>]
  *        [--url http://localhost:8765/] [--frames 12] [--warm 6]
  *        [--species birb,crow,owl] [--tiers ultra,okay,light]
- *        [--scenarios forest-spawn,forest-seeds,boost,tumble,biome-city,biome-mountain]
- *        [--seeds 16160,1,2] [--seed-frames 6]
+ *        [--scenarios forest-spawn,forest-seeds,boost,tumble,stunt,biome-city,biome-mountain]
+ *        [--seeds 16160,1,2] [--seed-frames 6] [--boot-seeds 1,2,3]
+ *   node tools/species-frame-budget.mjs --merge a.json b.json ... [--out merged.json]
  *
  * Writes JSON to stdout (and to --out when given):
  *   { build, measuredAt, url, frames, rows: [{ species, renderTier,
@@ -111,10 +150,26 @@ import path from 'node:path';
 import { BIRD_BUDGET } from '../src/flight/bird-contract.js';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FALLBACK_PUPPETEER = '/workspace/frontfootprep-launch/tools/node_modules/puppeteer-core';
+const FALLBACK_PUPPETEERS = Object.freeze([
+  '/workspace/frontfootprep-launch/tools/node_modules/puppeteer-core',
+  '/workspace/birb/tools/node_modules/puppeteer-core',
+]);
+
+/** The Pionus v3's own cost (CLAUDE.md, THE BIRD PICKER): the world's reference bird. */
+export const PIONUS_TRIANGLES = 1518;
 
 export const LIMITS = Object.freeze({
+  // SCENE: renderer.info over every renderer.render() of the frame — the
+  // budget CLAUDE.md states ("<100 draw calls, <80k triangles").
   triangles: 80000, drawCalls: 100, forestUltra: 78000,
+  // SHADOW-INCLUSIVE: every draw WebGL receives in the frame. 120,000
+  // triangles: the Pionus's worst Ultra frame measured with the shadow pass
+  // in it (113.8k on a random v86 boot; the world casts ~33-35k into the
+  // shadow map) plus the bird budget drawn twice (scene + shadow map) over the
+  // Pionus: 113,768 + 2 x (4,000 - 1,518) = 118,732 — so any bird inside
+  // BIRD_BUDGET fits in the worst world seen, and a world that grows past it
+  // shows up. Draws stay under the same 100 (measured <= 50 with shadows).
+  inclusive: Object.freeze({ triangles: 120000, drawCalls: 100 }),
   // BIRD_BUDGET (src/flight/bird-contract.js), gated on the crow and the owl.
   birdTriangles: BIRD_BUDGET.maxTriangles, birdDrawCalls: BIRD_BUDGET.maxDrawCalls,
 });
@@ -131,6 +186,7 @@ function parseArgs(argv) {
     quick: false, out: null, url: null,
     frames: 12, warm: 6, species: ['birb', 'crow', 'owl'], tiers: ['ultra', 'okay', 'light'],
     scenarios: DEFAULT_SCENARIOS.slice(), seeds: DEFAULT_SEEDS.slice(), seedFrames: 6,
+    bootSeeds: [null], merge: null, strictHeadroom: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -145,6 +201,11 @@ function parseArgs(argv) {
     else if (a === '--scenarios') o.scenarios = next().split(',').filter(Boolean);
     else if (a === '--seeds') o.seeds = next().split(',').map(Number).filter(Number.isFinite);
     else if (a === '--seed-frames') o.seedFrames = Math.max(1, Number(next()) | 0);
+    else if (a === '--strict-headroom') o.strictHeadroom = true;
+    // Positive integers: SEED_MATH_RANDOM maps 0 onto 1's stream, and an
+    // empty list (no boots) fails the run as "no rows".
+    else if (a === '--boot-seeds') o.bootSeeds = next().split(',').filter((s) => s.trim() !== '').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    else if (a === '--merge') { o.merge = []; while (argv[i + 1] && !argv[i + 1].startsWith('--')) o.merge.push(path.resolve(next())); }
     else if (a === '--help' || a === '-h') { process.stderr.write(HELP); process.exit(0); }
     else throw new Error('unknown argument ' + a);
   }
@@ -154,7 +215,8 @@ function parseArgs(argv) {
 
 const HELP = 'node tools/species-frame-budget.mjs [--quick] [--out file] [--url base] [--frames N] [--warm N]\n'
   + '  [--species birb,crow,owl] [--tiers ultra,okay,light] [--scenarios ' + ALL_SCENARIOS.join(',') + ']\n'
-  + '  [--seeds ' + DEFAULT_SEEDS.join(',') + '] [--seed-frames 6]\n';
+  + '  [--seeds ' + DEFAULT_SEEDS.join(',') + '] [--seed-frames 6] [--boot-seeds 1,2,3] [--strict-headroom]\n'
+  + 'node tools/species-frame-budget.mjs --merge a.json b.json ... [--out merged.json]\n';
 
 // ---------------------------------------------------------------- puppeteer
 
@@ -164,11 +226,11 @@ async function loadPuppeteer() {
     return m.default || m;
   } catch (_) { /* not installed here */ }
   const require = createRequire(import.meta.url);
-  for (const p of [process.env.PUPPETEER_CORE, FALLBACK_PUPPETEER]) {
+  for (const p of [process.env.PUPPETEER_CORE, ...FALLBACK_PUPPETEERS]) {
     if (!p) continue;
     try { return require(p); } catch (_) { /* next */ }
   }
-  throw new Error('puppeteer-core not found (npm-resolvable, $PUPPETEER_CORE, or ' + FALLBACK_PUPPETEER + ')');
+  throw new Error('puppeteer-core not found (npm-resolvable, $PUPPETEER_CORE, or ' + FALLBACK_PUPPETEERS.join(' / ') + ')');
 }
 
 // ------------------------------------------------------------ static server
@@ -249,8 +311,21 @@ async function startGame(page) {
  * their instance count) in `window.__fbGL`. The sampler zeroes it per frame.
  */
 function GL_COUNTER() {
-  const C = { calls: 0, tris: 0 };
+  const C = { calls: 0, tris: 0, lastFrame: null };
   window.__fbGL = C;
+  // Per GAME FRAME: every requestAnimationFrame callback is bracketed, and a
+  // callback that drew (the game loop's: its renderer.render, shadow map
+  // included, runs inside it) leaves its own totals in `lastFrame`. Counting
+  // between two of the sampler's callbacks instead (v88's first version)
+  // read 14,844 against a 30,748-triangle scene on one mountain row: the
+  // window did not always hold one whole frame.
+  const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (cb) => raf((t) => {
+    const c0 = C.calls, t0 = C.tris;
+    try { return cb(t); } finally {
+      if (C.calls > c0) C.lastFrame = { calls: C.calls - c0, tris: C.tris - t0 };
+    }
+  });
   const tri = (mode, count, inst) => {
     if (mode === 4) C.tris += Math.floor(count / 3) * inst;
     else if (mode === 5 || mode === 6) C.tris += Math.max(0, count - 2) * inst;
@@ -275,6 +350,22 @@ function GL_COUNTER() {
   }
 }
 
+/**
+ * Installed before any page script when the boot is seeded: Math.random is a
+ * mulberry32 stream from `seed`, so the boot's random world (and sky hour,
+ * drones, ...) is one particular random world that can be booted again.
+ */
+function SEED_MATH_RANDOM(seed) {
+  let a = (seed >>> 0) || 1;
+  Math.random = function seededRandom() {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** Advance N rendered frames (the only clock that means anything under SwiftShader). */
 const advance = (page, n) => page.evaluate((count) => new Promise((resolve) => {
   let seen = 0;
@@ -292,11 +383,11 @@ const sample = (page, n) => page.evaluate(async (count) => {
   const G = window.__fbGL;
   const t0 = performance.now();
   for (let i = 0; i < count; i++) {
-    if (G) { G.calls = 0; G.tris = 0; }
+    if (G) G.lastFrame = null;
     await new Promise((r) => requestAnimationFrame(r));
-    // Every draw the GPU was handed between two of this loop's callbacks:
-    // exactly one game frame, whichever of the two rAF callbacks runs first.
-    if (G && i > 0) { glTris.push(G.tris); glCalls.push(G.calls); }
+    // The last game frame that drew (GL_COUNTER brackets each rAF callback):
+    // the same frame frameTotals() describes, whichever callback ran first.
+    if (G && G.lastFrame) { glTris.push(G.lastFrame.tris); glCalls.push(G.lastFrame.calls); }
     const f = B.frameTotals();
     tris.push(f.triangles); calls.push(f.calls); scene.push(f.scene.triangles); passes.push(f.passes);
     const e = B.effective ? B.effective().statsPath : null;
@@ -377,10 +468,10 @@ async function readBuild(page) {
 
 // ------------------------------------------------------------------- main
 
-async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
+async function measureCombo(puppeteer, chrome, base, species, tier, opts, log, bootSeed = null) {
   const browser = await puppeteer.launch({
     executablePath: chrome, headless: 'new', protocolTimeout: 0,
-    args: [...LAUNCH_ARGS, `--user-data-dir=/tmp/birb-frame-budget-${process.pid}-${species}-${tier}`],
+    args: [...LAUNCH_ARGS, `--user-data-dir=/tmp/birb-frame-budget-${process.pid}-${species}-${tier}-${bootSeed}`],
   });
   const rows = [];
   let build = null;
@@ -396,11 +487,12 @@ async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
       if (m.type() === 'warn' || m.type() === 'warning') warnings.push(t.slice(0, 300));
     });
     await page.evaluateOnNewDocument(GL_COUNTER);
+    if (bootSeed !== null) await page.evaluateOnNewDocument(SEED_MATH_RANDOM, bootSeed);
     const url = new URL(base);
     url.searchParams.set('debug', '1');
     url.searchParams.set('bird', species);
     url.searchParams.set('quality', QUALITY_IDS[tier]);
-    log(`[${species}/${tier}] boot ${url.href}`);
+    log(`[${species}/${tier}] boot ${url.href}${bootSeed !== null ? ' (Math.random seed ' + bootSeed + ')' : ''}`);
     await page.goto(url.href, { waitUntil: 'networkidle2', timeout: 180000 });
     build = await readBuild(page);
     await startGame(page);
@@ -428,7 +520,12 @@ async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
           }, seed, spawnPose);
           await advance(page, opts.warm + 4);
           const one = await sample(page, opts.seedFrames);
-          perSeed.push({ seed, frameTriangles: Math.max(...one.tris), frameDrawCalls: Math.max(...one.calls), one });
+          perSeed.push({
+            seed, frameTriangles: Math.max(...one.tris), frameDrawCalls: Math.max(...one.calls),
+            glTriangles: one.glTris.length ? Math.max(...one.glTris) : null,
+            glDrawCalls: one.glCalls.length ? Math.max(...one.glCalls) : null,
+            birdTriangles: one.bird ? one.bird.triangles : null, one,
+          });
         }
         const pick = (k) => perSeed.reduce((a, p) => a.concat(p.one[k]), []);
         const last = perSeed[perSeed.length - 1].one;
@@ -447,6 +544,7 @@ async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
       const row = {
         species,
         quality: tier,
+        bootSeed,
         renderTier: s.speciesInfo ? s.speciesInfo.renderTier : s.stats.tier,
         renderTierPinned: s.stats.pinned,
         speciesTier: s.speciesInfo ? s.speciesInfo.tier : null,
@@ -459,8 +557,7 @@ async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
         sceneTrianglesMax: Math.max(...s.scene),
         // Every draw the GPU received, shadow-map passes included (three
         // renders the shadow map BEFORE renderer.info resets, so frameTotals
-        // never sees it). Reported, not gated: the 80k budget is defined on
-        // the renderer.info count above.
+        // never sees it): the SHADOW-INCLUSIVE budget, LIMITS.inclusive.
         glTriangles: s.glTris.length ? Math.max(...s.glTris) : null,
         glDrawCalls: s.glCalls.length ? Math.max(...s.glCalls) : null,
         passes: Math.max(...s.passes),
@@ -485,7 +582,7 @@ async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
       }
       errors = []; warnings = [];
       rows.push(row);
-      log(`[${species}/${tier}] ${scenario}: frame ${row.frameTriangles} tris / ${row.frameDrawCalls} draws `
+      log(`[${species}/${tier}${bootSeed !== null ? '/seed ' + bootSeed : ''}] ${scenario}: frame ${row.frameTriangles} tris / ${row.frameDrawCalls} draws `
         + `[gl ${row.glTriangles}/${row.glDrawCalls}] (bird ${row.birdTriangles}/${row.birdDrawCalls}, speciesTier ${row.speciesTier}, renderTier ${row.renderTier}) `
         + `${s.msPerFrame} ms/frame, ${Math.round((Date.now() - t0) / 1000)} s`);
     }
@@ -495,23 +592,100 @@ async function measureCombo(puppeteer, chrome, base, species, tier, opts, log) {
   return { rows, build };
 }
 
-export function verdict(rows) {
+const rowId = (r) => `${r.species}/${r.quality}/${r.scenario}${r.bootSeed !== null && r.bootSeed !== undefined ? '@seed' + r.bootSeed : ''}`
+  + (r.worldSeed !== undefined ? '@world' + r.worldSeed : '');
+
+/**
+ * What the 78k headroom judges: a row, or for forest-seeds EACH world seed
+ * (its own frame and its own world) — the row's max would pair one seed's
+ * frame with that seed's world and miss a species breach at another seed.
+ */
+const headroomSamples = (r) => (r.scenario === 'forest-seeds' && Array.isArray(r.perSeed) && r.perSeed.length
+  ? r.perSeed.map((p) => Object.assign({}, r, {
+    worldSeed: p.seed, frameTriangles: p.frameTriangles,
+    worldTriangles: p.frameTriangles - (Number.isFinite(p.birdTriangles) ? p.birdTriangles : (r.birdTriangles || 0)),
+  }))
+  : [r]);
+
+/** A row the 78k scene headroom applies to: the Ultra forest spawn, random boot or fixed seeds. */
+const headroomRow = (r) => r.renderTier === 0 && (r.scenario === 'forest-spawn' || r.scenario === 'forest-seeds');
+
+/**
+ * The world's own share of a row's scene count: the frame minus the bird on
+ * the anchor. With the Pionus in that world instead, the frame would read
+ * world + PIONUS_TRIANGLES.
+ */
+const worldOf = (r) => (Number.isFinite(r.worldTriangles) ? r.worldTriangles : r.frameTriangles - (r.birdTriangles || 0));
+
+/**
+ * The 78k headroom breaches that are the WORLD's, not a species': every
+ * Pionus row over it, and every crow/owl row whose world alone would put the
+ * Pionus over it. Reported (precisely: the world's own count), never fixed by
+ * changing the default bird.
+ */
+export function worldBreaches(rows) {
+  const out = [];
+  for (const r of rows.flatMap(headroomSamples)) {
+    if (!headroomRow(r) || r.frameTriangles <= LIMITS.forestUltra) continue;
+    const world = worldOf(r);
+    if (r.species === 'birb' || world + PIONUS_TRIANGLES > LIMITS.forestUltra) {
+      out.push({ id: rowId(r), species: r.species, scenario: r.scenario, bootSeed: r.bootSeed ?? null, frameTriangles: r.frameTriangles, worldTriangles: world, pionusWouldRead: world + PIONUS_TRIANGLES });
+    }
+  }
+  return out;
+}
+
+/**
+ * The 78k headroom breaches the SPECIES owns: a crow/owl row at the Ultra
+ * forest over 78,000 in a world where the Pionus would fit (world + 1,518 <=
+ * 78,000). On the fixed seeds (forest-seeds) verdict() fails them; on random
+ * boots (forest-spawn) they are listed here and fail only with
+ * `--strict-headroom` (2026-10-11: the invisible trims are spent — see
+ * CLAUDE.md "Species leftovers" for the measured gap and what closing it
+ * would cost to look at).
+ */
+export function speciesHeadroomBreaches(rows) {
+  return rows.flatMap(headroomSamples).filter((r) => headroomRow(r) && r.species !== 'birb' && r.frameTriangles > LIMITS.forestUltra
+    && worldOf(r) + PIONUS_TRIANGLES <= LIMITS.forestUltra)
+    .map((r) => ({ id: rowId(r), species: r.species, scenario: r.scenario, bootSeed: r.bootSeed ?? null, frameTriangles: r.frameTriangles, over: r.frameTriangles - LIMITS.forestUltra, worldTriangles: worldOf(r), pionusWouldRead: worldOf(r) + PIONUS_TRIANGLES }));
+}
+
+export function verdict(rows, { strictHeadroom = false } = {}) {
   const fails = [];
-  for (const r of rows) {
-    const id = `${r.species}/${r.quality}/${r.scenario}`;
-    if (r.frameTriangles >= LIMITS.triangles) fails.push(`${id}: ${r.frameTriangles} tris >= ${LIMITS.triangles}`);
-    if (r.frameDrawCalls >= LIMITS.drawCalls) fails.push(`${id}: ${r.frameDrawCalls} draws >= ${LIMITS.drawCalls}`);
-    // The 78k headroom is gated on the SEEDED forest only. `forest-spawn` is
-    // the boot's random world: measured 73.3k-77.5k without a bird, so the
-    // Pionus itself read 79,000 on one boot (2026-10-09) — a world-budget
-    // fact no bird trim can fix. It is reported (worldTriangles) and held to
-    // the 80k budget above, not to the headroom.
-    if (r.scenario === 'forest-seeds' && r.renderTier === 0 && r.frameTriangles > LIMITS.forestUltra) {
-      fails.push(`${id}: seeded forest spawn at Ultra ${r.frameTriangles} tris > ${LIMITS.forestUltra}`);
+  if (!rows.length) fails.push('no rows: nothing was measured (or merged), so nothing passed');
+  for (const r0 of rows) {
+    const r = Object.assign({ errors: [], warnings: [] }, r0);
+    const id = rowId(r);
+    // SCENE: CLAUDE.md's budget, renderer.info over the frame's renders.
+    if (r.frameTriangles >= LIMITS.triangles) fails.push(`${id}: scene ${r.frameTriangles} tris >= ${LIMITS.triangles}`);
+    if (r.frameDrawCalls >= LIMITS.drawCalls) fails.push(`${id}: scene ${r.frameDrawCalls} draws >= ${LIMITS.drawCalls}`);
+    // SHADOW-INCLUSIVE: everything WebGL drew, the shadow map included. A row
+    // with no GL count cannot be judged, which is a failure, not a pass.
+    if (!Number.isFinite(r.glTriangles) || !Number.isFinite(r.glDrawCalls)) fails.push(`${id}: no shadow-inclusive (GL) count`);
+    else if (r.glTriangles < r.frameTriangles) {
+      // Everything WebGL drew can never be less than what renderer.info
+      // counted: the counter missed a frame, so the row proves nothing.
+      fails.push(`${id}: shadow-inclusive ${r.glTriangles} < scene ${r.frameTriangles}: the GL counter missed the frame`);
+    } else {
+      if (r.glTriangles >= LIMITS.inclusive.triangles) fails.push(`${id}: shadow-inclusive ${r.glTriangles} tris >= ${LIMITS.inclusive.triangles}`);
+      if (r.glDrawCalls >= LIMITS.inclusive.drawCalls) fails.push(`${id}: shadow-inclusive ${r.glDrawCalls} draws >= ${LIMITS.inclusive.drawCalls}`);
+    }
+    // The 78k scene headroom at the Ultra forest: a crow/owl over it where
+    // the Pionus, in the same world, would not be (world + 1,518 <= 78,000)
+    // — the species broke it. FAILS on the fixed seeds; on random boots only
+    // with strictHeadroom (speciesHeadroomBreaches() lists them either way).
+    // A world over it by itself is worldBreaches()' to report.
+    if (headroomRow(r) && (r.scenario === 'forest-seeds' || strictHeadroom) && r.species !== 'birb') {
+      for (const s of headroomSamples(r)) {
+        if (s.frameTriangles > LIMITS.forestUltra && worldOf(s) + PIONUS_TRIANGLES <= LIMITS.forestUltra) {
+          fails.push(`${rowId(s)}: Ultra forest ${s.frameTriangles} tris > ${LIMITS.forestUltra} where the Pionus would read ${worldOf(s) + PIONUS_TRIANGLES}`);
+        }
+      }
     }
     if (r.species !== 'birb') {
-      if (!(r.birdTriangles <= LIMITS.birdTriangles)) fails.push(`${id}: bird ${r.birdTriangles} tris > BIRD_BUDGET ${LIMITS.birdTriangles}`);
-      if (!(r.birdDrawCalls <= LIMITS.birdDrawCalls)) fails.push(`${id}: bird ${r.birdDrawCalls} draws > BIRD_BUDGET ${LIMITS.birdDrawCalls}`);
+      // A missing count is a failure: `null <= 4000` would pass.
+      if (!(Number.isFinite(r.birdTriangles) && r.birdTriangles <= LIMITS.birdTriangles)) fails.push(`${id}: bird ${r.birdTriangles} tris > BIRD_BUDGET ${LIMITS.birdTriangles} (or missing)`);
+      if (!(Number.isFinite(r.birdDrawCalls) && r.birdDrawCalls <= LIMITS.birdDrawCalls)) fails.push(`${id}: bird ${r.birdDrawCalls} draws > BIRD_BUDGET ${LIMITS.birdDrawCalls} (or missing)`);
     }
     for (const e of r.errors) fails.push(`${id}: error ${e}`);
     for (const w of r.warnings) fails.push(`${id}: warning ${w}`);
@@ -519,21 +693,70 @@ export function verdict(rows) {
   return fails;
 }
 
+/** min / median / p95 / max (nearest rank) of a list of numbers, or null. */
+export function spread(values) {
+  const v = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const rank = (q) => v[Math.min(v.length - 1, Math.max(0, Math.ceil(q * v.length) - 1))];
+  return { n: v.length, min: v[0], median: rank(0.5), p95: rank(0.95), max: v[v.length - 1] };
+}
+
+/**
+ * Per species x quality x scenario, over every boot (and, for forest-seeds,
+ * every world seed): the scene count, the shadow-inclusive count, the world
+ * without the bird, and the draws.
+ */
+export function distributions(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    const k = `${r.species}/${r.quality}/${r.scenario}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const out = {};
+  for (const [k, rs] of groups) {
+    // forest-seeds: one sample per world seed (perSeed), not the row's max.
+    const samples = rs.flatMap((r) => (r.scenario === 'forest-seeds' && Array.isArray(r.perSeed) && r.perSeed.length ? r.perSeed : [r]));
+    out[k] = {
+      boots: rs.length,
+      samples: samples.length,
+      bootSeeds: rs.map((r) => r.bootSeed ?? null),
+      scene: spread(samples.map((s) => s.frameTriangles)),
+      sceneDraws: spread(samples.map((s) => s.frameDrawCalls)),
+      inclusive: spread(samples.map((s) => s.glTriangles)),
+      inclusiveDraws: spread(samples.map((s) => s.glDrawCalls)),
+      world: spread(samples.map(worldOf)),
+      bird: spread(samples.map((s) => s.birdTriangles)),
+    };
+  }
+  return out;
+}
+
+export function distributionTable(dist) {
+  const f = (s) => (s ? `${s.min}/${s.median}/${s.p95}/${s.max}` : '-');
+  const head = ['group', 'n', 'scene min/med/p95/max', 'incl min/med/p95/max', 'world min/med/p95/max', 'draws max (incl)'];
+  const body = Object.entries(dist).map(([k, d]) => [k, String(d.samples), f(d.scene), f(d.inclusive), f(d.world),
+    `${d.sceneDraws ? d.sceneDraws.max : '-'} (${d.inclusiveDraws ? d.inclusiveDraws.max : '-'})`]);
+  const w = head.map((h, i) => Math.max(h.length, ...body.map((b) => b[i].length)));
+  return [head, ...body].map((c) => c.map((x, i) => x.padEnd(w[i])).join('  ')).join('\n');
+}
+
 /** The short human table: one line per row. */
 export function table(rows) {
-  const head = ['species', 'quality', 'tier', 'scenario', 'frameTris', 'frameDraws', 'birdTris', 'birdDraws', 'err', 'warn'];
+  const head = ['species', 'quality', 'tier', 'scenario', 'seed', 'sceneTris', 'sceneDraws', 'inclTris', 'inclDraws', 'birdTris', 'birdDraws', 'err', 'warn'];
   const body = rows.map((r) => [
-    r.species, r.quality, r.speciesTier || '-', r.scenario, r.frameTriangles, r.frameDrawCalls,
-    r.birdTriangles, r.birdDrawCalls, r.errors.length, r.warnings.length,
+    r.species, r.quality, r.speciesTier || '-', r.scenario, r.bootSeed ?? '-', r.frameTriangles, r.frameDrawCalls,
+    r.glTriangles ?? '-', r.glDrawCalls ?? '-', r.birdTriangles, r.birdDrawCalls, (r.errors || []).length, (r.warnings || []).length,
   ].map(String));
   const w = head.map((h, i) => Math.max(h.length, ...body.map((b) => b[i].length)));
-  const line = (cells) => cells.map((c, i) => (i >= 4 ? c.padStart(w[i]) : c.padEnd(w[i]))).join('  ');
+  const line = (cells) => cells.map((c, i) => (i >= 5 ? c.padStart(w[i]) : c.padEnd(w[i]))).join('  ');
   return [line(head), ...body.map(line)].join('\n');
 }
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const log = (s) => process.stderr.write(s + '\n');
+  if (opts.merge) return merge(opts, log);
   const puppeteer = await loadPuppeteer();
   const chrome = process.env.CHROME_PATH || '/usr/bin/google-chrome';
   let server = null;
@@ -548,11 +771,19 @@ async function main() {
   const rows = [];
   let build = null;
   try {
-    for (const species of opts.species) {
-      for (const tier of opts.tiers) {
-        const r = await measureCombo(puppeteer, chrome, base, species, tier, opts, log);
-        rows.push(...r.rows);
-        build = build || r.build;
+    for (const bootSeed of opts.bootSeeds) {
+      for (const species of opts.species) {
+        for (const tier of opts.tiers) {
+          const r = await measureCombo(puppeteer, chrome, base, species, tier, opts, log, bootSeed);
+          rows.push(...r.rows);
+          build = build || r.build;
+          // A command here is time-capped: what has been measured is on disk
+          // after every boot (`partial: true`), for --merge, if the run is cut.
+          if (opts.out) {
+            await mkdir(path.dirname(opts.out), { recursive: true });
+            await writeFile(opts.out, JSON.stringify({ build, partial: true, rows }, null, 2) + '\n');
+          }
+        }
       }
     }
   } finally {
@@ -561,32 +792,65 @@ async function main() {
   if (!build) {
     try { build = (/const BIRB_BUILD = '([^']+)'/.exec(await readFile(path.join(REPO_ROOT, 'index.html'), 'utf8')) || [])[1] || null; } catch (_) { build = null; }
   }
-  const fails = verdict(rows);
-  const out = {
+  await report({
     build,
     measuredAt: new Date().toISOString(),
     url: opts.url || '(self-served checkout)',
     frames: opts.frames,
     warm: opts.warm,
-    limits: LIMITS,
     runSeconds: Math.round((Date.now() - started) / 1000),
+  }, rows, opts, log);
+}
+
+/** The JSON (with the verdict, the world breaches and the distributions), the tables, the exit code. */
+async function report(meta, rows, opts, log) {
+  const fails = verdict(rows, { strictHeadroom: opts.strictHeadroom });
+  const out = Object.assign({}, meta, {
+    limits: LIMITS,
+    strictHeadroom: !!opts.strictHeadroom,
     pass: fails.length === 0,
     failures: fails,
+    worldBreaches: worldBreaches(rows),
+    speciesHeadroomBreaches: speciesHeadroomBreaches(rows),
+    distributions: distributions(rows),
     rows,
-  };
+  });
   const json = JSON.stringify(out, null, 2);
   if (opts.out) {
     await mkdir(path.dirname(opts.out), { recursive: true });
     await writeFile(opts.out, json + '\n');
+  } else {
+    process.stdout.write(json + '\n');
   }
-  process.stdout.write(json + '\n');
   log(table(rows));
-  log(`${rows.length} rows in ${out.runSeconds} s${opts.out ? ' -> ' + opts.out : ''}`);
+  log(distributionTable(out.distributions));
+  if (out.worldBreaches.length) {
+    log('WORLD over the 78k headroom by itself (reported, not a species failure):\n  '
+      + out.worldBreaches.map((b) => `${b.id}: frame ${b.frameTriangles}, world ${b.worldTriangles} (the Pionus would read ${b.pionusWouldRead})`).join('\n  '));
+  }
+  if (out.speciesHeadroomBreaches.length) {
+    log(`SPECIES over the 78k headroom where the Pionus fits (${opts.strictHeadroom ? 'FAILING: --strict-headroom' : 'reported; --strict-headroom gates it'}):\n  `
+      + out.speciesHeadroomBreaches.map((b) => `${b.id}: frame ${b.frameTriangles} (+${b.over}), world ${b.worldTriangles} (the Pionus would read ${b.pionusWouldRead})`).join('\n  '));
+  }
+  log(`${rows.length} rows${meta.runSeconds !== undefined ? ' in ' + meta.runSeconds + ' s' : ''}${opts.out ? ' -> ' + opts.out : ''}`);
   if (fails.length) {
     log('FAIL:\n  ' + fails.join('\n  '));
     process.exit(1);
   }
   log('PASS');
+}
+
+/** --merge: several runs' JSON (one command is time-capped) judged as one. */
+async function merge(opts, log) {
+  const rows = [];
+  const builds = new Set();
+  for (const f of opts.merge) {
+    const j = JSON.parse(await readFile(f, 'utf8'));
+    if (j.build) builds.add(j.build);
+    rows.push(...j.rows);
+  }
+  if (builds.size > 1) log('WARNING: merging runs of different builds: ' + [...builds].join(', '));
+  await report({ build: [...builds].join(',') || null, mergedAt: new Date().toISOString(), mergedFrom: opts.merge.map((f) => path.relative(REPO_ROOT, f)) }, rows, opts, log);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

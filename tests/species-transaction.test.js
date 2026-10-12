@@ -93,7 +93,20 @@ function makeWorld({ from = 'birb', breaks = {} } = {}) {
       page.anchor = [model];
       log.push('mount ' + model.name);
     },
-    mounted: () => page.anchor[0] || null,
+    // The ONE model on the anchor (index.html's contract): null when empty
+    // or when a broken mount left two.
+    mounted: () => (page.anchor.length === 1 ? page.anchor[0] : null),
+    // The double failure's fresh default Birb, mounted by its own path (the
+    // page's anchor written directly, never hooks.mount).
+    fallback() {
+      page.fallbacks = (page.fallbacks || 0) + 1;
+      if (breaks.fallback) throw new Error('broken fallback');
+      const b = build('birb');
+      if (!breaks.fallbackMisses) page.anchor = [b.model];
+      log.push('fallback mount ' + b.model.name);
+      return { species: 'birb', quality: null, tag: b.tag, model: b.model, sb: null, env: sky(b.tag), feathers: null, rim: b.rim, fallback: true };
+    },
+    clearAnchor() { page.anchor = []; log.push('clear anchor'); },
     handover(staged) {
       page.sb = staged.sb;
       page.env = staged.env;
@@ -107,6 +120,8 @@ function makeWorld({ from = 'birb', breaks = {} } = {}) {
     sync() { if (breaks.sync) throw new Error('broken sync'); page.syncs += 1; log.push('sync'); },
     warn(message) { page.warnings.push(message); },
   };
+  const mount = hooks.mount;
+  hooks.mount = (model) => { page.mounts = (page.mounts || 0) + 1; return mount(model); };
   const tx = createBirdTransaction(hooks);
   // index.html's stageBird: remember the live rim handles, then stage.
   const swap = (to, quality = 'high') => {
@@ -124,14 +139,20 @@ const ROUTES = [['birb', 'crow'], ['crow', 'owl'], ['owl', 'birb'], ['crow', 'bi
 // ------------------------------------------------ the fault at EVERY stage
 
 test('the harness can name exactly these stages, and an unknown one arms nothing', () => {
-  assert.deepEqual([...BIRD_FAULT_STAGES], ['stage', 'sky', 'feathers', 'mount', 'dispose', 'audio', 'sync']);
+  assert.deepEqual([...BIRD_FAULT_STAGES], ['stage', 'sky', 'feathers', 'mount', 'attached', 'restore', 'fallback', 'dispose', 'audio', 'sync']);
   const { tx } = makeWorld();
   assert.equal(tx.fault('sky'), 'sky');
   assert.equal(tx.fault('nonsense'), null);
   assert.equal(tx.fault(null), null);
+  // Several at once (the double failure), as a list or an array; unknown
+  // names dropped; arming replaces.
+  assert.equal(tx.fault('restore,attached'), 'attached,restore');
+  assert.equal(tx.fault(['attached', 'restore', 'fallback', 'bogus']), 'attached,restore,fallback');
+  assert.equal(tx.fault('sync'), 'sync');
+  assert.equal(tx.fault(null), null);
 });
 
-for (const stage of ABORT) {
+for (const stage of [...ABORT, 'attached']) {
   test(`fault '${stage}': the old bird keeps flying, everything staged is disposed, the caller gets the error`, () => {
     for (const [from, to] of ROUTES) {
       const { tx, page, live, swap } = makeWorld({ from });
@@ -253,6 +274,201 @@ test('a mount that takes the old bird off the anchor and THEN throws puts the ol
   }
 });
 
+// ------------------------------------------------- the double failure
+
+const errOf = (fn) => { try { fn(); } catch (e) { return e; } assert.fail('expected a throw'); };
+
+test("failure AFTER attachment ('attached'): the old bird is put back and checked, nothing else changes, no fallback", () => {
+  for (const [from, to] of ROUTES) {
+    const { tx, page, live, swap } = makeWorld({ from });
+    const old = page.anchor[0];
+    tx.fault('attached');
+    const err = errOf(() => swap(to));
+    assert.match(err.message, /injected attached fault/);
+    assert.equal(err.birdFallback, undefined, 'a single failure is the caller\'s to warn about');
+    assert.deepEqual(page.anchor, [old], `${from}->${to}`);
+    assert.equal(page.fallbacks || 0, 0, 'no fresh bird needed');
+    assert.deepEqual(names(live), names(page.bootResources));
+    assert.deepEqual(page.warnings, []);
+  }
+});
+
+test('a mount that "succeeds" but leaves the anchor wrong (two birds) is a failure after attachment, unwound the same way', () => {
+  for (const [from, to] of ROUTES) {
+    const w = makeWorld({ from });
+    const old = w.page.anchor[0];
+    w.hooks.mount = (model) => { w.page.anchor = model === old ? [old] : [old, model]; };
+    assert.throws(() => w.swap(to), /not on the anchor after mounting/);
+    assert.deepEqual(w.page.anchor, [old]);
+    assert.equal(w.page.species, from);
+    assert.deepEqual(names(w.live), names(w.page.bootResources));
+  }
+});
+
+test("the DOUBLE failure ('attached,restore'): a fresh default Birb is mounted by its own path and checked BEFORE anything is disposed; then the staged and outgoing birds go; one warning", () => {
+  for (const [from, to] of ROUTES) {
+    const { tx, page, live, swap, log } = makeWorld({ from });
+    const outgoing = [...page.bootResources];
+    tx.fault('attached,restore');
+    const mountsBefore = page.mounts || 0;
+    const err = errOf(() => swap(to));
+    assert.match(err.message, /injected attached fault/, `${from}->${to}: the caller gets the original error`);
+    assert.equal(err.birdFallback, 'birb');
+    assert.equal(err.birdWarned, true);
+    assert.equal(page.mounts - mountsBefore, 1, 'the mount hook ran once (the failed swap); the restore was injected; the fallback never used it');
+    assert.equal(page.fallbacks, 1);
+    assert.equal(page.anchor.length, 1);
+    assert.match(page.anchor[0].name, /^birb#\d+ model$/);
+    assert.equal(page.species, 'birb');
+    assert.equal(page.sb, null);
+    assert.ok(page.env && /^birb#\d+ sky$/.test(page.env.name), 'its sky handed over');
+    assert.equal(page.feathers, null, 'minimal: no authored feathers');
+    assert.ok(page.rim.length === 1 && page.rim[0] === 'rim ' + page.anchor[0].name.replace(' model', ''), 'its rim handles are the live ones');
+    // Only the fresh Birb is alive: the staged and the outgoing bird are gone.
+    const fresh = page.anchor[0].name.replace(' model', '');
+    assert.deepEqual(names(live), [fresh + ' model', fresh + ' sky'].sort(), `${from}->${to}: ${names(live)}`);
+    assert.ok(outgoing.every((r) => r.disposed), 'the outgoing bird released');
+    // ...and nothing was disposed before the fresh bird was on the anchor.
+    const fb = log.findIndex((l) => l.startsWith('fallback mount'));
+    const firstDispose = log.findIndex((l, i) => i > log.findIndex((m) => m.startsWith('build ' + to)) && l.startsWith('dispose'));
+    assert.ok(fb > 0 && firstDispose > fb, `${from}->${to}: ${log.join(' | ')}`);
+    assert.deepEqual(page.warnings, ['[species] the swap failed and the outgoing bird could not be put back; flying a fresh birb']);
+    assert.deepEqual(page.audio, ['birb']);
+    assert.equal(page.syncs, 1);
+    assert.equal(tx.armed(), null);
+    // The game goes on: the next swap is clean.
+    swap(to);
+    assert.equal(page.species, to);
+    assert.equal(page.warnings.length, 1);
+    assert.ok(names(live).every((n) => n.startsWith(to + '#')));
+  }
+});
+
+test('the double failure when restoring THROWS for real (the mount hook breaks for the outgoing bird too)', () => {
+  const w = makeWorld({ from: 'crow', breaks: { mount: true } });
+  const err = errOf(() => w.swap('owl'));
+  assert.match(err.message, /broken mount/);
+  assert.equal(err.birdFallback, 'birb');
+  assert.equal(w.page.species, 'birb');
+  assert.match(w.page.anchor[0].name, /^birb#/);
+  assert.equal(w.page.warnings.length, 1);
+});
+
+test("the fallback fails too ('attached,restore,fallback'): the anchor is emptied and checked, the staged bird disposed, the outgoing bird left alone, ONE warning", () => {
+  for (const [from, to] of ROUTES) {
+    const { tx, page, live, swap } = makeWorld({ from });
+    const before = { species: page.species, sb: page.sb, env: page.env, feathers: page.feathers };
+    tx.fault('attached,restore,fallback');
+    const err = errOf(() => swap(to));
+    assert.equal(err.birdFallback, 'none', `${from}->${to}`);
+    assert.equal(err.birdWarned, true);
+    assert.deepEqual(page.anchor, [], 'a known state: the anchor is empty');
+    assert.deepEqual(names(live), names(page.bootResources), 'the staged bird disposed; the outgoing bird untouched');
+    assert.ok([...page.bootResources].every((r) => !r.disposed));
+    assert.deepEqual({ species: page.species, sb: page.sb, env: page.env, feathers: page.feathers }, before, 'live references untouched');
+    assert.deepEqual(page.warnings, ['[species] the swap failed, the outgoing bird could not be put back and no fresh birb could be mounted; the bird anchor is left empty']);
+    assert.deepEqual(page.audio, []);
+    assert.equal(page.syncs, 0);
+    // A later swap mounts onto the empty anchor and flies, and the stranded
+    // outgoing bird (its model off the anchor) is torn down by it: no leak.
+    swap(to);
+    assert.equal(page.species, to);
+    assert.equal(page.anchor.length, 1);
+    assert.ok(names(live).every((n) => n.startsWith(to + '#')), `${from}->${to}: ${names(live)}`);
+    assert.ok([...page.bootResources].every((r) => r.disposed));
+  }
+});
+
+test('after an empty anchor, a later swap that fails before its mount puts the STRANDED bird back on the anchor', () => {
+  const { tx, page, live, swap } = makeWorld({ from: 'birb' });
+  const old = page.anchor[0];
+  tx.fault('attached,restore,fallback');
+  assert.throws(() => swap('owl'));
+  assert.deepEqual(page.anchor, []);
+  tx.fault('attached');
+  assert.throws(() => swap('crow'));
+  assert.deepEqual(page.anchor, [old], 'the bird the live references name is flying again');
+  assert.deepEqual(names(live), names(page.bootResources));
+});
+
+test('a fallback that throws for real, or returns a bird that is NOT on the anchor: the anchor is emptied and its bird disposed', () => {
+  {
+    const w = makeWorld({ from: 'owl', breaks: { mount: true, fallback: true } });
+    const err = errOf(() => w.swap('crow'));
+    assert.equal(err.birdFallback, 'none');
+    assert.deepEqual(w.page.anchor, []);
+    assert.equal(w.page.warnings.length, 1);
+  }
+  {
+    const w = makeWorld({ from: 'owl', breaks: { mount: true, fallbackMisses: true } });
+    const err = errOf(() => w.swap('crow'));
+    assert.equal(err.birdFallback, 'none');
+    assert.deepEqual(w.page.anchor, []);
+    assert.deepEqual(names(w.live), names(w.page.bootResources), 'the fresh bird that missed the anchor was disposed with the staged one');
+  }
+});
+
+test('a fault armed for a branch the transaction never reaches is not carried into the next one', () => {
+  // 'stage' + 'restore': the stage aborts, commit never runs, and the
+  // 'restore' it never reached must not linger for a later swap.
+  const { tx, page, swap } = makeWorld({ from: 'crow' });
+  tx.fault('stage,restore');
+  assert.throws(() => swap('owl'), /injected stage fault/);
+  assert.equal(tx.armed(), null, 'cleared with the aborted transaction');
+  // A later single failure stays single: the old bird is put back.
+  tx.fault('attached');
+  const err = errOf(() => swap('owl'));
+  assert.equal(err.birdFallback, undefined);
+  assert.equal(page.species, 'crow');
+  // And within commit: 'fallback' armed, but the restore held.
+  tx.fault('attached,fallback');
+  assert.throws(() => swap('owl'));
+  assert.equal(tx.armed(), null);
+});
+
+test('a mount hook that throws a NON-Error (a string, undefined): still one warning, the caller still told', () => {
+  for (const thrown of ['a string', undefined]) {
+    const w = makeWorld({ from: 'crow' });
+    w.hooks.mount = () => { w.page.anchor = []; throw thrown; };
+    const err = errOf(() => w.swap('owl'));
+    assert.ok(err instanceof Error);
+    assert.equal(err.birdFallback, 'birb');
+    assert.equal(err.birdWarned, true);
+    assert.equal(w.page.warnings.length, 1);
+    assert.equal(w.page.species, 'birb');
+  }
+});
+
+test("a fresh Birb whose sky did not bake says so in the double failure's one warning", () => {
+  const w = makeWorld({ from: 'owl' });
+  const fallback = w.hooks.fallback;
+  w.hooks.fallback = () => Object.assign(fallback(), { env: null, skyError: new Error('no probe') });
+  w.tx.fault('attached,restore');
+  const warned = [];
+  w.hooks.warn = (m, e) => warned.push([m, e && e.message]);
+  assert.throws(() => w.swap('crow'));
+  assert.equal(warned.length, 1);
+  assert.match(warned[0][1], /lights only: no probe/);
+});
+
+test('index.html: the double failure is wired — a fresh default Birb by its own anchor path, the empty-anchor last resort, and no second warning from the callers', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const hooks = html.slice(html.indexOf('const birdTransaction = createBirdTransaction({'), html.indexOf('const syncSwappedBird = '));
+  const fb = hooks.slice(hooks.indexOf('fallback: () => {'), hooks.indexOf('clearAnchor:'));
+  assert.ok(fb.includes('makePionusModel()'), 'the variant this load runs (v3, or ?bird=v1/v2)');
+  assert.ok(!fb.includes('mountBirbModel') && !fb.includes('hooks.mount'), 'never the mount hook');
+  assert.ok(fb.includes('birbAnchor.add(model)'));
+  assert.ok(hooks.includes('mounted: () => (birbAnchor.children.length === 1 ? birbAnchor.children[0] : null),'));
+  assert.ok(hooks.includes('clearAnchor: () => birbAnchor.clear(),'));
+  assert.ok(fb.includes('fallback: true'), 'the minimal Birb is marked');
+  assert.ok(hooks.includes('birbIsFallback = staged.fallback === true;'));
+  const swapFn = html.slice(html.indexOf('const setBirdSpecies = async'), html.indexOf('runSpeciesRetier = () => {'));
+  assert.ok(swapFn.includes('if (!err?.birdWarned) console.warn('));
+  assert.ok(swapFn.includes("!(id === 'birb' && birbIsFallback)"), 're-choosing Birb rebuilds the full Pionus');
+  const retier = html.slice(html.indexOf('runSpeciesRetier = () => {'), html.indexOf('let speciesPending = null;'));
+  assert.ok(retier.includes('if (!err?.birdWarned) console.warn('));
+});
+
 test('a teardown that throws part-way: every other piece of the outgoing bird is still released, one warning, audio and sync run', () => {
   // The Pionus going out: its sky's dispose throws, its feathers and model
   // are still released.
@@ -339,7 +555,8 @@ test('index.html: the re-LOD asks the gate (before its no-change test), records 
   const same = retier.indexOf('if (want === speciesBird.quality) return;');
   assert.ok(allows > 0 && same > allows, 'a tier back to the bird\'s own lifts the block too');
   const fail = retier.slice(retier.indexOf('} catch (err) {'));
-  assert.ok(fail.includes('speciesRetierGate.failed(speciesBird.species, want);'));
+  assert.ok(retier.includes('const retierSpecies = speciesBird.species;'));
+  assert.ok(fail.includes('speciesRetierGate.failed(retierSpecies, want);'));
   // The picker / setSpecies, and a quality preset.
   const swap = html.slice(html.indexOf('const setBirdSpecies = async'), html.indexOf('const setBirdSpecies = async') + 900);
   assert.ok(swap.includes('if (speciesRetierGate.reset()) scheduleSpeciesRetier();'));

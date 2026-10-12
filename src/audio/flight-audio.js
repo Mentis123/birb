@@ -850,6 +850,30 @@ export function createFlightAudio(options = {}) {
     }
   }
 
+  /**
+   * Pin a param at `at` to the value its timeline has there, and drop every
+   * event after: the start of a new envelope (whoosh, tick, caw note) or of a
+   * cut, from wherever the param IS. One that lands inside a ramp — a
+   * whoosh's 25 ms rise, a tick's 2 ms attack — would otherwise lose that
+   * ramp, and cancelScheduledValues alone leaves the param at the ramp's
+   * START value: a step in the gain, which is a click. cancelAndHoldAtTime
+   * pins the ramp's value at `at`; older Safari (and Firefox) have no
+   * cancelAndHoldAtTime, so there the value is read BEFORE the cancel and
+   * set back by hand — the order that is right whether or not an engine's
+   * `.value` follows the cancel (browsers report the last render quantum's
+   * value, up to ~2.7 ms stale; tests/species-audio-cut.test.js models one
+   * where the cancel moves it). For an `at` ahead of the clock (the caw's
+   * second note) that path holds the present value, as it always has.
+   */
+  function holdAt(param, at) {
+    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(at);
+    else {
+      const held = param.value;
+      param.cancelScheduledValues(at);
+      param.setValueAtTime(held, at);
+    }
+  }
+
   function triggerWhoosh(strength) {
     const level = whooshLevel(strength, t);
     if (!(level > 1e-5)) return;
@@ -857,8 +881,7 @@ export function createFlightAudio(options = {}) {
     const peak = level * bandpassMakeup(hz, t.whooshQ, n.rate);
     const p = n.whooshGain.gain;
     const now = ctx.currentTime;
-    if (typeof p.cancelAndHoldAtTime === 'function') p.cancelAndHoldAtTime(now);
-    else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now); }
+    holdAt(p, now);
     p.linearRampToValueAtTime(peak, now + t.whooshAttack);
     p.setTargetAtTime(0, now + t.whooshAttack, t.whooshDecay);
     send(P.whooshHz, hz);
@@ -905,8 +928,7 @@ export function createFlightAudio(options = {}) {
     return true;
   }
   function envelope(param, at, peak, attack, decay) {
-    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(at);
-    else { param.cancelScheduledValues(at); param.setValueAtTime(param.value, at); }
+    holdAt(param, at);
     param.linearRampToValueAtTime(peak, at + attack);
     param.setTargetAtTime(0, at + attack, decay);
   }
@@ -916,22 +938,12 @@ export function createFlightAudio(options = {}) {
    * to 0 from wherever it is (an envelope already decaying keeps decaying,
    * just faster). Nothing is left on the timeline after `now`.
    *
-   * From wherever it IS, not from where the last event left it: a swap that
-   * lands mid-ramp (a tick's 2 ms attack, a caw note's rise, a decay) would
-   * otherwise drop the ramp it is inside, and cancelScheduledValues alone
-   * leaves the decay starting from the ramp's START value — a step in the
-   * gain, which is a click. cancelAndHoldAtTime pins the ramp's value at
-   * `now`; older Safari has no cancelAndHoldAtTime, so there the value is
-   * read BEFORE the cancel (the cancel is what moves it) and set back at
-   * `now` by hand.
+   * From wherever it IS, not from where the last event left it (holdAt): a
+   * swap that lands mid-ramp (a tick's 2 ms attack, a caw note's rise, a
+   * decay) decays from the ramp's value at `now`, not from its start.
    */
   function cut(param, now) {
-    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(now);
-    else {
-      const held = param.value;
-      param.cancelScheduledValues(now);
-      param.setValueAtTime(held, now);
-    }
+    holdAt(param, now);
     param.setTargetAtTime(0, now, t.speciesCutTau);
   }
   /**

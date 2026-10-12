@@ -97,12 +97,12 @@
 >
 > | Render tier | Materials | Crow (tris / draws) | Owl (tris / draws) |
 > |---|---|---|---|
-> | 0 | Physical | 2,604 / 7 (v84: 2,722) | 2,911 / 6 (v84: 3,461; `OWL_ROOT_MID`: no wing train) |
-> | 1 | Standard | 2,604 / 7 | 2,911 / 6 |
+> | 0 | Physical | 2,604 / 7 (v84: 2,722) | 2,959 / 6 (v86: 2,911; v84: 3,461; `OWL_ROOT_MID`: no wing train) |
+> | 1 | Standard | 2,604 / 7 | 2,959 / 6 |
 > | 2 | Phong | 1,614 / 6 (v84: 1,690) | 2,080 / 6 (v84: 2,404) |
 >
-> Every tier is inside BIRD_BUDGET (8 / 4,000). v86 numbers after the trim
-> (see "Species final", below); the whole-frame table is there too.
+> Every tier is inside BIRD_BUDGET (8 / 4,000). v88 numbers (see "Species
+> final" and "Species leftovers", below; the whole-frame tables are there).
 >
 > **Audio.** flight-audio.js builds a species voice lazily, so the Pionus
 > graph is untouched: owl escapement ticks plus a gear whir, and a
@@ -170,13 +170,14 @@
 > - **The audio `cut()` never steps**: `cancelAndHoldAtTime(now)` where it
 >   exists, else read `.value`, cancel, `setValueAtTime(value)`, then decay.
 >   `tests/species-audio-cut.test.js` models the ramps (attack and decay,
->   both code paths). `envelope()`/`triggerWhoosh()` still use the old
->   fallback order (harmless in Chrome, untested on old Safari).
+>   both code paths). (v88: `envelope()`/`triggerWhoosh()` now hold the same
+>   way — "Species leftovers", below.)
 >
 > **Trim.** Only invisible geometry, root-only options in the ported
 > builders (Gauntlet's tables untouched): zero-area triangles, gear rims at 6
 > tris a tooth, triangles wholly buried inside another shell, 3-sided toes,
-> and on owl high/mid 3-sided rivets and 4-sided hubs. A deterministic
+> and on owl high/mid 3-sided rivets and 4-sided hubs (v88: those two are
+> BACK — they were the glints; "Species leftovers"). A deterministic
 > builder render (fixed light, pose, no clock; 10 views × 3 tiers × flying
 > and standing) shows the only differences: rivet/hub glints, a few px of
 > tucked toes, and the standing legs. The "red/green lights" in the earlier
@@ -184,7 +185,9 @@
 > sun, i.e. a harness artefact.
 >
 > **Whole-frame budget** (`tools/species-frame-budget.mjs`: renderer.info
-> summed over every pass of a frame, species × Ultra/Okay/Light × forest,
+> summed over every pass of a frame — which in three r183 leaves out the
+> shadow map, drawn before renderer.info resets; v88 gates that too, see
+> "Species leftovers" — species × Ultra/Okay/Light × forest,
 > boost, tumble, city, mountain; exits 1 on a breach or any console
 > message; serves its own frozen copy of the tree, because index.html reloads
 > on a new service worker). Ultra, v86 (v84 in brackets):
@@ -217,11 +220,186 @@
 > "504 (Offline)" errors in a v84 budget run were the SW's offline fallback
 > answering after that run's private server had stopped: a harness artefact.
 >
-> **Known limits.** `tools/species-lifecycle-check.mjs --only swaps` is not
-> world-frozen and can see programs/geometries grow by a few as drones,
-> rings and landmarks come into view (the `leak` and `failure` sections use
-> `birdStudio` and are flat). Phone cost and the first-swap compile hitch
-> remain unmeasured.
+> **Known limits.** (v88: the `swaps` section is world-frozen now —
+> "Species leftovers".) Phone cost and the first-swap compile hitch remain
+> unmeasured.
+>
+> **Species leftovers (2026-10-11, build v88).** What "Species final" left
+> open, closed or measured:
+> - **The owl's glints are back.** The v86 trim's 3-sided rivet domes and
+>   4-sided gear hubs (OWL_ROOT_MID) changed the brass highlights on the
+>   seams, the disc rim and the hubs (the hubs read as 4-point diamonds; the
+>   glint COUNT moved under 3%, the shapes and places are what changed). Back
+>   to 4 and 5 sides: owl high/mid 2,911 -> 2,959 triangles. The fixed-light
+>   builder harness
+>   (`shots/main-species-leftovers/glints/`: 90a5edc / bdb750e / now, nine
+>   views x three tiers) counts the glint pixels (max channel >= 235): now ==
+>   90a5edc on every owl high/mid view (e.g. the close top view 1,402 /
+>   1,367 / 1,402) and now vs 90a5edc differs by 0-99 pixels per view (the
+>   other v86 trims) against 0-2,050 for bdb750e -> now; the crow is unchanged
+>   (0 pixels head -> now on every view). The owl's dropHidden was tried on
+>   the crow too (20 triangles) and reverted: the same harness showed one of
+>   them, a scapular's edge, 242 pixels in a close face view. The crow has no
+>   invisible triangles left (2,604 / 1,614, as v86).
+> - **The double failure.** COMMIT now checks the anchor holds exactly the
+>   mounted model ('attached' is a failure after attachment). Putting the
+>   outgoing bird back is checked the same way; if that fails too, a fresh
+>   DEFAULT Birb (the Pionus variant this load runs: v3, or `?bird=v1|v2`)
+>   goes on the anchor by its own three lines (`fallback`, never
+>   mountBirbModel), is checked there, and only then are the staged and the
+>   outgoing bird disposed: one warning. If even that fails, the anchor is
+>   emptied and checked empty (every per-frame reader looks parts up by
+>   name and skips what is missing), the staged bird disposed only if it is
+>   provably off, the outgoing bird left alone (the next swap tears it down
+>   or puts it back), one warning; choosing any bird, the named one too,
+>   refills it. `err.birdWarned` keeps the callers from warning twice.
+>   `__BIRB.speciesFault('attached,restore')` and `'attached,restore,
+>   fallback'` drive both in the page. An armed fault lasts ONE transaction
+>   (one for a branch it never reached is cleared, not left for a later
+>   swap); a hook that throws a non-Error is wrapped, so the one-warning
+>   rule holds; re-choosing Birb after a fallback rebuilds the full Pionus
+>   (the fallback has no authored feathers). Tests: `tests/species-
+>   transaction.test.js` (32), the lifecycle `failure` section (all passed,
+>   twice, GPU counts back on the clean round's).
+> - **The CDN crawl's timeout** no longer needs `AbortSignal.timeout`:
+>   `withDeadline` (sw.js) is an AbortController + setTimeout raced against
+>   the whole module — fetch, cache.put and the body read — and the timer is
+>   always cleared. `tests/sw-cdn.test.js` (11): no AbortSignal at all, a
+>   fetch that ignores its signal, headers then a stalled body, no timer
+>   left on success.
+> - **Audio**: `holdAt` (flight-audio.js) is the one hold for `cut()`,
+>   `envelope()` and `triggerWhoosh()`: cancelAndHoldAtTime, else read
+>   `.value`, cancel, set it back. `tests/species-audio-cut.test.js` (24)
+>   retriggers a whoosh, an owl tick and a caw inside the last envelope's
+>   attack and decay on both paths. Honest scope: the step the old order
+>   made is the TEST MODEL's (its `.value` follows the cancel); a real
+>   browser's `.value` is the last render quantum's and a cancel does not
+>   move it synchronously, so the fix is the order that is right on either
+>   reading, and on the fallback path (older Safari, and Firefox, which has
+>   no cancelAndHoldAtTime) the held value can be one quantum (~2.7 ms)
+>   stale. Left: a caw's SECOND note is scheduled 0.23 s ahead, where the
+>   fallback can only hold the present value (as before).
+>
+> **The budget, defined.** CLAUDE.md's "<100 draw calls, <80k triangles"
+> has always been measured with renderer.info: per frame, the scene render
+> plus the post-pass quads, summed (`__BIRB.frameTotals()`). That leaves
+> out the SHADOW MAP: three r183 draws it inside render() before it resets
+> renderer.info. So `tools/species-frame-budget.mjs` gates both: SCENE
+> < 80,000 / < 100 (and the 78,000 headroom at the Ultra forest), and
+> SHADOW-INCLUSIVE (every GL draw, counted by wrapping drawElements /
+> drawArrays and the instanced forms before any page script, per game
+> requestAnimationFrame callback) < 120,000 / < 100. 120k is the worst Pionus frame measured with its shadow pass
+> (113.8k, v86) plus BIRD_BUDGET drawn twice over the Pionus (scene and
+> shadow map: 113,768 + 2 x (4,000 - 1,518) = 118,732). On Ultra the shadow
+> pass is ~34-35k triangles and ~13 draws (world casters, the bird again,
+> the VSM blur); on Okay/Light the two counts are equal.
+> `tests/species-frame-budget.test.js` holds a row that passes the scene
+> gate and fails the inclusive one. The 78k headroom is now judged per
+> world: a crow/owl over it where the Pionus WOULD fit (world + 1,518 <=
+> 78,000) is the species' breach (`speciesHeadroomBreaches`); a world over
+> it by itself is the world's (`worldBreaches`), never fixed by touching
+> Birb. Fixed seeds fail on a species breach; random boots list it and fail
+> only with `--strict-headroom` (below).
+>
+> **Random worlds, measured** (v88, Ultra, forest spawn, 20 boots per bird,
+> `--boot-seeds 1..20`: the page's Math.random seeded before any script, so
+> each is one random world that can be booted again; the same seed gives
+> the same world to within a prop or a transient, see below):
+>
+> | Ultra forest spawn, 20 boots | Scene min / median / p95 / max | Shadow-incl. max | World (no bird) max | Over 78k |
+> |---|---|---|---|---|
+> | Pionus (1,518) | 75,438 / 76,438 / 77,732 / 77,872 | 112,640 | 76,354 | 0 |
+> | Crow (2,604 *) | 76,794 / 77,470 / 78,426 / 78,552 | 114,374 | 75,948 | 5 (max +552) |
+> | Owl (2,959) | 77,013 / 77,879 / 79,313 / 79,381 | 115,522 | 76,422 | 9 (max +1,381) |
+>
+> (* measured with a 2,584-triangle crow, the trim reverted below; the
+> shipped 2,604 adds exactly 20 to every crow row, as shown, and changes no
+> verdict: the next-highest crow boot is 77,782.)
+>
+> Every one of the 60 boots is inside 80k / 100 draws (max 64, a transient)
+> and 120k shadow-inclusive. The Pionus never breaks 78k, so EVERY crow/owl
+> breach above is the species' (the Pionus would read 76.7k-77.9k in those
+> worlds): the 78k headroom is NOT robust for the crow or the owl on random
+> worlds. Closing it means a bird of ~1,580 (owl) / ~2,050 (crow)
+> triangles at Ultra: −1,380 / −550. The invisible trims are spent (the
+> crow's 20 "buried" triangles were not invisible, above), and the cuts that
+> would do it are visible: segment counts alone take the crow to 2,156 (faceted
+> silhouettes, plates), and the owl down that far needs its low mesh (no
+> seams, rivets or the third gear: the glints this round put back). Not
+> done; the owner's call. So the gate: SPECIES headroom breaches FAIL on the
+> fixed seeds (forest-seeds, judged seed by seed) and are listed, counted
+> and attributed on random boots, failing only with `--strict-headroom`.
+> And the fixed seeds are NOT boot-independent: a world seed pins the
+> forest's props, not the drones, rings and nests the boot placed. On boot
+> seed 1 forest-seeds reads crow 76,832 *, owl 77,187 (pass); on boot seed
+> 14 the owl reads 78,363 and 78,125 at world seeds 16160 and 2 (that
+> world 75,404 vs 74,228; the Pionus would read 76.9k) — a FAIL, the tool
+> exits 1. So the default matrix can fail for the owl, depending on the
+> boot: that is the owl's real cost against a 78k headroom, reported, not
+> hidden. (Seed reproducibility: boot 14 read 79,313 twice, to the
+> triangle; boot 18 read 79,381 then 78,189 — the first had a 64-draw
+> transient frame.) Other scenarios (Ultra, boot seed 1; scene /
+> inclusive): boost 76.4k-77.1k / 111-113k, tumble 76.0-77.1k / 111-113k,
+> **stunt** (never run before; the stunt loop, climb stick + full throttle
+> from 60 up, mostly sky) 69.1k / 103.9k (Pionus), 69.8k / 105.6k (crow),
+> 70.2k / 106.3k (owl), city 49.3-50.7k / 84-87k, mountain 46.5-47.9k.
+> **A counter defect, found by its own numbers and fixed:** the crow/owl
+> MOUNTAIN rows read ~50k shadow-inclusive against the Pionus's 81k, and one
+> Okay mountain row 14,844 inclusive against 30,748 scene — impossible,
+> since inclusive >= scene. The first GL counter counted draws between two
+> of the SAMPLER's rAF callbacks, which did not always hold one whole game
+> frame; it now brackets each of the game's own rAF callbacks (one callback,
+> one frame, its shadow pass inside), and the verdict fails any row whose
+> inclusive count is below its scene count. Rerun: crow mountain 55,314 /
+> 90,952, Pionus 54,204 / 88,744. (The random-boot and scenario rows above
+> were taken with the first counter: every Ultra row reads inclusive >=
+> scene, each the max over 8 frames, but may under-read by a frame; three
+> Okay/Light rows read under scene — two city rows by 80, that mountain row
+> — and would now fail as "the GL counter missed the frame".)
+> Okay / Light (boot seed 1, every scenario incl. stunt, rerun with the
+> fixed counter): 29.7k-61.6k scene, draws <= 33, inclusive == scene on all
+> 36 rows (no shadow pass off Ultra) — all pass. Evidence:
+> `shots/main-species-leftovers/budget/` (`boots-merged.json`,
+> `scen-*.json`).
+>
+> **The `swaps` growth was the world.** `tools/species-lifecycle-check.mjs
+> --only swaps` now pins the world seed (16160) and holds the world like
+> `leak` (freeze, studio latch with the world kept, a fixed orbit camera).
+> Evidence (cycle-end geometries / textures / programs): `--swaps-unfrozen`
+> (the v86 way) 40/24/42, 42/24/52, 42/24/52 — it passed this time; the
+> `--swaps-control` run (the same tier pins and biome round trips, NO
+> species swap) 44/24/50, 44/24/56, 44/24/56: the world alone grows programs;
+> frozen without the seed, two runs FAILED on 34/22/42, 33/22/40, 34/22/42 and
+> 34/22/40, 34/22/40, 35/22/42 — an oscillation with what each unseeded
+> biome rebuild placed, textures flat throughout; seeded and frozen, three
+> runs passed, each cycle identical (34/22/42 x3, 34/22/42 x3, 34/22/40 x3).
+> No leak; the section passes reliably.
+>
+> **v1 / v2 unchanged.** The Pionus builders (v1, v2, v3), the variant
+> choice and makePionusModel are byte-identical to bdb750e and 90a5edc
+> (`shots/main-species-leftovers/ab/builder-identity.mjs`); the mount path
+> is identical to bdb750e (vs 90a5edc: bdb750e's own isolateBirdShadowDepth
+> call). Pixels (`ab/ab.mjs`: ?bird=v1|v2 at Ultra, Math.random seeded, one
+> recorded pose restored, bird frozen at flap phase 0.3, UI hidden, studio
+> and world views): the studio front / side / top views differ from bdb750e
+> and from 90a5edc by 0-2.1k pixels over 8 (of 1,316,640; max channel
+> 1-114), the world chase view by 93-751 — the same as two runs of the
+> SAME tree (0-2.4k studio, 283-493 world). The first view (studio
+> chase) is not reproducible even on one tree (two copies of the working
+> tree: 155k pixels apart), so it carries no signal. Nothing changed, as
+> none was intended.
+>
+> **Not verifiable here**: real Safari audio (the no-cancelAndHoldAtTime
+> path is proved on a model of AudioParam, not on a Safari) and real-phone
+> performance (SwiftShader counts triangles and draws; it cannot time a
+> phone frame or its first-swap compile hitch). Tools/tests added or
+> changed: `tests/species-frame-budget.test.js` (new), `tests/species-
+> {transaction,budget,audio-cut}.test.js`, `tests/sw-cdn.test.js`,
+> `tools/species-frame-budget.mjs` (two budgets, `--boot-seeds`,
+> `--merge`, `--strict-headroom`, partial JSON after every boot),
+> `tools/species-lifecycle-check.mjs` (frozen swaps, `--swaps-unfrozen`,
+> `--swaps-control`, the double failure), and every species tool also
+> finds puppeteer-core in /workspace/birb/tools/node_modules.
 
 > **REALISM WAVE 3 (2026-09-24): the eye adapts, water carves the ground,
 > and the reviews that session limits cut short are finished.** Both new
@@ -2908,9 +3086,9 @@ Touch Input → flight-controls.js → bird-flight.js → Three.js Render
 | `src/environment/collider-grid.js` | Spatial-hash collision broad-phase (unit-tested) |
 | `src/ui/minimap.js` | Minimap radar (extracted from index.html; pure helpers unit-tested) |
 | `src/flight/species/species-select.js` | Bird picker resolution: `?bird=crow\|owl\|birb` (this load, not saved) > `localStorage['birb.species']` > birb; `?bird=v1\|v2\|v3` stays the Pionus A/B. Pure, on every boot |
-| `src/flight/species/bird-transaction.js` | The swap/re-LOD transaction (STAGE off the anchor, COMMIT, guarded teardown/audio/sync), named fault injection for `__BIRB.speciesFault(stage)`, and the per-(species, tier) re-LOD retry gate. Pure, on every boot |
+| `src/flight/species/bird-transaction.js` | The swap/re-LOD transaction (STAGE off the anchor, COMMIT with a checked mount, guarded teardown/audio/sync, the double-failure fallback to a fresh default Birb or a known empty anchor), named fault injection for `__BIRB.speciesFault(stage[,stage…])`, and the per-(species, tier) re-LOD retry gate. Pure, on every boot |
 | `src/effects/bird-shadow.js` | Bird shadow helpers incl. `isolateBirdShadowDepth`: per-bird-mesh depth materials, so three's shared shadow depth material never holds (and re-uploads) a disposed bird texture |
-| `tools/species-lifecycle-check.mjs` / `species-frame-budget.mjs` / `species-offline-check.mjs` | Headless checks: picker boots/swaps/failure-per-stage/leak (10 flat rounds); whole-frame tris/draws per species × tier × scenario; offline boot + swaps through the service worker |
+| `tools/species-lifecycle-check.mjs` / `species-frame-budget.mjs` / `species-offline-check.mjs` | Headless checks: picker boots/swaps (world-frozen)/failure-per-stage incl. the double failure/leak (10 flat rounds); whole-frame tris/draws per species × tier × scenario, scene AND shadow-inclusive, seeded random boots (`--boot-seeds`), distributions, `--merge`; offline boot + swaps through the service worker |
 | `src/flight/species/species-bird.js` | Corvus (crow) and Tock (clockwork owl) as root-game birds: Gauntlet frame under a -90° node, root-frame rig nodes (rig contract), hand/tail nodes → shader uniforms via getters, standing legs that retract, owl escapement/gears/key, LOD per render tier. Lazy import |
 | `src/flight/species/{mesh-kit,film,gears,feather-textures,crow,owl,materials}.js` | PORTED copies of `gauntlet/src/bird/realistic/*` (Gauntlet stays airtight). Root adaptations are marked `ROOT:` |
 | `docs/ULTRACODE_REALISM_PLAN.md` | How to run the realism backlog with an agent fleet: the tiering law + art corollary, the 16-wave plan, the cost model, and the blind paired forced-choice check that is the only thing able to catch a green stage that did not improve the game |
@@ -2950,7 +3128,7 @@ Input smoothing: 0.3
 
 **Turret feel:** Spring-damper system (C0=8.0 stiffness, C1=6.0 damping). Heavy, inertial, momentum carry-through on release. See `TURRET_RESEARCH.md`.
 
-**Performance budget:** 60fps, <100 draw calls, <80k triangles, <50MB heap, <16ms frame time.
+**Performance budget:** 60fps, <100 draw calls, <80k triangles, <50MB heap, <16ms frame time. The draw-call and triangle counts are per frame as renderer.info counts them (the scene render plus the post-pass quads, summed); in three r183 that EXCLUDES the shadow map, which render() draws before renderer.info resets. Every GPU draw of the frame, the shadow pass included, is budgeted separately at <120k triangles / <100 draws ("Species leftovers", `tools/species-frame-budget.mjs`).
 
 **Mobile rendering:** DPR capped at 1.4 (mobile) / 1.8 (desktop). Adaptive quality via performance manager.
 

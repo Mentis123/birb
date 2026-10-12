@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-10-10 at commit 9f67de2 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-10-11 at commit bdb750e by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -59,16 +59,58 @@ eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.
 0dd6e9703acd9101975104a03e3df47dfcf03b53bc02dd2e9a53229a945d080f  tests/flight-audio.test.js
 4085c194d973a405c2b27a620d1041b094a5f9769ba4880afcb4ca2cce40b3bd  tests/helpers/species-three-stub.js
 445ff78c97a88a81687da7b4dfd9dde42f24643b7180513f5946ebc0ea5afd8a  tests/perf-advisor.test.js
-87e9425eed94afda6d53f4b6ca44f7ceeab6181ea0453781dc84bfda22f6c955  tests/species-audio-cut.test.js
+# tests/species-frame-budget.test.js added 2026-10-11 (v88 species leftovers,
+# owner-requested, not a perf wave). The oracle for tools/species-frame-budget
+# .mjs's verdict: the SCENE budget (renderer.info, CLAUDE.md's <80k/<100) and
+# the SHADOW-INCLUSIVE one (every GL draw, 120k/100) are both gated — a row
+# that passes the scene total and breaches the inclusive one fails — plus who
+# owns a 78k headroom breach (the species where the Pionus would fit, else
+# the world; forest-seeds judged seed by seed), a GL count below the scene
+# count failing as a missed frame, no rows / a missing bird count failing,
+# and the distributions' nearest-rank statistics.
+602eb5a3b420c5a6db646a3b32cb22bc2dbfc0930ad7d4ba24828fa36949dd05  tests/species-frame-budget.test.js
+# tests/species-audio-cut.test.js re-hashed 2026-10-11 with the envelope /
+# whoosh continuity fix (owner-approved code change, not a perf wave). It is
+# additive: every existing cut test and assertion is unchanged; new tests
+# retrigger a whoosh, an owl tick and a caw's first note inside the last
+# envelope's ramp, with and without cancelAndHoldAtTime, and pin that the
+# fallback reads `.value` BEFORE cancelScheduledValues (no step at the
+# retrigger), plus a model check that the old order did step.
+f68526618cbe5ca6a4824061f8af03339f695a867b7aa3fc4df593e0e1198b42  tests/species-audio-cut.test.js
 301e414b13575c3edfe6ea521b603da0847145fd207ba9fbf0b78ab579284f07  tests/species-audio.test.js
 70aa804d8d1f3ade162a782b7b2ace8670411fa144105559e07d580a8c2e9686  tests/species-bird.test.js
-f36f52d5a0ac6c8d6532ec877e322cbd583d1678845e18de99610b0b0488ffd5  tests/species-budget.test.js
+# tests/species-budget.test.js re-hashed 2026-10-11 (v88 species leftovers,
+# owner-requested, not a perf wave). A PINNED count moved, up and on purpose:
+# the owl's high/mid 2,911 -> 2,959 (the owner asked for the rivet and hub
+# glints the v86 trim took: 4-sided rivets and 5-sided hubs are back,
+# shots/main-species-leftovers/glints/). The seeded-world constant follows the
+# v88 measurement (74,620 -> 74,774). Every other assertion is unchanged; the
+# seeded-world headroom test still holds (74,774 + 2,959 = 77,733).
+582d3416517cbfa84d761845831189de22ecf160ccaa1466a7b8fc0eab98004c  tests/species-budget.test.js
 50a97a7fbec41656f3c7c694ce0f69bb48a9ee3a0292b57d8673e0bcaf793e9f  tests/species-gpu-leak.test.js
 3d95e906636724c639527a733e34ded240cd8bf066be8ee4584be49346db11cb  tests/species-lifecycle.test.js
 3bc4e5b4fc8fe1de780796818113265b189563c5da92fb21ac085b8c3668d0ea  tests/species-select.test.js
-132af0a7788e5262d9d3c38c3822ecedc4103af08da504763f318c52427f0651  tests/species-transaction.test.js
+# tests/species-transaction.test.js re-hashed 2026-10-11 (v88, the double
+# failure). Additive except two literals that follow the code: the fault
+# stage list gains 'attached', 'restore', 'fallback' (several may be armed at
+# once), and the re-LOD's gate call reads the species captured before the
+# commit (`retierSpecies`). New tests: a failure after attachment, a mount
+# that leaves the anchor wrong, the double failure (a fresh default Birb,
+# checked on the anchor before anything is disposed, one warning), a restore
+# that throws for real, the fallback failing too (a checked empty anchor, the
+# stranded bird torn down by the next swap), a fault armed for a branch never
+# reached not lingering, a mount hook throwing a non-Error, the fresh Birb's
+# failed sky named in the one warning, and the index.html wiring.
+58fef69e6ffc0ca16bf3de05291f1e6161524e5b41d1faedfb44554fa7fcc0ce  tests/species-transaction.test.js
 d9b56ebbd4fbdd3d65225823b88c36fa7364ee2e46ae36de26bc02b133747658  tests/species-wing-tip.test.js
-81c139b8fa8d06547d0eee94b98780cdf2dab6c7dfa87d7f8db1a35193e02220  tests/sw-cdn.test.js
+# tests/sw-cdn.test.js re-hashed 2026-10-11 with the precacheCdn deadline fix
+# (owner-approved code change, not a perf wave). It is additive: the sandbox
+# now has no AbortSignal at all, with a shrinkable deadline and tracked timers,
+# and new tests pin a fetch that ignores its signal, a body that stalls after
+# the headers, timers cleared on success, and one failed module not sinking
+# the rest. The stalled-CDN test keeps its assertions; its 0 < ms <= 60000
+# bound moved to its own test on CDN_FETCH_TIMEOUT_MS.
+bb8f2e2506dc9a7e2a6898f404348e57ed41ee70100830bea33f79757909003f  tests/sw-cdn.test.js
 # tests/gauntlet-realistic-birds.test.js added 2026-10-08 with the realistic
 # Corvus / Tock rebuild (owner-approved code change, not a perf wave, so no
 # docs/perf/gates/G<n>.md; recorded here in the same change as the file). It

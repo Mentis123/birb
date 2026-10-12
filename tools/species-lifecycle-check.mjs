@@ -11,9 +11,17 @@
  *             warning, the Birb boot never fetches species-bird.js, and a
  *             crow/owl boot BUILDS ONCE at the tier the boot settles on.
  *   swaps     Birb -> crow -> owl -> Birb, N cycles, with tier pins (0/1/2,
- *             each a deferred re-LOD) and a biome round trip inside each:
- *             renderer.info geometries / textures / programs PLATEAU across
- *             cycles and the shared feather textures hold 0 references on Birb.
+ *             each a deferred re-LOD) and a biome round trip inside each, the
+ *             WORLD held still (a pinned world seed, freeze, the studio latch
+ *             with the world kept, a fixed orbit camera): renderer.info
+ *             geometries / textures /
+ *             programs PLATEAU across cycles and the shared feather textures
+ *             hold 0 references on Birb. `--swaps-unfrozen` runs it the v86
+ *             way (world live) and `--swaps-control` with every setSpecies
+ *             skipped (the Pionus alone), for the diagnosis in the section.
+ *   failure   ...also the failure AFTER attachment ('attached') and the
+ *             DOUBLE failure ('attached,restore': a fresh default Birb flies;
+ *             'attached,restore,fallback': a known empty anchor).
  *   failure   __BIRB.speciesFault(stage), at EVERY stage of the transaction.
  *             Before the mount ('stage', 'feathers', 'mount'): the outgoing
  *             bird keeps flying, the saved choice untouched, the GPU counts
@@ -35,7 +43,7 @@
  *
  * Usage: node tools/species-lifecycle-check.mjs [--base http://localhost:8765/]
  *        [--cycles 3] [--rounds 10] [--only boots|swaps|failure|motion|leak]
- *        [--out file.json]
+ *        [--swaps-unfrozen] [--swaps-control] [--out file.json]
  * Exit 1 on any failed check. Needs puppeteer-core (env PUPPETEER_CORE, or the
  * operator's copy) and Chrome (env CHROME_PATH, default /usr/bin/google-chrome).
  * A run takes several minutes: SwiftShader draws a few frames a second.
@@ -54,7 +62,8 @@ const OUT = arg('--out', null);
 async function loadPuppeteer() {
   try { return (await import('puppeteer-core')).default; } catch (_) { /* fall through */ }
   const require = createRequire(import.meta.url);
-  for (const p of [process.env.PUPPETEER_CORE, '/workspace/frontfootprep-launch/tools/node_modules/puppeteer-core'].filter(Boolean)) {
+  for (const p of [process.env.PUPPETEER_CORE, '/workspace/frontfootprep-launch/tools/node_modules/puppeteer-core',
+    '/workspace/birb/tools/node_modules/puppeteer-core'].filter(Boolean)) {
     try { return require(p); } catch (_) { /* next */ }
   }
   throw new Error('puppeteer-core not found (set PUPPETEER_CORE)');
@@ -150,22 +159,50 @@ if (!ONLY || ONLY === 'swaps') {
   const envs = await page.evaluate(() => window.__BIRB.environments());
   const boot0 = await page.evaluate(() => window.__BIRB.stats().environment);
   const [home, away] = envs.filter((e) => e !== boot0);
-  await page.evaluate((id) => { window.__BIRB.setEnvironment(id); window.__BIRB.pinTier(0); }, home);
-  // The bird held still: flying reveals world content that is drawn (and
-  // counted by renderer.info) for the first time — measured, the Pionus alone
-  // grows 35 -> 46 geometries and 44 -> 48 programs in 175 frames of flight.
-  // Frozen, any growth across cycles is the picker's.
-  await page.evaluate(() => window.__BIRB.freeze(true));
+  // A FIXED world seed, unless --swaps-unfrozen: each biome round trip
+  // rebuilds the world, and an unseeded rebuild is a different random world
+  // every time — the frozen v88 runs still read programs 40 -> 42 -> 40 and
+  // geometries 33 -> 34 at cycle ends (textures flat), an oscillation with
+  // whatever props a rebuild happened to place, not a growth.
+  const pinnedSeed = args.includes('--swaps-unfrozen') ? null : 16160;
+  await page.evaluate((id, seed) => {
+    if (seed !== null) window.__BIRB.worldSeed(seed);
+    window.__BIRB.setEnvironment(id);
+    window.__BIRB.pinTier(0);
+  }, home, pinnedSeed);
+  // The WORLD held still, as in `leak` and `failure`: the world seed pinned
+  // (above), the bird frozen, the studio latch with { world: true } (drones,
+  // rings and weather hidden; the world and sky kept) and a fixed orbit
+  // camera, re-placed after every step. Measured, v88: `--swaps-unfrozen`
+  // (the v86 section) and `--swaps-control` (the same steps with every
+  // setSpecies skipped: the Pionus alone) both move programs and geometries
+  // with the world — the control grew 50 -> 56 programs between its first
+  // two cycles with no swap at all; frozen without the seed, 40 -> 42 -> 40;
+  // textures flat in every run. Seeded and frozen, three runs end every cycle
+  // on identical counts. So the v86 "growth" was the world, not a leak, and
+  // any growth here now is the picker's.
+  const unfrozen = pinnedSeed === null;
+  const control = args.includes('--swaps-control');
+  await page.evaluate((u) => {
+    const B = window.__BIRB;
+    B.freeze(true);
+    if (!u) { B.birdStudio(true, { world: true }); B.orbitBird(0, 0.25, 3); }
+  }, unfrozen);
   await frames(page, 6);
   const ends = [];
   for (let c = 0; c < CYCLES; c++) {
-    const step = async (js, n = 3) => { await page.evaluate(js); await frames(page, n); };
+    const step = async (js, n = 3) => {
+      if (control && /setSpecies/.test(js)) js = 'void 0';
+      await page.evaluate(js);
+      if (!unfrozen) await page.evaluate(() => window.__BIRB.orbitBird(0, 0.25, 3));
+      await frames(page, n);
+    };
     await step('window.__BIRB.setSpecies("crow")');
     for (const t of [1, 2, 0]) {
       await step(`window.__BIRB.pinTier(${t})`, 4);
       const i = await info(page);
       const want = t === 0 ? 'high' : t === 1 ? 'mid' : 'low';
-      check(`cycle ${c} crow: re-LOD to tier ${t} landed between frames`, i.tier === want && i.textureRefs === 1, { tier: i.tier, refs: i.textureRefs });
+      if (!control) check(`cycle ${c} crow: re-LOD to tier ${t} landed between frames`, i.tier === want && i.textureRefs === 1, { tier: i.tier, refs: i.textureRefs });
     }
     await step('window.__BIRB.setSpecies("owl")');
     await step(`window.__BIRB.setEnvironment(${JSON.stringify(away)})`, 4);
@@ -173,13 +210,13 @@ if (!ONLY || ONLY === 'swaps') {
     await step(`window.__BIRB.setEnvironment(${JSON.stringify(home)})`, 4);
     await step('window.__BIRB.pinTier(0)', 4);
     const owl = await info(page);
-    check(`cycle ${c} owl: one texture reference, sky bound`, owl.textureRefs === 1 && owl.env && owl.env.bound, { refs: owl.textureRefs, env: owl.env && owl.env.bound });
+    if (!control) check(`cycle ${c} owl: one texture reference, sky bound`, owl.textureRefs === 1 && owl.env && owl.env.bound, { refs: owl.textureRefs, env: owl.env && owl.env.bound });
     await step('window.__BIRB.setSpecies("birb")', 4);
     const end = await info(page);
     check(`cycle ${c} Birb: shared feather textures back to 0 references`, end.species === 'birb' && end.textureRefs === 0, { species: end.species, refs: end.textureRefs });
     ends.push(end.gpu);
   }
-  console.log('cycle-end GPU counts', JSON.stringify(ends));
+  console.log(`cycle-end GPU counts${unfrozen ? ' (world NOT frozen)' : ''}${control ? ' (CONTROL: no species swaps)' : ''}`, JSON.stringify(ends));
   // Cycle 0 warms the program cache (each tier's and biome's variants
   // compile once); from cycle 1 on nothing may GROW. Geometries can fall
   // (terrain LODs dispose), so the test is "never above cycle 1", not "equal".
@@ -191,7 +228,7 @@ if (!ONLY || ONLY === 'swaps') {
   }
   check('swaps: no console errors', errs.length === 0, errs);
   check('swaps: no console warnings', warns.length === 0, warns);
-  results.push({ name: 'swaps: cycle-end gpu', ok: true, detail: ends });
+  results.push({ name: 'swaps: cycle-end gpu', ok: true, detail: { unfrozen, control, ends } });
   await page.close();
 }
 
@@ -301,6 +338,59 @@ if (!ONLY || ONLY === 'failure') {
     check(`failure '${stage}' crow->${to}, then a clean swap back: the crow, no warning, GPU counts = the clean round's`,
       back.r === 'crow' && back.anchorOk && back.warned.length === 0 && back.i.textureRefs === 1 && !!(back.i.env && back.i.env.bound)
       && sameCounts(back.i, controlBack.i), { warned: back.warned, clean: counts(controlBack.i), faulted: counts(back.i) });
+  }
+
+  // AFTER ATTACHMENT, and the DOUBLE failure (bird-transaction.js recover):
+  //   'attached'                   the owl was on the anchor and the swap
+  //                                failed: the crow is put back (one warning,
+  //                                the caller's), nothing changes hands;
+  //   'attached,restore'           ...and putting the crow back failed too: a
+  //                                fresh default Birb flies, the crow and the
+  //                                owl are both gone, ONE warning, saved stays
+  //                                crow; a clean swap back lands on the clean
+  //                                round's counts;
+  //   'attached,restore,fallback'  ...and the fresh Birb failed: the anchor is
+  //                                left EMPTY (a known state), one warning, the
+  //                                page keeps running, and choosing the crow
+  //                                again refills it with no leak.
+  {
+    const s = await swapTo('owl', 'attached');
+    const msg = /^\[species\] could not build the owl; keeping the crow/;
+    expected.push(msg);
+    check("failure 'attached' crow->owl: the crow is put back (and is on the anchor), saved stays crow",
+      s.r === 'crow' && s.i.species === 'crow' && s.anchorOk && s.saved === 'crow' && s.i.textureRefs === 1 && sameCounts(s.i, base),
+      { r: s.r, species: s.i.species, saved: s.saved, anchor: s.anchor, before: counts(base), after: counts(s.i) });
+    check("failure 'attached' crow->owl: exactly its one warning", s.warned.length === 1 && msg.test(s.warned[0]), s.warned);
+  }
+  {
+    const control = await swapTo('birb');
+    const controlBack = await swapTo('crow');
+    const s = await swapTo('owl', 'attached,restore');
+    const msg = /^\[species\] the swap failed and the outgoing bird could not be put back; flying a fresh birb/;
+    expected.push(msg);
+    check("double failure 'attached,restore' crow->owl: a fresh Birb flies (and is on the anchor), saved stays crow, 0 texture refs",
+      control.warned.length === 0 && controlBack.warned.length === 0
+      && s.r === 'birb' && s.i.species === 'birb' && s.anchorOk && s.saved === 'crow' && s.i.textureRefs === 0,
+      { r: s.r, species: s.i.species, saved: s.saved, refs: s.i.textureRefs, anchor: s.anchor });
+    check("double failure 'attached,restore': exactly ONE warning", s.warned.length === 1 && msg.test(s.warned[0]), s.warned);
+    const back = await swapTo('crow');
+    check("double failure 'attached,restore', then a clean swap back: the crow, no warning, GPU counts = the clean round's",
+      back.r === 'crow' && back.anchorOk && back.warned.length === 0 && back.i.textureRefs === 1 && sameCounts(back.i, controlBack.i),
+      { warned: back.warned, clean: counts(controlBack.i), now: counts(back.i) });
+  }
+  {
+    const s = await swapTo('owl', 'attached,restore,fallback');
+    const msg = /^\[species\] the swap failed, the outgoing bird could not be put back and no fresh birb could be mounted; the bird anchor is left empty/;
+    expected.push(msg);
+    const anchor = await page.evaluate(() => window.__BIRB.birdStats());
+    await frames(page, 4);
+    check("triple failure 'attached,restore,fallback': the anchor is EMPTY, the page keeps running, ONE warning",
+      anchor.meshes === 0 && s.warned.length === 1 && msg.test(s.warned[0]) && errs.length === 0,
+      { meshes: anchor.meshes, warned: s.warned, errs });
+    const back = await swapTo('crow');
+    check("triple failure, then choosing the crow again: it flies (and is on the anchor), no warning, GPU counts = the warm baseline's",
+      back.r === 'crow' && back.anchorOk && back.warned.length === 0 && back.i.textureRefs === 1 && sameCounts(back.i, base),
+      { warned: back.warned, base: counts(base), now: counts(back.i), anchor: back.anchor });
   }
 
   // The settings button with a failing mount: no rejection reaches the page.

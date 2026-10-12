@@ -73,22 +73,43 @@ test('install crawls CDN_MODULES into RUNTIME_CACHE alongside the core precache'
 });
 
 // precacheCdn itself, lifted out of sw.js and run against fake caches/fetch.
-function loadCrawler({ fetch, timeout }) {
+// AbortSignal is undefined in the sandbox (the bound must not need
+// AbortSignal.timeout), timeoutMs shrinks the 20 s deadline so a stall test
+// runs in milliseconds, and the sandbox's timers are tracked: `live` holds
+// every timer set and not yet cleared or fired.
+function loadCrawler({ fetch, timeoutMs }) {
   const pick = (re, what) => { const m = re.exec(sw); assert.ok(m, `${what} missing`); return m[0]; };
+  const limit = pick(/const CDN_FETCH_TIMEOUT_MS = \d+;/, 'CDN_FETCH_TIMEOUT_MS');
   const parts = [
     pick(/const CDN_MODULES = \[[\s\S]*?\];/, 'CDN_MODULES'),
     pick(/function esmImports\(text, base\) \{[\s\S]*?\n\}/, 'esmImports'),
-    pick(/const CDN_FETCH_TIMEOUT_MS = \d+;/, 'CDN_FETCH_TIMEOUT_MS'),
+    timeoutMs === undefined ? limit : `const CDN_FETCH_TIMEOUT_MS = ${timeoutMs};`,
+    pick(/async function withDeadline\(ms, work\) \{[\s\S]*?\n\}/, 'withDeadline'),
     pick(/async function precacheCdn\(\) \{[\s\S]*?\n\}/, 'precacheCdn'),
   ];
   const stored = new Map();
   const caches = { open: async () => ({ put: async (url, res) => { await res.text(); stored.set(url, res); } }) };
-  const AbortSignal = { timeout };
+  const timers = { set: 0, live: new Set() };
+  const setTimer = (fn, ms) => {
+    timers.set += 1;
+    const id = setTimeout(() => { timers.live.delete(id); fn(); }, ms);
+    timers.live.add(id);
+    return id;
+  };
+  const clearTimer = (id) => { timers.live.delete(id); clearTimeout(id); };
   // eslint-disable-next-line no-new-func
-  const precacheCdn = new Function('caches', 'fetch', 'AbortSignal', 'RUNTIME_CACHE', 'RUNTIME_CACHEABLE_HOSTS',
-    `${parts.join('\n')}; return precacheCdn;`)(caches, fetch, AbortSignal, 'runtime', new Set(['esm.sh', 'cdn.esm.sh']));
-  return { precacheCdn, stored };
+  const precacheCdn = new Function('caches', 'fetch', 'AbortSignal', 'AbortController', 'setTimeout', 'clearTimeout',
+    'RUNTIME_CACHE', 'RUNTIME_CACHEABLE_HOSTS', `${parts.join('\n')}; return precacheCdn;`)(
+    caches, fetch, undefined, globalThis.AbortController, setTimer, clearTimer, 'runtime', new Set(['esm.sh', 'cdn.esm.sh']));
+  return { precacheCdn, stored, timers };
 }
+
+// precacheCdn must settle well inside this, or the test fails rather than hangs.
+const within = (promise, ms, what) => {
+  let t;
+  return Promise.race([promise, new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`${what} not bounded`)), ms); })])
+    .finally(() => clearTimeout(t));
+};
 
 test('precacheCdn follows the entries\' imports into the runtime cache', async () => {
   const bodies = {
@@ -96,11 +117,17 @@ test('precacheCdn follows the entries\' imports into the runtime cache', async (
     'https://esm.sh/three@0.183.2/es2022/three.mjs': 'import{a}from"/three@0.183.2/es2022/build/three.core.mjs";',
   };
   const fetch = async (url) => new Response(bodies[url] ?? '/* leaf */', { status: 200 });
-  const { precacheCdn, stored } = loadCrawler({ fetch, timeout: () => new globalThis.AbortController().signal });
+  const { precacheCdn, stored } = loadCrawler({ fetch });
   await precacheCdn();
   for (const url of [...cdnModules(), 'https://esm.sh/three@0.183.2/es2022/three.mjs', 'https://esm.sh/three@0.183.2/es2022/build/three.core.mjs']) {
     assert.ok(stored.has(url), `${url} cached`);
   }
+});
+
+test('the CDN deadline is a real bound, 20 s or so', () => {
+  const m = /const CDN_FETCH_TIMEOUT_MS = (\d+);/.exec(sw);
+  assert.ok(m, 'CDN_FETCH_TIMEOUT_MS missing');
+  assert.ok(Number(m[1]) > 0 && Number(m[1]) <= 60000, `timeout ${m[1]}`);
 });
 
 test('precacheCdn is bounded: a CDN that stalls times out and install goes on, nothing cached', async () => {
@@ -113,16 +140,58 @@ test('precacheCdn is bounded: a CDN that stalls times out and install goes on, n
     signals += 1;
     init.signal.addEventListener('abort', () => reject(new Error('timed out')));
   });
-  const timeout = (ms) => {
-    assert.ok(ms > 0 && ms <= 60000, `timeout ${ms}`);
-    const c = new globalThis.AbortController();
-    setTimeout(() => c.abort(), 5);
-    return c.signal;
-  };
-  const { precacheCdn, stored } = loadCrawler({ fetch, timeout });
-  await precacheCdn();
+  const { precacheCdn, stored, timers } = loadCrawler({ fetch, timeoutMs: 5 });
+  await within(precacheCdn(), 2000, 'precacheCdn');
   assert.equal(signals, cdnModules().length);
   assert.equal(stored.size, 0);
+  assert.equal(timers.live.size, 0);
+});
+
+test('precacheCdn is bounded without AbortSignal.timeout, even when fetch ignores its signal', async () => {
+  // The sandbox has no AbortSignal at all, and this fetch never settles, abort
+  // or not: only the deadline's own timer can end the wait.
+  const aborted = [];
+  const fetch = (url, init) => {
+    init.signal.addEventListener('abort', () => aborted.push(url));
+    return new Promise(() => {});
+  };
+  const { precacheCdn, stored, timers } = loadCrawler({ fetch, timeoutMs: 10 });
+  await within(precacheCdn(), 2000, 'precacheCdn');
+  assert.deepEqual(aborted.sort(), [...cdnModules()].sort(), 'each stalled fetch is aborted at the deadline');
+  assert.equal(stored.size, 0);
+  assert.equal(timers.live.size, 0);
+});
+
+test('precacheCdn is bounded when headers arrive but the body stalls', async () => {
+  // 200 and headers, then a body stream that never delivers or closes. The
+  // deadline must cover cache.put and the text() read, not just the headers.
+  const stall = () => new Response(new ReadableStream({ pull: () => new Promise(() => {}) }), { status: 200 });
+  const fetch = async () => stall();
+  const { precacheCdn, stored, timers } = loadCrawler({ fetch, timeoutMs: 10 });
+  await within(precacheCdn(), 2000, 'precacheCdn');
+  assert.equal(stored.size, 0, 'a module whose body never finished is skipped');
+  assert.equal(timers.live.size, 0);
+});
+
+test('precacheCdn clears every deadline timer when the crawl succeeds', async () => {
+  const fetch = async () => new Response('/* leaf */', { status: 200 });
+  const { precacheCdn, stored, timers } = loadCrawler({ fetch });
+  await precacheCdn();
+  assert.equal(stored.size, cdnModules().length);
+  assert.equal(timers.set, cdnModules().length, 'one deadline per module');
+  assert.equal(timers.live.size, 0, 'a 20 s timer left running after success');
+});
+
+test('a failing module is skipped, the rest are still cached', async () => {
+  const [bad, ...good] = cdnModules();
+  const fetch = async (url) => {
+    if (url === bad) throw new TypeError('Failed to fetch');
+    return new Response('/* leaf */', { status: 200 });
+  };
+  const { precacheCdn, stored, timers } = loadCrawler({ fetch });
+  await precacheCdn();
+  assert.deepEqual([...stored.keys()].sort(), good.sort());
+  assert.equal(timers.live.size, 0);
 });
 
 // The crawler's parser, run on the stub and bundle heads esm.sh actually

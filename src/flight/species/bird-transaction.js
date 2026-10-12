@@ -11,10 +11,27 @@
  * one exception, as it always was: the bird keeps its lights only, with one
  * warning, and the swap goes on.
  *
- * COMMIT swaps the model on the anchor. A failure BEFORE that swap (the mount
- * itself, if it throws) puts the outgoing model back if it got as far as
- * taking it off, disposes everything staged and rethrows: the old bird keeps
- * flying and the caller keeps its saved choice. From the swap on, the new bird
+ * COMMIT swaps the model on the anchor, and checks that the anchor now holds
+ * exactly that model. A failure there (the mount throws, before or after it
+ * attached anything, or the check fails) puts the outgoing model back and
+ * checks THAT, disposes everything staged and rethrows: the old bird keeps
+ * flying and the caller keeps its saved choice.
+ *
+ * THE DOUBLE FAILURE. If the outgoing bird cannot be put back either (the
+ * restoring mount throws, or the anchor still does not hold it), a fresh
+ * DEFAULT Birb is built (`fallback`: the Pionus variant this load runs, by a
+ * minimal anchor path of its own that shares nothing with the mount hook) and
+ * checked on the anchor; only once it is there are the staged and the
+ * outgoing bird disposed (each guarded), and the live references name the
+ * fresh Birb. If even that fails, the anchor is emptied and checked empty (a
+ * known state: every per-frame reader looks bird parts up by name and skips
+ * what is missing), the staged bird is disposed only if the anchor is
+ * provably empty, the outgoing bird is left alone, and the live references
+ * are untouched. Either way ONE warning, and the error the caller gets says
+ * which (`err.birdFallback` 'birb' | 'none', `err.birdWarned` true), so the
+ * caller does not warn a second time.
+ *
+ * From the swap on, the new bird
  * IS the bird: the live references are handed over (plain assignments), and
  * then three things that may throw are each guarded — warned about, and the
  * commit goes on — so none of them can leave the new bird half-mounted or
@@ -30,9 +47,12 @@
  *
  * FAULT INJECTION (the harness's __BIRB.speciesFault): `fault(stage)` arms ONE
  * throw at a named stage of the next transaction — 'stage' (once everything is
- * staged), 'sky', 'feathers', 'mount', 'dispose' (once the outgoing teardown
- * has run), 'audio', 'sync'. Disarmed, a checkpoint is one string compare per
- * stage per swap; nothing runs per frame.
+ * staged), 'sky', 'feathers', 'mount', 'attached' (the mount has put the new
+ * model on the anchor), 'restore' (putting the outgoing bird back),
+ * 'fallback' (the fresh default Birb), 'dispose' (once the outgoing teardown
+ * has run), 'audio', 'sync'. Several at once: 'attached,restore' (the double
+ * failure) or an array; each throws once. Disarmed, a checkpoint is one Set
+ * lookup per stage per swap; nothing runs per frame.
  *
  * Also here: the re-LOD's retry gate (createRetierGate), pure.
  *
@@ -40,7 +60,10 @@
  * through it too), so it stays small.
  */
 
-export const BIRD_FAULT_STAGES = Object.freeze(['stage', 'sky', 'feathers', 'mount', 'dispose', 'audio', 'sync']);
+export const BIRD_FAULT_STAGES = Object.freeze(['stage', 'sky', 'feathers', 'mount', 'attached', 'restore', 'fallback', 'dispose', 'audio', 'sync']);
+
+export const DOUBLE_FAILURE_WARNING = '[species] the swap failed and the outgoing bird could not be put back; flying a fresh birb';
+export const ANCHOR_EMPTY_WARNING = '[species] the swap failed, the outgoing bird could not be put back and no fresh birb could be mounted; the bird anchor is left empty';
 
 /**
  * hooks:
@@ -54,21 +77,30 @@ export const BIRD_FAULT_STAGES = Object.freeze(['stage', 'sky', 'feathers', 'mou
  *                        outgoing bird's rim handles)
  *   outgoing()           { sb, model, env, feathers } of the live bird
  *   mount(model)         the swap on the anchor
- *   mounted()            the model on the anchor now
+ *   mounted()            the ONE model on the anchor now (null when the anchor
+ *                        holds none, or more than one)
  *   handover(staged)     the live references now name the incoming bird
  *   disposeModel(model)  geometry and materials of a model with no sb
  *   audio(species)       the flight audio's voice switch
  *   sync()               the mounted bird inherits shadows and rim tint
+ *   fallback()           a fresh default Birb ON the anchor, by its own path
+ *                        (never `mount`): { species: 'birb', model, sb: null,
+ *                        env, feathers, rim }; disposes its own half-made bird
+ *                        if it throws
+ *   clearAnchor()        empty the anchor (the last resort)
  *   warn(message, err)
  */
 export function createBirdTransaction(hooks) {
-  let armed = null;
+  const armed = new Set();
+  // The outgoing model of a transaction that ended on an EMPTY anchor.
+  let stranded = null;
   const checkpoint = (stage) => {
-    if (armed === stage) {
-      armed = null;
+    if (armed.has(stage)) {
+      armed.delete(stage);
       throw new Error('injected ' + stage + ' fault (__BIRB.speciesFault)');
     }
   };
+  const armedList = () => (armed.size ? BIRD_FAULT_STAGES.filter((s) => armed.has(s)).join(',') : null);
 
   // A bird's sky, then its model: the species bird's own dispose, or the
   // Pionus's authored feather sheets and then its geometry and materials.
@@ -102,6 +134,9 @@ export function createBirdTransaction(hooks) {
       checkpoint('stage');
     } catch (err) {
       release(staged);
+      // The transaction ends here: a fault armed for a later stage of it
+      // (or for a branch it never reached) is not carried into the next one.
+      armed.clear();
       throw err;
     } finally {
       hooks.settle();
@@ -109,23 +144,104 @@ export function createBirdTransaction(hooks) {
     return staged;
   }
 
+  // The mount failed: nothing has changed hands. Put the outgoing bird back
+  // and CHECK it is the one bird on the anchor; failing that, a fresh default
+  // Birb; failing that, an empty anchor. Nothing that might still be on the
+  // anchor is disposed. Returns how it ended, for the error the caller gets.
+  const recover = (out, staged, err) => {
+    let restoreErr = null;
+    if (out.model) {
+      try {
+        if (hooks.mounted() !== out.model) {
+          checkpoint('restore');
+          hooks.mount(out.model);
+        }
+        if (hooks.mounted() !== out.model) throw new Error('the outgoing bird is not on the anchor after restoring it');
+        release(staged);
+        return null;
+      } catch (e) { restoreErr = e; }
+    }
+    // The double failure: neither the incoming nor the outgoing bird is
+    // known to be on the anchor.
+    let fresh = null;
+    try {
+      checkpoint('fallback');
+      fresh = hooks.fallback();
+      if (!fresh || !fresh.model || hooks.mounted() !== fresh.model) throw new Error('the fresh birb is not on the anchor');
+    } catch (fallbackErr) {
+      // Last resort: a known, empty anchor. A fresh bird that never made it
+      // on is disposed with the staged one, only once the anchor is provably
+      // empty; the outgoing bird is left as it is (it may be what a later
+      // swap's outgoing() finds).
+      let empty = false;
+      try { hooks.clearAnchor(); empty = hooks.mounted() === null; } catch (_) { empty = false; }
+      if (empty) {
+        release(staged);
+        if (fresh && fresh.model) release(fresh);
+      }
+      // The live references still name the outgoing bird; its model is off
+      // the anchor now, so the next commit's outgoing() cannot see it.
+      // Remembered here (only when the anchor is provably empty: otherwise
+      // nothing is known about what is on it), it is that commit's to put
+      // back or to tear down.
+      stranded = empty ? (out.model || null) : null;
+      hooks.warn(ANCHOR_EMPTY_WARNING, chain(err, restoreErr, fallbackErr, empty ? null : new Error('the anchor did not empty')));
+      return 'none';
+    }
+    // The fresh Birb flies. Now, and only now, the staged and outgoing birds
+    // go (each piece tried), and the fresh one becomes the live bird.
+    hooks.handover(fresh);
+    const lostStaged = release(staged);
+    const lostOut = release(out);
+    const lost = lostStaged || lostOut;
+    attempt(() => hooks.audio('birb'));
+    attempt(() => hooks.sync());
+    // A sky that did not bake leaves the fresh Birb on its lights: said in
+    // the same, single warning.
+    const skyLost = fresh.skyError ? new Error('the fresh birb flies on its lights only: ' + (fresh.skyError.message || fresh.skyError)) : null;
+    hooks.warn(DOUBLE_FAILURE_WARNING, chain(err, restoreErr, lost || skyLost));
+    return 'birb';
+  };
+
   function commit(staged) {
-    const out = hooks.outgoing();
+    try {
+      commitArmed(staged);
+    } finally {
+      // One transaction per arming: a fault for a branch this commit never
+      // reached (a 'restore' when the mount threw before attaching, a
+      // 'fallback' when the restore held) is not left for a later swap.
+      armed.clear();
+    }
+  }
+
+  function commitArmed(staged) {
+    const live = hooks.outgoing();
+    const strandedModel = stranded;
+    stranded = null;
+    const out = strandedModel && !live.model ? Object.assign({}, live, { model: strandedModel }) : live;
     try {
       checkpoint('mount');
       hooks.mount(staged.model);
-    } catch (err) {
-      // Nothing has changed hands. A mount that took the old model off the
-      // anchor before it threw gets it put back.
-      if (out.model && hooks.mounted() !== out.model) {
-        try { hooks.mount(out.model); } catch (_) { /* nothing better to do */ }
+      checkpoint('attached');
+      if (hooks.mounted() !== staged.model) throw new Error('the incoming bird is not on the anchor after mounting it');
+    } catch (thrown) {
+      // A hook may throw anything; the flags below need an object.
+      const err = thrown instanceof Error ? thrown : new Error(String(thrown), { cause: thrown });
+      const fallback = recover(out, staged, err);
+      if (fallback) {
+        err.birdFallback = fallback;
+        err.birdWarned = true;
       }
-      release(staged);
       throw err;
     }
     hooks.handover(staged);
     const released = release(out);
-    const torn = attempt(() => checkpoint('dispose')) || released;
+    // A stranded Pionus model that something else replaced on the anchor in
+    // the meantime (never through here) is still the live references' bird:
+    // its geometry goes with them. (A crow/owl's goes with its sb.)
+    const strandedLost = strandedModel && out.model !== strandedModel && !out.sb
+      ? attempt(() => hooks.disposeModel(strandedModel)) : null;
+    const torn = attempt(() => checkpoint('dispose')) || released || strandedLost;
     if (torn) hooks.warn('[species] the outgoing bird did not tear down cleanly; the ' + staged.species + ' flies on', torn);
     const voiced = attempt(() => { checkpoint('audio'); hooks.audio(staged.species); });
     if (voiced) hooks.warn('[species] the flight audio did not switch to the ' + staged.species + '; a frame will silence the old voice', voiced);
@@ -136,17 +252,32 @@ export function createBirdTransaction(hooks) {
   return {
     stage,
     commit,
-    /** Arm one throw at `stage` (BIRD_FAULT_STAGES), or disarm with null. */
-    fault(stageName) {
-      armed = BIRD_FAULT_STAGES.indexOf(stageName) >= 0 ? stageName : null;
-      return armed;
+    /**
+     * Arm one throw at each named stage (BIRD_FAULT_STAGES): a name, a comma
+     * list ('attached,restore') or an array; null disarms. Replaces whatever
+     * was armed. Returns what is armed now (a comma list), or null.
+     */
+    fault(stageNames) {
+      armed.clear();
+      const list = Array.isArray(stageNames) ? stageNames : (typeof stageNames === 'string' ? stageNames.split(',') : []);
+      for (const s of list) if (BIRD_FAULT_STAGES.indexOf(s.trim()) >= 0) armed.add(s.trim());
+      return armedList();
     },
-    armed: () => armed,
+    armed: armedList,
   };
 }
 
 function attempt(fn) {
   try { fn(); return null; } catch (err) { return err; }
+}
+
+// The one warning of a double failure carries every error that led to it:
+// the mount's, then the restore's, then whatever came after (in order).
+function chain(mountErr, ...later) {
+  const parts = ['mount: ' + (mountErr && mountErr.message)];
+  const names = ['restore', 'then'];
+  later.forEach((e, i) => { if (e) parts.push((names[i] || 'then') + ': ' + (e.message || String(e))); });
+  return new Error(parts.join('; '), { cause: mountErr });
 }
 
 /**

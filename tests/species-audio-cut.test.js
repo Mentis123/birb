@@ -9,7 +9,9 @@
 // value at the context's current time, as a browser reports it. The swap is
 // checked for continuity at the instant it lands, with and without
 // cancelAndHoldAtTime (older Safari has none), through both ways a swap
-// reaches the voice: setSpecies, and a frame naming another bird.
+// reaches the voice: setSpecies, and a frame naming another bird. The same
+// hold starts every envelope (whoosh, owl tick, caw note), so a retrigger
+// that lands inside the last one's ramp is checked the same way, below.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlightAudio, FLIGHT_AUDIO_TUNING as T } from '../src/audio/flight-audio.js';
@@ -106,7 +108,12 @@ function makeAudio({ hold }) {
     const bp = (hz) => all.find((x) => x.kind === 'biquad' && x.type === 'bandpass' && x.frequency.at(0) === hz);
     return { cawGain: caw.out.out.gain, tickGain: bp(T.owlTickHz).out.gain, whirGain: bp(T.owlWhirHz).out.gain };
   };
-  return { fa, ctx: () => fa.context, voice };
+  const whoosh = () => {
+    const bps = all.filter((x) => x.kind === 'biquad' && x.type === 'bandpass' && x.frequency.at(0) === T.whooshHz);
+    assert.equal(bps.length, 1, 'one whoosh band-pass');
+    return bps[0].out.gain;
+  };
+  return { fa, ctx: () => fa.context, voice, whoosh };
 }
 
 const frame = (extra = {}) => ({
@@ -215,4 +222,157 @@ test('the model sees the click the old cut made (cancelScheduledValues, then dec
   p.setTargetAtTime(0, 3.001, T.speciesCutTau);
   assert.ok(Math.abs(before - 0.025) < 1e-9);
   assert.equal(p.at(3.001), 0, 'the old cut dropped half the peak in one sample');
+});
+
+// ---- envelope() and triggerWhoosh(): a retrigger must not click either -----
+// The hold the cut makes is also the start of every new envelope: a whoosh on
+// the next downstroke, an owl tick on the next tick, a caw's first note. One
+// that lands inside the last envelope's ramp must rise from where the gain IS,
+// not from where that ramp started (cancelScheduledValues, then `.value`, read
+// the start: the old order on the no-cancelAndHoldAtTime path).
+
+/** Drive the downstroke detector through one stroke; the last frame fires. */
+function downstroke(fa, first) {
+  const angles = first ? [0, -0.1, 0, 0] : [-0.1, 0, 0];
+  for (const wingAngle of angles) fa.update(frame({ wingAngle }), 1 / 60);
+}
+
+/**
+ * Retrigger at `at` and check `p` is continuous there: the new envelope
+ * starts from exactly the value the timeline had at that instant, rises with
+ * no sample-to-sample step steeper than its own attack, reaches `peak` at
+ * the end of the attack, and nothing of the old envelope is left after `at`.
+ */
+function assertSmoothRetrigger(p, at, peak, attack, decay, doIt, label) {
+  const before = p.at(at);
+  assert.ok(before > 1e-5, `${label}: the gain is sounding at the retrigger (${before})`);
+  doIt();
+  const now = p.at(at);
+  assert.ok(Math.abs(now - before) <= 1e-9 * before, `${label}: a step at the retrigger, ${before} -> ${now}`);
+  const step = 1 / 48000;
+  const slope = peak / attack; // the steepest the new envelope may move
+  let prev = now;
+  for (let t = at + step; t < at + attack + 0.01; t += step) {
+    const v = p.at(t);
+    assert.ok(Math.abs(v - prev) <= slope * step * (1 + 1e-6) + 1e-12, `${label}: a discontinuity at ${t} (${prev} -> ${v})`);
+    prev = v;
+  }
+  assert.ok(Math.abs(p.at(at + attack) - peak) <= 1e-9 * peak, `${label}: the new envelope peaks at ${peak}`);
+  assert.deepEqual(
+    p.events.filter((e) => e.time > at).map((e) => [e.type, e.value, e.time, e.tau]),
+    [['linear', peak, at + attack, undefined], ['target', 0, at + attack, decay]],
+    `${label}: only the new envelope is left after the retrigger`,
+  );
+}
+
+for (const hold of [true, false]) {
+  const how = hold ? 'with cancelAndHoldAtTime' : 'without cancelAndHoldAtTime';
+
+  test(`whoosh: a downstroke during the last whoosh's ATTACK and during its DECAY does not click (${how})`, () => {
+    // The first whoosh at 2: a 25 ms linear rise, then its decay.
+    for (const at of [2.005, 2.0125, 2.02, 2.04, 2.15]) {
+      const { fa, ctx, whoosh } = makeAudio({ hold });
+      ctx().currentTime = 2;
+      downstroke(fa, true);
+      const p = whoosh();
+      const peak = p.at(2 + T.whooshAttack); // the same stroke again: the same peak
+      assert.ok(peak > 1e-4, 'the first downstroke whooshed');
+      ctx().currentTime = at;
+      assertSmoothRetrigger(p, at, peak, T.whooshAttack, T.whooshDecay, () => downstroke(fa, false), `whoosh @${at}`);
+    }
+  });
+
+  test(`owl tick: a tick during the last tick's ATTACK and during its DECAY does not click (${how})`, () => {
+    for (const at of [3.0005, 3.001, 3.0015, 3.005, 3.02]) {
+      const { fa, ctx, voice } = makeAudio({ hold });
+      fa.setSpecies('owl');
+      ctx().currentTime = 3;
+      const tick = () => fa.update(frame({ species: 'owl', speciesTick: true }), 1 / 60);
+      tick();
+      const p = voice().tickGain;
+      const peak = p.at(3.002);
+      ctx().currentTime = at;
+      assertSmoothRetrigger(p, at, peak, 0.002, T.owlTickDecay, tick, `tick @${at}`);
+    }
+  });
+
+  test(`crow caw: the first note, landing inside a ramp, rises from where the gain is (${how})`, () => {
+    for (const [type, from, to] of [['linear', 0.001, 0.05], ['linear', 0.05, 0.001], ['exp', 0.001, 0.05], ['exp', 0.05, 0.001]]) {
+      const { fa, ctx, voice } = makeAudio({ hold });
+      fa.setSpecies('crow');
+      const p = voice().cawGain;
+      p.setValueAtTime(from, 1);
+      if (type === 'linear') p.linearRampToValueAtTime(to, 1.2);
+      else p.exponentialRampToValueAtTime(to, 1.2);
+      ctx().currentTime = 1.07;
+      const before = p.at(1.07);
+      p.calls.length = 0;
+      fa.update(frame({ species: 'crow', speciesCall: true }), 1 / 60);
+      const peak = p.calls.find((c) => c[0] === 'linear')[1];
+      // Note one only: note two (scheduled at 1.07 + gap, ahead of the clock)
+      // is checked below. Undo it here so the shared check sees one envelope.
+      const at2 = 1.07 + T.crowCawGap;
+      const note2 = p.events.filter((e) => e.time >= at2);
+      p.events = p.events.filter((e) => e.time < at2);
+      assert.ok(Math.abs(p.at(1.07) - before) <= 1e-9 * before, `${type} ${from}->${to}: a step at the caw, ${before} -> ${p.at(1.07)}`);
+      const n1 = p.events.filter((e) => e.time > 1.07).map((e) => [e.type, e.value, e.time]);
+      assert.deepEqual(n1, [['linear', peak, 1.07 + 0.015], ['target', 0, 1.07 + 0.015]], `${type}: the old ramp is gone`);
+      assert.ok(Math.abs(p.at(1.07 + 0.015) - peak) <= 1e-9 * peak);
+      // With cancelAndHoldAtTime, note two also starts where note one's decay
+      // has got to. Without it, `.value` can only say where the gain is NOW, so
+      // the second note starts from that (the behaviour it always had).
+      p.events = p.events.concat(note2);
+      if (hold) {
+        const left = p.at(at2 - 1e-9);
+        assert.ok(Math.abs(p.at(at2) - left) <= 1e-6 * peak, `note two steps, ${left} -> ${p.at(at2)}`);
+      }
+    }
+  });
+
+  test(`envelope and whoosh calls: hold (or read, cancel, set) at the retrigger, then attack and decay (${how})`, () => {
+    const { fa, ctx, voice, whoosh } = makeAudio({ hold });
+    ctx().currentTime = 2;
+    downstroke(fa, true);
+    const w = whoosh();
+    ctx().currentTime = 2.01;
+    const wMid = w.at(2.01);
+    w.calls.length = 0;
+    downstroke(fa, false);
+    fa.setSpecies('owl');
+    ctx().currentTime = 3;
+    const tick = () => fa.update(frame({ species: 'owl', speciesTick: true }), 1 / 60);
+    tick();
+    const k = voice().tickGain;
+    ctx().currentTime = 3.001;
+    const kMid = k.at(3.001);
+    k.calls.length = 0;
+    tick();
+    for (const [p, at, mid, attack, decay] of [[w, 2.01, wMid, T.whooshAttack, T.whooshDecay], [k, 3.001, kMid, 0.002, T.owlTickDecay]]) {
+      const peak = p.calls.find((c) => c[0] === 'linear')[1];
+      const head = hold ? [['hold', at]] : [['cancel', at], ['set', mid, at]];
+      assert.deepEqual(p.calls, [...head, ['linear', peak, at + attack], ['target', 0, at + attack, decay]]);
+      assert.ok(mid > 0.1 * peak && mid < 0.9 * peak, 'read mid-attack, not the ramp start');
+    }
+  });
+}
+
+test('the model sees the click the old envelope order made (cancel, THEN read .value): the check is not vacuous', () => {
+  // A whoosh at 2 as triggerWhoosh schedules it (from silence), retriggered
+  // 10 ms into its 25 ms rise.
+  const clock = { currentTime: 2 };
+  const old = modelParam(clock, 0, { hold: false });
+  const peak = 0.04;
+  old.setValueAtTime(0, 2);
+  old.linearRampToValueAtTime(peak, 2 + T.whooshAttack);
+  old.setTargetAtTime(0, 2 + T.whooshAttack, T.whooshDecay);
+  clock.currentTime = 2.01;
+  const before = old.value;
+  assert.ok(Math.abs(before - 0.4 * peak) < 1e-12, 'mid-rise');
+  // The old order: the cancel drops the ramp, and `.value` then reads where
+  // it STARTED.
+  old.cancelScheduledValues(2.01);
+  assert.equal(old.value, 0, '.value after the cancel is the ramp start, not where the gain was');
+  old.setValueAtTime(old.value, 2.01);
+  old.linearRampToValueAtTime(peak, 2.01 + T.whooshAttack);
+  assert.equal(old.at(2.01), 0, 'the old order dropped 40% of the peak in one sample');
 });

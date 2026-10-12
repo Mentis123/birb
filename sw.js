@@ -60,7 +60,10 @@
 // v87 species final: bird-transaction.js (on EVERY boot) joins CORE_ASSETS as
 // the twelfth species module, the builders and bird-shadow.js changed, and
 // install now crawls CDN_MODULES (below).
-const CACHE_VERSION = 'v87-2026-10-11-species-final';
+// v88 species leftovers: the owl's rivets and hubs back (species-bird.js),
+// the double-failure fallback (bird-transaction.js), the envelope/whoosh hold
+// (flight-audio.js), and every CDN fetch bounded without AbortSignal.timeout.
+const CACHE_VERSION = 'v88-2026-10-11-species-leftovers';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -288,6 +291,24 @@ function esmImports(text, base) {
 
 const CDN_FETCH_TIMEOUT_MS = 20000;
 
+// Runs work(signal) under one deadline. The signal aborts the fetch (and the
+// body stream it feeds); the race abandons anything that ignores the signal,
+// so a body that stalls mid-read is bounded too. A plain AbortController and
+// setTimeout, not AbortSignal.timeout, so the bound holds where that is
+// missing. The timer is always cleared: success leaves nothing behind.
+async function withDeadline(ms, work) {
+  const controller = new AbortController();
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(new Error('timed out')); }, ms);
+  });
+  try {
+    return await Promise.race([work(controller.signal), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function precacheCdn() {
   const cache = await caches.open(RUNTIME_CACHE);
   const seen = new Set();
@@ -300,12 +321,15 @@ async function precacheCdn() {
       // Bounded: install waits on this crawl, and a THIRD-PARTY host that
       // stalls (rather than failing) would otherwise hold the update until the
       // browser kills the install event — a deploy that never activates. A
-      // fetch (or body) past the limit counts as failed, like offline.
-      const response = await fetch(url, typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-        ? { signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS) } : undefined);
-      if (!response.ok) return;
-      await cache.put(url, response.clone());
-      await Promise.all(esmImports(await response.text(), url).map(visit));
+      // fetch, cache.put or body read past the limit counts as failed, like
+      // offline. Each module gets its own deadline; its imports get theirs.
+      const text = await withDeadline(CDN_FETCH_TIMEOUT_MS, async (signal) => {
+        const response = await fetch(url, { signal });
+        if (!response.ok) return null;
+        await cache.put(url, response.clone());
+        return response.text();
+      });
+      if (text !== null) await Promise.all(esmImports(text, url).map(visit));
     } catch (err) {
       // Offline or blocked — the runtime cacheFirst path still gets a chance.
     }

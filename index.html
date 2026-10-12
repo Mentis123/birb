@@ -4049,7 +4049,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v87-2026-10-11-species-final';
+    const BIRB_BUILD = 'v88-2026-10-11-species-leftovers';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -9430,6 +9430,9 @@
     // birbRimUniforms (the biome switch retints from it). Staged, they are
     // lifted out and the outgoing bird's handles put back until commit.
     let rimBeforeStage = [];
+    // True while the bird flying is the double failure's minimal fresh Birb
+    // (no authored feathers): choosing Birb again then rebuilds the full one.
+    let birbIsFallback = false;
     const stageBird = (id, quality) => {
       rimBeforeStage = birbRimUniforms.slice();
       return birdTransaction.stage(id, quality);
@@ -9455,8 +9458,43 @@
       },
       outgoing: () => ({ sb: speciesBird, model: birbAnchor.children[0] || null, env: birbPlumageEnv, feathers: __birbFeatherDisposer }),
       mount: (model) => mountBirbModel(model),
-      mounted: () => birbAnchor.children[0] || null,
+      // The ONE bird on the anchor: a broken mount that left two (or none)
+      // reads null, so the transaction's checks fail safe.
+      mounted: () => (birbAnchor.children.length === 1 ? birbAnchor.children[0] : null),
+      // The double failure (the swap failed after attaching, and the outgoing
+      // bird could not be put back): a fresh DEFAULT Birb — the Pionus variant
+      // this load runs — on the anchor by its own three lines, never through
+      // mountBirbModel. Minimal: its sky if it bakes (lights-only if not,
+      // said in the transaction's one warning for the whole event), no
+      // authored feathers — so `birbIsFallback` lets re-choosing Birb build
+      // the full one. Its rim handles are lifted out of the shared list as a
+      // staged Pionus's are. A throw disposes its own half-made bird.
+      fallback: () => {
+        const rimBefore = birbRimUniforms.slice();
+        let model = null;
+        try {
+          model = makePionusModel();
+          const rim = birbRimUniforms.filter((u) => rimBefore.indexOf(u) < 0);
+          birbRimUniforms.length = 0;
+          for (const u of rimBefore) birbRimUniforms.push(u);
+          prepareBirbModel(model);
+          birbAnchor.clear();
+          birbAnchor.add(model);
+          birbAnchor.scale.setScalar(0.52);
+          let env = null;
+          let skyError = null;
+          try { env = bakeBirdSky(pionusSkyMaterials(model)); } catch (err) { env = null; skyError = err; }
+          return { species: 'birb', quality: null, sb: null, model, env, feathers: null, rim, skyError, fallback: true };
+        } catch (err) {
+          birbRimUniforms.length = 0;
+          for (const u of rimBefore) birbRimUniforms.push(u);
+          if (model) { try { disposeBirdObject(model); } catch (_) { /* half-made */ } }
+          throw err;
+        }
+      },
+      clearAnchor: () => birbAnchor.clear(),
       handover: (staged) => {
+        birbIsFallback = staged.fallback === true;
         speciesBird = staged.sb;
         birbPlumageEnv = staged.env;
         __birbFeatherDisposer = staged.feathers;
@@ -14030,7 +14068,10 @@
         // flying retries its LOD).
         if (speciesRetierGate.reset()) scheduleSpeciesRetier();
         const token = ++speciesSwapToken;
-        if (id === birbSpecies) {
+        // An EMPTY anchor (a double failure whose fresh Birb failed too) is
+        // refilled by choosing any bird, the one it names included; so is the
+        // double failure's minimal Birb, by choosing Birb.
+        if (id === birbSpecies && birbAnchor.children.length && !(id === 'birb' && birbIsFallback)) {
           if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
           labelSpecies();
           return birbSpecies;
@@ -14046,7 +14087,9 @@
         // never leaves a choice behind that warns on every later boot.
         if (persist) { try { writeSavedSpecies(window.localStorage, id); } catch (_) { /* private mode */ } }
       } catch (err) {
-        console.warn('[species] could not build the ' + id + '; keeping the ' + birbSpecies, err);
+        // The double failure has warned once already (bird-transaction.js),
+        // and the bird flying is now the fresh Birb (or none).
+        if (!err?.birdWarned) console.warn('[species] could not build the ' + id + '; keeping the ' + birbSpecies, err);
       }
       labelSpecies();
       return birbSpecies;
@@ -14071,11 +14114,16 @@
       // never a per-frame write).
       if (speciesRetierLog.length >= 8) speciesRetierLog.shift();
       speciesRetierLog.push(speciesBird.quality + '->' + want + ' @' + Math.round(performance.now()) + 'ms');
+      const retierSpecies = speciesBird.species;
       try {
         commitBird(stageBird(speciesBird.species, want));
       } catch (err) {
-        speciesRetierGate.failed(speciesBird.species, want);
-        console.warn('[species] re-LOD failed; keeping the ' + speciesBird.quality + ' bird', err);
+        // Read before the commit: after a double failure the fresh Birb flies
+        // and speciesBird is null (and that event has warned once already).
+        speciesRetierGate.failed(retierSpecies, want);
+        if (!err?.birdWarned) console.warn('[species] re-LOD failed; keeping the ' + speciesBird.quality + ' bird', err);
+        // A double failure flies a fresh Birb: the panel says so.
+        else labelSpecies();
       }
     };
     // Cycle from the PENDING choice, so a double tap during the first lazy
