@@ -144,7 +144,7 @@ const FRAG = `
     // Light the body by the sun's height: water at dusk is not lit like
     // water at noon, and an unlit body colour glowed at night.
     float sunUp = clamp(dot(normalize(uSunDirection), up), 0.0, 1.0);
-    body *= 0.55 + 0.45 * sunUp;
+    body *= 0.75 + 0.25 * sunUp;
 
     // ── Reflection ───────────────────────────────────────────────────────
     // What the ripple mirrors depends on where the reflected ray points: up
@@ -182,9 +182,11 @@ const FRAG = `
     // Tuned DOWN hard from 2.6. The glint is additive, the frame is
     // tone-mapped, and the bloom pass then finds whatever clipped — so a
     // highlight that looks reasonable in isolation becomes a white hole the
-    // size of a harbour with a halo around it. Weighted by the fresnel now
-    // too: a reflection of the sun is a reflection.
-    color += uSunColor * (spec * 1.25 + sheen) * (0.35 + 0.65 * fres / 0.82) * step(0.0, dot(L, up));
+    // size of a harbour with a halo around it. Only while the sun is above
+    // the horizon. (Weighting it by the fresnel as well was tried and lost
+    // the golden-hour sun path across every lake: the glint is seen at the
+    // steep angles where the fresnel is smallest.)
+    color += uSunColor * (spec * 1.25 + sheen) * step(0.0, dot(L, up));
 
     // ── Shore foam ───────────────────────────────────────────────────────
     // A band where the water is shallowest, wobbled by the same swell so it
