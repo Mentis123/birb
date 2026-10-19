@@ -48,6 +48,7 @@ import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
 import { worldRng } from "./seeded-random.js";
 import { createLivingWorld } from "./living-world.js";
+import { createContactDecals } from "../effects/contact-decals.js";
 import {
   cloudVolumeRequested, addCloudVolume, addCloudShadow, setCloudShadowSpheres,
   cloudShadowSphere, extraCloudPuffs, createCloudImmersion, createCloudsInfo,
@@ -2882,8 +2883,28 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       const pos = placeOnSphere(THREE, sphereRadius, theta, phi, 0);
       const up = pos.clone().normalize();
       const s = randomInRange(1.2, 2.0);
+      // Seat it on its FEET, not its centre. A span of up to 32 units on a
+      // slope left one foot dangling (tools/birb-audit.mjs, a random world:
+      // a foot 7.4 units in the air). The spin is still drawn exactly once,
+      // so the RNG sequence is unchanged; twelve yaws offset from it are
+      // tried for the pair of feet whose ground agrees best, and the arch
+      // sits on the LOWER foot (the higher one is embedded, not floating).
+      const spin0 = _activeRng() * Math.PI * 2;
       orientQ.setFromUnitVectors(defaultUp, up);
-      spinYQ.setFromAxisAngle(yAxis, _activeRng() * Math.PI * 2);
+      let bestSpin = spin0, bestGap = Infinity, bestLow = 0;
+      for (let k = 0; k < 12; k++) {
+        const sp = spin0 + (k * Math.PI) / 12;
+        spinYQ.setFromAxisAngle(yAxis, sp);
+        legDir.set(1, 0, 0).applyQuaternion(orientQ.clone().multiply(spinYQ));
+        const footH = (sg) => {
+          const d = up.clone().addScaledVector(legDir, (sg * archR * s) / sphereRadius).normalize();
+          return terrainHeightDir(d.x, d.y, d.z);
+        };
+        const a = footH(-1), b = footH(1);
+        if (Math.abs(a - b) < bestGap) { bestGap = Math.abs(a - b); bestSpin = sp; bestLow = Math.min(a, b); }
+      }
+      pos.copy(up).multiplyScalar(sphereRadius + bestLow - 0.4);
+      spinYQ.setFromAxisAngle(yAxis, bestSpin);
       orientQ.multiply(spinYQ);
       dummy.position.copy(pos);
       dummy.quaternion.copy(orientQ);
@@ -4473,6 +4494,10 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
         hexTile: hexTileRequested(window.location?.search) }
       : null,
     ...(wetTexture ? { wetMap: { texture: wetTexture, ...wetTexture.userData.erosion } } : {}),
+    // A damp bank round every lake (?shore=0 is the before). Only where
+    // there is water; the city keeps its asphalt grid untouched by it.
+    ...(_activeWaterLevel < 0 && variant !== 'city' && !/[?&]shore=0(?:&|$)/.test(_search)
+      ? { shore: { level: _activeWaterLevel } } : {}),
   });
   if (wantsGroundTexture) {
     try {
@@ -4834,6 +4859,59 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     console.warn('[SphericalWorld] derived places failed:', e);
   }
 
+  // ── Undergrowth out of the lakes ───────────────────────────────────────
+  // tools/birb-audit.mjs measured a THIRD of the forest's shrubs (27 of 74)
+  // and 11 of 36 ferns standing under lake water. They carry no collider
+  // and no nest, so the drowned ones are collapsed AFTER planting (zero
+  // scale) — rejecting them inside the planting loop would reshuffle every
+  // prop placed after them (the tabletop kit's rule, learned the same way).
+  // Trunks and towers in lakes are reported by the audit, not touched here:
+  // they carry colliders and nests.
+  if (_activeWaterLevel < 0) {
+    try {
+      const m = new THREE.Matrix4();
+      const p = new THREE.Vector3();
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      root.traverse((o) => {
+        if (!o.isInstancedMesh || !/^(forest-shrubs|forest-ferns)$/.test(o.name)) return;
+        let dropped = 0;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const bb = o.geometry.boundingBox;
+        for (let i = 0; i < o.count; i++) {
+          o.getMatrixAt(i, m);
+          // The BASE (bottom of its box), the point the audit measures: a
+          // dome sunk into the ground has its centre above water while its
+          // foot is under it.
+          p.set((bb.min.x + bb.max.x) / 2, bb.min.y, (bb.min.z + bb.max.z) / 2).applyMatrix4(m);
+          const L = p.length() || 1;
+          const nx = p.x / L, ny = p.y / L, nz = p.z / L;
+          if (basinHeightDir(nx, ny, nz) < _activeWaterLevel && sphereRadius + _activeWaterLevel - L > 0.6) {
+            o.setMatrixAt(i, zero);
+            dropped++;
+          }
+        }
+        if (dropped) { o.instanceMatrix.needsUpdate = true; o.computeBoundingSphere(); }
+        o.userData.droppedInWater = dropped;
+      });
+    } catch (e) {
+      console.warn('[SphericalWorld] undergrowth water pass failed:', e);
+    }
+  }
+
+  // ── Contact decals: grounding where there is no shadow map ─────────────
+  // One draw, two triangles a prop; the page shows them only while the
+  // shadow map is off (src/effects/contact-decals.js). ?groundao=0 skips.
+  let contactDecals = null;
+  if (!/[?&]groundao=0(?:&|$)/.test(_search)) {
+    try {
+      contactDecals = createContactDecals({ THREE, root, sphereRadius, heightDir: terrainHeightDir });
+      if (contactDecals) contactDecals.mesh.visible = false;   // the page decides
+    } catch (e) {
+      console.warn('[SphericalWorld] contact decals failed:', e);
+      contactDecals = null;
+    }
+  }
+
   // ── Standing water ──────────────────────────────────────────────────────
   // Built last, so it is not caught by the atmosphere traverse (its own shader
   // already does aerial perspective through the scene fog) and so the terrain
@@ -4882,6 +4960,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     proximityTargets,
     features,
     living,
+    contactDecals: contactDecals?.mesh || null,
     // Clouds with volume, for __BIRB.clouds()/goToCloud(): null with
     // ?cloudvol=0 or in a biome without clouds.
     clouds: cloudsInfo,

@@ -68,7 +68,7 @@ async function main() {
             console.log(`${env}: ${res.checked} checks (${layers.length} layers, ${marks.length} landmarks, ${routes.length} routes) — ${res.pass ? 'PASS' : 'FAIL'}`);
             for (const s of res.sections) {
                 const tag = s.pass ? 'ok  ' : 'FAIL';
-                if (s.kind === 'layer') console.log(`  ${tag} layer ${s.name}: ${s.audited}/${s.count} base clearance min ${s.clearance.min} med ${s.clearance.median} max ${s.clearance.max}${s.pass ? '' : ' — ' + s.failureCount + ' bad, e.g. ' + JSON.stringify(s.failures[0])}`);
+                if (s.kind === 'layer') console.log(`  ${tag} layer ${s.name}: ${s.audited}/${s.count} base clearance min ${s.clearance.min} med ${s.clearance.median} max ${s.clearance.max}${s.inWater ? ` · ${s.inWater} in water` : ''}${s.pass ? '' : ' — ' + s.failureCount + ' bad, e.g. ' + JSON.stringify(s.failures[0])}`);
                 else if (s.kind === 'landmark') console.log(`  ${tag} landmark ${s.name}: lowest ${s.lowest} highest ${s.highest} (rise ${s.rise}, apex ${s.apex}) under ${s.buriedShare} feet ${JSON.stringify(s.feet)}${s.pass ? '' : ' — ' + JSON.stringify(s.failures)}`);
                 else if (s.kind === 'route') console.log(`  ${tag} route ${s.name}: ${s.samples} samples, ride ${s.lowest}..${s.highest}${s.pass ? '' : ' — ' + JSON.stringify(s.failures[0])}`);
                 else console.log(`  ${tag} ${s.kind} ${s.name}: ${JSON.stringify(s.failures)}`);

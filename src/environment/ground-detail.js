@@ -467,7 +467,7 @@ const HEX_FLAT_OVERLAY = `
  *                    and cache key are byte-for-byte what they were; passed,
  *                    every field but `core` is required.
  */
-export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0, wetMap = null } = {}) {
+export function addGroundDetail(material, THREE, { baseRadius = 120, biome, groundMap = null, smooth = false, bump = 0.0, wetMap = null, shore = null } = {}) {
   const profile = GROUND_PROFILES[biome];
   // The city's ground already carries a street grid and asphalt; mottling it
   // would fight the one thing that identifies it.
@@ -495,8 +495,17 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
     uGdWetDamp: { value: new THREE.Vector3(wetMap.damp[0], wetMap.damp[1], wetMap.damp[2]) },
     uGdWetCore: { value: new THREE.Vector2(wetCore[0], wetCore[1]) },
   } : null;
+  // Wet shoreline (opt-in; nothing is emitted without it, so every other
+  // compile of this shader is byte-for-byte what it was). From the tabletop
+  // worlds kit's realism notes: "weathering where water goes". Ground within
+  // `width` above the lake surface reads damp and dark, fading up the bank —
+  // by RADIUS, like the strata, so it lies level all round every lake.
+  const shoreUniforms = shore && Number.isFinite(shore.level) ? {
+    uGdShore: { value: new THREE.Vector3(baseRadius + shore.level, shore.width ?? 2.6, shore.strength ?? 0.42) },
+  } : null;
   material.userData = material.userData || {};
   material.userData.birbGroundDetail = true;
+  if (shoreUniforms) material.userData.birbGroundShoreUniforms = shoreUniforms;
   // Live A/B: strength 0 is the ground without the wetness, same program.
   if (wetUniforms) material.userData.birbGroundWetUniforms = wetUniforms;
 
@@ -550,6 +559,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
     shader.uniforms.uGdBand = { value: new THREE.Vector2(profile.band, profile.bandScale) };
     if (texUniforms) Object.assign(shader.uniforms, texUniforms);
     if (wetUniforms) Object.assign(shader.uniforms, wetUniforms);
+    if (shoreUniforms) Object.assign(shader.uniforms, shoreUniforms);
     // Bound whenever the material CAN go hex, not only when this compile is
     // the hex one: three runs a program it reuses from its cache with the
     // uniforms object of whichever program it compiled LAST, so after an
@@ -650,6 +660,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
         : '')
       + (hex ? HEX_TILE_GLSL : '')
       + (wetUniforms ? 'uniform sampler2D uGdWetMap; uniform vec4 uGdWet; uniform vec3 uGdWetDamp; uniform vec2 uGdWetCore;\n' : '')
+      + (shoreUniforms ? 'uniform vec3 uGdShore;\n' : '')
       + `
       float gdHash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
@@ -759,6 +770,15 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
           acos(clamp(gdUp.y, -1.0, 1.0)) * 0.31830989)).r;
         gdTint = mix(gdTint, gdTint * uGdWetDamp, gdWet * uGdWet.w);
         gdTint = mix(gdTint, gdTint * uGdWet.rgb, smoothstep(uGdWetCore.x, uGdWetCore.y, gdWet) * uGdWet.w);
+` : '') + (shoreUniforms ? `
+        // Damp bank: darker and a touch greener-brown just above the water,
+        // fading over uGdShore.y units up the slope. Below the surface the
+        // lake draws over it, so only the visible band changes.
+        {
+          float gdShR = length(gdP) - uGdShore.x;
+          float gdShW = (1.0 - smoothstep(0.0, uGdShore.y, gdShR)) * step(-1.5, gdShR);
+          gdTint *= mix(vec3(1.0), vec3(0.58, 0.62, 0.60), gdShW * uGdShore.z);
+        }
 ` : '') + `
         outgoingLight *= gdTint;
       }
@@ -769,7 +789,7 @@ export function addGroundDetail(material, THREE, { baseRadius = 120, biome, grou
 
   const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
   material.customProgramCacheKey = () =>
-    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}${hexState && hexState.enabled ? '-hex' : ''}${wetUniforms ? '-wet' : ''}`;
+    `${base}-ground-${biome}${texUniforms ? '-tex' : ''}${smooth ? '-smooth' : ''}${smooth && bump > 0 ? '-bump' : ''}${hexState && hexState.enabled ? '-hex' : ''}${wetUniforms ? '-wet' : ''}${shoreUniforms ? '-shore' : ''}`;
   material.needsUpdate = true;
   return material;
 }

@@ -37,7 +37,8 @@ export const GROUNDED_LAYER_RULES = [
   { match: /trunk/i, float: 1.2, bury: 0.5, floatFrac: 0.04 },
   // Domes and rocks sit INTO the soil by design; a fully buried one (no
   // vertex above the ground) is the defect.
-  { match: /shrub|fern|snag/i, float: 1.2, bury: 0.95, floatFrac: 0.1 },
+  // `dry`: must not stand under lake water (it reads as drowned scenery).
+  { match: /shrub|fern|snag/i, float: 1.2, bury: 0.95, floatFrac: 0.1, dry: true },
   { match: /rock|boulder|scree/i, float: 1.5, bury: 0.95, floatFrac: 0.35 },
   { match: /spire|needle|wall|cliff|peak|monolith/i, float: 2.0, bury: 0.5, floatFrac: 0.05 },
   { match: /arch/i, float: 2.0, bury: 0.6, floatFrac: 0.05 },
@@ -97,7 +98,7 @@ const r3 = (v) => (Number.isFinite(v) ? Math.round(v * 1000) / 1000 : v);
  * builds along local +Y and orients local +Y onto the radial), transformed by
  * instance x mesh world. `height` is the instance's own extent along that axis.
  */
-export function auditInstancedLayer({ name, meshWorld, instanceArray, count, position, groundRadiusAt, rule, maxSamples = 4000 }) {
+export function auditInstancedLayer({ name, meshWorld, instanceArray, count, position, groundRadiusAt, waterRadiusAt = null, rule, maxSamples = 4000 }) {
   const b = geometryBounds(position);
   const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2;
   const localH = b.max[1] - b.min[1];
@@ -112,6 +113,8 @@ export function auditInstancedLayer({ name, meshWorld, instanceArray, count, pos
   const failures = [];
   const stride = Math.max(1, Math.ceil(count / maxSamples));
   let audited = 0;
+  let inWater = 0;
+  const wet = [];
   for (let i = 0; i < count; i += stride) {
     const inst = instanceArray.subarray ? instanceArray.subarray(i * 16, i * 16 + 16) : instanceArray.slice(i * 16, i * 16 + 16);
     // A zero-scale instance is a hidden slot (collapsed after planting).
@@ -138,6 +141,17 @@ export function auditInstancedLayer({ name, meshWorld, instanceArray, count, pos
     if (!Number.isFinite(c)) { failures.push({ index: i, problem: 'non-finite', clearance: c }); continue; }
     audited++;
     clear.push(c);
+    // Standing in a lake: the ground under the base is lake bed, and the
+    // water surface stands over it by more than a puddle.
+    if (waterRadiusAt) {
+      mulPoint(m, cx, b.min[1], cz, p);
+      const depth = waterRadiusAt(p[0], p[1], p[2]) - Math.hypot(p[0], p[1], p[2]);
+      if (depth > 0.6) {
+        inWater++;
+        if (wet.length < 6) wet.push({ index: i, depth: r3(depth) });
+        if (rule.dry) failures.push({ index: i, problem: 'under-water', depth: r3(depth) });
+      }
+    }
     const floatLimit = rule.float + (rule.floatFrac || 0) * height;
     if (c > floatLimit) failures.push({ index: i, problem: 'floating', clearance: r3(c), limit: r3(floatLimit), height: r3(height) });
     else if (highest < (1 - rule.bury) * height) failures.push({ index: i, problem: 'buried', highest: r3(highest), limit: r3((1 - rule.bury) * height), height: r3(height) });
@@ -145,6 +159,7 @@ export function auditInstancedLayer({ name, meshWorld, instanceArray, count, pos
   clear.sort((a, z) => a - z);
   return {
     name, kind: 'layer', mode: vertexMode ? 'vertices' : 'base', count, audited, localHeight: r3(localH),
+    inWater, wet,
     clearance: { min: r3(clear[0]), p05: r3(quantile(clear, 0.05)), median: r3(quantile(clear, 0.5)), p95: r3(quantile(clear, 0.95)), max: r3(clear[clear.length - 1]) },
     failures: failures.slice(0, 12), failureCount: failures.length,
     pass: failures.length === 0,
@@ -263,7 +278,7 @@ export function summarise(sections) {
  * direction (sphereRadius + sampleTerrainMeshHeight), not the flight floor —
  * a prop stands on the mesh, and over a lake the floor is the water.
  */
-export function auditSphericalWorld(world, { groundRadiusAt, rules = GROUNDED_LAYER_RULES, routes = [] } = {}) {
+export function auditSphericalWorld(world, { groundRadiusAt, waterRadiusAt = null, rules = GROUNDED_LAYER_RULES, routes = [] } = {}) {
   const sections = [];
   if (!world?.root) return summarise([{ name: 'world', kind: 'world', pass: false, failures: [{ problem: 'no-world' }], failureCount: 1 }]);
   world.root.updateMatrixWorld(true);
@@ -285,6 +300,7 @@ export function auditSphericalWorld(world, { groundRadiusAt, rules = GROUNDED_LA
       count: o.count,
       position: g.attributes.position,
       groundRadiusAt,
+      waterRadiusAt,
       rule,
     }));
   });

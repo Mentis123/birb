@@ -212,6 +212,7 @@ const CORE_ASSETS = [
   './src/ui/studio.js',
   './src/ui/discovery.js',
   './src/ui/pins-layer.js',
+  './src/effects/contact-decals.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
   './src/environment/cloud-volume.js',

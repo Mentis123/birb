@@ -11895,6 +11895,9 @@
       // Clocked actors (src/environment/living-world.js): scene time, so a
       // pause stops the traffic and a shot can seek it.
       if (sphericalWorld?.living) sphericalWorld.living.update(delta);
+      // Contact decals ground the props only where nothing else does: on
+      // the tiers with no shadow map (src/effects/contact-decals.js).
+      if (sphericalWorld?.contactDecals) sphericalWorld.contactDecals.visible = !shadowsEnabled;
       // The lakes' swell. One uniform; the waves are shader-side.
       if (sphericalWorld?.water) {
         sphericalWorld.water.update(reducedMotionState.enabled ? 0 : motionState.elapsed);
@@ -15561,6 +15564,7 @@
           try {
             result = auditSphericalWorld(sphericalWorld, {
               groundRadiusAt,
+              waterRadiusAt: (x, y, z) => shotWaterRadius(x, y, z),
               routes: sphericalWorld.living?.routes?.() || [],
             });
           } finally {
