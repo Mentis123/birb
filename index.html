@@ -11870,6 +11870,9 @@
       if (sphericalWorld?.features) {
         sphericalWorld.features.update(flightController.position, delta, time);
       }
+      // Clocked actors (src/environment/living-world.js): scene time, so a
+      // pause stops the traffic and a shot can seek it.
+      if (sphericalWorld?.living) sphericalWorld.living.update(delta);
       // The lakes' swell. One uniform; the waves are shader-side.
       if (sphericalWorld?.water) {
         sphericalWorld.water.update(reducedMotionState.enabled ? 0 : motionState.elapsed);
@@ -15079,6 +15082,39 @@
         // tools/birb-audit.mjs runs it on every biome in CI. `plant` moves one
         // prop off its ground first ('float' | 'bury' | 'flat-arch'), so the
         // harness can prove the audit fails on the defect it exists for.
+        // Living world (src/environment/living-world.js): `living()` reports
+        // fleets and the scene clock; `living({ time })` seeks it; `living({
+        // actor, t })` reads one actor's state at a scene time (what a shot's
+        // {actor} ref resolves to).
+        living: ({ time, actor, t } = {}) => {
+          const lw = sphericalWorld?.living;
+          if (!lw) return null;
+          if (Number.isFinite(time)) lw.setTime(time);
+          if (actor) return lw.actors[actor] ? lw.actors[actor].stateAt(Number.isFinite(t) ? t : lw.time) : null;
+          return { ...lw.stats(), actorNames: Object.keys(lw.actors) };
+        },
+        // Put the bird `back` units behind-and-beside an actor, `lift` above
+        // it, looking at it, at the current scene time. Pair with
+        // holdMotion(true) to freeze the moment for a capture.
+        goToActor: (name, back = 26, lift = 6, sideways = 0.6) => {
+          const lw = sphericalWorld?.living;
+          const a = lw?.actors?.[name];
+          if (!a || !flightController?.position) return null;
+          const s = a.stateAt(lw.time);
+          const target = new THREE.Vector3().fromArray(s.position);
+          const up = target.clone().normalize();
+          const fwd = new THREE.Vector3().fromArray(s.forward);
+          const side = new THREE.Vector3().crossVectors(fwd, up).normalize();
+          const eye = target.clone().addScaledVector(fwd, -back * (1 - sideways)).addScaledVector(side, back * sideways).addScaledVector(up, lift);
+          flightController.position.copy(eye);
+          const eyeUp = eye.clone().normalize();
+          const look = target.clone().sub(eye);
+          look.addScaledVector(eyeUp, -look.dot(eyeUp)).normalize();
+          const right = new THREE.Vector3().crossVectors(look, eyeUp).normalize();
+          flightController.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, eyeUp, look.clone().multiplyScalar(-1)));
+          __birbPendingCameraSnap = 1;
+          return { name, phase: s.phase, time: lw.time };
+        },
         auditWorld: async ({ plant = null, full = false } = {}) => {
           if (!sphericalWorld?.root) return null;
           const { auditSphericalWorld } = await import('./src/environment/world-audit.js');

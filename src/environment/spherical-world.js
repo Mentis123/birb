@@ -47,6 +47,7 @@ import { createColliderGrid } from "./collider-grid.js";
 import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
 import { worldRng } from "./seeded-random.js";
+import { createLivingWorld } from "./living-world.js";
 import {
   cloudVolumeRequested, addCloudVolume, addCloudShadow, setCloudShadowSpheres,
   cloudShadowSphere, extraCloudPuffs, createCloudImmersion, createCloudsInfo,
@@ -4735,6 +4736,24 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     console.warn('[SphericalWorld] landmark features failed:', e);
   }
 
+  // ── Living world: things that move on their own, on a clock ────────────
+  // (src/environment/living-world.js). Built after every prop so its routes
+  // can avoid them; its own RNG stream, so building it moves nothing else.
+  let living = null;
+  try {
+    living = createLivingWorld({
+      THREE, root, variant, sphereRadius,
+      groundAt: (x, y, z) => sampleTerrainMeshHeight(x, y, z),
+      colliders: collisionSystem.objectColliders,
+      rng: worldRng(`living-world:${variant}`),
+      isMobile: _isMobile(),
+      search: _search,
+    });
+  } catch (e) {
+    console.warn('[SphericalWorld] living world failed; the world stays still:', e);
+    living = null;
+  }
+
   // ── Standing water ──────────────────────────────────────────────────────
   // Built last, so it is not caught by the atmosphere traverse (its own shader
   // already does aerial perspective through the scene fog) and so the terrain
@@ -4782,6 +4801,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     nestablePositions,
     proximityTargets,
     features,
+    living,
     // Clouds with volume, for __BIRB.clouds()/goToCloud(): null with
     // ?cloudvol=0 or in a biome without clouds.
     clouds: cloudsInfo,

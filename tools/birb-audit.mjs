@@ -17,6 +17,9 @@
  * world, because the scatter is random per boot: a check that only ever saw
  * one world proves nothing about the next player's.
  *
+ * Routes: when the living world is on (the default), every actor route
+ * (city hover lanes, the sky-tram, the mountain cable car) is checked too.
+ *
  * Usage: node tools/birb-audit.mjs [--json out.json] [--env forest,city] [--seeds 16160,2,7,random]
  * Exits 1 on any audit failure, any planted defect that passes, or any page
  * error / console error / console warning.

@@ -205,6 +205,7 @@ const CORE_ASSETS = [
   './src/environment/atmosphere-model.js',
   './src/environment/water.js',
   './src/environment/world-audit.js',
+  './src/environment/living-world.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
   './src/environment/cloud-volume.js',
