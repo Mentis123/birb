@@ -2676,6 +2676,7 @@
         <button type="button" class="title-btn title-btn-secondary" data-title-howto>How to Play</button>
       </div>
       <div class="title-streak" data-title-streak hidden></div>
+      <div class="title-streak" data-title-found hidden></div>
     </div>
     <div class="title-footer">
       From the Mind of <a href="https://x.com/adam_x_mentis" target="_blank" rel="noreferrer">Mentis</a>
@@ -3376,6 +3377,20 @@
       if (streak >= 2) el.textContent = `\u{1F525} ${streak}-day flight streak`;
     }
     refreshTitleStreak();
+    // Places found (src/ui/discovery.js): read straight from storage so the
+    // title can show it before the game module has loaded.
+    function refreshTitleFound() {
+      const el = document.querySelector('[data-title-found]');
+      if (!el) return;
+      let n = 0;
+      try {
+        const v = JSON.parse(localStorage.getItem('birb.found.v1') || '{}');
+        for (const ids of Object.values(v || {})) if (Array.isArray(ids)) n += ids.length;
+      } catch (_) { /* private mode */ }
+      el.hidden = n < 1;
+      if (n >= 1) el.textContent = `\u2728 ${n} place${n === 1 ? '' : 's'} discovered`;
+    }
+    refreshTitleFound();
 
     if (titleStartBtn) {
       const beginGame = () => {
@@ -3844,6 +3859,8 @@
       var { loadTexture: loadAuthoredTexture, applyAuthoredFeathers, authoredFeathersRequested, authoredFeatherNormalsRequested } =
         await import("./src/environment/authored-textures.js");
       var { createMinimap } = await import("./src/ui/minimap.js");
+      var { createDiscovery } = await import("./src/ui/discovery.js");
+      var { createPinsLayer } = await import("./src/ui/pins-layer.js");
       var { createDevGesture } = await import("./src/ui/dev-gesture.js");
       var { createDevQualityPanel, sentinel: qualitySentinel, SENTINEL_REASONS: QUALITY_SENTINEL_REASONS } =
         await import("./src/ui/dev-quality-panel.js");
@@ -13495,6 +13512,15 @@
 
       // Ring arrow removed – minimap edge arrows serve this purpose
 
+      // Discovery: places worth finding, their pins, and the moment of a find.
+      // Before the minimap, which reads each place's `found` flag.
+      try { updateDiscovery(delta); } catch (err) {
+        if (!window.__birbDiscoveryWarned) {
+          window.__birbDiscoveryWarned = true;
+          console.warn('Discovery update failed; pins disabled for this session', err);
+        }
+      }
+
       // IMPROVEMENT 7: Minimap radar
       // ZERO-ALLOC: minimapRingScratch is a permanent pool of { position, collected }
       // entries reused each frame — previous version allocated 10 Vec3 clones +
@@ -14253,21 +14279,38 @@
       back = back ?? found.viewDistance ?? 34;
       const up = found.position.clone().normalize();
       // Offset sideways along the surface so the landmark is in front of
-      // the bird rather than inside it.
-      const side = new THREE.Vector3(0, 1, 0).cross(up);
-      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
-      side.normalize();
-      const target = found.position.clone().addScaledVector(side, back);
-      const dir = target.clone().normalize();
-      const terrain = (typeof sampleTerrainHeight === 'function')
-        ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
-      // At least level with the landmark's own middle: a landmark on a plateau
-      // seen from ground+16 in the valley beside it is a view of pine trunks
-      // (the summit arch, measured: the bird opened 13 units under the arch's
-      // base with a canopy filling the frame).
-      let eyeR = sphericalWorld.sphereRadius + terrain + 16;
-      if (found.base && Number.isFinite(found.apex)) eyeR = Math.max(eyeR, found.base.length() + found.apex * 0.6);
-      flightController.position.copy(dir).multiplyScalar(eyeR);
+      // the bird rather than inside it. Eight bearings, the place's own
+      // "from the front" first when it has one: the first with a clear line
+      // of sight over the ground wins (the falls sit in a bowl, and a seek
+      // from a fixed side opened on the bowl's wall).
+      const east = new THREE.Vector3(0, 1, 0).cross(up);
+      if (east.lengthSq() < 0.01) east.set(1, 0, 0);
+      east.normalize();
+      if (found.forward) {
+        east.copy(found.forward).addScaledVector(up, -found.forward.dot(up));
+        if (east.lengthSq() < 1e-6) east.set(1, 0, 0);
+        east.normalize().negate();
+      }
+      const north = new THREE.Vector3().crossVectors(up, east);
+      const side = new THREE.Vector3();
+      const eyeAt = (bearing) => {
+        side.copy(east).multiplyScalar(Math.cos(bearing)).addScaledVector(north, Math.sin(bearing));
+        const dir = found.position.clone().addScaledVector(side, back).normalize();
+        const terrain = (typeof sampleTerrainHeight === 'function') ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
+        // At least level with the landmark's own middle: a landmark on a plateau
+        // seen from ground+16 in the valley beside it is a view of pine trunks
+        // (the summit arch, measured: the bird opened 13 units under the arch's
+        // base with a canopy filling the frame).
+        let eyeR = sphericalWorld.sphereRadius + terrain + 16;
+        if (found.base && Number.isFinite(found.apex)) eyeR = Math.max(eyeR, found.base.length() + found.apex * 0.6);
+        return dir.multiplyScalar(eyeR);
+      };
+      let seat = null;
+      for (let k = 0; k < 8 && !seat; k++) {
+        const candidate = eyeAt((k * Math.PI) / 4);
+        if (typeof terrainBlocks !== 'function' || !terrainBlocks(candidate, found.position)) seat = candidate;
+      }
+      flightController.position.copy(seat || eyeAt(0));
       // AIM at it. The first version called a setForward() that does not
       // exist on this controller, so the bird kept whatever heading it had
       // and the landmark was usually behind the camera — which is how three
@@ -14321,6 +14364,66 @@
       }, 5000);
     }
 
+
+
+    // ─── Discovery (production path): places worth finding ──────────────
+    // src/ui/discovery.js decides when a place is found and remembers it;
+    // src/ui/pins-layer.js draws a soft pin over each (a "?" until found).
+    // Casual and Zen only: a pin is a reward for exploring, not a waypoint
+    // in a timed mode, and never on screen during a shot.
+    const discovery = createDiscovery({ storage: (() => { try { return window.localStorage; } catch { return null; } })() });
+    let pinsLayer = null;
+    let __discoveryFlagged = null;
+    const _discV = new THREE.Vector3();
+    function discoveryBiome() { return (sphericalWorld?.root?.name || '').replace('spherical-world-', ''); }
+    // Sight along the ground only (zero-alloc): a hill between you and the
+    // place hides it; a tree does not stop you having seen a waterfall.
+    function terrainBlocks(from, to) {
+      const fx = from.x, fy = from.y, fz = from.z;
+      const dx = to.x - fx, dy = to.y - fy, dz = to.z - fz;
+      const R = sphericalWorld?.sphereRadius ?? 120;
+      for (let i = 1; i < 14; i++) {
+        const u = i / 14;
+        const x = fx + dx * u, y = fy + dy * u, z = fz + dz * u;
+        if (Math.sqrt(x * x + y * y + z * z) < R + sampleTerrainMeshHeight(x, y, z) - 1) return true;
+      }
+      return false;
+    }
+    function placeInView(l) {
+      const cam = cameraState.camera;
+      _discV.copy(l.position).project(cam);
+      if (!(_discV.z < 1 && Math.abs(_discV.x) < 0.9 && Math.abs(_discV.y) < 0.9)) return false;
+      return !terrainBlocks(cam.position, l.position);
+    }
+    function updateDiscovery(dt) {
+      const lms = sphericalWorld?.landmarks;
+      if (!lms || !flightController?.position) return;
+      const biome = discoveryBiome();
+      if (__discoveryFlagged !== lms) { discovery.flag(biome, lms); __discoveryFlagged = lms; }
+      const show = (currentGameMode === GAME_MODES.ZEN || currentGameMode === GAME_MODES.CASUAL)
+        && !miniGameState.active && !(shotPlayer && shotPlayer.active);
+      if (!pinsLayer && show) {
+        // Inside the canvas wrapper (z 9999, which holds the canvas AND the
+        // HUD) at z 2: above the picture, below every control. On body at
+        // z 40 the pins sat under the whole game and drew nothing.
+        pinsLayer = createPinsLayer({
+          THREE,
+          parent: renderer.domElement.parentElement || document.body,
+          coarse: !!window.matchMedia?.('(pointer: coarse)').matches,
+        });
+      }
+      if (pinsLayer) pinsLayer.setVisible(show);
+      if (!show) return;
+      const fresh = discovery.update(dt, biome, lms, flightController.position, placeInView);
+      for (const l of fresh) {
+        const prog = discovery.progress(biome, lms);
+        showGotoToast(`Discovered: ${l.label || l.id} · ${prog.found} of ${prog.total} here`);
+        pinsLayer?.celebrate(l.id);
+        try { triggerHaptic(18); } catch (_) { /* no haptics */ }
+        try { refreshTitleFound(); } catch (_) { /* title not built */ }
+      }
+      pinsLayer.update(cameraState.camera, lms, flightController.position, dt, terrainBlocks);
+    }
 
     // ─── Shots: camera flights as data (production path) ─────────────────
     // `?shot=<name>` plays one after Tap-to-Start; `?studio=1` is a clean
@@ -15367,6 +15470,26 @@
           flightController.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, eyeUp, look.clone().multiplyScalar(-1)));
           __birbPendingCameraSnap = 1;
           return { name, phase: s.phase, time: lw.time };
+        },
+        // Discovery: what is found, per biome; `find(id)` marks one found the
+        // way flying there would (for a capture); `reset()` forgets all.
+        discovery: ({ reset = false, find = null } = {}) => {
+          const lms = sphericalWorld?.landmarks || [];
+          const biome = discoveryBiome();
+          if (reset) { discovery.reset(); __discoveryFlagged = null; refreshTitleFound(); }
+          if (find) {
+            const l = lms.find((x) => x.id === find);
+            if (l) discovery.update(2, biome, [l], l.position, () => true);
+            __discoveryFlagged = null;
+          }
+          const pins = [...document.querySelectorAll('.birb-pin')].map((el) => ({
+            label: el.querySelector('.birb-pin__label')?.textContent, opacity: +el.style.opacity || 0,
+            unfound: el.classList.contains('birb-pin--unfound'),
+          }));
+          return {
+            biome, places: lms.map((l) => ({ id: l.id, label: l.label, found: !!l.found })),
+            progress: discovery.progress(biome, lms), total: discovery.total(), found: discovery.snapshot(), pins,
+          };
         },
         // Shots (src/camera/flythrough.js + src/camera/shots.js). `seek` holds
         // the shot at t; `audit` compiles and audits without playing.

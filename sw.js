@@ -210,6 +210,8 @@ const CORE_ASSETS = [
   './src/camera/shot-player.js',
   './src/camera/shots.js',
   './src/ui/studio.js',
+  './src/ui/discovery.js',
+  './src/ui/pins-layer.js',
   './src/environment/city-windows.js',
   './src/environment/ground-detail.js',
   './src/environment/cloud-volume.js',

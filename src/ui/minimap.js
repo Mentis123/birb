@@ -360,12 +360,19 @@ export function createMinimap({ THREE, canvas, sphereRadius }) {
     // were placed and the owner never found one. The rim arrow is the feature.
     if (landmarks && landmarks.length) {
       const LANDMARK = '#f0d089';
+      // The arrow points at the nearest place NOT YET FOUND (discovery
+      // flags `found` on each entry, src/ui/discovery.js), so the radar is
+      // the compass for the next find; once a biome is complete it points
+      // at the nearest place again.
       let nearest = null;
       let nearestD2 = Infinity;
-      for (const landmark of landmarks) {
-        if (!landmark || !landmark.position) continue;
-        const d2 = minimapGroundDist2(landmark.position, _up, sphereRadius);
-        if (d2 < nearestD2) { nearestD2 = d2; nearest = landmark; }
+      for (let pass = 0; pass < 2 && !nearest; pass++) {
+        for (const landmark of landmarks) {
+          if (!landmark || !landmark.position) continue;
+          if (pass === 0 && landmark.found) continue;
+          const d2 = minimapGroundDist2(landmark.position, _up, sphereRadius);
+          if (d2 < nearestD2) { nearestD2 = d2; nearest = landmark; }
+        }
       }
       if (nearest) {
         const raw = project(nearest.position, birdPos, half, scale);

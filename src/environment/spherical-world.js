@@ -4775,6 +4775,65 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     living = null;
   }
 
+  // ── Places worth finding, derived from the world itself ────────────────
+  // The forest has six authored landmarks; the other biomes had one each,
+  // which is no discovery loop at all. These are the extremes the world
+  // already built (the tallest tower, the highest peak, the tallest spire)
+  // plus the cable car's top station — read from the instance matrices
+  // after the build, so they consume no RNG and move nothing.
+  try {
+    const tallest = (re) => {
+      let best = null;
+      const m = new THREE.Matrix4();
+      const lo = new THREE.Vector3(), hi = new THREE.Vector3();
+      root.updateMatrixWorld(true);
+      root.traverse((o) => {
+        if (!o.isInstancedMesh || !re.test(o.name)) return;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const b = o.geometry.boundingBox;
+        for (let i = 0; i < o.count; i++) {
+          o.getMatrixAt(i, m);
+          m.premultiply(o.matrixWorld);
+          hi.set((b.min.x + b.max.x) / 2, b.max.y, (b.min.z + b.max.z) / 2).applyMatrix4(m);
+          if (!best || hi.length() > best.top) {
+            lo.set((b.min.x + b.max.x) / 2, b.min.y, (b.min.z + b.max.z) / 2).applyMatrix4(m);
+            best = { top: hi.length(), base: lo.clone(), apexPoint: hi.clone() };
+          }
+        }
+      });
+      return best;
+    };
+    const derived = {
+      city: { re: /^city-towers/, id: 'tallest-tower', label: 'Tallest tower', kind: 'tower' },
+      mountain: { re: /^mountain-peaks-body$/, id: 'high-peak', label: 'The high peak', kind: 'peak' },
+      canyons: { re: /^canyon-spires/, id: 'tallest-spire', label: 'Tallest spire', kind: 'spire' },
+    }[variant];
+    if (derived) {
+      const t = tallest(derived.re);
+      if (t) {
+        const apex = t.apexPoint.distanceTo(t.base);
+        _landmarks.push({
+          id: derived.id, label: derived.label, kind: derived.kind,
+          position: t.base.clone().lerp(t.apexPoint, 0.7),
+          base: t.base.clone(), apex, meshes: [],
+          viewDistance: Math.max(40, apex * 1.4),
+        });
+      }
+    }
+    const cc = living?.stats?.().info?.cablecar;
+    if (cc) {
+      const top = new THREE.Vector3().fromArray(cc.top);
+      _landmarks.push({
+        id: 'cable-car', label: 'Cable car', kind: 'cablecar',
+        position: top.clone(),
+        base: top.clone().normalize().multiplyScalar(sphereRadius + terrainHeightDir(...top.clone().normalize().toArray())),
+        apex: 9, meshes: [], viewDistance: 40,
+      });
+    }
+  } catch (e) {
+    console.warn('[SphericalWorld] derived places failed:', e);
+  }
+
   // ── Standing water ──────────────────────────────────────────────────────
   // Built last, so it is not caught by the atmosphere traverse (its own shader
   // already does aerial perspective through the scene fog) and so the terrain

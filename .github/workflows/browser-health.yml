@@ -141,6 +141,14 @@ jobs:
         # like the chase camera and pass any screenshot check.
         run: node tools/birb-flythrough.mjs all --frames 2
 
+      - name: Places can be discovered, are shown, counted and remembered
+        if: ${{ !cancelled() }}
+        # Casual flight's goal: every biome has places (more than one each),
+        # flying to one and looking at it finds it, the find is announced,
+        # named on its pin, counted on the title, survives a reload, and no
+        # pin shows in a timed mode.
+        run: node tools/birb-discovery.mjs
+
       - name: The bird can stand, walk, stop, reverse and steer
         if: ${{ !cancelled() }}
         # The grounded state had a walk cycle and walk controls for months
