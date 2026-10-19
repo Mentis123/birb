@@ -3881,6 +3881,9 @@
       var { createBloomPass } = await import("./src/effects/bloom-pass.js");
       // Exposure like an eye (?autoexp=1, ?localtm=1 — opt-in; the pass builds it).
       var { autoExposureRequested, localToneRequested } = await import("./src/effects/exposure.js");
+      // Visual realism to 11 (2026-10-19): an ULTRA boot builds every realism
+      // package (AO, the eye, hex tiling); ?key=0 / ?key=1 override either way.
+      var { realismOn, currentBootPreset } = await import("./src/ui/realism-defaults.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
@@ -4071,7 +4074,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v89-2026-10-19-full-send';
+    const BIRB_BUILD = 'v90-2026-10-19-realism-eleven';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5034,10 +5037,15 @@
         softness: 0.24,
         strength: SHIPPING_BLOOM_STRENGTH,
         vignette: 0.42,
-        // Eye adaptation and local tone mapping, both OFF unless the URL
-        // asks: off, the pass and its composite are exactly as before.
-        autoExposure: autoExposureRequested(window.location?.search || ''),
-        localTone: localToneRequested(window.location?.search || ''),
+        // Eye adaptation, local tone mapping and ambient occlusion: built on
+        // an Ultra boot (realism-defaults.js), or when the URL asks. Off, the
+        // pass and its composite are exactly as before — and every frozen
+        // harness boots &quality=amazing, where all three are off.
+        autoExposure: autoExposureRequested(window.location?.search || '')
+          || realismOn('autoexp', window.location?.search || ''),
+        localTone: localToneRequested(window.location?.search || '')
+          || realismOn('localtm', window.location?.search || ''),
+        ambientOcclusion: realismOn('ao', window.location?.search || ''),
       });
     } catch (bloomError) {
       console.warn('Bloom unavailable; rendering without it', bloomError);
@@ -13897,6 +13905,13 @@
       for (const [key, value] of preset.levers()) {
         qualitySettings.request({ source: src, key, value });
       }
+      // 4. The post-pass realism stages a boot built (AO, the eye) run at
+      //    Ultra and are shed by any step down — at once, nothing rebuilt.
+      //    A URL that forced one on keeps it on at every preset.
+      if (bloomPass?.setRealismEnabled) {
+        bloomPass.setRealismEnabled(preset.id === 'ultra'
+          || /[?&](ao|autoexp|localtm)=1(?:&|#|$)/.test(window.location?.search || ''));
+      }
       if (qualityLabelEl) qualityLabelEl.textContent = auto ? `Auto · ${preset.label}` : preset.label;
       if (settingsQualityButton) {
         settingsQualityButton.setAttribute('title', auto
@@ -16412,6 +16427,20 @@
             environment: environmentState?.id ?? null,
             authoredExposure: renderer.toneMappingExposure,
             ...(eye ? await eye.read() : { autoexp: false, localtm: false }),
+          };
+        },
+        // Ambient occlusion (src/effects/ambient-occlusion.js; Ultra default,
+        // ?ao=0/1). Takes { enabled, debug: 0|1, strength, radius, bias,
+        // intensity, maxScreen, fadeStart, fadeEnd } and reports the stage.
+        ao: (opts) => {
+          const ao = bloomPass ? bloomPass.ao : null;
+          if (ao && opts) ao.configure(opts);
+          return {
+            present: !!ao,
+            postActive: isPostPassActive(),
+            bootPreset: currentBootPreset(),
+            realismEnabled: bloomPass ? bloomPass.realismEnabled : false,
+            ...(ao ? ao.info() : {}),
           };
         },
         // Lighting + colour-grade overrides for side-by-side comparison

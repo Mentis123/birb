@@ -1,7 +1,7 @@
 import {
   createCanopyGeometry, addFoliageWind, bakeGroundContacts, addAtmosphere,
   smoothShadingRequested, treeLean, rockShape,
-  addLeafEdge, addUpwardSnow, leafEdgeRequested, upwardSnowRequested,
+  addLeafEdge, addUpwardSnow, addFoliageLight, leafEdgeRequested, upwardSnowRequested,
   visualUniforms,
 } from './visual-style.js';
 import {
@@ -43,8 +43,9 @@ let disposeAuthoredSnow = null;
 let disposeAuthoredCityFacades = []; // one disposer per buildingMats[i] that loaded
 let disposeAuthoredGround = null;
 import { addGroundDetail, hexTileRequested } from "./ground-detail.js";
+import { realismOn } from "../ui/realism-defaults.js";
 import { createColliderGrid } from "./collider-grid.js";
-import { createWater, WATER_LEVELS, WATER_PALETTE } from "./water.js";
+import { createWater, WATER_LEVELS, WATER_PALETTE, classicWaterRequested } from "./water.js";
 import { addWindowLights, addStreetGrid } from "./city-windows.js";
 import { worldRng } from "./seeded-random.js";
 import { createLivingWorld } from "./living-world.js";
@@ -509,6 +510,7 @@ function _softFlat() { return !_smoothShading; }
 
 // Wave B of the organic pass, resolved per world build like _smoothShading.
 let _leafEdge = true;
+let _foliageLight = false;
 let _upwardSnow = true;
 // The air (src/flight/air-field.js): the mountain pines sway in the same
 // gusting wind as the forest canopies. `?air=0` leaves them still, as before.
@@ -1061,7 +1063,8 @@ function _startErosionPrefetch(current) {
 // it has not landed, the build bakes on the main thread and the worker's
 // copy is simply not used. Never in a worker (no window), so the worker that
 // imports this module does not start another.
-if (typeof window !== 'undefined' && erosionRequested(window.location?.search || '')) {
+if (typeof window !== 'undefined' && (erosionRequested(window.location?.search || '')
+    || realismOn('erosion', window.location?.search || ''))) {
   _startErosionPrefetch(null);
 }
 
@@ -1659,6 +1662,9 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
     // The leaves. Cut out of the crown's silhouette rather than modelled:
     // 285 canopies are already 41% of this frame's triangles.
     if (_leafEdge) addLeafEdge(canopyMats[c], THREE, { key: `canopy${c}` });
+    // Leaf clumps and sun through the crown edge (realism to 11). After the
+    // edge, so its leaf noise is already declared when this patch compiles.
+    if (_foliageLight) addFoliageLight(canopyMats[c], THREE, { key: `canopy${c}` });
     const canopyInst = new THREE.InstancedMesh(canopyUnitGeom, canopyMats[c], bucket.length);
     canopyInst.name = `forest-canopies-${c}`;
     const dummy = new THREE.Object3D();
@@ -3093,6 +3099,8 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
   // slab lying on a boulder.
   if (_upwardSnow) addUpwardSnow(pineCanopyMat, THREE, { key: 'pine', amount: 0.42, start: 0.10, end: 0.62 });
   if (_leafEdge) addLeafEdge(pineCanopyMat, THREE, { key: 'pine', cut: 0.40, scale: 1.7 });
+  // Needles clump less and pass less light than broad leaves.
+  if (_foliageLight) addFoliageLight(pineCanopyMat, THREE, { key: 'pine', clump: 0.32, translucency: 0.55 });
   const boulderMat = new THREE.MeshLambertMaterial({ color: 0x4a505a, flatShading: true });
   const cliffWallMat = new THREE.MeshLambertMaterial({ color: 0x434953, flatShading: true });
   // uSnowColor is snowMat's own 0xe6f1ff, so snow on a boulder is the same
@@ -4331,6 +4339,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   const _search = typeof window !== 'undefined' ? (window.location?.search || '') : '';
   _smoothShading = typeof window !== 'undefined' ? smoothShadingRequested(_search) : true;
   _leafEdge = typeof window !== 'undefined' ? leafEdgeRequested(_search) : true;
+  _foliageLight = typeof window !== 'undefined' ? realismOn('foliage', _search) : false;
   _upwardSnow = typeof window !== 'undefined' ? upwardSnowRequested(_search) : true;
   _pineWind = typeof window !== 'undefined' ? airRequested(_search) : true;
   _cloudVolume = typeof window !== 'undefined' ? cloudVolumeRequested(_search) : true;
@@ -4365,7 +4374,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
   let _erosionEntry = null;
   let _erosionMs = 0;
   let _erosionCached = false;
-  if (typeof window !== 'undefined' && erosionRequested(_search) && EROSION_PROFILES[variant]) {
+  // Built on an Ultra boot too (realism to 11; realism-defaults.js).
+  if (typeof window !== 'undefined' && (erosionRequested(_search) || realismOn('erosion', _search))
+      && EROSION_PROFILES[variant]) {
     const t0 = _horizonNow();
     try {
       _erosionEntry = _erosionCache.get(variant) || null;
@@ -4474,7 +4485,7 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     groundMap: wantsGroundTexture
       ? { tile: GROUND_TILE_UNITS, sharpness: GROUND_TRIPLANAR_SHARPNESS, gain: GROUND_TINT,
         // ?hextile=1: the map never repeats (ground-detail.js, hex note). Opt-in.
-        hexTile: hexTileRequested(window.location?.search) }
+        hexTile: hexTileRequested(window.location?.search) || realismOn('hextile', window.location?.search || '') }
       : null,
     ...(wetTexture ? { wetMap: { texture: wetTexture, ...wetTexture.userData.erosion } } : {}),
     // A damp bank round every lake (?shore=0 is the before). Only where
@@ -4919,6 +4930,9 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
         // budget of eighty. Higher looked no better and cost real headroom.
         segmentsU: _isMobile() ? 190 : 280,
         segmentsV: _isMobile() ? 95 : 140,
+        // Gradient reflection, physical fresnel and near ripples (realism to
+        // 11); ?water=classic is the shader before it, verbatim.
+        classic: classicWaterRequested(_search),
       });
       if (water) {
         water.mesh.raycast = () => {};   // rockets never detonate on a lake

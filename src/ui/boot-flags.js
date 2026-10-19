@@ -50,10 +50,10 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'groundbump', group: 'Surfaces', kind: 'toggle', label: 'Ground bump (soil grain)', parent: 'authored' },
   { key: 'hextile', group: 'Surfaces', kind: 'select', label: 'Ground map never repeats (hex tiling)',
     options: [
-      { value: null, label: 'Off' },
-      { value: '1', label: 'On' },
+      { value: null, label: 'Ultra default' },
+      { value: '1', label: 'On (any preset)' },
     ],
-    hint: 'Opt-in. Re-lays the forest ground map as randomly offset and rotated hex tiles on the two projections that face the ground best, so the 18-unit repeat disappears and valley walls stop streaking. Needs the forest ground map.' },
+    hint: 'On by default on an Ultra boot (realism to 11), off on any other unless forced. Re-lays the forest ground map as randomly offset and rotated hex tiles on the two projections that face the ground best, so the 18-unit repeat disappears and valley walls stop streaking. Needs the forest ground map.' },
   { key: 'skytex', group: 'Surfaces', kind: 'select', label: 'Authored sky',
     options: [
       { value: null, label: 'On' },
@@ -67,6 +67,28 @@ export const BOOT_FLAGS = Object.freeze([
   { key: 'snowline', group: 'Shading', kind: 'toggle', label: 'Snow on up-facing surfaces' },
   { key: 'cloudvol', group: 'Shading', kind: 'toggle', label: 'Clouds with volume + real cloud shadows',
     hint: 'Off is the solid puffs and the drifting sine-field shadows that had no relation to where any cloud was.' },
+  { key: 'realism', group: 'Shading', kind: 'toggle', label: 'Ultra realism set (AO, eye, local tone, hex tiling, erosion, foliage)',
+    hint: 'Realism to 11: an Ultra boot builds ambient occlusion, eye adaptation, local tone mapping, hex-tiled ground, water-carved terrain and lit foliage. Off (?realism=0) is the Ultra before; each one can still be forced on with its own =1.' },
+  { key: 'ao', group: 'Shading', kind: 'select', label: 'Ambient occlusion (contact darkening)',
+    options: [
+      { value: null, label: 'Ultra default' },
+      { value: '1', label: 'On' },
+      { value: '0', label: 'Off' },
+    ],
+    hint: 'Screen-space AO from the scene depth: trunks sit IN the ground, creases and corners darken. Three half-res passes; built on an Ultra boot, shed by any step down.' },
+  { key: 'foliage', group: 'Shading', kind: 'select', label: 'Foliage light (leaf clumps, sun through the crowns)',
+    options: [
+      { value: null, label: 'Ultra default' },
+      { value: '1', label: 'On' },
+      { value: '0', label: 'Off' },
+    ],
+    hint: 'Crowns mottled by leaf clumps and darker underneath, and lit THROUGH at the edge when you look toward the sun. Fragment terms only; built on an Ultra boot.' },
+  { key: 'water', group: 'Shading', kind: 'select', label: 'Water',
+    options: [
+      { value: null, label: 'Realistic' },
+      { value: 'classic', label: 'Classic' },
+    ],
+    hint: 'Realistic mirrors the sky as a gradient (zenith, horizon haze, the far bank), with a physical fresnel and ripples that break the sun into glitter. Classic is the water before, verbatim.' },
   // ---- Shadows without shadow maps (every preset) ----
   { key: 'horizon', group: 'Shading', kind: 'toggle', label: 'Terrain + canopy shadows (horizon map)',
     hint: 'Ridges, canopies, peaks, spires and towers shade the ground and each other, and valleys see less sky. Baked once per world in a worker; off is the old unshadowed light.' },
@@ -81,10 +103,10 @@ export const BOOT_FLAGS = Object.freeze([
   // ---- Terrain ----
   { key: 'erosion', group: 'Terrain', kind: 'select', label: 'A landscape carved by water (stream-power erosion)',
     options: [
-      { value: null, label: 'Off' },
-      { value: '1', label: 'On' },
+      { value: null, label: 'Ultra default' },
+      { value: '1', label: 'On (any preset)' },
     ],
-    hint: 'Rivers routed to the lakes and eroded into the ground at world build (carve-down only), with the ground wet where they run. Forest, canyons and mountain; the city keeps its streets. Off is the shipping default.' },
+    hint: 'On by default on an Ultra boot (realism to 11). Rivers routed to the lakes and eroded into the ground at world build (carve-down only), with the ground wet where they run. Forest, canyons and mountain; the city keeps its streets. Off on any other boot unless forced.' },
   // ---- Light: one sun, one sky, for a planet ----
   { key: 'planetsun', group: 'Light', kind: 'toggle', label: 'Sun in the bird’s own horizon (planet sun)',
     hint: 'Off is the before: a world-fixed sun that sat below the local horizon over half the planet, a hemisphere light pointing at world +Y, and a point light buried in the planet’s core.' },
@@ -93,16 +115,16 @@ export const BOOT_FLAGS = Object.freeze([
   // ---- Exposure: an eye, not a fixed stop (opt-in, post pass only) ----
   { key: 'autoexp', group: 'Exposure', kind: 'select', label: 'Eye adaptation (auto-exposure)',
     options: [
-      { value: null, label: 'Off' },
-      { value: '1', label: 'On' },
+      { value: null, label: 'Ultra default' },
+      { value: '1', label: 'On (any preset)' },
     ],
-    hint: 'The exposure follows the frame: a dark valley lifts, an open sky comes down, over about a second, within 1.5 stops of the biome’s authored exposure (exactly it at the reference view). Needs the post pass (Ultra, or Amazing at full tier).' },
+    hint: 'On by default on an Ultra boot (realism to 11) and shed with the post pass by any step down. The exposure follows the frame: a dark valley lifts, an open sky comes down, over about a second, within 1.5 stops of the biome’s authored exposure (exactly it at the reference view). Needs the post pass (Ultra, or Amazing at full tier).' },
   { key: 'localtm', group: 'Exposure', kind: 'select', label: 'Local tone mapping (exposure fusion)',
     options: [
-      { value: null, label: 'Off' },
-      { value: '1', label: 'On' },
+      { value: null, label: 'Ultra default' },
+      { value: '1', label: 'On (any preset)' },
     ],
-    hint: 'Three synthetic exposures of each frame blended through Laplacian pyramids (Mertens 2007): detail comes up out of the shadows while the sky keeps its brightness. Four quarter-resolution passes; needs the post pass.' },
+    hint: 'On by default on an Ultra boot (realism to 11). Three synthetic exposures of each frame blended through Laplacian pyramids (Mertens 2007): detail comes up out of the shadows while the sky keeps its brightness. Four quarter-resolution passes; needs the post pass.' },
   // ---- The bird ----
   { key: 'bird', group: 'Bird', kind: 'select', label: 'Bird build',
     options: [

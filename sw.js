@@ -63,7 +63,7 @@
 // v88 species leftovers: the owl's rivets and hubs back (species-bird.js),
 // the double-failure fallback (bird-transaction.js), the envelope/whoosh hold
 // (flight-audio.js), and every CDN fetch bounded without AbortSignal.timeout.
-const CACHE_VERSION = 'v89-2026-10-19-full-send';
+const CACHE_VERSION = 'v90-2026-10-19-realism-eleven';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -250,6 +250,10 @@ const CORE_ASSETS = [
   // Statically imported by bloom-pass.js (the ?autoexp / ?localtm eye), so
   // it is on the boot path whether or not a flag is set.
   './src/effects/exposure.js',
+  // Statically imported by bloom-pass.js (AO; Ultra default).
+  './src/effects/ambient-occlusion.js',
+  // Imported at boot by index.html and spherical-world.js (realism to 11).
+  './src/ui/realism-defaults.js',
   './src/effects/wake.js',
   './src/effects/energy-ring.js',
   './src/effects/ribbon-trail.js',

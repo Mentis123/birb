@@ -98,6 +98,121 @@ const FRAG = `
   uniform vec3 uSky;
   uniform float uTime;
   uniform float uWaves;
+  uniform float uDetail;
+  varying vec3 vWorld;
+  varying float vDepth;
+
+  void main() {
+    vec3 up = normalize(vWorld);
+    vec3 N = up;
+    vec3 toEye = cameraPosition - vWorld;
+    float dist = length(toEye);
+    vec3 V = toEye / max(dist, 1.0e-4);
+
+    // ── Waves ────────────────────────────────────────────────────────────
+    // Two crossed sine fields, evaluated on world position, tilting the
+    // normal in a tangent basis. A real normal map would look the same from
+    // a bird and would cost a texture fetch and a megabyte.
+    vec3 ref = abs(N.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+    vec3 T = normalize(cross(ref, N));
+    vec3 B = cross(N, T);
+    float u = dot(vWorld, T);
+    float v = dot(vWorld, B);
+    float w1 = sin(u * 0.42 + uTime * 1.15) * cos(v * 0.31 - uTime * 0.83);
+    float w2 = sin((u + v) * 0.86 - uTime * 1.9) * 0.5;
+    // Flat water offshore would mirror the sky as one hard sheet; the swell
+    // is what makes it read as liquid at this distance.
+    vec2 slope = vec2(w1 * 0.9 + w2, w2 * 1.1 - w1 * 0.6);
+    // ── Ripples (uDetail, realism to 11) ─────────────────────────────────
+    // Two short, fast octaves on rotated axes: the cat's-paw texture a lake
+    // has at the distance the bird skims it, and what breaks the sun into
+    // glitter instead of one smooth highlight. They fade out with distance
+    // (they would alias into shimmer past ~70 units) so the far lake keeps
+    // the swell alone.
+    if (uDetail > 0.001) {
+      float near = uDetail * (1.0 - smoothstep(25.0, 70.0, dist));
+      float r1 = sin(dot(vec2(u, v), vec2(1.9, 1.3)) - uTime * 3.1);
+      float r2 = sin(dot(vec2(u, v), vec2(-1.1, 2.6)) + uTime * 2.6);
+      float r3 = sin(dot(vec2(u, v), vec2(3.7, -2.9)) - uTime * 4.3) * 0.5;
+      slope += vec2(r1 * 0.9 - r2 * 0.4 + r3, r2 * 0.8 + r1 * 0.3 - r3 * 0.7) * 0.55 * near;
+    }
+    N = normalize(N + (T * slope.x + B * slope.y) * uWaves);
+
+    // ── Body colour ──────────────────────────────────────────────────────
+    float deepen = smoothstep(0.4, 9.0, vDepth);
+    vec3 body = mix(uShallow, uDeep, deepen);
+    // Light the body by the sun's height: water at dusk is not lit like
+    // water at noon, and an unlit body colour glowed at night.
+    float sunUp = clamp(dot(normalize(uSunDirection), up), 0.0, 1.0);
+    body *= 0.55 + 0.45 * sunUp;
+
+    // ── Reflection ───────────────────────────────────────────────────────
+    // What the ripple mirrors depends on where the reflected ray points: up
+    // (the zenith-ish uSky), at the horizon (the haze — this world's fog
+    // colour IS its horizon), or below the horizon, which from a lake is the
+    // far BANK. A single flat sky colour made every lake one sheet of paint.
+    vec3 R = reflect(-V, N);
+    float e = dot(R, up);
+    #ifdef USE_FOG
+      vec3 horizon = fogColor;
+    #else
+      vec3 horizon = uSky * 1.45;
+    #endif
+    vec3 bank = mix(uDeep, horizon, 0.35) * 0.55;
+    vec3 sky = mix(horizon, uSky, smoothstep(0.02, 0.55, e));
+    vec3 mirrored = mix(bank, sky, smoothstep(-0.06, 0.05, e));
+
+    // ── Fresnel ──────────────────────────────────────────────────────────
+    // Schlick with water's F0 (0.02). The old capped fresnel (max 0.55)
+    // existed because a full mirror of ONE flat sky colour turned the far
+    // half of every lake into flat sky; mirroring a horizon-to-zenith
+    // gradient with the bank below it, the far lake reads as reflection.
+    float cosV = clamp(dot(N, V), 0.0, 1.0);
+    float fres = 0.02 + 0.98 * pow(1.0 - cosV, 5.0);
+    vec3 color = mix(body, mirrored, clamp(fres, 0.0, 0.82));
+
+    // ── Sun glitter ──────────────────────────────────────────────────────
+    vec3 L = normalize(uSunDirection);
+    vec3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 150.0);
+    // A broad sheen under the tight highlight: the wide lobe is the path of
+    // light across the water that you can see from a mile away, and it is the
+    // thing that actually makes a lake look like a lake from the air.
+    float sheen = pow(max(dot(N, H), 0.0), 13.0) * 0.075;
+    // Tuned DOWN hard from 2.6. The glint is additive, the frame is
+    // tone-mapped, and the bloom pass then finds whatever clipped — so a
+    // highlight that looks reasonable in isolation becomes a white hole the
+    // size of a harbour with a halo around it. Weighted by the fresnel now
+    // too: a reflection of the sun is a reflection.
+    color += uSunColor * (spec * 1.25 + sheen) * (0.35 + 0.65 * fres / 0.82) * step(0.0, dot(L, up));
+
+    // ── Shore foam ───────────────────────────────────────────────────────
+    // A band where the water is shallowest, wobbled by the same swell so it
+    // is not a clean contour line.
+    // Narrow and light. The first pass ran a 2.6-unit band at 0.55 and every
+    // lake wore a white ribbon that read as snow rather than as surf.
+    float shoreline = smoothstep(1.5, 0.0, vDepth + w1 * 0.42);
+    color = mix(color, uFoam * (0.5 + 0.5 * sunUp), shoreline * 0.30);
+
+    gl_FragColor = vec4(color, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    #include <fog_fragment>
+  }
+`;
+
+// The water before realism-to-11, kept verbatim for the A/B (?water=classic).
+const FRAG_CLASSIC = `
+  #include <common>
+  #include <fog_pars_fragment>
+  uniform vec3 uSunDirection;
+  uniform vec3 uSunColor;
+  uniform vec3 uShallow;
+  uniform vec3 uDeep;
+  uniform vec3 uFoam;
+  uniform vec3 uSky;
+  uniform float uTime;
+  uniform float uWaves;
   varying vec3 vWorld;
   varying float vDepth;
 
@@ -162,6 +277,11 @@ const FRAG = `
   }
 `;
 
+/** `?water=classic` is the water before realism-to-11, for the A/B. */
+export function classicWaterRequested(search) {
+  return /[?&]water=classic(?:&|#|$)/.test(typeof search === 'string' ? search : '');
+}
+
 /**
  * Build the water sheet for one biome.
  *
@@ -182,6 +302,10 @@ export function createWater(THREE, {
   segmentsU = 320,
   segmentsV = 160,
   waves = 0.045,
+  // Short ripples near the eye (realism to 11). 0 is the swell alone.
+  detail = 1,
+  // The pre-realism shader, verbatim (?water=classic).
+  classic = false,
 } = {}) {
   if (typeof terrainHeightAt !== 'function') return null;
   const basinAt = typeof basinHeightAt === 'function' ? basinHeightAt : terrainHeightAt;
@@ -282,12 +406,13 @@ export function createWater(THREE, {
       uSky: { value: new THREE.Color(0.62, 0.74, 0.86) },
       uTime: { value: 0 },
       uWaves: { value: waves },
+      uDetail: { value: detail },
     },
   ]);
 
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT_FULL,
-    fragmentShader: FRAG,
+    fragmentShader: classic ? FRAG_CLASSIC : FRAG,
     uniforms,
     // The sheet is a closed-ish patch seen from outside; the far side of a
     // lake basin is behind the terrain anyway.
@@ -311,6 +436,7 @@ export function createWater(THREE, {
     },
     setSunColor(color) { material.uniforms.uSunColor.value.copy(color); },
     setSky(color) { material.uniforms.uSky.value.copy(color); },
+    setDetail(value) { material.uniforms.uDetail.value = Math.max(0, Number(value) || 0); },
     dispose() { geometry.dispose(); material.dispose(); },
   };
 }

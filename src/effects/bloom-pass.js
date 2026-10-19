@@ -67,6 +67,7 @@
  */
 
 import { createExposureStage } from './exposure.js';
+import { createAmbientOcclusionStage } from './ambient-occlusion.js';
 
 const FULLSCREEN_VERT = `
   varying vec2 vUv;
@@ -310,6 +311,11 @@ export function createBloomPass(THREE, renderer, {
   autoExposure = false,
   localTone = false,
   environment = null,
+  // Screen-space ambient occlusion (src/effects/ambient-occlusion.js).
+  // Off builds nothing: no depth texture, no passes, the composite's source
+  // untouched. `aoOptions` overrides AO_DEFAULTS.
+  ambientOcclusion = false,
+  aoOptions = {},
 } = {}) {
   const size = renderer.getSize(new THREE.Vector2());
   const pixelRatio = renderer.getPixelRatio();
@@ -351,7 +357,16 @@ export function createBloomPass(THREE, renderer, {
   // so every closure below that needs the CURRENT target reads this binding
   // rather than capturing the original object.
   let currentSamples = msaaSupported ? Math.max(0, Math.min(Math.floor(samples) || 0, renderer.capabilities.maxSamples)) : 0;
-  let sceneTarget = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, samples: currentSamples });
+  // With AO the scene target carries a DEPTH TEXTURE rather than a depth
+  // renderbuffer: AO reads it. Under MSAA three blits the multisample depth
+  // into it with the colour resolve (resolveDepthBuffer, on by default), so
+  // the AO pass always sees the resolved frame's depth.
+  function sceneTargetOptions(nextSamples) {
+    const o = { ...targetOptions, samples: nextSamples };
+    if (ambientOcclusion) o.depthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
+    return o;
+  }
+  let sceneTarget = new THREE.WebGLRenderTarget(1, 1, sceneTargetOptions(currentSamples));
   // The blur targets need no depth buffer at all; they are full-screen
   // triangle passes over a texture.
   const blurA = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, depthBuffer: false });
@@ -403,6 +418,13 @@ export function createBloomPass(THREE, renderer, {
 
   // The eye: null unless a flag asked for it (then its passes run before the
   // composite, and the composite below is rebuilt with it patched in).
+  const ao = ambientOcclusion
+    ? createAmbientOcclusionStage(THREE, { vertexShader: FULLSCREEN_VERT, options: aoOptions })
+    : null;
+  // Live switch for the eye (a preset change): off skips its passes and
+  // neutralises the composite's multiply, without rebuilding anything.
+  let eyeEnabled = true;
+
   const eye = (autoExposure || localTone)
     ? createExposureStage(THREE, renderer, {
       autoExposure, localTone, vertexShader: FULLSCREEN_VERT, environment,
@@ -428,6 +450,10 @@ export function createBloomPass(THREE, renderer, {
   if (eye) {
     compositeMaterial.fragmentShader = eye.patchComposite(COMPOSITE_FRAG);
     Object.assign(compositeMaterial.uniforms, eye.compositeUniforms);
+  }
+  if (ao) {
+    compositeMaterial.fragmentShader = ao.patchComposite(compositeMaterial.fragmentShader);
+    Object.assign(compositeMaterial.uniforms, ao.compositeUniforms);
   }
 
   // One triangle, not a quad. A quad rasterises the screen diagonal twice;
@@ -496,6 +522,7 @@ export function createBloomPass(THREE, renderer, {
     blurB.setSize(bw, bh);
     rayTarget.setSize(bw, bh);
     if (eye) eye.setSize(w, h);
+    if (ao) ao.setSize(bw, bh);
   }
   setSize(size.x, size.y, pixelRatio);
 
@@ -512,8 +539,9 @@ export function createBloomPass(THREE, renderer, {
    * snapshot, so they pick the new object up with no further change.
    */
   function recreateSceneTarget(nextSamples) {
+    if (sceneTarget.depthTexture) sceneTarget.depthTexture.dispose();
     sceneTarget.dispose();
-    sceneTarget = new THREE.WebGLRenderTarget(1, 1, { ...targetOptions, samples: nextSamples });
+    sceneTarget = new THREE.WebGLRenderTarget(1, 1, sceneTargetOptions(nextSamples));
     sceneTarget.texture.colorSpace = THREE.NoColorSpace;
     brightMaterial.uniforms.tScene.value = sceneTarget.texture;
     compositeMaterial.uniforms.tScene.value = sceneTarget.texture;
@@ -711,8 +739,17 @@ export function createBloomPass(THREE, renderer, {
       drawWith(blurMaterial, blurA);
       if (tally) tally(false);
 
+      // Ambient occlusion, only when built and switched on: three half-res
+      // passes off the scene's depth.
+      if (ao && ao.enabled) {
+        ao.render(sceneTarget.depthTexture, camera, sceneTarget.width, sceneTarget.height, drawWith, tally);
+      }
+
       // The eye, only when a flag built it: meter + adapt, then the fusion.
-      if (eye) eye.render(sceneTarget.texture, drawWith, tally);
+      if (eye) {
+        if (eyeEnabled) eye.render(sceneTarget.texture, drawWith, tally);
+        else eye.skipFrame();
+      }
 
       // Composite plus vignette, the one full-resolution pass.
       compositeMaterial.uniforms.tBloom.value = blurA.texture;
@@ -722,11 +759,32 @@ export function createBloomPass(THREE, renderer, {
 
     /** The eye (exposure.js's stage), or null — the shipping default. */
     get eye() { return eye; },
+    /** Ambient occlusion (ambient-occlusion.js's stage), or null. */
+    get ao() { return ao; },
+    /**
+     * Live on/off for the realism stages a boot built (AO, the eye), for
+     * the quality presets: Ultra runs them, a step down skips their passes
+     * and neutralises the composite. Nothing is rebuilt either way.
+     */
+    setRealismEnabled(on) {
+      const next = !!on;
+      if (ao) ao.setEnabled(next);
+      if (eye && next !== eyeEnabled) {
+        eyeEnabled = next;
+        const u = eye.compositeUniforms;
+        if (u.uEyeAuto) u.uEyeAuto.value = next ? 1 : 0;
+        if (u.uEyeLocal) u.uEyeLocal.value = next ? 1 : 0;
+        if (next) eye.skipFrame();
+      }
+    },
+    get realismEnabled() { return (ao ? ao.enabled : false) || (eye ? eyeEnabled : false); },
     /** True while the composite is built from the untouched source. */
     get compositePristine() { return compositeMaterial.fragmentShader === COMPOSITE_FRAG; },
 
     dispose() {
       if (eye) eye.dispose();
+      if (ao) ao.dispose();
+      if (sceneTarget.depthTexture) sceneTarget.depthTexture.dispose();
       sceneTarget.dispose();
       blurA.dispose();
       blurB.dispose();

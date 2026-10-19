@@ -527,6 +527,94 @@ export function addUpwardSnow(material, THREE, {
   return material;
 }
 
+/**
+ * Foliage light (realism to 11; Ultra boot, `?foliage=0` / `?foliage=1`).
+ *
+ * A crown in this world is one smooth lathe or cone with one colour per
+ * instance, so under any light it reads as a painted solid: evenly lit,
+ * evenly dark, with a cut-out edge. Real crowns do two things this does
+ * not, and both are fragment terms on the existing material — no geometry,
+ * no texture, no pass:
+ *
+ *  - CLUMPS. Leaves grow in sprays with gaps between them, so a crown is
+ *    mottled light and dark at about a metre and again at a third of that.
+ *    Two octaves of the world-space leaf noise the edge cut already uses
+ *    (so the mottling and the ragged outline belong to the same leaves),
+ *    plus a darker underside: the inside and bottom of a crown are lit
+ *    only by what gets through the rest of it.
+ *  - TRANSLUCENCY. A leaf is thin; looking toward the sun through the edge
+ *    of a crown, the light comes THROUGH it, yellow-green. That glow at the
+ *    rim of every backlit tree is most of what makes a forest at golden hour
+ *    look like one. A forward-scatter lobe (view against the sun) times the
+ *    silhouette band, times the leaf colour, added after the lighting at
+ *    <opaque_fragment>, where Lambert has already summed outgoingLight —
+ *    so it is light, not paint.
+ *
+ * Chained like every patch here; the program cache key is extended.
+ */
+export function foliageLightRequested(search) {
+  const m = /[?&]foliage=([01])(?:&|#|$)/.exec(search || '');
+  return m ? m[1] === '1' : null;
+}
+
+export function addFoliageLight(material, THREE, {
+  clump = 0.42, underside = 0.24, translucency = 0.9, key = 'foliage',
+} = {}) {
+  if (!material || material.userData?.birbFoliageLight) return material;
+  material.userData = material.userData || {};
+  material.userData.birbFoliageLight = true;
+  if (!visualUniforms.sunDir.value) visualUniforms.sunDir.value = new THREE.Vector3(0, 1, 0);
+  if (!visualUniforms.sunColor.value) visualUniforms.sunColor.value = new THREE.Color(0, 0, 0);
+
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = (shader, renderer) => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    ensureWorldVarying(shader);
+    ensureWorldNormalVarying(shader);
+    shader.uniforms.uFlSunDir = visualUniforms.sunDir;
+    shader.uniforms.uFlSunColor = visualUniforms.sunColor;
+    shader.uniforms.uFlParams = { value: new THREE.Vector3(clump, underside, translucency) };
+    // The leaf noise is shared with addLeafEdge; declared once whichever
+    // patch runs first (a second copy would not compile).
+    const noise = shader.fragmentShader.includes('float birbLeafNoise(') ? '' : LEAF_NOISE_GLSL;
+    shader.fragmentShader =
+      'uniform vec3 uFlSunDir; uniform vec3 uFlSunColor; uniform vec3 uFlParams;\n'
+      + noise + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+      #include <color_fragment>
+      {
+        vec3 flUp = normalize(vBirbWorld);
+        vec3 flN = normalize(vBirbNormalW);
+        float flClump = birbLeafNoise(vBirbWorld * 0.55) * 0.6 + birbLeafNoise(vBirbWorld * 1.9) * 0.4;
+        diffuseColor.rgb *= 1.0 + (flClump - 0.5) * 2.0 * uFlParams.x;
+        diffuseColor.rgb *= 1.0 - uFlParams.y * (1.0 - smoothstep(-0.55, 0.35, dot(flN, flUp)));
+      }
+    `);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+      {
+        vec3 flUp2 = normalize(vBirbWorld);
+        vec3 flN2 = normalize(vBirbNormalW);
+        vec3 flV = normalize(cameraPosition - vBirbWorld);
+        vec3 flL = normalize(uFlSunDir);
+        float flBack = pow(max(dot(-flV, flL), 0.0), 4.0);
+        float flRim = pow(1.0 - abs(dot(flN2, flV)), 1.5);
+        float flSunUp = smoothstep(-0.05, 0.15, dot(flL, flUp2));
+        // Green-shifted: light that came through a leaf has lost its red
+        // and blue to the chlorophyll.
+        vec3 flLeaf = diffuseColor.rgb * vec3(0.9, 1.25, 0.6);
+        outgoingLight += uFlSunColor * flLeaf * (flBack * flRim * flSunUp * uFlParams.z);
+      }
+      #include <opaque_fragment>
+    `);
+  };
+  const base = typeof previousKey === 'function' ? previousKey.call(material) : 'birb';
+  material.customProgramCacheKey = () => `${base}-${key}-flight-v1`;
+  material.needsUpdate = true;
+  return material;
+}
+
 /** Bake root contact shading into existing ground vertex colours at build time.
  * Small spatial hash bounds nearby queries; no extra mesh, pass or frame work.
  */

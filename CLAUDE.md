@@ -1,5 +1,48 @@
 # CLAUDE.md — Birb Mobile
 
+> **REALISM TO 11 (2026-10-19, build v90): an ULTRA boot builds every
+> realism package.** Owner: "I just want visual realism to 11." Gate:
+> [docs/perf/gates/G-REALISM-ELEVEN.md](docs/perf/gates/G-REALISM-ELEVEN.md).
+> `src/ui/realism-defaults.js` (`realismOn(key)`) decides from the BOOT
+> preset: on Ultra (the default, and Auto's start) it turns on **ambient
+> occlusion** (new, `src/effects/ambient-occlusion.js`), **eye adaptation**,
+> **local tone mapping**, **hex-tiled ground**, **erosion** and **foliage
+> light** (new, `addFoliageLight` in visual-style.js: leaf-clump mottling,
+> dark crown undersides, sun THROUGH the crown edge). Any other boot preset
+> builds none of them; `?key=1` forces one on anywhere, `?key=0` turns it off,
+> and `?realism=0` (Flags tab) is the Ultra before. AO and the eye are also
+> LIVE-gated: `applyQualityPreset` calls `bloomPass.setRealismEnabled`, so a
+> step down from Ultra sheds their passes immediately. **Water** changed at
+> every preset: it reflects a gradient (zenith, the fog colour as horizon,
+> the far bank below it), uses a Schlick fresnel with water's F0, and has
+> near ripples that break the sun into glitter. `?water=classic` is the old
+> shader, verbatim. Every frozen harness boots `&quality=amazing`, where
+> nothing here builds; Ultra is covered by birb-default and birb-shaders.
+>
+> **AO was debugged on an isolated box/sphere/wall scene, and that is the
+> only reason it works.** Three defects, all invisible as "AO looks weak"
+> in a game frame:
+> - A HALF-float target holds at most 65504, so the sky's 1e5 depth marker
+>   was stored as Inf. The blur then computed Inf − Inf = NaN, and the sky
+>   went black.
+> - A tap read the depth of the NEAREST texel but unprojected it at its own
+>   uv. That painted horizontal bands of false occlusion on every grazing
+>   hillside. Taps now snap to texel centres.
+> - A half-res pixel centre lies exactly on a full-res texel BOUNDARY. A
+>   pixel and its neighbour could round to the same texel, giving a zero
+>   edge vector, a NaN normal and a broken line down the screen. The centre
+>   is snapped once, and neighbours step from it.
+>
+> `__BIRB.ao({debug:1})` shows the AO factor RAW. The sRGB-encoded first
+> version made 0.33 read as 155/255, so the AO looked a third as strong as it
+> was.
+>
+> **Cost, SwiftShader, Ultra forest:** 3.0 s per frame against 2.1 s with
+> `?realism=0`. Boot to ready: 37.7 s against 34.0 s, which puts
+> birb-shaders' frozen 30 s wait over its limit in this sandbox (it was
+> already over at 34 s; CI is faster). Eroded worlds pass the world audit,
+> 9/9. **Unmeasured: the phone.**
+
 > **FULL SEND (2026-10-19): the world moves, it can be found, it can film
 > itself, and every prop is measured against its ground.** Plan and status:
 > [docs/FULL_SEND_PLAN.md](docs/FULL_SEND_PLAN.md). Ideas ported from the
