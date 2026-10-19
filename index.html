@@ -23,6 +23,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Birb Mobile" />
   <style>
+    /* A playing shot (?shot=, __BIRB.shot.play) is a picture, not a game: the
+       HUD, minimap and pills step out until it ends. visibility, not display,
+       so nothing reflows and the canvas keeps its size. */
+    body.birb-shot-playing *:not(canvas) { visibility: hidden !important; }
+    body.birb-shot-playing canvas.birb-render-canvas, body.birb-shot-playing #birb-goto-toast { visibility: visible !important; }
     :root {
       color-scheme: dark;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -3274,7 +3279,7 @@
     function showTitleScreen() {
       if (!titleScreen) {
         // No title screen (shouldn't happen) — go straight to game.
-        if (typeof triggerAutoFullscreen === 'function') triggerAutoFullscreen();
+        if (typeof triggerAutoFullscreen === 'function' && !/[?&]studio=/.test(location.search)) triggerAutoFullscreen();
         showMinigameOnboarding();
         return;
       }
@@ -3392,7 +3397,7 @@
         }
         hideTitleScreen();
         setTimeout(() => {
-          if (typeof triggerAutoFullscreen === 'function') triggerAutoFullscreen();
+          if (typeof triggerAutoFullscreen === 'function' && !/[?&]studio=/.test(location.search)) triggerAutoFullscreen();
           showMinigameOnboarding();
         }, 300);
       };
@@ -12343,7 +12348,10 @@
         // IMPORTANT: We pass delta even when nested!
         // BirdFlight.speed will be 0 when nested, preventing position change,
         // but 'tick()' MUST run to allow rotation/orientation updates (Turret Mode).
-        pose = flight.tick(_stuntInput, delta);
+        // A playing shot owns the picture: the bird holds exactly where it
+        // was (tick at zero time, so no collision, landing or stall can
+        // happen off screen) and the shot moves only what is drawn.
+        pose = flight.tick(_stuntInput, shotHoldsBird() ? 0 : delta);
 
         if (!nestingControlsBird && flightRecoveryState === FLIGHT_RECOVERY_STATES.FALLING) {
           // Linear ramp from 1× → 3× over FALL_RAMP_DURATION seconds, then hold.
@@ -13538,6 +13546,10 @@
       // frame (never this one — its own contract forbids that), so it can
       // run on either side; kept last so a just-issued query is never
       // mistaken for the readable one on the same tick.
+      // Shots (src/camera/shot-player.js): last thing before the frame is
+      // presented, after the chase rig, so they overwrite this frame only.
+      if (shotPlayer && shotPlayer.active) applyShotFrame();
+
       gpuFrameId += 1;
       gpuTimer.beginFrame(gpuFrameId);
       presentFrame();
@@ -14307,6 +14319,247 @@
         el.style.opacity = '0';
         el.dataset.state = 'faded';
       }, 5000);
+    }
+
+
+    // ─── Shots: camera flights as data (production path) ─────────────────
+    // `?shot=<name>` plays one after Tap-to-Start; `?studio=1` is a clean
+    // recording frame with a small panel (src/ui/studio.js). The kernel and
+    // the registry are dynamic imports, so a normal boot never fetches them.
+    // Ported from the tabletop worlds kit's flythrough harness.
+    let shotPlayer = null;
+    let shotKernel = null;
+    let shotRegistry = null;
+    let shotLead = false;
+    let __shotHidden = [];
+    const _shotFwd = new THREE.Vector3();
+    const _shotUp = new THREE.Vector3();
+    const _shotRight = new THREE.Vector3();
+    const _shotBasis = new THREE.Matrix4();
+    const shotHoldsBird = () => !!(shotPlayer && shotPlayer.active);
+
+    async function loadShots() {
+      if (!shotKernel) {
+        const [kernel, registry, playerMod] = await Promise.all([
+          import('./src/camera/flythrough.js'),
+          import('./src/camera/shots.js'),
+          import('./src/camera/shot-player.js'),
+        ]);
+        shotKernel = kernel;
+        shotRegistry = registry;
+        shotPlayer = playerMod.createShotPlayer({ THREE, scene, camera: cameraState.camera });
+      }
+      return { kernel: shotKernel, registry: shotRegistry, player: shotPlayer };
+    }
+
+    function shotContext() {
+      const toArr = (v) => (v ? [v.x, v.y, v.z] : null);
+      return {
+        THREE,
+        actors: sphericalWorld?.living?.actors || {},
+        landmark: (id) => {
+          const l = (sphericalWorld?.landmarks || []).find((x) => x.id === id);
+          return l ? { position: toArr(l.position), base: toArr(l.base || l.position), forward: toArr(l.forward), apex: l.apex } : null;
+        },
+        bird: () => {
+          if (!flightController?.position) return null;
+          const f = new THREE.Vector3(0, 0, -1).applyQuaternion(flightController.quaternion);
+          return { position: toArr(flightController.position), forward: toArr(f) };
+        },
+      };
+    }
+
+    function shotGroundRadius(x, y, z) {
+      return (sphericalWorld?.sphereRadius ?? 120) + sampleTerrainMeshHeight(x, y, z);
+    }
+    function shotWaterRadius(x, y, z) {
+      const w = sphericalWorld;
+      if (!w || !(w.waterLevel < 0) || typeof sampleBasinHeight !== 'function') return -Infinity;
+      return sampleBasinHeight(x, y, z) < w.waterLevel ? w.sphereRadius + w.waterLevel : -Infinity;
+    }
+
+    // Inside a solid collider (trees, towers, peaks, rocks; clouds are flown
+    // through on purpose). Returns the collider's type, or null.
+    function shotObstacle(x, y, z) {
+      const cs = sphericalWorld?.collisionSystem?.objectColliders || [];
+      for (let i = 0; i < cs.length; i++) {
+        const c = cs[i];
+        if (c.type === 'cloud') continue;
+        const dx = x - c.position.x, dy = y - c.position.y, dz = z - c.position.z;
+        if (dx * dx + dy * dy + dz * dz < c.radius * c.radius) return c.type;
+      }
+      return null;
+    }
+
+    // What the lens can be inside or behind: built once per world from the
+    // drawn instances (see buildOccluders). Clouds, hover traffic, actors and
+    // the water are not solid to a camera.
+    let __shotOccluders = null;
+    function shotOccluders() {
+      const root = sphericalWorld?.root;
+      if (!root || !shotKernel) return null;
+      if (__shotOccluders?.root === root) return __shotOccluders.occ;
+      const objects = [];
+      root.updateMatrixWorld(true);
+      const m = new THREE.Matrix4();
+      root.traverse((o) => {
+        if (!o.isMesh || !o.visible || !o.geometry?.attributes?.position) return;
+        const nm = o.name || o.parent?.name || '';
+        // Arches are excluded: a capsule round a half ring fills the very
+        // opening a shot threads. Their legs carry colliders already.
+        // Moving actors are not obstacles (their positions are per frame);
+        // the cable-car stations stand still and are.
+        if (/cloud|hover|actor-(?!cablecar-stations)|water|ribbon|ring|drone|valley|fall|mist|pool|river|shot-fade|arch/i.test(nm)) return;
+        if (o === root.children.find((c) => c.geometry?.type === 'SphereGeometry')) return;
+        if (o.geometry.type === 'SphereGeometry' && o.geometry.parameters?.radius >= 100) return;   // the planet
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const bb = o.geometry.boundingBox;
+        const box = { min: bb.min.toArray(), max: bb.max.toArray() };
+        const matrices = [];
+        if (o.isInstancedMesh) {
+          for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, m); m.premultiply(o.matrixWorld); matrices.push(m.elements.slice()); }
+        } else matrices.push(o.matrixWorld.elements.slice());
+        objects.push({ name: nm, box, matrices });
+      });
+      const occ = shotKernel.buildOccluders(objects);
+      __shotOccluders = { root, occ };
+      return occ;
+    }
+
+    /** Compile + audit a shot by name (or spec). Refuses a failing audit unless force. */
+    async function prepareShot(nameOrSpec, { force = false } = {}) {
+      const { kernel, registry } = await loadShots();
+      const spec = typeof nameOrSpec === 'string' ? registry.getShot(nameOrSpec) : nameOrSpec;
+      if (!spec) return { ok: false, error: `no shot "${nameOrSpec}"` };
+      const biome = (sphericalWorld?.root?.name || '').replace('spherical-world-', '');
+      if (spec.world && spec.world !== '*' && spec.world !== biome) return { ok: false, error: `"${spec.name}" is a ${spec.world} shot; this is ${biome}` };
+      let plan;
+      try {
+        const occ = shotOccluders();
+        plan = kernel.planShot(spec, shotContext(), {
+          groundRadiusAt: shotGroundRadius,
+          waterRadiusAt: shotWaterRadius,
+          obstacleAt: (x, y, z) => shotObstacle(x, y, z) || (occ ? occ.inside(x, y, z) : null),
+          // Through the ground counts too: a canyon wall between the lens and
+          // the falls is a frame of sandstone (measured: half of the first
+          // canyon valley render).
+          sightBlocked: (a, b) => {
+            const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+            const L = Math.hypot(dx, dy, dz);
+            const n = Math.max(2, Math.ceil(L / 3));
+            for (let i = 1; i < n; i++) {
+              const u = i / n;
+              if ((1 - u) * L < 6) break;
+              const x = a[0] + dx * u, y = a[1] + dy * u, z = a[2] + dz * u;
+              if (Math.hypot(x, y, z) < shotGroundRadius(x, y, z) - 0.5) return 'terrain';
+            }
+            return occ ? occ.blocks(a, b, 6) : false;
+          },
+        });
+      } catch (err) { return { ok: false, error: String(err.message || err) }; }
+      const { compiled, audit, raise, spin, scale, attempts } = plan;
+      const variant = { raise, spin: +(spin || 0).toFixed(2), scale, attempts };
+      if (!audit.pass && !force) return { ok: false, error: 'audit failed', audit, variant, compiled };
+      return { ok: true, compiled, audit, variant };
+    }
+
+    async function playShot(nameOrSpec, opts = {}) {
+      const prep = await prepareShot(nameOrSpec, opts);
+      if (!prep.ok) return prep;
+      shotLead = !!prep.compiled.spec.bird;
+      renderer.domElement.classList.add('birb-render-canvas');
+      // Gameplay set dressing steps out of the picture: a drone that drifts
+      // in front of the lens fills the frame (it did, in the first cable-car
+      // render). Restored exactly as found when the shot ends.
+      __shotHidden = [];
+      for (const nm of ['drone-targets', 'collectibles']) {
+        const o = scene.getObjectByName(nm);
+        if (o && o.visible) { o.visible = false; __shotHidden.push(o); }
+      }
+      shotPlayer.play(prep.compiled, opts);
+      document.body.classList.add('birb-shot-playing');
+      return { ok: true, name: prep.compiled.name, duration: prep.compiled.duration, audit: prep.audit };
+    }
+
+    function stopShot() {
+      if (!shotPlayer?.active) return null;
+      const was = shotPlayer.stop();
+      shotEnded();
+      return was;
+    }
+
+    function shotEnded() {
+      document.body.classList.remove('birb-shot-playing');
+      for (const o of __shotHidden) o.visible = true;
+      __shotHidden = [];
+      // The chase rig damps toward the bird; without a snap the first frame
+      // after a shot is a swoop from wherever the shot left the camera.
+      __birbPendingCameraSnap = 1;
+      if (typeof window.__birbOnShotEnd === 'function') window.__birbOnShotEnd();
+    }
+
+    function applyShotFrame() {
+      const s = shotPlayer.apply(performance.now());
+      if (!s) return;
+      if (s.ended) { shotEnded(); return; }
+      // The shot owns the clock the actors run on, so an {actor} ref and
+      // the actor it names are the same instant even when frames drop.
+      if (sphericalWorld?.living) sphericalWorld.living.setTime(s.sceneTime);
+      if (shotLead && s.lead) {
+        // The bird flies the path just ahead of the lens. Only what is DRAWN
+        // moves: the flight model is held where it was.
+        _shotUp.set(s.lead[0], s.lead[1], s.lead[2]).normalize();
+        _shotFwd.set(s.lead[0] - s.position[0], s.lead[1] - s.position[1], s.lead[2] - s.position[2]);
+        _shotFwd.addScaledVector(_shotUp, -_shotFwd.dot(_shotUp));
+        if (_shotFwd.lengthSq() > 1e-8) {
+          _shotFwd.normalize();
+          _shotRight.crossVectors(_shotFwd, _shotUp).normalize();
+          _shotBasis.makeBasis(_shotRight, _shotUp, _shotFwd.negate());
+          birbAnchor.quaternion.setFromRotationMatrix(_shotBasis).multiply(modelOrientationOffset);
+        }
+        birbAnchor.position.set(s.lead[0], s.lead[1], s.lead[2]);
+        birbAnchor.updateMatrixWorld(true);
+        birbAnchor.visible = true;
+      } else {
+        birbAnchor.visible = false;
+      }
+    }
+
+    // A touch or Esc hands the camera back, outside studio mode.
+    const __shotStudio = new URLSearchParams(location.search).has('studio');
+    if (!__shotStudio) {
+      const stopOnInput = (e) => {
+        if (!shotPlayer?.active) return;
+        if (e.type === 'keydown' && e.key !== 'Escape') return;
+        stopShot();
+      };
+      window.addEventListener('keydown', stopOnInput);
+      window.addEventListener('pointerdown', stopOnInput, { capture: true });
+    }
+
+    function applyStartupShot() {
+      const params = new URLSearchParams(location.search);
+      if (params.has('studio')) {
+        import('./src/ui/studio.js').then(({ installStudio }) => installStudio({
+          params,
+          canvas: renderer.domElement,
+          listShots: async () => {
+            const { registry } = await loadShots();
+            const biome = (sphericalWorld?.root?.name || '').replace('spherical-world-', '');
+            return registry.shotsFor(biome).map((x) => ({ name: x.name, title: x.title }));
+          },
+          play: (name, opts) => playShot(name, opts),
+          stop: () => stopShot(),
+          status: () => shotPlayer?.status() ?? { name: null },
+          setQualityHold: () => {},
+        })).catch((err) => console.warn('[studio] failed to load', err));
+        return;
+      }
+      const name = params.get('shot');
+      if (!name) return;
+      playShot(name, { loop: params.get('loop') === '1' }).then((r) => {
+        if (!r.ok) showGotoToast(`Shot "${name}": ${r.error}`);
+      });
     }
 
     // ?env=<biome>&goto=<landmark-id>, applied once when the loop starts.
@@ -15114,6 +15367,42 @@
           flightController.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, eyeUp, look.clone().multiplyScalar(-1)));
           __birbPendingCameraSnap = 1;
           return { name, phase: s.phase, time: lw.time };
+        },
+        // Shots (src/camera/flythrough.js + src/camera/shots.js). `seek` holds
+        // the shot at t; `audit` compiles and audits without playing.
+        shot: {
+          list: async () => { const { registry } = await loadShots(); return registry.SHOTS.map((x) => ({ name: x.name, world: x.world, title: x.title })); },
+          play: (name, opts = {}) => playShot(name, opts),
+          stop: () => stopShot(),
+          seek: (t) => shotPlayer?.seek(t) ?? null,
+          resume: () => shotPlayer?.resume(),
+          status: () => shotPlayer?.status() ?? { name: null },
+          // What the kernel says for t, and where the camera that rendered
+          // the last frame actually stood — a harness compares the two.
+          sample: (t) => shotPlayer?.compiled?.sample(t) ?? null,
+          camera: () => ({
+            position: cameraState.camera.position.toArray(),
+            fov: cameraState.camera.fov,
+            birdVisible: birbAnchor.visible,
+            bird: birbAnchor.position.toArray(),
+          }),
+          // Why is the subject hidden at t? Names the blocker ('terrain' or a mesh).
+          why: async (name, t = 0) => {
+            const r = await prepareShot(name, { force: true });
+            if (!r.compiled) return r;
+            const smp = r.compiled.sample(t);
+            const occ = shotOccluders();
+            const target = smp.lead || smp.lookAt;
+            const dx = target[0] - smp.position[0], dy = target[1] - smp.position[1], dz = target[2] - smp.position[2];
+            const L = Math.hypot(dx, dy, dz);
+            const terrain = [];
+            for (let i = 1; i < 40; i++) { const u = i / 40; const x = smp.position[0] + dx * u, y = smp.position[1] + dy * u, z = smp.position[2] + dz * u; terrain.push(+(Math.hypot(x, y, z) - shotGroundRadius(x, y, z)).toFixed(1)); }
+            return { L: +L.toFixed(1), solid: occ ? occ.blocks(smp.position, target, 6) : null, terrainClearanceAlong: terrain, occluders: occ?.count };
+          },
+          audit: async (name) => {
+            const r = await prepareShot(name, { force: true });
+            return r.compiled ? { name, duration: r.compiled.duration, dynamic: r.compiled.dynamic, variant: r.variant, audit: r.audit } : r;
+          },
         },
         auditWorld: async ({ plant = null, full = false } = {}) => {
           if (!sphericalWorld?.root) return null;
@@ -16538,12 +16827,33 @@
         } catch (err) {
           console.warn('[goto] startup location failed', err);
         }
+        try {
+          applyStartupShot();
+        } catch (err) {
+          console.warn('[shot] startup shot failed', err);
+        }
       });
       if (pendingDevPanelOpen) {
         pendingDevPanelOpen = false;
         openDevWorkbench();
       }
     };
+    // Studio mode starts the game itself: click through the splash chain the
+    // way a player would (it is time-driven, so poll), then Tap-to-Start.
+    if (new URLSearchParams(location.search).has('studio')) {
+      const deadline = performance.now() + 60000;
+      const advance = () => {
+        if (gameLoopStarted || performance.now() > deadline) return;
+        const startBtn = document.querySelector('[data-title-start]');
+        const title = document.querySelector('[data-title-screen]');
+        if (startBtn && title && !title.hidden && !startBtn.disabled) { startBtn.click(); return; }
+        document.querySelector('[data-splash-screen]')?.click();
+        document.querySelector('[data-vibe-splash]')?.click();
+        setTimeout(advance, 250);
+      };
+      setTimeout(advance, 300);
+    }
+
     // If the user already tapped Start before the script finished loading
     // (very fast tap / slow network), run the full start sequence now — it
     // reveals the UI, starts the loop + music, and dismisses the title page.

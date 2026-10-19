@@ -480,6 +480,17 @@ export function createValleyFeature({
   return {
     group,
     update,
+    // Where the falls are, for the landmark registry (?goto=waterfall,
+    // discovery pins, shots). World positions; `forward` runs downstream.
+    points: {
+      pool: poolCenter.clone(),
+      fallTop: rimTop.clone(),
+      fallBase: fallBase.clone(),
+      fallCenter: fallCenter.clone(),
+      drop,
+      up: A.clone(),
+      forward: F.clone(),
+    },
     /**
      * Point the water's specular at this environment's key light. Called on
      * every environment switch, after the light rig has been positioned.

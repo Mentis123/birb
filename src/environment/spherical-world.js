@@ -2332,6 +2332,8 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
     {
       id: 'stone-arch', label: 'Stone arch', kind: 'arch',
       base: archBase.clone(), apex: ARCH_RADIUS, meshes: [archMesh],
+      // Through the opening: shots and the discovery pin use this frame.
+      forward: archFace.clone(),
       contacts: [-1, 1].map((sg) => archBase.clone().addScaledVector(archSide, sg * ARCH_RADIUS)),
       position: archBase.clone().addScaledVector(arch.up, ARCH_RADIUS * 0.6),
       // Far enough back that the whole span is in a portrait frame, close
@@ -2407,6 +2409,7 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
   const group = new THREE.Group();
   group.name = `${variant}-landmark`;
   let contacts = null;
+  let landmarkForward = null;
   const orient = (object) => object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
 
   let apexHeight = 0;
@@ -2505,6 +2508,7 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
     group.add(ring);
     apexHeight = R_ARCH + TUBE - 1;
     contacts = [-1, 1].map((sg) => ring.position.clone().addScaledVector(side, sg * R_ARCH));
+    landmarkForward = face.clone();
     // Colliders follow the ARC (see the forest arch): a vertical post at the
     // foot guards air beside a leg nine units up.
     for (const sign of [-1, 1]) {
@@ -2555,6 +2559,7 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
     base: base.clone(),
     apex: apexHeight,
     contacts,
+    forward: landmarkForward,
     meshes: group.children.filter((o) => o.isMesh),
     viewDistance: Math.max(34, apexHeight * 1.6),
   }];
@@ -4726,6 +4731,22 @@ export function createSphericalWorld(scene, { three, variant = 'forest', definit
     // spatial-hash collisionSystem, not the Raycaster.
     const _noRaycast = () => {};
     valley.group.traverse((o) => { o.raycast = _noRaycast; });
+    // Every biome has the falls, so every biome gets a waterfall landmark:
+    // ?goto=waterfall, a discovery pin, and a named place a shot can fly to.
+    // No meshes listed — the falls are a decorative sheet, not a prop that
+    // stands on the ground, so the grounding audit has nothing to say.
+    if (valley.points) {
+      const vp = valley.points;
+      _landmarks.push({
+        id: 'waterfall', label: 'Waterfall', kind: 'waterfall',
+        position: vp.fallCenter.clone(),
+        base: vp.pool.clone(),
+        apex: vp.drop,
+        forward: vp.forward.clone(),
+        meshes: [],
+        viewDistance: Math.max(40, vp.drop * 2.2),
+      });
+    }
     features = {
       valley,
       update(birdPos, delta, timeMs) {

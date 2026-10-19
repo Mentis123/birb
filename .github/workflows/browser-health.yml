@@ -131,6 +131,16 @@ jobs:
         # all four biomes, then three PLANTED defects that must each fail it.
         run: node tools/birb-audit.mjs
 
+      - name: Every camera shot audits clean and drives the live camera
+        if: ${{ !cancelled() }}
+        # Shots are data (src/shots/index.js) flown through a live world whose
+        # props are random per boot. Each is planned against the real world
+        # (ground, water, solids, line of sight to its subject), rendered at
+        # two frames, and the camera that drew each frame must stand exactly
+        # where the kernel says: a shot that reached the wrong rig would look
+        # like the chase camera and pass any screenshot check.
+        run: node tools/birb-flythrough.mjs all --frames 2
+
       - name: The bird can stand, walk, stop, reverse and steer
         if: ${{ !cancelled() }}
         # The grounded state had a walk cycle and walk controls for months

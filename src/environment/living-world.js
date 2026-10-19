@@ -124,7 +124,7 @@ export function streetLanes(R) {
 
 // ── fleet: N vehicles sharing one InstancedMesh ───────────────────────────
 
-function createFleet(THREE, { name, mesh, count, place, orient = 'travel' }) {
+function createFleet(THREE, { name, mesh, count, place, orient = 'travel', forwardOf = null }) {
   const _p = new THREE.Vector3();
   const _ahead = new THREE.Vector3();
   const _up = new THREE.Vector3();
@@ -140,9 +140,12 @@ function createFleet(THREE, { name, mesh, count, place, orient = 'travel' }) {
   /** Frame of vehicle i at time t into _p (position), _fwd, _up. */
   function frame(i, t) {
     place(i, t, _p);
-    place(i, t + 0.05, _ahead);
     _up.copy(_p).normalize();
-    _fwd.copy(_ahead).sub(_p);
+    // A vehicle standing still (a cabin dwelling at its station) has no
+    // direction of travel to read off its path, so a fleet can say what
+    // its forward is instead of differencing two positions.
+    if (forwardOf) forwardOf(i, t, _fwd);
+    else { place(i, t + 0.05, _ahead); _fwd.copy(_ahead).sub(_p); }
     _fwd.addScaledVector(_up, -_fwd.dot(_up));
     if (_fwd.lengthSq() < 1e-10) _fwd.set(1, 0, 0).addScaledVector(_up, -_up.x);
     _fwd.normalize();
@@ -591,7 +594,9 @@ export function createLivingWorld({ THREE, root, variant, sphereRadius, groundAt
       for (const g of [cableGeo, stationGeo, cabinGeo]) g.dispose();
       for (const mm of [cableMat, stationMat, cabinMat]) mm.dispose();
     });
-    const period = 2 * (len / 4.5) + 2 * 6;   // 4.5 u/s, a 6 s dwell each end
+    // 2.2 u/s: an aerial tramway is SLOW, and the ride is the point — at
+    // 4.5 a 44-unit line was over in ten seconds. A 6 s dwell each end.
+    const period = 2 * (len / 2.2) + 2 * 6;
     const travel = (t, k) => {
       const u = ((t / period + (k ? 0.5 : 0)) % 1 + 1) % 1;
       // dwell, ride up, dwell, ride down, as fractions of the period
@@ -604,6 +609,9 @@ export function createLivingWorld({ THREE, root, variant, sphereRadius, groundAt
     const tmp = new THREE.Vector3();
     const fleet = createFleet(THREE, {
       name: 'cablecar', mesh: cabins, count: 2, orient: 'travel',
+      // Always up the cable: a dwelling cabin is not moving, and a cabin
+      // reads the same from either end.
+      forwardOf: (i, t, out) => out.copy(along),
       place(i, t, out) {
         // Cabin i runs its own cable; the two are half a period apart, so
         // one goes up while the other comes down and they pass mid-span.
