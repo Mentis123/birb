@@ -1,5 +1,71 @@
 # CLAUDE.md — Birb Mobile
 
+> **FULL SEND (2026-10-19): the world moves, it can be found, it can film
+> itself, and every prop is measured against its ground.** Plan and status:
+> [docs/FULL_SEND_PLAN.md](docs/FULL_SEND_PLAN.md). Ideas ported from the
+> energy/mining tabletop kit in `Mentis123/adamrappaport` (public/map-assets),
+> each changed for a planet where up is radial.
+>
+> **The world audit found nine defects on its first run, none of them seen
+> by anyone.** `__BIRB.auditWorld()` / `tools/birb-audit.mjs` (Browser Health,
+> 4 biomes x 3 fixed seeds + 1 random, three PLANTED defects that must fail
+> it) reads each prop's clearance above the ground it stands on, radially.
+> It caught: the **summit arch lying flat** (the forest arch's extra PI/2,
+> again — rise 3.7 of 18), **scree floating up to 34 units** (placed at the
+> base sphere, never the carved ground), **canyon corridor walls 18-31 units
+> in the air and mountain cliff walls 4-35**, the **fallen log** hanging over
+> the valley rim, forest rocks fully under the ground, **a third of the
+> forest's shrubs under lake water**, and — only on a random world — a
+> **canyon arch on one foot** 7.4 units up. Every fix is terrain samples
+> only, NO RNG draw, so nothing else in any world moves; drowned undergrowth
+> is collapsed AFTER planting (the kit's rule). Two traps in the audit itself:
+> a randomly rotated rock's "bounding-box bottom" is a side as often as a
+> bottom (small meshes are judged by their real vertices), and a
+> DodecahedronGeometry is non-indexed — 108 vertices — so a 96-vertex
+> threshold silently put rocks back on the wrong rule. Trunks (8%) and city
+> towers (~11%) standing in lakes are REPORTED, not fixed: they carry nests.
+>
+> **Clocked actors** (`src/environment/living-world.js`, `?living=0`): a pure
+> function of SCENE time, so pause stops them and a shot seeks them. City
+> hover traffic is the 14/38 tori the city always drew, parked, now flying
+> the shader street grid (+0 tris, +0 draws); a lit sky-tram; a mountain
+> cable car (short and steep: on a radius-120 planet the ground bulges
+> d^2/8R above a straight cable — every 120-unit span hit the ground);
+> raptors over every landmark (6 triangles, the forest can afford them).
+> Routes avoid towers read from INSTANCE MATRICES — tower colliders cover
+> only base and middle. A box soup wound inward draws nothing under
+> FrontSide; a test pins the winding.
+>
+> **Shots** (`src/camera/flythrough.js`, `src/camera/shots.js` — NOT
+> `src/shots/`, `.gitignore` ignores every `shots/` directory and the first
+> commit silently left the registry out): keyframes are refs into the live
+> world, audited for ground, water, DRAWN solids (capsules from instance
+> matrices — canopies only have colliders in the cruise band, and the first
+> render spent half its frames inside crowns) and line of sight; `planShot`
+> turns, widens and raises a flight until a random world lets it through.
+> `?shot=valley` plays after Tap-to-Start; `?studio=1&shot=…&record=1`
+> starts the game itself, hides all chrome and saves a WebM from the canvas.
+> `tools/birb-flythrough.mjs` renders frame-exact and asserts the rendering
+> camera stood where the kernel said (error 0). An orbit of the falls cannot
+> see into the bowl; the shot flies down the river's cut instead.
+>
+> **Discovery** (`src/ui/discovery.js`, `pins-layer.js`): 3-6 places per
+> biome (derived extremes added: tallest tower, high peak, tallest spire,
+> the cable car), found after 1.2 s near and in view, toasted, counted on
+> the title, persisted, minimap arrow to the nearest UNFOUND. Pins are not
+> buttons (a pin under a thumb steals the joystick) and live INSIDE the
+> canvas wrapper at z 2 — on body at z 40 they drew under the whole game.
+>
+> **Grounding**: contact decals only where there is no shadow map (Ultra
+> has real shadows and no triangle headroom in the forest); `fog: false`, or
+> the black patch hazes into a PALE smudge. A damp shore band, compile-time
+> opt-in so every other shader compile is byte-identical (`?shore=0`).
+>
+> **Not done, on purpose**: the `__BIRB` extraction (R1) — 2,100 lines of
+> closure for no player-visible change; attract mode (the render loop is
+> deferred behind the title by design); perching on a moving actor
+> (unverified in nesting-system). **Unmeasured: the phone.**
+
 > **2026-09-10 realism research and executive direction:**
 > [docs/realism/README.md](docs/realism/README.md) is the next-phase decision
 > record, reviewed against main `f3f7c17`. Build the ambitious forest-river

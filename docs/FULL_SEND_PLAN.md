@@ -11,6 +11,27 @@ already borrowed Birb's adaptive-quality rules; this round borrows back. Nothing
 is copied verbatim: the kit is a flat table with +Y up and a turntable; Birb is a
 radius-120 sphere where up is radial. Every port below says what changes.
 
+## Status — built 2026-10-19 (same day, one session)
+
+What shipped, against the build order in §8. Every item is behind an
+escape hatch and has a gate in Browser Health.
+
+| Step | State | Notes |
+|---|---|---|
+| 1 §5 world audit | **Shipped** | `__BIRB.auditWorld()`, `tools/birb-audit.mjs` (4 biomes × 3 fixed seeds + 1 random, three planted defects). First run found: summit arch lying flat, scree floating to 34 u, corridor/cliff walls floating 4–35 u, fallen log in the air, rocks fully buried, a third of forest shrubs under lake water, a canyon arch on one foot (random world). All fixed with zero RNG draws. |
+| 2 R5/R6 update registry + landmark data | **Shipped (as `living`)** | `world.living.update(dt)` is the per-world tick for new systems; landmarks carry label/kind/base/apex/meshes/forward/contacts. Old hard-wired calls not moved (no gain). |
+| 2 R1–R4 extractions | **Not done** | Deliberately: a 2,100-line closure move buys no player-visible value and every frozen harness would have to re-prove it. Still the right next refactor; do it as its own PR with the pinned-pose 0-px A/B. |
+| 3 A1 hover traffic | **Shipped** | +0 tris, +0 draws. Lanes on the shader street grid, routed round towers read from instance matrices. |
+| 4 §4 shots + studio | **Shipped** | Kernel + player + registry (`src/camera/shots.js`, not `src/shots/` — `.gitignore` ignores every `shots/`). Audit checks ground, water, drawn solids (capsules from instance matrices) and line of sight; `planShot` turns/widens/raises a flight to clear a random world. 5 shots. `tools/birb-flythrough.mjs` (camera error 0). Attract mode NOT built (the render loop is deliberately deferred behind the title). |
+| 5 A2 sky-tram, A3 cable car | **Shipped** (no perch) | Perch on a moving actor not built: unverified in nesting-system, left for its own gate. |
+| 6 §3 discovery | **Shipped** | 3–6 places per biome (derived extremes added), pins non-interactive, minimap arrow → nearest unfound, title count, persisted. |
+| 7 §6 grounding | **Shipped** | Contact decals (no-shadow tiers only), damp shore band (subtle), undergrowth out of lakes. |
+| 8 A4 barge, A5 buzzards | Raptors shipped (all biomes, 6 tris); barge not built. |
+| 10 Codex art (C1–C5) | **Open** | Briefs in §7 stand; nothing here needed an asset. |
+
+Budget: see the CLAUDE.md entry for the measured rows. Phone: still
+unmeasured — everything above is SwiftShader and the unit suite.
+
 ## 0. What "best" means here
 
 1. **The world is alive.** Things move on their own, on a clock, and the player
