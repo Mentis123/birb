@@ -78,7 +78,13 @@ export function resolveRef(ref, ctx, sceneTime, variant = null) {
     const a = ctx.actors?.[ref.actor];
     if (!a) throw new Error(`unknown actor "${ref.actor}"`);
     const s = a.stateAt(sceneTime);
-    return actorFrame(s.position, s.forward, ref.offset || [0, 0, 0]);
+    const o = ref.offset || [0, 0, 0];
+    // A planning variant swings an actor-relative camera round the actor
+    // too: a chase that clips a tower on the left is often clean on the
+    // right (the first city-tram plan failed with only `raise` to try).
+    const sp = variant?.spin || 0, sc = variant?.scale || 1;
+    const cs = Math.cos(sp), sn = Math.sin(sp);
+    return actorFrame(s.position, s.forward, [(o[0] * cs - o[2] * sn) * sc, o[1], (o[0] * sn + o[2] * cs) * sc]);
   }
   if (ref.landmark || ref.around) {
     const id = ref.landmark || ref.around;
@@ -327,7 +333,7 @@ export function auditShot(compiled, { groundRadiusAt, waterRadiusAt = null, obst
  * passes, the attempt with the fewest failed checks is returned with its
  * failing audit, so the caller can refuse it honestly.
  */
-export function planShot(spec, ctx, auditOpts, { budgetMs = 3000, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) } = {}) {
+export function planShot(spec, ctx, auditOpts, { budgetMs = 6000, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) } = {}) {
   const t0 = now();
   const spins = [0, 0.45, -0.45, 0.9, -0.9, 1.6, -1.6, Math.PI];
   const scales = [1, 1.25, 0.85];

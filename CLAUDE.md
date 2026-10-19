@@ -26,9 +26,12 @@
 > towers (~11%) standing in lakes are REPORTED, not fixed: they carry nests.
 >
 > **Clocked actors** (`src/environment/living-world.js`, `?living=0`): a pure
-> function of SCENE time, so pause stops them and a shot seeks them. City
-> hover traffic is the 14/38 tori the city always drew, parked, now flying
-> the shader street grid (+0 tris, +0 draws); a lit sky-tram; a mountain
+> function of SCENE time, so pause stops them and a shot seeks them. The
+> city's parked translucent tori are GONE (they read as donuts — owner) and
+> its random draws are still consumed so no building moves; the city has
+> **sky cabs** instead: painted low-poly flying cars with lamps and an
+> under-glow, on street lanes over the lit roads and on tilted great-circle
+> skyways above them (2 draws, ~108 tris a cab, 18/40); a lit sky-tram; a mountain
 > cable car (short and steep: on a radius-120 planet the ground bulges
 > d^2/8R above a straight cable — every 120-unit span hit the ground);
 > raptors over every landmark (6 triangles, the forest can afford them).
@@ -60,6 +63,15 @@
 > has real shadows and no triangle headroom in the forest); `fog: false`, or
 > the black patch hazes into a PALE smudge. A damp shore band, compile-time
 > opt-in so every other shader compile is byte-identical (`?shore=0`).
+>
+> **Budget, measured** (`tools/species-frame-budget.mjs`, branch vs main in
+> the same sandbox, Ultra, boot seed 1): city 58.6k vs 58.0k, mountain 54.7k
+> vs 54.2k, forest and owl-boost LOWER than main; all 32 rows of the branch
+> run pass (worst owl boost 78,893 / 115,054 with shadows). The tool needs
+> `PUPPETEER_CORE=<dir>/node_modules/puppeteer-core CHROME_PATH=/opt/pw-
+> browsers/chromium-1194/chrome-linux/chrome` in a cloud sandbox. The city
+> 49-50k / mountain 46-48k Ultra figures quoted further down are STALE:
+> main itself measures 58.0k / 54.2k here.
 >
 > **Not done, on purpose**: the `__BIRB` extraction (R1) — 2,100 lines of
 > closure for no player-visible change; attract mode (the render loop is
