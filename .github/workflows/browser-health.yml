@@ -120,6 +120,17 @@ jobs:
         # count as failures: that is how the setup bug announced itself.
         run: node tools/birb-modes.mjs
 
+      - name: Every prop stands on its ground, in every biome and on several worlds
+        if: ${{ !cancelled() }}
+        # Every floating, flattened or buried prop this game shipped was found
+        # by eye on the phone: floating canyon tori, a forest arch laid flat,
+        # an arch buried in a pit, and (found by this check, its first run)
+        # floating scree and corridor walls and a summit arch lying flat. The
+        # audit reads the number each of those was: a prop's clearance above
+        # the ground it stands on. Three fixed world seeds plus a random one,
+        # all four biomes, then three PLANTED defects that must each fail it.
+        run: node tools/birb-audit.mjs
+
       - name: The bird can stand, walk, stop, reverse and steer
         if: ${{ !cancelled() }}
         # The grounded state had a walk cycle and walk controls for months

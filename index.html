@@ -14246,7 +14246,13 @@
       const dir = target.clone().normalize();
       const terrain = (typeof sampleTerrainHeight === 'function')
         ? sampleTerrainHeight(dir.x, dir.y, dir.z) : 0;
-      flightController.position.copy(dir).multiplyScalar(sphericalWorld.sphereRadius + terrain + 16);
+      // At least level with the landmark's own middle: a landmark on a plateau
+      // seen from ground+16 in the valley beside it is a view of pine trunks
+      // (the summit arch, measured: the bird opened 13 units under the arch's
+      // base with a canopy filling the frame).
+      let eyeR = sphericalWorld.sphereRadius + terrain + 16;
+      if (found.base && Number.isFinite(found.apex)) eyeR = Math.max(eyeR, found.base.length() + found.apex * 0.6);
+      flightController.position.copy(dir).multiplyScalar(eyeR);
       // AIM at it. The first version called a setForward() that does not
       // exist on this controller, so the bird kept whatever heading it had
       // and the landmark was usually behind the camera — which is how three
@@ -15069,6 +15075,54 @@
           canFire: rocketSystem ? rocketSystem.canFire() : null,
         }),
         landmarks: () => (sphericalWorld?.landmarks || []).map((l) => l.id),
+        // Is every prop standing on its ground? src/environment/world-audit.js;
+        // tools/birb-audit.mjs runs it on every biome in CI. `plant` moves one
+        // prop off its ground first ('float' | 'bury' | 'flat-arch'), so the
+        // harness can prove the audit fails on the defect it exists for.
+        auditWorld: async ({ plant = null, full = false } = {}) => {
+          if (!sphericalWorld?.root) return null;
+          const { auditSphericalWorld } = await import('./src/environment/world-audit.js');
+          const R = sphericalWorld.sphereRadius;
+          const groundRadiusAt = (x, y, z) => R + sampleTerrainMeshHeight(x, y, z);
+          const undo = [];
+          if (plant) {
+            if (plant === 'flat-arch') {
+              const lm = (sphericalWorld.landmarks || []).find((l) => l.kind === 'arch' && l.meshes?.length);
+              const m = lm?.meshes[0];
+              if (m) {
+                const q = m.quaternion.clone();
+                undo.push(() => m.quaternion.copy(q));
+                m.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2));
+              }
+            } else {
+              let layer = null;
+              sphericalWorld.root.traverse((o) => { if (!layer && o.isInstancedMesh && /trunk/i.test(o.name)) layer = o; });
+              if (layer) {
+                const mtx = new THREE.Matrix4();
+                layer.getMatrixAt(0, mtx);
+                const saved = mtx.clone();
+                const p = new THREE.Vector3().setFromMatrixPosition(mtx);
+                p.addScaledVector(p.clone().normalize(), plant === 'bury' ? -60 : 25);
+                mtx.setPosition(p);
+                layer.setMatrixAt(0, mtx);
+                undo.push(() => { layer.setMatrixAt(0, saved); layer.instanceMatrix.needsUpdate = true; });
+              }
+            }
+          }
+          let result;
+          try {
+            result = auditSphericalWorld(sphericalWorld, {
+              groundRadiusAt,
+              routes: sphericalWorld.living?.routes?.() || [],
+            });
+          } finally {
+            undo.forEach((f) => f());
+          }
+          result.environment = sphericalWorld.root.name;
+          result.planted = plant;
+          if (!full) result.sections = result.sections.map(({ failures, ...rest }) => ({ ...rest, failures: (failures || []).slice(0, 3) }));
+          return result;
+        },
         // The bird alone against a neutral background, for
         // tools/birb-bird-sheet.mjs. Hides the world, sky, weather, drones and
         // rings and swaps scene.background for a flat mid-grey; birdStudio(false)

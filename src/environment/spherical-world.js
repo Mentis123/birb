@@ -1794,6 +1794,7 @@ function buildForestOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       dummy.rotation.set(_activeRng() * Math.PI, _activeRng() * Math.PI, _activeRng() * Math.PI);
       dummy.scale.set(shape.x, shape.y, shape.z);
       dummy.updateMatrix();
+      if (_keepRockVisible(THREE, dummy, rockUnitGeom, 0.3 * shape.y) > 0) pos.copy(dummy.position);
       rockInst.setMatrixAt(i, dummy.matrix);
       // shape.max, not s: this collider was the rock's EXACT extent under a
       // uniform scale, so the long axis would otherwise escape it.
@@ -2026,9 +2027,9 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
   // Three of them, spread roughly a third of the planet apart, so no matter
   // where the player is at least one is within its horizon range.
   const SITES = [
-    { angle: 0.30, bearing: 0.0, id: 'giant-tree' },
-    { angle: 1.95, bearing: 1.9, id: 'giant-tree-north' },
-    { angle: 2.30, bearing: -1.7, id: 'giant-tree-far' },
+    { angle: 0.30, bearing: 0.0, id: 'giant-tree', label: 'Giant tree' },
+    { angle: 1.95, bearing: 1.9, id: 'giant-tree-north', label: 'Northern giant' },
+    { angle: 2.30, bearing: -1.7, id: 'giant-tree-far', label: 'Far giant' },
   ];
 
   // Where the arch must NOT go. The champion trees are 88 units of trunk
@@ -2045,6 +2046,7 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
     trunk.position.copy(base).addScaledVector(up, TRUNK_HEIGHT / 2);
     orient(trunk, up);
     group.add(trunk);
+    const siteMeshes = [trunk];
 
     // Four crowns stacked up the top half, widest low, so the silhouette
     // reads as one enormous tree rather than a pole with a hat.
@@ -2057,6 +2059,7 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
       crown.scale.set(scale, scale * 0.95, scale);
       orient(crown, up);
       group.add(crown);
+      siteMeshes.push(crown);
       top = height + scale * 0.95;
     }
 
@@ -2103,17 +2106,68 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
     });
     landmarks.push({
       id: site.id,
+      label: site.label,
+      kind: 'tree',
       position: base.clone().addScaledVector(up, TRUNK_HEIGHT * 0.6),
+      base: base.clone(),
+      apex: TRUNK_HEIGHT,
+      meshes: siteMeshes,
       viewDistance: TRUNK_HEIGHT,
     });
   }
 
   // Two smaller silhouettes near the valley, for close-range orientation.
-  const logDir = along(0.17, 1.15);
-  const log = groundAt(logDir);
-  const logMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.8, 34, 8), barkMat);
-  logMesh.position.copy(log.position).addScaledVector(log.up, 2.2);
-  const logAxis = new THREE.Vector3().crossVectors(log.up, forward).normalize();
+  // A fallen log LIES on the ground. It was placed level at its centre's
+  // height with its axis fixed by the valley frame, and it sits on the valley
+  // rim: measured, both ends hung 6-47 units over the falling slope and no
+  // part of it touched anything (tools/birb-audit.mjs). So search a small
+  // patch and the bearing for the place where a 34-unit trunk can rest, and
+  // tilt it to the ground under its two ends. Deterministic: terrain samples
+  // only, no RNG draws, so nothing else in the forest moves.
+  const LOG_LEN = 34;
+  const logAuthored = along(0.17, 1.15);
+  const logTanA = new THREE.Vector3().crossVectors(logAuthored, forward).normalize();
+  const logTanB = new THREE.Vector3().crossVectors(logAuthored, logTanA).normalize();
+  const logLie = (centre, bearing) => {
+    const axis = logTanA.clone().multiplyScalar(Math.cos(bearing)).addScaledVector(logTanB, Math.sin(bearing));
+    axis.addScaledVector(centre, -axis.dot(centre)).normalize();
+    const at = (u) => {
+      const d = centre.clone().addScaledVector(axis, u * LOG_LEN / sphereRadius).normalize();
+      return { d, h: terrainHeightDir(d.x, d.y, d.z) };
+    };
+    const ends = [at(-0.5), at(0.5)];
+    let worst = 0;
+    for (const u of [-0.25, 0, 0.25]) {
+      const line = ends[0].h + (u + 0.5) * (ends[1].h - ends[0].h);
+      worst = Math.max(worst, Math.abs(at(u).h - line));
+    }
+    const slope = Math.abs(ends[1].h - ends[0].h);
+    return { ends, score: worst + 0.25 * slope };
+  };
+  let logBest = null;
+  for (let i = 0; i <= 24; i++) {
+    const rad = i === 0 ? 0 : 3 + 22 * (i / 24);
+    const ang = i * 2.399963229728653;
+    const centre = logAuthored.clone()
+      .addScaledVector(logTanA, rad * Math.cos(ang) / sphereRadius)
+      .addScaledVector(logTanB, rad * Math.sin(ang) / sphereRadius)
+      .normalize();
+    const at = centre.clone().multiplyScalar(sphereRadius);
+    if (!keepClear.every((o) => at.distanceTo(o.position.clone().normalize().multiplyScalar(sphereRadius)) > o.radius)) continue;
+    for (let k = 0; k < 12; k++) {
+      const cand = logLie(centre, (k / 12) * Math.PI);
+      if (!logBest || cand.score < logBest.score) logBest = cand;
+    }
+  }
+  const LOG_LIFT = 2.2;
+  const logEndA = logBest.ends[0].d.clone().multiplyScalar(sphereRadius + logBest.ends[0].h + LOG_LIFT);
+  const logEndB = logBest.ends[1].d.clone().multiplyScalar(sphereRadius + logBest.ends[1].h + LOG_LIFT);
+  const logMid = logEndA.clone().add(logEndB).multiplyScalar(0.5);
+  const logAxis = logEndB.clone().sub(logEndA).normalize();
+  const log = groundAt(logMid.clone().normalize());
+  const logMesh = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.8, LOG_LEN, 8, 4), barkMat);
+  logMesh.name = 'fallen-log';
+  logMesh.position.copy(logMid);
   logMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), logAxis);
   group.add(logMesh);
   keepClear.push({ position: logMesh.position.clone(), radius: 24 });
@@ -2268,9 +2322,16 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
 
   root.add(group);
   landmarks.push(
-    { id: 'fallen-log', position: logMesh.position.clone(), viewDistance: 22 },
     {
-      id: 'stone-arch',
+      id: 'fallen-log', label: 'Fallen log', kind: 'log',
+      position: logMesh.position.clone(), base: log.position.clone(),
+      // Lying down: its highest point is its own diameter plus the lift.
+      apex: 4.6, meshes: [logMesh], viewDistance: 22,
+    },
+    {
+      id: 'stone-arch', label: 'Stone arch', kind: 'arch',
+      base: archBase.clone(), apex: ARCH_RADIUS, meshes: [archMesh],
+      contacts: [-1, 1].map((sg) => archBase.clone().addScaledVector(archSide, sg * ARCH_RADIUS)),
       position: archBase.clone().addScaledVector(arch.up, ARCH_RADIUS * 0.6),
       // Far enough back that the whole span is in a portrait frame, close
       // enough that it is not one more shape on the skyline.
@@ -2278,6 +2339,57 @@ function buildForestLandmarks({ THREE, root, sphereRadius, collisionSystem, prox
     },
   );
   return landmarks;
+}
+
+/**
+ * The lowest drawn ground under a wall's footprint, relative to the base
+ * radius (<= 0). A wall is placed at the base sphere and the terrain is
+ * carved BELOW it, so without this its foot hangs over the carve: measured,
+ * every canyon corridor wall stood 18-31 units in the air and five of six
+ * mountain cliff walls 4-35 (tools/birb-audit.mjs). Sampled, not solved: 9
+ * stations along the length on both faces is finer than the ground mesh.
+ */
+/**
+ * Raise a sunk rock just enough that its top shows. Rocks sink relative to
+ * the ground at their centre; on a valley wall the uphill ground can swallow
+ * the whole stone (tools/birb-audit.mjs found forest rocks with no vertex
+ * above the ground on two of three fixed seeds — invisible, and still
+ * carrying a collider). Exact: the rock's own vertices through its own
+ * matrix, raised by the deficit only, so a rock that already shows is not
+ * moved at all. Terrain samples only, no RNG. Mutates `dummy`.
+ */
+function _keepRockVisible(THREE, dummy, geometry, showAbove) {
+  const p = geometry.attributes.position;
+  const v = new THREE.Vector3();
+  let top = -Infinity;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).applyMatrix4(dummy.matrix);
+    const r = v.length();
+    top = Math.max(top, r - (SPHERE_RADIUS + terrainHeightDir(v.x / r, v.y / r, v.z / r)));
+  }
+  const deficit = showAbove - top;
+  if (deficit > 0) {
+    dummy.position.addScaledVector(dummy.position.clone().normalize(), deficit);
+    dummy.updateMatrix();
+  }
+  return deficit > 0 ? deficit : 0;
+}
+
+function _footprintGroundMin(THREE, center, up, along, length, thickness) {
+  const a = along.clone().addScaledVector(up, -along.dot(up)).normalize();
+  const b = new THREE.Vector3().crossVectors(up, a).normalize();
+  const R = center.length();
+  let lo = Infinity;
+  const d = new THREE.Vector3();
+  for (let i = 0; i <= 8; i++) {
+    const s = (i / 8 - 0.5) * length;
+    for (const t of [-0.5, 0, 0.5]) {
+      d.copy(center).addScaledVector(a, s).addScaledVector(b, t * thickness).normalize();
+      const h = terrainHeightDir(d.x, d.y, d.z);
+      if (h < lo) lo = h;
+    }
+  }
+  return Math.min(0, lo) + (R - SPHERE_RADIUS);
 }
 
 function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proximityTargets, nestablePositions, variant }) {
@@ -2288,20 +2400,25 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
     .addScaledVector(anchor, Math.cos(0.26))
     .addScaledVector(forward, Math.sin(0.26))
     .normalize();
-  const height = terrainHeightDir(dir.x, dir.y, dir.z);
-  const base = dir.clone().multiplyScalar(sphereRadius + height);
-  const up = dir.clone();
+  let height = terrainHeightDir(dir.x, dir.y, dir.z);
+  let base = dir.clone().multiplyScalar(sphereRadius + height);
+  let up = dir.clone();
   const group = new THREE.Group();
   group.name = `${variant}-landmark`;
+  let contacts = null;
   const orient = (object) => object.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
 
   let apexHeight = 0;
   let id = `${variant}-landmark`;
+  let label = 'Landmark';
+  let kind = 'landmark';
 
   if (variant === 'canyons') {
     // A leaning monolith. The canyon is all vertical needles, so the one
     // thing that stands out among them is a mass that is NOT vertical.
     id = 'leaning-monolith';
+    label = 'Leaning monolith';
+    kind = 'monolith';
     const mat = new THREE.MeshLambertMaterial({ color: 0x9c4a2e, flatShading: true });
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 8.5, 54, 7), mat);
     shaft.position.copy(base).addScaledVector(up, 24);
@@ -2316,27 +2433,96 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
     collisionSystem.addCollider(base.clone().addScaledVector(up, 26), 8, 'rock');
   } else if (variant === 'mountain') {
     // A stone arch high on the ridge, wide enough to fly through.
+    //
+    // It shipped LYING FLAT: the same extra PI/2 about local X that laid the
+    // forest arch on its back (TorusGeometry's half ring is already upright
+    // in local XY, so Y-onto-up stands it). tools/birb-audit.mjs measured it
+    // rising 3.7 units against an 18-unit arch. It also sat on the valley
+    // rim, where the ground falls 40 units inside one span, so stand it up
+    // AND pick the site: the flattest 34-unit span near the authored spot
+    // (terrain samples only — no RNG — so the rest of the mountain is where
+    // it was).
     id = 'summit-arch';
+    label = 'Summit arch';
+    kind = 'arch';
+    const R_ARCH = 17;
+    const TUBE = 3.1;
+    const tanA = new THREE.Vector3().crossVectors(dir, forward).normalize();
+    const tanB = new THREE.Vector3().crossVectors(dir, tanA).normalize();
+    const span = (d, bearing) => {
+      const u = d.clone().normalize();
+      const sd = tanA.clone().multiplyScalar(Math.cos(bearing)).addScaledVector(tanB, Math.sin(bearing));
+      sd.addScaledVector(u, -sd.dot(u)).normalize();
+      const at = (k) => {
+        const q = u.clone().addScaledVector(sd, k * R_ARCH / sphereRadius).normalize();
+        return terrainHeightDir(q.x, q.y, q.z);
+      };
+      const c = at(0), a = at(-1), b = at(1);
+      return { up: u, side: sd, feet: [a, b], height: Math.min(a, b), roughness: Math.max(Math.abs(a - c), Math.abs(b - c), Math.abs(a - b)) };
+    };
+    // Score: flat feet first, then HIGH ground (it is a summit arch — the
+    // flattest ground near the authored spot is the valley floor, among the
+    // pines), and nothing standing inside the span: every collider already
+    // placed (trees, peaks, boulders; clouds excepted) must clear the arch
+    // by its own radius plus four units, measured along the surface.
+    const blockers = collisionSystem.objectColliders.filter((c) => c.type !== 'cloud');
+    const spanClear = (u) => blockers.every((c) => {
+      const cl = c.position.length() || 1;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (c.position.x * u.x + c.position.y * u.y + c.position.z * u.z) / cl)));
+      return ang * sphereRadius > R_ARCH + c.radius + 4;
+    });
+    let site = null;
+    let fallback = null;
+    for (let i = 0; i <= 64; i++) {
+      const rad = i === 0 ? 0 : 4 + 60 * (i / 64);
+      const ang = i * 2.399963229728653;
+      const d = dir.clone()
+        .addScaledVector(tanA, rad * Math.cos(ang) / sphereRadius)
+        .addScaledVector(tanB, rad * Math.sin(ang) / sphereRadius)
+        .normalize();
+      const clear = spanClear(d);
+      for (let k = 0; k < 6; k++) {
+        const cand = span(d, (k / 6) * Math.PI);
+        cand.score = cand.roughness - 0.3 * cand.height;
+        if (!fallback || cand.score < fallback.score) fallback = cand;
+        if (clear && cand.roughness < 3 && (!site || cand.score < site.score)) site = cand;
+      }
+    }
+    site = site || fallback;
+    up = site.up.clone();
+    height = site.height;
+    base = up.clone().multiplyScalar(sphereRadius + height);
+    const side = site.side.clone();
+    const face = new THREE.Vector3().crossVectors(side, up).normalize();
     const mat = new THREE.MeshLambertMaterial({ color: 0x8794a4, flatShading: true });
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(17, 3.1, 6, 16, Math.PI), mat);
-    ring.position.copy(base).addScaledVector(up, 1);
-    const stand = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-    ring.quaternion.copy(stand).multiply(
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2),
-    );
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R_ARCH, TUBE, 6, 16, Math.PI), mat);
+    ring.name = 'summit-arch';
+    // Springing points a metre INTO the lower foot's ground: the half torus
+    // ends in open tube mouths, and a mouth standing proud of the ground shows.
+    ring.position.copy(base).addScaledVector(up, -1);
+    ring.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(side, up, face));
     group.add(ring);
-    apexHeight = 18;
-    // Legs only. A collider across the opening turns the one thing worth
-    // flying through into a wall.
-    const side = new THREE.Vector3().crossVectors(up, forward).normalize();
+    apexHeight = R_ARCH + TUBE - 1;
+    contacts = [-1, 1].map((sg) => ring.position.clone().addScaledVector(side, sg * R_ARCH));
+    // Colliders follow the ARC (see the forest arch): a vertical post at the
+    // foot guards air beside a leg nine units up.
     for (const sign of [-1, 1]) {
-      collisionSystem.addCollider(base.clone().addScaledVector(side, sign * 17).addScaledVector(up, 5), 4, 'rock');
+      for (const theta of [0.05, 0.28, 0.52]) {
+        collisionSystem.addCollider(
+          ring.position.clone()
+            .addScaledVector(side, sign * R_ARCH * Math.cos(theta))
+            .addScaledVector(up, R_ARCH * Math.sin(theta)),
+          TUBE + 0.7, 'rock',
+        );
+      }
     }
   } else {
     // A broadcast mast, taller than every tower, with a lit crown. The city
     // is a field of similar boxes; the landmark is the one thing with a
     // different silhouette rather than simply a taller box.
     id = 'broadcast-mast';
+    label = 'Broadcast mast';
+    kind = 'mast';
     const mat = new THREE.MeshLambertMaterial({ color: 0x3d4a5c, flatShading: true });
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 5.2, 74, 6), mat);
     mast.position.copy(base).addScaledVector(up, 37);
@@ -2362,7 +2548,13 @@ function buildBiomeLandmark({ THREE, root, sphereRadius, collisionSystem, proxim
   // fills the frame edge to edge and the capture is a black wall.
   return [{
     id,
+    label,
+    kind,
     position: base.clone().addScaledVector(up, apexHeight),
+    base: base.clone(),
+    apex: apexHeight,
+    contacts,
+    meshes: group.children.filter((o) => o.isMesh),
     viewDistance: Math.max(34, apexHeight * 1.6),
   }];
 }
@@ -2637,9 +2829,13 @@ function buildCanyonOnSphere({ THREE, root, sphereRadius, collisionSystem, proxi
       yRotQ.setFromAxisAngle(yAxis, yAngle);
       orientQ.multiply(yRotQ);
 
-      dummy.position.copy(wp.center).addScaledVector(wp.up, wp.height / 2);
+      // Keep the TOP where it was designed and carry the foot down to the
+      // lowest ground under the footprint, plus a metre of embed.
+      const drop = 1 - _footprintGroundMin(THREE, wp.center, wp.up, wp.cdir, wp.length, wp.thickness);
+      const fullHeight = wp.height + drop;
+      dummy.position.copy(wp.center).addScaledVector(wp.up, wp.height - fullHeight / 2);
       dummy.quaternion.copy(orientQ);
-      dummy.scale.set(wp.length, wp.height, wp.thickness);
+      dummy.scale.set(wp.length, fullHeight, wp.thickness);
       dummy.updateMatrix();
       wallInst.setMatrixAt(idx, dummy.matrix);
     });
@@ -3103,9 +3299,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       yRotQ.setFromAxisAngle(yAxis, yAngle);
       orientQ.multiply(yRotQ);
 
-      dummy.position.copy(wp.center).addScaledVector(wp.up, wp.height / 2);
+      // Keep the TOP where it was designed and carry the foot down to the
+      // lowest ground under the footprint, plus a metre of embed.
+      const drop = 1 - _footprintGroundMin(THREE, wp.center, wp.up, wp.cdir, wp.length, wp.thickness);
+      const fullHeight = wp.height + drop;
+      dummy.position.copy(wp.center).addScaledVector(wp.up, wp.height - fullHeight / 2);
       dummy.quaternion.copy(orientQ);
-      dummy.scale.set(wp.length, wp.height, wp.thickness);
+      dummy.scale.set(wp.length, fullHeight, wp.thickness);
       dummy.updateMatrix();
       wallInst.setMatrixAt(idx, dummy.matrix);
     });
@@ -3347,7 +3547,13 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       const peak = peakPlacements[Math.floor(_activeRng() * peakPlacements.length)];
       jitter.set(randomInRange(-1, 1), randomInRange(-1, 1), randomInRange(-1, 1))
         .normalize().multiplyScalar(randomInRange(4, 16));
-      const pos = peak.pos.clone().add(jitter).normalize().multiplyScalar(sphereRadius - 0.3);
+      // On the GROUND, not on the base sphere. This used `sphereRadius - 0.3`,
+      // which is the ground only where nothing is carved: the mountain carves
+      // down as far as 46 units, so 26 of 30 scree stones hung in the air,
+      // up to 34 units over the slope they were meant to lie on (found by
+      // tools/birb-audit.mjs, the first time anything measured it).
+      const screeDir = peak.pos.clone().add(jitter).normalize();
+      const pos = screeDir.multiplyScalar(sphereRadius + terrainHeightDir(screeDir.x, screeDir.y, screeDir.z) - 0.3);
       const s = randomInRange(0.8, 2.0);
       const shape = rockShape(_activeRng, s);
       dummy.position.copy(pos);
@@ -3355,6 +3561,7 @@ function buildMountainOnSphere({ THREE, root, sphereRadius, collisionSystem, pro
       // Already flattened 0.7 in Y; rockShape's own Y draw keeps that read.
       dummy.scale.set(shape.x, shape.y * 0.7, shape.z);
       dummy.updateMatrix();
+      _keepRockVisible(THREE, dummy, screeGeom, 0.2 * shape.y);
       screeInst.setMatrixAt(i, dummy.matrix);
     }
     screeInst.instanceMatrix.needsUpdate = true;
