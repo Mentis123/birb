@@ -32,6 +32,17 @@ test('lanes are continuous: a small step in u is a small step in space', () => {
   }
 });
 
+test('a skyway is a great circle: constant radius, closes on itself', () => {
+  const lane = { kind: 'arc', a: [1, 0, 0], b: [0, Math.SQRT1_2, Math.SQRT1_2] };
+  const p = { x: 0, y: 0, z: 0 }, q = { x: 0, y: 0, z: 0 };
+  for (const u of [0, 0.13, 0.5, 0.91]) {
+    laneAt(lane, u, 150, R, p);
+    assert.ok(Math.abs(Math.hypot(p.x, p.y, p.z) - 150) < 1e-9);
+  }
+  laneAt(lane, 0, 150, R, p); laneAt(lane, 1, 150, R, q);
+  assert.ok(Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z) < 1e-9, 'u and u+1 are the same point: no end to turn round at');
+});
+
 test('the shuttle dwells at both ends and is continuous', () => {
   assert.equal(_shuttle(0), 0);
   assert.equal(_shuttle(0.5), 1);

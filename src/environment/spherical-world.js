@@ -3969,34 +3969,17 @@ function buildCityOnSphere({ THREE, root, sphereRadius, collisionSystem, proximi
   }
 
   // --- Hover vehicles between buildings (instanced; mobile holds count low) ---
+  // The parked "hover vehicles" are gone: translucent tori hanging motionless
+  // in the sky read as donuts, not traffic (owner, 2026-10-19). The city's
+  // traffic is now the living world's sky cabs (src/environment/living-
+  // world.js). Their old random draws are still CONSUMED here, exactly as
+  // many and in the same order, so every prop placed after this point in the
+  // city stands where it always stood.
   const hoverCount = _isMobile() ? 14 : 38;
-  const hoverMat = new THREE.MeshLambertMaterial({
-    color: 0x6cc4ff,
-    // Keep transparent on both (looks better), but low opacity = cheap blend.
-    transparent: true,
-    opacity: 0.6,
-  });
-  if (hoverCount > 0) {
-    const hoverGeom = new THREE.TorusGeometry(1.5, 0.3, 6, 12);
-    const hoverInst = new THREE.InstancedMesh(hoverGeom, hoverMat, hoverCount);
-    hoverInst.name = 'city-hover';
-    const dummy = new THREE.Object3D();
-    const orientQ = new THREE.Quaternion();
-    const flatXQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-    for (let i = 0; i < hoverCount; i++) {
-      const theta = _activeRng() * Math.PI * 2;
-      const phi = Math.acos(1 - 2 * _activeRng());
-      const pos = placeOnSphere(THREE, sphereRadius, theta, phi, randomInRange(30, 60));
-      orientQ.setFromUnitVectors(defaultUp, pos.clone().normalize()).multiply(flatXQ);
-      dummy.position.copy(pos);
-      dummy.quaternion.copy(orientQ);
-      dummy.scale.setScalar(randomInRange(2.0, 4.2));
-      dummy.updateMatrix();
-      hoverInst.setMatrixAt(i, dummy.matrix);
-    }
-    hoverInst.instanceMatrix.needsUpdate = true;
-    hoverInst.computeBoundingSphere();
-    root.add(hoverInst);
+  for (let i = 0; i < hoverCount; i++) {
+    _activeRng(); _activeRng();          // theta, phi
+    randomInRange(30, 60);               // height
+    randomInRange(2.0, 4.2);             // scale
   }
 
   _landmarks = buildBiomeLandmark({

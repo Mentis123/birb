@@ -13,15 +13,22 @@
 //
 // Budget rule (docs/FULL_SEND_PLAN.md §2): the forest is within 235 triangles
 // of the 80k hard limit at its worst, so nothing here adds geometry there.
-// The city's hover traffic reuses the 14/38 instanced tori the city already
-// draws (zero triangles, zero draws); the city tram and the mountain cable
-// car are one InstancedMesh per material for the whole fleet.
+// The city's sky cabs, the sky-tram and the mountain cable car are each one
+// InstancedMesh per material for the whole fleet (the parked tori the city
+// used to draw are gone), and the raptors are six triangles.
 //
 // Zero allocation per frame: every scratch object is created at build time.
 
 const TAU = Math.PI * 2;
 
 // ── shared scratch-free helpers ──────────────────────────────────────────
+
+// Cab paint: saturated enough to read against a dusk sky, never so bright it
+// competes with the lamps.
+const CAB_PAINTS = [
+  [0.86, 0.26, 0.22], [0.95, 0.72, 0.18], [0.22, 0.55, 0.92], [0.92, 0.92, 0.95],
+  [0.18, 0.72, 0.58], [0.62, 0.32, 0.85], [0.95, 0.48, 0.16],
+];
 
 const nowMs = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -49,11 +56,16 @@ function hash01(n) {
 // ── tiny geometry kit (no BufferGeometryUtils: one import fewer to cache) ──
 
 /**
- * Non-indexed box soup: each box [cx, cy, cz, sx, sy, sz]. Flat normals.
- * Local +X is forward, +Y up — the fleet orients that frame along travel.
+ * Non-indexed box soup: each box [cx, cy, cz, sx, sy, sz, color?]. Flat
+ * normals. Local +X is forward, +Y up — the fleet orients that frame along
+ * travel. When any box carries a color ([r, g, b]) the soup gets a vertex
+ * colour attribute (boxes without one are white), so a cab's paint, glass
+ * and lamps can be one mesh.
  */
 function boxSoup(THREE, boxes) {
   const pos = [];
+  const col = [];
+  const colored = boxes.some((b) => Array.isArray(b[6]));
   const corner = (b, i) => [
     b[0] + ((i & 1) ? 0.5 : -0.5) * b[3],
     b[1] + ((i & 2) ? 0.5 : -0.5) * b[4],
@@ -69,10 +81,12 @@ function boxSoup(THREE, boxes) {
       // FrontSide that draws the inside of the far wall and nothing of the
       // near one (tests/living-world.test.js checks every face's normal).
       pos.push(...A, ...D, ...C, ...A, ...E, ...D);
+      if (colored) { const c = b[6] || [1, 1, 1]; for (let k = 0; k < 6; k++) col.push(c[0], c[1], c[2]); }
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  if (colored) g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   g.computeVertexNormals();
   g.computeBoundingSphere();
   return g;
@@ -94,6 +108,16 @@ export const STREET_BLOCK = 44;
  * Writes into `out` ({x,y,z}) and returns it. Pure.
  */
 export function laneAt(lane, u, r, R, out) {
+  if (lane.kind === 'arc') {
+    // A skyway: a great circle (unit axes a, b spanning its plane). No ends,
+    // so nothing on it ever has to turn round.
+    const t = TAU * (u - Math.floor(u));
+    const c = Math.cos(t), s = Math.sin(t);
+    out.x = r * (lane.a[0] * c + lane.b[0] * s);
+    out.y = r * (lane.a[1] * c + lane.b[1] * s);
+    out.z = r * (lane.a[2] * c + lane.b[2] * s);
+    return out;
+  }
   let lat, lon;
   if (lane.kind === 'lat') {
     lat = (lane.index * STREET_BLOCK) / R;
@@ -215,8 +239,8 @@ export function createLivingWorld({ THREE, root, variant, sphereRadius, groundAt
   // Function declarations below are hoisted; the order here is the order
   // each fleet's RNG draws happen in, so append new fleets at the END.
   if (enabled && variant === 'city') {
-    const hover = buildHoverTraffic();
-    if (hover) fleets.push(hover);
+    const traffic = buildSkyTraffic();
+    if (traffic) fleets.push(...traffic);
     const tram = buildSkyTram();
     if (tram) fleets.push(...tram);
   }
@@ -268,113 +292,131 @@ export function createLivingWorld({ THREE, root, variant, sphereRadius, groundAt
     return out;
   }
 
-  // ── A1 · city hover traffic ────────────────────────────────────────────
-  // The city has always drawn 14 (phone) / 38 (desktop) instanced "hover
-  // vehicles" — and parked every one of them in the sky at a random point,
-  // motionless. They now fly the street grid, each in its own lane, height
-  // and speed. Zero triangles and zero draw calls: the same instances move.
-  function buildHoverTraffic() {
-    let mesh = null;
-    root.traverse((o) => { if (!mesh && o.isInstancedMesh && o.name === 'city-hover') mesh = o; });
-    if (!mesh) return null;
-    const lanes = streetLanes(R);
+  // ── A1 · city sky traffic ──────────────────────────────────────────────
+  // Sky cabs: a low-poly flying car with a lit cabin, warm headlamps, red
+  // tail lamps and a cyan under-glow — the city at dusk is a field of lit
+  // windows, and traffic is what makes it a city rather than a skyline.
+  // They replace the parked translucent tori (which read as donuts). Two
+  // kinds of lane, neither with an end to turn round at:
+  //   - STREET lanes: the shader's east-west roads (lat*R/44 an integer),
+  //     low, over the lit grid, each at a height no tower stands in;
+  //   - SKYWAYS: tilted great circles higher up, a second layer of traffic
+  //     crossing the first at an angle.
+  // Two draws (bodies, lamps) for the whole fleet; ~108 triangles a cab.
+  function buildSkyTraffic() {
     const towers = towerCylinders();
     const tmp = new THREE.Vector3();
-    // A lane at a height is usable if it passes no tower closer than the
-    // tower's own half-width + 6 at any sample whose radius is below the
-    // tower's roof + 6: a vehicle never flies through a building, it picks a
-    // lane over a road where nothing stands that tall.
-    const laneClear = (lane, alt) => {
+    const clearAt = (lane, alt, margin = 6) => {
       for (let k = 0; k < 128; k++) {
         laneAt(lane, k / 128, R + alt, R, tmp);
+        if (tmp.length() - groundR(tmp) < 8) return false;
         const r = tmp.length();
         for (const c of towers) {
-          if (r > c.top + 6) continue;
+          if (r > c.top + margin) continue;
           const along = tmp.x * c.ux + tmp.y * c.uy + tmp.z * c.uz;
           const dx = tmp.x - c.ux * along, dy = tmp.y - c.uy * along, dz = tmp.z - c.uz * along;
-          const lim = c.radius + 6;
+          const lim = c.radius + margin;
           if (along > 0 && dx * dx + dy * dy + dz * dz < lim * lim) return false;
         }
       }
       return true;
     };
-    const count = mesh.count;
+    const streets = streetLanes(R).filter((l) => l.kind === 'lat');
+    const count = isMobile ? 18 : 40;
     const spec = [];
     for (let i = 0; i < count; i++) {
       let pick = null;
+      const skyway = rng() < 0.35;
       for (let tries = 0; tries < 24 && !pick; tries++) {
-        const lane = lanes[Math.floor(rng() * lanes.length)];
-        const alt = 16 + rng() * 34;
-        if (laneClear(lane, alt)) pick = { lane, alt };
+        let lane;
+        if (skyway) {
+          // A random great circle: two orthonormal axes.
+          const ax = [rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1];
+          const la = Math.hypot(...ax) || 1;
+          const a0 = ax.map((v) => v / la);
+          const h = Math.abs(a0[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+          let b0 = [a0[1] * h[2] - a0[2] * h[1], a0[2] * h[0] - a0[0] * h[2], a0[0] * h[1] - a0[1] * h[0]];
+          const lb = Math.hypot(...b0) || 1;
+          b0 = b0.map((v) => v / lb);
+          lane = { kind: 'arc', a: a0, b: b0 };
+        } else lane = streets[Math.floor(rng() * streets.length)];
+        const alt = skyway ? 58 + rng() * 30 : 18 + rng() * 30;
+        if (clearAt(lane, alt)) pick = { lane, alt };
       }
-      // No clear lane at any height tried: fly above the tallest towers.
-      if (!pick) pick = { lane: lanes[i % lanes.length], alt: 78 };
-      // One full cycle of u: a lat lane is its whole circle; a lon lane is
-      // there AND back across its latitude band (measured, not estimated —
-      // the band's ends are where the line bends hardest).
-      let circumference;
-      if (pick.lane.kind === 'lat') circumference = TAU * R * Math.cos((pick.lane.index * STREET_BLOCK) / R);
-      else {
-        circumference = 0;
-        const a = new THREE.Vector3(), b = new THREE.Vector3();
-        laneAt(pick.lane, 0, R, R, a);
-        for (let k = 1; k <= 64; k++) { laneAt(pick.lane, k / 64, R, R, b); circumference += a.distanceTo(b); a.copy(b); }
-        // The shuttle eases, so its peak speed is 1.5x its mean.
-        circumference *= 1.5;
-      }
-      const speed = 7 + rng() * 9;                   // units per second
-      const dir = rng() < 0.5 ? -1 : 1;
+      if (!pick) pick = { lane: streets[i % streets.length], alt: 96 };
+      const circumference = pick.lane.kind === 'lat'
+        ? TAU * R * Math.cos((pick.lane.index * STREET_BLOCK) / R)
+        : TAU * R;
+      const speed = 10 + rng() * 10;
       spec.push({
         ...pick,
-        period: Math.max(20, circumference / speed),
+        period: Math.max(20, circumference * ((R + pick.alt) / R) / speed),
         phase: rng(),
-        dir,
+        dir: rng() < 0.5 ? -1 : 1,
         bob: rng() * TAU,
-        scale: 2.0 + rng() * 2.2,
+        scale: 1.9 + rng() * 0.7,
+        paint: CAB_PAINTS[Math.floor(rng() * CAB_PAINTS.length)],
       });
     }
-    const fleet = createFleet(THREE, {
-      name: 'city-hover',
-      mesh,
-      count,
-      orient: 'flat',
-      place(i, t, out) {
-        const s = spec[i];
-        const u = s.phase + s.dir * t / s.period;
-        const bob = 0.6 * Math.sin(t * 1.3 + s.bob);
-        return laneAt(s.lane, u, R + s.alt + bob, R, out);
-      },
-    });
-    spec.forEach((s, i) => { fleet.scales[i] = s.scale; });
-    mesh.frustumCulled = false;   // instances move; a stale bounding sphere culls them
-    for (let i = 0; i < count; i++) {
+    const GLASS = [0.10, 0.14, 0.22];
+    const TRIM = [0.18, 0.20, 0.24];
+    const bodyGeo = boxSoup(THREE, [
+      [0, 0, 0, 3.2, 0.55, 1.5],                       // hull (painted)
+      [1.75, -0.05, 0, 0.32, 0.36, 1.2],               // nose
+      [-0.25, 0.5, 0, 1.7, 0.46, 1.24, GLASS],         // canopy
+      [-0.95, -0.3, 0.82, 1.5, 0.3, 0.26, TRIM],       // thruster pods
+      [-0.95, -0.3, -0.82, 1.5, 0.3, 0.26, TRIM],
+    ]);
+    const lampGeo = boxSoup(THREE, [
+      [1.93, 0.04, 0.46, 0.05, 0.14, 0.3, [1.0, 0.9, 0.7]],      // headlamps
+      [1.93, 0.04, -0.46, 0.05, 0.14, 0.3, [1.0, 0.9, 0.7]],
+      [-1.62, 0.06, 0, 0.05, 0.12, 1.3, [1.0, 0.12, 0.08]],      // tail bar
+      [0, -0.32, 0, 2.4, 0.04, 1.1, [0.25, 0.85, 1.0]],          // under-glow
+      [-1.71, -0.3, 0.82, 0.04, 0.2, 0.18, [0.4, 0.8, 1.0]],     // thrusters
+      [-1.71, -0.3, -0.82, 0.04, 0.2, 0.18, [0.4, 0.8, 1.0]],
+    ]);
+    const bodyMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    // Unlit and bright: these are the cab's emitters, and the bloom pass
+    // picks them up the way it picks up the city's windows.
+    const lampMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+    const bodies = new THREE.InstancedMesh(bodyGeo, bodyMat, count);
+    const lamps = new THREE.InstancedMesh(lampGeo, lampMat, count);
+    bodies.name = 'actor-skycabs-bodies';
+    lamps.name = 'actor-skycabs-lamps';
+    const paint = new THREE.Color();
+    for (let i = 0; i < count; i++) bodies.setColorAt(i, paint.setRGB(...spec[i].paint));
+    bodies.instanceColor.needsUpdate = true;
+    for (const m of [bodies, lamps]) { m.frustumCulled = false; m.raycast = () => {}; root.add(m); }
+    disposables.push(() => { bodyGeo.dispose(); lampGeo.dispose(); bodyMat.dispose(); lampMat.dispose(); });
+    const place = (i, t, out) => {
       const s = spec[i];
-      actors[`hover-${i}`] = {
-        kind: 'hover',
-        cycle: s.period,
-        phases: [{ name: 'cruise', start: 0, length: s.period }],
-        stateAt: (t) => ({ ...fleet.stateAt(i, t), phase: 'cruise' }),
+      const u = s.phase + s.dir * t / s.period;
+      return laneAt(s.lane, u, R + s.alt + 0.5 * Math.sin(t * 1.1 + s.bob), R, out);
+    };
+    const a = createFleet(THREE, { name: 'skycabs', mesh: bodies, count, place });
+    const b = createFleet(THREE, { name: 'skycabs-lamps', mesh: lamps, count, place });
+    spec.forEach((s, i) => { a.scales[i] = s.scale; b.scales[i] = s.scale; });
+    for (let i = 0; i < count; i++) {
+      actors[`cab-${i}`] = {
+        kind: 'cab',
+        cycle: spec[i].period,
+        phases: [{ name: 'cruise', start: 0, length: spec[i].period }],
+        stateAt: (t) => ({ ...a.stateAt(i, t), phase: 'cruise' }),
       };
     }
     routeSpecs.push({
-      name: 'city-hover-lanes',
-      // Over roads, above the roofs it was routed around, never in the ground.
+      name: 'city-sky-traffic',
       minClear: 8,
-      maxClear: 140,
+      maxClear: 160,
       samples: () => {
         const out = [];
-        for (let i = 0; i < count; i++) {
-          for (let k = 0; k < 24; k++) {
-            const p = fleet.stateAt(i, (k / 24) * spec[i].period).position;
-            out.push(p);
-          }
-        }
+        for (let i = 0; i < count; i++) for (let k = 0; k < 24; k++) out.push(a.stateAt(i, (k / 24) * spec[i].period).position);
         return out;
       },
     });
-    return fleet;
+    actorsInfo.skyTraffic = { cabs: count, skyways: spec.filter((x) => x.lane.kind === 'arc').length };
+    return [a, b];
   }
-
 
   // ── A2 · city sky-tram ─────────────────────────────────────────────────
   // Three lit cars running a street lane at the lowest height where nothing
