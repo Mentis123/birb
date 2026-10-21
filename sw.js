@@ -63,7 +63,7 @@
 // v88 species leftovers: the owl's rivets and hubs back (species-bird.js),
 // the double-failure fallback (bird-transaction.js), the envelope/whoosh hold
 // (flight-audio.js), and every CDN fetch bounded without AbortSignal.timeout.
-const CACHE_VERSION = 'v92-2026-10-21-ultra-2x';
+const CACHE_VERSION = 'v93-2026-10-21-phone-ultra';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

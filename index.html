@@ -4074,7 +4074,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v92-2026-10-21-ultra-2x';
+    const BIRB_BUILD = 'v93-2026-10-21-phone-ultra';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -13843,16 +13843,24 @@
     const QUALITY_PRESETS = [
       {
         id: 'ultra', label: 'Ultra', tier: 0, dprCap: isMobile ? ULTRA_MOBILE_DPR_CAP : Infinity,
-        hint: 'Max realism: soft real shadows, ambient occlusion, eye adaptation, 4x MSAA, dense terrain (2x resolution on a phone). For a phone that is keeping up.',
+        hint: 'Max realism: soft real shadows, ambient occlusion, eye adaptation, 4x MSAA, dense terrain (on a phone: 2x resolution, PCF shadows, 2x MSAA). For a phone that is keeping up.',
         levers: () => [
           ['postQuality', 'full'],
           ['shadowsEnabled', true],
           // VSM is the softest of the four filters this game exposes — the
           // ceiling of shadowType's own enum, same reasoning as 'high' for
-          // the map size just below.
-          ['shadowType', 'vsm'],
+          // the map size just below. On a PHONE it is PCF (owner's iPhone at
+          // Ultra 2x: 40-50 fps, dips to 30): VSM re-blurs the whole 2048²
+          // map in two extra passes every frame (~8M pixel ops, several
+          // times the 1.3M pixels of the screen itself), and three r183's
+          // PCF is already the filtered soft shadow (PCFSoftShadowMap now
+          // falls back to it).
+          ['shadowType', isMobile ? 'pcf' : 'vsm'],
           ['shadowMapSize', 'high'],
-          ['antialiasing', '4x'],
+          // 2x on a phone: at 2x DPR an edge is already half a CSS pixel, and
+          // each MSAA sample is another HalfFloat colour+depth write and
+          // resolve on a bandwidth-bound GPU.
+          ['antialiasing', isMobile ? '2x' : '4x'],
           ['anisotropy', renderer.capabilities.getMaxAnisotropy()],
           // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
           // 80k-triangle budget on desktop (85,504 tris — see spherical-

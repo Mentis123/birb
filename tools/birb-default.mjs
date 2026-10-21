@@ -31,9 +31,11 @@ import {
 const ULTRA = {
   postQuality: 'full',
   shadowsEnabled: true,
-  shadowType: 'vsm',
+  // This harness is an emulated 3x PHONE, and a phone's Ultra is PCF and
+  // 2x MSAA (owner's iPhone, 2026-10-21; desktop keeps VSM and 4x).
+  shadowType: 'pcf',
   shadowMapSize: 'high',
-  antialiasing: '4x',
+  antialiasing: '2x',
   terrainResolution: 'high',
   decorativeDensity: 1,
 };

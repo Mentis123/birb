@@ -94,6 +94,13 @@ index.html; desktop keeps native). That is 44% of a 3x phone's pixels, for
 every Ultra pass. `tools/birb-default.mjs` (not frozen) now expects 2x on its
 emulated 3x iPhone.
 
+**v92 retest (2x DPR): 40-50 fps, dips to 30.** v93: a phone's Ultra uses
+PCF shadows instead of VSM, because VSM blurs the whole 2048² map in two
+passes every frame, about 8M pixel ops against a 1.3M-pixel 2x screen. In
+three r183 PCF is the filtered soft shadow (PCFSoftShadowMap falls back to
+it). MSAA drops from 4x to 2x. Desktop keeps VSM and 4x. `birb-default.mjs`
+expects the phone values on its emulated iPhone.
+
 ## Not measured
 
 The phone: the cost of AO, the eye and foliage on an iPhone 16 Pro, and

@@ -48,7 +48,11 @@
 > small screen. We need ways for it to seem more realistic otherwise." Ultra
 > on a PHONE is capped at 2x DPR now (`ULTRA_MOBILE_DPR_CAP`, v92; 44% of
 > the native pixels for every Ultra pass); desktop keeps native.
-> tools/birb-default.mjs asserts 2x on its emulated 3x iPhone.
+> tools/birb-default.mjs asserts 2x on its emulated 3x iPhone. At 2x the
+> phone read 40-50 fps with dips to 30, so a phone's Ultra also uses PCF
+> shadows (VSM re-blurs the 2048² map in two passes every frame, ~8M pixel
+> ops against a 1.3M-pixel screen; r183's PCF is already the soft filter)
+> and 2x MSAA (v93). Desktop keeps VSM and 4x.
 
 > **FULL SEND (2026-10-19): the world moves, it can be found, it can film
 > itself, and every prop is measured against its ground.** Plan and status:
