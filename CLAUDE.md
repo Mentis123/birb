@@ -43,8 +43,12 @@
 > already over at 34 s; CI is faster). Eroded worlds pass the world audit,
 > 9/9. **The phone (owner, `?quality=ultra`):** ~40 fps before this change,
 > ~40 with the set minus AO, 25-30 with AO at half res. AO is at QUARTER
-> res per axis now (v91). Ultra was never 60 on the iPhone: it is native 3x
-> DPR, and capping that is the owner's call.
+> res per axis now (v91). Then 25-45 fps at v91, still at native 3x DPR,
+> and the owner's call (2026-10-21): "We don't need more resolution. It's a
+> small screen. We need ways for it to seem more realistic otherwise." Ultra
+> on a PHONE is capped at 2x DPR now (`ULTRA_MOBILE_DPR_CAP`, v92; 44% of
+> the native pixels for every Ultra pass); desktop keeps native.
+> tools/birb-default.mjs asserts 2x on its emulated 3x iPhone.
 
 > **FULL SEND (2026-10-19): the world moves, it can be found, it can film
 > itself, and every prop is measured against its ground.** Plan and status:

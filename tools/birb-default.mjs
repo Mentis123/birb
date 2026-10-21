@@ -49,6 +49,7 @@ const AMAZING = {
 };
 const SHIPPING_BLOOM_STRENGTH = 0.78;
 const DEVICE_DPR = 3;
+const ULTRA_PHONE_DPR = 2;
 
 const failures = [];
 function expect(cond, what) {
@@ -82,7 +83,9 @@ async function main() {
   const boot = await read();
   expect(boot.id === 'ultra', `preset is ultra (got ${boot.id})`);
   expect(boot.pinned === true && boot.tier === 0, `tier pinned at 0 (pinned ${boot.pinned}, tier ${boot.tier})`);
-  expect(boot.pixelRatio === DEVICE_DPR, `native DPR ${DEVICE_DPR} (got ${boot.pixelRatio})`);
+  // A phone's Ultra is capped at 2x (owner, 2026-10-21: "We don't need more
+  // resolution. It's a small screen."); this harness IS a 3x phone.
+  expect(boot.pixelRatio === ULTRA_PHONE_DPR, `phone Ultra at ${ULTRA_PHONE_DPR}x, not native ${DEVICE_DPR}x (got ${boot.pixelRatio})`);
   for (const [k, v] of Object.entries(ULTRA)) {
     expect(boot.effective[k] === v, `${k} = ${JSON.stringify(v)} (got ${JSON.stringify(boot.effective[k])})`);
   }

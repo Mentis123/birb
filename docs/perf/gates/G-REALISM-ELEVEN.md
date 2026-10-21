@@ -87,6 +87,13 @@ crease shading, a little softer. A DPR cap for Ultra on phones (3x to 2x,
 ~55% fewer pixels for everything) is proposed and waits on the owner,
 because native DPR at Ultra was his call (G-ULTRA-DEFAULT).
 
+**v91 retest: 25-45 fps.** The owner, on the DPR cap: "We don't need more
+resolution. It's a small screen. We need ways for it to seem more realistic
+otherwise." v92 caps Ultra at 2x DPR on phones (`ULTRA_MOBILE_DPR_CAP` in
+index.html; desktop keeps native). That is 44% of a 3x phone's pixels, for
+every Ultra pass. `tools/birb-default.mjs` (not frozen) now expects 2x on its
+emulated 3x iPhone.
+
 ## Not measured
 
 The phone: the cost of AO, the eye and foliage on an iPhone 16 Pro, and

@@ -4074,7 +4074,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v91-2026-10-21-ao-quarter';
+    const BIRB_BUILD = 'v92-2026-10-21-ultra-2x';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -13830,10 +13830,20 @@
     // entirely, so `__BIRB.pinTier(1)` would no longer move the drawing
     // buffer and the frozen A3 oracle's own self-check (pin 0, pin 1, expect
     // the ratio to differ) would read false on every fresh boot.
+    //
+    // PHONES ARE CAPPED AT 2x (owner, 2026-10-21): "We don't need more
+    // resolution. It's a small screen. We need ways for it to seem more
+    // realistic otherwise." Native on an iPhone is 3x, ~3.4M pixels a frame,
+    // and every Ultra pass (4x MSAA, VSM, AO, the eye, bloom) is paid per
+    // pixel: measured on the owner's phone at native, ~40 fps before the
+    // realism set and 25-45 with it. 2x is 44% of those pixels and, at
+    // phone size, not a resolution anyone can see the loss of. The pixels
+    // saved go to the realism. Desktop keeps native.
+    const ULTRA_MOBILE_DPR_CAP = 2;
     const QUALITY_PRESETS = [
       {
-        id: 'ultra', label: 'Ultra', tier: 0, dprCap: Infinity,
-        hint: 'Max realism: native resolution, soft real shadows, 4x MSAA, dense terrain. For a phone that is keeping up.',
+        id: 'ultra', label: 'Ultra', tier: 0, dprCap: isMobile ? ULTRA_MOBILE_DPR_CAP : Infinity,
+        hint: 'Max realism: soft real shadows, ambient occlusion, eye adaptation, 4x MSAA, dense terrain (2x resolution on a phone). For a phone that is keeping up.',
         levers: () => [
           ['postQuality', 'full'],
           ['shadowsEnabled', true],
