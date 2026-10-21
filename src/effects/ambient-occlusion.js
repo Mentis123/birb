@@ -10,7 +10,8 @@
  * floor all read flat. Contact darkening is the cue the eye uses to put things
  * ON each other, and it is the one the frame had none of. It costs no
  * triangles and no draw calls in the scene: three full-screen triangles at
- * half resolution.
+ * quarter resolution (1/16 of the pixels; the iPhone measured half res at
+ * 10-15 fps).
  *
  * The method is the range-limited, cosine-weighted horizon estimate that SAO
  * (McGuire et al. 2012) and Alchemy AO share, kept small for a phone:

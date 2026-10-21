@@ -522,7 +522,11 @@ export function createBloomPass(THREE, renderer, {
     blurB.setSize(bw, bh);
     rayTarget.setSize(bw, bh);
     if (eye) eye.setSize(w, h);
-    if (ao) ao.setSize(bw, bh);
+    // AO at QUARTER resolution per axis (1/16 of the pixels), not the blur's
+    // half. Measured on the owner's iPhone at Ultra: ~40 fps with the realism
+    // set and AO off, 25-30 with AO at half res. Occlusion is a low-frequency
+    // term that is blurred anyway; the composite upsamples it bilinearly.
+    if (ao) ao.setSize(safeSize(w / (currentDownscale * 2), 'ao width'), safeSize(h / (currentDownscale * 2), 'ao height'));
   }
   setSize(size.x, size.y, pixelRatio);
 

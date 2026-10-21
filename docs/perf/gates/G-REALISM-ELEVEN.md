@@ -72,6 +72,21 @@ compiles AO, the eye, foliage and the new water at Ultra).
   3. A half-res centre on a full-res texel boundary could snap onto its own
      neighbour. That gave a NaN normal and a broken line down the screen.
 
+## Measured on the owner's iPhone (2026-10-21, `?quality=ultra`)
+
+| Link | fps |
+|---|---|
+| `?realism=0&water=classic` (the Ultra before) | ~40 |
+| the realism set, `?ao=0` | ~40, occasional dips |
+| the realism set with AO at HALF resolution (v90) | 25-30 |
+
+So AO alone cost 10-15 fps, and Ultra itself was never at 60 on this phone:
+it renders at native 3x DPR. AO moved to QUARTER resolution per axis (1/16
+of the pixels) in v91. The isolated test scene shows the same contact and
+crease shading, a little softer. A DPR cap for Ultra on phones (3x to 2x,
+~55% fewer pixels for everything) is proposed and waits on the owner,
+because native DPR at Ultra was his call (G-ULTRA-DEFAULT).
+
 ## Not measured
 
 The phone: the cost of AO, the eye and foliage on an iPhone 16 Pro, and
