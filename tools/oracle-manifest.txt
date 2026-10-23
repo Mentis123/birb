@@ -42,7 +42,7 @@
 #                                  section. Its guard is that it derives from the plan.
 #   docs/perf/BASELINE.md        — a record of one run, superseded by later measured runs.
 #
-# Generated 2026-10-19 at commit bc71868 by tools/oracle-manifest-regen.mjs.
+# Generated 2026-10-21 at commit 53d5071 by tools/oracle-manifest-regen.mjs.
 #
 # --- tests/** (39 files: 37 test files + 2 shared helpers) -------------------
 6fb867af6f105c4052ef149c6ff7d681a00f15ef9abc32c97798bf58a9b25ea0  tests/adaptive-quality-holdout.test.js
@@ -63,6 +63,7 @@ eaeceeef167cd1d541834be8d0edd504f269066f06fe584612643eb6f5d86ffc  tests/erosion.
 6470b6c63b3d841f78f0b1f3b2bcb91b4c4e6cf4775a720f71a36411629eec53  tests/living-world.test.js
 445ff78c97a88a81687da7b4dfd9dde42f24643b7180513f5946ebc0ea5afd8a  tests/perf-advisor.test.js
 2d88dc6f7d16fc8ff9d7c4f00e8128905362d83aae634cbf0122e2f67789eff5  tests/realism-eleven.test.js
+4228fa9835b1e3e028ab789ab6fb3e346e9661e3ad6a7a03a0f689040c2b934b  tests/studio-reel.test.js
 0f0b27b44f38da887ff6333890a4013fbba40518772489823aab61cac29c61ce  tests/world-audit.test.js
 # tests/species-frame-budget.test.js added 2026-10-11 (v88 species leftovers,
 # owner-requested, not a perf wave). The oracle for tools/species-frame-budget

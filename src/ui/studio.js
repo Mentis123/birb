@@ -11,11 +11,19 @@
 //   &record=1                      tick "save a WebM"
 //   &count=0|3|5                   countdown seconds (default 3)
 //   &autoplay=1                    play as soon as the world is up
+//   &aspect=9:16                   a portrait frame (a phone reel), letterboxed
+//   &res=1080|720|1440             the frame's WIDTH in pixels (default 1080)
+//   &fps=30|60                     the video's frame rate (default 30)
+//   &exact=0                       real-time WebM instead of frame-exact MP4
 //
-// The WebM comes from the canvas itself (captureStream + MediaRecorder,
-// vp9 → vp8 → webm, 16 Mbps), so what you get is exactly the frames the
-// device drew — on a machine with a GPU, real time at full quality. The
-// shot's fade is drawn inside the WebGL frame, so it is in the file too.
+// Two ways to save the shot. FRAME-EXACT (the default where the browser has
+// WebCodecs — Chrome, Edge, Safari 26): the game runs on a virtual clock of
+// exactly 1/fps per frame (src/ui/frame-clock.js) and every frame is encoded
+// to H.264 MP4 as it is drawn (src/ui/studio-encoder.js), so the file is
+// smooth however slowly the machine renders it. REAL TIME (the fallback):
+// captureStream + MediaRecorder, vp9 → vp8 → webm, 16 Mbps, which records
+// whatever stutter the device had. The shot's fade is drawn inside the WebGL
+// frame, so it is in the file either way.
 
 const STYLE = `
 body.birb-studio, body.birb-studio * { visibility: hidden !important; cursor: default; }
@@ -24,6 +32,19 @@ body.birb-studio .birb-studio-panel, body.birb-studio .birb-studio-panel *,
 body.birb-studio .birb-studio-count { visibility: visible !important; }
 body.birb-studio.birb-studio-playing, body.birb-studio.birb-studio-playing * { cursor: none !important; }
 body.birb-studio.birb-studio-playing .birb-studio-panel { display: none; }
+html.birb-studio-portrait, body.birb-studio-portrait { background: #000 !important; }
+/* The game's canvas card has backdrop-filter (a containing block for fixed
+   descendants) and overflow: hidden, which clipped the letterboxed frame. */
+body.birb-studio-portrait .canvas-wrapper {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; overflow: visible !important;
+  transform: none !important; filter: none !important; contain: none !important;
+}
+body.birb-studio-portrait canvas.birb-studio-canvas {
+  position: fixed !important; left: 50% !important; top: 50% !important; right: auto !important; bottom: auto !important;
+  width: min(100vw, calc(100vh * var(--birb-studio-ar))) !important;
+  height: min(100vh, calc(100vw / var(--birb-studio-ar))) !important;
+  transform: translate(-50%, -50%) !important; z-index: 99999 !important;
+}
 .birb-studio-panel {
   position: fixed; left: 12px; top: 12px; z-index: 100000; display: flex; flex-wrap: wrap; gap: 8px;
   align-items: center; max-width: calc(100vw - 24px); padding: 10px 12px; border-radius: 12px;
@@ -58,12 +79,32 @@ function pickMime() {
  * @param {() => void} o.stop
  * @param {() => {name:string|null, t?:number, done?:boolean}} o.status
  */
-export async function installStudio({ params, canvas, listShots, play, stop, status }) {
+/** `?aspect=9:16&res=1080` → { width: 1080, height: 1920 } (even, for the encoder), or null. */
+export function studioFrameSize(params) {
+  const m = /^(\d+(?:\.\d+)?)[:x/](\d+(?:\.\d+)?)$/.exec(params.get('aspect') || '');
+  if (!m) return null;
+  const ar = Number(m[1]) / Number(m[2]);
+  if (!(ar > 0.2 && ar < 5)) return null;
+  const res = Math.max(240, Math.min(2160, Number(params.get('res')) || 1080));
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+  return { width: even(res), height: even(res / ar), ar };
+}
+
+export async function installStudio({ params, canvas, listShots, play, stop, status, seek, frameClock, resize }) {
   const style = document.createElement('style');
   style.textContent = STYLE;
   document.head.appendChild(style);
   document.body.classList.add('birb-studio');
   canvas.classList.add('birb-studio-canvas');
+  const frameSize = studioFrameSize(params);
+  if (frameSize) {
+    window.__birbStudioFrame = { width: frameSize.width, height: frameSize.height };
+    document.body.style.setProperty('--birb-studio-ar', String(frameSize.ar));
+    document.body.classList.add('birb-studio-portrait');
+    document.documentElement.classList.add('birb-studio-portrait');
+    resize?.();
+  }
+  const fps = Number(params.get('fps')) === 60 ? 60 : 30;
 
   const panel = document.createElement('div');
   panel.className = 'birb-studio-panel';
@@ -94,7 +135,10 @@ export async function installStudio({ params, canvas, listShots, play, stop, sta
   $('count').value = ['0', '3', '5'].includes(params.get('count')) ? params.get('count') : '3';
   $('record').checked = params.get('record') === '1';
   const mime = pickMime();
-  if (!mime) { $('record').disabled = true; $('record').parentElement.title = 'This browser cannot record the canvas'; }
+  const exactWanted = params.get('exact') !== '0' && typeof VideoEncoder !== 'undefined' && !!frameClock && !!seek;
+  if (!mime && !exactWanted) { $('record').disabled = true; $('record').parentElement.title = 'This browser cannot record the canvas'; }
+  if (exactWanted) $('record').parentElement.lastChild.textContent = ' Save MP4 (frame-exact)';
+  if (frameSize) msg(`${frameSize.width}x${frameSize.height} @ ${fps} fps · Space plays · Esc stops · H hides this`);
 
   let recorder = null;
   let chunks = [];
@@ -120,7 +164,63 @@ export async function installStudio({ params, canvas, listShots, play, stop, sta
     try { r.stop(); } catch { /* already stopped */ }
   }
 
+  // Frame-exact: park on frame 0, warm the world up on the virtual clock
+  // (shaders compile, the eye adapts, textures decode), then encode one
+  // frame per shot step. The encoder stalls the clock when it falls behind.
+  async function recordExact(name) {
+    const parked = await play(name, { hold: true, paused: true });
+    if (!parked.ok) { running = false; msg(`${name}: ${parked.error}`); return; }
+    const w = canvas.width, h = canvas.height;
+    let rec = null;
+    try {
+      const { createMp4Recorder } = await import('./studio-encoder.js');
+      rec = await createMp4Recorder({ canvas, width: w, height: h, fps });
+    } catch (err) { console.warn('[studio] encoder failed to load', err); }
+    if (!rec) { running = false; msg('No MP4 encoder here — try &exact=0 for a real-time WebM'); return; }
+    document.body.classList.add('birb-studio-playing');
+    const WARM = 2 * fps;
+    const total = Math.round(parked.duration * fps) + 1;
+    const t0 = performance.now();
+    let finishing = false;
+    const done = (blob, err) => {
+      frameClock.stop();
+      running = false;
+      document.body.classList.remove('birb-studio-playing');
+      counter.textContent = '';
+      if (err || !blob) { msg(`Recording failed: ${err?.message || err}`); console.warn('[studio]', err); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${name}-${w}x${h}-${fps}fps.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      const secs = ((performance.now() - t0) / 1000).toFixed(0);
+      msg(`Saved ${a.download} (${(blob.size / 1e6).toFixed(1)} MB, ${rec.codec}, made in ${secs} s)`);
+      window.__birbStudio.last = { name: a.download, bytes: blob.size, codec: rec.codec, frames: total, seconds: +secs };
+    };
+    frameClock.start(fps, performance.now(), {
+      stall: () => rec.backlog > 4,
+      before: () => {
+        const k = frameClock.frame - WARM;
+        seek(Math.max(0, Math.min(parked.duration, k / fps)));
+      },
+      after: () => {
+        if (!frameClock.fresh || finishing) return;
+        const k = frameClock.frame - WARM;
+        if (k < 0) { counter.textContent = 'warming up'; return; }
+        try { rec.addFrame(k); } catch (err) { finishing = true; done(null, err); return; }
+        counter.textContent = `${k + 1} / ${total}`;
+        if (k + 1 >= total) {
+          finishing = true;
+          rec.finish().then((b) => done(b), (err) => done(null, err));
+        }
+      },
+    });
+    window.__birbStudio.cancelExact = () => { if (!finishing) { finishing = true; rec.cancel(); frameClock.stop(); running = false; document.body.classList.remove('birb-studio-playing'); msg('Recording cancelled'); } };
+  }
+
   function end() {
+    window.__birbStudio?.cancelExact?.();
     running = false;
     clearInterval(watch);
     clearInterval(countTimer);
@@ -134,6 +234,7 @@ export async function installStudio({ params, canvas, listShots, play, stop, sta
     const name = $('shot').value;
     if (!name) { msg('No shots for this biome'); return; }
     running = true;
+    if ($('record').checked && exactWanted) { await recordExact(name); return; }
     let left = Number($('count').value) || 0;
     // Park on frame 0 during the countdown so a trim point is obvious.
     const parked = await play(name, { hold: true, paused: true });

@@ -63,7 +63,9 @@
 // v88 species leftovers: the owl's rivets and hubs back (species-bird.js),
 // the double-failure fallback (bird-transaction.js), the envelope/whoosh hold
 // (flight-audio.js), and every CDN fetch bounded without AbortSignal.timeout.
-const CACHE_VERSION = 'v93-2026-10-21-phone-ultra';
+// v94 studio reel: a 9:16 frame and frame-exact MP4 (frame-clock.js,
+// studio-encoder.js), and the 15-second reel-forest shot with its own sun.
+const CACHE_VERSION = 'v94-2026-10-23-studio-reel';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -210,6 +212,8 @@ const CORE_ASSETS = [
   './src/camera/shot-player.js',
   './src/camera/shots.js',
   './src/ui/studio.js',
+  './src/ui/studio-encoder.js',
+  './src/ui/frame-clock.js',
   './src/ui/discovery.js',
   './src/ui/pins-layer.js',
   './src/effects/contact-decals.js',

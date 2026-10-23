@@ -794,7 +794,13 @@ export function createExposureStage(THREE, renderer, {
   let sceneWidth = 1; let sceneHeight = 1;
   let passes = 0;
 
-  const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  // While the studio records frame-exact (src/ui/frame-clock.js) the eye
+  // adapts on the VIRTUAL clock, so a slow machine's video matches a fast one.
+  const now = () => {
+    const fc = globalThis.__birbFrameClock;
+    if (fc && fc.active) return fc.ms;
+    return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  };
 
   function setSize(width, height) {
     sceneWidth = Math.max(1, Math.floor(width) || 1);

@@ -1,5 +1,30 @@
 # CLAUDE.md — Birb Mobile
 
+> **STUDIO REEL (2026-10-23, build v94): a 9:16 frame-exact MP4, made in
+> the browser.** Owner: "I just want people to see a video of it and be blown
+> away." Open
+> `birbmobile.vercel.app/?studio=1&aspect=9:16&shot=reel-forest&record=1`
+> in Chrome or Edge on a machine with a GPU and press Play. The game then runs
+> on a VIRTUAL clock of exactly 1/fps per frame (`src/ui/frame-clock.js`:
+> the loop's rAF timestamp is replaced and the eye's adaptation reads it too),
+> and every drawn frame goes through WebCodecs into an MP4
+> (`src/ui/studio-encoder.js`, mp4-muxer from jsdelivr, H.264 first, VP9 in
+> MP4 as the fallback). So a laptop at 15 fps makes the SAME smooth 30 fps
+> file as a desktop at 60; it just takes longer. It warms up for 2 s of
+> virtual time at shot t=0 first (shader compiles, eye adaptation, texture
+> decodes). The encoder stalls the clock when it falls more than 4 frames
+> behind. `&aspect=9:16` fixes the drawing buffer (`window.__birbStudioFrame`,
+> read by updateRendererSize; `&res=` is the width, default 1080 → 1080x1920)
+> and letterboxes it on screen. `&fps=60`; `&exact=0` is the old real-time
+> WebM. A shot can light itself: `sun: { elevation, bearing }` in degrees,
+> where bearing 0 is the sun dead ahead of the lens at the shot's midpoint.
+> It holds one world direction for the shot, with the horizon frame stood at
+> the subject. `reel-forest` is the 15 s golden-hour pass through the stone
+> arch. **Two traps:** the canvas card's `backdrop-filter` is a containing
+> block for `position: fixed`, so the letterbox was clipped until the studio
+> turned it off. And Playwright's Chromium has no H.264 encoder: the headless
+> check gets VP9-in-MP4, and Edge/Chrome on a real machine get H.264.
+
 > **REALISM TO 11 (2026-10-19, build v90): an ULTRA boot builds every
 > realism package.** Owner: "I just want visual realism to 11." Gate:
 > [docs/perf/gates/G-REALISM-ELEVEN.md](docs/perf/gates/G-REALISM-ELEVEN.md).

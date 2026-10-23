@@ -15,7 +15,31 @@
 
 const FADE = (d) => [[0, 1], [1.6, 0], [d - 1.6, 0], [d, 1]];
 
+// A reel's fade is short: a 15-second clip cannot spend three of them in black.
+const REEL_FADE = (d) => [[0, 1], [0.5, 0], [d - 0.6, 0], [d, 1]];
+
 export const SHOTS = [
+  {
+    // The 15-second portrait reel (?studio=1&aspect=9:16&shot=reel-forest).
+    // The arch shot, compressed, with its own golden-hour light: `sun` holds
+    // a low sun a little off the lens's axis, so the crowns, the water and the
+    // bird's edges are lit from behind.
+    name: 'reel-forest',
+    title: 'Reel: golden hour through the arch (15 s)',
+    world: 'forest',
+    fov: 62,
+    bird: { lead: 0.8, lift: 2.2 },
+    sun: { elevation: 15, bearing: 28 },
+    audit: { minClearance: 3, maxSpeed: 40 },
+    fade: REEL_FADE(15),
+    keys: [
+      { t: 0, pos: { landmark: 'stone-arch', offset: [-74, 24, 18] } },
+      { t: 4.5, pos: { landmark: 'stone-arch', offset: [-32, 9, 5] }, ease: 'out' },
+      { t: 7.5, pos: { landmark: 'stone-arch', offset: [-7, 7, 0] }, pin: true },
+      { t: 10.5, pos: { landmark: 'stone-arch', offset: [28, 11, -8] } },
+      { t: 15, pos: { landmark: 'stone-arch', offset: [74, 40, -30] } },
+    ],
+  },
   {
     name: 'valley',
     title: 'The falls — every biome',

@@ -3884,6 +3884,8 @@
       // Visual realism to 11 (2026-10-19): an ULTRA boot builds every realism
       // package (AO, the eye, hex tiling); ?key=0 / ?key=1 override either way.
       var { realismOn, currentBootPreset } = await import("./src/ui/realism-defaults.js");
+      // Frame-exact studio recording: a virtual clock the loop runs on.
+      var { createFrameClock } = await import("./src/ui/frame-clock.js");
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
@@ -4074,7 +4076,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v93-2026-10-21-phone-ultra';
+    const BIRB_BUILD = 'v94-2026-10-23-studio-reel';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -5337,6 +5339,8 @@
     // direction depends on where the bird is. At the spawn pole the mapping is
     // the identity, so the first frame is exactly the old one.
     const sunFrame = createSunFrame();
+    // Set while a shot with its own `sun` plays: { anchor, dir, intensity }.
+    let shotSun = null;
     const _sunLocal = { x: 0, y: 1, z: 0, height: 0, elevation: Math.PI / 2 };
     const _sunWarmth = { r: 1, g: 1, b: 1, intensity: 1 };
     // The core "glow" PointLight sits ~2.5 units from the planet's centre,
@@ -5420,8 +5424,20 @@
     function updatePlanetSun(clockDelta, pos) {
       const key = lightingRig.keyLight;
       if (clockDelta > 0) sunState.seconds += clockDelta;
-      if (pos) sunFrame.update(pos.x, pos.y, pos.z);
-      if (sunState.seconds !== sunState.evaluatedSeconds) {
+      if (shotSun) {
+        // A shot that lights itself (`sun` in src/camera/shots.js): the horizon
+        // frame stands at the shot's subject, not the held bird, and the sun
+        // holds one world direction for the whole shot.
+        const a = shotSun.anchor;
+        sunFrame.update(a[0], a[1], a[2]);
+        sunFrame.toLocal(shotSun.dir[0], shotSun.dir[1], shotSun.dir[2], _sunLocal);
+        _sunLocal.elevation = Math.asin(Math.max(-1, Math.min(1, _sunLocal.y)));
+        _sunLocal.height = Math.max(0, Math.min(1, (_sunLocal.elevation - 0.34) / (1.02 - 0.34)));
+        key.intensity = sunState.baseKeyIntensity * (shotSun.intensity || 1);
+        lightingRig.rimLight.intensity = sunState.baseRimIntensity * (1.25 - _sunLocal.height * 0.4);
+        sunState.evaluatedSeconds = NaN;   // the cycle re-applies once the shot ends
+      } else if (pos) sunFrame.update(pos.x, pos.y, pos.z);
+      if (!shotSun && sunState.seconds !== sunState.evaluatedSeconds) {
         sunState.evaluatedSeconds = sunState.seconds;
         sunCycleInto(sunState.seconds, _sunLocal);
         if (atmosState) {
@@ -10352,14 +10368,17 @@
 
       if (!clientWidth || !clientHeight) return;
 
-      const nextWidth = Math.floor(clientWidth);
-      const nextHeight = Math.floor(clientHeight);
+      // A studio recording fixes the DRAWING BUFFER (e.g. 1080x1920 for a
+      // 9:16 reel) whatever the window is; CSS only scales it to fit.
+      const studioFrame = window.__birbStudioFrame || null;
+      const nextWidth = studioFrame ? studioFrame.width : Math.floor(clientWidth);
+      const nextHeight = studioFrame ? studioFrame.height : Math.floor(clientHeight);
       // T3 (CONTRACT §7.2/§7.1 precedence): the panel's DPR request wins
       // over the tier-derived ratio once set. PRO-9's 0.85-2.0 slider range
       // is enforced by qualitySettings' `clamp`, not here — this is the
       // single sizing function every quality/viewport change routes
       // through, so it trusts what already reached `panelOverrides.dpr`.
-      const pixelRatio = panelOverrides.dpr != null
+      const pixelRatio = studioFrame ? 1 : panelOverrides.dpr != null
         ? panelOverrides.dpr
         : getQualityPixelRatio(window.devicePixelRatio, qualityDprCap ?? DPR_CAP, adaptiveTier.getTier());
 
@@ -11859,10 +11878,16 @@
     const INPUT_SHAPE = { deadzone: 0.08, expo: 0.2 };
     const _shapedInput = { x: 0, y: 0, active: false };
 
+    // Studio frame-exact recording (src/ui/frame-clock.js). While active the
+    // loop runs on 1/fps per frame, not on the wall clock.
+    const frameClock = createFrameClock();
+    window.__birbFrameClock = frameClock;
+
     const renderFrame = (time = 0) => {
       if (contextState.lost) {
         return;
       }
+      if (frameClock.active) time = frameClock.advance();
       let delta = 0;
       if (motionState.animate) {
         if (previousTime === null) {
@@ -13585,6 +13610,7 @@
       // mistaken for the readable one on the same tick.
       // Shots (src/camera/shot-player.js): last thing before the frame is
       // presented, after the chase rig, so they overwrite this frame only.
+      if (frameClock.active && frameClock.before) frameClock.before();
       if (shotPlayer && shotPlayer.active) applyShotFrame();
 
       gpuFrameId += 1;
@@ -13592,6 +13618,7 @@
       presentFrame();
       gpuTimer.endFrame(gpuFrameId);
       gpuTimer.poll(gpuFrameId);
+      if (frameClock.active && frameClock.after) frameClock.after();
     };
 
     function handleContextLost(event) {
@@ -14615,6 +14642,7 @@
         const o = scene.getObjectByName(nm);
         if (o && o.visible) { o.visible = false; __shotHidden.push(o); }
       }
+      shotSun = shotSunFor(prep.compiled);
       shotPlayer.play(prep.compiled, opts);
       document.body.classList.add('birb-shot-playing');
       return { ok: true, name: prep.compiled.name, duration: prep.compiled.duration, audit: prep.audit };
@@ -14627,7 +14655,32 @@
       return was;
     }
 
+    // A shot's own light: `sun: { elevation, bearing, at, intensity }` in
+    // degrees. bearing 0 puts the sun dead ahead of the lens at shot time
+    // `at` (default the middle) — backlit, the golden-hour look; 180 is
+    // behind the camera. One world direction for the whole shot.
+    function shotSunFor(compiled) {
+      const sun = compiled?.spec?.sun;
+      if (!sun || !planetSunRequested) return null;
+      const s = compiled.sample(Number.isFinite(sun.at) ? sun.at : compiled.duration / 2);
+      const P = s.position, L = s.lookAt;
+      const ul = Math.hypot(L[0], L[1], L[2]) || 1;
+      const U = [L[0] / ul, L[1] / ul, L[2] / ul];
+      let F = [L[0] - P[0], L[1] - P[1], L[2] - P[2]];
+      const d = F[0] * U[0] + F[1] * U[1] + F[2] * U[2];
+      F = [F[0] - d * U[0], F[1] - d * U[1], F[2] - d * U[2]];
+      const fl = Math.hypot(F[0], F[1], F[2]);
+      if (!(fl > 1e-6)) return null;
+      F = [F[0] / fl, F[1] / fl, F[2] / fl];
+      const R = [F[1] * U[2] - F[2] * U[1], F[2] * U[0] - F[0] * U[2], F[0] * U[1] - F[1] * U[0]];
+      const b = (sun.bearing || 0) * Math.PI / 180;
+      const e = (Number.isFinite(sun.elevation) ? sun.elevation : 18) * Math.PI / 180;
+      const dir = [0, 1, 2].map((i) => (F[i] * Math.cos(b) + R[i] * Math.sin(b)) * Math.cos(e) + U[i] * Math.sin(e));
+      return { anchor: [L[0], L[1], L[2]], dir, intensity: sun.intensity || 1 };
+    }
+
     function shotEnded() {
+      shotSun = null;
       document.body.classList.remove('birb-shot-playing');
       for (const o of __shotHidden) o.visible = true;
       __shotHidden = [];
@@ -14690,6 +14743,9 @@
           play: (name, opts) => playShot(name, opts),
           stop: () => stopShot(),
           status: () => shotPlayer?.status() ?? { name: null },
+          seek: (t) => shotPlayer?.seek(t),
+          frameClock,
+          resize: () => updateRendererSize(true),
           setQualityHold: () => {},
         })).catch((err) => console.warn('[studio] failed to load', err));
         return;
