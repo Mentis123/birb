@@ -3798,6 +3798,10 @@
       const seededRandomModule = await import("./src/environment/seeded-random.js");
       var setWorldSeed = seededRandomModule.setWorldSeed;
       var getWorldSeed = seededRandomModule.getWorldSeed;
+      // `?seed=N` builds world N (a studio reel must find its landmarks where
+      // the shot was framed; a normal boot is a random world).
+      const __seedParam = /[?&]seed=(\d{1,9})(?:&|#|$)/.exec(window.location?.search || '');
+      if (__seedParam) setWorldSeed(Number(__seedParam[1]));
       const sphericalWorldModule = await import("./src/environment/spherical-world.js");
       var createSphericalWorld = sphericalWorldModule.createSphericalWorld;
       var SPHERE_RADIUS = sphericalWorldModule.SPHERE_RADIUS;
