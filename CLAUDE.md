@@ -1,5 +1,19 @@
 # CLAUDE.md — Birb Mobile
 
+> **CINEMA (2026-10-23, build v96): `?cinema=1` — the recording mode.**
+> Ultra with the phone caps lifted (native DPR, VSM, 4x MSAA), a 4096 shadow
+> map (`SHADOW_MAP_SIZES.cinema`), AO at HALF resolution (`aoDivisor` 1 in
+> bloom-pass.js; shipping is 2 = quarter), Ultra terrain, and the REC button.
+> It goes OVER the 80k budget on purpose: it is for filming on a machine
+> that can carry it, not for playing. It implies Ultra at boot
+> (`readQualityRaw`, `bootPresetId`), so the whole realism set builds. **The
+> REC button lives INSIDE `.canvas-wrapper`**: the game goes fullscreen on
+> that card, and in fullscreen nothing outside it is drawn, so a button on
+> body was invisible on the owner's screen. Verified headless: VSM 4096, 21
+> casters, Ultra terrain, REC on top in the fullscreen card, no console
+> noise. The `[bloom] ao width came out 0.5` warning was a transient
+> sub-pixel size during a resize; it is clamped quietly now.
+
 > **FLIGHT RECORDER (2026-10-23, build v95): `?rec=1` — fly it yourself,
 > save the video.** Owner: "I can fly, you record, we download." A REC button
 > at the top CENTRE (top-right sits under the ⚙ launcher, which ate the click

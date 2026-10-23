@@ -66,7 +66,8 @@
 // v94 studio reel: a 9:16 frame and frame-exact MP4 (frame-clock.js,
 // studio-encoder.js), and the 15-second reel-forest shot with its own sun.
 // v95: ?rec=1 flight recorder (fly it yourself, save the video).
-const CACHE_VERSION = 'v95-2026-10-23-flight-recorder';
+// v96: ?cinema=1 recording mode; REC lives inside the canvas card.
+const CACHE_VERSION = 'v96-2026-10-23-cinema';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.

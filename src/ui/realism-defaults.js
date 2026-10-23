@@ -43,6 +43,8 @@ const PRESET_RE = /^(ultra|amazing|okay|light)$/;
  * settled level, is Ultra (Auto starts on Ultra).
  */
 export function bootPresetId(search = '', saved = null, autoLevel = null) {
+  // ?cinema=1 is a recording mode built on Ultra (index.html readQualityRaw).
+  if (/[?&]cinema=1(?:&|#|$)/.test(search || '')) return 'ultra';
   const fromUrl = (/[?&]quality=(auto|ultra|amazing|okay|light)(?:&|$)/.exec(search || '') || [])[1];
   const raw = fromUrl || saved || null;
   if (raw !== null && raw !== 'auto') return PRESET_RE.test(raw) ? raw : 'ultra';

@@ -12,7 +12,7 @@
 
 const STYLE = `
 .birb-rec {
-  position: fixed; z-index: 10050; top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%; transform: translateX(-50%);
+  position: absolute; z-index: 10050; top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%; transform: translateX(-50%);
   min-width: 64px; min-height: 40px; padding: 0 14px; border-radius: 20px;
   border: 1px solid rgba(255,255,255,0.35); background: rgba(10,14,22,0.72); color: #fff;
   font: 700 14px/1 system-ui, sans-serif; letter-spacing: 0.04em; touch-action: manipulation;
@@ -46,7 +46,10 @@ export function installFlightRecorder({ canvas, fps = 60, bitrate = 20e6 }) {
   btn.className = 'birb-rec';
   btn.dataset.state = 'idle';
   btn.textContent = 'REC';
-  document.body.appendChild(btn);
+  // INSIDE the canvas card, not on body: the game goes fullscreen on that
+  // card, and in fullscreen nothing outside it is drawn (owner's screenshot:
+  // no REC button). The card is position: relative, so this sits on it.
+  (canvas.closest('.canvas-wrapper') || canvas.parentElement || document.body).appendChild(btn);
 
   let recorder = null;
   let chunks = [];

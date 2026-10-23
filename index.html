@@ -4080,7 +4080,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v95-2026-10-23-flight-recorder';
+    const BIRB_BUILD = 'v96-2026-10-23-cinema';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -4863,6 +4863,11 @@
     // frame, and the physical atmosphere that moves the palette with it.
     // Read here because the dome compiles the atmosphere tint only when asked.
     const planetSunRequested = !/[?&]planetsun=0(?:&|$)/.test(window.location?.search || '');
+    // `?cinema=1`: the recording mode. Ultra with no phone caps (native DPR,
+    // VSM, 4x MSAA), a 4096 shadow map, AO at half resolution, the densest
+    // terrain, and the REC button. Over the 80k budget by design: it is for
+    // making a video on a machine that can carry it, not for playing.
+    const cinemaMode = /[?&]cinema=1(?:&|#|$)/.test(window.location?.search || '');
     const atmosRequested = !/[?&]atmos=0(?:&|$)/.test(window.location?.search || '');
 
     // ===== IMPROVEMENT 1: Sky Dome (3-stop painterly gradient) =====
@@ -5052,6 +5057,7 @@
         localTone: localToneRequested(window.location?.search || '')
           || realismOn('localtm', window.location?.search || ''),
         ambientOcclusion: realismOn('ao', window.location?.search || ''),
+        aoDivisor: cinemaMode ? 1 : 2,
       });
     } catch (bloomError) {
       console.warn('Bloom unavailable; rendering without it', bloomError);
@@ -6633,7 +6639,7 @@
     const SHADOW_LIGHT_DISTANCE = 80;   // offset back along the sun direction
     const SHADOW_CAMERA_NEAR = 10;
     const SHADOW_CAMERA_FAR = 220;      // offset + 2x fit extent + margin for a 58-unit champion tree
-    const SHADOW_MAP_SIZES = { low: 512, medium: 1024, high: 2048 };
+    const SHADOW_MAP_SIZES = { low: 512, medium: 1024, high: 2048, cinema: 4096 };
     const shadowLight = new THREE.DirectionalLight(0xffe4b5, 0);
     // .visible=false excludes a light from BOTH illumination and shadow
     // collection in Three's per-frame light/shadow gather (both gate on
@@ -9588,6 +9594,7 @@
     // again every session; picking Auto from the gear menu starts it on Ultra.
     const QUALITY_AUTO_LEVEL_KEY = 'birbQualityAutoLevel';
     function readQualityRaw() {
+      if (/[?&]cinema=1(?:&|#|$)/.test(window.location?.search || '')) return 'ultra';
       const fromUrl = (/[?&]quality=(auto|ultra|amazing|okay|light)(?:&|$)/.exec(window.location?.search || '') || [])[1];
       let saved = null;
       try { saved = window.localStorage?.getItem(QUALITY_STORAGE_KEY); } catch (_) { saved = null; }
@@ -10001,7 +10008,7 @@
         if (key === 'antialiasing') return Object.prototype.hasOwnProperty.call(AA_SAMPLES, value) ? value : 'off';
         if (key === 'shadowsEnabled') return !!value;
         if (key === 'shadowType') return ['basic', 'pcf', 'vsm'].includes(value) ? value : 'pcf';
-        if (key === 'shadowMapSize') return ['low', 'medium', 'high'].includes(value) ? value : 'medium';
+        if (key === 'shadowMapSize') return ['low', 'medium', 'high', 'cinema'].includes(value) ? value : 'medium';
         // 0 is the "back to shipping default" sentinel (restore each
         // texture's own authored value) — never a real GL anisotropy level,
         // whose minimum is 1. Bounded above by the DEVICE's own reported
@@ -13873,7 +13880,7 @@
     const ULTRA_MOBILE_DPR_CAP = 2;
     const QUALITY_PRESETS = [
       {
-        id: 'ultra', label: 'Ultra', tier: 0, dprCap: isMobile ? ULTRA_MOBILE_DPR_CAP : Infinity,
+        id: 'ultra', label: 'Ultra', tier: 0, dprCap: isMobile && !cinemaMode ? ULTRA_MOBILE_DPR_CAP : Infinity,
         hint: 'Max realism: soft real shadows, ambient occlusion, eye adaptation, 4x MSAA, dense terrain (on a phone: 2x resolution, PCF shadows, 2x MSAA). For a phone that is keeping up.',
         levers: () => [
           ['postQuality', 'full'],
@@ -13886,18 +13893,18 @@
           // times the 1.3M pixels of the screen itself), and three r183's
           // PCF is already the filtered soft shadow (PCFSoftShadowMap now
           // falls back to it).
-          ['shadowType', isMobile ? 'pcf' : 'vsm'],
-          ['shadowMapSize', 'high'],
+          ['shadowType', isMobile && !cinemaMode ? 'pcf' : 'vsm'],
+          ['shadowMapSize', cinemaMode ? 'cinema' : 'high'],
           // 2x on a phone: at 2x DPR an edge is already half a CSS pixel, and
           // each MSAA sample is another HalfFloat colour+depth write and
           // resolve on a bandwidth-bound GPU.
-          ['antialiasing', isMobile ? '2x' : '4x'],
+          ['antialiasing', isMobile && !cinemaMode ? '2x' : '4x'],
           ['anisotropy', renderer.capabilities.getMaxAnisotropy()],
           // 'high', not 'ultra': ultra ALONE exceeds this game's whole-scene
           // 80k-triangle budget on desktop (85,504 tris — see spherical-
           // world.js's GROUND_RESOLUTION_PRESETS). Ultra terrain is still
           // one tap away on the panel's Ultra tab.
-          ['terrainResolution', 'high'],
+          ['terrainResolution', cinemaMode ? 'ultra' : 'high'],
           ['decorativeDensity', 1],
         ],
       },
@@ -14745,7 +14752,7 @@
     function applyStartupShot() {
       const params = new URLSearchParams(location.search);
       // `?rec=1`: fly it yourself and save the video (src/ui/flight-recorder.js).
-      if (params.get('rec') === '1') {
+      if (params.get('rec') === '1' || params.get('cinema') === '1') {
         import('./src/ui/flight-recorder.js')
           .then(({ installFlightRecorder }) => installFlightRecorder({ canvas: renderer.domElement }))
           .catch((err) => console.warn('[rec] failed to load', err));

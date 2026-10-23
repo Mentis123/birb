@@ -316,6 +316,9 @@ export function createBloomPass(THREE, renderer, {
   // untouched. `aoOptions` overrides AO_DEFAULTS.
   ambientOcclusion = false,
   aoOptions = {},
+  // AO's size per axis as a fraction of the BLUR's: 2 = quarter resolution
+  // (the shipping phone-led choice), 1 = half (cinema: ?cinema=1).
+  aoDivisor = 2,
 } = {}) {
   const size = renderer.getSize(new THREE.Vector2());
   const pixelRatio = renderer.getPixelRatio();
@@ -500,7 +503,9 @@ export function createBloomPass(THREE, renderer, {
 
   function safeSize(value, label) {
     const n = clampTargetSize(value, glLimit);
-    if (n !== Math.floor(value) && !limitWarned) {
+    // A transient sub-pixel size during a resize (a 1-px-wide drawing buffer
+    // divided down) is clamped quietly; only a real limit or a NaN is news.
+    if (n !== Math.floor(value) && !(value >= 0 && value < 1) && !limitWarned) {
       limitWarned = true;
       console.warn(`[bloom] ${label} came out ${value}; clamped to ${n}. `
         + `size=${lastWidth}x${lastHeight} ratio=${lastRatio} limit=${glLimit}`);
@@ -526,7 +531,7 @@ export function createBloomPass(THREE, renderer, {
     // half. Measured on the owner's iPhone at Ultra: ~40 fps with the realism
     // set and AO off, 25-30 with AO at half res. Occlusion is a low-frequency
     // term that is blurred anyway; the composite upsamples it bilinearly.
-    if (ao) ao.setSize(safeSize(w / (currentDownscale * 2), 'ao width'), safeSize(h / (currentDownscale * 2), 'ao height'));
+    if (ao) ao.setSize(safeSize(w / (currentDownscale * aoDivisor), 'ao width'), safeSize(h / (currentDownscale * aoDivisor), 'ao height'));
   }
   setSize(size.x, size.y, pixelRatio);
 
