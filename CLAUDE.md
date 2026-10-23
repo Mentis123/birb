@@ -1,5 +1,16 @@
 # CLAUDE.md — Birb Mobile
 
+> **FLIGHT RECORDER (2026-10-23, build v95): `?rec=1` — fly it yourself,
+> save the video.** Owner: "I can fly, you record, we download." A REC button
+> at the top CENTRE (top-right sits under the ⚙ launcher, which ate the click
+> in the first headless run) records the game CANVAS only, so no joystick or
+> HUD is in the picture (`src/ui/flight-recorder.js`, MediaRecorder, MP4 where
+> the browser can, else WebM, 20 Mbps). Tap it again to stop, then SAVE: the
+> share sheet on a phone ("Save Video"), a download elsewhere. SAVE is its own
+> tap because the share sheet needs a gesture and the file only exists after
+> the recorder flushes. Verified headless: REC, 5 s, stop, SAVE, and a 4.2 s
+> file downloaded.
+
 > **STUDIO REEL (2026-10-23, build v94): a 9:16 frame-exact MP4, made in
 > the browser.** Owner: "I just want people to see a video of it and be blown
 > away." Open

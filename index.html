@@ -4080,7 +4080,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v94-2026-10-23-studio-reel';
+    const BIRB_BUILD = 'v95-2026-10-23-flight-recorder';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -14744,6 +14744,12 @@
 
     function applyStartupShot() {
       const params = new URLSearchParams(location.search);
+      // `?rec=1`: fly it yourself and save the video (src/ui/flight-recorder.js).
+      if (params.get('rec') === '1') {
+        import('./src/ui/flight-recorder.js')
+          .then(({ installFlightRecorder }) => installFlightRecorder({ canvas: renderer.domElement }))
+          .catch((err) => console.warn('[rec] failed to load', err));
+      }
       if (params.has('studio')) {
         import('./src/ui/studio.js').then(({ installStudio }) => installStudio({
           params,
