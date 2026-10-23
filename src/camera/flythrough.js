@@ -180,6 +180,12 @@ export function compileShot(spec, ctx, { raise = 0, spin = 0, scale = 1 } = {}) 
   // Looking straight at a bird that is climbing its own path is a frame of
   // sky (measured: half of the first forest-arch render was sky).
   const lift = spec.bird?.lift ?? 0;
+  // `chase: { distance, height, lookAhead }` — GAMEPLAY framing. The keyed
+  // path is the BIRD's, and the lens rides behind and above it the way the
+  // game's own chase camera does (bird-camera.js: 8 back, 3 up, 2 ahead), so
+  // the bird sits in the frame the player knows, with the horizon ahead. A
+  // lens that LOOKS AT a lead bird frames it against the sky on any climb.
+  const chase = spec.chase || null;
   // `pin: true` on a key keeps it exact under a raise (an arch's opening is
   // a place, not a height): the raise eases to zero within 2.5 s of it.
   const pins = keys.filter((k) => k.pin).map((k) => k.t);
@@ -222,9 +228,52 @@ export function compileShot(spec, ctx, { raise = 0, spin = 0, scale = 1 } = {}) 
     return [v.x, v.y, v.z];
   }
 
+  // The bird's point on its own path (raise included), its level-ish
+  // heading, and a bank from how fast that heading is turning.
+  function birdPoint(tb) {
+    const tcl = Math.max(0, Math.min(duration, tb));
+    let p = pointAt('pos', tcl, startSceneTime + tcl);
+    const r = raiseAt(tcl);
+    if (r) p = addScaled(p, norm(p), r);
+    return p;
+  }
+  function headingAt(tb, up) {
+    const h = 0.12;
+    const a = birdPoint(Math.max(0, tb - h)), b = birdPoint(Math.min(duration, tb + h));
+    let f = norm(sub(b, a));
+    // Mostly level: a chase cam that pitches with every climb swings the
+    // horizon; the game's rig follows the bird's forward, damped.
+    f = norm(addScaled(f, up, -dot(f, up) * (chase?.level ?? 0.6)));
+    return f;
+  }
+  function chaseSample(tc) {
+    const bird = birdPoint(tc);
+    const up = norm(bird);
+    const f = headingAt(tc, up);
+    const fa = headingAt(Math.max(0, tc - 0.3), up), fb = headingAt(Math.min(duration, tc + 0.3), up);
+    // Signed turn rate about the radial (rad/s), +left; bank into the turn.
+    const turn = Math.asin(Math.max(-1, Math.min(1, dot(cross(fa, fb), up)))) / 0.6;
+    const bank = Math.max(-1.1, Math.min(1.1, turn * (chase.bankGain ?? 0.9)));
+    const d = chase.distance ?? 8, hgt = chase.height ?? 3, ahead = chase.lookAhead ?? 2;
+    const camera = addScaled(addScaled(bird, f, -d), up, hgt);
+    const lookAt = addScaled(bird, f, ahead);
+    return { camera, lookAt, bird, forward: f, bank };
+  }
+
   function sample(t) {
     const { i, local, tc } = segmentAt(t);
     const sceneTime = startSceneTime + tc;
+    if (chase) {
+      const c = chaseSample(tc);
+      const fovA = keys[i - 1].fov ?? fov0, fovB = keys[i].fov ?? fovA;
+      return {
+        t: tc, sceneTime, position: c.camera, lookAt: c.lookAt, up: norm(c.camera),
+        fov: fovA + (fovB - fovA) * local,
+        fade: fadeAt(spec.fade, tc),
+        segment: i,
+        lead: c.bird, forward: c.forward, bank: c.bank,
+      };
+    }
     let position = pointAt('pos', tc, sceneTime);
     const up0 = lift + raiseAt(tc);
     if (up0) position = addScaled(position, norm(position), up0);

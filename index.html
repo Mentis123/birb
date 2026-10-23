@@ -14636,7 +14636,7 @@
     async function playShot(nameOrSpec, opts = {}) {
       const prep = await prepareShot(nameOrSpec, opts);
       if (!prep.ok) return prep;
-      shotLead = !!prep.compiled.spec.bird;
+      shotLead = !!(prep.compiled.spec.bird || prep.compiled.spec.chase);
       renderer.domElement.classList.add('birb-render-canvas');
       // Gameplay set dressing steps out of the picture: a drone that drifts
       // in front of the lens fills the frame (it did, in the first cable-car
@@ -14705,11 +14705,20 @@
         // The bird flies the path just ahead of the lens. Only what is DRAWN
         // moves: the flight model is held where it was.
         _shotUp.set(s.lead[0], s.lead[1], s.lead[2]).normalize();
-        _shotFwd.set(s.lead[0] - s.position[0], s.lead[1] - s.position[1], s.lead[2] - s.position[2]);
+        // A chase shot hands over the bird's own heading and bank.
+        if (s.forward) _shotFwd.set(s.forward[0], s.forward[1], s.forward[2]);
+        else _shotFwd.set(s.lead[0] - s.position[0], s.lead[1] - s.position[1], s.lead[2] - s.position[2]);
         _shotFwd.addScaledVector(_shotUp, -_shotFwd.dot(_shotUp));
         if (_shotFwd.lengthSq() > 1e-8) {
           _shotFwd.normalize();
           _shotRight.crossVectors(_shotFwd, _shotUp).normalize();
+          if (s.bank) {
+            // Roll into the turn about the heading: +bank is a left turn,
+            // so the up vector leans left (toward -right).
+            const c = Math.cos(s.bank), sn = Math.sin(s.bank);
+            _shotUp.multiplyScalar(c).addScaledVector(_shotRight, -sn);
+            _shotRight.crossVectors(_shotFwd, _shotUp).normalize();
+          }
           _shotBasis.makeBasis(_shotRight, _shotUp, _shotFwd.negate());
           birbAnchor.quaternion.setFromRotationMatrix(_shotBasis).multiply(modelOrientationOffset);
         }
