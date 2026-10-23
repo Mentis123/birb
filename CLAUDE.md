@@ -4,7 +4,9 @@
 > the browser.** Owner: "I just want people to see a video of it and be blown
 > away." Open
 > `birbmobile.vercel.app/?studio=1&aspect=9:16&seed=16160&shot=reel-forest&record=1`
-> in Chrome or Edge on a machine with a GPU and press Play. The game then runs
+> in Chrome or Edge and press Play: it records in REAL TIME from the canvas
+> (MediaRecorder, MP4 where the browser can, else WebM; owner: "just use the
+> browser capture"). `&exact=1` is the frame-exact MP4 below. The game then runs
 > on a VIRTUAL clock of exactly 1/fps per frame (`src/ui/frame-clock.js`:
 > the loop's rAF timestamp is replaced and the eye's adaptation reads it too),
 > and every drawn frame goes through WebCodecs into an MP4

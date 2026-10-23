@@ -65,7 +65,9 @@ body.birb-studio-portrait canvas.birb-studio-canvas {
 `;
 
 function pickMime() {
-  const options = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  // MP4 first where the browser records it (Chrome/Edge 126+, Safari): it
+  // plays on phones and uploads anywhere. WebM otherwise.
+  const options = ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   if (typeof MediaRecorder === 'undefined') return null;
   return options.find((m) => MediaRecorder.isTypeSupported?.(m)) || null;
 }
@@ -114,7 +116,7 @@ export async function installStudio({ params, canvas, listShots, play, stop, sta
     <select data-k="count" aria-label="Countdown">
       <option value="0">No countdown</option><option value="3">3 s</option><option value="5">5 s</option>
     </select>
-    <label><input type="checkbox" data-k="record"> Save WebM</label>
+    <label><input type="checkbox" data-k="record"> Save video</label>
     <button data-act="play" type="button">Play</button>
     <button data-act="stop" type="button">Stop</button>
     <span class="birb-studio-msg" data-k="msg">Space plays · Esc stops · H hides this</span>`;
@@ -135,7 +137,10 @@ export async function installStudio({ params, canvas, listShots, play, stop, sta
   $('count').value = ['0', '3', '5'].includes(params.get('count')) ? params.get('count') : '3';
   $('record').checked = params.get('record') === '1';
   const mime = pickMime();
-  const exactWanted = params.get('exact') !== '0' && typeof VideoEncoder !== 'undefined' && !!frameClock && !!seek;
+  // Real-time browser capture is the default (owner: "just use the browser
+  // capture"); `&exact=1` is the frame-exact MP4 for a machine too slow to
+  // hold the frame rate.
+  const exactWanted = params.get('exact') === '1' && typeof VideoEncoder !== 'undefined' && !!frameClock && !!seek;
   if (!mime && !exactWanted) { $('record').disabled = true; $('record').parentElement.title = 'This browser cannot record the canvas'; }
   if (exactWanted) $('record').parentElement.lastChild.textContent = ' Save MP4 (frame-exact)';
   if (frameSize) msg(`${frameSize.width}x${frameSize.height} @ ${fps} fps · Space plays · Esc stops · H hides this`);
@@ -151,11 +156,12 @@ export async function installStudio({ params, canvas, listShots, play, stop, sta
     const r = recorder;
     recorder = null;
     r.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
+      const type = (r.mimeType || mime || 'video/webm').split(';')[0];
+      const blob = new Blob(chunks, { type });
       chunks = [];
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `${name || 'birb-shot'}.webm`;
+      a.download = `${name || 'birb-shot'}.${type === 'video/mp4' ? 'mp4' : 'webm'}`;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
