@@ -20,7 +20,12 @@
 > where bearing 0 is the sun dead ahead of the lens at the shot's midpoint.
 > It holds one world direction for the shot, with the horizon frame stood at
 > the subject. `reel-forest` is the 15 s golden-hour pass through the stone
-> arch, framed on `?seed=16160` (a new boot parameter that builds world N). **Two traps:** the canvas card's `backdrop-filter` is a containing
+> arch, framed on `?seed=16160` (a new boot parameter that builds world N).
+> It uses GAMEPLAY framing (owner: "needs to be game play so birb in the
+> shot"): `chase: { distance, height, lookAhead }` makes the keys the BIRD's
+> path, and the lens rides behind and above it like bird-camera.js, banking
+> the bird by its turn rate. A drone shot that LOOKS AT a lead bird framed it
+> as a dot against the sky on every climb. **Two traps:** the canvas card's `backdrop-filter` is a containing
 > block for `position: fixed`, so the letterbox was clipped until the studio
 > turned it off. And Playwright's Chromium has no H.264 encoder: the headless
 > check gets VP9-in-MP4, and Edge/Chrome on a real machine get H.264.
