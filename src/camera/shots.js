@@ -20,24 +20,29 @@ const REEL_FADE = (d) => [[0, 1], [0.5, 0], [d - 0.6, 0], [d, 1]];
 
 export const SHOTS = [
   {
-    // The 15-second portrait reel (?studio=1&aspect=9:16&shot=reel-forest).
-    // The arch shot, compressed, with its own golden-hour light: `sun` holds
-    // a low sun a little off the lens's axis, so the crowns, the water and the
-    // bird's edges are lit from behind.
+    // The 15-second portrait reel:
+    // ?studio=1&aspect=9:16&seed=16160&shot=reel-forest&record=1
+    // A drone pass, not a chase. It starts on the arch lit warm from the side,
+    // threads the opening, lifts over the crown that stands right behind it,
+    // rides the treetops and turns back onto the arch against the light.
+    // Framed on world seed 16160; on another world the planner re-aims it.
+    // Five rounds of stills chose it. Following the bird kept the lens on the
+    // bird against the sky. An exit "14 up" at 90 units out is 40+ above the
+    // forest, because the planet curves away d^2/2R under a landmark's
+    // tangent plane.
     name: 'reel-forest',
     title: 'Reel: golden hour through the arch (15 s)',
     world: 'forest',
-    fov: 62,
-    bird: { lead: 0.8, lift: 2.2 },
-    sun: { elevation: 15, bearing: 28 },
+    fov: 60,
+    sun: { elevation: 14, bearing: 125 },
     audit: { minClearance: 3, maxSpeed: 40 },
     fade: REEL_FADE(15),
     keys: [
-      { t: 0, pos: { landmark: 'stone-arch', offset: [-74, 24, 18] } },
-      { t: 4.5, pos: { landmark: 'stone-arch', offset: [-32, 9, 5] }, ease: 'out' },
-      { t: 7.5, pos: { landmark: 'stone-arch', offset: [-7, 7, 0] }, pin: true },
-      { t: 10.5, pos: { landmark: 'stone-arch', offset: [28, 11, -8] } },
-      { t: 15, pos: { landmark: 'stone-arch', offset: [74, 40, -30] } },
+      { t: 0, pos: { landmark: 'stone-arch', offset: [-70, 16, 22] }, look: { landmark: 'stone-arch', offset: [0, 9, 0] } },
+      { t: 5, pos: { landmark: 'stone-arch', offset: [-26, 8, 5] }, look: { landmark: 'stone-arch', offset: [0, 8, 0] }, ease: 'inOut' },
+      { t: 7.5, pos: { landmark: 'stone-arch', offset: [-4, 7, 0] }, look: { landmark: 'stone-arch', offset: [20, 22, -14] }, pin: true },
+      { t: 10, pos: { landmark: 'stone-arch', offset: [10, 24, -12] }, look: { landmark: 'stone-arch', offset: [40, 14, -40] } },
+      { t: 15, pos: { landmark: 'stone-arch', offset: [46, 38, -34] }, look: { landmark: 'stone-arch', offset: [0, 8, 0] }, ease: 'inOut' },
     ],
   },
   {
