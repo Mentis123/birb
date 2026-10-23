@@ -4,7 +4,9 @@
 // stop, then SAVE hands the file to the share sheet (phones: "Save Video")
 // or downloads it. The canvas only, so the joystick, pills and HUD are not in
 // the picture. MediaRecorder records in real time, MP4 where the browser can
-// (Safari, Chrome/Edge 126+), WebM otherwise.
+// (Safari, Chrome/Edge 126+), WebM otherwise. With the audio tap
+// (src/ui/audio-tap.js) the game's sound is recorded too: music, wind,
+// wingbeats, chimes, rockets.
 //
 // SAVE is its own tap on purpose: the share sheet needs a user gesture, and
 // the file is only assembled after the recorder has flushed, which can be
@@ -26,14 +28,16 @@ const STYLE = `
 .birb-rec[data-state="ready"]::before { display: none; }
 `;
 
-export function pickRecorderMime() {
+export function pickRecorderMime(withAudio = false) {
   if (typeof MediaRecorder === 'undefined') return null;
-  const options = ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  const options = withAudio
+    ? ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,opus', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+    : ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   return options.find((m) => MediaRecorder.isTypeSupported?.(m)) || null;
 }
 
-export function installFlightRecorder({ canvas, fps = 60, bitrate = 20e6 }) {
-  const mime = pickRecorderMime();
+export function installFlightRecorder({ canvas, audio = null, fps = 60, bitrate = 20e6 }) {
+  const mime = pickRecorderMime(!!audio);
   if (!mime || !canvas?.captureStream) {
     console.warn('[rec] this browser cannot record the canvas');
     return null;
@@ -62,7 +66,14 @@ export function installFlightRecorder({ canvas, fps = 60, bitrate = 20e6 }) {
   function start() {
     chunks = [];
     file = null;
-    recorder = new MediaRecorder(canvas.captureStream(fps), { mimeType: mime, videoBitsPerSecond: bitrate });
+    const stream = canvas.captureStream(fps);
+    if (audio) {
+      try {
+        audio.resume();
+        for (const track of audio.stream.getAudioTracks()) stream.addTrack(track);
+      } catch (err) { console.warn('[rec] recording without sound', err); }
+    }
+    recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitrate, audioBitsPerSecond: 192e3 });
     recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
     recorder.onstop = () => {
       const type = (recorder?.mimeType || mime).split(';')[0];

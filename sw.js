@@ -67,7 +67,8 @@
 // studio-encoder.js), and the 15-second reel-forest shot with its own sun.
 // v95: ?rec=1 flight recorder (fly it yourself, save the video).
 // v96: ?cinema=1 recording mode; REC lives inside the canvas card.
-const CACHE_VERSION = 'v96-2026-10-23-cinema';
+// v97: the recording carries the game's sound (audio-tap.js).
+const CACHE_VERSION = 'v97-2026-10-23-rec-audio';
 
 /**
  * Paths owned by other Birb Labs artefacts. This worker must not touch them.
@@ -216,6 +217,7 @@ const CORE_ASSETS = [
   './src/ui/studio.js',
   './src/ui/studio-encoder.js',
   './src/ui/flight-recorder.js',
+  './src/ui/audio-tap.js',
   './src/ui/frame-clock.js',
   './src/ui/discovery.js',
   './src/ui/pins-layer.js',

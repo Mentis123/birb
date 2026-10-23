@@ -1,5 +1,18 @@
 # CLAUDE.md — Birb Mobile
 
+> **THE RECORDING HAS SOUND (2026-10-23, build v97).** Owner: "need to
+> capture audio in the recording too". `src/ui/audio-tap.js` is installed in
+> record mode (`?rec=1` / `?cinema=1`) BEFORE any game audio exists, because
+> it changes how that audio is made. Every `new AudioContext()` returns one
+> SHARED context: flight audio and the ring chime each made their own, and a
+> MediaRecorder records one audio track, not a mix of contexts. Anything
+> connected to that context's speakers is also connected to a
+> MediaStreamDestination. Each `<audio>` element (music, rockets, rings) is
+> routed through the context on its first `play()`. The recorder adds that
+> track to the canvas stream (MP4 + AAC where possible, else Opus).
+> Verified headless: 5.6 s file with an Opus stream, decoded RMS 840 (not
+> silence). A normal boot never imports the tap.
+
 > **CINEMA (2026-10-23, build v96): `?cinema=1` — the recording mode.**
 > Ultra with the phone caps lifted (native DPR, VSM, 4x MSAA), a 4096 shadow
 > map (`SHADOW_MAP_SIZES.cinema`), AO at HALF resolution (`aoDivisor` 1 in

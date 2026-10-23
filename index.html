@@ -3890,6 +3890,11 @@
       var { realismOn, currentBootPreset } = await import("./src/ui/realism-defaults.js");
       // Frame-exact studio recording: a virtual clock the loop runs on.
       var { createFrameClock } = await import("./src/ui/frame-clock.js");
+      // Record mode taps the game's sound BEFORE any of it exists (audio-tap.js).
+      if (/[?&](rec|cinema)=1(?:&|#|$)/.test(window.location?.search || '')) {
+        try { (await import("./src/ui/audio-tap.js")).installAudioTap(); }
+        catch (err) { console.warn('[rec] audio tap failed to load', err); }
+      }
       var { createWeather, WEATHER_PROFILES } = await import("./src/environment/weather.js");
       var { createWake } = await import("./src/effects/wake.js");
       var { createRibbonTrail } = await import("./src/effects/ribbon-trail.js");
@@ -4080,7 +4085,7 @@
     // keeping the two in sync and bumping both together; this line only
     // gives the panel's evidence export and __BIRB.quality() something to
     // report today, ahead of P2.4's full CORE_ASSETS/CACHE_VERSION wiring.
-    const BIRB_BUILD = 'v96-2026-10-23-cinema';
+    const BIRB_BUILD = 'v97-2026-10-23-rec-audio';
 
     // Image-based lighting, ?ibl=1 only. Held at 1 for the first measurement:
     // the whole point of proving this with a procedural map is to find out how
@@ -14754,7 +14759,7 @@
       // `?rec=1`: fly it yourself and save the video (src/ui/flight-recorder.js).
       if (params.get('rec') === '1' || params.get('cinema') === '1') {
         import('./src/ui/flight-recorder.js')
-          .then(({ installFlightRecorder }) => installFlightRecorder({ canvas: renderer.domElement }))
+          .then(({ installFlightRecorder }) => installFlightRecorder({ canvas: renderer.domElement, audio: window.__birbAudioTap || null }))
           .catch((err) => console.warn('[rec] failed to load', err));
       }
       if (params.has('studio')) {
